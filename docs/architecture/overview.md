@@ -60,13 +60,14 @@ core/                       # mailx-core，共享核心；业务与通用实现�
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
   capabilities/             # 主窗口权限
-  icons/                    # 开发占位图标
+  icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位
 frontend/                   # React + TypeScript + Vite + shadcn 前端骨架
   src/                      # 页面与 UI 组件
   package.json              # 前端脚本与依赖
   vite.config.ts            # Vite / Tailwind 配置
 docs/                       # 文档
+branding/                   # 主 Logo 源稿、品牌变体、分享素材与资源清单
 .github/                    # 协作与 CI，当前占位
 ```
 

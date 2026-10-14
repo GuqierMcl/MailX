@@ -17,7 +17,7 @@ bun run tauri dev
 - `src/commands.rs`：唯一的 `core_info` 开发检查命令，从核心返回 `{ "coreVersion": "0.1.0" }`；不代表邮件服务已就绪。
 - `capabilities/main.json`：仅为本地 `main` 窗口开放 `allow-core-info`，没有文件系统、Shell、网络插件或远程来源授权。`build.rs` 为该命令生成权限定义。
 - `frontend/`：React + TypeScript + Vite + shadcn 前端工程骨架；当前初始化模板尚未实现邮件功能。
-- `icons/`：为跨平台构建提供的开发占位图标，后续可替换。
+- `icons/`：从 `branding/logo.svg` 生成的正式应用图标，包含 Windows ICO、macOS ICNS、Linux PNG 和 Windows 商店尺寸；`tray/` 为后续托盘功能预备黑白与 macOS template 资源。
 
 `tauri.conf.json` 设置 CSP，当前不允许 iframe 或远程内容。正式邮件阅读器尚未实现，届时仍需独立验证正文隔离，不能把主窗口权限直接交给邮件正文。[Tauri capability 说明](https://v2.tauri.app/security/capabilities/)。
 
@@ -25,4 +25,6 @@ bun run tauri dev
 
 `desktop/tauri.conf.json` 的 `beforeDevCommand` / `beforeBuildCommand` 分别调用根目录工作区中的前端脚本，`devUrl` 指向 Vite 的 `5173` 端口，`frontendDist` 指向 `../frontend/dist`。`scripts/tauri.mjs` 让根目录命令在配置文件位于 `desktop/` 子目录时仍能正确调用 Tauri CLI。正式前端接入 IPC 时可以改为模块化 API 和统一客户端适配器，不能把当前初始化模板视为已冻结的应用契约。
 
-应用标识 `dev.mailx.desktop`、Cargo 包名和占位图标仅服务当前开发。安装包、命令行别名、正式应用标识和镜像名称留待分发设计；`bundle.active` 当前为 `false`，尚无安装包或发布流程。首次发布前确定标识，避免后续改变平台数据目录归属。
+应用标识 `dev.mailx.desktop` 和 Cargo 包名仅服务当前开发。安装包、命令行别名、正式应用标识和镜像名称留待分发设计；`bundle.active` 当前为 `false`，尚无安装包或发布流程。首次发布前确定标识，避免后续改变平台数据目录归属。
+
+更新主 Logo 后，在仓库根目录运行 `bun run icons:generate`，再用 `bun run icons:check` 验证生成文件。不要手工修改 `icons/` 下的派生资源；托盘资源的存在不代表托盘功能已开启。完整目录与使用方式见[品牌资源说明](../branding/README.md)。

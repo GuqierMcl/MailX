@@ -23,10 +23,15 @@
     "desktop:dev": "bun run tauri dev",
     "desktop:build": "bun run tauri build",
     "version:check": "bun scripts/check-version.mjs",
+    "icons:generate": "bun scripts/generate-icons.mjs",
+    "icons:check": "bun scripts/generate-icons.mjs --check",
     "rust:check": "cargo check --workspace --locked",
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "rust:test": "cargo test --workspace --locked",
     "check": "bun run version:check && bun run typecheck && bun run lint && bun run build && bun run rust:check"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2"
   }
 }

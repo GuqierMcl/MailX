@@ -1,5 +1,7 @@
 # MailX
 
+<img src="branding/logo.svg" alt="MailX Logo" width="128" height="128" />
+
 一款极速启动、兼容市面所有邮箱、本地数据优先、AI 原生（内置全功能智能引擎 + 双向 MCP 互通）的跨平台开源邮件工作台。
 
 MailX 围绕快速启动、广泛的邮箱兼容性和流畅的日常收发体验设计，让个人邮箱、工作邮箱与企业邮箱在同一个轻量工作台中统一管理。桌面端基于 Rust + Tauri，面向 Windows、macOS 和 Linux，后续提供单用户 Docker Web 版本。
@@ -29,6 +31,7 @@ MailX 围绕快速启动、广泛的邮箱兼容性和流畅的日常收发体�
 - [实施路线图](docs/roadmap/README.md)：里程碑、依赖关系和完成标准。
 - [开发指南](docs/development/README.md)：环境、构建检查与下一条收信链路。
 - [贡献说明](CONTRIBUTING.md)：提交和验证约定。
+- [品牌资源](branding/README.md)：正式 Logo、平台图标、分享素材与生成方式。
 
 根目录 `core/` 管理共享核心与通用实现，`frontend/` 是 React + TypeScript + Vite + shadcn 前端工程，`desktop/` 是 Tauri 宿主；`server/` 留待第二阶段服务器 MVP。数据库与协议库尚未引入。
 

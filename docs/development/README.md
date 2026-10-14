@@ -62,6 +62,8 @@ git diff --check
 
 ## 3. 包边界
 
+Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run icons:generate`，会同步品牌素材、桌面图标和网页图标；`bun run icons:check` 验证派生资源与源稿一致。该工具只在设计资源变更时运行，无需加入每次应用构建。详见[品牌资源说明](../../branding/README.md)。
+
 - **core**：共享业务与通用实现一起管理，之后按功能逐步加入账号、同步、发件队列、存储、路由、搜索等模块。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
 - **desktop**：Tauri 生命周期、窗口、IPC 和平台集成。IPC 负责适配核心调用，不承载邮件业务。
 - **frontend**：React + TypeScript + Vite + shadcn（Mira preset）工程骨架，依赖 React Router；当前只包含初始化模板，后续通过统一客户端适配器调用 core 能力。
