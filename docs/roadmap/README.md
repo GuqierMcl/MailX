@@ -2,7 +2,9 @@
 
 状态：**Planned / 可调整** · 2026-10-14。阶段、版本号、功能组合与验收指标用于指导启动，不是发布日期承诺。后续需求与验证结果可以改变路线。
 
-当前已完成：文档与仓库基础初始化。当前未开始：下列应用实现阶段。原蓝图的八周计划不直接作为交付承诺，先解决协议 / OAuth / 代理等不确定性再估算工期。
+当前已完成：仓库与文档基础、根 Cargo workspace、core 库、React + TypeScript + Vite + shadcn 前端骨架和 desktop Tauri 集成。邮件功能和服务器仍未实现，M0 尚未完成。原蓝图的八周计划不直接作为交付承诺，先解决协议 / OAuth / 代理等不确定性再估算工期。
+
+优先顺序为**第一阶段桌面 MVP，第二阶段服务器 MVP**。下文 M0–M4 是桌面阶段的细分候选里程碑，M5 是后续服务器阶段；AI / MCP 的具体交付范围可根据邮件收发闭环进展再调整。
 
 仓库为 [GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)，目前私有，按开源项目形式维护。首个 MVP 版本发布后再公开并开源；公开时机跟随实际 MVP 交付，不固定绑定本文的阶段编号。
 
@@ -10,8 +12,10 @@
 
 前置：本轮初始设计可供讨论。
 
-- [ ] Cargo workspace、React / Vite / Bun、Tauri 空壳，固定版本和锁文件。
-- [ ] core / infra 边界、结构化错误、DTO 生成、平台数据目录与实例锁。
+- [x] 根 Cargo workspace、独立 core 库与 Tauri 宿主骨架，固定 Rust 工具链并保存 Cargo.lock。
+- [x] 合并 core / infra，采用 `desktop → core`，以只读版本 IPC 连接占位页面。
+- [x] 选择 React + TypeScript + Vite + shadcn，初始化 `frontend/` 与根 Bun 工作区，接通 Tauri 开发 / 构建入口。
+- [ ] 结构化错误、应用服务与 DTO 生成、平台数据目录与实例锁。
 - [ ] IMAP 与 SMTP 的 Direct / SOCKS5 / HTTP CONNECT + TLS 最小探针。
 - [ ] OAuth 应用注册与回调方案验证，记录发布所需外部依赖。
 - [ ] SQLite WAL / FTS5 探针、HTML iframe 无 IPC / 外链处理验证。
@@ -74,7 +78,7 @@
 
 建议在桌面核心稳定后开展，不阻塞首版邮件核心开发。
 
-- [ ] Axum API 与同源 SPA，复用 core / infra 和 DTO。
+- [ ] 初始化根目录 server，提供 Axum API 与同源前端产物，复用 core 和 DTO。
 - [ ] 引导、防抢占、Session、TOTP、CSRF、限速、恢复与主密钥管理。
 - [ ] 非 root 单镜像、本地数据卷、secret 挂载、健康检查和升级 / 恢复指南。
 - [ ] 两种宿主的功能契约对照与发布测试。
@@ -88,4 +92,4 @@ POP3 / JMAP、更多预设、向量索引、自然语言搜索、自动分流、
 
 ## 下一次开发的建议起点
 
-先做 M0 的协议路由探针和最小 workspace，再进入“收取最近 5 封 → 入库 → 重启读取”的 M1 纵向链路。任务完成时提供改动、验证命令 / 场景、结果和未解决限制；文档仅在功能真正落地后标记 Implemented。
+在现有 core + desktop + frontend 骨架上确定 UI 客户端适配、异步执行和数据库驱动，完成协议路由探针，再进入“收取最近 5 封 → 入库 → 重启读取”的 M1 纵向链路。前端讨论期间也可独立推进 Rust 探针。任务完成时提供验证结果和未解决限制，文档仅在功能真正落地后标记 Implemented。

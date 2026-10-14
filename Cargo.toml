@@ -1,0 +1,20 @@
+[workspace]
+members = ["core", "desktop"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+repository = "https://github.com/GuqierMcl/MailX"
+publish = false
+
+[workspace.dependencies]
+mailx-core = { path = "core" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2.11.5" }
+tauri-build = { version = "2.6.3" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

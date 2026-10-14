@@ -1,6 +1,6 @@
 # 验证与质量目标初案
 
-状态：**Initial draft**。本页是未来测试计划，不是已通过的结果；阈值可根据目标硬件和实现证据修订。
+状态：**骨架检查已可执行 / 业务验证仍为 Initial draft**。第 5 节说明当前工程检查，其余是未来测试计划，不是已通过的结果；阈值可根据目标硬件和实现证据修订。
 
 ## 1. 分层验证
 
@@ -64,8 +64,33 @@
 
 原蓝图的冷启动 <300ms、待机 <80MB、容器 <30MB 和镜像 <50MB 保留为探索方向，不作为未经验证的 README 宣传或本轮硬性验收承诺。
 
-## 5. 工程建成后的检查
+## 5. 当前工程检查
 
-M0 完成后再将以下命令接入真实 CI：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`，以及当时实际配置的 Bun typecheck / test / build 脚本。当前仓库没有这些工程或脚本，不应把建议命令当作现成开发入口。
+根 Cargo workspace 已包含 core 与 desktop，前端工作区位于 `frontend/`，可执行：
+
+```sh
+bun install --frozen-lockfile
+bun run version:check
+bun run typecheck
+bun run lint
+bun run build
+bun run tauri dev
+bun run tauri build
+bun run check
+cargo check -p mailx-core --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build -p mailx-desktop --locked
+git diff --check
+```
+
+`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。当前 `bundle.active=false`，它不代表已经生成安装包。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。当前没有业务测试，`cargo test` 仅检查测试目标能编译运行，不证明任何收发、存储或安全行为。
+
+手动启动 `bun run tauri dev`，确认窗口显示前端模板、关闭窗口后宿主退出；当前仍可通过 `core_info` 检查核心版本及只读 IPC。此检查只覆盖前端模板、宿主和只读 IPC。真实邮件 HTML、实例锁、退出时任务取消和数据恢复需在对应实现后另行验证。
+
+前端已初始化 typecheck / lint / build 脚本，但尚无业务 UI 测试；`.github/` 只占位，尚未接入 CI。跨平台验证与自动化随实际工程补齐。
+
+2026-10-14 的初始化验证在 Windows x86_64 MSVC、Rust 1.94.0、Bun 1.3.12 上完成：版本同步、前端类型检查、ESLint、Vite 构建、Rust check / 格式 / Clippy / 测试目标和 `bun run tauri dev` 启动通过；Tauri 开发命令成功启动 Vite、编译并打开 `MailX` 窗口，关闭后宿主退出。当前结果不覆盖未来邮件功能；macOS / Linux 尚未执行构建或运行验证。
 
 按变更范围运行检查：核心改动跑相关测试，跨宿主契约改动增加两个 adapter 验证，发布前再执行完整平台矩阵。结果以命令输出和可复现实验为准，未执行项明确标注。

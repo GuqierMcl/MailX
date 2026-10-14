@@ -1,0 +1,32 @@
+{
+  "name": "mailx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MailX workspace entrypoint",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/GuqierMcl/MailX.git",
+  "packageManager": "bun@1.3.12",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "bun run frontend:dev",
+    "frontend:dev": "bun run --cwd frontend dev",
+    "frontend:build": "bun run --cwd frontend build",
+    "frontend:lint": "bun run --cwd frontend lint",
+    "frontend:typecheck": "bun run --cwd frontend typecheck",
+    "frontend:preview": "bun run --cwd frontend preview",
+    "build": "bun run frontend:build",
+    "lint": "bun run frontend:lint",
+    "typecheck": "bun run frontend:typecheck",
+    "tauri": "bun scripts/tauri.mjs",
+    "desktop:dev": "bun run tauri dev",
+    "desktop:build": "bun run tauri build",
+    "version:check": "bun scripts/check-version.mjs",
+    "rust:check": "cargo check --workspace --locked",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "rust:test": "cargo test --workspace --locked",
+    "check": "bun run version:check && bun run typecheck && bun run lint && bun run build && bun run rust:check"
+  }
+}

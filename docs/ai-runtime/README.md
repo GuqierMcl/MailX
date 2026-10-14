@@ -10,7 +10,7 @@
 
 ## 2. 模型适配
 
-核心定义 `ModelProvider` 端口，infra 实现 OpenAI 兼容 HTTP 流接口与 Ollama 原生接口。两类适配器分别解析流与错误，不能假设所有提供商支持相同参数、工具调用或 JSON 输出。具体 API 版本与 SDK 在 M3 对接时核验。
+后续在 core 内按需定义 `ModelProvider` 接口，并在同一包的模型模块实现 OpenAI 兼容 HTTP 流接口与 Ollama 原生接口，不另设 infra 包。两类适配器分别解析流与错误，不能假设所有提供商支持相同参数、工具调用或 JSON 输出。具体 API 版本与 SDK 在 M3 对接时核验。
 
 模型配置包含 providerId、baseUrl、modelId、secretRef、routeId、超时及可选上下文预算。所谓“兼容接口”先通过真实请求测试才标记可用。Anthropic 原生协议单独适配，不把一个 Key 输入框当作已经支持所有模型。
 

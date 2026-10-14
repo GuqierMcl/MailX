@@ -1,16 +1,16 @@
 # MailX 第一版架构
 
-状态：**Initial draft** · 2026-10-14 · 本文中的模块和路径均为启动阶段的建议方案，尚无源代码；后续设计可以调整或替换。
+状态：**部分 Implemented / 其余 Initial draft** · 2026-10-14。根目录 Cargo workspace、`core/`、React + TypeScript + Vite + shadcn 前端骨架与 `desktop/` 已建立；邮件功能尚未实现。下文区分当前骨架与后续设想，所有设计仍可演化。
 
 ## 1. 总体结构
 
 采用模块化单体与轻量宿主。每个数据目录只有一个 Rust 核心实例拥有数据库、同步任务和发件队列。桌面与 Web 复用核心库；独立部署时不共享数据目录。
 
 ```text
-React 工作台（阅读 / 撰写 / 搜索 / AI / 设置）
+前端工作台（React + TypeScript + Vite + shadcn；当前为初始化模板）
     └── MailxClient 接口
-         ├── Tauri IPC adapter ── 桌面宿主 mailx-app
-         └── HTTP + SSE adapter ─ Web 宿主 mailx-server（v0.2）
+         ├── Tauri IPC adapter ── 桌面宿主
+         └── HTTP + SSE adapter ─ Web 宿主（v0.2）
                                       │
 外部 Agent ─ stdio ─ MCP bridge ─ 本地受控 IPC
                                       │
@@ -20,8 +20,8 @@ React 工作台（阅读 / 撰写 / 搜索 / AI / 设置）
                          ├── AI Run / 内容选择 / 草稿建议
                          └── 事件 / 审计 / 任务取消
                                       │
-                  Repository / SecretStore / MailTransport /
-                  NetworkConnector / ModelProvider 等端口
+                  core 内部的存储 / 协议 / 路由 / 模型模块
+                  按实际需要定义 SecretStore 等可替换接口
                                       │
                 SQLite + blob 文件 / OS Keyring / IMAP + SMTP /
                 账号级路由 / 用户选择的模型端点
@@ -33,47 +33,52 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 
 | 层 | 设计选择 | 实施约束 |
 | --- | --- | --- |
-| UI | React + TypeScript + Vite | 与 NexusPilot 保持开发经验一致，UI 框架不决定邮件性能 |
-| UI 基础 | Tailwind CSS + shadcn/ui，TanStack Query，少量 Zustand | Query 管服务状态；Zustand 只管布局与交互 |
-| 桌面 | Tauri v2 | 邮件阅读 iframe 无 IPC 能力；按窗口缩小 capabilities |
-| 核心 | Rust + Tokio | 宿主无关；有界任务队列、超时、取消、可恢复状态 |
+| UI | React + TypeScript + Vite，已初始化 | 当前只有模板页；通过统一客户端适配器访问桌面 IPC 或未来 HTTP |
+| UI 基础 | shadcn `base-mira` preset，已初始化 | 组件基础已建立，服务状态、交互状态和邮件领域模型仍待实现 |
+| 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；仅有核心版本 IPC；正文隔离待实现 |
+| 核心 | Rust，已初始化；Tokio 为后续候选 | 单个 crate 承担业务与通用实现，当前无第三方依赖 |
 | 接收 / 发送 | `async-imap` / `lettre` 候选 | M0 必须验证自定义流、TLS、OAuth 和代理；不能因库限制绕过账号路由 |
 | MIME / HTML | `mail-parser` / `ammonia` 候选 | 限制大小、递归深度；净化之外仍需 iframe + CSP |
-| 存储 | SQLite + `rusqlite`，WAL + FTS5 | 专用阻塞数据库执行器，短事务，SQL 迁移文件 |
+| 存储 | SQLite 方向；SQLx / `rusqlite` 待定 | 驱动、执行模型与迁移方式经验证后确定，当前未引入 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
 | MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 候选 | M0 验证 SDK / 客户端协议协商，首版 stdio |
 | Web | Axum + 同源静态 SPA + SSE | v0.2；单用户、服务端 Session、TOTP |
-| 工具链 | Cargo + Bun | M0 固定具体版本与锁文件；本设计不虚构已锁定依赖 |
+| 工具链 | Rust / Cargo 1.94.0、Bun 1.3.12，均已记录 | 根 `package.json` 提供命令与版本入口；`bun.lock`、`Cargo.lock` 分别锁定依赖 |
 
 选型理由见 [ADR 0001](../adr/0001-shared-core-and-hosts.md)、[ADR 0002](../adr/0002-stack-and-storage.md)。协议库的官方接口文档用于 M0 接入验证：[async-imap](https://docs.rs/async-imap/latest/async_imap/)、[lettre](https://docs.rs/lettre/latest/lettre/transport/smtp/struct.AsyncSmtpTransport.html)。
 
 ## 3. 目标目录与依赖
 
-以下目录在对应里程碑创建，当前不放置无内容占位工程。
+关键目录直接放在仓库根目录。`core/` 与 `desktop/` 是现有 Cargo 包，`frontend/` 是 Bun 工作区中的前端包；`server/` 和 `.github/` 仍只占位。Cargo 包名表达当前工程依赖，不冻结对外程序、安装包或镜像名称。
 
 ```text
-apps/
-  desktop/src-tauri/         # Tauri 宿主；桌面二进制 mailx-app
-  web/                      # Web SPA 构建入口（v0.2）
-packages/
-  ui/                       # 可复用 React 工作台
-  contracts/                # 生成的 TS DTO + JSON Schema
-crates/
-  mailx-core/               # domain、ports、services、policy、jobs
-  mailx-infra/              # SQLite、协议、路由、密钥、模型适配
-  mailx-mcp/                # 工具定义、stdio bridge、本地受控调用
-  mailx-server/             # Axum 宿主（v0.2）
-migrations/                 # 有序、不可改写的已发布 SQL 迁移
-resources/providers/        # 审核后的邮箱预设，不含凭证
-tests/fixtures/             # 合成 MIME / 协议 / HTML 样本
-docs/                       # 文档单一来源
+Cargo.toml                  # workspace：core + desktop
+Cargo.lock                  # Rust 依赖解析结果
+rust-toolchain.toml          # Rust 1.94.0、rustfmt、Clippy
+core/                       # mailx-core，共享核心；业务与通用实现均在这里
+  src/lib.rs                # 当前只提供版本信息
+desktop/                    # mailx-desktop，Tauri 宿主
+  src/                      # 程序入口与 IPC 适配
+  capabilities/             # 主窗口权限
+  icons/                    # 开发占位图标
+server/                     # 第二阶段服务器宿主，当前占位
+frontend/                   # React + TypeScript + Vite + shadcn 前端骨架
+  src/                      # 页面与 UI 组件
+  package.json              # 前端脚本与依赖
+  vite.config.ts            # Vite / Tailwind 配置
+docs/                       # 文档
+.github/                    # 协作与 CI，当前占位
 ```
 
-依赖方向：`mailx-infra → mailx-core`；桌面 / Web 宿主装配 core 与 infra；`mailx-mcp → mailx-core` 的 DTO / 应用端口，不直接依赖数据库实现。core 不导入 Tauri、Axum、SQLite 或具体模型 SDK。初期在 crate 内按模块分层，不为每张表建立独立 crate。
+当前依赖为 **`desktop → core`**，第二阶段增加 **`server → core`**。不再单设 `infra` 包：存储、邮件协议、网络路由和模型适配随功能一起放入 `core` 的内部模块。宿主无关意味着 core 不导入 Tauri、Axum 或 UI API，可以依赖 SQLite 驱动、协议库和 HTTP 客户端；不要求为每个实现预建 trait。平台特定能力按需要由宿主注入。
 
-Rust DTO 作为跨边界类型来源，M0 选择生成工具，生成 TypeScript / Schema 后检查差异。前端只经 `MailxClient` 调用，组件不直接导入 Tauri API 或拼 HTTP 请求。
+邮件同步、收信、发信、重试与持久化均由 Rust core 承担，前端负责展示、输入和交互。当前 `desktop/src/commands.rs` 仅把核心版本交给前端模板，没有业务流程；后续 IPC / HTTP / MCP 仍应调用同一套核心服务。出现独立发布、可选重依赖或明确复用需求时，再评估拆包。
 
-## 4. 核心职责
+后续以 Rust DTO 作为跨边界类型来源，再决定 TypeScript / Schema 生成工具。正式前端通过统一客户端适配器调用；当前模板保留的 Tauri 调用仅用于验证宿主，不是已冻结的应用契约。
+
+## 4. 后续核心职责
+
+以下服务与模块尚未实现，按实际功能逐步建立，不要求先创建所有目录或接口。
 
 | 模块 | 拥有的状态 / 责任 | 不承担 |
 | --- | --- | --- |

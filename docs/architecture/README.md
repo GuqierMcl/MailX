@@ -1,6 +1,6 @@
 # 架构文档
 
-状态：**Initial draft** · 尚未实现；这些方案可由后续设计修订或替换。
+状态：**部分 Implemented / 其余 Initial draft** · core、frontend 与 desktop 骨架已建立，业务流程尚未实现；这些方案可由后续设计修订或替换。
 
 | 文档 | 主要问题 |
 | --- | --- |

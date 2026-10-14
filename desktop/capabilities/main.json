@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Allow the local main window to read core build metadata.",
+  "windows": ["main"],
+  "permissions": ["allow-core-info"]
+}

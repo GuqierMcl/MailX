@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**Initial draft / 初始设计草案** · 2026-10-14。此目录记录项目刚启动时的愿景、第一版架构方案和实施建议，不是已完成软件的使用手册，也不是后续必须遵循的固定规范。当前已交付的是仓库基础配置和文档；建议实现从 M0 开始。
+状态：**初始设计与工程骨架并行演进** · 2026-10-14。此目录记录项目启动愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。已有 Cargo workspace、core、React + TypeScript + Vite + shadcn 前端骨架与 desktop 宿主；邮件能力仍按 M0 → M1 逐步实现。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 
@@ -19,11 +19,11 @@
 | 目录 | 内容 | 本阶段状态 |
 | --- | --- | --- |
 | [product/](product/README.md) | 初始产品目标、兼容范围、非目标 | Initial draft |
-| [architecture/](architecture/README.md) | 初始系统边界、数据与关键流程 | Initial draft |
+| [architecture/](architecture/README.md) | 当前包边界与后续数据、流程设计 | 部分 Implemented |
 | [contracts/](contracts/README.md) | IPC / HTTP / MCP 的接口草案 | Draft |
 | [ai-runtime/](ai-runtime/README.md) | 模型适配、运行生命周期和权限 | Initial draft |
-| [development/](development/README.md) | 建议的工程落地与验证方法 | Initial draft |
-| [adr/](adr/README.md) | 初始选型理由、代价与重新评估条件 | Proposed |
+| [development/](development/README.md) | 当前开发命令与后续验证计划 | 骨架命令可执行 |
+| [adr/](adr/README.md) | 选型理由、代价与重新评估条件 | Accepted / Proposed |
 | [roadmap/](roadmap/README.md) | 未实现工作及验收标准 | Planned |
 | [reference/](reference/blueprint-review.md) | 蓝图修订依据与外部资料 | Reference |
 
@@ -34,6 +34,7 @@
 - **Initial draft**：项目启动时的一版可实施设想，尚无运行证据，可由后续设计替换。
 - **Draft**：可随首批实现调整的契约，尚未承诺对外兼容。
 - **Proposed**：初始建议，待实现验证；不表示维护者已批准或冻结。
+- **Accepted**：当前讨论采用的方向；不等于全部实现，也允许随后续设计调整。
 - **Implemented**：已有对应代码和验证；更新时写明代码位置与验证方法。
 - **Planned / Deferred**：未来工作，不覆盖当前边界。
 

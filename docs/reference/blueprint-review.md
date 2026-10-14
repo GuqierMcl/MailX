@@ -11,7 +11,7 @@
 | 蓝图表述 / 留白 | 初始设计处理 | 理由 |
 | --- | --- | --- |
 | “全邮箱兼容”与 30+ 预设 | 先 IMAP / SMTP + 小规模实测矩阵 | 预设无法保证认证与租户策略允许接入 |
-| Svelte 或 React | 暂选 React / TypeScript / Bun | 复用维护者已有经验，后续可重评 |
+| Svelte 或 React | 采用 React + TypeScript + Vite，组件基础采用 shadcn `base-mira` | 先建立可运行的桌面前端骨架；业务 UI、状态管理和 DTO 方案继续验证 |
 | 全部内容、凭证都在 SQLite | 凭证库分离，大对象放 blob 文件 | 区分缓存、秘密与持久化语义 |
 | “绝不向第三方发送数据”与 BYOK 云模型并存 | 不设 MailX 中继；云 AI / MCP 需明确披露 | 与真实数据流一致 |
 | reqwest 实现分账号代理 | HTTP 和 IMAP / SMTP 流分别适配，统一策略 | HTTP 代理设置不能自动覆盖其他协议 |

@@ -1,0 +1,25 @@
+[package]
+name = "mailx-desktop"
+description = "Tauri desktop host for MailX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+mailx-core.workspace = true
+serde.workspace = true
+tauri.workspace = true
+
+[features]
+# Enable the custom protocol for loading bundled frontend assets in production builds.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[lints]
+workspace = true
