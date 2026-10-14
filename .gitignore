@@ -1,0 +1,52 @@
+# Build and dependency output
+/target/
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+**/test-results/
+**/playwright-report/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private mail, runtime state and diagnostics
+/data/
+/backups/
+/artifacts/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.eml
+*.mbox
+*.log
+*.har
+# Synthetic fixtures may be tracked; never use production mail here.
+!tests/fixtures/**/*.eml
+
+# Local tools and editor state
+/.codegraph/
+/.idea/
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings.json
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo

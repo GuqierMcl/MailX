@@ -1,0 +1,42 @@
+# MailX 文档入口
+
+状态：**Initial draft / 初始设计草案** · 2026-10-14。此目录记录项目刚启动时的愿景、第一版架构方案和实施建议，不是已完成软件的使用手册，也不是后续必须遵循的固定规范。当前已交付的是仓库基础配置和文档；建议实现从 M0 开始。
+
+**演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
+
+文档沿用 NexusPilot 的按职责分层方式，内容针对 MailX 重新设计，不继承该项目的数据库业务或 AI sidecar 架构。
+
+## 阅读路径
+
+- 了解项目：先看[产品范围](product/README.md)，再看[架构总览](architecture/overview.md)。
+- 开始编码：先看[开发指南](development/README.md)和[实施路线图](roadmap/README.md)，按 M0 → M1 建立第一条可验证链路。
+- 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
+- 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
+- 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
+
+## 目录职责
+
+| 目录 | 内容 | 本阶段状态 |
+| --- | --- | --- |
+| [product/](product/README.md) | 初始产品目标、兼容范围、非目标 | Initial draft |
+| [architecture/](architecture/README.md) | 初始系统边界、数据与关键流程 | Initial draft |
+| [contracts/](contracts/README.md) | IPC / HTTP / MCP 的接口草案 | Draft |
+| [ai-runtime/](ai-runtime/README.md) | 模型适配、运行生命周期和权限 | Initial draft |
+| [development/](development/README.md) | 建议的工程落地与验证方法 | Initial draft |
+| [adr/](adr/README.md) | 初始选型理由、代价与重新评估条件 | Proposed |
+| [roadmap/](roadmap/README.md) | 未实现工作及验收标准 | Planned |
+| [reference/](reference/blueprint-review.md) | 蓝图修订依据与外部资料 | Reference |
+
+有可用客户端后再建立 `guides/` 用户手册；需要文档站时以它为唯一用户文档来源。本阶段不创建空站点或第二套 Markdown 副本。
+
+## 状态与维护规则
+
+- **Initial draft**：项目启动时的一版可实施设想，尚无运行证据，可由后续设计替换。
+- **Draft**：可随首批实现调整的契约，尚未承诺对外兼容。
+- **Proposed**：初始建议，待实现验证；不表示维护者已批准或冻结。
+- **Implemented**：已有对应代码和验证；更新时写明代码位置与验证方法。
+- **Planned / Deferred**：未来工作，不覆盖当前边界。
+
+冲突时先区分“初始设想”“最新设计”与“实际行为”：实际能力由代码和测试证明，最新明确设计优先于启动草案。变更时更新受影响的说明，避免把被替代的方案继续标成当前设计。只有接口实际对外发布并明确承诺兼容后，才按届时确定的版本策略维护；本轮没有冻结任何接口。
+
+不要提交原始个人规划、AI 对话、临时工作日志、真实邮件、凭证或机器绝对路径；可复用结论写入相应权威文档。
