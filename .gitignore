@@ -12,12 +12,20 @@
 # Local configuration and secrets
 .env
 .env.*
+.env_*
 !.env.example
 !.env.*.example
 *.pem
 *.key
 *.p12
 *.pfx
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+*.local.conf
+*.local.config
+.mcp.json
 
 # Private mail, runtime state and diagnostics
 /data/
@@ -39,12 +47,67 @@
 # Synthetic fixtures may be tracked; never use production mail here.
 !tests/fixtures/**/*.eml
 
+# Personal AI coding-agent skills, configuration and state
+.codex/
+.claude/
+.opencode/
+.kilo/
+.windsurf/
+.continue/
+.agents/
+.cursor/
+.zcode/
+.codegraph/
+.comet/
+.superpowers/
+
+# Personal AI collaboration records
+.ai-local/
+.ai-private/
+.personal/
+.private/
+.worklogs/
+.scratch/
+.transcripts/
+.prompts/
+/docs/superpowers/
+/superpowers/
+/docs/comet/
+/docs/openspec/
+/openspec/
+/skills-lock.json
+
+# Personal development artifacts
+screenshots-local/
+captures-local/
+exports-local/
+audit-local/
+scan-local/
+reports-local/
+coverage-local/
+release-preview/
+staging-local/
+
+# Personal task records (shared project instructions remain versioned)
+TODO.local.md
+TODO.private.md
+TASKS.local.md
+TASKS.private.md
+PLAN.local.md
+PLAN.private.md
+CHECKLIST.local.md
+CHECKLIST.private.md
+REVIEW.local.md
+REVIEW.private.md
+AGENTS.local.md
+CLAUDE.local.md
+
 # Local tools and editor state
-/.codegraph/
 /.idea/
 /.vscode/*
 !/.vscode/extensions.json
 !/.vscode/settings.json
+.tmp/
 __pycache__/
 *.pyc
 .DS_Store
@@ -52,3 +115,11 @@ Thumbs.db
 Desktop.ini
 *.swp
 *.swo
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<
+
+# Keep personal Comet files private even when its managed block is refreshed.
+/.comet/

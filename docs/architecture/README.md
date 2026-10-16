@@ -1,10 +1,11 @@
 # 架构文档
 
-状态：**部分 Implemented / 其余 Initial draft** · core、frontend 与 desktop 骨架已建立，业务流程尚未实现；这些方案可由后续设计修订或替换。
+状态：**部分 Implemented / 其余 Initial draft** · 账号配置、持久化及桌面界面已接通，邮件连接与收发尚未实现；这些方案可由后续设计修订或替换。
 
 | 文档 | 主要问题 |
 | --- | --- |
 | [总览](overview.md) | 模块如何划分，代码放在哪里，依赖指向哪里 |
+| [账号配置](account-configuration.md) | 账号、认证、路由、凭证恢复和操作生命周期 |
 | [同步与发信](mail-sync.md) | 账号生命周期、增量同步、断网恢复与防重复发送 |
 | [存储与搜索](storage-search.md) | 数据身份、表结构、缓存、全文索引和一致性备份 |
 | [网络与安全](network-security.md) | 代理、OAuth、密钥、HTML、日志和外部数据访问 |

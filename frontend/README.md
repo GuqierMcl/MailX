@@ -1,85 +1,25 @@
 # MailX frontend
 
-This directory contains the initial React + TypeScript + Vite frontend scaffold for MailX. The current page is still the generated starter UI; mail accounts, synchronization, reading, composing, and sending are not implemented yet.
+React + TypeScript + Vite frontend using shadcn's `base-mira` preset. The current UI provides account navigation, a list, and configuration details. Mail connections, synchronization, reading, composing, and sending are not implemented.
 
-Run commands from the repository root so the root `package.json` and `bun.lock` remain the single workspace entry point:
+Run commands from the repository root so `package.json` and `bun.lock` remain the workspace entry point:
 
 ```sh
-bun install
+bun install --frozen-lockfile
 bun run dev
 bun run tauri dev
+bun run typecheck
+bun run lint
+bun run build
+bun run frontend:test
+bun run types:generate
+bun run types:check
 ```
 
-The UI foundation uses shadcn's `base-mira` preset and React Router as a dependency. These choices can evolve as the desktop MVP is implemented.
+Account screens compose shadcn components; install missing components using the existing project preset. Native DOM inside those component implementations is expected. The layout uses a navigation sidebar, account list, and settings detail area, with loading, empty, save, conflict, and failure states.
 
-Currently, two official plugins are available:
+Business components depend on `MailxClient` in `src/lib/mailx-client.ts`. The desktop adapter invokes the four account commands; Rust DTOs generate `src/generated/accounts.ts`. Keep transient form state separate from those generated wire types. Ordinary browser development has no desktop backend and displays an unavailable-host state; it does not persist accounts to localStorage or report simulated saves.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Passwords are write-only inputs. An edit explicitly preserves or replaces the backend secret, never fills it back into the form, and clears sensitive input after submission. A saved account remains “connection unverified”; saving does not contact a mail server. Application data is owned by the desktop/core service in user-data-dir.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+Vitest and Testing Library exercise form behavior and the client boundary using explicit test doubles. Desktop IPC and the real OS credential store require separate host verification. See [account configuration](../docs/architecture/account-configuration.md), [API contracts](../docs/contracts/app-api.md), and [validation](../docs/development/validation.md).

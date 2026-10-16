@@ -1,13 +1,13 @@
 # MailX 第一版架构
 
-状态：**部分 Implemented / 其余 Initial draft** · 2026-10-14。根目录 Cargo workspace、`core/`、React + TypeScript + Vite + shadcn 前端骨架与 `desktop/` 已建立；邮件功能尚未实现。下文区分当前骨架与后续设想，所有设计仍可演化。
+状态：**部分 Implemented / 其余 Initial draft** · 2026-10-16。已建立 core、Tauri 宿主与 shadcn 账号设置界面，并接通配置持久化、系统凭据库与账号 IPC；邮件连接、同步和收发尚未实现。下文区分当前能力与后续设想，所有设计仍可演化。
 
 ## 1. 总体结构
 
 采用模块化单体与轻量宿主。每个数据目录只有一个 Rust 核心实例拥有数据库、同步任务和发件队列。桌面与 Web 复用核心库；独立部署时不共享数据目录。
 
 ```text
-前端工作台（React + TypeScript + Vite + shadcn；当前为初始化模板）
+前端工作台（React + TypeScript + Vite + shadcn；当前为账号设置）
     └── MailxClient 接口
          ├── Tauri IPC adapter ── 桌面宿主
          └── HTTP + SSE adapter ─ Web 宿主（v0.2）
@@ -33,13 +33,13 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 
 | 层 | 设计选择 | 实施约束 |
 | --- | --- | --- |
-| UI | React + TypeScript + Vite，已初始化 | 当前只有模板页；通过统一客户端适配器访问桌面 IPC 或未来 HTTP |
-| UI 基础 | shadcn `base-mira` preset，已初始化 | 组件基础已建立，服务状态、交互状态和邮件领域模型仍待实现 |
-| 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；仅有核心版本 IPC；正文隔离待实现 |
-| 核心 | Rust，已初始化；Tokio 为后续候选 | 单个 crate 承担业务与通用实现，当前无第三方依赖 |
+| UI | React + TypeScript + Vite，已初始化 | 当前为账号列表和配置表单；MailxClient 访问桌面 IPC，HTTP 留待后续 |
+| UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
+| 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文隔离待实现 |
+| 核心 | Rust，同步账号应用服务 | 宿主用阻塞工作线程串行调用；协议异步运行模型后续确定 |
 | 接收 / 发送 | `async-imap` / `lettre` 候选 | M0 必须验证自定义流、TLS、OAuth 和代理；不能因库限制绕过账号路由 |
 | MIME / HTML | `mail-parser` / `ammonia` 候选 | 限制大小、递归深度；净化之外仍需 iframe + CSP |
-| 存储 | SQLite 方向；SQLx / `rusqlite` 待定 | 驱动、执行模型与迁移方式经验证后确定，当前未引入 |
+| 存储 | SQLite + `rusqlite`，已采用 | 账号配置使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
 | MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 候选 | M0 验证 SDK / 客户端协议协商，首版 stdio |
 | Web | Axum + 同源静态 SPA + SSE | v0.2；单用户、服务端 Session、TOTP |
@@ -56,14 +56,18 @@ Cargo.toml                  # workspace：core + desktop
 Cargo.lock                  # Rust 依赖解析结果
 rust-toolchain.toml          # Rust 1.94.0、rustfmt、Clippy
 core/                       # mailx-core，共享核心；业务与通用实现均在这里
-  src/lib.rs                # 当前只提供版本信息
+  src/accounts/             # 账号服务、写入型认证输入与脱敏 DTO
+  src/storage/              # SQLite、迁移、凭证更新恢复与实例锁
+  src/secrets.rs            # 宿主注入的 SecretStore
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
   capabilities/             # 主窗口权限
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位
-frontend/                   # React + TypeScript + Vite + shadcn 前端骨架
-  src/                      # 页面与 UI 组件
+frontend/                   # React + TypeScript + Vite + shadcn 前端
+  src/features/accounts/    # shadcn 账号配置界面
+  src/lib/mailx-client.ts    # 传输适配
+  src/generated/            # Rust DTO 生成的 TypeScript
   package.json              # 前端脚本与依赖
   vite.config.ts            # Vite / Tailwind 配置
 docs/                       # 文档
@@ -73,17 +77,17 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 
 当前依赖为 **`desktop → core`**，第二阶段增加 **`server → core`**。不再单设 `infra` 包：存储、邮件协议、网络路由和模型适配随功能一起放入 `core` 的内部模块。宿主无关意味着 core 不导入 Tauri、Axum 或 UI API，可以依赖 SQLite 驱动、协议库和 HTTP 客户端；不要求为每个实现预建 trait。平台特定能力按需要由宿主注入。
 
-邮件同步、收信、发信、重试与持久化均由 Rust core 承担，前端负责展示、输入和交互。当前 `desktop/src/commands.rs` 仅把核心版本交给前端模板，没有业务流程；后续 IPC / HTTP / MCP 仍应调用同一套核心服务。出现独立发布、可选重依赖或明确复用需求时，再评估拆包。
+邮件同步、收信、发信、重试与持久化均由 Rust core 承担，前端负责展示、输入和交互。当前账号 IPC 调用 `AccountService` 的创建、列表、详情与修改；后续 HTTP / MCP 也应调用同一套核心服务。出现独立发布、可选重依赖或明确复用需求时，再评估拆包。
 
-后续以 Rust DTO 作为跨边界类型来源，再决定 TypeScript / Schema 生成工具。正式前端通过统一客户端适配器调用；当前模板保留的 Tauri 调用仅用于验证宿主，不是已冻结的应用契约。
+账号以 Rust DTO 为跨边界类型来源，通过 `ts-rs` 生成 TypeScript；输入秘密与读取结果分开。前端仅经 `MailxClient` 调用宿主，生成产物可检查漂移。接口仍处于开发期，未冻结对外兼容承诺。
 
-## 4. 后续核心职责
+## 4. 核心职责
 
-以下服务与模块尚未实现，按实际功能逐步建立，不要求先创建所有目录或接口。
+当前已实现 AccountService 及账号配置所需存储；表中其余服务按实际功能逐步建立，不要求先创建空目录或接口。
 
 | 模块 | 拥有的状态 / 责任 | 不承担 |
 | --- | --- | --- |
-| AccountService | 账号配置、端点、能力、认证状态、密钥引用 | 返回密钥明文 |
+| AccountService | 账号、端点、认证配置、路由、凭证引用与恢复；当前未探测连接能力 | 返回密钥明文 |
 | SyncCoordinator | 每账号任务、文件夹游标、增量与对账 | UI 排序和模型判断 |
 | MailService / SearchService | 缓存读取、状态变更、受限搜索 | 让前端执行 SQL |
 | DraftService / OutboxService | 草稿版本、发送快照、幂等与结果状态 | 模型自主确认发送 |
@@ -91,9 +95,11 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 | PolicyService | 账号范围、动作权限、内容披露与确认 | 依赖前端按钮隐藏来授权 |
 | Repository / BlobStore | 持久化、迁移、缓存与备份 | 网络调用跨越事务 |
 
-每次请求携带由宿主构造的 `RequestContext`：调用主体、来源、授权账号集合、权限集合、`requestId`。客户端不能自报自己是 UI 或管理员。单用户实例仍需隔离不同 MCP 客户端的授权。
+当前仅本地受信主窗口可调用账号管理 IPC，参数不接受客户端自报主体或秘密引用。未来多入口请求携带由宿主构造的 `RequestContext`：调用主体、来源、授权账号集合、权限集合、`requestId`。客户端不能自报自己是 UI 或管理员。单用户实例仍需隔离不同 MCP 客户端的授权。
 
 ## 5. 关键数据流
+
+当前账号配置链路为：shadcn 表单 → MailxClient → 受限 Tauri IPC → AccountService → SecretStore 与 SQLite 更新恢复。保存不会连接邮箱，完整模型与操作边界见[账号配置](account-configuration.md)。下面邮件与 AI 链路仍为后续设计。
 
 1. **同步**：账号配置 → 路由与认证 → 分页读取 UID / 头部 → 短事务写入与游标推进 → 发送失效事件 → UI 重新查询。正文按需读取，不阻塞壳启动。
 2. **阅读**：缓存查询 → 缺失则创建获取任务 → MIME 解码 → 纯文本与净化 HTML → 隔离渲染。远程图片由受控资源加载器按单封授权处理。

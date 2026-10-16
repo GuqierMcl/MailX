@@ -15,6 +15,7 @@
     "frontend:build": "bun run --cwd frontend build",
     "frontend:lint": "bun run --cwd frontend lint",
     "frontend:typecheck": "bun run --cwd frontend typecheck",
+    "frontend:test": "bun run --cwd frontend test",
     "frontend:preview": "bun run --cwd frontend preview",
     "build": "bun run frontend:build",
     "lint": "bun run frontend:lint",
@@ -23,13 +24,15 @@
     "desktop:dev": "bun run tauri dev",
     "desktop:build": "bun run tauri build",
     "version:check": "bun scripts/check-version.mjs",
+    "types:generate": "bun scripts/generate-types.mjs",
+    "types:check": "bun scripts/generate-types.mjs --check",
     "icons:generate": "bun scripts/generate-icons.mjs",
     "icons:check": "bun scripts/generate-icons.mjs --check",
     "rust:check": "cargo check --workspace --locked",
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "rust:test": "cargo test --workspace --locked",
-    "check": "bun run version:check && bun run typecheck && bun run lint && bun run build && bun run rust:check"
+    "check": "bun run version:check && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2"

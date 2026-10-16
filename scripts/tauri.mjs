@@ -9,7 +9,8 @@ const bun = process.platform === "win32" ? "bun.exe" : "bun";
 
 const result = spawnSync(
   bun,
-  [cli, ...args, "--config", config],
+  // Load the repository config first so explicit CLI overrides take precedence.
+  [cli, ...(args.length ? [args[0], "--config", config, ...args.slice(1)] : ["--help"])],
   { cwd: root, stdio: "inherit" },
 );
 

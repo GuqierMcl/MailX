@@ -1,6 +1,6 @@
-# 应用服务 API 草案
+# 应用服务 API
 
-状态：**Draft / 未实现、未冻结**。以下接口用于指导首批实现，可随新设计修改。
+状态：**账号配置接口已实现 / 其余 Draft，均未冻结对外兼容承诺**。当前只有桌面账号管理 IPC，没有 HTTP、MCP、连接测试或邮件 API。Rust 类型位于 `core/src/accounts/types.rs` 和 `core/src/error.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts`。
 
 ## 1. 通用结构
 
@@ -9,24 +9,25 @@
 应用响应统一为互斥结果，传输状态另外保留：
 
 ```ts
-type Result<T> =
+type ApiResult<T> =
   | { ok: true; data: T; requestId: string }
   | { ok: false; error: AppError; requestId: string };
 
 type AppError = {
   code: string;
   message: string;
-  retryable: boolean;
-  details?: Record<string, unknown>; // 仅允许各错误定义的脱敏字段
+  field: string | null; // 参数错误的字段名；不包含原输入值
 };
 
 type Page<T> = { items: T[]; nextCursor: string | null };
 type BodyState = "missing" | "fetching" | "ready" | "failed";
 ```
 
-成功 HTTP 返回对应 2xx，失败使用合理的 4xx / 5xx，不能始终返回 200。Tauri adapter 和 HTTP adapter 将响应转换为同一前端结果类型。MCP 使用自己的 JSON-RPC / tool result 封装，复用 `AppError.code` 而非套一层 HTTP 状态。
+当前账号响应使用上述 `ApiResult<T>` 结构，宿主生成响应 `requestId`；创建请求中的 `request.requestId` 则是客户端幂等键，两者用途不同。`Page` 与邮件状态类型尚属后续草案。
 
-## 2. 分页与查询
+未来成功 HTTP 返回对应 2xx，失败使用合理的 4xx / 5xx，不能始终返回 200。Tauri adapter 和 HTTP adapter 将响应转换为同一前端结果类型。MCP 使用自己的 JSON-RPC / tool result 封装，复用 `AppError.code` 而非套一层 HTTP 状态。
+
+## 2. 邮件分页与查询（后续）
 
 列表默认 `limit=50`，范围 1–100。游标不透明，绑定查询条件和最后一条 `(receivedAt, emailId)`；改变过滤条件后重新开始。无效游标报参数错误。权限范围始终由服务端与查询指定的账号取交集，显式请求未授权账号直接拒绝。
 
@@ -48,16 +49,31 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 `EmailSummary` 至少包含 `id`、`accountId`、`folderId`、`subject`、`from`、`receivedAt`、`isRead`、`isStarred`、`hasAttachment`、`bodyState`、`pendingChanges`。不把正文塞进每行，也不向列表暴露 blob 文件路径。
 
-## 3. 首批应用操作
+## 3. 当前账号操作
 
-下表中的 HTTP 映射属于后续 Web 设计，当前没有运行中的端点。Tauri 命令按领域命名，经同一服务执行。
+| MailxClient 方法 | Tauri 命令与参数 | 核心服务 | 成功结果 |
+| --- | --- | --- | --- |
+| `listAccounts()` | `accounts_list`，无参数 | `AccountService::list` | `Account[]` |
+| `getAccount(accountId)` | `accounts_get`，`{ accountId }` | `AccountService::get` | `Account` |
+| `createAccount(request)` | `accounts_create`，`{ request: { requestId, config } }` | `AccountService::create` | `Account` |
+| `updateAccount(request)` | `accounts_update`，`{ request: { accountId, expectedRevision, config } }` | `AccountService::update` | `Account` |
+
+`config` 包含 `displayName`、`emailAddress`、可空 `providerId`、独立的 `imap` / `smtp` 连接配置、`authentication` 和 `route`。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
+
+`Account` 返回账号与来源 ID、revision、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
+
+命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
+
+创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。
+
+### 后续应用操作草案
+
+下表没有运行中的命令或 HTTP 端点。Web 映射会随实现明确，当前账号接口不因此开放网络访问。
 
 | 应用操作 | 主要输入 → 输出 | 拟定 HTTP 映射 |
 | --- | --- | --- |
-| `accounts.list` | 无 → 脱敏账号、能力、状态 | GET `/api/v1/accounts` |
-| `accounts.configure` | 配置 + 写入型凭证字段 → accountId / revision | POST `/api/v1/accounts` |
 | `accounts.test` | accountId → 收 / 发测试结果 | POST `/api/v1/accounts/{id}/test` |
-| `accounts.reauthorize` | accountId → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
+| `accounts.reauthorize` | accountId / authProfileId / expectedRevision → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
 | `folders.list` | accountId → 文件夹列表 | GET `/api/v1/accounts/{id}/folders` |
 | `emails.list` | 结构化过滤 / 游标 → Page + coverage | GET `/api/v1/emails` |
 | `emails.search` | query / 过滤 / 游标 → Page + coverage | POST `/api/v1/search` |
@@ -76,13 +92,13 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 OAuth、附件上传、设置和删除账号的细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
 
-## 4. 写操作一致性
+## 4. 邮件写操作一致性（后续）
 
 `expectedRevision` 不匹配报 `REVISION_CONFLICT`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
 
-`drafts.queueSend` 只允许交互 UI 主体，后端核对账号权限、草稿版本和确认过的快照；MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md)解释；`retryable` 从不授权对 `unknown` SMTP 结果自动重发。
+`drafts.queueSend` 只允许交互 UI 主体，后端核对账号权限、草稿版本和确认过的快照；MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
 
-## 5. 事件草案
+## 5. 事件草案（后续）
 
 ```ts
 type DomainEvent = {
@@ -100,7 +116,23 @@ type DomainEvent = {
 
 Tauri 事件与 Web SSE 都是可丢失通知，不提供可靠消息队列语义。发现 epoch 变化、序号缺口或重连时读取快照。UI 列表按账号批量失效，不能每封邮件触发一次全库查询。AI delta 不保证重放，以 Run 的累积输出恢复。
 
-## 6. 错误分类初案
+## 6. 当前错误与后续分类
+
+当前 `AppError.code` 使用下列 camelCase 值，`message` 为固定脱敏文本，`field` 为可空字段名。当前没有 `retryable` 或任意 `details` 对象。
+
+| code | 含义 / 处理 |
+| --- | --- |
+| `validation` | 输入无效，按 field 修改；秘密原值不进入错误 |
+| `notFound` | 账号不存在 |
+| `conflict` / `idempotencyConflict` | 加载最新配置或处理重复创建请求 |
+| `unsupported` | 当前不支持该认证方式，例如 OAuth2 |
+| `storageUnavailable` / `storageIncompatible` | 读写失败或 schema/校验不兼容；保留原数据 |
+| `alreadyOpen` | 数据目录已被另一核心实例持有 |
+| `secretStoreLocked` / `secretStoreUnavailable` | 解锁或恢复系统凭据库后重试，不降级明文 |
+| `secretMissing` | 凭证条目确认不存在，需要重新输入 |
+| `internal` | 脱敏内部故障 |
+
+MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）与 `transport`（通信失败）；不展示原始 IPC 异常。以下大写代码及 HTTP 映射是未来邮件功能的原始分类草案，尚未加入当前生成的错误枚举，实施时统一命名与验证。
 
 | code | 含义 / 处理 | HTTP |
 | --- | --- | --- |
@@ -117,4 +149,4 @@ Tauri 事件与 Web SSE 都是可丢失通知，不提供可靠消息队列语�
 | `SEND_OUTCOME_UNKNOWN` | 可能已提交，需人工核查 | 409 |
 | `CANCELED` / `INTERNAL` | 取消 / 脱敏内部故障 | 409 / 500 |
 
-未知内部异常不原样泄漏路径、SQL、凭证或正文。`details` 按错误类型白名单输出，例如 `retryAfterMs`、`currentRevision`，禁止直接序列化底层异常对象。
+未知内部异常不原样泄漏路径、SQL、凭证或正文。未来若增加 `details`，按错误类型白名单输出，例如 `retryAfterMs`、`currentRevision`，禁止直接序列化底层异常对象。

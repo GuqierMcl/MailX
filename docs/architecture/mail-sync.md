@@ -1,20 +1,14 @@
 # 账号、同步与发信
 
-状态：**Initial draft** · 对应建议里程碑 M1 / M2；状态与参数可随实现验证修订。
+状态：**同步与发送为 Initial draft** · 账号配置已单独实现，详见[账号配置](account-configuration.md)。本文的连接、缓存、任务与发送均尚未实现；状态与参数可随验证修订。
 
 ## 1. 账号生命周期
 
-账号配置包含接收端点、发送端点、认证方法、密钥引用和网络策略，不能假设 IMAP 与 SMTP 使用相同主机或用户名。连接测试分别报告收信 / 发信能力，不因收信成功就显示“账号完全可用”。
+当前账号服务只创建、查看和修改配置，返回 `connectionStatus=unverified`。IMAP 与 SMTP 可使用不同主机、用户名与凭证；保存成功不代表连接成功。实际配置模型、邮箱来源世代、端点信任及后续停用/删除契约见[账号配置](account-configuration.md)。
 
-```text
-unconfigured → testing → ready → syncing → ready
-                   └── needsAuth / degraded
-ready / syncing → offline / paused
-needsAuth → testing（重新授权）
-```
+连接器落地后，配置状态、认证状态、收发连接状态和同步进度分别表达，由 UI 汇总：例如 IMAP 正常同步、SMTP 被禁用、本地缓存可读可以同时成立。网络不通与授权被撤销分别处理；不得因为一个连接失败就禁止读取本地缓存。连接测试分别报告收信和发信能力。
 
-`degraded` 表示部分能力不可用，例如 IMAP 成功但 SMTP 被策略禁用；UI 按能力显示提示，缓存仍可读。用户禁用账号时取消任务并断开连接。删除账号由交互入口确认，撤销其 MCP 授权与待发送项，按明确选择清理本地数据，不删除服务端邮件。
-
+停用应阻止新任务、关闭连接并按操作类型收尾；删除需显式处理缓存、授权与在途任务，不删除服务端邮件。不能把“停止调度”理解为丢弃已轮换的凭证或已经发生的 SMTP 结果。
 能力由连接探测产生：`canRead`、`canSend`、`canSetSeen`、`canSetFlagged`、`supportsIdle` 等。预设只是建议配置，不能替代实际探测。
 
 ## 2. 连接与任务预算
@@ -36,19 +30,20 @@ needsAuth → testing（重新授权）
 
 UID 只在文件夹及其 `UIDVALIDITY` 世代内有效，不能拿序号或邮件头 `Message-ID` 当唯一远端主键。IMAP 规范说明了这组身份语义。[RFC 9051](https://www.rfc-editor.org/rfc/rfc9051.html)。
 
-MailX 使用 `(accountId, folderId, uidValidity, uid)` 作为远端位置唯一键，本地 `emailId` 是独立 UUID。`UIDVALIDITY` 改变时：暂停该文件夹写操作，废弃旧游标，旧位置标为失效并重建映射；旧缓存暂留供恢复，不将待写 flags 自动套到相同 UID 的新邮件上。
+MailX 使用 `(accountId, mailboxSourceId, folderId, uidValidity, uid)` 作为远端位置唯一键，本地 `emailId` 是独立 UUID。更换接收来源后建立新的来源世代，即使对方使用相同文件夹名、UIDVALIDITY 和 UID，也不能复用旧映射或待写 flags。`UIDVALIDITY` 改变时：暂停该文件夹写操作，废弃旧游标，旧位置标为失效并重建映射；旧缓存暂留供恢复，不将待写 flags 自动套到相同 UID 的新邮件上。
 
 增量游标区分 `highestObservedUid`、本次已处理区间与历史回填进度。最大 UID 不是“之前所有邮件都已缓存”的证明。基础模式对已缓存范围定期做 UID 存在性和 flags 对账；仅在成功完成该范围枚举后标记远端删除，网络中断不得触发批量清理。
 
 ## 4. 本地变更与恢复
 
-v0.1 只支持已读和星标写回。`pending_mutations` 保存目标远端身份、期望 flags、客户端操作 ID 和状态。离线修改显示“待同步”，服务端确认 flags 与本地意图分开存储。
+v0.1 只支持已读和星标写回。`pending_mutations` 保存包含来源世代的目标远端身份、期望 flags、客户端操作 ID 和状态。离线修改显示“待同步”，服务端确认 flags 与本地意图分开存储。
 
 - 同一邮件的同类待写操作可合并，按账号串行应用；成功后重新读取服务端状态。
 - 使用支持的条件写能力检测冲突；不支持时应用用户最后一次明确操作并重新读取，不宣称具备跨设备强一致性。
 - 远端已删除或 UID 世代变化时失败并提示，不按主题或 `Message-ID` 猜测重放。
 - SQLite 写入失败不推进同步游标；磁盘满时停止新增缓存、保留草稿并报告可恢复错误。
 - 进程重启恢复未完成的只读同步；发送与写操作按各自状态处理，不把所有任务一律重跑。
+- 配置变化后，读取批次与游标仅向匹配来源世代提交；OAuth 刷新按 grant/凭证版本接管，SMTP 结果始终关联原发送尝试。删除准入规则应阻止旧任务复活账号。
 
 ## 5. 本地草稿与可靠发送
 

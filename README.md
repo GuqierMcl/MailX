@@ -6,7 +6,7 @@
 
 MailX 围绕快速启动、广泛的邮箱兼容性和流畅的日常收发体验设计，让个人邮箱、工作邮箱与企业邮箱在同一个轻量工作台中统一管理。桌面端基于 Rust + Tauri，面向 Windows、macOS 和 Linux，后续提供单用户 Docker Web 版本。
 
-> **项目状态：工程骨架阶段。** 已建立 Rust 核心库、React + TypeScript + Vite 前端和 Tauri 桌面宿主，前端开发服务器与桌面开发命令已经打通；邮件功能尚未实现，当前页面仍是初始化模板。上述定位与下述亮点描述产品愿景，目前没有可用的邮件客户端、安装包或 Docker 镜像，设计可随项目演化调整。
+> **项目状态：账号配置基础阶段。** 已接通 Rust 账号配置服务、user-data-dir 中的 SQLite、系统凭据库、Tauri IPC 与 shadcn 设置页面，支持创建、查看、修改及重启读取配置。保存不连接邮箱，真实登录、同步与收发尚未实现。上述定位与下述亮点描述产品愿景，目前没有可用的邮件客户端、安装包或 Docker 镜像，设计可随项目演化调整。
 
 项目仓库：[GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)。当前为私有仓库，按开源项目的文档、贡献和版本管理方式维护；计划在首个 MVP 版本发布后公开并开源。
 
@@ -28,6 +28,7 @@ MailX 围绕快速启动、广泛的邮箱兼容性和流畅的日常收发体�
 从[文档入口](docs/README.md)开始，或直接阅读：
 
 - [架构总览](docs/architecture/overview.md)：模块划分、技术选型与目标代码结构。
+- [账号配置](docs/architecture/account-configuration.md)：当前能力、凭证恢复与未来 OAuth 扩展边界。
 - [实施路线图](docs/roadmap/README.md)：里程碑、依赖关系和完成标准。
 - [开发指南](docs/development/README.md)：环境、构建检查与下一条收信链路。
 - [贡献说明](CONTRIBUTING.md)：提交和验证约定。

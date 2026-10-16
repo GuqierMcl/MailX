@@ -1,8 +1,16 @@
 //! Shared, host-independent foundation for MailX.
 //!
-//! Mail services, protocol connections, storage, and account routing will live
-//! in this crate. Desktop and server hosts depend on it, never the reverse.
-//! Mail functionality is not implemented yet.
+//! Account configuration is persisted here; hosts supply a data directory and
+//! system secret store. No network login, synchronization, or sending is enabled.
+
+pub mod accounts;
+pub mod error;
+pub mod secrets;
+mod storage;
+
+pub use accounts::AccountService;
+pub use accounts::types::*;
+pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 
 /// The core crate version, available without initializing storage or networking.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

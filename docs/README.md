@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**初始设计与工程骨架并行演进** · 2026-10-14。此目录记录项目启动愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。已有 Cargo workspace、core、React + TypeScript + Vite + shadcn 前端骨架与 desktop 宿主；邮件能力仍按 M0 → M1 逐步实现。
+状态：**账号配置已接通，邮件能力继续演进** · 2026-10-16。此目录记录产品愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。已提供 Rust 账号配置服务、SQLite 与系统凭据边界、Tauri IPC 和 shadcn 设置页面；真实邮箱登录、同步和收发尚未实现。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 
@@ -10,6 +10,7 @@
 
 - 了解项目：先看[产品范围](product/README.md)，再看[架构总览](architecture/overview.md)。
 - 开始编码：先看[开发指南](development/README.md)和[实施路线图](roadmap/README.md)，按 M0 → M1 建立第一条可验证链路。
+- 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)和[应用 API](contracts/app-api.md)。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
@@ -20,11 +21,11 @@
 | --- | --- | --- |
 | [product/](product/README.md) | 初始产品目标、兼容范围、非目标 | Initial draft |
 | [architecture/](architecture/README.md) | 当前包边界与后续数据、流程设计 | 部分 Implemented |
-| [contracts/](contracts/README.md) | IPC / HTTP / MCP 的接口草案 | Draft |
+| [contracts/](contracts/README.md) | 当前账号 IPC 与后续 HTTP / MCP 契约 | 部分 Implemented / 其余 Draft |
 | [ai-runtime/](ai-runtime/README.md) | 模型适配、运行生命周期和权限 | Initial draft |
-| [development/](development/README.md) | 当前开发命令与后续验证计划 | 骨架命令可执行 |
+| [development/](development/README.md) | 当前开发命令与后续验证计划 | 账号及宿主检查可执行 |
 | [adr/](adr/README.md) | 选型理由、代价与重新评估条件 | Accepted / Proposed |
-| [roadmap/](roadmap/README.md) | 未实现工作及验收标准 | Planned |
+| [roadmap/](roadmap/README.md) | 已有基础、后续工作及验收标准 | 部分完成 / M0 未完成 |
 | [reference/](reference/blueprint-review.md) | 蓝图修订依据与外部资料 | Reference |
 
 有可用客户端后再建立 `guides/` 用户手册；需要文档站时以它为唯一用户文档来源。本阶段不创建空站点或第二套 Markdown 副本。

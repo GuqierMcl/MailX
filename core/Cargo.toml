@@ -8,5 +8,19 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+fs2 = "0.4"
+rusqlite = { version = "0.39", features = ["bundled"] }
+serde.workspace = true
+serde_json = "1"
+sha2 = "0.10"
+ts-rs = { version = "11", features = ["serde-compat", "no-serde-warnings"] }
+uuid = { version = "1", features = ["v4"] }
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

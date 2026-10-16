@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "MailX",
-        "width": 800,
-        "height": 560,
+        "width": 1180,
+        "height": 800,
         "minWidth": 480,
         "minHeight": 360
       }

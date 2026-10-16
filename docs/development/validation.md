@@ -1,6 +1,6 @@
 # 验证与质量目标初案
 
-状态：**骨架检查已可执行 / 业务验证仍为 Initial draft**。第 5 节说明当前工程检查，其余是未来测试计划，不是已通过的结果；阈值可根据目标硬件和实现证据修订。
+状态：**账号配置已有针对性测试 / 邮件及跨平台验证继续推进**。第 5 节说明当前检查方法，第 1–4 节主要是未来邮件能力的验证计划，不是已通过结果；阈值可根据实现证据修订。
 
 ## 1. 分层验证
 
@@ -78,6 +78,10 @@ bun run tauri dev
 bun run tauri build
 bun run check
 cargo check -p mailx-core --locked
+cargo test -p mailx-core --locked
+bun run frontend:test
+bun run types:generate
+bun run types:check
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
@@ -85,12 +89,40 @@ cargo build -p mailx-desktop --locked
 git diff --check
 ```
 
-`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。当前 `bundle.active=false`，它不代表已经生成安装包。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。当前没有业务测试，`cargo test` 仅检查测试目标能编译运行，不证明任何收发、存储或安全行为。
+`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。当前 `bundle.active=false`，它不代表已经生成安装包。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。账号核心及前端已有针对性测试，`cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。
 
-手动启动 `bun run tauri dev`，确认窗口显示前端模板、关闭窗口后宿主退出；当前仍可通过 `core_info` 检查核心版本及只读 IPC。此检查只覆盖前端模板、宿主和只读 IPC。真实邮件 HTML、实例锁、退出时任务取消和数据恢复需在对应实现后另行验证。
+### 账号配置的可重复检查
 
-前端已初始化 typecheck / lint / build 脚本，但尚无业务 UI 测试；`.github/` 只占位，尚未接入 CI。跨平台验证与自动化随实际工程补齐。
+- `core/tests/accounts.rs` 使用临时目录和 SecretStore 故障替身：检查重开读取、多账号归属、共享/独立密码、版本冲突和重复请求、端点信任、来源世代、路由配置、实例锁与 schema 兼容性；在秘密写入、配置提交和清理边界验证恢复，不误把凭据库不可用当作条目缺失。
+- `frontend/src/features/accounts/` 的 Vitest/Testing Library 测试检查表单映射、保存失败与冲突、敏感输入清理；MailxClient 测试检查实际命令和传输失败。测试替身不作为普通浏览器的生产后端。
+- `bun run types:generate` 调用 Rust 的 `export_types` 入口生成契约，`bun run types:check` 检查产物漂移；修改 DTO 后重新生成，禁止手写第二套跨边界字段。秘密输入不应出现在结果类型或异常输出中。
+- 手动运行 `bun run tauri dev`：检查 shadcn 页面加载、创建、编辑和关闭后重启；应保留账号 ID 与非敏感配置，始终显示连接尚未验证。检查共享/独立密码、版本冲突、密码不回填、键盘操作和窗口缩放。第二个核心打开相同数据目录应明确被拒绝。
+- 宿主测试检查本地 main 窗口及来源 URL 限制、畸形或越权参数的固定脱敏错误，以及系统凭据错误不透传原始值。参数通过受控的原始 IPC 解析进入核心，避免反序列化异常输出秘密。
+- 系统凭据库冒烟必须在实际桌面环境用唯一的合成条目验证写入、读取和清理；同时确认 SQLite/WAL、响应、Debug 与诊断输出不含秘密。自动化 SecretStore 替身不代替系统库验证。
 
-2026-10-14 的初始化验证在 Windows x86_64 MSVC、Rust 1.94.0、Bun 1.3.12 上完成：版本同步、前端类型检查、ESLint、Vite 构建、Rust check / 格式 / Clippy / 测试目标和 `bun run tauri dev` 启动通过；Tauri 开发命令成功启动 Vite、编译并打开 `MailX` 窗口，关闭后宿主退出。当前结果不覆盖未来邮件功能；macOS / Linux 尚未执行构建或运行验证。
+真实凭据库测试默认忽略，需要已解锁的原生凭据库并显式执行：
+
+```sh
+cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored
+```
+
+测试创建唯一 service 名下的合成条目并清理，验证读取、写入、删除与重复删除。它不会使用真实邮箱凭证；普通 `cargo test` 不包含这一测试。执行结论需单独记录，不因提供命令而视为通过。
+
+上述是检查范围和复现方法；当前执行结论应以当次命令及实际宿主结果记录，不因测试文件存在就宣称通过。真实邮箱 HTML、同步退出、OAuth 刷新及 SMTP 结果恢复尚需对应实现与独立验证。`.github/` 仍只占位，没有 CI。
+
+### 平台证据边界
+
+2026-10-14 的初始化验证在 Windows x86_64 MSVC、Rust 1.94.0、Bun 1.3.12 上完成：版本同步、前端类型检查、ESLint、Vite 构建、Rust check / 格式 / Clippy / 测试目标和 `bun run tauri dev` 启动通过。该记录只证明当时的工程骨架，不能证明后来新增的账号、系统凭据库或恢复能力。
+
+当前账号能力需分别记录 macOS、Windows 和 Linux 的构建、窗口、IPC 与系统凭据实际存取结果。某平台的适配代码存在、Rust 测试通过或另一个平台成功，均不能代替该平台的运行验证；真实收发和 OAuth 仍未验证。
+
+2026-10-16 在 macOS 26.2 arm64 上完成账号配置开发期冒烟：
+
+- `cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored` 通过，合成钥匙串条目完成写入、读取、删除和重复删除。
+- 使用独立应用 identifier 的 debug `.app` 实测打包后的页面与四个账号 IPC。创建共享密码账号后，修改为独立 IMAP/SMTP 密码并添加带认证的 SOCKS5 配置；保存后退出并重启，列表和详情恢复，账号 ID 与邮箱来源保持不变，revision 从 1 增至 2。
+- 数据位于该测试 identifier 对应的 `app_data_dir`；SQLite、WAL 与更新记录没有合成密码明文。重启后的系统凭据状态正常，表单只显示保留/替换选项，不回填密码，页面始终说明连接尚未验证。
+- 前端组件检查和普通浏览器预览使用显式测试替身或无宿主状态；这类证据与真实桌面冒烟分别记录。Windows/Linux 的新增账号功能尚未完成平台实测。
+
+隔离冒烟可通过 `bun run tauri build --debug --bundles app --config <测试配置文件>` 覆盖 identifier。根脚本先加载仓库配置，再应用显式覆盖；不要将测试配置和合成账号写入正式用户数据目录。测试完成后清理合成凭据与对应测试目录。
 
 按变更范围运行检查：核心改动跑相关测试，跨宿主契约改动增加两个 adapter 验证，发布前再执行完整平台矩阵。结果以命令输出和可复现实验为准，未执行项明确标注。

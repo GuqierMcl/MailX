@@ -1,6 +1,6 @@
 # 开发指南
 
-状态：**桌面工程骨架已建立，邮件功能待实现**。当前可以启动 Vite 前端、启动前端 + Tauri 桌面开发环境并构建两者；数据库、协议接入与服务器端仍待后续设计。
+状态：**账号配置基础已接通，邮件功能待实现**。当前可启动 shadcn 账号界面与 Tauri 宿主，创建、查看、修改并重载配置；非敏感数据存 user-data-dir 的 SQLite，凭证由系统凭据库保存。协议接入、OAuth 与服务器仍未实现。
 
 ## 1. 环境与目录
 
@@ -47,8 +47,18 @@ bun run rust:test
 bun run typecheck
 bun run lint
 
-# 一次执行版本、前端类型 / lint 和 Rust check
+# 一次执行版本、生成类型漂移、前端类型 / lint / 测试 / build 和 Rust check
 bun run check
+
+# 前端账号组件与客户端测试
+bun run frontend:test
+
+# 核心账号及存储测试
+cargo test -p mailx-core --locked
+
+# 生成 Rust DTO 对应的 TypeScript，并检查提交产物漂移
+bun run types:generate
+bun run types:check
 
 # 变更检查
 git diff --check
@@ -56,7 +66,9 @@ git diff --check
 
 `bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`；推荐使用会自动准备前端资源的 `bun run check`。当前 `bundle.active=false`，所以不宣称已经生成安装包。
 
-当前前端仍是初始化模板，尚未实现邮件列表、账号、同步或发信。桌面启动后，Tauri 宿主仍可通过 `core_info` 验证页面 → IPC → core 的连接；该调用不检查数据库、账号或同步状态。代码尚无业务测试；`bun run rust:test` 当前验证测试目标可编译运行，不代表邮件行为已有覆盖。
+当前前端是账号导航、列表与设置详情。桌面经 `MailxClient → accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
+
+桌面数据目录直接来自 Tauri `app_data_dir()`，包含 `mailx.sqlite3` 与 `mailx.lock`，不写入仓库或当前工作目录。应用标识变化会影响目录归属，已有数据需要显式迁移。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
 
 正常 Tauri 开发和构建使用 `frontend/dist`，不再在 `desktop/` 内维护另一份前端资源。Tauri 生成的 schema 与命令权限文件忽略提交，由 `build.rs` 重新生成。`git diff --check` 不覆盖未跟踪文件，新文件需额外检查。
 
@@ -64,20 +76,20 @@ git diff --check
 
 Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run icons:generate`，会同步品牌素材、桌面图标和网页图标；`bun run icons:check` 验证派生资源与源稿一致。该工具只在设计资源变更时运行，无需加入每次应用构建。详见[品牌资源说明](../../branding/README.md)。
 
-- **core**：共享业务与通用实现一起管理，之后按功能逐步加入账号、同步、发件队列、存储、路由、搜索等模块。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
-- **desktop**：Tauri 生命周期、窗口、IPC 和平台集成。IPC 负责适配核心调用，不承载邮件业务。
-- **frontend**：React + TypeScript + Vite + shadcn（Mira preset）工程骨架，依赖 React Router；当前只包含初始化模板，后续通过统一客户端适配器调用 core 能力。
+- **core**：已实现账号、认证与路由配置、SQLite 存储及凭证更新恢复；之后按功能加入同步、发件队列、连接器和搜索。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
+- **desktop**：Tauri 生命周期、窗口、受限 IPC、user-data-dir 和系统凭据库装配，在阻塞线程串行调用同步核心。IPC 负责适配核心调用，不承载邮件业务。
+- **frontend**：React + TypeScript + Vite + shadcn（Mira preset）；账号业务界面由 shadcn 组件组成，缺少组件时按现有配置安装。MailxClient 隔离传输，Rust DTO 生成 TypeScript，表单状态与应用契约分别维护。
 - **server**：当前仅顶级目录占位，第二阶段服务器 MVP 复用 core。
 
 不预建空 trait、Repository 层或每种技术的独立 crate。需要多个实现、平台适配或故障注入时再引入明确接口。
 
 ## 4. 接下来的桌面 MVP 工作
 
-1. 在现有前端骨架上确定 UI 客户端适配和 DTO 生成方案，接入真实工作台。
-2. 选择异步执行方案，编写最小 IMAP / SMTP 探针，验证 Direct / SOCKS5 / HTTP CONNECT 下的 TLS、认证与收发，并证明代理失败不会直连。
-3. 在 SQLite 方向下比较 SQLx / rusqlite，验证 WAL、FTS5、迁移和执行模型；建立平台数据目录、实例锁与凭据存储。
-4. 完成“配置测试邮箱 → 获取最近 5 封头部 → 去重入库 → 重启读取 → 展示缓存正文”的纵向链路，再增加第二个不同路由账号。
-5. 随功能补齐故障测试和真实 CI；第一阶段先完成桌面 MVP，第二阶段再初始化 server 与容器部署。
+1. 在已有账号配置基础上编写 IMAP / SMTP 探针，确定协议异步执行方案，验证 Direct / SOCKS5 / HTTP CONNECT 下的 TLS、认证与收发，并证明代理失败不会直连。
+2. 实现连接测试及状态，把密码/授权码配置接入真实连接器；按可用资格推进 OAuth 注册、主体核验与授权流程。
+3. 在现有 SQLite 迁移与恢复基础上加入邮件来源身份、批次事务和 FTS5 探针，验证搜索与同步负载下的执行模型。
+4. 完成“测试邮箱 → 最近 5 封头部 → 去重入库 → 重启读取 → 展示缓存正文”链路，再增加第二个不同路由账号。
+5. 随功能补齐故障测试与 CI；先桌面 MVP，再初始化 server 和容器部署。现有账号配置的自动化测试不代表邮件或全部平台已验证。
 
 ## 5. 增加邮箱预设
 
