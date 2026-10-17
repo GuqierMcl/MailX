@@ -4,6 +4,10 @@ import type {
   AppError,
   ApiResult,
   CreateAccountRequest,
+  EmailDetail,
+  EmailListQuery,
+  EmailPage,
+  Folder,
   UpdateAccountRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
@@ -32,6 +36,9 @@ export interface MailxClient {
   getAccount(accountId: string): Promise<Account>
   createAccount(request: CreateAccountRequest): Promise<Account>
   updateAccount(request: UpdateAccountRequest): Promise<Account>
+  listFolders(accountId: string): Promise<Folder[]>
+  listEmails(query: EmailListQuery): Promise<EmailPage>
+  getEmail(emailId: string): Promise<EmailDetail>
 }
 
 export function clientFailure(error: unknown): ClientFailure {
@@ -64,5 +71,9 @@ export function createDesktopClient(): MailxClient {
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
     updateAccount: (request) => call<Account>('accounts_update', { request }),
+    // The desktop host has no mail commands yet; these fail until sync lands.
+    listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
+    listEmails: (query) => call<EmailPage>('emails_list', { query }),
+    getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
   }
 }

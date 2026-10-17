@@ -1,6 +1,6 @@
 # MailX 第一版架构
 
-状态：**部分 Implemented / 其余 Initial draft** · 2026-10-16。已建立 core、Tauri 宿主与 shadcn 账号设置界面，并接通配置持久化、系统凭据库与账号 IPC；邮件连接、同步和收发尚未实现。下文区分当前能力与后续设想，所有设计仍可演化。
+状态：**部分 Implemented / 其余 Initial draft** · 2026-10-16。已建立 core、Tauri 宿主、shadcn 邮件工作台外壳与设置弹窗，并接通配置持久化、系统凭据库与账号 IPC；邮件连接、同步和收发尚未实现。下文区分当前能力与后续设想，所有设计仍可演化。
 
 ## 1. 总体结构
 
@@ -33,7 +33,7 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 
 | 层 | 设计选择 | 实施约束 |
 | --- | --- | --- |
-| UI | React + TypeScript + Vite，已初始化 | 当前为账号列表和配置表单；MailxClient 访问桌面 IPC，HTTP 留待后续 |
+| UI | React + TypeScript + Vite，已初始化 | 当前为三栏工作台外壳（邮件 DTO 已定义，数据来自开发期 mock）与设置弹窗；MailxClient 访问桌面 IPC，HTTP 留待后续 |
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文隔离待实现 |
 | 核心 | Rust，同步账号应用服务 | 宿主用阻塞工作线程串行调用；协议异步运行模型后续确定 |
@@ -65,7 +65,9 @@ desktop/                    # mailx-desktop，Tauri 宿主
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位
 frontend/                   # React + TypeScript + Vite + shadcn 前端
-  src/features/accounts/    # shadcn 账号配置界面
+  src/features/accounts/    # 账号配置表单
+  src/features/mail/        # 三栏邮件工作台
+  src/features/settings/    # 设置弹窗
   src/lib/mailx-client.ts    # 传输适配
   src/generated/            # Rust DTO 生成的 TypeScript
   package.json              # 前端脚本与依赖

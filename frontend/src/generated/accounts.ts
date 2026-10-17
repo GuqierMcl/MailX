@@ -57,3 +57,49 @@ export type Account = { id: string, revision: number, displayName: string, email
  * The initial application default is direct at revision 1.
  */
 defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, createdAt: string, updatedAt: string, };
+
+export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
+
+export type Folder = { id: string, accountId: string, parentId: string | null, name: string, role: FolderRole, unreadCount: number, totalCount: number, };
+
+export type MailAddress = { name: string | null, address: string, };
+
+export type BodyState = "missing" | "fetching" | "ready" | "failed";
+
+export type EmailSummary = { id: string, accountId: string, folderId: string, subject: string, from: MailAddress,
+/**
+ * Short plain-text excerpt for list rows, never HTML.
+ */
+preview: string,
+/**
+ * RFC 3339 timestamp.
+ */
+receivedAt: string, isRead: boolean, isStarred: boolean, hasAttachment: boolean, bodyState: BodyState,
+/**
+ * Local changes (read, star, move) not yet confirmed by the server.
+ */
+pendingChanges: boolean, };
+
+export type EmailListQuery = {
+/**
+ * `None` searches every account.
+ */
+accountIds: Array<string> | null, folderId: string | null,
+/**
+ * Matches folders with this role in every selected account, e.g. a unified inbox.
+ */
+folderRole: FolderRole | null, text: string | null, unread: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
+
+export type Coverage = { headersComplete: boolean, bodiesComplete: boolean, syncedAfter: string | null, syncedBefore: string | null, };
+
+export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
+
+export type AttachmentSummary = { id: string, filename: string, mimeType: string, size: number, isInline: boolean, };
+
+export type EmailBody = { text: string | null, html: string | null, };
+
+export type EmailDetail = { summary: EmailSummary, to: Array<MailAddress>, cc: Array<MailAddress>, replyTo: Array<MailAddress>,
+/**
+ * `None` until `summary.body_state` is `ready`.
+ */
+body: EmailBody | null, attachments: Array<AttachmentSummary>, };

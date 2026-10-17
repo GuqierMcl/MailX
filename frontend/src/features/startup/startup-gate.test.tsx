@@ -33,7 +33,7 @@ describe('startup gate', () => {
     expect(screen.getByRole('status', { name: '正在初始化本地数据' })).toBeInTheDocument()
     expect(client.listAccounts).not.toHaveBeenCalled()
     await act(async () => { pending.resolve({ state: 'ready', revision: 1 }) })
-    await waitFor(() => expect(screen.getByText('从添加一个邮箱开始')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('还没有邮箱账号')).toBeInTheDocument())
     expect(client.listAccounts).toHaveBeenCalledTimes(1)
   })
 
@@ -46,7 +46,7 @@ describe('startup gate', () => {
     await waitFor(() => expect(client.getStartupStatus).toHaveBeenCalledTimes(1))
     await new Promise((resolve) => setTimeout(resolve, 550))
     await waitFor(() => expect(client.getStartupStatus).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('从添加一个邮箱开始')).toBeInTheDocument()
+    expect(await screen.findByText('还没有邮箱账号')).toBeInTheDocument()
     await new Promise((resolve) => setTimeout(resolve, 550))
     expect(client.getStartupStatus).toHaveBeenCalledTimes(2)
   })
