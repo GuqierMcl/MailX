@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { TitleBar } from './title-bar'
+import { TitleBar, TitleBarActions, TitleBarSlotsProvider } from './title-bar'
 import { previewPlatformFromUrl, type WindowChrome, type WindowHost, type WindowState } from './window-host'
 
 const normal: WindowState = { maximized: false, fullscreen: false, focused: true }
@@ -94,6 +94,30 @@ describe('TitleBar', () => {
   it('renders a plain bar without a window host', () => {
     render(<TitleBar host={null} title="MailX" />)
     expect(screen.getByRole('banner').querySelector('[data-window-button]')).toBeNull()
+  })
+})
+
+describe('TitleBarActions', () => {
+  it('places page actions beside the window controls without making them drag handles', async () => {
+    const { host, perform } = fakeHost({ platform: 'windows', trailing: ['close'] })
+    render(
+      <TitleBarSlotsProvider>
+        <TitleBar host={host} title="MailX" />
+        <TitleBarActions side="leading"><button type="button">折叠</button></TitleBarActions>
+        <TitleBarActions side="trailing"><button type="button">更多</button></TitleBarActions>
+      </TitleBarSlotsProvider>,
+    )
+    const header = screen.getByRole('banner')
+    await vi.waitFor(() => expect(header.dataset.platform).toBe('windows'))
+    const leading = header.querySelector('[data-slot="title-bar-leading"]')!
+    const trailing = header.querySelector('[data-slot="title-bar-trailing"]')!
+    expect(leading).toContainElement(await screen.findByRole('button', { name: '折叠' }))
+    expect(trailing).toContainElement(screen.getByRole('button', { name: '更多' }))
+    // The trailing actions sit directly before the window controls.
+    expect(trailing.nextElementSibling).toHaveAttribute('data-slot', 'window-controls')
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: '折叠' }), { button: 0, detail: 1 })
+    expect(perform).not.toHaveBeenCalled()
   })
 })
 
