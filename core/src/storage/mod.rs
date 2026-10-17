@@ -4,14 +4,14 @@ use crate::{
 };
 use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, params};
-use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
     time::Duration,
 };
 
-const SCHEMA: &str = include_str!("schema.sql");
+mod migrations;
+
 pub(crate) struct Storage {
     pub db: Connection,
     _lock: File,
@@ -45,39 +45,7 @@ impl Storage {
         let mut db = Connection::open(directory.join("mailx.sqlite3"))?;
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", true)?;
-        let version: u32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
-            return Err(AppError::new(ErrorCode::StorageIncompatible));
-        }
-        let checksum = format!("{:x}", Sha256::digest(SCHEMA.as_bytes()));
-        if version == 0 {
-            // A nonempty, unversioned database is never overwritten.
-            let tables: u32 = db.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0))?;
-            if tables != 0 {
-                return Err(AppError::new(ErrorCode::StorageIncompatible));
-            }
-            let tx = db.transaction()?;
-            tx.execute_batch(SCHEMA)?;
-            tx.execute(
-                "INSERT INTO schema_migrations(version, checksum) VALUES (1, ?1)",
-                [&checksum],
-            )?;
-            tx.pragma_update(None, "user_version", 1)?;
-            tx.commit()?;
-        } else {
-            let saved: String = db
-                .query_row(
-                    "SELECT checksum FROM schema_migrations WHERE version = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
-            if saved != checksum {
-                return Err(AppError::new(ErrorCode::StorageIncompatible));
-            }
-        }
-        db.pragma_update(None, "journal_mode", "WAL")?;
-        db.pragma_update(None, "synchronous", "FULL")?;
+        migrations::apply(&mut db, migrations::MIGRATIONS)?;
         Ok(Self { db, _lock: lock })
     }
 

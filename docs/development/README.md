@@ -66,7 +66,7 @@ git diff --check
 
 `bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`；推荐使用会自动准备前端资源的 `bun run check`。当前 `bundle.active=false`，所以不宣称已经生成安装包。
 
-当前前端是账号导航、列表与设置详情。桌面经 `MailxClient → accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
+当前前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航、列表与设置详情，经 `accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
 
 桌面数据目录直接来自 Tauri `app_data_dir()`，包含 `mailx.sqlite3` 与 `mailx.lock`，不写入仓库或当前工作目录。应用标识变化会影响目录归属，已有数据需要显式迁移。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
 

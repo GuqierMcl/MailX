@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**账号配置接口已实现 / 其余 Draft，均未冻结对外兼容承诺**。当前只有桌面账号管理 IPC，没有 HTTP、MCP、连接测试或邮件 API。Rust 类型位于 `core/src/accounts/types.rs` 和 `core/src/error.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts`。
+状态：**启动状态与账号配置接口已实现 / 其余 Draft，均未冻结对外兼容承诺**。当前只有桌面启动状态和账号管理 IPC，没有 HTTP、MCP、连接测试或邮件 API。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts`。
 
 ## 1. 通用结构
 
@@ -67,6 +67,8 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。
 
 ### 后续应用操作草案
+
+启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
 
 下表没有运行中的命令或 HTTP 端点。Web 映射会随实现明确，当前账号接口不因此开放网络访问。
 

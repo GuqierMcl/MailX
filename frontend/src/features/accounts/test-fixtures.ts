@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type { Account } from '@/generated/accounts'
+import type { StartupStatus } from '@/generated/startup'
 import type { MailxClient } from '@/lib/mailx-client'
 
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
@@ -14,9 +15,11 @@ export function exampleAccount(overrides: Partial<Account> = {}): Account {
   }
 }
 
-export function testClient(rows: Account[] = []) {
+export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
   return {
     available: true,
+    getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
+    retryStartup: vi.fn<MailxClient['retryStartup']>().mockResolvedValue(startup),
     listAccounts: vi.fn<MailxClient['listAccounts']>().mockResolvedValue(rows),
     getAccount: vi.fn<MailxClient['getAccount']>().mockImplementation(async (id) => rows.find((row) => row.id === id) ?? exampleAccount()),
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),

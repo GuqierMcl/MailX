@@ -6,7 +6,9 @@
 
 当前 `desktop/` 加载 Vite 构建产物，直接依赖 `core/`，装配账号服务、系统凭据库与受限账号 IPC。前端是由 shadcn 组件构成的账号导航、列表和配置详情，保存配置不连接邮箱。实际命令见[应用 API](../contracts/app-api.md)，启动方式见[开发指南](../development/README.md)。
 
-桌面直接以 Tauri `app_data_dir()` 作为 user-data-dir，向核心注入该目录和 SecretStore。第一次账号调用在阻塞线程中打开核心，取得 `mailx.lock`，打开并校验 `mailx.sqlite3`，恢复凭证更新后才提供配置读写。同步 AccountService 由宿主在阻塞线程调用，以互斥访问保证串行执行，避免数据库或系统凭据操作阻塞 UI 线程。打开失败不会缓存半初始化服务；用户解锁凭据库后可以重试。
+桌面直接以 Tauri `app_data_dir()` 作为 user-data-dir，向核心注入该目录和 SecretStore。宿主启动时在阻塞线程打开核心，取得 `mailx.lock`，打开并校验 `mailx.sqlite3`，恢复凭证更新后才发布 `Ready` 和配置读写。同步 AccountService 由宿主在阻塞线程调用，以互斥访问保证串行执行，避免数据库或系统凭据操作阻塞 UI 线程。打开失败不会缓存半初始化服务；用户解锁凭据库后可以重试。
+
+启动状态以 `Initializing / Ready / Failed` 同时控制界面和业务 IPC。Ready 前账号命令返回 `coreNotReady`，前端不会挂载账号页面。
 
 一个数据目录只允许一个核心实例；第二个写入者返回 `alreadyOpen`，当前不承诺聚焦已有窗口。关闭窗口后宿主退出并释放服务与目录锁。没有后台同步、托盘常驻或通知；未来启用常驻时必须显式配置。未来退出流程停止新任务、取消可取消读取，并按[账号操作契约](account-configuration.md#6-操作与后台任务契约)及[发送恢复语义](mail-sync.md)保留在途操作的事实。
 未来邮件工作台拆为应用壳、账号 / 文件夹导航、分页虚拟邮件列表、阅读器、撰写器、AI 面板和设置。v0.1 先完成键盘可达、焦点管理、深浅主题及窗口缩放，不把装饰性动效放在收发链路之前。

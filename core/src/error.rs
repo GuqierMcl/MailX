@@ -15,6 +15,7 @@ pub enum ErrorCode {
     SecretStoreLocked,
     SecretStoreUnavailable,
     SecretMissing,
+    CoreNotReady,
     Internal,
 }
 
@@ -41,6 +42,7 @@ impl AppError {
             ErrorCode::SecretStoreLocked => "系统凭据库已锁定，请解锁后重试。",
             ErrorCode::SecretStoreUnavailable => "系统凭据库暂不可用，请稍后重试。",
             ErrorCode::SecretMissing => "所需凭证不存在，请重新输入。",
+            ErrorCode::CoreNotReady => "本地核心尚未就绪，请稍候重试。",
             ErrorCode::Internal => "操作未完成，请重试。",
         };
         Self {

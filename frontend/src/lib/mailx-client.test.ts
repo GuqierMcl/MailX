@@ -13,6 +13,17 @@ describe('desktop client boundary', () => {
     expect(invoke).toHaveBeenCalledWith('accounts_get', { accountId: 'test' })
   })
 
+  it('exposes startup status commands without accepting client-side readiness', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ ok: true, data: { state: 'initializing', revision: 1 }, requestId: 'request-1' })
+      .mockResolvedValueOnce({ ok: true, data: { state: 'ready', revision: 2 }, requestId: 'request-2' })
+    const client = createDesktopClient()
+    await expect(client.getStartupStatus()).resolves.toEqual({ state: 'initializing', revision: 1 })
+    await expect(client.retryStartup()).resolves.toEqual({ state: 'ready', revision: 2 })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'app_get_startup_status', undefined)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'app_retry_startup', undefined)
+  })
+
   it('preserves sanitized service errors but does not reveal raw IPC errors', async () => {
     vi.mocked(invoke).mockResolvedValueOnce({ ok: false, error: { code: 'secretStoreLocked', message: '系统凭据库已锁定。', field: null }, requestId: 'request' })
     const client = createDesktopClient()

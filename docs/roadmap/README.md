@@ -19,7 +19,8 @@
 - [x] 账号创建 / 列表 / 详情 / 修改的 Tauri IPC 与 shadcn 设置页；保存明确标记连接尚未验证。
 - [ ] IMAP 与 SMTP 的 Direct / SOCKS5 / HTTP CONNECT + TLS 最小探针。
 - [ ] OAuth 应用注册与回调方案验证，记录发布所需外部依赖。
-- [x] 账号配置采用 rusqlite、WAL、外键、迁移校验与凭证更新恢复。
+- [x] 账号配置采用 rusqlite、WAL、外键、v1 初始化与校验、凭证更新恢复。
+- [x] [版本化迁移与启动准入](../architecture/database-migrations.md)：兼容 v1，启动完成数据库准备后再开放业务；备份恢复与完整升级保障后续实施。
 - [ ] FTS5 搜索探针、HTML iframe 无 IPC / 外链处理验证。
 - [ ] MCP SDK + stdio bridge / 本地 IPC 最小连通性验证。
 - [ ] 已存在代码的格式、类型、测试和构建 CI。
@@ -95,4 +96,4 @@ POP3 / JMAP、更多预设、向量索引、自然语言搜索、自动分流、
 
 ## 下一次开发的建议起点
 
-在已有账号配置服务、MailxClient 与 rusqlite 基础上，完成 IMAP/SMTP 路由探针和协议异步执行选型，再进入“收取最近 5 封 → 入库 → 重启读取”的 M1 纵向链路。保存配置本身不证明 TLS、凭证或代理可用；OAuth 注册与分发资格仍单独跟进。任务完成时提供验证结果和未解决限制，文档仅在功能真正落地后标记 Implemented。
+[数据库迁移与启动准入](../architecture/database-migrations.md)已实现。接下来在已有账号配置服务、MailxClient 与 rusqlite 基础上，完成 IMAP/SMTP 路由探针和协议异步执行选型，再进入“收取最近 5 封 → 入库 → 重启读取”的 M1 纵向链路。保存配置本身不证明 TLS、凭证或代理可用；OAuth 注册与分发资格仍单独跟进。任务完成时提供验证结果和未解决限制，文档仅在功能真正落地后标记 Implemented。

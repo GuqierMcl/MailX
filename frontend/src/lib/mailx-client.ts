@@ -6,6 +6,7 @@ import type {
   CreateAccountRequest,
   UpdateAccountRequest,
 } from '@/generated/accounts'
+import type { StartupStatus } from '@/generated/startup'
 
 export type ClientFailure = AppError | {
   code: 'hostUnavailable' | 'transport'
@@ -25,6 +26,8 @@ export class MailxClientError extends Error {
 
 export interface MailxClient {
   readonly available: boolean
+  getStartupStatus(): Promise<StartupStatus>
+  retryStartup(): Promise<StartupStatus>
   listAccounts(): Promise<Account[]>
   getAccount(accountId: string): Promise<Account>
   createAccount(request: CreateAccountRequest): Promise<Account>
@@ -55,6 +58,8 @@ export function createDesktopClient(): MailxClient {
 
   return {
     available,
+    getStartupStatus: () => call<StartupStatus>('app_get_startup_status'),
+    retryStartup: () => call<StartupStatus>('app_retry_startup'),
     listAccounts: () => call<Account[]>('accounts_list'),
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),

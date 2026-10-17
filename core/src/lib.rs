@@ -6,11 +6,13 @@
 pub mod accounts;
 pub mod error;
 pub mod secrets;
+mod startup;
 mod storage;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
+pub use startup::StartupStatus;
 
 /// The core crate version, available without initializing storage or networking.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

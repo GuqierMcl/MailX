@@ -2,7 +2,7 @@ use mailx_core::{Account, ApiResult, AppError, CreateAccountRequest, UpdateAccou
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
 
-use crate::state::DesktopState;
+use crate::state::{DesktopState, StartupStatus};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +59,32 @@ fn authorize(window: &WebviewWindow) -> Result<(), AppError> {
 
 fn respond<T>(result: Result<T, AppError>) -> ApiResult<T> {
     ApiResult::from_result(result, uuid::Uuid::new_v4().to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn app_get_startup_status(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<StartupStatus>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => Ok(state.startup_status()),
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn app_retry_startup(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<StartupStatus>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => Ok(state.retry_startup()),
+        Err(error) => Err(error),
+    }))
 }
 
 #[tauri::command]

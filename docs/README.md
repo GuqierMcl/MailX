@@ -11,6 +11,7 @@
 - 了解项目：先看[产品范围](product/README.md)，再看[架构总览](architecture/overview.md)。
 - 开始编码：先看[开发指南](development/README.md)和[实施路线图](roadmap/README.md)，按 M0 → M1 建立第一条可验证链路。
 - 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)和[应用 API](contracts/app-api.md)。
+- 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，当前 v1 迁移、启动准入和失败重试已实现。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。

@@ -11,6 +11,7 @@ if (args.some((arg) => arg !== "--check") || args.length > 1) {
 
 const check = args.includes("--check");
 const target = resolve(root, "frontend/src/generated/accounts.ts");
+const startupTarget = resolve(root, "frontend/src/generated/startup.ts");
 const result = spawnSync("cargo", ["run", "-p", "mailx-core", "--example", "export_types", "--locked"], {
   cwd: root,
   encoding: "utf8",
@@ -30,8 +31,11 @@ if (!generated.startsWith("// Generated from Rust") || generated.includes("\r"))
   process.exit(1);
 }
 
+const startupGenerated = `// Generated from Rust by \`cargo run -p mailx-core --example export_types\`. Do not edit.\n\nexport type { StartupStatus } from './accounts'\n`;
+
 if (check) {
-  if (!existsSync(target) || readFileSync(target, "utf8") !== generated) {
+  if (!existsSync(target) || readFileSync(target, "utf8") !== generated ||
+      !existsSync(startupTarget) || readFileSync(startupTarget, "utf8") !== startupGenerated) {
     console.error("Rust DTO types have drifted. Run `bun run types:generate` and review the generated changes.");
     process.exit(1);
   }
@@ -39,5 +43,6 @@ if (check) {
 } else {
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, generated, "utf8");
-  console.log("Generated frontend/src/generated/accounts.ts from Rust DTOs.");
+  writeFileSync(startupTarget, startupGenerated, "utf8");
+  console.log("Generated frontend/src/generated/accounts.ts and startup.ts from Rust DTOs.");
 }

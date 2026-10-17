@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Allow only the local main account settings window to manage account configuration.",
   "windows": ["main"],
-  "permissions": ["allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update"]
+  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update"]
 }

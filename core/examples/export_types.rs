@@ -10,6 +10,7 @@ fn main() {
     export!(
         ErrorCode,
         AppError,
+        StartupStatus,
         ApiSuccess<String>,
         ApiFailure,
         ApiResult<String>,
