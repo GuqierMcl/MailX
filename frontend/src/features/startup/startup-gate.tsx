@@ -6,7 +6,7 @@ import { FieldDescription } from '@/components/ui/field'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { StartupStatus } from '@/generated/startup'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { AccountsPage } from '@/features/accounts/accounts-page'
+import { Workbench } from '@/features/mail/workbench'
 
 const POLL_INTERVAL_MS = 500
 
@@ -87,7 +87,7 @@ export function StartupGate({ client }: { client: MailxClient }) {
 
   if (!client.available) return <UnavailableScreen />
   if (queryFailure) return <TransportFailureScreen failure={queryFailure} onRetry={() => { void queryStatus() }} />
-  if (status?.state === 'ready') return <AccountsPage client={client} />
+  if (status?.state === 'ready') return <Workbench client={client} />
   if (status?.state === 'failed') {
     return <StartupFailureScreen status={status} retrying={retrying} onRetry={() => { void retryStartup() }} />
   }

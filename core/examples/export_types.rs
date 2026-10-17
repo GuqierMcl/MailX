@@ -34,6 +34,17 @@ fn main() {
         ProxyAuthenticationSummary,
         RouteConfig,
         ConnectionStatus,
-        Account
+        Account,
+        FolderRole,
+        Folder,
+        MailAddress,
+        BodyState,
+        EmailSummary,
+        EmailListQuery,
+        Coverage,
+        EmailPage,
+        AttachmentSummary,
+        EmailBody,
+        EmailDetail,
     );
 }

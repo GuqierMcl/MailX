@@ -1,5 +1,7 @@
-import { useRef, type MouseEvent, type ReactNode } from 'react'
+import { useCallback, useContext, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { TitleBarSlotsContext, type TitleBarSide, type TitleBarSlotElements } from './title-bar-slots'
 import { useWindowChrome } from './use-window-chrome'
 import type { WindowAction, WindowButton, WindowHost, WindowPlatform } from './window-host'
 
@@ -24,6 +26,25 @@ function isDragSurface(event: MouseEvent<HTMLElement>) {
   return interactive === null || !event.currentTarget.contains(interactive)
 }
 
+/** Lets pages place actions into the title bar with `TitleBarActions`, keeping their React context. */
+export function TitleBarSlotsProvider({ children }: { children: ReactNode }) {
+  const [slots, setSlots] = useState<TitleBarSlotElements>({ leading: null, trailing: null })
+  const register = useCallback((side: TitleBarSide, element: HTMLElement | null) => {
+    setSlots((current) => (current[side] === element ? current : { ...current, [side]: element }))
+  }, [])
+  const value = useMemo(() => ({ slots, register }), [slots, register])
+  return <TitleBarSlotsContext.Provider value={value}>{children}</TitleBarSlotsContext.Provider>
+}
+
+/**
+ * Renders actions into the title bar: `leading` sits right after the macOS
+ * traffic lights (or the left edge), `trailing` just before the window controls.
+ */
+export function TitleBarActions({ side, children }: { side: TitleBarSide; children: ReactNode }) {
+  const target = useContext(TitleBarSlotsContext)?.slots[side]
+  return target ? createPortal(children, target) : null
+}
+
 type TitleBarProps = {
   host: WindowHost | null
   title?: string
@@ -37,6 +58,9 @@ type TitleBarProps = {
  */
 export function TitleBar({ host, title, children }: TitleBarProps) {
   const chrome = useWindowChrome(host)
+  const register = useContext(TitleBarSlotsContext)?.register
+  const leadingSlot = useCallback((element: HTMLElement | null) => register?.('leading', element), [register])
+  const trailingSlot = useCallback((element: HTMLElement | null) => register?.('trailing', element), [register])
   const pendingDoubleClick = useRef<{ x: number; y: number } | null>(null)
   const platform = chrome?.platform
   const state = chrome?.state
@@ -81,6 +105,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
       {platform && chrome.leading.length > 0 && (
         <WindowControls platform={platform} buttons={chrome.leading} maximized={state?.maximized} onAction={perform} />
       )}
+      <div ref={leadingSlot} data-slot="title-bar-leading" className="flex shrink-0 items-center gap-1 px-2 empty:px-0" />
       <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
         {title && (
           <span
@@ -95,6 +120,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
         )}
         {children}
       </div>
+      <div ref={trailingSlot} data-slot="title-bar-trailing" className="flex shrink-0 items-center gap-1 px-2 empty:px-0" />
       {platform && chrome.trailing.length > 0 && (
         <WindowControls platform={platform} buttons={chrome.trailing} maximized={state?.maximized} onAction={perform} />
       )}

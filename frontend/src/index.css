@@ -12,41 +12,44 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color-scheme: light;
-  --background: oklch(.985 .003 240);
-  --foreground: oklch(.25 .02 250);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: var(--foreground);
+  --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: var(--foreground);
-  --primary: oklch(.43 .09 235);
-  --primary-foreground: oklch(.99 0 0);
-  --secondary: oklch(.955 .013 230);
-  --secondary-foreground: oklch(.35 .05 235);
-  --muted: oklch(.96 .004 240);
-  --muted-foreground: oklch(.5 .015 250);
-  --accent: oklch(.94 .012 230);
-  --accent-foreground: oklch(.3 .05 235);
-  --destructive: oklch(.55 .2 27);
-  --border: oklch(.91 .008 240);
-  --input: oklch(.86 .012 240);
-  --ring: oklch(.6 .09 235);
-  --chart-1: oklch(.87 0 0);
-  --chart-2: oklch(.556 0 0);
-  --chart-3: oklch(.439 0 0);
-  --chart-4: oklch(.371 0 0);
-  --chart-5: oklch(.269 0 0);
-  --radius: .625rem;
-  --sidebar: oklch(.97 .005 240);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(.93 .018 230);
-  --sidebar-accent-foreground: oklch(.3 .05 235);
-  --sidebar-border: var(--border);
-  --sidebar-ring: var(--ring);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 }
 
 body { margin: 0; min-width: 320px; }
+
+/* The shadcn sidebar is fixed to the viewport; keep it below the custom title bar. */
+[data-slot="sidebar-container"] { top: var(--titlebar-height); height: calc(100svh - var(--titlebar-height)); }
 
 @theme inline {
   --font-heading: var(--font-sans);
@@ -92,6 +95,7 @@ body { margin: 0; min-width: 320px; }
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
