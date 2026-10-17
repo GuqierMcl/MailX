@@ -1,8 +1,11 @@
-use mailx_core::{Account, ApiResult, AppError, CreateAccountRequest, UpdateAccountRequest};
+use mailx_core::{
+    Account, ApiResult, AppError, CreateAccountRequest, ErrorCode, UpdateAccountRequest,
+};
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
 
 use crate::state::{DesktopState, StartupStatus};
+use crate::window_chrome::{self, WindowAction, WindowChrome};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,6 +145,34 @@ pub(crate) async fn accounts_update(
     Ok(respond(match args {
         Ok(args) => state.run(move |service| service.update(args.request)).await,
         Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WindowPerformArgs {
+    action: WindowAction,
+}
+
+// Window commands stay synchronous so they run on the main thread, which
+// GTK settings and native window calls require.
+#[tauri::command]
+pub(crate) fn window_get_chrome(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> ApiResult<WindowChrome> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    respond(args.map(|_| window_chrome::chrome(&window)))
+}
+
+#[tauri::command]
+pub(crate) fn window_perform(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> ApiResult<()> {
+    let args = authorize(&window).and_then(|()| parse::<WindowPerformArgs>(request.body()));
+    respond(args.and_then(|args| {
+        window_chrome::perform(&window, args.action).map_err(|_| AppError::new(ErrorCode::Internal))
     }))
 }
 

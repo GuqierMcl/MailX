@@ -19,7 +19,7 @@ import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx
 import { AccountForm } from './account-form'
 
 export function AccountsPage({ client }: { client: MailxClient }) {
-  return <TooltipProvider><SidebarProvider><AccountWorkspace client={client} /></SidebarProvider></TooltipProvider>
+  return <TooltipProvider><SidebarProvider className="h-full min-h-0"><AccountWorkspace client={client} /></SidebarProvider></TooltipProvider>
 }
 
 function AccountWorkspace({ client }: { client: MailxClient }) {

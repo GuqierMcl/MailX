@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Allow only the local main account settings window to manage account configuration.",
+  "description": "Allow only the local main window to manage account configuration and its own title bar.",
   "windows": ["main"],
-  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update"]
+  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update", "allow-window-get-chrome", "allow-window-perform", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

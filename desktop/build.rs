@@ -7,6 +7,8 @@ fn main() {
             "accounts_get",
             "accounts_create",
             "accounts_update",
+            "window_get_chrome",
+            "window_perform",
         ]),
     ))
     .expect("failed to prepare the MailX desktop host");
