@@ -3,6 +3,7 @@
 mod commands;
 mod secret_store;
 mod state;
+mod window_chrome;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -22,6 +23,7 @@ fn main() {
             // Prepare the data directory before exposing business commands;
             // the task itself runs on Tauri's blocking pool.
             state.start_initialization();
+            window_chrome::create_main_window(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -31,6 +33,8 @@ fn main() {
             commands::accounts_get,
             commands::accounts_create,
             commands::accounts_update,
+            commands::window_get_chrome,
+            commands::window_perform,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the MailX desktop host");

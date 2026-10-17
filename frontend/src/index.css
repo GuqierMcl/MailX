@@ -6,6 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --titlebar-height: 2.5rem;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

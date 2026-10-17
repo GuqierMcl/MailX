@@ -10,7 +10,9 @@
 .account-avatar { width: 2.2rem; height: 2.2rem; }
 .sidebar-empty { padding: 1rem .5rem; }
 .sidebar-footer { padding: 1.25rem; gap: 1rem; }
-.workspace-main { height: 100svh; min-width: 0; }
+.workspace-main { height: 100%; min-width: 0; }
+/* The shadcn sidebar is fixed to the viewport; keep it below the custom title bar. */
+.account-sidebar { top: var(--titlebar-height); height: calc(100svh - var(--titlebar-height)); }
 .workspace-topbar { flex-shrink: 0; border-radius: 0; padding-block: .5rem; box-shadow: none; border-bottom: 1px solid var(--border); }
 .topbar-content { display: flex; flex-direction: row; align-items: center; gap: .75rem; padding-inline: 1.5rem; }
 .workspace-scroll { min-height: 0; flex: 1; }

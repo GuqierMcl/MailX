@@ -66,6 +66,17 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。
 
+### 桌面窗口命令
+
+自定义标题栏使用两个仅属于桌面宿主的命令，不经过核心服务，也不受 Ready 检查影响，启动中和启动失败时标题栏仍可操作：
+
+| 命令与参数 | 结果 |
+| --- | --- |
+| `window_get_chrome`，无参数 | `{ platform, leading, trailing, state }`：平台、标题内容前后要绘制的按钮、`{ maximized, fullscreen, focused }` |
+| `window_perform`，`{ action }` | `action` 为 `minimize` / `toggleMaximize` / `close` / `startDragging` / `titleBarDoubleClick` |
+
+状态变化通过定向到 main 窗口的 `mailx://window-state` 事件推送。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。命令同样只授权本地可信 main 窗口。
+
 ### 后续应用操作草案
 
 启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
