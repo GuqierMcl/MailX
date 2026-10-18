@@ -62,10 +62,13 @@ export function createMockClient(): MailxClient {
           (query.hasAttachment == null || email.hasAttachment === query.hasAttachment) &&
           (!text || [email.subject, email.preview, email.from.name ?? '', email.from.address].some((field) => field.toLowerCase().includes(text))),
         )
-        .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+        .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
+      const offset = query.cursor ? Number(query.cursor) : 0
+      const limit = query.limit ?? 50
+      const page = items.slice(offset, offset + limit)
       return {
-        items: structuredClone(items),
-        nextCursor: null,
+        items: structuredClone(page),
+        nextCursor: offset + limit < items.length ? String(offset + limit) : null,
         coverage: { headersComplete: true, bodiesComplete: false, syncedAfter: null, syncedBefore: null },
       }
     },

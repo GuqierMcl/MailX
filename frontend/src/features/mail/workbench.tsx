@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
-import type { Account, AccountSyncState, EmailDetail, EmailSummary, Folder } from '@/generated/accounts'
+import type { Account, AccountSyncState, EmailDetail, EmailListQuery, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -17,6 +17,14 @@ import { MailSidebar } from './mail-sidebar'
 import { mailboxTitle, type Mailbox } from './mailbox'
 
 type Loadable<T> = { data: T; loading: boolean; error: string | null }
+type EmailListState = Loadable<EmailSummary[]> & {
+  query: EmailListQuery | null
+  coverage: EmailPage['coverage'] | null
+  nextCursor: string | null
+  refreshing: boolean
+  loadingMore: boolean
+  loadMoreError: string | null
+}
 
 const SEARCH_DELAY_MS = 200
 
@@ -32,12 +40,18 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
-  const [list, setList] = useState<Loadable<EmailSummary[]> & { unsynced: boolean }>({
+  const [list, setList] = useState<EmailListState>({
     data: [],
     loading: true,
     error: null,
-    unsynced: false,
+    query: null,
+    coverage: null,
+    nextCursor: null,
+    refreshing: false,
+    loadingMore: false,
+    loadMoreError: null,
   })
+  const listRequest = useRef(0)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Loadable<EmailDetail | null>>({ data: null, loading: false, error: null })
@@ -61,8 +75,9 @@ export function Workbench({ client }: { client: MailxClient }) {
   useEffect(() => {
     let active = true
     const apply = (state: AccountSyncState) => setSyncStates((current) => ({ ...current, [state.accountId]: state }))
-    // A finished sync means fresh folders and counts; events are only hints to refetch.
+    // A finished sync means fresh folders, counts and headers; events are only hints to refetch.
     const stop = client.onSyncState((state) => {
+      if (!active) return
       apply(state)
       if (state.phase === 'idle') setTreeVersion((version) => version + 1)
     })
@@ -83,33 +98,78 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const folderId = mailbox.kind === 'folder' ? mailbox.folder.id : null
   const folderRole = mailbox.kind === 'unified' ? mailbox.role : null
+  const listQuery = useMemo(() => emailQuery({
+    folderId,
+    folderRole,
+    unread: filter === 'unread' ? true : null,
+    text: query || null,
+    limit: 100,
+  }), [folderId, folderRole, filter, query])
   useEffect(() => {
-    let active = true
-    setList((current) => ({ ...current, loading: true, error: null }))
-    client
-      .listEmails(
-        emailQuery({
-          folderId,
-          folderRole,
-          unread: filter === 'unread' ? true : null,
-          text: query || null,
-        }),
-      )
-      .then(
-        (page) =>
-          active &&
-          setList({
-            data: page.items,
-            loading: false,
-            error: null,
-            unsynced: page.items.length === 0 && !page.coverage.headersComplete,
-          }),
-        (cause) => active && setList({ data: [], loading: false, error: clientFailure(cause).message, unsynced: false }),
-      )
+    const request = ++listRequest.current
+    setList((current) => ({
+      ...current,
+      data: current.query === listQuery ? current.data : [],
+      loading: current.query !== listQuery,
+      refreshing: true,
+      loadingMore: false,
+      error: null,
+      loadMoreError: null,
+      query: listQuery,
+    }))
+    client.listEmails(listQuery).then(
+      (page) => {
+        if (request !== listRequest.current) return
+        setList({
+          data: page.items,
+          loading: false,
+          error: null,
+          query: listQuery,
+          coverage: page.coverage,
+          nextCursor: page.nextCursor,
+          refreshing: false,
+          loadingMore: false,
+          loadMoreError: null,
+        })
+        setSelectedId((current) => page.items.some((email) => email.id === current) ? current : null)
+        setDetail((current) => {
+          const summary = page.items.find((email) => email.id === current.data?.summary.id)
+          return summary && current.data ? { ...current, data: { ...current.data, summary } } : current
+        })
+      },
+      (cause) => {
+        if (request !== listRequest.current) return
+        setList((current) => ({ ...current, loading: false, refreshing: false, error: clientFailure(cause).message }))
+      },
+    )
     return () => {
-      active = false
+      // Invalidate both the first page and any outstanding pagination from this view.
+      listRequest.current += 1
     }
-  }, [client, folderId, folderRole, filter, query])
+  }, [client, listQuery, treeVersion])
+
+  const loadMore = async () => {
+    if (!list.nextCursor || list.refreshing || list.loadingMore) return
+    const request = listRequest.current
+    setList((current) => ({ ...current, loadingMore: true, loadMoreError: null }))
+    try {
+      const page = await client.listEmails({ ...listQuery, cursor: list.nextCursor })
+      if (request !== listRequest.current) return
+      setList((current) => {
+        const ids = new Set(current.data.map((email) => email.id))
+        return {
+          ...current,
+          data: [...current.data, ...page.items.filter((email) => !ids.has(email.id))],
+          coverage: page.coverage,
+          nextCursor: page.nextCursor,
+          loadingMore: false,
+        }
+      })
+    } catch (cause) {
+      if (request !== listRequest.current) return
+      setList((current) => ({ ...current, loadingMore: false, loadMoreError: clientFailure(cause).message }))
+    }
+  }
 
   useEffect(() => {
     if (!selectedId) return
@@ -142,6 +202,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     )
   }
   const showAccountBadges = mailbox.kind === 'unified' && accounts.length > 1
+  const isInbox = (mailbox.kind === 'unified' ? mailbox.role : mailbox.folder.role) === 'inbox'
 
   const selectMailbox = (next: Mailbox) => {
     setMailbox(next)
@@ -172,7 +233,11 @@ export function Workbench({ client }: { client: MailxClient }) {
                 emails={list.data}
                 accounts={showAccountBadges ? accounts : null}
                 loading={list.loading}
-                unsynced={list.unsynced}
+                emptyState={!isInbox ? 'unsupported' : list.coverage?.headersComplete ? 'empty' : 'syncing'}
+                hasMore={list.nextCursor !== null}
+                loadingMore={list.loadingMore}
+                refreshing={list.refreshing}
+                loadMoreError={list.loadMoreError}
                 error={tree.error ?? list.error}
                 filter={filter}
                 search={search}
@@ -180,11 +245,12 @@ export function Workbench({ client }: { client: MailxClient }) {
                 onFilterChange={setFilter}
                 onSearchChange={setSearch}
                 onSelect={(email) => setSelectedId(email.id)}
+                onLoadMore={loadMore}
               />
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize="60" minSize={360}>
-              <EmailView email={selectedId ? detail.data : null} loading={detail.loading} error={detail.error} />
+              <EmailView email={selectedId ? detail.data : null} loading={selectedId !== null && detail.loading} error={selectedId ? detail.error : null} />
             </ResizablePanel>
           </ResizablePanelGroup>
         </SidebarInset>

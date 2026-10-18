@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, Folder } from '@/generated/accounts'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
-import { UNSYNCED_PAGE } from '@/lib/mailx-client'
 import { Workbench } from './workbench'
 
 const account = exampleAccount()
@@ -17,7 +16,7 @@ function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
   let emit: (state: AccountSyncState) => void = () => undefined
   client.listFolders.mockResolvedValue(folders)
   client.listSyncStates.mockResolvedValue(states)
-  client.listEmails.mockResolvedValue(UNSYNCED_PAGE)
+  client.listEmails.mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null } })
   client.onSyncState.mockImplementation((listener) => {
     emit = listener
     return () => undefined
@@ -63,10 +62,10 @@ describe('folder sync in the workbench', () => {
     expect(screen.getByText('修改账号设置后会重新尝试。')).toBeInTheDocument()
   })
 
-  it('tells the user mail itself is not synced yet', async () => {
+  it('tells the user inbox headers are syncing', async () => {
     const { client } = desktopLike([folder('INBOX', { role: 'inbox' })])
     render(<Workbench client={client} />)
-    expect(await screen.findByText('邮件尚未同步')).toBeInTheDocument()
+    expect(await screen.findByText('正在同步邮件…')).toBeInTheDocument()
     await waitFor(() => expect(client.listEmails).toHaveBeenCalled())
   })
 })
