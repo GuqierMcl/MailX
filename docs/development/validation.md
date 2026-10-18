@@ -91,6 +91,15 @@ git diff --check
 
 `bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。当前 `bundle.active=false`，它不代表已经生成安装包。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。账号核心及前端已有针对性测试，`cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。
 
+### 持续集成
+
+`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行：
+
+- Ubuntu：`version:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
+- Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
+
+CI 证明三平台能编译并通过自动测试，不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
+
 ### 账号配置的可重复检查
 
 - `core/tests/accounts.rs` 使用临时目录和 SecretStore 故障替身：检查重开读取、多账号归属、共享/独立密码、版本冲突和重复请求、端点信任、来源世代、路由配置、实例锁与 schema 兼容性；在秘密写入、配置提交和清理边界验证恢复，不误把凭据库不可用当作条目缺失。
