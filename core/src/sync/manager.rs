@@ -1,4 +1,4 @@
-//! Per-account background workers that keep the folder list in sync.
+//! Per-account background workers for folders and inbox message headers.
 //!
 //! Each account gets one task that owns its IMAP connections. Workers never
 //! hold the account database lock across network I/O: they read a sync plan,
@@ -11,17 +11,18 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use ts_rs::TS;
 
-use super::folders;
+use super::{folders, messages};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
-use crate::error::ErrorCode;
+use crate::error::{AppError, ErrorCode};
 use crate::imap::{self, ImapError};
 use crate::net::NetError;
 
-/// How often a healthy account refreshes its folder list.
-const REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
+const MESSAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const FOLDER_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// Retry delay after consecutive transient failures: exponential from 1s,
 /// capped at 5 minutes, with jitter so accounts do not retry in lockstep
 /// (docs/architecture/mail-sync.md §2).
@@ -76,7 +77,7 @@ pub struct SyncFailure {
 pub struct AccountSyncState {
     pub account_id: String,
     pub phase: SyncPhase,
-    /// RFC 3339 time of the last successful folder sync in this session.
+    /// RFC 3339 time of the last successful inbox sync in this session.
     pub last_synced_at: Option<String>,
     pub failure: Option<SyncFailure>,
 }
@@ -84,7 +85,7 @@ pub struct AccountSyncState {
 /// Receives every sync state change, e.g. to forward it to a UI as a hint to refetch.
 pub type SyncListener = Arc<dyn Fn(&AccountSyncState) + Send + Sync>;
 
-struct Shared {
+pub(super) struct Shared {
     /// Weak so that closing the core releases the store (and its directory
     /// lock) at once; a worker that finds it gone simply stops.
     service: Weak<Mutex<AccountService>>,
@@ -183,9 +184,10 @@ enum Outcome {
 
 async fn run(shared: Arc<Shared>, account_id: String) {
     let mut failures = 0u32;
+    let mut last_folder_refresh = None;
     loop {
         shared.update(&account_id, |state| state.phase = SyncPhase::Syncing);
-        let wait = match sync_once(&shared, &account_id).await {
+        let wait = match sync_once(&shared, &account_id, &mut last_folder_refresh).await {
             Outcome::Synced => {
                 failures = 0;
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -194,7 +196,7 @@ async fn run(shared: Arc<Shared>, account_id: String) {
                     state.last_synced_at = Some(now);
                     state.failure = None;
                 });
-                REFRESH_INTERVAL
+                MESSAGE_REFRESH_INTERVAL
             }
             Outcome::Transient(failure) => {
                 let wait = backoff(failures);
@@ -246,7 +248,46 @@ async fn with_service<T: Send + 'static>(
     .unwrap_or(Access::Failed)
 }
 
-async fn sync_once(shared: &Arc<Shared>, account_id: &str) -> Outcome {
+#[derive(Debug)]
+pub(super) enum SyncError {
+    Imap(ImapError),
+    Storage(AppError),
+    Stale,
+    Closed,
+}
+
+impl From<ImapError> for SyncError {
+    fn from(error: ImapError) -> Self {
+        Self::Imap(error)
+    }
+}
+
+impl From<AppError> for SyncError {
+    fn from(error: AppError) -> Self {
+        Self::Storage(error)
+    }
+}
+
+pub(super) async fn with_store<T: Send + 'static>(
+    shared: &Arc<Shared>,
+    operation: impl FnOnce(&mut AccountService) -> Result<T, AppError> + Send + 'static,
+) -> Result<T, SyncError> {
+    match with_service(shared, operation).await {
+        Access::Done(result) => result.map_err(SyncError::Storage),
+        Access::Closed => Err(SyncError::Closed),
+        Access::Failed => Err(AppError::new(ErrorCode::StorageUnavailable).into()),
+    }
+}
+
+fn folders_due(last_refresh: Option<Instant>) -> bool {
+    last_refresh.is_none_or(|last| last.elapsed() >= FOLDER_REFRESH_INTERVAL)
+}
+
+async fn sync_once(
+    shared: &Arc<Shared>,
+    account_id: &str,
+    last_folder_refresh: &mut Option<Instant>,
+) -> Outcome {
     let id = account_id.to_owned();
     let plan = match with_service(shared, move |service| service.sync_plan(&id)).await {
         Access::Done(Ok(plan)) => plan,
@@ -270,26 +311,40 @@ async fn sync_once(shared: &Arc<Shared>, account_id: &str) -> Outcome {
         Access::Failed => return Outcome::Transient(failure(SyncFailureCode::Storage, None, true)),
     };
 
-    let remote = match imap::fetch_folders(&plan.route, &plan.login).await {
-        Ok(remote) => remote,
+    let mut session = match imap::open_session(&plan.route, &plan.login).await {
+        Ok(session) => session,
         Err(error) => return classify(error),
     };
-    let records = folders::interpret(&remote);
-    let id = account_id.to_owned();
-    let source = plan.mailbox_source_id;
-    match with_service(shared, move |service| {
-        service.store_folders(&id, &source, &records)
-    })
-    .await
-    {
-        // `false` means the account moved to another server meanwhile; its
-        // restarted worker owns the new listing.
-        Access::Done(Ok(_)) => Outcome::Synced,
-        Access::Done(Err(error)) => {
+    let result: Result<(), SyncError> = async {
+        if folders_due(*last_folder_refresh) {
+            let remote = session.list_folders().await?;
+            let records = folders::interpret(&remote);
+            let id = account_id.to_owned();
+            let source = plan.mailbox_source_id.clone();
+            if !with_store(shared, move |service| {
+                service.store_folders(&id, &source, &records)
+            })
+            .await?
+            {
+                return Err(SyncError::Stale);
+            }
+            *last_folder_refresh = Some(Instant::now());
+        }
+        messages::sync_inboxes(shared, account_id, &plan.mailbox_source_id, &mut session).await
+    }
+    .await;
+    // Failed or timed-out sessions are dropped immediately. Only a fully
+    // synchronized session is still known to be safe for a final LOGOUT.
+    if result.is_ok() {
+        let _ = session.logout().await;
+    }
+    match result {
+        Ok(()) => Outcome::Synced,
+        Err(SyncError::Imap(error)) => classify(error),
+        Err(SyncError::Storage(error)) => {
             Outcome::Transient(failure(SyncFailureCode::Storage, Some(error.message), true))
         }
-        Access::Closed => Outcome::Gone,
-        Access::Failed => Outcome::Transient(failure(SyncFailureCode::Storage, None, true)),
+        Err(SyncError::Stale | SyncError::Closed) => Outcome::Gone,
     }
 }
 
@@ -344,8 +399,24 @@ fn failure(code: SyncFailureCode, detail: Option<String>, will_retry: bool) -> S
 }
 
 #[cfg(test)]
+#[path = "messages_tests.rs"]
+mod message_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn inbox_ticks_do_not_repeat_folder_listing_until_ten_minutes() {
+        assert!(folders_due(None));
+        let refreshed = Instant::now();
+        for _ in 0..9 {
+            tokio::time::advance(MESSAGE_REFRESH_INTERVAL).await;
+            assert!(!folders_due(Some(refreshed)));
+        }
+        tokio::time::advance(MESSAGE_REFRESH_INTERVAL).await;
+        assert!(folders_due(Some(refreshed)));
+    }
 
     #[test]
     fn login_and_setup_problems_wait_for_the_user_instead_of_retrying() {

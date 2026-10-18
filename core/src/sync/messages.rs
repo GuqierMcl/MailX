@@ -1,0 +1,253 @@
+//! Bounded inbox metadata synchronization. Plans are pure; network operations
+//! never hold the account service or a SQLite transaction.
+
+use std::collections::HashSet;
+
+use chrono::{Duration, NaiveDate, Utc};
+
+use crate::accounts::messages::{FolderSyncCursor, SyncTarget};
+use crate::error::{AppError, ErrorCode};
+use crate::imap::{ImapError, Session};
+
+use super::headers::parse_header;
+use super::manager::{Shared, SyncError, with_store};
+
+const WINDOW_DAYS: i64 = 30;
+const WINDOW_LIMIT: usize = 1_000;
+const HEADER_BATCH_SIZE: usize = 200;
+const FLAGS_BATCH_SIZE: usize = 500;
+
+#[derive(Debug, PartialEq, Eq)]
+struct MessagePlan {
+    fetch: Vec<u32>,
+    refresh_flags: Vec<u32>,
+    deleted: Vec<u32>,
+    capped: bool,
+}
+
+/// SEARCH has already completed successfully. Its full result, rather than
+/// the capped selection, is the only authority for disappearance in this range.
+fn plan_messages(
+    cursor: &FolderSyncCursor,
+    cached: &[(u32, String)],
+    server_uids: &[u32],
+) -> MessagePlan {
+    let remote: HashSet<u32> = server_uids.iter().copied().collect();
+    let cached_ids: HashSet<u32> = cached.iter().map(|(uid, _)| *uid).collect();
+    let mut selected: Vec<u32> = remote.iter().copied().collect();
+    selected.sort_unstable_by(|a, b| b.cmp(a));
+    let capped = selected.len() > WINDOW_LIMIT;
+    selected.truncate(WINDOW_LIMIT);
+    MessagePlan {
+        fetch: selected
+            .iter()
+            .filter(|uid| !cached_ids.contains(uid))
+            .copied()
+            .collect(),
+        refresh_flags: selected
+            .into_iter()
+            .filter(|uid| cached_ids.contains(uid))
+            .collect(),
+        deleted: cached
+            .iter()
+            .filter(|(uid, received_at)| {
+                received_at.as_str() >= cursor.window_start.as_str() && !remote.contains(uid)
+            })
+            .map(|(uid, _)| *uid)
+            .collect(),
+        capped,
+    }
+}
+
+fn current(written: bool) -> Result<(), SyncError> {
+    if written {
+        Ok(())
+    } else {
+        Err(SyncError::Stale)
+    }
+}
+
+pub(super) async fn sync_inboxes(
+    shared: &std::sync::Arc<Shared>,
+    account_id: &str,
+    source: &str,
+    session: &mut Session,
+) -> Result<(), SyncError> {
+    let id = account_id.to_owned();
+    let source_id = source.to_owned();
+    let folders = with_store(shared, move |service| {
+        service.inbox_folders(&id, &source_id)
+    })
+    .await?;
+    for (folder_id, remote_name) in folders {
+        let status = session.status(&remote_name).await?;
+        let id = account_id.to_owned();
+        let source_id = source.to_owned();
+        let folder = folder_id.clone();
+        current(
+            with_store(shared, move |service| {
+                service.update_folder_counts(
+                    &id,
+                    &source_id,
+                    &folder,
+                    status.unseen,
+                    status.messages,
+                )
+            })
+            .await?,
+        )?;
+
+        let mailbox = session.examine(&remote_name).await?;
+        let target = SyncTarget {
+            account_id: account_id.to_owned(),
+            mailbox_source_id: source.to_owned(),
+            folder_id,
+            uid_validity: mailbox.uid_validity,
+        };
+        let now = Utc::now();
+        let window_start = (now.date_naive() - Duration::days(WINDOW_DAYS)).to_string();
+        let guard = target.clone();
+        let cursor = with_store(shared, move |service| {
+            service.ensure_generation(&guard, &window_start)
+        })
+        .await?
+        .ok_or(SyncError::Stale)?;
+        let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
+            .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
+        let remote = session.search_since(since).await?;
+        let guard = target.clone();
+        let cached = with_store(shared, move |service| service.cached_uids(&guard)).await?;
+        let plan = plan_messages(&cursor, &cached, &remote);
+        let guard = target.clone();
+        let capped = plan.capped;
+        current(
+            with_store(shared, move |service| {
+                service.begin_backfill(&guard, capped)
+            })
+            .await?,
+        )?;
+
+        let mut highest_uid = cursor.highest_uid;
+        for batch in plan.fetch.chunks(HEADER_BATCH_SIZE) {
+            let headers = session.fetch_headers(batch).await?;
+            let fetched: HashSet<u32> = headers.iter().map(|header| header.uid).collect();
+            let complete = batch.iter().all(|uid| fetched.contains(uid));
+            let records: Vec<_> = headers
+                .iter()
+                .map(|header| parse_header(header, now))
+                .collect();
+            highest_uid =
+                highest_uid.max(records.iter().map(|record| record.uid).max().unwrap_or(0));
+            let guard = target.clone();
+            current(
+                with_store(shared, move |service| {
+                    service.store_message_batch(&guard, &records, highest_uid)
+                })
+                .await?,
+            )?;
+            if !complete {
+                // A concurrent expunge may remove a searched UID. Keep committed
+                // records but re-enumerate before claiming complete coverage.
+                return Err(
+                    ImapError::Protocol("mailbox changed during header fetch".into()).into(),
+                );
+            }
+        }
+
+        let guard = target.clone();
+        current(
+            with_store(shared, move |service| {
+                service.mark_deleted(&guard, &plan.deleted)
+            })
+            .await?,
+        )?;
+        for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
+            let flags = session.fetch_flags(batch).await?;
+            let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
+            let complete = batch.iter().all(|uid| fetched.contains(uid));
+            let guard = target.clone();
+            current(with_store(shared, move |service| service.apply_flags(&guard, &flags)).await?)?;
+            if !complete {
+                return Err(ImapError::Protocol("mailbox changed during flag fetch".into()).into());
+            }
+        }
+        let guard = target;
+        current(
+            with_store(shared, move |service| {
+                service.finish_backfill(&guard, capped)
+            })
+            .await?,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cursor() -> FolderSyncCursor {
+        FolderSyncCursor {
+            uid_validity: 42,
+            window_start: "2026-09-18".into(),
+            window_capped: false,
+            backfill_done: false,
+            highest_uid: 0,
+            updated_at: "2026-10-18T00:00:00.000Z".into(),
+        }
+    }
+
+    #[test]
+    fn initial_sync_uses_actual_uids_in_descending_order() {
+        let plan = plan_messages(&cursor(), &[], &[2, 98, 4, 98]);
+        assert_eq!(plan.fetch, [98, 4, 2]);
+        assert!(plan.refresh_flags.is_empty());
+        assert!(plan.deleted.is_empty());
+        assert!(!plan.capped);
+    }
+
+    #[test]
+    fn incremental_plan_does_not_skip_holes_below_the_high_water_mark() {
+        let mut cursor = cursor();
+        cursor.highest_uid = 100;
+        let cached = vec![(100, "2026-10-17T00:00:00.000Z".into())];
+        let plan = plan_messages(&cursor, &cached, &[99, 100, 101]);
+        assert_eq!(plan.fetch, [101, 99]);
+        assert_eq!(plan.refresh_flags, [100]);
+    }
+
+    #[test]
+    fn capped_selection_never_implies_deletion_of_unselected_remote_mail() {
+        let remote: Vec<_> = (1..=1001).collect();
+        let cached = vec![(1, "2026-10-17T00:00:00.000Z".into())];
+        let plan = plan_messages(&cursor(), &cached, &remote);
+        assert!(plan.capped);
+        assert_eq!(plan.fetch.len(), WINDOW_LIMIT);
+        assert_eq!(plan.fetch.first(), Some(&1001));
+        assert_eq!(plan.fetch.last(), Some(&2));
+        assert!(plan.deleted.is_empty());
+    }
+
+    #[test]
+    fn deletion_only_reconciles_the_successfully_enumerated_window() {
+        let cached = vec![
+            (1, "2026-09-17T23:59:59.999Z".into()),
+            (2, "2026-09-18T00:00:00.000Z".into()),
+            (3, "2026-10-17T00:00:00.000Z".into()),
+        ];
+        let plan = plan_messages(&cursor(), &cached, &[3]);
+        assert_eq!(plan.deleted, [2]);
+        assert_eq!(plan.refresh_flags, [3]);
+        assert_eq!(plan_messages(&cursor(), &cached, &[]).deleted, [2, 3]);
+    }
+
+    #[test]
+    fn generation_change_uses_only_the_new_generations_cache() {
+        // The store switches the generation and supplies no old present rows.
+        let mut cursor = cursor();
+        cursor.uid_validity = 43;
+        let plan = plan_messages(&cursor, &[], &[1, 2]);
+        assert_eq!(plan.fetch, [2, 1]);
+        assert!(plan.deleted.is_empty());
+    }
+}

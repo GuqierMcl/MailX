@@ -157,6 +157,10 @@ pub(crate) async fn test_session(
 }
 
 /// Compatibility wrapper for callers that only need a folder snapshot.
+#[expect(
+    dead_code,
+    reason = "Retained folder-only entry point; inbox workers share a session."
+)]
 pub(crate) async fn fetch_folders(
     route: &NetRoute,
     login: &ImapLogin,
