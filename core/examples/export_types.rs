@@ -46,5 +46,9 @@ fn main() {
         AttachmentSummary,
         EmailBody,
         EmailDetail,
+        SyncPhase,
+        SyncFailureCode,
+        SyncFailure,
+        AccountSyncState,
     );
 }

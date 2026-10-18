@@ -137,9 +137,8 @@ impl AccountService {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+pub(crate) mod tests {
+    use std::sync::Arc;
 
     use serde_json::{Value, json};
     use tempfile::TempDir;
@@ -149,26 +148,9 @@ mod tests {
     use crate::accounts::types::{Account, CreateAccountRequest, UpdateAccountRequest};
     use crate::imap::FolderStatus;
     use crate::mail::FolderRole;
-    use crate::secrets::{SecretStore, SecretValue};
+    use crate::secrets::test_support::MemorySecrets;
 
-    #[derive(Default)]
-    struct MemorySecrets(Mutex<HashMap<String, SecretValue>>);
-
-    impl SecretStore for MemorySecrets {
-        fn get(&self, key: &str) -> Result<Option<SecretValue>, SecretStoreError> {
-            Ok(self.0.lock().unwrap().get(key).cloned())
-        }
-        fn set(&self, key: &str, value: &SecretValue) -> Result<(), SecretStoreError> {
-            self.0.lock().unwrap().insert(key.into(), value.clone());
-            Ok(())
-        }
-        fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
-            self.0.lock().unwrap().remove(key);
-            Ok(())
-        }
-    }
-
-    fn config(route: Value) -> Value {
+    pub(crate) fn config(route: Value) -> Value {
         json!({"displayName":"Work","emailAddress":"lin@example.com","providerId":null,
             "imap":{"host":"imap.example.com","port":993,"tls":"implicit","username":"lin"},
             "smtp":{"host":"smtp.example.com","port":465,"tls":"implicit","username":"lin"},

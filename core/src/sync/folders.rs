@@ -92,7 +92,7 @@ fn parent_name(folder: &RemoteFolder, names: &HashSet<&str>) -> Option<String> {
     names.contains(parent).then(|| parent.to_owned())
 }
 
-fn last_segment<'a>(folder: &'a RemoteFolder) -> &'a str {
+fn last_segment(folder: &RemoteFolder) -> &str {
     match folder
         .delimiter
         .as_deref()

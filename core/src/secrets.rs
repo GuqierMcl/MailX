@@ -42,3 +42,29 @@ pub trait SecretStore: Send + Sync {
     fn set(&self, key: &str, value: &SecretValue) -> Result<(), SecretStoreError>;
     fn delete(&self, key: &str) -> Result<(), SecretStoreError>;
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use super::{SecretStore, SecretStoreError, SecretValue};
+
+    /// In-memory secret store for tests.
+    #[derive(Default)]
+    pub(crate) struct MemorySecrets(Mutex<HashMap<String, SecretValue>>);
+
+    impl SecretStore for MemorySecrets {
+        fn get(&self, key: &str) -> Result<Option<SecretValue>, SecretStoreError> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+        fn set(&self, key: &str, value: &SecretValue) -> Result<(), SecretStoreError> {
+            self.0.lock().unwrap().insert(key.into(), value.clone());
+            Ok(())
+        }
+        fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+}

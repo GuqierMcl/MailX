@@ -107,3 +107,23 @@ export type EmailDetail = { summary: EmailSummary, to: Array<MailAddress>, cc: A
  * `None` until `summary.body_state` is `ready`.
  */
 body: EmailBody | null, attachments: Array<AttachmentSummary>, };
+
+export type SyncPhase = "syncing" | "idle" | "failed";
+
+export type SyncFailureCode = "authentication" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
+
+export type SyncFailure = { code: SyncFailureCode, message: string,
+/**
+ * Technical reason from the server or network stack, for display only.
+ */
+detail: string | null,
+/**
+ * Whether the worker will try again on its own.
+ */
+willRetry: boolean, };
+
+export type AccountSyncState = { accountId: string, phase: SyncPhase,
+/**
+ * RFC 3339 time of the last successful folder sync in this session.
+ */
+lastSyncedAt: string | null, failure: SyncFailure | null, };
