@@ -139,7 +139,12 @@ fn persists_config_across_restart_without_disclosing_secrets() {
     assert!(debug.contains("REDACTED"));
     assert!(!debug.contains("test-mail-secret"));
     for entry in std::fs::read_dir(directory.path()).unwrap() {
-        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        let path = entry.unwrap().path();
+        // The empty instance lock is held open, and Windows locks are mandatory, so it cannot be read.
+        if path.file_name().is_some_and(|name| name == "mailx.lock") {
+            continue;
+        }
+        let bytes = std::fs::read(path).unwrap();
         assert!(
             !bytes
                 .windows(b"test-mail-secret".len())

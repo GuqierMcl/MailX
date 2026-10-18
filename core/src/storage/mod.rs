@@ -37,7 +37,11 @@ impl Storage {
             .open(directory.join("mailx.lock"))
             .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
         FileExt::try_lock_exclusive(&lock).map_err(|error| {
-            AppError::new(if error.kind() == std::io::ErrorKind::WouldBlock {
+            // Contention is EWOULDBLOCK on Unix but ERROR_LOCK_VIOLATION on
+            // Windows, which has no matching ErrorKind; compare the OS code.
+            let contended = error.raw_os_error().is_some()
+                && error.raw_os_error() == fs2::lock_contended_error().raw_os_error();
+            AppError::new(if contended {
                 ErrorCode::AlreadyOpen
             } else {
                 ErrorCode::StorageUnavailable
