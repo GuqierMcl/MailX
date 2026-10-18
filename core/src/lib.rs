@@ -5,11 +5,13 @@
 
 pub mod accounts;
 pub mod error;
+mod imap;
 pub mod mail;
 mod net;
 pub mod secrets;
 mod startup;
 mod storage;
+mod sync;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
