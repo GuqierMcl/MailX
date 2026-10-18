@@ -46,6 +46,8 @@ fn main() {
             commands::accounts_create,
             commands::accounts_update,
             commands::folders_list,
+            commands::emails_list,
+            commands::emails_get,
             commands::sync_states,
             commands::window_get_chrome,
             commands::window_perform,

@@ -1,6 +1,6 @@
 use mailx_core::{
-    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, ErrorCode, Folder,
-    UpdateAccountRequest,
+    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
+    EmailListQuery, EmailPage, ErrorCode, Folder, UpdateAccountRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -22,6 +22,18 @@ struct GetArgs {
 #[serde(deny_unknown_fields)]
 struct WriteArgs<T> {
     request: T,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmailListArgs {
+    query: EmailListQuery,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmailGetArgs {
+    email_id: String,
 }
 
 fn parse<T: DeserializeOwned>(body: &InvokeBody) -> Result<T, AppError> {
@@ -175,6 +187,32 @@ pub(crate) async fn folders_list(
 }
 
 #[tauri::command]
+pub(crate) async fn emails_list(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<EmailPage>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmailListArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => state.run(move |core| core.list_emails(&args.query)).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_get(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<EmailDetail>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => state.run(move |core| core.get_email(&args.email_id)).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
 pub(crate) async fn sync_states(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
@@ -262,5 +300,33 @@ mod tests {
         }
         assert!(parse::<EmptyArgs>(&InvokeBody::Json(json!({"actor":"admin"}))).is_err());
         assert!(parse::<EmptyArgs>(&InvokeBody::Raw(vec![1, 2])).is_err());
+    }
+
+    #[test]
+    fn email_commands_accept_only_their_named_arguments() {
+        let list = parse::<EmailListArgs>(&InvokeBody::Json(json!({
+            "query": {"folderRole":"inbox", "limit":100, "text":"中文"}
+        })))
+        .unwrap();
+        assert_eq!(list.query.limit, Some(100));
+        assert_eq!(list.query.text.as_deref(), Some("中文"));
+        let id = uuid::Uuid::new_v4().to_string();
+        let detail = parse::<EmailGetArgs>(&InvokeBody::Json(json!({"emailId":id}))).unwrap();
+        assert_eq!(detail.email_id, id);
+        for body in [
+            json!({}),
+            json!({"query":null}),
+            json!({"query":{}, "actor":"forged"}),
+        ] {
+            let error = parse::<EmailListArgs>(&InvokeBody::Json(body))
+                .err()
+                .unwrap();
+            assert_eq!(error, AppError::validation("request"));
+        }
+        assert!(parse::<EmailGetArgs>(&InvokeBody::Json(json!({"accountId":id}))).is_err());
+        assert!(
+            parse::<EmailGetArgs>(&InvokeBody::Json(json!({"emailId":id,"path":"secret"})))
+                .is_err()
+        );
     }
 }
