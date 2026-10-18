@@ -18,20 +18,28 @@ pub(crate) struct Migration {
 }
 
 /// The production migration manifest. Keep entries ordered and append-only.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "account configuration baseline",
-    required_tables: &[
-        "schema_migrations",
-        "accounts",
-        "auth_profiles",
-        "mail_connections",
-        "network_routes",
-        "create_requests",
-        "credential_journal",
-    ],
-    sql: include_str!("migrations/0001_account_configuration.sql"),
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "account configuration baseline",
+        required_tables: &[
+            "schema_migrations",
+            "accounts",
+            "auth_profiles",
+            "mail_connections",
+            "network_routes",
+            "create_requests",
+            "credential_journal",
+        ],
+        sql: include_str!("migrations/0001_account_configuration.sql"),
+    },
+    Migration {
+        version: 2,
+        description: "folder list cache",
+        required_tables: &["folders"],
+        sql: include_str!("migrations/0002_folders.sql"),
+    },
+];
 
 pub(crate) fn checksum(sql: &str) -> String {
     format!("{:x}", Sha256::digest(sql.as_bytes()))
@@ -359,11 +367,12 @@ mod tests {
         .unwrap();
         db.pragma_update(None, "user_version", 1).unwrap();
         apply(&mut db, MIGRATIONS).unwrap();
+        // A v1 database is accepted and upgraded through every later migration.
         assert_eq!(
             db.query_row("SELECT count(*) FROM schema_migrations", [], |row| row
-                .get::<_, u32>(0))
+                .get::<_, i64>(0))
                 .unwrap(),
-            1
+            MIGRATIONS.len() as i64
         );
     }
 
