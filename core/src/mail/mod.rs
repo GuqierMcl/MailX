@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum FolderRole {
     Inbox,
@@ -23,6 +23,8 @@ pub struct Folder {
     pub parent_id: Option<String>,
     pub name: String,
     pub role: FolderRole,
+    /// `false` for IMAP `\Noselect` containers that only group child folders.
+    pub selectable: bool,
     #[ts(type = "number")]
     pub unread_count: u32,
     #[ts(type = "number")]

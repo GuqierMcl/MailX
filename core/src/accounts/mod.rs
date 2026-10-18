@@ -1,4 +1,5 @@
 pub(crate) mod model;
+pub(crate) mod sync_plan;
 pub mod types;
 
 use crate::{

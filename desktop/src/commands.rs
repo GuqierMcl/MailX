@@ -1,5 +1,6 @@
 use mailx_core::{
-    Account, ApiResult, AppError, CreateAccountRequest, ErrorCode, UpdateAccountRequest,
+    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, ErrorCode, Folder,
+    UpdateAccountRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -98,7 +99,7 @@ pub(crate) async fn accounts_list(
 ) -> Result<ApiResult<Vec<Account>>, ()> {
     let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
-        Ok(_) => state.run(|service| service.list()).await,
+        Ok(_) => state.run(|core| core.list_accounts()).await,
         Err(error) => Err(error),
     }))
 }
@@ -113,7 +114,7 @@ pub(crate) async fn accounts_get(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |service| service.get(&args.account_id))
+                .run(move |core| core.get_account(&args.account_id))
                 .await
         }
         Err(error) => Err(error),
@@ -129,7 +130,11 @@ pub(crate) async fn accounts_create(
     let args =
         authorize(&window).and_then(|()| parse::<WriteArgs<CreateAccountRequest>>(request.body()));
     Ok(respond(match args {
-        Ok(args) => state.run(move |service| service.create(args.request)).await,
+        Ok(args) => {
+            state
+                .run(move |core| core.create_account(args.request))
+                .await
+        }
         Err(error) => Err(error),
     }))
 }
@@ -143,7 +148,41 @@ pub(crate) async fn accounts_update(
     let args =
         authorize(&window).and_then(|()| parse::<WriteArgs<UpdateAccountRequest>>(request.body()));
     Ok(respond(match args {
-        Ok(args) => state.run(move |service| service.update(args.request)).await,
+        Ok(args) => {
+            state
+                .run(move |core| core.update_account(args.request))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn folders_list(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<Folder>>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<GetArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.list_folders(&args.account_id))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn sync_states(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<AccountSyncState>>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state.run(|core| Ok(core.sync_states())).await,
         Err(error) => Err(error),
     }))
 }

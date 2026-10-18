@@ -7,12 +7,13 @@ use std::{
 };
 
 pub(crate) use mailx_core::StartupStatus;
-use mailx_core::{AccountService, AppError, ErrorCode, secrets::SecretStore};
+use mailx_core::{AppError, ErrorCode, MailxCore, SyncListener, secrets::SecretStore};
 
 struct Inner {
     data_dir: Result<PathBuf, AppError>,
     secrets: Arc<dyn SecretStore>,
-    service: Mutex<Option<AccountService>>,
+    sync_listener: SyncListener,
+    core: Mutex<Option<MailxCore>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
 }
@@ -21,11 +22,16 @@ struct Inner {
 pub(crate) struct DesktopState(Arc<Inner>);
 
 impl DesktopState {
-    pub(crate) fn new(data_dir: Result<PathBuf, AppError>, secrets: Arc<dyn SecretStore>) -> Self {
+    pub(crate) fn new(
+        data_dir: Result<PathBuf, AppError>,
+        secrets: Arc<dyn SecretStore>,
+        sync_listener: SyncListener,
+    ) -> Self {
         Self(Arc::new(Inner {
             data_dir,
             secrets,
-            service: Mutex::new(None),
+            sync_listener,
+            core: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
@@ -104,24 +110,23 @@ impl DesktopState {
     pub(crate) async fn run<T, F>(&self, operation: F) -> Result<T, AppError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut AccountService) -> Result<T, AppError> + Send + 'static,
+        F: FnOnce(&MailxCore) -> Result<T, AppError> + Send + 'static,
     {
         if !self.is_ready() {
             return Err(AppError::new(ErrorCode::CoreNotReady));
         }
-        let inner = self.0.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let mut service = inner
-                .service
-                .lock()
-                .map_err(|_| AppError::new(ErrorCode::Internal))?;
-            let service = service
-                .as_mut()
-                .ok_or_else(|| AppError::new(ErrorCode::CoreNotReady))?;
-            operation(service)
-        })
-        .await
-        .map_err(|_| AppError::new(ErrorCode::Internal))?
+        let core = self
+            .0
+            .core
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .clone()
+            .ok_or_else(|| AppError::new(ErrorCode::CoreNotReady))?;
+        // The core serializes store access itself; this only keeps the
+        // blocking call off the async runtime.
+        tauri::async_runtime::spawn_blocking(move || operation(&core))
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
     }
 
     fn is_ready(&self) -> bool {
@@ -131,16 +136,22 @@ impl DesktopState {
         )
     }
 
-    fn open_service(&self) -> Result<AccountService, AppError> {
+    fn open_service(&self) -> Result<MailxCore, AppError> {
         let path = self.0.data_dir.as_ref().map_err(Clone::clone)?;
-        AccountService::open(path, self.0.secrets.clone())
+        let tauri::async_runtime::RuntimeHandle::Tokio(runtime) = tauri::async_runtime::handle();
+        MailxCore::open(
+            path,
+            self.0.secrets.clone(),
+            runtime,
+            self.0.sync_listener.clone(),
+        )
     }
 
-    fn finish_initialization(&self, result: Result<AccountService, AppError>) {
+    fn finish_initialization(&self, result: Result<MailxCore, AppError>) {
         let status = match result {
-            Ok(service) => match self.0.service.lock() {
+            Ok(core) => match self.0.core.lock() {
                 Ok(mut current) => {
-                    *current = Some(service);
+                    *current = Some(core);
                     StartupStatus::Ready {
                         revision: self.next_revision(),
                     }
@@ -233,6 +244,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
         );
         assert!(matches!(
             state.startup_status(),
@@ -253,12 +265,14 @@ mod tests {
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
         );
         state.start_initialization();
         for _ in 0..100 {
             if matches!(state.startup_status(), StartupStatus::Ready { .. }) {
-                let accounts = tauri::async_runtime::block_on(state.run(|service| service.list()))
-                    .expect("ready service should accept business calls");
+                let accounts =
+                    tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
+                        .expect("ready service should accept business calls");
                 assert!(accounts.is_empty());
                 return;
             }
@@ -272,6 +286,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
         );
         let error =
             tauri::async_runtime::block_on(state.run(|_| Ok::<_, AppError>(()))).unwrap_err();
@@ -283,6 +298,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageIncompatible)),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
         );
         *state.0.startup.lock().unwrap() = StartupStatus::Failed {
             revision: 4,

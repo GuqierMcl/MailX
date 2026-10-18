@@ -178,7 +178,7 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
       <div className="flex flex-col gap-6 p-6">
         <Alert role="status">
           <AlertTitle>{account ? '尚未验证连接' : '手动配置 · 密码或授权码'}</AlertTitle>
-          <AlertDescription>此处只保存账号设置，不会连接服务器或收发邮件。</AlertDescription>
+          <AlertDescription>保存后 MailX 会登录收信服务器同步文件夹列表；暂不收取邮件，也不会发送邮件。</AlertDescription>
         </Alert>
         {needsTrust && <Alert variant="destructive"><AlertTitle>凭证需要重新确认</AlertTitle><AlertDescription>服务器或登录身份已改变。请为受影响的收信、发信或代理配置重新输入密码，以确认新的使用范围。</AlertDescription></Alert>}
         {error && (

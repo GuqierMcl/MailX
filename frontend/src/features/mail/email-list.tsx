@@ -19,6 +19,8 @@ type EmailListProps = {
   /** Shown as a badge on each row when the list spans several accounts. */
   accounts: Account[] | null
   loading: boolean
+  /** Nothing is cached for this view yet because messages are not synced. */
+  unsynced: boolean
   error: string | null
   filter: ListFilter
   search: string
@@ -65,7 +67,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, error, filter, search, selectedId, onSelect }: EmailListProps) {
+function EmailRows({ emails, accounts, loading, unsynced, error, filter, search, selectedId, onSelect }: EmailListProps) {
   if (loading && emails.length === 0) {
     return (
       <div className="flex flex-col gap-2 px-3" role="status" aria-label="正在加载邮件">
@@ -81,6 +83,19 @@ function EmailRows({ emails, accounts, loading, error, filter, search, selectedI
         <EmptyHeader>
           <EmptyTitle>无法加载邮件</EmptyTitle>
           <EmptyDescription>{error}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
+  }
+  if (unsynced) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <HugeiconsIcon icon={InboxIcon} />
+          </EmptyMedia>
+          <EmptyTitle>邮件尚未同步</EmptyTitle>
+          <EmptyDescription>当前版本只同步文件夹列表，邮件同步将在后续版本提供。</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )

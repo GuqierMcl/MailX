@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
-import type { Account, EmailDetail, EmailSummary, Folder } from '@/generated/accounts'
+import type { Account, AccountSyncState, EmailDetail, EmailSummary, Folder } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -32,7 +32,13 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
-  const [list, setList] = useState<Loadable<EmailSummary[]>>({ data: [], loading: true, error: null })
+  const [list, setList] = useState<Loadable<EmailSummary[]> & { unsynced: boolean }>({
+    data: [],
+    loading: true,
+    error: null,
+    unsynced: false,
+  })
+  const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Loadable<EmailDetail | null>>({ data: null, loading: false, error: null })
 
@@ -51,6 +57,24 @@ export function Workbench({ client }: { client: MailxClient }) {
       active = false
     }
   }, [client, treeVersion])
+
+  useEffect(() => {
+    let active = true
+    const apply = (state: AccountSyncState) => setSyncStates((current) => ({ ...current, [state.accountId]: state }))
+    // A finished sync means fresh folders and counts; events are only hints to refetch.
+    const stop = client.onSyncState((state) => {
+      apply(state)
+      if (state.phase === 'idle') setTreeVersion((version) => version + 1)
+    })
+    client.listSyncStates().then(
+      (states) => active && states.forEach(apply),
+      () => undefined,
+    )
+    return () => {
+      active = false
+      stop()
+    }
+  }, [client])
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), SEARCH_DELAY_MS)
@@ -72,8 +96,15 @@ export function Workbench({ client }: { client: MailxClient }) {
         }),
       )
       .then(
-        (page) => active && setList({ data: page.items, loading: false, error: null }),
-        (cause) => active && setList({ data: [], loading: false, error: clientFailure(cause).message }),
+        (page) =>
+          active &&
+          setList({
+            data: page.items,
+            loading: false,
+            error: null,
+            unsynced: page.items.length === 0 && !page.coverage.headersComplete,
+          }),
+        (cause) => active && setList({ data: [], loading: false, error: clientFailure(cause).message, unsynced: false }),
       )
     return () => {
       active = false
@@ -125,6 +156,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           accounts={accounts}
           folders={folders}
           loading={tree.loading}
+          syncStates={syncStates}
           mailbox={mailbox}
           onSelect={selectMailbox}
           onOpenSettings={() => setSettings({ section: 'general' })}
@@ -140,6 +172,7 @@ export function Workbench({ client }: { client: MailxClient }) {
                 emails={list.data}
                 accounts={showAccountBadges ? accounts : null}
                 loading={list.loading}
+                unsynced={list.unsynced}
                 error={tree.error ?? list.error}
                 filter={filter}
                 search={search}

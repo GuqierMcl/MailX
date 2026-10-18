@@ -13,6 +13,21 @@ export const UNIFIED_TITLES: Record<FolderRole, string> = {
   other: '全部邮件',
 }
 
+const ROLE_LABELS: Record<FolderRole, string | null> = {
+  inbox: '收件箱',
+  drafts: '草稿',
+  sent: '已发送',
+  archive: '归档',
+  junk: '垃圾邮件',
+  trash: '已删除',
+  other: null,
+}
+
+/** System folders get the same label on every server ("Sent Messages", "已发送邮件" → 已发送). */
+export function folderLabel(folder: Folder) {
+  return ROLE_LABELS[folder.role] ?? folder.name
+}
+
 export function mailboxTitle(mailbox: Mailbox) {
-  return mailbox.kind === 'unified' ? UNIFIED_TITLES[mailbox.role] : mailbox.folder.name
+  return mailbox.kind === 'unified' ? UNIFIED_TITLES[mailbox.role] : folderLabel(mailbox.folder)
 }

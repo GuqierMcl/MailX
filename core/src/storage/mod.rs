@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+mod folders;
 mod migrations;
 
 pub(crate) struct Storage {

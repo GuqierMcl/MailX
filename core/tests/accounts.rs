@@ -408,7 +408,13 @@ fn future_schema_and_checksum_mismatch_preserve_data() {
     let account = create(&mut service);
     drop(service);
     let database = db(directory.path());
-    database.pragma_update(None, "user_version", 2).unwrap();
+    let current: i64 = database
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    // A version this build does not know, as written by a newer MailX.
+    database
+        .pragma_update(None, "user_version", current + 1)
+        .unwrap();
     assert!(matches!(
         AccountService::open(directory.path(), secrets.clone()),
         Err(AppError {
@@ -417,7 +423,9 @@ fn future_schema_and_checksum_mismatch_preserve_data() {
         })
     ));
     assert_eq!(count(&database, "accounts"), 1);
-    database.pragma_update(None, "user_version", 1).unwrap();
+    database
+        .pragma_update(None, "user_version", current)
+        .unwrap();
     database
         .execute("UPDATE schema_migrations SET checksum='modified'", [])
         .unwrap();
