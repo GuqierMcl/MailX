@@ -22,7 +22,8 @@ use tokio_rustls::TlsConnector;
 use crate::accounts::types::ProxyKind;
 use crate::secrets::SecretValue;
 
-pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Initial connection budget from docs/architecture/mail-sync.md §2.
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// A byte stream a protocol client can run over: plain TCP, a proxy tunnel, or TLS on either.
 pub(crate) trait MailStream: AsyncRead + AsyncWrite + Unpin + Send + fmt::Debug {}

@@ -22,14 +22,17 @@ use crate::net::NetError;
 
 /// How often a healthy account refreshes its folder list.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
-/// Waits after consecutive transient failures; the last one repeats.
-const BACKOFF: [Duration; 5] = [
-    Duration::from_secs(30),
-    Duration::from_secs(60),
-    Duration::from_secs(120),
-    Duration::from_secs(300),
-    Duration::from_secs(600),
-];
+/// Retry delay after consecutive transient failures: exponential from 1s,
+/// capped at 5 minutes, with jitter so accounts do not retry in lockstep
+/// (docs/architecture/mail-sync.md §2).
+fn backoff(failures: u32) -> Duration {
+    let base = Duration::from_secs(1u64 << failures.min(9)).min(Duration::from_secs(300));
+    // Up to 25% extra; the clock's sub-second part is random enough for spreading retries.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.subsec_nanos());
+    base + base.mul_f64(f64::from(nanos % 1000) / 4000.0)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -179,7 +182,7 @@ enum Outcome {
 }
 
 async fn run(shared: Arc<Shared>, account_id: String) {
-    let mut failures = 0usize;
+    let mut failures = 0u32;
     loop {
         shared.update(&account_id, |state| state.phase = SyncPhase::Syncing);
         let wait = match sync_once(&shared, &account_id).await {
@@ -194,8 +197,8 @@ async fn run(shared: Arc<Shared>, account_id: String) {
                 REFRESH_INTERVAL
             }
             Outcome::Transient(failure) => {
-                let wait = BACKOFF[failures.min(BACKOFF.len() - 1)];
-                failures += 1;
+                let wait = backoff(failures);
+                failures = failures.saturating_add(1);
                 shared.update(&account_id, |state| {
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
@@ -372,6 +375,22 @@ mod tests {
                 })
             ));
         }
+    }
+
+    #[test]
+    fn backoff_grows_from_one_second_to_five_minutes() {
+        let within = |failures, low: u64, high: f64| {
+            let wait = backoff(failures).as_secs_f64();
+            assert!(
+                wait >= low as f64 && wait <= high,
+                "attempt {failures}: {wait}s"
+            );
+        };
+        within(0, 1, 1.25);
+        within(1, 2, 2.5);
+        within(5, 32, 40.0);
+        within(9, 300, 375.0);
+        within(u32::MAX, 300, 375.0);
     }
 
     #[test]

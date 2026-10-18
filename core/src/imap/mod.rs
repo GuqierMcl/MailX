@@ -17,8 +17,9 @@ use crate::accounts::types::TlsMode;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
 use crate::secrets::SecretValue;
 
-/// Upper bound for one command round trip; a server that stalls longer is treated as gone.
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+/// Upper bound for one command round trip (docs/architecture/mail-sync.md §2);
+/// a server that stalls longer is treated as gone.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Server and credentials for one IMAP login.
 #[derive(Debug)]
