@@ -147,16 +147,32 @@ const FOLDER_NAMES: [FolderRole, string][] = [
 
 const folderId = (accountId: string, role: FolderRole) => `${accountId}:${role}`
 
+/** User folders by account: `[path, name, parent path, selectable]`; `selectable: false` mimics IMAP `\\Noselect`. */
+const CUSTOM_FOLDERS: Record<string, [string, string, string | null, boolean][]> = {
+  [WORK]: [
+    ['projects', '项目', null, true],
+    ['projects/mailx', 'MailX', 'projects', true],
+    ['projects/q3', '第三季度', 'projects', true],
+    ['clients', '客户', null, false],
+    ['clients/east', '华东区', 'clients', true],
+  ],
+  [PERSONAL]: [['travel', '旅行', null, true]],
+}
+
 function buildFolders(accountId: string, emails: EmailDetail[]): Folder[] {
-  return FOLDER_NAMES.map(([role, name]) => {
-    const id = folderId(accountId, role)
+  const custom = (CUSTOM_FOLDERS[accountId] ?? []).map(
+    ([path, name, parent, selectable]) => [`${accountId}:${path}`, name, 'other', parent && `${accountId}:${parent}`, selectable] as const,
+  )
+  const system = FOLDER_NAMES.map(([role, name]) => [folderId(accountId, role), name, role, null, true] as const)
+  return [...system, ...custom].map(([id, name, role, parentId, selectable]) => {
     const inFolder = emails.filter((email) => email.summary.folderId === id)
     return {
       id,
       accountId,
-      parentId: null,
+      parentId,
       name,
       role,
+      selectable,
       unreadCount: inFolder.filter((email) => !email.summary.isRead).length,
       totalCount: inFolder.length,
     }
@@ -166,6 +182,8 @@ function buildFolders(accountId: string, emails: EmailDetail[]): Folder[] {
 type Seed = {
   account: string
   role?: FolderRole
+  /** Path of a user folder from `CUSTOM_FOLDERS`; overrides `role`. */
+  folder?: string
   from: MailAddress
   subject: string
   text: string
@@ -214,6 +232,7 @@ const SEEDS: Seed[] = [
   {
     account: WORK,
     from: { name: '李娜', address: 'li.na@example.com' },
+    folder: 'projects/mailx',
     subject: '设计稿：邮件列表的紧凑模式',
     text: '附上紧凑模式的两版设计，A 版本每行显示两行摘要，B 版本只显示主题。你更倾向哪一版？',
     hoursAgo: 26,
@@ -225,6 +244,7 @@ const SEEDS: Seed[] = [
   {
     account: WORK,
     from: { name: '张强', address: 'zhang.qiang@example.com' },
+    folder: 'projects/mailx',
     subject: '关于 IMAP IDLE 的兼容性测试结果',
     text: '测试了 6 家服务商，其中 2 家在空闲 29 分钟后会主动断开 IDLE，需要我们提前重连。详细表格见附件。',
     hoursAgo: 50,
@@ -261,10 +281,19 @@ const SEEDS: Seed[] = [
   {
     account: PERSONAL,
     from: { name: '中国国际航空', address: 'service@airline.example' },
+    folder: 'travel',
     subject: '您的行程单：北京 — 上海 11月2日',
     text: '尊敬的旅客，您的航班 CA1501 将于 11 月 2 日 08:00 起飞，请提前 90 分钟到达机场办理值机。',
     hoursAgo: 2,
     attachments: [['电子行程单.pdf', 'application/pdf', 152_000]],
+  },
+  {
+    account: WORK,
+    folder: 'clients/east',
+    from: { name: '赵敏', address: 'zhao.min@client.example' },
+    subject: '合同续签的几点意见',
+    text: '附件是我们法务对续签合同的修改意见，主要集中在服务等级和数据存放地两条，方便的话周三电话沟通。',
+    hoursAgo: 20,
   },
   {
     account: PERSONAL,
@@ -311,7 +340,7 @@ function buildEmails(): EmailDetail[] {
     const summary: EmailSummary = {
       id,
       accountId: seed.account,
-      folderId: folderId(seed.account, seed.role ?? 'inbox'),
+      folderId: seed.folder ? `${seed.account}:${seed.folder}` : folderId(seed.account, seed.role ?? 'inbox'),
       subject: seed.subject,
       from: seed.from,
       preview: seed.text.replace(/\s+/g, ' ').slice(0, 120),

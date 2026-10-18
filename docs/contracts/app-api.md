@@ -87,7 +87,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 | --- | --- | --- |
 | `accounts.test` | accountId → 收 / 发测试结果 | POST `/api/v1/accounts/{id}/test` |
 | `accounts.reauthorize` | accountId / authProfileId / expectedRevision → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
-| `folders.list` | accountId → 文件夹列表 | GET `/api/v1/accounts/{id}/folders` |
+| `folders.list` | accountId → 文件夹列表（含 `parentId` 层级、角色、`selectable`；`selectable: false` 对应 IMAP `\Noselect` 分组） | GET `/api/v1/accounts/{id}/folders` |
 | `emails.list` | 结构化过滤 / 游标 → Page + coverage | GET `/api/v1/emails` |
 | `emails.search` | query / 过滤 / 游标 → Page + coverage | POST `/api/v1/search` |
 | `emails.read` | emailId → 正文缓存状态、正文、附件元信息 | GET `/api/v1/emails/{id}` |

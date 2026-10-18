@@ -60,7 +60,11 @@ defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, created
 
 export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
 
-export type Folder = { id: string, accountId: string, parentId: string | null, name: string, role: FolderRole, unreadCount: number, totalCount: number, };
+export type Folder = { id: string, accountId: string, parentId: string | null, name: string, role: FolderRole,
+/**
+ * `false` for IMAP `\Noselect` containers that only group child folders.
+ */
+selectable: boolean, unreadCount: number, totalCount: number, };
 
 export type MailAddress = { name: string | null, address: string, };
 

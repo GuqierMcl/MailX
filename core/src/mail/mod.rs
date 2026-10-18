@@ -23,6 +23,8 @@ pub struct Folder {
     pub parent_id: Option<String>,
     pub name: String,
     pub role: FolderRole,
+    /// `false` for IMAP `\Noselect` containers that only group child folders.
+    pub selectable: bool,
     #[ts(type = "number")]
     pub unread_count: u32,
     #[ts(type = "number")]
