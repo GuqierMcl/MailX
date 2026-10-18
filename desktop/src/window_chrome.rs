@@ -69,6 +69,8 @@ pub(crate) enum WindowAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Windows has no title bar double-click preference; it always toggles maximize.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 enum TitleBarGesture {
     ToggleMaximize,
     Minimize,
