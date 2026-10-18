@@ -1,5 +1,6 @@
-//! Mail read contract. Types only: no synchronization or storage implements
-//! them yet, and the desktop frontend serves them from mock data until it does.
+//! Mail read contract shared by local storage and host adapters. Folder and
+//! inbox header queries are implemented; bodies and attachment contents remain
+//! unavailable until their retrieval is implemented.
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

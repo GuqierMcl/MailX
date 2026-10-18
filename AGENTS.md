@@ -1,6 +1,6 @@
 # MailX 仓库协作约定
 
-MailX 是规划中的本地优先、AI 原生邮件工作台。仓库已建立 `core` Rust 库、React + TypeScript + Vite + shadcn 前端骨架与 `desktop` Tauri 宿主；桌面端已能经账号路由登录 IMAP 同步文件夹列表，邮件收取与发送尚未实现。技术选型、目录、接口和路线图均可随项目演化重新设计，不是长期冻结规范；后续用户要求与明确的新设计优先，不能以启动草案为由拒绝合理调整。
+MailX 是开发中的本地优先、AI 原生邮件工作台。仓库已建立 `core` Rust 库、React + TypeScript + Vite + shadcn 前端与 `desktop` Tauri 宿主；桌面端已能经账号路由登录 IMAP，同步文件夹和收件箱邮件头，提供统一收件箱、本地头部搜索与分页。正文下载、邮件标记写回和发信尚未实现，真实服务商兼容性尚未验证。技术选型、目录、接口和路线图均可随项目演化重新设计，不是长期冻结规范；后续用户要求与明确的新设计优先，不能以启动草案为由拒绝合理调整。
 
 ## 先读
 
@@ -15,7 +15,7 @@ MailX 是规划中的本地优先、AI 原生邮件工作台。仓库已建立 `
 - 不把规划中的功能写成已经可用，不编造启动命令、测试结果、发布地址或性能数据。
 - 可执行程序、命令行别名、安装包和镜像名称尚未确定；`mailx-app` 等初始示例仅为候选，不得写成已冻结的命名决定。
 - Rust 核心合并原 core / infra 职责，存储和协议实现在 core 内按需分模块；core 不依赖 Tauri、Axum 或 UI。前端、MCP 和 Web 后续通过同一应用服务访问数据。
-- 先桌面 MVP、再服务器 MVP；`frontend/` 已初始化为前端工程骨架，但不把初始化模板当成已经实现的邮件工作台，`server/` 仍只占位。
+- 先桌面 MVP、再服务器 MVP；`frontend/` 已接通只读邮件头工作台，但不把头部列表当成完整的邮件阅读与收发能力，`server/` 仍只占位。
 - 协议连接必须走账号路由；自定义代理失败不得回退直连。
 - 邮件 HTML、模型输出和 MCP 输入都不可信；邮件正文不能获得 Tauri IPC 权限。
 - 凭证由后端 SecretStore 管理，禁止返回读取凭证的接口；AI 不能自行批准发信。
@@ -26,4 +26,4 @@ MailX 是规划中的本地优先、AI 原生邮件工作台。仓库已建立 `
 
 ## 检查
 
-当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run typecheck`、`bun run lint`、`bun run build`、`bun run tauri dev`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；当前没有业务测试，不把测试目标可运行等同于邮件行为已验证。详见 `docs/development/validation.md`。
+当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run check`、`bun run tauri dev`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；已有账号、存储、同步协议及前端测试，不把自动测试通过等同于真实服务商或三平台桌面行为已验证。详见 `docs/development/validation.md`。

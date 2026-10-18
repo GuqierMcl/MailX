@@ -124,6 +124,6 @@ willRetry: boolean, };
 
 export type AccountSyncState = { accountId: string, phase: SyncPhase,
 /**
- * RFC 3339 time of the last successful folder sync in this session.
+ * RFC 3339 time of the last successful inbox sync in this session.
  */
 lastSyncedAt: string | null, failure: SyncFailure | null, };

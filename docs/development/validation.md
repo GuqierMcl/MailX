@@ -1,6 +1,6 @@
 # 验证与质量目标初案
 
-状态：**账号配置已有针对性测试 / 邮件及跨平台验证继续推进**。第 5 节说明当前检查方法，第 1–4 节主要是未来邮件能力的验证计划，不是已通过结果；阈值可根据实现证据修订。
+状态：**账号与收件箱邮件头已有针对性测试 / 完整邮件及跨平台验证继续推进** · 2026-10-18。第 5 节区分当前检查方法与实际执行证据，第 1–4 节包含后续能力的验证计划，不是全部已通过结果；阈值可根据实现证据修订。
 
 ## 1. 分层验证
 
@@ -98,7 +98,7 @@ git diff --check
 - Ubuntu：`version:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
-CI 证明三平台能编译并通过自动测试，不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
+只有对应运行通过时，CI 才能证明该提交在三平台能编译并通过所配置的自动测试；工作流存在不等于本次运行成功，也不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
 
 ### 账号配置的可重复检查
 
@@ -117,7 +117,32 @@ cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored
 
 测试创建唯一 service 名下的合成条目并清理，验证读取、写入、删除与重复删除。它不会使用真实邮箱凭证；普通 `cargo test` 不包含这一测试。执行结论需单独记录，不因提供命令而视为通过。
 
-上述是检查范围和复现方法；当前执行结论应以当次命令及实际宿主结果记录，不因测试文件存在就宣称通过。真实邮箱 HTML、同步退出、OAuth 刷新及 SMTP 结果恢复尚需对应实现与独立验证。`.github/` 仍只占位，没有 CI。
+上述是检查范围和复现方法；当前执行结论应以当次命令及实际宿主结果记录，不因测试文件存在就宣称通过。真实邮箱兼容性、HTML、同步退出、OAuth 刷新及 SMTP 结果恢复仍需独立验证，未实现能力先保留为计划；已有 CI 工作流与单次运行结果分别记录。
+
+### 收件箱邮件头同步的检查与证据
+
+以下为实现对应的回归范围，不能仅因测试文件存在就视为通过：
+
+- `core/src/imap/mod.rs`：脚本化 IMAP 会话验证 STATUS → EXAMINE → UID SEARCH SINCE → UID FETCH，使用头部字面量；禁止 SELECT、STORE 与非 PEEK 正文读取，并验证 UID 集合压缩和 BODYSTRUCTURE 附件判断。
+- `core/src/sync/headers.rs`：UTF-8 B / Q、GBK / GB2312 等 encoded-word、损坏字段兜底、地址组、收件日期优先级和 UTC 时间规范化；`mail-parser` 必须启用 `full_encoding`。
+- `core/src/sync/messages.rs` 及其测试：固定窗口首次 / 增量计划、1,000 封截取、200 封批次、代际切换、完整 SEARCH 后才删除、部分抓取失败恢复、flags 刷新与来源保护。
+- `core/src/storage/messages/` 及服务测试：v3 迁移、upsert 保留 id、来源 / 文件夹 / 代际写入保护、级联删除、筛选与 LIKE 字面转义、同时间稳定分页、coverage 组合和非法参数。
+- 前端 `workbench-headers.test.tsx`、`sync-state.test.tsx`、`mailx-client.test.ts`、`mock-client.test.ts`：每页 100 条与加载更多、idle 刷新保持有效选中、取消消失的选中并忽略迟到详情、刷新 / 查询变化后的旧响应、分页失败重试、三种空状态、缺主题 / 摘要、正文未下载提示和真实 IPC 参数。
+
+2026-10-18 本轮已执行的开发检查（按实施步骤记录，不重复累计为测试总数）：
+
+- 第 3 步 core 检查：69 项单元测试与 25 项集成测试通过，覆盖当时已接入的存储和查询实现。
+- 随后的 sync 定向检查：31 项通过，包含 4 项 IMAP + SQLite 端到端测试和调度测试。
+- 第 5 步 desktop commands 定向检查：3 项通过，覆盖宿主命令边界；不替代真实 WebView 冒烟。
+- `bun run --cwd frontend test`：12 个测试文件、59 项测试通过；包含上述新增邮件头交互用例。
+- `bun run --cwd frontend typecheck` 与 `bun run --cwd frontend lint` 通过。
+- `git diff --check -- frontend` 通过。
+
+2026-10-18 首轮 Comet Runtime 整合检查：Rust 格式检查、workspace Clippy（`-D warnings`）、Rust 全量测试与 `bun run tauri build` 通过。Rust 测试为 core 79 单元 + 25 集成、desktop 10 通过；1 项真实系统凭据库测试按默认配置跳过。`bun run check` 首轮在 DTO 漂移检查处失败，差异仅为同步状态注释从 folder 更新为 inbox，已运行类型生成同步；最终检查结论以当前候选的 Comet 验收记录为准。
+
+真实服务商与本次三平台 CI 尚未验证。前端测试使用合成 DTO 与受控 Promise，协议端到端测试使用脚本化服务器，不证明真实服务商或 WebView 行为。三平台 CI 未获得实际运行证据前不得标为全绿。
+
+真实账号验收需记录：新增账号后的固定窗口首轮、UTF-8 / GBK 中文主题和发件人、同步前后未读状态不变、外部客户端新增 / 改 flags / 删除后的轮询更新、双账号统一分页、来源切换后旧数据立即不可见、重启读取缓存、非收件箱范围提示。每 60 秒重新登录的服务商频率限制需观察；不得用一个服务商成功替代兼容矩阵。
 
 ### 平台证据边界
 

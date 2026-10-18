@@ -1,9 +1,9 @@
 //! Shared, host-independent foundation for MailX.
 //!
 //! Account configuration is persisted here; hosts supply a data directory,
-//! system secret store and async runtime. Background sync logs in over IMAP to
-//! keep each account's folder list current; messages are not synced and nothing
-//! is sent yet.
+//! system secret store and async runtime. Read-only background IMAP sync keeps
+//! folders and inbox message headers in a local cache for paginated queries.
+//! Message bodies, flag writes and sending are not implemented yet.
 
 pub mod accounts;
 mod app;

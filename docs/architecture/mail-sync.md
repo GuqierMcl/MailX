@@ -1,6 +1,6 @@
 # 账号、同步与发信
 
-状态：**同步与发送为 Initial draft** · 账号配置已单独实现，详见[账号配置](account-configuration.md)。已实现：经账号路由的 IMAP 连接（§2 的超时与退避预算）与文件夹列表同步（见下方“已实现：文件夹同步”）；邮件同步、缓存、发送与任务队列尚未实现；状态与参数可随验证修订。
+状态：**文件夹与收件箱邮件头同步已有实现 / 正文与发送仍为 Initial draft** · 2026-10-18。已实现经账号路由的 IMAP 连接、邮件头缓存与只读查询；真实服务商兼容性待验证，执行证据见[验证策略](../development/validation.md)。账号配置详见[账号配置](account-configuration.md)，状态与参数可随验证修订。
 
 ## 已实现：文件夹同步
 
@@ -9,18 +9,30 @@
 - 登录被拒、凭证缺失 / 不受信任、服务器不支持 STARTTLS 时不自动重试，直到账号被修改；网络、代理、TLS 与超时按 §2 退避重试。
 - 角色识别顺序：INBOX 名称 → SPECIAL-USE 属性 → 顶层（或 INBOX 下）的常见名称；每个角色只分配给一个文件夹。层级由服务器分隔符得出，`INBOX.Sent` 这类系统文件夹与收件箱并列显示。
 - 文件夹按账号的 `mailboxSourceId` 隔离：切换服务器后旧列表不再显示，旧服务器迟到的结果会被丢弃；同一服务器名称在多次同步间保持本地 ID。
-- 尚未实现：OBJECTID 改名识别、NOTIFY、邮件同步及服务商矩阵验证。
+- 尚未实现：OBJECTID 改名识别、NOTIFY；服务商矩阵尚未验证。
+
+## 已实现：收件箱邮件头同步
+
+- `core/src/imap/mod.rs` 提供可复用登录会话，`core/src/sync/headers.rs` 解析头部，`core/src/sync/messages.rs` 负责计划与执行，`SyncManager` 按账号调度。每轮重新登录一次，在同一会话中执行到期的目录刷新和收件箱同步，成功后退出登录，失败或超时则丢弃会话；健康账号邮件节拍为 60 秒，目录 `LIST` + `STATUS` 仍为 10 分钟。收件箱计数每轮在 `EXAMINE` 前用 `STATUS` 更新。
+- 只同步角色为 `inbox` 的文件夹。使用 `EXAMINE` 和 `BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)]`，同时读取 UID、FLAGS、INTERNALDATE、RFC822.SIZE 与 BODYSTRUCTURE；不读取正文或附件内容，不发送 `SELECT`、`STORE` 或其他写命令。
+- `mail-parser` 启用 `full_encoding`，解码 UTF-8、GBK、GB2312、GB18030 等编码的主题和地址显示名。收件时间依次取 INTERNALDATE、Date 头和同步时间，保存为 UTC 毫秒时间；缺失或损坏字段按空值兜底，不记录原始邮件头。
+- 附件标志来自 BODYSTRUCTURE：附件 disposition，或 multipart 下既非 text / multipart 且非 inline 的叶子部分，视为有附件；纯文本、HTML、multipart/alternative 中的正文部分不因此成为附件。不建立附件记录或正文预览。
+- 邮件与游标存入 `messages` / `folder_sync_cursors`，经 `emails_list` / `emails_get` 提供本地只读查询。统一收件箱、未读筛选、主题 / 发件人搜索和“加载更多”使用真实缓存；每次 `idle` 事件刷新目录和当前列表第一页，仍在该页的选中保持，否则取消选择，刷新期间不闪现加载骨架。
+- 空收件箱且覆盖未完成显示“正在同步邮件…”；其他空文件夹显示“当前版本只同步收件箱”；覆盖完成的空收件箱显示“这里还没有邮件”（搜索或未读筛选沿用对应空提示）。缺主题显示“（无主题）”，缺摘要不留摘要行，详情显示“正文尚未下载”。
+- 尚未实现：其他文件夹邮件同步、正文和附件获取、标记写回、历史回填、同步窗口设置、IDLE、CONDSTORE / QRESYNC、Gmail 标签语义与发信。
 
 ## 1. 账号生命周期
 
 当前账号服务只创建、查看和修改配置，返回 `connectionStatus=unverified`。IMAP 与 SMTP 可使用不同主机、用户名与凭证；保存成功不代表连接成功。实际配置模型、邮箱来源世代、端点信任及后续停用/删除契约见[账号配置](account-configuration.md)。
 
-连接器落地后，配置状态、认证状态、收发连接状态和同步进度分别表达，由 UI 汇总：例如 IMAP 正常同步、SMTP 被禁用、本地缓存可读可以同时成立。网络不通与授权被撤销分别处理；不得因为一个连接失败就禁止读取本地缓存。连接测试分别报告收信和发信能力。
+当前用独立的 `AccountSyncState` 表达后台收件同步状态；后续连接测试与发送接入后，配置状态、认证状态、收发连接状态和同步进度分别表达，由 UI 汇总：例如 IMAP 正常同步、SMTP 被禁用、本地缓存可读可以同时成立。网络不通与授权被撤销分别处理；不得因为一个连接失败就禁止读取本地缓存。连接测试分别报告收信和发信能力。
 
 停用应阻止新任务、关闭连接并按操作类型收尾；删除需显式处理缓存、授权与在途任务，不删除服务端邮件。不能把“停止调度”理解为丢弃已轮换的凭证或已经发生的 SMTP 结果。
 能力由连接探测产生：`canRead`、`canSend`、`canSetSeen`、`canSetFlagged`、`supportsIdle` 等。预设只是建议配置，不能替代实际探测。
 
 ## 2. 连接与任务预算
+
+当前每账号每轮使用一条 IMAP 会话，普通命令 30 秒超时并沿用现有连接超时与失败退避。下列连接池、全局并发、IDLE、正文 / 附件及 SMTP 配额属于后续目标，不代表已经启用。
 
 - 每个账号默认最多 2 条 IMAP 连接：1 条收件箱 IDLE / 轮询，1 条获取正文与历史；最多 1 个 SMTP 发送任务。
 - 全实例默认最多 4 个主动同步任务；队列有界并公平调度，一个账号失败不阻塞其他账号。
@@ -30,20 +42,21 @@
 
 ## 3. 首次同步与增量同步
 
-1. 通过 `NetworkConnector` 建立 TLS 连接，完成认证并探测能力；枚举文件夹及特殊用途，不能只依赖英文文件夹名称。
-2. 优先同步 INBOX 最近 30 天、最多 1,000 封的头部；记录范围和剩余历史，不将“部分完成”标成全量完成。用户选择其他文件夹时同步对应范围。
-3. 按 UID 分页获取头部与 flags，默认每批 200 条；持久化本批与对应进度在同一数据库事务提交。
-4. 初次仅缓存头部和可获得的大小信息；正文 / 附件按需获取，可由用户发起限额离线下载。
-5. 活跃 INBOX 优先 IDLE；不支持时默认每 60 秒轮询。其他已订阅文件夹默认每 5 分钟检查；应用恢复前台立即调度一次。
-6. 有 CONDSTORE / QRESYNC 时可优化变化读取；基础实现仍必须支持 UID 列表与 flags 对账，不能仅检查最大 UID。
+当前同步窗口在首次建立游标或 UIDVALIDITY 变化时确定：`window_start` 为当日 UTC 日期减 30 天，之后沿用该起点，**不是每天滚动的最近 30 天**。IMAP `SEARCH SINCE` 使用服务器日期语义，时区边界可能相差一天。
 
-UID 只在文件夹及其 `UIDVALIDITY` 世代内有效，不能拿序号或邮件头 `Message-ID` 当唯一远端主键。IMAP 规范说明了这组身份语义。[RFC 9051](https://www.rfc-editor.org/rfc/rfc9051.html)。
+1. 按账号路由登录，必要时刷新文件夹目录；只选择角色为 `inbox` 的文件夹。先用 `STATUS` 更新总数和未读数，再用 `EXAMINE` 获取 UIDVALIDITY；缺少 UIDVALIDITY 时本轮失败，不写入邮件。
+2. 没有游标或 UIDVALIDITY 改变时，在短事务内将旧代际的 `present` 邮件标记为 `stale`，重建游标，设置固定窗口起点、`highest_uid=0`、`backfill_done=0`。旧代际不再对查询可见。
+3. 每轮重新执行完整 `UID SEARCH SINCE <window_start>`，对所有匹配 UID 排序，选取最大的 1,000 个。超过上限时设置 `window_capped=1`；此上限是每轮选择范围，不是本地总记录上限。
+4. 只抓取选定集合中尚无当前 `present` 记录的 UID，按新到旧每批最多 200 封。每批邮件与 `highest_uid` 在同一事务提交，重复写入保留本地 ID；选定集合头部全部取得，且删除与 flags 对账成功后，才标记 `backfill_done=1`。取消、断线或写库失败保留已提交批次，下一轮按实际缓存继续，最大 UID 不代表其之前都已缓存。
+5. 只有完整 SEARCH 成功后，才把当前代际中 `received_at >= window_start`、却不在**完整搜索结果**中的本地 `present` UID 标记为 `deleted`。不得拿截取后的 1,000 个 UID 判断删除；窗口外缓存不对账、不自动清理。
+6. 对选定集合中已有的 UID 重新读取 FLAGS，每条命令最多 500 个 UID，更新已读、星标和原始 flags；不修改服务器标志。已缓存但后来退出最新 1,000 个集合的邮件仍保留，头部总量可超过 1,000；这些记录不再参与本轮 flags 刷新。
+7. 邮件批次、flags、删除与既有游标推进事务核对账号当前 `mailboxSourceId`、文件夹归属与 UIDVALIDITY，任一不匹配就拒绝写入迟到结果。文件夹计数只核对来源与归属，代际初始化事务负责建立或切换 UIDVALIDITY。完成后退出登录并发布 `idle`；认证拒绝等不可重试错误与网络 / 协议可重试错误继续沿用既有分类。
 
-MailX 使用 `(accountId, mailboxSourceId, folderId, uidValidity, uid)` 作为远端位置唯一键，本地 `emailId` 是独立 UUID。更换接收来源后建立新的来源世代，即使对方使用相同文件夹名、UIDVALIDITY 和 UID，也不能复用旧映射或待写 flags。`UIDVALIDITY` 改变时：暂停该文件夹写操作，废弃旧游标，旧位置标为失效并重建映射；旧缓存暂留供恢复，不将待写 flags 自动套到相同 UID 的新邮件上。
+UID 只在文件夹及其 `UIDVALIDITY` 世代内有效，不能拿序号或邮件头 `Message-ID` 当唯一远端主键。[RFC 9051](https://www.rfc-editor.org/rfc/rfc9051.html)。MailX 使用 `(accountId, mailboxSourceId, folderId, uidValidity, uid)` 表达远端位置，本地 `emailId` 是独立 UUID；更换接收来源后建立新来源，即使远端使用相同文件夹名和 UID，也不复用旧映射。
 
-增量游标区分 `highestObservedUid`、本次已处理区间与历史回填进度。最大 UID 不是“之前所有邮件都已缓存”的证明。基础模式对已缓存范围定期做 UID 存在性和 flags 对账；仅在成功完成该范围枚举后标记远端删除，网络中断不得触发批量清理。
+服务端 UID 不连续是正常情况；搜索得到明确的 UID 集合后再抓取，不用 `UIDNEXT - 1000` 推算数量，也不将 UIDNEXT 当作本地已提交进度。CONDSTORE / QRESYNC 和保持连接的 IDLE 可在后续优化每轮完整搜索、flags 获取与重新登录成本。
 
-## 4. 本地变更与恢复
+## 4. 本地变更与恢复（写操作为后续设计）
 
 v0.1 只支持已读和星标写回。`pending_mutations` 保存包含来源世代的目标远端身份、期望 flags、客户端操作 ID 和状态。离线修改显示“待同步”，服务端确认 flags 与本地意图分开存储。
 
@@ -54,7 +67,7 @@ v0.1 只支持已读和星标写回。`pending_mutations` 保存包含来源世�
 - 进程重启恢复未完成的只读同步；发送与写操作按各自状态处理，不把所有任务一律重跑。
 - 配置变化后，读取批次与游标仅向匹配来源世代提交；OAuth 刷新按 grant/凭证版本接管，SMTP 结果始终关联原发送尝试。删除准入规则应阻止旧任务复活账号。
 
-## 5. 本地草稿与可靠发送
+## 5. 本地草稿与可靠发送（后续）
 
 v0.1 草稿只存本地，含 `accountId`、正文、收件人、附件引用和单调递增 `revision`。回复 / 全部回复依据原邮件 Reply-To、From 和收件人集合构建，排除当前身份，界面始终展示完整 To / Cc / Bcc。构造邮件时拒绝地址和主题中的头部注入。
 
@@ -86,8 +99,10 @@ draft → queued → sending → accepted
 
 统一收件箱是各账号 INBOX 已缓存邮件的查询视图，按 `(receivedAt, emailId)` 降序游标分页。v0.1 不做跨文件夹去重；Gmail 标签映射成多个文件夹时，同一内容可能有多个位置，UI 应保留账号和文件夹来源。
 
-线程按账号内 `References` / `In-Reply-To` 尝试关联，缺失或有歧义时保持独立。不能仅凭同主题合并，也不跨账号合并正文供 AI 使用。线程摘要始终标明实际纳入的邮件集合。
+线程聚合尚未实现。后续按账号内 `References` / `In-Reply-To` 尝试关联，缺失或有歧义时保持独立。不能仅凭同主题合并，也不跨账号合并正文供 AI 使用。线程摘要始终标明实际纳入的邮件集合。
 
 ## 7. 完成证据
 
-必须覆盖：重复同步不增加同一远端位置记录、UIDVALIDITY 变化、远端删除对账中断、中文 MIME、附件取消、离线 flags、SMTP 部分拒绝、DATA 后断线、提交后进程崩溃和 Sent 归档失败。完整矩阵见[验证策略](../development/validation.md)。
+当前头部同步应验证：重复批次不增加远端位置记录、UIDVALIDITY 切换、来源隔离、固定窗口、稳定分页、flags / 删除对账、SEARCH / FETCH 中断、中文多字符集解码及只读命令。前端自动测试与本轮待补证据见[验证策略](../development/validation.md#收件箱邮件头同步的检查与证据)，真实服务商、三平台 CI 结果不能由代码存在推定。
+
+后续完整收发还必须覆盖：重复同步不增加同一远端位置记录、UIDVALIDITY 变化、远端删除对账中断、中文 MIME、附件取消、离线 flags、SMTP 部分拒绝、DATA 后断线、提交后进程崩溃和 Sent 归档失败。完整矩阵见[验证策略](../development/validation.md)。
