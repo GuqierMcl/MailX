@@ -7,6 +7,8 @@ fn main() {
             "accounts_get",
             "accounts_create",
             "accounts_update",
+            "folders_list",
+            "sync_states",
             "window_get_chrome",
             "window_perform",
         ]),

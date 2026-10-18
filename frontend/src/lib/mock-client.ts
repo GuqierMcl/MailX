@@ -47,6 +47,9 @@ export function createMockClient(): MailxClient {
       return structuredClone(accounts[index])
     },
     listFolders: async (accountId) => structuredClone(folders.filter((folder) => folder.accountId === accountId)),
+    listSyncStates: async () =>
+      accounts.map((account) => ({ accountId: account.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null })),
+    onSyncState: () => () => undefined,
     async listEmails(query) {
       const text = query.text?.trim().toLowerCase()
       const items = emails

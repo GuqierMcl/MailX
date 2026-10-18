@@ -25,6 +25,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
     updateAccount: vi.fn<MailxClient['updateAccount']>().mockResolvedValue(exampleAccount({ revision: 4 })),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
+    listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue([]),
+    onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
   }

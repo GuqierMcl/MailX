@@ -33,11 +33,11 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 
 | 层 | 设计选择 | 实施约束 |
 | --- | --- | --- |
-| UI | React + TypeScript + Vite，已初始化 | 当前为三栏工作台外壳（邮件 DTO 已定义，数据来自开发期 mock）与设置弹窗；MailxClient 访问桌面 IPC，HTTP 留待后续 |
+| UI | React + TypeScript + Vite，已初始化 | 当前为三栏工作台外壳与设置弹窗；桌面端文件夹来自真实同步，邮件列表在浏览器开发期使用 mock，桌面端提示尚未同步；MailxClient 访问桌面 IPC，HTTP 留待后续 |
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文隔离待实现 |
-| 核心 | Rust，同步账号应用服务 | 宿主用阻塞工作线程串行调用；协议异步运行模型后续确定 |
-| 接收 / 发送 | `async-imap` / `lettre` 候选 | M0 必须验证自定义流、TLS、OAuth 和代理；不能因库限制绕过账号路由 |
+| 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
+| 接收 / 发送 | `async-imap` 0.12 已用于文件夹同步；`lettre` 候选 | M0 必须验证自定义流、TLS、OAuth 和代理；不能因库限制绕过账号路由 |
 | MIME / HTML | `mail-parser` / `ammonia` 候选 | 限制大小、递归深度；净化之外仍需 iframe + CSP |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号配置使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
@@ -56,8 +56,12 @@ Cargo.toml                  # workspace：core + desktop
 Cargo.lock                  # Rust 依赖解析结果
 rust-toolchain.toml          # Rust 1.94.0、rustfmt、Clippy
 core/                       # mailx-core，共享核心；业务与通用实现均在这里
-  src/accounts/             # 账号服务、写入型认证输入与脱敏 DTO
-  src/storage/              # SQLite、迁移、凭证更新恢复与实例锁
+  src/app.rs                # MailxCore：宿主共用的应用服务门面
+  src/accounts/             # 账号服务、写入型认证输入与脱敏 DTO、同步凭证解析
+  src/net/                  # 按账号路由建立直连 / SOCKS5 / HTTP CONNECT 与 TLS
+  src/imap/                 # IMAP 会话与修改版 UTF-7
+  src/sync/                 # 文件夹解析与每账号后台同步任务
+  src/storage/              # SQLite、迁移、文件夹缓存、凭证更新恢复与实例锁
   src/secrets.rs            # 宿主注入的 SecretStore
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配

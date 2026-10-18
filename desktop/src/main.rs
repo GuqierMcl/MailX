@@ -6,7 +6,10 @@ mod state;
 mod window_chrome;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, EventTarget, Manager};
+
+/// Pushed to the main window whenever an account's sync state changes.
+const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 
 fn main() {
     tauri::Builder::default()
@@ -18,7 +21,16 @@ fn main() {
             let secrets = Arc::new(secret_store::SystemSecretStore::new(
                 app.config().identifier.clone(),
             ));
-            let state = state::DesktopState::new(data_dir, secrets);
+            // Sync state changes only hint the UI to refetch; a lost event is harmless.
+            let events = app.handle().clone();
+            let sync_listener: mailx_core::SyncListener = Arc::new(move |sync_state| {
+                let _ = events.emit_to(
+                    EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                    SYNC_STATE_EVENT,
+                    sync_state,
+                );
+            });
+            let state = state::DesktopState::new(data_dir, secrets, sync_listener);
             app.manage(state.clone());
             // Prepare the data directory before exposing business commands;
             // the task itself runs on Tauri's blocking pool.
@@ -33,6 +45,8 @@ fn main() {
             commands::accounts_get,
             commands::accounts_create,
             commands::accounts_update,
+            commands::folders_list,
+            commands::sync_states,
             commands::window_get_chrome,
             commands::window_perform,
         ])

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
+  Alert02Icon,
   Archive02Icon,
   ArrowRight01Icon,
   Delete02Icon,
@@ -12,7 +13,7 @@ import {
   Settings01Icon,
   SpamIcon,
 } from '@hugeicons/core-free-icons'
-import type { Account, Folder, FolderRole } from '@/generated/accounts'
+import type { Account, AccountSyncState, Folder, FolderRole, SyncFailure } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
@@ -31,9 +32,11 @@ import {
   SidebarMenuSkeleton,
   SidebarMenuSub,
 } from '@/components/ui/sidebar'
+import { Spinner } from '@/components/ui/spinner'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { buildFolderTree, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
-import type { Mailbox } from './mailbox'
+import { folderLabel, type Mailbox } from './mailbox'
 
 const ROLE_ICONS: Record<FolderRole, IconSvgElement> = {
   inbox: InboxIcon,
@@ -49,12 +52,14 @@ type MailSidebarProps = {
   accounts: Account[]
   folders: Folder[]
   loading: boolean
+  /** Latest sync state by account id; missing means no sync has reported yet. */
+  syncStates: Record<string, AccountSyncState>
   mailbox: Mailbox
   onSelect: (mailbox: Mailbox) => void
   onOpenSettings: () => void
 }
 
-export function MailSidebar({ accounts, folders, loading, mailbox, onSelect, onOpenSettings }: MailSidebarProps) {
+export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenSettings }: MailSidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const toggle = (id: string, open: boolean) => {
     const next = new Set(collapsed)
@@ -109,6 +114,7 @@ export function MailSidebar({ accounts, folders, loading, mailbox, onSelect, onO
                 const tree = buildFolderTree(folders.filter((folder) => folder.accountId === account.id))
                 const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
                 const open = !collapsed.has(account.id)
+                const sync = syncStates[account.id]
                 return (
                   <Collapsible
                     key={account.id}
@@ -122,9 +128,22 @@ export function MailSidebar({ accounts, folders, loading, mailbox, onSelect, onO
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
-                    {unread > 0 && <SidebarMenuBadge>{unread}</SidebarMenuBadge>}
+                    {unread > 0 && <SidebarMenuBadge className={cn(sync?.failure && 'right-7')}>{unread}</SidebarMenuBadge>}
+                    {sync?.failure && <SyncFailureAction failure={sync.failure} />}
                     <CollapsibleContent>
                       <SidebarMenuSub>
+                        {tree.length === 0 && (
+                          <SidebarMenuItem>
+                            <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
+                              {sync?.phase === 'failed' ? '暂无文件夹' : (
+                                <>
+                                  <Spinner className="size-3.5" aria-label="正在同步" />
+                                  正在同步文件夹…
+                                </>
+                              )}
+                            </span>
+                          </SidebarMenuItem>
+                        )}
                         {tree.map((node) => (
                           <FolderItem
                             key={node.folder.id}
@@ -175,7 +194,7 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
   const label = (
     <>
       <HugeiconsIcon icon={ROLE_ICONS[folder.role]} />
-      <span>{folder.name}</span>
+      <span>{folderLabel(folder)}</span>
     </>
   )
 
@@ -196,7 +215,7 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
       {unread > 0 && <SidebarMenuBadge className={cn(hasChildren && 'right-7')}>{unread}</SidebarMenuBadge>}
       {hasChildren && (
         <>
-          <CollapsibleTrigger render={<SidebarMenuAction aria-label={`${open ? '收起' : '展开'}${folder.name}`} />}>
+          <CollapsibleTrigger render={<SidebarMenuAction aria-label={`${open ? '收起' : '展开'}${folderLabel(folder)}`} />}>
             <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -216,5 +235,20 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
         </>
       )}
     </Collapsible>
+  )
+}
+
+function SyncFailureAction({ failure }: { failure: SyncFailure }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<SidebarMenuAction aria-label={`同步失败：${failure.message}`} className="text-destructive" />}>
+        <HugeiconsIcon icon={Alert02Icon} />
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-72">
+        <p>{failure.message}</p>
+        {failure.detail && <p className="mt-1 opacity-70">{failure.detail}</p>}
+        <p className="mt-1 opacity-70">{failure.willRetry ? '稍后会自动重试。' : '修改账号设置后会重新尝试。'}</p>
+      </TooltipContent>
+    </Tooltip>
   )
 }

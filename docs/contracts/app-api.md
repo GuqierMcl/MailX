@@ -77,6 +77,15 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 状态变化通过定向到 main 窗口的 `mailx://window-state` 事件推送。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。命令同样只授权本地可信 main 窗口。
 
+### 文件夹与同步状态
+
+| 命令与参数 | 结果 |
+| --- | --- |
+| `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）与未读 / 总数 |
+| `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt` 与 `failure` |
+
+状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷为单个 `AccountSyncState`；事件只提示前端重新查询，丢失不影响正确性。`failure.willRetry` 为 `false` 时（登录被拒、凭证需重新确认或缺失、服务器不支持所需功能）后台不再重试，直到账号配置被修改，以免错误密码反复登录导致账号被锁。账号创建或修改后，宿主重启该账号的同步任务，旧服务器、路由或凭证下建立的连接不会继续使用。
+
 ### 后续应用操作草案
 
 启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
@@ -87,7 +96,6 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 | --- | --- | --- |
 | `accounts.test` | accountId → 收 / 发测试结果 | POST `/api/v1/accounts/{id}/test` |
 | `accounts.reauthorize` | accountId / authProfileId / expectedRevision → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
-| `folders.list` | accountId → 文件夹列表（含 `parentId` 层级、角色、`selectable`；`selectable: false` 对应 IMAP `\Noselect` 分组） | GET `/api/v1/accounts/{id}/folders` |
 | `emails.list` | 结构化过滤 / 游标 → Page + coverage | GET `/api/v1/emails` |
 | `emails.search` | query / 过滤 / 游标 → Page + coverage | POST `/api/v1/search` |
 | `emails.read` | emailId → 正文缓存状态、正文、附件元信息 | GET `/api/v1/emails/{id}` |

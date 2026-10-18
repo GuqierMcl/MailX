@@ -1,6 +1,8 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
   Account,
+  AccountSyncState,
   AppError,
   ApiResult,
   CreateAccountRequest,
@@ -37,9 +39,21 @@ export interface MailxClient {
   createAccount(request: CreateAccountRequest): Promise<Account>
   updateAccount(request: UpdateAccountRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
+  listSyncStates(): Promise<AccountSyncState[]>
+  /** Hears each account's sync state change; returns an unsubscribe function. */
+  onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
 }
+
+/** Mail is not synced yet: an empty page whose coverage says nothing is cached. */
+export const UNSYNCED_PAGE: EmailPage = {
+  items: [],
+  nextCursor: null,
+  coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null },
+}
+
+const SYNC_STATE_EVENT = 'mailx://sync-state'
 
 export function clientFailure(error: unknown): ClientFailure {
   if (error instanceof MailxClientError) return error.failure
@@ -71,9 +85,22 @@ export function createDesktopClient(): MailxClient {
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
     updateAccount: (request) => call<Account>('accounts_update', { request }),
-    // The desktop host has no mail commands yet; these fail until sync lands.
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
-    listEmails: (query) => call<EmailPage>('emails_list', { query }),
-    getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
+    listSyncStates: () => call<AccountSyncState[]>('sync_states'),
+    onSyncState(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<AccountSyncState>(SYNC_STATE_EVENT, (event) => listener(event.payload))
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => {
+        disposed = true
+        unlisten?.()
+      }
+    },
+    // Only folders are synced so far; message commands do not exist yet.
+    listEmails: async () => UNSYNCED_PAGE,
+    getEmail: () => call<EmailDetail>('emails_get', {}),
   }
 }

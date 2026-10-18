@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Allow only the local main window to manage account configuration and its own title bar.",
   "windows": ["main"],
-  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update", "allow-window-get-chrome", "allow-window-perform", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update", "allow-folders-list", "allow-sync-states", "allow-window-get-chrome", "allow-window-perform", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

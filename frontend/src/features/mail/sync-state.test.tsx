@@ -1,0 +1,72 @@
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it } from 'vitest'
+import type { AccountSyncState, Folder } from '@/generated/accounts'
+import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
+import { UNSYNCED_PAGE } from '@/lib/mailx-client'
+import { Workbench } from './workbench'
+
+const account = exampleAccount()
+
+function folder(id: string, overrides: Partial<Folder> = {}): Folder {
+  return { id, accountId: account.id, parentId: null, name: id, role: 'other', selectable: true, unreadCount: 0, totalCount: 0, ...overrides }
+}
+
+function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
+  const client = testClient([account])
+  let emit: (state: AccountSyncState) => void = () => undefined
+  client.listFolders.mockResolvedValue(folders)
+  client.listSyncStates.mockResolvedValue(states)
+  client.listEmails.mockResolvedValue(UNSYNCED_PAGE)
+  client.onSyncState.mockImplementation((listener) => {
+    emit = listener
+    return () => undefined
+  })
+  return { client, emit: (state: AccountSyncState) => act(() => emit(state)) }
+}
+
+const failed: AccountSyncState = {
+  accountId: account.id,
+  phase: 'failed',
+  lastSyncedAt: null,
+  failure: { code: 'authentication', message: '服务器拒绝了登录，请检查用户名和密码或授权码。', detail: 'login rejected: Invalid credentials', willRetry: false },
+}
+
+describe('folder sync in the workbench', () => {
+  it('shows server folders under their system names', async () => {
+    const { client } = desktopLike([folder('INBOX', { role: 'inbox' }), folder('Sent Messages', { role: 'sent' }), folder('Receipts')])
+    render(<Workbench client={client} />)
+    expect(await screen.findByRole('button', { name: '已发送' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收件箱' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receipts' })).toBeInTheDocument()
+    expect(screen.queryByText('Sent Messages')).not.toBeInTheDocument()
+  })
+
+  it('says folders are syncing before the first listing arrives, then refetches when it does', async () => {
+    const { client, emit } = desktopLike()
+    render(<Workbench client={client} />)
+    expect(await screen.findByText('正在同步文件夹…')).toBeInTheDocument()
+
+    client.listFolders.mockResolvedValue([folder('INBOX', { role: 'inbox', unreadCount: 2 })])
+    emit({ accountId: account.id, phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null })
+    expect(await screen.findByRole('button', { name: '收件箱' })).toBeInTheDocument()
+    expect(screen.queryByText('正在同步文件夹…')).not.toBeInTheDocument()
+  })
+
+  it('explains a failed sync on the account row', async () => {
+    const { client } = desktopLike([], [failed])
+    render(<Workbench client={client} />)
+    const action = await screen.findByRole('button', { name: /^同步失败：服务器拒绝了登录/ })
+    expect(screen.getByText('暂无文件夹')).toBeInTheDocument()
+    await userEvent.hover(action)
+    expect(await screen.findByText('login rejected: Invalid credentials', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByText('修改账号设置后会重新尝试。')).toBeInTheDocument()
+  })
+
+  it('tells the user mail itself is not synced yet', async () => {
+    const { client } = desktopLike([folder('INBOX', { role: 'inbox' })])
+    render(<Workbench client={client} />)
+    expect(await screen.findByText('邮件尚未同步')).toBeInTheDocument()
+    await waitFor(() => expect(client.listEmails).toHaveBeenCalled())
+  })
+})
