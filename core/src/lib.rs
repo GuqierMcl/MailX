@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod error;
 pub mod mail;
+mod net;
 pub mod secrets;
 mod startup;
 mod storage;
