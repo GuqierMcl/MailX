@@ -11,6 +11,7 @@ use std::{
 };
 
 mod folders;
+pub(crate) mod messages;
 mod migrations;
 
 pub(crate) struct Storage {

@@ -1,5 +1,6 @@
-//! Mail read contract. Types only: no synchronization or storage implements
-//! them yet, and the desktop frontend serves them from mock data until it does.
+//! Mail read contract shared by local storage and host adapters. Folder and
+//! per-folder header queries are implemented; bodies and attachment contents remain
+//! unavailable until their retrieval is implemented.
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -25,6 +26,8 @@ pub struct Folder {
     pub role: FolderRole,
     /// `false` for IMAP `\Noselect` containers that only group child folders.
     pub selectable: bool,
+    /// Whether a successful STATUS has supplied these counts. Unknown is not zero.
+    pub counts_known: bool,
     #[ts(type = "number")]
     pub unread_count: u32,
     #[ts(type = "number")]
@@ -92,6 +95,8 @@ pub struct EmailListQuery {
 #[serde(rename_all = "camelCase")]
 pub struct Coverage {
     pub headers_complete: bool,
+    /// At least one matching selectable folder exceeded the per-round UID limit.
+    pub window_capped: bool,
     pub bodies_complete: bool,
     pub synced_after: Option<String>,
     pub synced_before: Option<String>,

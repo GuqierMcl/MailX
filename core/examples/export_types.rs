@@ -49,6 +49,8 @@ fn main() {
         SyncPhase,
         SyncFailureCode,
         SyncFailure,
+        FolderSyncPhase,
+        FolderSyncState,
         AccountSyncState,
     );
 }

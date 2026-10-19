@@ -11,7 +11,7 @@ use tokio::runtime::Handle;
 use crate::accounts::AccountService;
 use crate::accounts::types::{Account, CreateAccountRequest, UpdateAccountRequest};
 use crate::error::{AppError, ErrorCode};
-use crate::mail::Folder;
+use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
 
@@ -74,6 +74,14 @@ impl MailxCore {
 
     pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
         self.accounts()?.list_folders(account_id)
+    }
+
+    pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
+        self.accounts()?.list_emails(query)
+    }
+
+    pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
+        self.accounts()?.get_email(email_id)
     }
 
     /// Current sync state of every account that has a worker.

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { createDesktopClient, MailxClientError, UNSYNCED_PAGE } from './mailx-client'
+import { createDesktopClient, MailxClientError } from './mailx-client'
+import { emailQuery } from '@/features/mail/format'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 
@@ -32,16 +33,26 @@ describe('desktop client boundary', () => {
     await expect(client.listAccounts()).rejects.toThrow('与桌面应用的通信中断')
   })
 
-  it('reads folders and sync states from the host but reports mail as not yet synced', async () => {
+  it('reads folders and sync states from the host', async () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: [], requestId: 'request' })
     const client = createDesktopClient()
     await client.listFolders('account')
     await client.listSyncStates()
     expect(invoke).toHaveBeenNthCalledWith(1, 'folders_list', { accountId: 'account' })
     expect(invoke).toHaveBeenNthCalledWith(2, 'sync_states', undefined)
-    vi.mocked(invoke).mockClear()
-    await expect(client.listEmails({} as never)).resolves.toEqual(UNSYNCED_PAGE)
-    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('forwards the complete email query and the selected email identifier', async () => {
+    const query = emailQuery({ folderRole: 'inbox', unread: true, text: '主题', limit: 100, cursor: 'next-page' })
+    const page = { items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null } }
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ ok: true, data: page, requestId: 'list' })
+      .mockResolvedValueOnce({ ok: true, data: { summary: { id: 'email-id' } }, requestId: 'detail' })
+    const client = createDesktopClient()
+    await expect(client.listEmails(query)).resolves.toEqual(page)
+    await expect(client.getEmail('email-id')).resolves.toEqual({ summary: { id: 'email-id' } })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'emails_list', { query })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'emails_get', { emailId: 'email-id' })
   })
 
   it('never invokes IPC when the desktop host is absent', async () => {
@@ -49,6 +60,8 @@ describe('desktop client boundary', () => {
     const client = createDesktopClient()
     expect(client.available).toBe(false)
     await expect(client.listAccounts()).rejects.toBeInstanceOf(MailxClientError)
+    await expect(client.listEmails(emailQuery({}))).rejects.toBeInstanceOf(MailxClientError)
+    await expect(client.getEmail('email-id')).rejects.toBeInstanceOf(MailxClientError)
     expect(invoke).not.toHaveBeenCalled()
   })
 })

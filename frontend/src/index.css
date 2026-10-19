@@ -129,6 +129,16 @@ body { margin: 0; min-width: 320px; }
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Base UI hides native scrollbars under its own with an injected <style> tag,
+   which the desktop CSP blocks; main.tsx disables the tag and these rules
+   take its place. Without them scroll areas show two scrollbars. */
+.base-ui-disable-scrollbar {
+  scrollbar-width: none;
+}
+.base-ui-disable-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;}

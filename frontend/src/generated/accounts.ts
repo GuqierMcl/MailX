@@ -64,7 +64,11 @@ export type Folder = { id: string, accountId: string, parentId: string | null, n
 /**
  * `false` for IMAP `\Noselect` containers that only group child folders.
  */
-selectable: boolean, unreadCount: number, totalCount: number, };
+selectable: boolean,
+/**
+ * Whether a successful STATUS has supplied these counts. Unknown is not zero.
+ */
+countsKnown: boolean, unreadCount: number, totalCount: number, };
 
 export type MailAddress = { name: string | null, address: string, };
 
@@ -94,7 +98,11 @@ accountIds: Array<string> | null, folderId: string | null,
  */
 folderRole: FolderRole | null, text: string | null, unread: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
 
-export type Coverage = { headersComplete: boolean, bodiesComplete: boolean, syncedAfter: string | null, syncedBefore: string | null, };
+export type Coverage = { headersComplete: boolean,
+/**
+ * At least one matching selectable folder exceeded the per-round UID limit.
+ */
+windowCapped: boolean, bodiesComplete: boolean, syncedAfter: string | null, syncedBefore: string | null, };
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 
@@ -114,7 +122,7 @@ export type SyncFailureCode = "authentication" | "credentialUntrusted" | "creden
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**
- * Technical reason from the server or network stack, for display only.
+ * Sanitized protocol or network reason, for display only.
  */
 detail: string | null,
 /**
@@ -122,8 +130,24 @@ detail: string | null,
  */
 willRetry: boolean, };
 
-export type AccountSyncState = { accountId: string, phase: SyncPhase,
+export type FolderSyncPhase = "waiting" | "syncing" | "idle" | "failed";
+
+export type FolderSyncState = { folderId: string, phase: FolderSyncPhase, lastSyncedAt: string | null, failure: SyncFailure | null, dataRevision: number, };
+
+export type AccountSyncState = { accountId: string, mailboxSourceId: string | null,
 /**
- * RFC 3339 time of the last successful folder sync in this session.
+ * Incremented synchronously whenever account settings restart the worker.
+ */
+generation: number,
+/**
+ * Event order within the worker generation.
+ */
+sequence: number,
+/**
+ * Complete LIST commits; consumers refresh the folder tree on change.
+ */
+folderRevision: number, folders: Array<FolderSyncState>, phase: SyncPhase,
+/**
+ * RFC 3339 time of the last entirely successful round in this session.
  */
 lastSyncedAt: string | null, failure: SyncFailure | null, };

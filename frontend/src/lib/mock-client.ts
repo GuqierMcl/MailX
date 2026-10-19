@@ -48,7 +48,13 @@ export function createMockClient(): MailxClient {
     },
     listFolders: async (accountId) => structuredClone(folders.filter((folder) => folder.accountId === accountId)),
     listSyncStates: async () =>
-      accounts.map((account) => ({ accountId: account.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null })),
+      accounts.map((account) => ({
+        accountId: account.id, mailboxSourceId: account.mailboxSourceId, generation: 1, sequence: 1, folderRevision: 1,
+        phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null,
+        folders: folders.filter((folder) => folder.accountId === account.id && folder.selectable).map((folder) => ({
+          folderId: folder.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, dataRevision: 0,
+        })),
+      })),
     onSyncState: () => () => undefined,
     async listEmails(query) {
       const text = query.text?.trim().toLowerCase()
@@ -62,11 +68,14 @@ export function createMockClient(): MailxClient {
           (query.hasAttachment == null || email.hasAttachment === query.hasAttachment) &&
           (!text || [email.subject, email.preview, email.from.name ?? '', email.from.address].some((field) => field.toLowerCase().includes(text))),
         )
-        .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+        .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
+      const offset = query.cursor ? Number(query.cursor) : 0
+      const limit = query.limit ?? 50
+      const page = items.slice(offset, offset + limit)
       return {
-        items: structuredClone(items),
-        nextCursor: null,
-        coverage: { headersComplete: true, bodiesComplete: false, syncedAfter: null, syncedBefore: null },
+        items: structuredClone(page),
+        nextCursor: offset + limit < items.length ? String(offset + limit) : null,
+        coverage: { headersComplete: true, bodiesComplete: false, syncedAfter: null, syncedBefore: null, windowCapped: false },
       }
     },
     async getEmail(emailId) {
@@ -176,6 +185,7 @@ function buildFolders(accountId: string, emails: EmailDetail[]): Folder[] {
       name,
       role,
       selectable,
+      countsKnown: true,
       unreadCount: inFolder.filter((email) => !email.summary.isRead).length,
       totalCount: inFolder.length,
     }

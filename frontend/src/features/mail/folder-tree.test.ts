@@ -10,6 +10,7 @@ function folder(id: string, overrides: Partial<Folder> = {}): Folder {
     name: id,
     role: 'other',
     selectable: true,
+    countsKnown: true,
     unreadCount: 0,
     totalCount: 0,
     ...overrides,
@@ -43,6 +44,16 @@ describe('buildFolderTree', () => {
 
   it('keeps a folder whose parent is missing at the top level', () => {
     expect(buildFolderTree([folder('orphan', { parentId: 'gone' })]).map((node) => node.folder.id)).toEqual(['orphan'])
+  })
+
+  it('propagates unknown counts and ignores stale counts on a Noselect container', () => {
+    const [root] = buildFolderTree([
+      folder('container', { selectable: false, countsKnown: false, unreadCount: 99 }),
+      folder('child', { parentId: 'container', countsKnown: false }),
+    ])
+    expect(root.unreadWithChildren).toBe(0)
+    expect(root.countsKnown).toBe(false)
+    expect(buildFolderTree([folder('container', { selectable: false, countsKnown: false })])[0].countsKnown).toBe(true)
   })
 })
 

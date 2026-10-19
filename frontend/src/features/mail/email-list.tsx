@@ -2,6 +2,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary } from '@/generated/accounts'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,14 +14,23 @@ import { displayName, formatListTime } from './format'
 
 export type ListFilter = 'all' | 'unread'
 
+export type ListSyncStatus = {
+  phase: 'waiting' | 'syncing' | 'idle' | 'failed'
+  failure: string | null
+  windowCapped: boolean
+}
+
 type EmailListProps = {
   title: string
   emails: EmailSummary[]
   /** Shown as a badge on each row when the list spans several accounts. */
   accounts: Account[] | null
   loading: boolean
-  /** Nothing is cached for this view yet because messages are not synced. */
-  unsynced: boolean
+  syncStatus: ListSyncStatus
+  hasMore: boolean
+  loadingMore: boolean
+  refreshing: boolean
+  loadMoreError: string | null
   error: string | null
   filter: ListFilter
   search: string
@@ -28,6 +38,7 @@ type EmailListProps = {
   onFilterChange: (filter: ListFilter) => void
   onSearchChange: (search: string) => void
   onSelect: (email: EmailSummary) => void
+  onLoadMore: () => void
 }
 
 export function EmailList(props: EmailListProps) {
@@ -55,7 +66,7 @@ export function EmailList(props: EmailListProps) {
           <Input
             type="search"
             aria-label="搜索邮件"
-            placeholder="搜索主题、发件人或内容"
+            placeholder="搜索主题或发件人"
             className="pl-7"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
@@ -67,7 +78,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, unsynced, error, filter, search, selectedId, onSelect }: EmailListProps) {
+function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, loadMoreError, onLoadMore }: EmailListProps) {
   if (loading && emails.length === 0) {
     return (
       <div className="flex flex-col gap-2 px-3" role="status" aria-label="正在加载邮件">
@@ -87,15 +98,28 @@ function EmailRows({ emails, accounts, loading, unsynced, error, filter, search,
       </Empty>
     )
   }
-  if (unsynced) {
+  const syncTitle = {
+    waiting: '等待同步邮件…',
+    syncing: '正在同步邮件…',
+    failed: '邮件同步失败',
+    idle: '这里还没有邮件',
+  }[syncStatus.phase]
+  const syncDescription = syncStatus.phase === 'failed'
+    ? syncStatus.failure ?? '稍后会自动重试，已有邮件仍可查看。'
+    : syncStatus.phase === 'waiting'
+      ? '轮到这个文件夹时会自动同步。'
+      : '邮件头同步后会显示在这里。'
+  const filtered = Boolean(search) || filter === 'unread'
+  if (emails.length === 0 && !filtered) {
     return (
       <Empty>
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <HugeiconsIcon icon={InboxIcon} />
           </EmptyMedia>
-          <EmptyTitle>邮件尚未同步</EmptyTitle>
-          <EmptyDescription>当前版本只同步文件夹列表，邮件同步将在后续版本提供。</EmptyDescription>
+          <EmptyTitle>{syncTitle}</EmptyTitle>
+          <EmptyDescription>{syncDescription}</EmptyDescription>
+          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
@@ -109,12 +133,20 @@ function EmailRows({ emails, accounts, loading, unsynced, error, filter, search,
           </EmptyMedia>
           <EmptyTitle>{search ? '没有匹配的邮件' : filter === 'unread' ? '没有未读邮件' : '这里还没有邮件'}</EmptyTitle>
           <EmptyDescription>{search ? '换个关键词试试。' : '新邮件同步后会显示在这里。'}</EmptyDescription>
+          {syncStatus.phase !== 'idle' && <EmptyDescription>{syncTitle} {syncDescription}</EmptyDescription>}
+          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
   }
   return (
     <ScrollArea className="min-h-0 flex-1">
+      {(syncStatus.phase !== 'idle' || syncStatus.windowCapped) && (
+        <div role="status" aria-label="邮件同步状态" className="space-y-1 px-3 pb-3 text-xs text-muted-foreground">
+          {syncStatus.phase !== 'idle' && <p>{syncTitle} {syncStatus.phase === 'failed' && syncDescription}</p>}
+          {syncStatus.windowCapped && <p>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</p>}
+        </div>
+      )}
       <div role="list" aria-label="邮件列表" className="flex flex-col gap-2 px-3 pb-3">
         {emails.map((email) => (
           <EmailRow
@@ -126,6 +158,14 @@ function EmailRows({ emails, accounts, loading, unsynced, error, filter, search,
           />
         ))}
       </div>
+      {hasMore && (
+        <div className="flex flex-col items-center gap-2 px-3 pb-3">
+          {loadMoreError && <p role="alert" className="text-sm text-destructive">{loadMoreError}</p>}
+          <Button variant="outline" disabled={loadingMore || refreshing} onClick={onLoadMore}>
+            {loadingMore ? '正在加载…' : '加载更多'}
+          </Button>
+        </div>
+      )}
     </ScrollArea>
   )
 }
@@ -153,14 +193,14 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs font-medium">
-          <span className="truncate">{email.subject}</span>
+          <span className="truncate">{email.subject || '（无主题）'}</span>
           {email.hasAttachment && (
             <HugeiconsIcon icon={Attachment01Icon} aria-label="有附件" className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           {email.isStarred && <HugeiconsIcon icon={StarIcon} aria-label="已加星标" className="size-3.5 shrink-0 text-muted-foreground" />}
         </div>
       </div>
-      <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>
+      {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
       {account && <Badge variant="outline">{account.displayName}</Badge>}
     </button>
   )

@@ -39,6 +39,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["folders"],
         sql: include_str!("migrations/0002_folders.sql"),
     },
+    Migration {
+        version: 3,
+        description: "message header cache and folder synchronization cursors",
+        required_tables: &["folder_sync_cursors", "messages"],
+        sql: include_str!("migrations/0003_messages.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {

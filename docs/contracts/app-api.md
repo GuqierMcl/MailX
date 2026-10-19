@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态与账号配置接口已实现 / 其余 Draft，均未冻结对外兼容承诺**。当前只有桌面启动状态和账号管理 IPC，没有 HTTP、MCP、连接测试或邮件 API。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts`。
+状态：**启动状态、账号、文件夹、同步状态与邮件头读取接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-19。桌面通过受限 Tauri IPC 读取本地邮件头；HTTP、MCP、连接测试、正文下载和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -23,31 +23,80 @@ type Page<T> = { items: T[]; nextCursor: string | null };
 type BodyState = "missing" | "fetching" | "ready" | "failed";
 ```
 
-当前账号响应使用上述 `ApiResult<T>` 结构，宿主生成响应 `requestId`；创建请求中的 `request.requestId` 则是客户端幂等键，两者用途不同。`Page` 与邮件状态类型尚属后续草案。
+当前账号、文件夹和邮件响应使用上述 `ApiResult<T>` 结构，宿主生成响应 `requestId`；创建请求中的 `request.requestId` 则是客户端幂等键，两者用途不同。邮件分页实际返回下述 `EmailPage`，额外包含覆盖信息。
 
 未来成功 HTTP 返回对应 2xx，失败使用合理的 4xx / 5xx，不能始终返回 200。Tauri adapter 和 HTTP adapter 将响应转换为同一前端结果类型。MCP 使用自己的 JSON-RPC / tool result 封装，复用 `AppError.code` 而非套一层 HTTP 状态。
 
-## 2. 邮件分页与查询（后续）
+## 2. 当前邮件分页与查询
 
-列表默认 `limit=50`，范围 1–100。游标不透明，绑定查询条件和最后一条 `(receivedAt, emailId)`；改变过滤条件后重新开始。无效游标报参数错误。权限范围始终由服务端与查询指定的账号取交集，显式请求未授权账号直接拒绝。
+| MailxClient 方法 | Tauri 命令与参数 | 核心入口 | 成功结果 |
+| --- | --- | --- | --- |
+| `listEmails(query)` | `emails_list`，`{ query }` | `MailxCore::list_emails` → `AccountService::list_emails` | `EmailPage` |
+| `getEmail(emailId)` | `emails_get`，`{ emailId }` | `MailxCore::get_email` → `AccountService::get_email` | `EmailDetail` |
+
+两个命令与账号、文件夹读取使用同一主窗口来源与启动 Ready 准入，参数结构拒绝未知顶层字段。不访问网络，不下载正文，也不改变已读或星标。宿主没有通用 SQL、路径或读凭证参数。
+
+### 查询参数
 
 ```json
 {
-  "accountIds": ["00000000-0000-4000-8000-000000000001"],
-  "folderId": null,
-  "query": "invoice",
-  "unread": true,
-  "hasAttachment": null,
-  "receivedAfter": "2026-10-01T00:00:00Z",
-  "receivedBefore": "2026-11-01T00:00:00Z",
-  "limit": 50,
-  "cursor": null
+  "query": {
+    "accountIds": ["00000000-0000-4000-8000-000000000001"],
+    "folderId": null,
+    "folderRole": "inbox",
+    "text": "invoice",
+    "unread": true,
+    "hasAttachment": null,
+    "receivedAfter": "2026-10-01T00:00:00Z",
+    "receivedBefore": "2026-11-01T00:00:00Z",
+    "limit": 100,
+    "cursor": null
+  }
 }
 ```
 
-时间范围为左闭右开。`accountIds` 省略表示当前主体的获授权账号，空数组表示空结果；布尔筛选 `null` 表示不限。全文范围与短词限制见[搜索设计](../architecture/storage-search.md)。返回 `items`、`nextCursor` 与 `coverage { headersComplete, bodyComplete, syncedAfter?, syncedBefore? }`，完整性只针对当前过滤范围。
+- `accountIds` 为 null 或省略时查询所有本地账号，空数组返回空结果；数组元素必须为有效 UUID。当前只有受信本地 UI 入口，未来 HTTP / MCP 再与宿主授权账号范围取交集。
+- `folderId` 指定本地文件夹 UUID；`folderRole` 在选定账号间按角色匹配，`inbox` 即统一收件箱。二者不能同时给出，否则返回 `validation`。
+- `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。星标是返回字段，本阶段没有星标筛选参数或标记写回。
+- `text` 去掉首尾空白后，对 subject、from.name、from.address 进行 LIKE 字面子串匹配，`%`、`_` 和反斜杠均转义；空白文本视为不限。当前不搜索正文，没有三字符最短限制，不接受全文 MATCH 表达式。
+- `receivedAfter` / `receivedBefore` 为 RFC 3339 时间，规范化为 UTC 毫秒格式后按左闭右开区间过滤；无效时间返回 `validation`。
+- `limit` 为 null 或省略时默认 50，有效范围 1–200；工作台请求 100。越界返回 `validation`。
+- `cursor` 为 null 时从第一页开始，否则原样传回服务端提供的游标。更改查询条件后须清空游标重新开始；游标不是权限凭据。
 
-`EmailSummary` 至少包含 `id`、`accountId`、`folderId`、`subject`、`from`、`receivedAt`、`isRead`、`isStarred`、`hasAttachment`、`bodyState`、`pendingChanges`。不把正文塞进每行，也不向列表暴露 blob 文件路径。
+仅返回 `remote_state=present`、账号当前 `mailboxSourceId` 下、与文件夹游标 UIDVALIDITY 一致的记录。排序为 `(receivedAt DESC, id DESC)`，下一页条件为 `(received_at, id) < (r, i)`；当前游标编码是 `{"r": receivedAt, "i": id}` 的无填充 base64url，客户端按不透明字符串处理。无法解码、字段结构错误、时间或 ID 无效均返回 `validation`，最后一页 `nextCursor=null`。
+
+### 列表和覆盖信息
+
+```ts
+type EmailPage = {
+  items: EmailSummary[];
+  nextCursor: string | null;
+  coverage: {
+    headersComplete: boolean;
+    windowCapped: boolean;
+    bodiesComplete: boolean;
+    syncedAfter: string | null;
+    syncedBefore: string | null;
+  };
+};
+```
+
+`EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、pendingChanges。当前 `preview=""`、`bodyState="missing"`、`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
+
+`coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
+
+- 至少有一个匹配文件夹，且每个都存在游标、`backfill_done=1`、`window_capped=0` 时，`headersComplete=true`。任一文件夹尚未同步、抓取未完成或窗口超过 1,000 封上限时为 false；不存在匹配文件夹时同样为 false。
+- `syncedAfter` 是这些游标中最晚的固定 `window_start`，格式为 UTC 日期 `YYYY-MM-DD`；无游标时为 null。起点是各文件夹首次同步或代际切换当日减 30 天，之后不每日滚动。
+- `windowCapped=true` 表示至少一个匹配目录达到每轮 1,000 封选取上限；它与是否仍在同步分别表达。
+- `syncedBefore=null`、`bodiesComplete=false`。头部完整性只声明同步窗口，不表示整箱历史完整；文本、未读、附件与时间筛选不改变参与计算的文件夹范围。查询窗口之前的历史时，必须结合 `syncedAfter` 解读结果。
+
+任意可选文件夹使用相同的列表、搜索、未读筛选及分页。空状态依据实际目录同步状态区分等待、同步、失败和成功空目录；覆盖数量受限单独提示，不能从 `headersComplete=false` 推断正在同步。搜索和未读筛选保留各自空提示，详情保持“正文尚未下载”。相关目录数据版本变化后刷新已加载结果并保留仍有效的选中；无关目录通知不重置当前分页。切换查询后丢弃旧请求结果。
+
+### 详情与错误
+
+`emails_get` 接受本地 `emailId` UUID，只能读取与列表相同可见范围中的邮件；返回 summary、to、cc、replyTo，当前 body 为 null、attachments 为空数组。即使 summary.hasAttachment 为 true，也只代表远端结构含附件，不能据此生成下载链接。详情不会触发正文抓取，界面保留“正文尚未下载”提示。
+
+非法查询、游标、时间或 UUID 返回 `validation`；邮件不存在、已删除、旧来源或旧 UIDVALIDITY 不可见时返回 `notFound`。数据库错误使用现有 `storageUnavailable` 等脱敏错误；启动未 Ready 使用 `coreNotReady`，宿主来源或负载错误沿用受控 IPC 边界。无网络访问，因此这两个读取命令不报告 IMAP 登录错误；后台错误通过同步状态单独表达。
 
 ## 3. 当前账号操作
 
@@ -81,24 +130,32 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 | 命令与参数 | 结果 |
 | --- | --- |
-| `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）与未读 / 总数 |
-| `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt` 与 `failure` |
+| `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）、`countsKnown` 与未读 / 总数；countsKnown=false 时计数未知 |
+| `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt`、`failure`、来源 / 运行版本和每目录状态 |
 
-状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷为单个 `AccountSyncState`；事件只提示前端重新查询，丢失不影响正确性。`failure.willRetry` 为 `false` 时（登录被拒、凭证需重新确认或缺失、服务器不支持所需功能）后台不再重试，直到账号配置被修改，以免错误密码反复登录导致账号被锁。账号创建或修改后，宿主重启该账号的同步任务，旧服务器、路由或凭证下建立的连接不会继续使用。
+状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷仍是单个 `AccountSyncState`，`sync_states` 返回同形状快照：
+
+- `mailboxSourceId`：当前邮箱来源；`generation`：本进程内账号 worker 重启版本；`sequence`：本代任务内递增的状态版本。前端按当前账号来源及版本拒绝旧快照，包括初始查询与事件的竞态。
+- `folderRevision`：成功提交目录列表后的版本；`folders` 为当前可选目录的状态快照。
+- 每个 `FolderSyncState` 包含 `folderId`、`phase`（waiting / syncing / idle / failed）、`lastSyncedAt`、`failure` 和 `dataRevision`。只有可见数据实际变化（新增、恢复、删除或标志变化的邮件，目录计数，代际切换与覆盖状态）时才递增版本，未变化的轮次不递增；某步失败前已提交的变化同样会递增版本。前端仅刷新相关查询及目录计数，并把短时间内多个目录的变化合并为一次目录树重载；统一收件箱只响应 inbox，消息内容仍从本地缓存查询。
+- 目录状态与数据 coverage 各有职责：同步失败保留已有缓存；`windowCapped` 说明窗口超限；尚未获得 STATUS 的计数用 `countsKnown=false` 表示。
+- 账号 `lastSyncedAt` 仅在整轮全部成功时推进；局部目录失败不得宣称账号整轮成功。目录状态为运行态，重启后重建；窗口、邮件和最后已知计数仍持久化。
+
+`failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改；单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
 
 ### 后续应用操作草案
 
-启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
+启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号、文件夹和邮件操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
 
-下表没有运行中的命令或 HTTP 端点。Web 映射会随实现明确，当前账号接口不因此开放网络访问。
+下表描述后续应用能力和拟定 HTTP 映射；不存在对应 HTTP 端点。邮件列表与头部详情已通过上文桌面命令提供，正文及其他操作仍未实现；当前接口不因此开放网络访问。
 
 | 应用操作 | 主要输入 → 输出 | 拟定 HTTP 映射 |
 | --- | --- | --- |
 | `accounts.test` | accountId → 收 / 发测试结果 | POST `/api/v1/accounts/{id}/test` |
 | `accounts.reauthorize` | accountId / authProfileId / expectedRevision → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
-| `emails.list` | 结构化过滤 / 游标 → Page + coverage | GET `/api/v1/emails` |
+| `emails.list`（桌面 `emails_list` 已有） | 结构化过滤 / 游标 → EmailPage | GET `/api/v1/emails` |
 | `emails.search` | query / 过滤 / 游标 → Page + coverage | POST `/api/v1/search` |
-| `emails.read` | emailId → 正文缓存状态、正文、附件元信息 | GET `/api/v1/emails/{id}` |
+| `emails.read`（桌面 `emails_get` 当前仅头部） | emailId → 正文缓存状态、正文、附件元信息（后续） | GET `/api/v1/emails/{id}` |
 | `emails.fetchBody` | emailId → jobId | POST `/api/v1/emails/{id}/fetch` |
 | `emails.setFlags` | emailId / flags / clientMutationId → mutationId | PATCH `/api/v1/emails/{id}/flags` |
 | `attachments.fetch` | attachmentId → jobId | POST `/api/v1/attachments/{id}/fetch` |
@@ -144,13 +201,14 @@ Tauri 事件与 Web SSE 都是可丢失通知，不提供可靠消息队列语�
 | code | 含义 / 处理 |
 | --- | --- |
 | `validation` | 输入无效，按 field 修改；秘密原值不进入错误 |
-| `notFound` | 账号不存在 |
+| `notFound` | 账号不存在，或邮件不存在 / 不属于当前可见来源和代际 |
 | `conflict` / `idempotencyConflict` | 加载最新配置或处理重复创建请求 |
 | `unsupported` | 当前不支持该认证方式，例如 OAuth2 |
 | `storageUnavailable` / `storageIncompatible` | 读写失败或 schema/校验不兼容；保留原数据 |
 | `alreadyOpen` | 数据目录已被另一核心实例持有 |
 | `secretStoreLocked` / `secretStoreUnavailable` | 解锁或恢复系统凭据库后重试，不降级明文 |
 | `secretMissing` | 凭证条目确认不存在，需要重新输入 |
+| `coreNotReady` | 核心尚未完成启动，读取启动状态或重试初始化 |
 | `internal` | 脱敏内部故障 |
 
 MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）与 `transport`（通信失败）；不展示原始 IPC 异常。以下大写代码及 HTTP 映射是未来邮件功能的原始分类草案，尚未加入当前生成的错误枚举，实施时统一命名与验证。

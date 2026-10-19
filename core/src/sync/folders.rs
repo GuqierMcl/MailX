@@ -82,6 +82,12 @@ fn has_attribute(folder: &RemoteFolder, wanted: &str) -> bool {
         .any(|attribute| attribute.eq_ignore_ascii_case(wanted))
 }
 
+fn is_selectable(folder: &RemoteFolder) -> bool {
+    // LIST establishes mailbox capability. STATUS is a later, independent
+    // counts observation and may not have succeeded yet.
+    !has_attribute(folder, "\\Noselect") && !has_attribute(folder, "\\NonExistent")
+}
+
 /// Server name of the parent folder, when the list contains it.
 fn parent_name(folder: &RemoteFolder, names: &HashSet<&str>) -> Option<String> {
     let delimiter = folder
@@ -128,11 +134,14 @@ pub(crate) fn interpret(remote: &[RemoteFolder]) -> Vec<FolderRecord> {
         }
     };
     for (index, folder) in remote.iter().enumerate() {
-        if is_inbox(&folder.name) {
+        if is_selectable(folder) && is_inbox(&folder.name) {
             assign(index, FolderRole::Inbox, &mut roles);
         }
     }
     for (index, folder) in remote.iter().enumerate() {
+        if !is_selectable(folder) {
+            continue;
+        }
         for (attribute, role) in SPECIAL_USE {
             if has_attribute(folder, attribute) {
                 assign(index, role, &mut roles);
@@ -141,7 +150,7 @@ pub(crate) fn interpret(remote: &[RemoteFolder]) -> Vec<FolderRecord> {
     }
     for (index, folder) in remote.iter().enumerate() {
         let near_top = parents[index].as_deref().is_none_or(is_inbox);
-        if !near_top || has_attribute(folder, "\\Noselect") {
+        if !near_top || !is_selectable(folder) {
             continue;
         }
         let name = display[index].to_lowercase();
@@ -167,7 +176,7 @@ pub(crate) fn interpret(remote: &[RemoteFolder]) -> Vec<FolderRecord> {
                 name: display[index].clone(),
                 delimiter: folder.delimiter.clone(),
                 role,
-                selectable: folder.status.is_some(),
+                selectable: is_selectable(folder),
                 attributes: folder.attributes.clone(),
                 status: folder.status,
             }
@@ -180,9 +189,6 @@ mod tests {
     use super::*;
 
     fn folder(name: &str, delimiter: &str, attributes: &[&str]) -> RemoteFolder {
-        let selectable = !attributes
-            .iter()
-            .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect"));
         RemoteFolder {
             name: name.into(),
             delimiter: Some(delimiter.into()),
@@ -190,12 +196,7 @@ mod tests {
                 .iter()
                 .map(|attribute| (*attribute).into())
                 .collect(),
-            status: selectable.then_some(FolderStatus {
-                messages: 1,
-                unseen: 0,
-                uid_next: None,
-                uid_validity: None,
-            }),
+            status: None,
         }
     }
 
@@ -293,6 +294,33 @@ mod tests {
                 ("Deleted Items", FolderRole::Other)
             ]
         );
+    }
+
+    #[test]
+    fn list_only_containers_do_not_claim_selectable_folder_roles() {
+        let records = interpret(&[
+            folder("Legacy", "/", &["\\noselect", "\\Sent"]),
+            folder("Sent", "/", &[]),
+            folder("Missing", "/", &["\\nonexistent", "\\Trash"]),
+            folder("Trash", "/", &[]),
+        ]);
+        assert_eq!(
+            roles(&records),
+            [
+                ("Legacy", FolderRole::Other),
+                ("Sent", FolderRole::Sent),
+                ("Missing", FolderRole::Other),
+                ("Trash", FolderRole::Trash),
+            ]
+        );
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.selectable)
+                .collect::<Vec<_>>(),
+            [false, true, false, true]
+        );
+        assert!(records.iter().all(|record| record.status.is_none()));
     }
 
     #[test]

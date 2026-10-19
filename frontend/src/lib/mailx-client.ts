@@ -40,17 +40,10 @@ export interface MailxClient {
   updateAccount(request: UpdateAccountRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
-  /** Hears each account's sync state change; returns an unsubscribe function. */
+  /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
-}
-
-/** Mail is not synced yet: an empty page whose coverage says nothing is cached. */
-export const UNSYNCED_PAGE: EmailPage = {
-  items: [],
-  nextCursor: null,
-  coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null },
 }
 
 const SYNC_STATE_EVENT = 'mailx://sync-state'
@@ -99,8 +92,7 @@ export function createDesktopClient(): MailxClient {
         unlisten?.()
       }
     },
-    // Only folders are synced so far; message commands do not exist yet.
-    listEmails: async () => UNSYNCED_PAGE,
-    getEmail: () => call<EmailDetail>('emails_get', {}),
+    listEmails: (query) => call<EmailPage>('emails_list', { query }),
+    getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
   }
 }

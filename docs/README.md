@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**账号配置已接通，邮件能力继续演进** · 2026-10-16。此目录记录产品愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。已提供 Rust 账号配置服务、SQLite 与系统凭据边界、Tauri IPC 和 shadcn 设置页面；真实邮箱登录、同步和收发尚未实现。
+状态：**账号配置、文件夹与所有可选目录的邮件头同步已有实现，邮件能力继续演进** · 2026-10-19。此目录记录产品愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。Rust 核心经账号路由登录 IMAP，将所有可选文件夹的邮件头存入 SQLite，Tauri IPC 与 shadcn 工作台提供统一列表、分页和头部搜索；正文下载、标记写回与发信尚未实现。实现代码与真实服务商兼容性分别记录，已有部分真实账号冒烟证据，完整矩阵仍待验证。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 
@@ -11,7 +11,7 @@
 - 了解项目：先看[产品范围](product/README.md)，再看[架构总览](architecture/overview.md)。
 - 开始编码：先看[开发指南](development/README.md)和[实施路线图](roadmap/README.md)，按 M0 → M1 建立第一条可验证链路。
 - 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)和[应用 API](contracts/app-api.md)。
-- 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，当前 v1 迁移、启动准入和失败重试已实现。
+- 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，当前编号迁移覆盖 v1 账号、v2 文件夹与 v3 邮件头；启动准入和失败重试已实现。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
@@ -22,9 +22,9 @@
 | --- | --- | --- |
 | [product/](product/README.md) | 初始产品目标、兼容范围、非目标 | Initial draft |
 | [architecture/](architecture/README.md) | 当前包边界与后续数据、流程设计 | 部分 Implemented |
-| [contracts/](contracts/README.md) | 当前账号 IPC 与后续 HTTP / MCP 契约 | 部分 Implemented / 其余 Draft |
+| [contracts/](contracts/README.md) | 当前账号、同步与邮件读取 IPC；后续 HTTP / MCP 契约 | 部分 Implemented / 其余 Draft |
 | [ai-runtime/](ai-runtime/README.md) | 模型适配、运行生命周期和权限 | Initial draft |
-| [development/](development/README.md) | 当前开发命令与后续验证计划 | 账号及宿主检查可执行 |
+| [development/](development/README.md) | 当前开发命令与后续验证计划 | 账号、邮件头与宿主检查可执行；平台及服务商证据单列 |
 | [adr/](adr/README.md) | 选型理由、代价与重新评估条件 | Accepted / Proposed |
 | [roadmap/](roadmap/README.md) | 已有基础、后续工作及验收标准 | 部分完成 / M0 未完成 |
 | [reference/](reference/blueprint-review.md) | 蓝图修订依据与外部资料 | Reference |

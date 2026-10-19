@@ -103,7 +103,7 @@ function EmailContent({ email }: { email: EmailDetail }) {
     <ScrollArea className="min-h-0 flex-1">
       <article className="flex flex-col">
         <header className="flex flex-col gap-4 p-4">
-          <h2 className="text-lg font-semibold">{summary.subject}</h2>
+          <h2 className="text-lg font-semibold">{summary.subject || '（无主题）'}</h2>
           <div className="flex items-start gap-3 text-sm">
             <Avatar>
               <AvatarFallback>{initials(summary.from)}</AvatarFallback>

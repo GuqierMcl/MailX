@@ -100,12 +100,15 @@ impl Storage {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT (account_id, mailbox_source_id, remote_name) DO UPDATE SET
                parent_id = excluded.parent_id, name = excluded.name, delimiter = excluded.delimiter, role = excluded.role,
-               selectable = excluded.selectable, attributes = excluded.attributes, unread_count = excluded.unread_count,
-               total_count = excluded.total_count, uid_next = excluded.uid_next, uid_validity = excluded.uid_validity,
-               synced_at = excluded.synced_at",
+               selectable = excluded.selectable, attributes = excluded.attributes,
+               unread_count = CASE WHEN ?16 THEN excluded.unread_count ELSE folders.unread_count END,
+               total_count = CASE WHEN ?16 THEN excluded.total_count ELSE folders.total_count END,
+               uid_next = CASE WHEN ?16 THEN excluded.uid_next ELSE folders.uid_next END,
+               uid_validity = CASE WHEN ?16 THEN excluded.uid_validity ELSE folders.uid_validity END,
+               synced_at = CASE WHEN ?16 THEN excluded.synced_at ELSE folders.synced_at END",
         )?;
         for record in records {
-            let status = record.status;
+            let status = record.status.filter(|_| record.selectable);
             upsert.execute(params![
                 ids[&record.remote_name],
                 account_id,
@@ -124,7 +127,12 @@ impl Storage {
                 status.map_or(0, |status| status.messages),
                 status.and_then(|status| status.uid_next),
                 status.and_then(|status| status.uid_validity),
-                synced_at,
+                // `synced_at` is the last successful counts observation. An
+                // empty value marks LIST-only discoveries whose zero storage
+                // defaults are not verified server counts. Existing versions
+                // only stored selectable folders after STATUS had succeeded.
+                if status.is_some() { synced_at } else { "" },
+                status.is_some(),
             ])?;
         }
         drop(upsert);
@@ -135,7 +143,8 @@ impl Storage {
     /// Folders cached for the account's current server, in no particular order.
     pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
         let mut query = self.db.prepare(
-            "SELECT f.id, f.parent_id, f.name, f.role, f.selectable, f.unread_count, f.total_count
+            "SELECT f.id, f.parent_id, f.name, f.role, f.selectable, f.unread_count, f.total_count,
+             (f.selectable = 1 AND f.synced_at <> '')
              FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
              WHERE f.account_id = ?1",
         )?;
@@ -150,6 +159,7 @@ impl Storage {
                     selectable: row.get(4)?,
                     unread_count: row.get(5)?,
                     total_count: row.get(6)?,
+                    counts_known: row.get(7)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
