@@ -53,6 +53,18 @@ pub enum BodyState {
     Failed,
 }
 
+/// Controlled reasons only; server text and local paths are never persisted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BodyFailureCode {
+    TooLarge,
+    Stale,
+    Network,
+    Authentication,
+    Protocol,
+    Storage,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailSummary {
