@@ -109,6 +109,9 @@ jobs:
       - name: Exercise WebKitGTK
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a bun tests/body-webview/run-external.mjs
+      - name: Summarize native WebView evidence
+        if: always()
+        run: bun tests/body-webview/ci-summary.mjs
       - name: Preserve WebView evidence
         if: always()
         uses: actions/upload-artifact@v4
