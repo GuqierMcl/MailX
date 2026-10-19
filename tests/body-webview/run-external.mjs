@@ -109,7 +109,26 @@ try {
     env: { MAILX_BODY_WEBVIEW_ROOT: testRoot, MAILX_BODY_WEBVIEW_NONCE: randomBytes(32).toString('hex'), MAILX_BODY_CANARY_ORIGIN: `http://127.0.0.1:${canary.address().port}` },
   });
   report.capabilities = driver.capabilities;
-  await until(() => driver.state(), (snapshot) => snapshot?.ready, 'trusted parent real event subscription');
+  try {
+    await until(() => driver.state(), (snapshot) => snapshot?.ready, 'trusted parent real event subscription');
+  } catch (error) {
+    // Say which side failed: wrong page attached, harness not loaded, Tauri
+    // globals missing, or the event subscription itself rejected. Synthetic
+    // page facts only; no message content exists at this stage.
+    let page;
+    try {
+      await driver.top();
+      page = await driver.execute(`return {
+        url: location.href, readyState: document.readyState, title: document.title,
+        status: document.querySelector('#status')?.textContent ?? null,
+        harness: typeof window.__MAILX_BODY_TEST, tauri: typeof window.__TAURI__,
+        tauriEvent: typeof window.__TAURI__?.event?.listen, internals: typeof window.__TAURI_INTERNALS__ };`);
+      page.windowHandles = await driver.command('GET', `/session/${driver.session}/window/handles`);
+    } catch (cause) { page = { unavailable: cause.message }; }
+    report.subscriptionDiagnostics = page;
+    logs += `[subscription diagnostics] ${JSON.stringify(page)}\n`;
+    throw error;
+  }
   const safe = await load('safe');
   report.stages.safe = safe;
   isolation('safe', safe);
