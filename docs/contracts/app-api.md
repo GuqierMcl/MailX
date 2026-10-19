@@ -137,7 +137,7 @@ type EmailPage = {
 
 - `mailboxSourceId`：当前邮箱来源；`generation`：本进程内账号 worker 重启版本；`sequence`：本代任务内递增的状态版本。前端按当前账号来源及版本拒绝旧快照，包括初始查询与事件的竞态。
 - `folderRevision`：成功提交目录列表后的版本；`folders` 为当前可选目录的状态快照。
-- 每个 `FolderSyncState` 包含 `folderId`、`phase`（waiting / syncing / idle / failed）、`lastSyncedAt`、`failure` 和 `dataRevision`。目录数据提交后递增版本，前端仅刷新相关查询及目录计数；统一收件箱只响应 inbox，消息内容仍从本地缓存查询。
+- 每个 `FolderSyncState` 包含 `folderId`、`phase`（waiting / syncing / idle / failed）、`lastSyncedAt`、`failure` 和 `dataRevision`。只有可见数据实际变化（新增、恢复、删除或标志变化的邮件，目录计数，代际切换与覆盖状态）时才递增版本，未变化的轮次不递增；某步失败前已提交的变化同样会递增版本。前端仅刷新相关查询及目录计数，并把短时间内多个目录的变化合并为一次目录树重载；统一收件箱只响应 inbox，消息内容仍从本地缓存查询。
 - 目录状态与数据 coverage 各有职责：同步失败保留已有缓存；`windowCapped` 说明窗口超限；尚未获得 STATUS 的计数用 `countsKnown=false` 表示。
 - 账号 `lastSyncedAt` 仅在整轮全部成功时推进；局部目录失败不得宣称账号整轮成功。目录状态为运行态，重启后重建；窗口、邮件和最后已知计数仍持久化。
 

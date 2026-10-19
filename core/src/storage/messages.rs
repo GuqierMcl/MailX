@@ -30,6 +30,9 @@ pub(crate) struct FolderSyncCursor {
     pub backfill_done: bool,
     pub highest_uid: u32,
     pub updated_at: String,
+    /// Set when this call started a new generation (first sync or UIDVALIDITY
+    /// change), which hides previously visible messages. Not stored.
+    pub created: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,6 +47,15 @@ pub(crate) struct ValidatedEmailQuery {
     pub query: EmailListQuery,
     pub cursor: Option<PageCursor>,
     pub limit: u32,
+}
+
+/// Flags in a stable order so the same server state always encodes the same
+/// way; servers may list flags in any order between FETCH responses.
+fn encode_flags(flags: &[String]) -> Result<String, AppError> {
+    let mut sorted = flags.to_vec();
+    sorted.sort_by_key(|flag| flag.to_ascii_lowercase());
+    sorted.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    encode(&sorted)
 }
 
 fn now() -> String {
@@ -89,6 +101,7 @@ fn read_cursor(db: &Connection, folder_id: &str) -> Result<Option<FolderSyncCurs
         |row| Ok(FolderSyncCursor {
             uid_validity: row.get(0)?, window_start: row.get(1)?, window_capped: row.get(2)?,
             backfill_done: row.get(3)?, highest_uid: row.get(4)?, updated_at: row.get(5)?,
+            created: false,
         }),
     ).optional()?)
 }
@@ -120,17 +133,19 @@ impl Storage {
         folder_id: &str,
         unread: u32,
         total: u32,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         let tx = self.db.transaction()?;
         if !current_folder(&tx, account_id, source, folder_id)? {
-            return Ok(false);
+            return Ok(None);
         }
-        tx.execute(
-            "UPDATE folders SET unread_count = ?1, total_count = ?2, synced_at = ?3 WHERE id = ?4",
+        // An empty synced_at marks counts as unknown, so filling it in is a change too.
+        let changed = tx.execute(
+            "UPDATE folders SET unread_count = ?1, total_count = ?2, synced_at = ?3
+             WHERE id = ?4 AND (unread_count <> ?1 OR total_count <> ?2 OR synced_at = '')",
             params![unread, total, now(), folder_id],
         )?;
         tx.commit()?;
-        Ok(true)
+        Ok(Some(changed))
     }
 
     pub(crate) fn ensure_generation(
@@ -160,7 +175,10 @@ impl Storage {
              window_start = excluded.window_start, window_capped = 0, backfill_done = 0, highest_uid = 0, updated_at = excluded.updated_at",
             params![target.folder_id, target.uid_validity, window_start, timestamp],
         )?;
-        let cursor = read_cursor(&tx, &target.folder_id)?;
+        let cursor = read_cursor(&tx, &target.folder_id)?.map(|cursor| FolderSyncCursor {
+            created: true,
+            ..cursor
+        });
         tx.commit()?;
         Ok(cursor)
     }
@@ -182,10 +200,10 @@ impl Storage {
         target: &SyncTarget,
         records: &[MessageRecord],
         highest_uid: u32,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         let tx = self.db.transaction()?;
         if !current_target(&tx, target)? {
-            return Ok(false);
+            return Ok(None);
         }
         let timestamp = now();
         let mut statement = tx.prepare(
@@ -221,7 +239,7 @@ impl Storage {
                 record.size,
                 record.is_read,
                 record.is_flagged,
-                encode(&record.flags)?,
+                encode_flags(&record.flags)?,
                 record.has_attachment,
                 timestamp,
             ])?;
@@ -229,14 +247,16 @@ impl Storage {
         drop(statement);
         tx.execute("UPDATE folder_sync_cursors SET highest_uid = MAX(highest_uid, ?1), updated_at = ?2 WHERE folder_id = ?3", params![highest_uid, timestamp, target.folder_id])?;
         tx.commit()?;
-        Ok(true)
+        // Sync only fetches UIDs that are not cached as present, so each record
+        // is a new or revived message.
+        Ok(Some(records.len()))
     }
 
     pub(crate) fn begin_backfill(
         &mut self,
         target: &SyncTarget,
         capped: bool,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.set_backfill_state(target, capped, false)
     }
 
@@ -244,7 +264,7 @@ impl Storage {
         &mut self,
         target: &SyncTarget,
         capped: bool,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.set_backfill_state(target, capped, true)
     }
 
@@ -253,29 +273,31 @@ impl Storage {
         target: &SyncTarget,
         capped: bool,
         done: bool,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         let tx = self.db.transaction()?;
         if !current_target(&tx, target)? {
-            return Ok(false);
+            return Ok(None);
         }
-        tx.execute("UPDATE folder_sync_cursors SET backfill_done = ?1, window_capped = ?2, updated_at = ?3 WHERE folder_id = ?4", params![done, capped, now(), target.folder_id])?;
+        // Coverage depends on these two flags, so only a real transition counts.
+        let changed = tx.execute("UPDATE folder_sync_cursors SET backfill_done = ?1, window_capped = ?2, updated_at = ?3 WHERE folder_id = ?4 AND (backfill_done <> ?1 OR window_capped <> ?2)", params![done, capped, now(), target.folder_id])?;
         tx.commit()?;
-        Ok(true)
+        Ok(Some(changed))
     }
 
     pub(crate) fn mark_deleted(
         &mut self,
         target: &SyncTarget,
         uids: &[u32],
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         let tx = self.db.transaction()?;
         if !current_target(&tx, target)? {
-            return Ok(false);
+            return Ok(None);
         }
         let timestamp = now();
+        let mut changed = 0;
         let mut statement = tx.prepare("UPDATE messages SET remote_state = 'deleted', updated_at = ?1 WHERE folder_id = ?2 AND uid_validity = ?3 AND uid = ?4 AND remote_state = 'present'")?;
         for uid in uids {
-            statement.execute(params![
+            changed += statement.execute(params![
                 timestamp,
                 target.folder_id,
                 target.uid_validity,
@@ -284,29 +306,31 @@ impl Storage {
         }
         drop(statement);
         tx.commit()?;
-        Ok(true)
+        Ok(Some(changed))
     }
 
     pub(crate) fn apply_flags(
         &mut self,
         target: &SyncTarget,
         flags: &[(u32, Vec<String>)],
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         let tx = self.db.transaction()?;
         if !current_target(&tx, target)? {
-            return Ok(false);
+            return Ok(None);
         }
         let timestamp = now();
-        let mut statement = tx.prepare("UPDATE messages SET is_read = ?1, is_flagged = ?2, flags = ?3, updated_at = ?4 WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present'")?;
+        let mut changed = 0;
+        // Rows whose flags already match are left alone so the count reflects real changes.
+        let mut statement = tx.prepare("UPDATE messages SET is_read = ?1, is_flagged = ?2, flags = ?3, updated_at = ?4 WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present' AND (is_read <> ?1 OR is_flagged <> ?2 OR flags <> ?3)")?;
         for (uid, values) in flags {
-            statement.execute(params![
+            changed += statement.execute(params![
                 values
                     .iter()
                     .any(|flag| flag.eq_ignore_ascii_case("\\Seen")),
                 values
                     .iter()
                     .any(|flag| flag.eq_ignore_ascii_case("\\Flagged")),
-                encode(values)?,
+                encode_flags(values)?,
                 timestamp,
                 target.folder_id,
                 target.uid_validity,
@@ -315,7 +339,7 @@ impl Storage {
         }
         drop(statement);
         tx.commit()?;
-        Ok(true)
+        Ok(Some(changed))
     }
 
     pub(crate) fn list_emails(

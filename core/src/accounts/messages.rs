@@ -36,7 +36,7 @@ impl AccountService {
         folder_id: &str,
         unread: u32,
         total: u32,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage
             .update_folder_counts(account_id, source, folder_id, unread, total)
     }
@@ -58,7 +58,7 @@ impl AccountService {
         target: &SyncTarget,
         records: &[MessageRecord],
         highest_uid: u32,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage
             .store_message_batch(target, records, highest_uid)
     }
@@ -67,7 +67,7 @@ impl AccountService {
         &mut self,
         target: &SyncTarget,
         capped: bool,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage.begin_backfill(target, capped)
     }
 
@@ -75,7 +75,7 @@ impl AccountService {
         &mut self,
         target: &SyncTarget,
         capped: bool,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage.finish_backfill(target, capped)
     }
 
@@ -83,7 +83,7 @@ impl AccountService {
         &mut self,
         target: &SyncTarget,
         uids: &[u32],
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage.mark_deleted(target, uids)
     }
 
@@ -91,7 +91,7 @@ impl AccountService {
         &mut self,
         target: &SyncTarget,
         flags: &[(u32, Vec<String>)],
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<usize>, AppError> {
         self.storage.apply_flags(target, flags)
     }
 }

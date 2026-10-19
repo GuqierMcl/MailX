@@ -136,6 +136,7 @@ fn put(fixture: &mut Fixture, records: &[MessageRecord]) {
                 records.iter().map(|record| record.uid).max().unwrap_or(0)
             )
             .unwrap()
+            .is_some()
     );
 }
 
@@ -230,6 +231,7 @@ fn same_generation_keeps_window_and_progress_and_new_generation_hides_old_rows()
         f.service
             .store_message_batch(&new_target, &[record(20)], 20)
             .unwrap()
+            .is_some()
     );
     let new = f
         .service
@@ -243,17 +245,19 @@ fn same_generation_keeps_window_and_progress_and_new_generation_hides_old_rows()
 
 fn assert_rejected(service: &mut AccountService, target: &SyncTarget) {
     assert!(
-        !service
+        service
             .store_message_batch(target, &[record(99)], 99)
             .unwrap()
+            .is_none()
     );
-    assert!(!service.begin_backfill(target, true).unwrap());
-    assert!(!service.finish_backfill(target, true).unwrap());
-    assert!(!service.mark_deleted(target, &[1]).unwrap());
+    assert!(service.begin_backfill(target, true).unwrap().is_none());
+    assert!(service.finish_backfill(target, true).unwrap().is_none());
+    assert!(service.mark_deleted(target, &[1]).unwrap().is_none());
     assert!(
-        !service
+        service
             .apply_flags(target, &[(1, vec!["\\Seen".into()])])
             .unwrap()
+            .is_none()
     );
     assert!(service.cached_uids(target).unwrap().is_empty());
 }
@@ -294,7 +298,7 @@ fn every_write_rechecks_account_source_folder_and_generation() {
                     .is_none()
             );
             assert!(
-                !f.service
+                f.service
                     .update_folder_counts(
                         &target.account_id,
                         &target.mailbox_source_id,
@@ -303,6 +307,7 @@ fn every_write_rechecks_account_source_folder_and_generation() {
                         100
                     )
                     .unwrap()
+                    .is_none()
             );
         }
     }
@@ -454,7 +459,8 @@ fn deleting_given_uids_and_applying_flags_do_not_touch_other_rows() {
             0
         ))
         .unwrap(),
-        r#"["\sEeN","\FLAGGED","$custom"]"#.replace("\\", "\\\\")
+        // Server spelling is kept; the order is normalized so equal sets compare equal.
+        r#"["$custom","\FLAGGED","\sEeN"]"#.replace("\\", "\\\\")
     );
     assert!(
         !f.db
@@ -523,6 +529,7 @@ fn folder_counts_update_only_the_current_identity() {
                 9
             )
             .unwrap()
+            .is_some()
     );
     let folders = f.service.list_folders(&f.account.id).unwrap();
     let inbox = folders
@@ -531,7 +538,7 @@ fn folder_counts_update_only_the_current_identity() {
         .unwrap();
     assert_eq!((inbox.unread_count, inbox.total_count), (4, 9));
     assert!(
-        !f.service
+        f.service
             .update_folder_counts(
                 &f.target.account_id,
                 "old-source",
@@ -540,6 +547,7 @@ fn folder_counts_update_only_the_current_identity() {
                 0
             )
             .unwrap()
+            .is_none()
     );
     let folders = f.service.list_folders(&f.account.id).unwrap();
     let inbox = folders
@@ -1159,7 +1167,7 @@ fn noselect_hides_cached_mail_rejects_late_writes_and_excludes_coverage() {
             .is_none()
     );
     assert!(
-        !f.service
+        f.service
             .update_folder_counts(
                 &f.account.id,
                 &f.account.mailbox_source_id,
@@ -1168,6 +1176,7 @@ fn noselect_hides_cached_mail_rejects_late_writes_and_excludes_coverage() {
                 1
             )
             .unwrap()
+            .is_none()
     );
     let page = f.service.list_emails(&EmailListQuery::default()).unwrap();
     assert_eq!(page.items.len(), 1);
@@ -1258,4 +1267,68 @@ fn invalid_external_query_values_return_validation() {
             .code,
         ErrorCode::NotFound
     );
+}
+
+#[test]
+fn writes_report_only_real_changes() {
+    let mut f = setup();
+    let target = f.target.clone();
+    let account_id = f.account.id.clone();
+    let source = f.account.mailbox_source_id.clone();
+    let counts = |service: &mut AccountService, unread, total| {
+        service
+            .update_folder_counts(&account_id, &source, &target.folder_id, unread, total)
+            .unwrap()
+    };
+    assert_eq!(counts(&mut f.service, 3, 10), Some(1));
+    assert_eq!(
+        counts(&mut f.service, 3, 10),
+        Some(0),
+        "same counts are no change"
+    );
+    assert_eq!(counts(&mut f.service, 2, 10), Some(1));
+
+    put(&mut f, &[record(1), record(2)]);
+    let flags = |order: [&str; 2]| vec![(1, order.iter().map(|flag| (*flag).to_owned()).collect())];
+    assert_eq!(
+        f.service
+            .apply_flags(&target, &flags(["\\Seen", "\\Flagged"]))
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        f.service
+            .apply_flags(&target, &flags(["\\Flagged", "\\Seen"]))
+            .unwrap(),
+        Some(0),
+        "the same flags in another order are no change"
+    );
+
+    assert_eq!(f.service.mark_deleted(&target, &[2, 99]).unwrap(), Some(1));
+    assert_eq!(
+        f.service.mark_deleted(&target, &[2]).unwrap(),
+        Some(0),
+        "already deleted"
+    );
+
+    assert_eq!(f.service.finish_backfill(&target, false).unwrap(), Some(1));
+    assert_eq!(f.service.finish_backfill(&target, false).unwrap(), Some(0));
+    assert_eq!(f.service.begin_backfill(&target, false).unwrap(), Some(1));
+
+    let created = f
+        .service
+        .ensure_generation(&target, "2026-09-18")
+        .unwrap()
+        .unwrap();
+    assert!(!created.created, "an existing generation is reused");
+    let replaced = SyncTarget {
+        uid_validity: 11,
+        ..target
+    };
+    let created = f
+        .service
+        .ensure_generation(&replaced, "2026-09-18")
+        .unwrap()
+        .unwrap();
+    assert!(created.created, "a new UIDVALIDITY starts a new generation");
 }

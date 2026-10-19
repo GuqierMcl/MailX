@@ -13,7 +13,7 @@
 
 ## 已实现：所有可选文件夹邮件头同步
 
-- `SyncManager` 按账号调度，账号间并发、暂不设全局账号并发上限；每账号正常使用一条连接，收件箱先、其余目录按稳定顺序串行处理。每轮结束后等待 60 秒，文件夹多或网络慢时会增加轮询总周期。每目录先 STATUS 更新计数，再 EXAMINE。
+- `SyncManager` 按账号调度，账号间并发、暂不设全局账号并发上限；每账号正常使用一条连接，收件箱先、其余目录按稳定顺序串行处理。每轮结束后等待 60 秒，文件夹多或网络慢时会增加轮询总周期。每目录先 STATUS 更新计数；若 UIDVALIDITY、UIDNEXT、MESSAGES、UNSEEN 均与该目录上次完整处理时相同，且距上次完整处理不足 10 分钟，则跳过 EXAMINE、SEARCH 与标志对账（服务器不返回 UIDNEXT 时从不跳过）。每 10 分钟的完整处理补上 STATUS 看不到的变化，例如 `\Flagged`。STATUS 快照只保存在同步任务内存中，任务启动或某目录本轮失败后，下一轮总是完整处理。
 - 同步 LIST 中全部可选文件夹，包括已发送、草稿、归档、垃圾邮件、回收站和自定义目录；不可选容器仅显示层级。使用 `EXAMINE` 和 `BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)]`，同时读取 UID、FLAGS、INTERNALDATE、RFC822.SIZE 与 BODYSTRUCTURE；不读取正文或附件内容，不发送 SELECT、STORE 或其他写命令。
 - 明确消费完成的单目录命令拒绝只使该目录本轮失败，保留缓存并继续其他目录；STATUS 失败保留上次计数，新发现目录显示计数未知。超时、EOF、BYE 或不完整响应使会话失效，丢弃旧连接并退避重连，从下一未处理目录继续，避免一直卡在首个坏目录。认证 / 信任失败仍停止整个账号。
 - `mail-parser` 启用 `full_encoding`，解码 UTF-8、GBK、GB2312、GB18030 等编码的主题和地址显示名。收件时间依次取 INTERNALDATE、Date 头和同步时间，保存为 UTC 毫秒时间；缺失或损坏字段按空值兜底，不记录原始邮件头。

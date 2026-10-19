@@ -318,9 +318,10 @@ enum Outcome {
 async fn run(shared: Arc<Shared>, token: WorkerToken) {
     let mut failures = 0u32;
     let mut last_folder_refresh = None;
+    let mut memory = messages::FolderMemory::new();
     loop {
         shared.begin_round(&token);
-        let wait = match sync_once(&shared, &token, &mut last_folder_refresh).await {
+        let wait = match sync_once(&shared, &token, &mut last_folder_refresh, &mut memory).await {
             Outcome::Synced => {
                 failures = 0;
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -434,6 +435,7 @@ async fn sync_once(
     shared: &Arc<Shared>,
     token: &WorkerToken,
     last_folder_refresh: &mut Option<Instant>,
+    memory: &mut messages::FolderMemory,
 ) -> Outcome {
     let id = token.account_id.clone();
     let plan = match with_store(shared, token, move |service| Ok(service.sync_plan(&id))).await {
@@ -501,7 +503,7 @@ async fn sync_once(
         Err(error) => return from_sync_error(error),
     };
     shared.reconcile_targets(token, &targets, listed);
-    sync_targets(shared, token, targets, session, || {
+    sync_targets(shared, token, targets, session, memory, || {
         imap::open_session(&plan.route, &plan.login)
     })
     .await
@@ -515,6 +517,7 @@ async fn sync_targets<F, Fut>(
     token: &WorkerToken,
     targets: Vec<(String, String)>,
     session: Session,
+    memory: &mut messages::FolderMemory,
     mut connect: F,
 ) -> Outcome
 where
@@ -551,12 +554,15 @@ where
             folder.phase = FolderSyncPhase::Syncing;
             folder.failure = None;
         });
+        let mut changed = false;
         let result = messages::sync_folder(
             shared,
             token,
             &folder_id,
             &remote_name,
             session.as_mut().expect("connected session"),
+            memory,
+            &mut changed,
         )
         .await;
         match result {
@@ -568,7 +574,10 @@ where
                         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                     );
                     folder.failure = None;
-                    folder.data_revision = folder.data_revision.saturating_add(1);
+                    // Readers refetch on a new revision, so it only moves when data did.
+                    if changed {
+                        folder.data_revision = folder.data_revision.saturating_add(1);
+                    }
                 });
             }
             Err(SyncError::Imap(error)) => {

@@ -6,6 +6,7 @@ use crate::imap::{FolderStatus, ImapLogin};
 use crate::mail::{EmailListQuery, FolderRole};
 use crate::secrets::{SecretValue, test_support::MemorySecrets};
 use crate::sync::folders::FolderRecord;
+use crate::sync::messages::FolderMemory;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
@@ -179,7 +180,20 @@ async fn serve(stream: DuplexStream, script: Script) {
     }
 }
 
-async fn run(fixture: &Fixture, mut script: Script, success: bool) -> Result<(), SyncError> {
+async fn run(fixture: &Fixture, script: Script, success: bool) -> Result<(), SyncError> {
+    run_with(fixture, script, success, &mut FolderMemory::new())
+        .await
+        .0
+}
+
+/// Runs one folder round against `script`, returning the result and whether
+/// visible data changed. `memory` carries STATUS snapshots between rounds.
+async fn run_with(
+    fixture: &Fixture,
+    mut script: Script,
+    success: bool,
+    memory: &mut FolderMemory,
+) -> (Result<(), SyncError>, bool) {
     if success {
         script.push(("LOGOUT".into(), "{tag} OK goodbye\r\n".into()));
     }
@@ -202,12 +216,15 @@ async fn run(fixture: &Fixture, mut script: Script, success: bool) -> Result<(),
     fixture
         .shared
         .reconcile_targets(&fixture.token, &targets, false);
+    let mut changed = false;
     let result = super::super::messages::sync_folder(
         &fixture.shared,
         &fixture.token,
         &targets[0].0,
         &targets[0].1,
         &mut session,
+        memory,
+        &mut changed,
     )
     .await;
     if success {
@@ -216,7 +233,7 @@ async fn run(fixture: &Fixture, mut script: Script, success: bool) -> Result<(),
         drop(session);
     }
     server.await.unwrap();
-    result
+    (result, changed)
 }
 
 #[tokio::test]
@@ -530,6 +547,7 @@ async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers()
             &fixture.token,
             targets.clone(),
             session,
+            &mut FolderMemory::new(),
             || async { Err(ImapError::Timeout) }
         )
         .await,
@@ -614,6 +632,7 @@ async fn every_completed_folder_rejection_continues_on_the_same_connection() {
             &fixture.token,
             targets.clone(),
             session,
+            &mut FolderMemory::new(),
             || async {
                 panic!("completed rejection must not reconnect");
                 #[allow(unreachable_code)]
@@ -680,6 +699,7 @@ async fn broken_first_folder_reconnects_with_backoff_and_resumes_after_it() {
             &fixture.token,
             targets.clone(),
             session,
+            &mut FolderMemory::new(),
             || {
                 let mut attempts = recorded.lock().unwrap();
                 attempts.push(Instant::now());
@@ -745,6 +765,7 @@ async fn no_inbox_nested_and_escaped_names_sync_independently_and_notify_per_fol
             &fixture.token,
             targets.clone(),
             session,
+            &mut FolderMemory::new(),
             || async { Err(ImapError::Timeout) }
         )
         .await,
@@ -977,4 +998,22 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
                 .any(|folder| folder.phase == FolderSyncPhase::Idle)
         }));
     }
+}
+
+#[tokio::test]
+async fn an_unchanged_folder_skips_the_full_round_and_reports_no_change() {
+    let fixture = fixture();
+    let mut memory = FolderMemory::new();
+    let mut first = commands(21, &[2, 3]);
+    add_headers(&mut first, &[(2, "Old"), (3, "Kept")]);
+    let (result, changed) = run_with(&fixture, first, true, &mut memory).await;
+    result.unwrap();
+    assert!(changed, "the first round stores messages");
+
+    // Same STATUS: the server script ends after STATUS, so an EXAMINE, SEARCH
+    // or FETCH from the client would fail the scripted server.
+    let unchanged = commands(21, &[2, 3]).into_iter().take(3).collect();
+    let (result, changed) = run_with(&fixture, unchanged, true, &mut memory).await;
+    result.unwrap();
+    assert!(!changed, "nothing changed, so readers need not refetch");
 }

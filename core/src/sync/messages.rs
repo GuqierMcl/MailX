@@ -1,13 +1,14 @@
 //! Bounded per-folder metadata synchronization. Plans are pure; network operations
 //! never hold the account service or a SQLite transaction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, NaiveDate, Utc};
+use tokio::time::Instant;
 
 use crate::accounts::messages::{FolderSyncCursor, SyncTarget};
 use crate::error::{AppError, ErrorCode};
-use crate::imap::{ImapError, Session};
+use crate::imap::{FolderStatus, ImapError, Session};
 
 use super::headers::parse_header;
 use super::manager::{Shared, SyncError, WorkerToken, with_store};
@@ -16,6 +17,32 @@ const WINDOW_DAYS: i64 = 30;
 const WINDOW_LIMIT: usize = 1_000;
 const HEADER_BATCH_SIZE: usize = 200;
 const FLAGS_BATCH_SIZE: usize = 500;
+/// How long a folder whose STATUS is unchanged may skip the full round. The
+/// periodic full round also catches changes STATUS cannot show, such as
+/// `\Flagged` being set or a message being replaced by another.
+const FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// STATUS of a folder when it last completed a full round, kept in memory by
+/// the account worker. Starting a worker therefore always begins with full rounds.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct StatusSnapshot {
+    status: FolderStatus,
+    reconciled_at: Instant,
+}
+
+pub(super) type FolderMemory = HashMap<String, StatusSnapshot>;
+
+/// Unchanged UIDVALIDITY, UIDNEXT, MESSAGES and UNSEEN mean no message arrived,
+/// disappeared or changed read state since the last full round. Without UIDNEXT
+/// an arrival plus an expunge could look unchanged, so such servers never skip.
+fn can_skip(previous: Option<&StatusSnapshot>, status: &FolderStatus, now: Instant) -> bool {
+    previous.is_some_and(|previous| {
+        status.uid_next.is_some()
+            && status.uid_validity.is_some()
+            && previous.status == *status
+            && now.duration_since(previous.reconciled_at) < FULL_RECONCILE_INTERVAL
+    })
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct MessagePlan {
@@ -59,37 +86,50 @@ fn plan_messages(
     }
 }
 
-fn current(written: bool) -> Result<(), SyncError> {
-    if written {
-        Ok(())
-    } else {
-        Err(SyncError::Stale)
+/// Turns a store write into a sync result, noting whether it changed visible data.
+fn written(result: Option<usize>, changed: &mut bool) -> Result<(), SyncError> {
+    match result {
+        None => Err(SyncError::Stale),
+        Some(rows) => {
+            *changed |= rows > 0;
+            Ok(())
+        }
     }
 }
 
+/// Syncs one folder. `changed` is set whenever visible data changed, even if a
+/// later step fails, so the UI refreshes for what was already committed.
 pub(super) async fn sync_folder(
     shared: &std::sync::Arc<Shared>,
     token: &WorkerToken,
     folder_id: &str,
     remote_name: &str,
     session: &mut Session,
+    memory: &mut FolderMemory,
+    changed: &mut bool,
 ) -> Result<(), SyncError> {
+    // Forgotten until this round completes, so any failure forces a full round next time.
+    let previous = memory.remove(folder_id);
     let account_id = &token.account_id;
     let source = &token.source;
     let status = session.status(remote_name).await?;
     let id = account_id.to_owned();
     let source_id = source.to_owned();
     let folder = folder_id.to_owned();
-    current(
+    written(
         with_store(shared, token, move |service| {
             service.update_folder_counts(&id, &source_id, &folder, status.unseen, status.messages)
         })
         .await?,
+        changed,
     )?;
 
-    shared.folder_update(token, folder_id, |folder| {
-        folder.data_revision = folder.data_revision.saturating_add(1);
-    });
+    let started = Instant::now();
+    if let Some(previous) = previous.filter(|previous| can_skip(Some(previous), &status, started)) {
+        memory.insert(folder_id.to_owned(), previous);
+        return Ok(());
+    }
+
     let mailbox = session.examine(remote_name).await?;
     let target = SyncTarget {
         account_id: account_id.to_owned(),
@@ -105,6 +145,8 @@ pub(super) async fn sync_folder(
     })
     .await?
     .ok_or(SyncError::Stale)?;
+    // A new generation hides the old messages and resets coverage.
+    *changed |= cursor.created;
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
         .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
     let remote = session.search_since(since).await?;
@@ -113,11 +155,15 @@ pub(super) async fn sync_folder(
     let plan = plan_messages(&cursor, &cached, &remote);
     let guard = target.clone();
     let capped = plan.capped;
-    current(
+    // Backfill is marked open for the round and closed at its end; only the
+    // net coverage change between rounds matters to readers, checked below.
+    let mut transient = false;
+    written(
         with_store(shared, token, move |service| {
             service.begin_backfill(&guard, capped)
         })
         .await?,
+        &mut transient,
     )?;
 
     let mut highest_uid = cursor.highest_uid;
@@ -131,11 +177,12 @@ pub(super) async fn sync_folder(
             .collect();
         highest_uid = highest_uid.max(records.iter().map(|record| record.uid).max().unwrap_or(0));
         let guard = target.clone();
-        current(
+        written(
             with_store(shared, token, move |service| {
                 service.store_message_batch(&guard, &records, highest_uid)
             })
             .await?,
+            changed,
         )?;
         if !complete {
             // A concurrent expunge may remove a searched UID. Keep committed
@@ -145,34 +192,45 @@ pub(super) async fn sync_folder(
     }
 
     let guard = target.clone();
-    current(
+    written(
         with_store(shared, token, move |service| {
             service.mark_deleted(&guard, &plan.deleted)
         })
         .await?,
+        changed,
     )?;
     for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
         let flags = session.fetch_flags(batch).await?;
         let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
         let complete = batch.iter().all(|uid| fetched.contains(uid));
         let guard = target.clone();
-        current(
+        written(
             with_store(shared, token, move |service| {
                 service.apply_flags(&guard, &flags)
             })
             .await?,
+            changed,
         )?;
         if !complete {
             return Err(ImapError::Mailbox("mailbox changed during flag fetch".into()).into());
         }
     }
     let guard = target;
-    current(
+    written(
         with_store(shared, token, move |service| {
             service.finish_backfill(&guard, capped)
         })
         .await?,
+        &mut transient,
     )?;
+    *changed |= !cursor.backfill_done || cursor.window_capped != capped;
+    memory.insert(
+        folder_id.to_owned(),
+        StatusSnapshot {
+            status,
+            reconciled_at: started,
+        },
+    );
     Ok(())
 }
 
@@ -188,7 +246,71 @@ mod tests {
             backfill_done: false,
             highest_uid: 0,
             updated_at: "2026-10-18T00:00:00.000Z".into(),
+            created: false,
         }
+    }
+
+    fn status(messages: u32, unseen: u32, uid_next: Option<u32>) -> FolderStatus {
+        FolderStatus {
+            messages,
+            unseen,
+            uid_next,
+            uid_validity: Some(7),
+        }
+    }
+
+    #[test]
+    fn unchanged_status_skips_until_the_next_full_round() {
+        let start = Instant::now();
+        let snapshot = StatusSnapshot {
+            status: status(10, 2, Some(11)),
+            reconciled_at: start,
+        };
+        assert!(can_skip(
+            Some(&snapshot),
+            &status(10, 2, Some(11)),
+            start + std::time::Duration::from_secs(60)
+        ));
+        assert!(
+            !can_skip(
+                Some(&snapshot),
+                &status(10, 2, Some(11)),
+                start + FULL_RECONCILE_INTERVAL
+            ),
+            "a full round is due every ten minutes"
+        );
+        assert!(
+            !can_skip(None, &status(10, 2, Some(11)), start),
+            "the first round is always full"
+        );
+    }
+
+    #[test]
+    fn any_status_change_or_missing_uidnext_forces_a_full_round() {
+        let start = Instant::now();
+        let snapshot = StatusSnapshot {
+            status: status(10, 2, Some(11)),
+            reconciled_at: start,
+        };
+        for changed in [
+            status(11, 2, Some(12)),
+            status(10, 1, Some(11)),
+            status(10, 2, Some(12)),
+        ] {
+            assert!(!can_skip(Some(&snapshot), &changed, start));
+        }
+        let mut other_generation = status(10, 2, Some(11));
+        other_generation.uid_validity = Some(8);
+        assert!(!can_skip(Some(&snapshot), &other_generation, start));
+
+        let without_uidnext = StatusSnapshot {
+            status: status(10, 2, None),
+            reconciled_at: start,
+        };
+        assert!(
+            !can_skip(Some(&without_uidnext), &status(10, 2, None), start),
+            "an arrival plus an expunge is invisible without UIDNEXT"
+        );
     }
 
     #[test]
