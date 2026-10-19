@@ -13,7 +13,13 @@ use crate::accounts::types::{Account, CreateAccountRequest, UpdateAccountRequest
 use crate::error::{AppError, ErrorCode};
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
+use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
+
+mod bodies;
+#[cfg(test)]
+mod body_fixture;
+pub use bodies::{BodyBinding, BodyDocument};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
@@ -22,6 +28,7 @@ use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
 pub struct MailxCore {
     service: Arc<Mutex<AccountService>>,
     sync: Arc<SyncManager>,
+    bodies: Arc<BodyManager>,
 }
 
 impl MailxCore {
@@ -36,11 +43,16 @@ impl MailxCore {
         let service = AccountService::open(path, secrets)?;
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
+        let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
         let sync = Arc::new(SyncManager::new(service.clone(), runtime, listener));
         for account in &accounts {
             sync.restart(&account.id);
         }
-        Ok(Self { service, sync })
+        Ok(Self {
+            service,
+            sync,
+            bodies,
+        })
     }
 
     fn accounts(&self) -> Result<MutexGuard<'_, AccountService>, AppError> {
@@ -67,8 +79,16 @@ impl MailxCore {
     /// Updates an account and restarts its sync with the new settings, so no
     /// connection made under the old server, route or credentials survives.
     pub fn update_account(&self, request: UpdateAccountRequest) -> Result<Account, AppError> {
-        let account = self.accounts()?.update(request)?;
+        let (account, body_restart) = {
+            let mut service = self.accounts()?;
+            let account = service.update(request)?;
+            let body_restart = self.bodies.restart(&account.id, &mut service);
+            (account, body_restart)
+        };
+        // The configuration is committed even if resetting a body state fails.
+        // Always retire the old header connection before returning that error.
         self.sync.restart(&account.id);
+        body_restart?;
         Ok(account)
     }
 
@@ -82,6 +102,12 @@ impl MailxCore {
 
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
         self.accounts()?.get_email(email_id)
+    }
+
+    /// Explicit user-opened body request; shared work survives individual IPC
+    /// waiter cancellation and always honors the account's configured route.
+    pub async fn fetch_body(&self, email_id: String) -> Result<EmailDetail, AppError> {
+        self.bodies.fetch(email_id).await
     }
 
     /// Current sync state of every account that has a worker.

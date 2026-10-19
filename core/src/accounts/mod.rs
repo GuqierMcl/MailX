@@ -1,3 +1,6 @@
+pub(crate) mod bodies;
+#[cfg(test)]
+mod body_fixture;
 pub(crate) mod messages;
 pub(crate) mod model;
 pub(crate) mod sync_plan;

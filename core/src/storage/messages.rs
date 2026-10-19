@@ -8,7 +8,8 @@ use super::{Storage, decode, encode};
 use crate::{
     AppError, ErrorCode,
     mail::{
-        BodyState, Coverage, EmailDetail, EmailListQuery, EmailPage, EmailSummary, MailAddress,
+        AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail, EmailListQuery, EmailPage,
+        EmailSummary, MailAddress,
     },
     sync::headers::MessageRecord,
 };
@@ -432,33 +433,75 @@ impl Storage {
 
     pub(crate) fn get_email(&self, id: &str) -> Result<EmailDetail, AppError> {
         let sql = format!(
-            "SELECT {SUMMARY_COLUMNS}, m.to_addresses, m.cc_addresses, m.reply_to_addresses {VISIBLE_MESSAGES} AND m.id = ?1"
+            "SELECT {SUMMARY_COLUMNS}, m.to_addresses, m.cc_addresses, m.reply_to_addresses, m.body_failure {VISIBLE_MESSAGES} AND m.id = ?1"
         );
         let result = self
             .db
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, String>(11)?,
                     row.get::<_, String>(12)?,
+                    row.get::<_, String>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ))
             })
             .optional()?;
-        let (summary, to, cc, reply_to) =
+        let (summary, to, cc, reply_to, body_failure) =
             result.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        let body_failure = body_failure
+            .map(|failure| serde_json::from_value(serde_json::Value::String(failure)))
+            .transpose()
+            .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
+        let (body, attachments) = if summary.body_state == BodyState::Ready {
+            // Do not select HTML even internally on the ordinary IPC read path.
+            let body = self.db.query_row(
+                "SELECT plain_text, sanitized_html IS NOT NULL, truncated, remote_images_blocked
+                 FROM message_bodies WHERE message_id = ?1", [id], |row| {
+                    Ok(EmailBody {
+                        text: row.get(0)?, has_html: row.get(1)?, truncated: row.get(2)?,
+                        remote_images_blocked: row.get(3)?,
+                    })
+                },
+            ).optional()?.ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+            let mut statement = self.db.prepare(
+                "SELECT part_index, filename, mime_type, size FROM message_parts
+                 WHERE message_id = ?1 AND is_inline = 0 ORDER BY part_index",
+            )?;
+            let attachments = statement
+                .query_map([id], |row| {
+                    let index: i64 = row.get(0)?;
+                    let size: i64 = row.get(3)?;
+                    let size = u64::try_from(size)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(3, size))?;
+                    Ok(AttachmentSummary {
+                        id: format!("{id}:{index}"),
+                        filename: row
+                            .get::<_, Option<String>>(1)?
+                            .unwrap_or_else(|| "未命名附件".into()),
+                        mime_type: row.get(2)?,
+                        size,
+                        is_inline: false,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            (Some(body), attachments)
+        } else {
+            (None, vec![])
+        };
         Ok(EmailDetail {
             summary,
             to: decode(&to)?,
             cc: decode(&cc)?,
             reply_to: decode(&reply_to)?,
-            body: None,
-            attachments: vec![],
+            body,
+            body_failure,
+            attachments,
         })
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment";
+const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
@@ -477,8 +520,14 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
         is_read: row.get(7)?,
         is_starred: row.get(8)?,
         has_attachment: row.get(9)?,
-        preview: String::new(),
-        body_state: BodyState::Missing,
+        preview: row.get(10)?,
+        body_state: match row.get::<_, String>(11)?.as_str() {
+            "missing" => BodyState::Missing,
+            "fetching" => BodyState::Fetching,
+            "ready" => BodyState::Ready,
+            "failed" => BodyState::Failed,
+            _ => return Err(rusqlite::Error::InvalidQuery),
+        },
         pending_changes: false,
     })
 }

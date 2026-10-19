@@ -649,7 +649,10 @@ fn classify(error: ImapError) -> Outcome {
         ImapError::Net(NetError::Timeout) | ImapError::Timeout => {
             Outcome::Transient(failure(SyncFailureCode::Timeout, detail, true))
         }
-        ImapError::Protocol(_) | ImapError::Mailbox(_) | ImapError::Rejected => {
+        ImapError::Protocol(_)
+        | ImapError::Mailbox(_)
+        | ImapError::Rejected
+        | ImapError::TooLarge => {
             Outcome::Transient(failure(SyncFailureCode::Protocol, detail, true))
         }
     }
