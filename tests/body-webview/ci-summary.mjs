@@ -27,7 +27,7 @@ async function visit(directory) {
       if (report.status !== 'passed') {
         // These reports are produced only by the isolated synthetic fixture app.
         console.log(`::notice title=Native WebView diagnostic::${escape(JSON.stringify({ stages: report.stages, finalState: report.finalState }).slice(0, 24000))}`);
-        for (const filename of ['driver.log', 'native-driver.log']) {
+        for (const filename of ['driver.log', 'native-driver.log', 'startup.log']) {
           try {
             const log = await readFile(resolve(directory, filename), 'utf8');
             console.log(`::notice title=Native WebDriver log::${escape(log.slice(-8000))}`);

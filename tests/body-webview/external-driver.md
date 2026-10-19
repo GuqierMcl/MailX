@@ -44,6 +44,8 @@ captures that process's output, and attaches through a dynamically allocated
 loopback debugging port. The WebView2 profile stays under the synthetic test
 root. These process-local test options do not alter the production application,
 sandbox or CSP. The embedded macOS driver is not initialized.
+The evidence includes fixed native startup checkpoints and, on an endpoint
+timeout, a process snapshot limited to the synthetic app and its direct children.
 Install a driver matching that Runtime, rather than matching Microsoft Edge:
 
 ```powershell

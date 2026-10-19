@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -172,6 +172,12 @@ try {
 } finally {
   report.finishedAt = new Date().toISOString();
   try {
+    try {
+      const startup = await readFile(resolve(testRoot, 'startup.log'), 'utf8');
+      await writeFile(resolve(output, 'startup.log'), startup);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
     await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2));
     await writeFile(resolve(output, 'driver.log'), logs);
   } finally {

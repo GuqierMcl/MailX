@@ -4,7 +4,7 @@
 import { access } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const ELEMENT = 'element-6066-11e4-a52e-4f735466cecf';
 const delay = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
@@ -111,7 +111,20 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
         if (debuggingReady) break;
         await delay(100);
       }
-      if (!debuggingReady) throw new Error('Synthetic WebView2 debugging endpoint did not become ready.');
+      if (!debuggingReady) {
+        // Inspect only this synthetic process and its direct children. Exclude
+        // command lines/environment values; no user's browser is enumerated.
+        if (Number.isInteger(application.pid)) {
+          const snapshot = spawnSync('pwsh', ['-NoProfile', '-Command', `
+            $testProcess = Get-Process -Id ${application.pid} -ErrorAction SilentlyContinue
+            $testChildren = Get-CimInstance Win32_Process -Filter "ParentProcessId = ${application.pid}"
+            @{ application = $testProcess | Select-Object Id, ProcessName, Responding, MainWindowTitle;
+               children = @($testChildren | Select-Object ProcessId, Name) } | ConvertTo-Json -Compress -Depth 3
+          `], { encoding: 'utf8', timeout: 5_000 });
+          onLog(`[synthetic app process] ${snapshot.stdout ?? 'snapshot unavailable'}\n`);
+        }
+        throw new Error('Synthetic WebView2 debugging endpoint did not become ready.');
+      }
     }
     const created = await command('POST', '/session', {
       capabilities: { alwaysMatch: {

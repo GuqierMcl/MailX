@@ -19,6 +19,8 @@ use tauri::{Emitter, EventTarget, Manager};
 const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 
 fn main() {
+    #[cfg(feature = "body-webview-test")]
+    body_webview_test::checkpoint("main entered");
     let builder = tauri::Builder::default().plugin(
         tauri_plugin_opener::Builder::new()
             .open_js_links_on_click(false)

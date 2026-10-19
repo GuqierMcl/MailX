@@ -11,6 +11,22 @@ use tauri::{AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub(crate) const TITLE: &str = "MailX Body WebView Test";
 
+/// Fixed startup stages only, inside the marked synthetic profile. Keep native
+/// startup failures observable even when WebDriver cannot create a session.
+pub(crate) fn checkpoint(stage: &str) {
+    use std::io::Write;
+
+    eprintln!("[body-webview-test] {stage}");
+    if let Ok(root) = isolated_root()
+        && let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(root.join("startup.log"))
+    {
+        let _ = writeln!(file, "{stage}");
+    }
+}
+
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
@@ -26,6 +42,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     use std::sync::Arc;
     use tauri::Manager;
 
+    checkpoint("setup entered");
     let root = isolated_root()?;
     let canary = std::env::var("MAILX_BODY_CANARY_ORIGIN")?;
     let fixtures = fixtures(&canary)?;
@@ -34,8 +51,10 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         .map(|fixture| fixture.raw.as_slice())
         .collect();
     let tauri::async_runtime::RuntimeHandle::Tokio(runtime) = tauri::async_runtime::handle();
+    checkpoint("creating synthetic cache");
     let (core, ids) =
         mailx_core::MailxCore::body_test_fixture(&root.join("profile"), runtime, &raws)?;
+    checkpoint("synthetic cache ready");
     app.manage(crate::state::DesktopState::for_body_test(core));
     let origin = if cfg!(target_os = "windows") {
         "http://mailx-body.localhost"
@@ -50,7 +69,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         }
         documents.insert(fixture.name.to_owned(), format!("{origin}/document/{id}"));
     }
+    checkpoint("creating native window and WebView");
     create_window(app.handle(), documents)?;
+    checkpoint("native window and WebView ready");
     Ok(())
 }
 
