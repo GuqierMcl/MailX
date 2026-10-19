@@ -1,4 +1,4 @@
-//! Scripted IMAP plus real temporary SQLite tests for the inbox driver.
+//! Scripted IMAP plus real temporary SQLite tests for the per-folder driver.
 
 use super::*;
 use crate::accounts::sync_plan::tests::config;
@@ -16,9 +16,15 @@ struct Fixture {
     shared: Arc<Shared>,
     account_id: String,
     source: String,
+    token: WorkerToken,
+    events: Arc<Mutex<Vec<AccountSyncState>>>,
 }
 
 fn fixture() -> Fixture {
+    fixture_with_config(config(json!({"kind":"direct"})))
+}
+
+fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
     let directory = TempDir::new().unwrap();
     let mut service =
         AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
@@ -26,7 +32,7 @@ fn fixture() -> Fixture {
         .create(
             serde_json::from_value(json!({
                 "requestId": uuid::Uuid::new_v4().to_string(),
-                "config": config(json!({"kind":"direct"}))
+                "config": account_config
             }))
             .unwrap(),
         )
@@ -53,12 +59,36 @@ fn fixture() -> Fixture {
         )
         .unwrap();
     let service = Arc::new(Mutex::new(service));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = events.clone();
     let shared = Arc::new(Shared {
         service: Arc::downgrade(&service),
         states: Mutex::new(HashMap::new()),
-        listener: Arc::new(|_| {}),
+        listener: Arc::new(move |state| observed.lock().unwrap().push(state.clone())),
     });
+    let token = WorkerToken {
+        account_id: account.id.clone(),
+        source: account.mailbox_source_id.clone(),
+        revision: account.revision,
+        generation: 1,
+    };
+    shared.states.lock().unwrap().insert(
+        account.id.clone(),
+        AccountSyncState {
+            account_id: account.id.clone(),
+            mailbox_source_id: Some(account.mailbox_source_id.clone()),
+            generation: 1,
+            sequence: 0,
+            folder_revision: 0,
+            folders: vec![],
+            phase: SyncPhase::Syncing,
+            last_synced_at: None,
+            failure: None,
+        },
+    );
     Fixture {
+        events,
+        token,
         _directory: directory,
         service,
         shared,
@@ -163,10 +193,20 @@ async fn run(fixture: &Fixture, mut script: Script, success: bool) -> Result<(),
         password: SecretValue::new("synthetic-password".into()),
     };
     let mut session = imap::test_session(Box::new(client), &login).await.unwrap();
-    let result = super::super::messages::sync_inboxes(
+    let targets = fixture
+        .service
+        .lock()
+        .unwrap()
+        .sync_folders(&fixture.account_id, &fixture.source)
+        .unwrap();
+    fixture
+        .shared
+        .reconcile_targets(&fixture.token, &targets, false);
+    let result = super::super::messages::sync_folder(
         &fixture.shared,
-        &fixture.account_id,
-        &fixture.source,
+        &fixture.token,
+        &targets[0].0,
+        &targets[0].1,
         &mut session,
     )
     .await;
@@ -310,4 +350,470 @@ async fn vanished_uid_between_search_and_fetch_keeps_coverage_incomplete() {
             .coverage
             .headers_complete
     );
+}
+
+fn replace_targets(fixture: &Fixture, names: &[(&str, bool)]) -> Vec<(String, String)> {
+    let mut service = fixture.service.lock().unwrap();
+    let records: Vec<_> = names
+        .iter()
+        .map(|(name, selectable)| FolderRecord {
+            remote_name: (*name).into(),
+            parent_remote_name: None,
+            name: (*name).into(),
+            delimiter: Some("/".into()),
+            role: if *name == "INBOX" {
+                FolderRole::Inbox
+            } else {
+                FolderRole::Other
+            },
+            selectable: *selectable,
+            attributes: vec![],
+            status: None,
+        })
+        .collect();
+    service
+        .store_folders(&fixture.account_id, &fixture.source, &records)
+        .unwrap();
+    let targets = service
+        .sync_folders(&fixture.account_id, &fixture.source)
+        .unwrap();
+    fixture
+        .shared
+        .reconcile_targets(&fixture.token, &targets, true);
+    targets
+}
+
+fn authenticate_commands() -> Script {
+    commands(1, &[]).into_iter().take(2).collect()
+}
+
+fn folder_commands(name: &str, validity: u32, uids: &[u32]) -> Script {
+    let quoted = format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut script: Script = commands(validity, uids).into_iter().skip(2).collect();
+    script[0].0 = format!("STATUS {quoted} ");
+    script[0].1 = script[0]
+        .1
+        .replace("STATUS INBOX ", &format!("STATUS {quoted} "));
+    script[1].0 = format!("EXAMINE {quoted}");
+    script
+}
+
+async fn scripted_session(script: Script) -> (Session, JoinHandle<()>) {
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    let server = tokio::spawn(serve(server, script));
+    let login = ImapLogin {
+        host: "imap.example.com".into(),
+        port: 993,
+        tls: crate::accounts::types::TlsMode::Implicit,
+        username: "lin".into(),
+        password: SecretValue::new("synthetic-password".into()),
+    };
+    let session = imap::test_session(Box::new(client), &login).await.unwrap();
+    (session, server)
+}
+
+#[tokio::test]
+async fn every_completed_folder_rejection_continues_on_the_same_connection() {
+    // STATUS, EXAMINE, SEARCH, header FETCH and flags FETCH each reject a
+    // complete command; the second folder must still succeed without reconnect.
+    for rejected_step in 0..5 {
+        let fixture = fixture();
+        if rejected_step == 4 {
+            let mut existing = commands(21, &[2]);
+            add_headers(&mut existing, &[(2, "Cached")]);
+            run(&fixture, existing, true).await.unwrap();
+        }
+        let targets = replace_targets(
+            &fixture,
+            &[("Later", true), ("INBOX", true), ("Container", false)],
+        );
+        assert_eq!(targets[0].1, "INBOX");
+        let mut script = authenticate_commands();
+        let mut inbox = folder_commands("INBOX", 21, &[2]);
+        if rejected_step >= 3 {
+            inbox.push((
+                "UID FETCH ".into(),
+                header(2, "Must not commit") + "{tag} OK\r\n",
+            ));
+        }
+        let index = rejected_step.min(3);
+        inbox.truncate(index + 1);
+        inbox[index].1 = if rejected_step >= 3 {
+            header(2, "Must not commit") + "{tag} NO private rejected contents\r\n"
+        } else {
+            "{tag} NO private rejected contents\r\n".into()
+        };
+        script.extend(inbox);
+        script.extend(folder_commands("Later", 21, &[2]));
+        add_headers(&mut script, &[(2, "Later mail")]);
+        script.push(("LOGOUT".into(), "{tag} OK\r\n".into()));
+        let (session, server) = scripted_session(script).await;
+        let result = sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            || async {
+                panic!("completed rejection must not reconnect");
+                #[allow(unreachable_code)]
+                Err(ImapError::Timeout)
+            },
+        )
+        .await;
+        assert!(matches!(result, Outcome::Partial(_)));
+        server.await.unwrap();
+        let page = fixture
+            .service
+            .lock()
+            .unwrap()
+            .list_emails(&EmailListQuery::default())
+            .unwrap();
+        assert!(page.items.iter().any(|mail| mail.subject == "Later mail"));
+        assert!(
+            !page
+                .items
+                .iter()
+                .any(|mail| mail.subject == "Must not commit")
+        );
+        let states = fixture.shared.states.lock().unwrap();
+        let state = &states[&fixture.account_id];
+        assert_eq!(state.folders.len(), 2);
+        assert_eq!(state.folders[0].phase, FolderSyncPhase::Failed);
+        assert_eq!(state.folders[1].phase, FolderSyncPhase::Idle);
+        assert!(
+            !state.folders[0]
+                .failure
+                .as_ref()
+                .unwrap()
+                .detail
+                .as_ref()
+                .unwrap()
+                .contains("private")
+        );
+        assert!(state.folders.iter().all(|folder| folder.data_revision > 0));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn broken_first_folder_reconnects_with_backoff_and_resumes_after_it() {
+    let fixture = fixture();
+    let targets = replace_targets(&fixture, &[("INBOX", true), ("Later", true)]);
+    // Repeat a complete round: INBOX always breaks, but Later is never starved.
+    for _ in 0..2 {
+        let mut first = authenticate_commands();
+        first.push((
+            "STATUS \"INBOX\" ".into(),
+            "* BYE private disconnect\r\n".into(),
+        ));
+        let (session, server) = scripted_session(first).await;
+        let mut resumed = authenticate_commands();
+        resumed.extend(folder_commands("Later", 21, &[]));
+        resumed.push(("LOGOUT".into(), "{tag} OK\r\n".into()));
+        let mut remaining = Some(resumed);
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let recorded = attempts.clone();
+        let start = Instant::now();
+        let resume_server = Arc::new(Mutex::new(None));
+        let result = sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            || {
+                let mut attempts = recorded.lock().unwrap();
+                attempts.push(Instant::now());
+                let first_failure = attempts.len() == 1;
+                let script = if first_failure {
+                    None
+                } else {
+                    remaining.take()
+                };
+                let resume_server = resume_server.clone();
+                async move {
+                    if let Some(script) = script {
+                        let (session, server) = scripted_session(script).await;
+                        // The script must reach LOGOUT; await it once the round exits.
+                        *resume_server.lock().unwrap() = Some(server);
+                        Ok(session)
+                    } else {
+                        Err(ImapError::Net(NetError::Connect("refused".into())))
+                    }
+                }
+            },
+        )
+        .await;
+        assert!(matches!(result, Outcome::Partial(_)));
+        server.await.unwrap();
+        let server = resume_server.lock().unwrap().take().unwrap();
+        server.await.unwrap();
+        let attempts = attempts.lock().unwrap();
+        assert_eq!(attempts.len(), 2);
+        assert!(attempts[0].duration_since(start) >= Duration::from_secs(1));
+        assert!(attempts[1].duration_since(attempts[0]) >= Duration::from_secs(2));
+        assert_eq!(
+            fixture.shared.states.lock().unwrap()[&fixture.account_id].folders[1].phase,
+            FolderSyncPhase::Idle
+        );
+    }
+}
+
+#[tokio::test]
+async fn no_inbox_nested_and_escaped_names_sync_independently_and_notify_per_folder() {
+    let fixture = fixture();
+    let targets = replace_targets(
+        &fixture,
+        &[
+            ("&XfJT0ZAB-/East \"team\"", true),
+            ("Empty", true),
+            ("Parent", false),
+        ],
+    );
+    let mut script = authenticate_commands();
+    for (_, name) in &targets {
+        let uids = if name == "Empty" { vec![] } else { vec![2] };
+        script.extend(folder_commands(name, 21, &uids));
+        if !uids.is_empty() {
+            add_headers(&mut script, &[(2, "Nested")]);
+        }
+    }
+    script.push(("LOGOUT".into(), "{tag} OK\r\n".into()));
+    let (session, server) = scripted_session(script).await;
+    assert!(matches!(
+        sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            || async { Err(ImapError::Timeout) }
+        )
+        .await,
+        Outcome::Synced
+    ));
+    server.await.unwrap();
+    let events = fixture.events.lock().unwrap();
+    assert!(
+        events
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|state| state.folders[0].phase == FolderSyncPhase::Idle
+                && state.folders[1].phase == FolderSyncPhase::Waiting)
+    );
+    let page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert!(page.coverage.headers_complete);
+}
+
+#[tokio::test]
+async fn queued_old_worker_cannot_write_after_generation_changes() {
+    let fixture = fixture();
+    let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let written = writes.clone();
+    // Poll once to enqueue spawn_blocking while the service lock is unavailable.
+    let service_guard = fixture.service.lock().unwrap();
+    let mut old_write = Box::pin(with_store(&fixture.shared, &fixture.token, move |_| {
+        written.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }));
+    assert!(
+        old_write
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            .is_pending()
+    );
+    fixture
+        .shared
+        .states
+        .lock()
+        .unwrap()
+        .get_mut(&fixture.account_id)
+        .unwrap()
+        .generation += 1;
+    drop(service_guard);
+    assert!(matches!(old_write.await, Err(SyncError::Stale)));
+    assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let before = fixture.events.lock().unwrap().len();
+    fixture.shared.update(&fixture.token, |state| {
+        state.failure = Some(failure(SyncFailureCode::Timeout, None, true))
+    });
+    assert_eq!(fixture.events.lock().unwrap().len(), before);
+}
+
+#[test]
+fn successful_listing_rebuilds_runtime_states_without_resurrecting_removed_folders() {
+    let fixture = fixture();
+    let old = replace_targets(
+        &fixture,
+        &[
+            ("INBOX", true),
+            ("Removed", true),
+            ("Parent", true),
+            ("Parent/Child", true),
+        ],
+    );
+    let removed_id = old
+        .iter()
+        .find(|(_, name)| name == "Removed")
+        .unwrap()
+        .0
+        .clone();
+    let parent_id = old
+        .iter()
+        .find(|(_, name)| name == "Parent")
+        .unwrap()
+        .0
+        .clone();
+    let child_id = old
+        .iter()
+        .find(|(_, name)| name == "Parent/Child")
+        .unwrap()
+        .0
+        .clone();
+    fixture
+        .shared
+        .folder_update(&fixture.token, &child_id, |folder| {
+            folder.phase = FolderSyncPhase::Idle;
+            folder.data_revision = 7;
+        });
+    let targets = replace_targets(
+        &fixture,
+        &[
+            ("INBOX", true),
+            ("Renamed", true),
+            ("Parent", false),
+            ("Parent/Child", true),
+        ],
+    );
+    fixture
+        .shared
+        .folder_update(&fixture.token, &removed_id, |folder| {
+            folder.phase = FolderSyncPhase::Idle
+        });
+    let states = fixture.shared.states.lock().unwrap();
+    let state = &states[&fixture.account_id];
+    assert_eq!(state.folder_revision, 2);
+    assert!(
+        !state
+            .folders
+            .iter()
+            .any(|folder| folder.folder_id == removed_id || folder.folder_id == parent_id)
+    );
+    assert_eq!(
+        state
+            .folders
+            .iter()
+            .find(|folder| folder.folder_id == child_id)
+            .unwrap()
+            .data_revision,
+        7
+    );
+    let renamed_id = &targets
+        .iter()
+        .find(|(_, name)| name == "Renamed")
+        .unwrap()
+        .0;
+    assert_eq!(
+        state
+            .folders
+            .iter()
+            .find(|folder| &folder.folder_id == renamed_id)
+            .unwrap()
+            .phase,
+        FolderSyncPhase::Waiting
+    );
+}
+
+#[tokio::test]
+async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_folders() {
+    for blocked in [false, true] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let mut account_config = config(json!({"kind":"direct"}));
+        account_config["imap"]["host"] = json!("127.0.0.1");
+        account_config["imap"]["port"] = json!(port);
+        let mut fixture = fixture_with_config(account_config.clone());
+        let targets = replace_targets(&fixture, &[("INBOX", true), ("Later", true)]);
+        let synced_at = "2026-10-19T00:00:00.000Z";
+        for (folder_id, _) in &targets {
+            fixture
+                .shared
+                .folder_update(&fixture.token, folder_id, |folder| {
+                    folder.phase = FolderSyncPhase::Idle;
+                    folder.last_synced_at = Some(synced_at.into());
+                    folder.data_revision = 7;
+                });
+        }
+        if blocked {
+            // TLS changes retain mailbox identity but revoke credential trust.
+            account_config["imap"]["tls"] = json!("startTls");
+            account_config["authentication"]["password"] = json!({"action":"keep"});
+            let account = fixture
+                .service
+                .lock()
+                .unwrap()
+                .update(
+                    serde_json::from_value(json!({
+                        "accountId": fixture.account_id, "expectedRevision": fixture.token.revision,
+                        "config": account_config,
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(account.mailbox_source_id, fixture.source);
+            fixture.token.revision = account.revision;
+        }
+        fixture.events.lock().unwrap().clear();
+        let worker = tokio::spawn(super::run(fixture.shared.clone(), fixture.token.clone()));
+        let failed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let state = fixture.shared.states.lock().unwrap()[&fixture.account_id].clone();
+                if state.phase == SyncPhase::Failed {
+                    break state;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        worker.abort();
+        let _ = worker.await;
+        assert_eq!(
+            failed.failure.unwrap().code,
+            if blocked {
+                SyncFailureCode::CredentialUntrusted
+            } else {
+                SyncFailureCode::Network
+            }
+        );
+        assert_eq!(failed.folders.len(), 2);
+        for folder in &failed.folders {
+            assert_eq!(folder.phase, FolderSyncPhase::Waiting);
+            assert_eq!(folder.last_synced_at.as_deref(), Some(synced_at));
+            assert_eq!(folder.data_revision, 7);
+            assert!(folder.failure.is_none());
+        }
+        let events = fixture.events.lock().unwrap();
+        assert!(events.iter().any(|state| {
+            state.phase == SyncPhase::Syncing
+                && state
+                    .folders
+                    .iter()
+                    .all(|folder| folder.phase == FolderSyncPhase::Waiting)
+        }));
+        assert!(!events.iter().any(|state| {
+            state
+                .folders
+                .iter()
+                .any(|folder| folder.phase == FolderSyncPhase::Idle)
+        }));
+    }
 }

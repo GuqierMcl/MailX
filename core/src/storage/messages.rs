@@ -59,7 +59,7 @@ fn current_folder(
     Ok(db.query_row(
         "SELECT EXISTS(SELECT 1 FROM folders f JOIN accounts a ON a.id = f.account_id
          WHERE f.id = ?1 AND f.account_id = ?2 AND f.mailbox_source_id = ?3
-         AND a.mailbox_source_id = ?3)",
+         AND a.mailbox_source_id = ?3 AND f.selectable = 1)",
         params![folder_id, account_id, source],
         |row| row.get(0),
     )?)
@@ -94,7 +94,9 @@ fn read_cursor(db: &Connection, folder_id: &str) -> Result<Option<FolderSyncCurs
 }
 
 impl Storage {
-    pub(crate) fn inbox_folders(
+    /// Every selectable folder on the current source, with a stable order so a
+    /// busy account still gives each folder one bounded attempt per round.
+    pub(crate) fn sync_folders(
         &self,
         account_id: &str,
         source: &str,
@@ -102,7 +104,7 @@ impl Storage {
         let mut statement = self.db.prepare(
             "SELECT f.id, f.remote_name FROM folders f JOIN accounts a ON a.id = f.account_id
              WHERE f.account_id = ?1 AND f.mailbox_source_id = ?2 AND a.mailbox_source_id = ?2
-             AND f.role = 'inbox' AND f.selectable = 1 ORDER BY f.id",
+             AND f.selectable = 1 ORDER BY (f.role = 'inbox') DESC, f.remote_name, f.id",
         )?;
         Ok(statement
             .query_map(params![account_id, source], |row| {
@@ -124,8 +126,8 @@ impl Storage {
             return Ok(false);
         }
         tx.execute(
-            "UPDATE folders SET unread_count = ?1, total_count = ?2 WHERE id = ?3",
-            params![unread, total, folder_id],
+            "UPDATE folders SET unread_count = ?1, total_count = ?2, synced_at = ?3 WHERE id = ?4",
+            params![unread, total, now(), folder_id],
         )?;
         tx.commit()?;
         Ok(true)
@@ -387,16 +389,17 @@ impl Storage {
     fn email_coverage(&self, query: &EmailListQuery) -> Result<Coverage, AppError> {
         let filter = ScopeFilter::new(query)?;
         let sql = format!(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.backfill_done = 1 AND c.window_capped = 0 THEN 1 ELSE 0 END), 0), MAX(c.window_start)
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.backfill_done = 1 AND c.window_capped = 0 THEN 1 ELSE 0 END), 0), MAX(c.window_start), COALESCE(MAX(c.window_capped), 0)
              FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
              LEFT JOIN folder_sync_cursors c ON c.folder_id = f.id WHERE {}", filter.sql());
-        let (total, complete, synced_after): (i64, i64, Option<String>) =
-            self.db
-                .query_row(&sql, params_from_iter(filter.values), |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                })?;
+        let (total, complete, synced_after, window_capped): (i64, i64, Option<String>, bool) = self
+            .db
+            .query_row(&sql, params_from_iter(filter.values), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
         Ok(Coverage {
             headers_complete: total > 0 && total == complete,
+            window_capped,
             bodies_complete: false,
             synced_after,
             synced_before: None,
@@ -434,7 +437,7 @@ impl Storage {
 const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
- JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present'";
+ JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
     Ok(EmailSummary {
@@ -466,7 +469,7 @@ struct ScopeFilter {
 impl ScopeFilter {
     fn new(query: &EmailListQuery) -> Result<Self, AppError> {
         let mut result = Self {
-            clauses: vec!["1 = 1".into()],
+            clauses: vec!["f.selectable = 1".into()],
             values: vec![],
         };
         if let Some(accounts) = &query.account_ids {

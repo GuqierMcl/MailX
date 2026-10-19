@@ -21,12 +21,12 @@ impl AccountService {
         self.storage.get_email(email_id)
     }
 
-    pub(crate) fn inbox_folders(
+    pub(crate) fn sync_folders(
         &self,
         account_id: &str,
         source: &str,
     ) -> Result<Vec<(String, String)>, AppError> {
-        self.storage.inbox_folders(account_id, source)
+        self.storage.sync_folders(account_id, source)
     }
 
     pub(crate) fn update_folder_counts(

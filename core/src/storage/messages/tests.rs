@@ -52,7 +52,7 @@ fn add_account(service: &mut AccountService) -> (Account, SyncTarget) {
         )
         .unwrap();
     let inbox = service
-        .inbox_folders(&account.id, &account.mailbox_source_id)
+        .sync_folders(&account.id, &account.mailbox_source_id)
         .unwrap()
         .remove(0);
     let target = SyncTarget {
@@ -359,7 +359,7 @@ fn source_change_hides_cache_before_folder_refresh_and_rejects_late_work() {
     );
     assert!(
         f.service
-            .inbox_folders(&f.account.id, &f.target.mailbox_source_id)
+            .sync_folders(&f.account.id, &f.target.mailbox_source_id)
             .unwrap()
             .is_empty()
     );
@@ -725,6 +725,7 @@ fn coverage_uses_every_scoped_folder_and_tracks_failed_or_capped_backfill() {
     f.service.finish_backfill(&f.target, false).unwrap();
     let complete = f.service.list_emails(&inbox_query()).unwrap().coverage;
     assert!(complete.headers_complete);
+    assert!(!complete.window_capped);
     assert!(!complete.bodies_complete);
     assert_eq!(complete.synced_after.as_deref(), Some("2026-09-18"));
     assert_eq!(complete.synced_before, None);
@@ -754,13 +755,9 @@ fn coverage_uses_every_scoped_folder_and_tracks_failed_or_capped_backfill() {
             .headers_complete
     );
     f.service.finish_backfill(&f.target, true).unwrap();
-    assert!(
-        !f.service
-            .list_emails(&inbox_query())
-            .unwrap()
-            .coverage
-            .headers_complete
-    );
+    let capped = f.service.list_emails(&inbox_query()).unwrap().coverage;
+    assert!(!capped.headers_complete);
+    assert!(capped.window_capped);
     f.service.finish_backfill(&f.target, false).unwrap();
     let (_, second) = add_account(&mut f.service);
     assert!(
@@ -804,6 +801,384 @@ fn coverage_uses_every_scoped_folder_and_tracks_failed_or_capped_backfill() {
             .coverage
             .headers_complete
     );
+}
+
+fn target_for(f: &Fixture, remote_name: &str, uid_validity: u32) -> SyncTarget {
+    let (folder_id, _) = f
+        .service
+        .sync_folders(&f.account.id, &f.account.mailbox_source_id)
+        .unwrap()
+        .into_iter()
+        .find(|(_, name)| name == remote_name)
+        .unwrap();
+    SyncTarget {
+        folder_id,
+        uid_validity,
+        ..f.target.clone()
+    }
+}
+
+#[test]
+fn sync_targets_cover_all_selectable_roles_in_stable_order_without_requiring_inbox() {
+    let mut f = setup();
+    let mut container = folder("Projects", FolderRole::Other);
+    container.selectable = false;
+    container.status = None;
+    let mut child = folder("Projects/中文 \"项目\"", FolderRole::Other);
+    child.parent_remote_name = Some("Projects".into());
+    let records = [
+        folder("Trash", FolderRole::Trash),
+        folder("Sent", FolderRole::Sent),
+        folder("INBOX", FolderRole::Inbox),
+        folder("Drafts", FolderRole::Drafts),
+        folder("Archive", FolderRole::Archive),
+        folder("Junk", FolderRole::Junk),
+        child,
+        container,
+    ];
+    f.service
+        .store_folders(&f.account.id, &f.account.mailbox_source_id, &records)
+        .unwrap();
+    let targets = f
+        .service
+        .sync_folders(&f.account.id, &f.account.mailbox_source_id)
+        .unwrap();
+    assert_eq!(
+        targets
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "INBOX",
+            "Archive",
+            "Drafts",
+            "Junk",
+            "Projects/中文 \"项目\"",
+            "Sent",
+            "Trash"
+        ]
+    );
+    let no_inbox: Vec<_> = records
+        .into_iter()
+        .filter(|record| record.role != FolderRole::Inbox)
+        .rev()
+        .collect();
+    f.service
+        .store_folders(&f.account.id, &f.account.mailbox_source_id, &no_inbox)
+        .unwrap();
+    assert_eq!(
+        f.service
+            .sync_folders(&f.account.id, &f.account.mailbox_source_id)
+            .unwrap(),
+        targets[1..]
+    );
+    assert!(
+        f.service
+            .sync_folders(&f.account.id, "previous-source")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn list_only_refresh_keeps_known_counts_and_persists_unknown_until_status_succeeds() {
+    let mut f = setup();
+    f.service
+        .update_folder_counts(
+            &f.account.id,
+            &f.account.mailbox_source_id,
+            &f.target.folder_id,
+            4,
+            9,
+        )
+        .unwrap();
+    let mut records = [
+        folder("INBOX", FolderRole::Inbox),
+        folder("Sent", FolderRole::Sent),
+        folder("New", FolderRole::Other),
+    ];
+    for record in &mut records {
+        record.status = None;
+    }
+    f.service
+        .store_folders(&f.account.id, &f.account.mailbox_source_id, &records)
+        .unwrap();
+    drop(f.service);
+    f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
+    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let inbox = folders
+        .iter()
+        .find(|folder| folder.role == FolderRole::Inbox)
+        .unwrap();
+    assert_eq!(
+        (inbox.unread_count, inbox.total_count, inbox.counts_known),
+        (4, 9, true)
+    );
+    let new = folders.iter().find(|folder| folder.name == "New").unwrap();
+    assert!(!new.counts_known);
+    assert_eq!((new.unread_count, new.total_count), (0, 0));
+    let (uid_next, uid_validity): (Option<u32>, Option<u32>) =
+        f.db.query_row(
+            "SELECT uid_next, uid_validity FROM folders WHERE id = ?1",
+            [&f.target.folder_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((uid_next, uid_validity), (Some(1), Some(10)));
+    f.service
+        .update_folder_counts(&f.account.id, &f.account.mailbox_source_id, &new.id, 0, 0)
+        .unwrap();
+    f.service
+        .store_folders(&f.account.id, &f.account.mailbox_source_id, &records)
+        .unwrap();
+    drop(f.service);
+    f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
+    let after = f.service.list_folders(&f.account.id).unwrap();
+    assert!(
+        after
+            .iter()
+            .find(|folder| folder.id == new.id)
+            .unwrap()
+            .counts_known
+    );
+}
+
+#[test]
+fn identical_uids_and_message_ids_stay_independent_across_folder_lifecycles() {
+    let mut f = setup();
+    let sent = target_for(&f, "Sent", 10);
+    f.service.ensure_generation(&sent, "2026-09-20").unwrap();
+    let original = record(7);
+    put(&mut f, std::slice::from_ref(&original));
+    f.service
+        .store_message_batch(&sent, std::slice::from_ref(&original), 7)
+        .unwrap();
+    let both = f
+        .service
+        .list_emails(&EmailListQuery::default())
+        .unwrap()
+        .items;
+    assert_eq!(both.len(), 2);
+    assert_ne!(both[0].id, both[1].id);
+    let sent_mail = both
+        .iter()
+        .find(|mail| mail.folder_id == sent.folder_id)
+        .unwrap();
+    f.service
+        .apply_flags(&f.target, &[(7, vec!["\\Seen".into(), "\\Flagged".into()])])
+        .unwrap();
+    assert!(!f.service.get_email(&sent_mail.id).unwrap().summary.is_read);
+    assert!(
+        !f.service
+            .get_email(&sent_mail.id)
+            .unwrap()
+            .summary
+            .is_starred
+    );
+    // A move converges as source deletion plus destination insertion; the
+    // matching Message-ID does not merge their independent folder identities.
+    f.service.mark_deleted(&f.target, &[7]).unwrap();
+    assert!(
+        f.service
+            .list_emails(&inbox_query())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        f.service
+            .get_email(&sent_mail.id)
+            .unwrap()
+            .summary
+            .folder_id,
+        sent.folder_id
+    );
+    put(&mut f, &[record(7)]);
+    let next_sent = SyncTarget {
+        uid_validity: 11,
+        ..sent.clone()
+    };
+    f.service
+        .ensure_generation(&next_sent, "2026-10-01")
+        .unwrap();
+    assert_eq!(
+        f.service.get_email(&sent_mail.id).unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        f.service.list_emails(&inbox_query()).unwrap().items.len(),
+        1
+    );
+    assert_eq!(f.service.cached_uids(&f.target).unwrap().len(), 1);
+    assert_rejected(&mut f.service, &sent);
+    f.service
+        .store_folders(
+            &f.account.id,
+            &f.account.mailbox_source_id,
+            &[
+                folder("INBOX", FolderRole::Inbox),
+                folder("Renamed", FolderRole::Sent),
+            ],
+        )
+        .unwrap();
+    let renamed = target_for(&f, "Renamed", 11);
+    assert_ne!(renamed.folder_id, sent.folder_id);
+    assert_eq!(count(&f.db, "messages"), 1);
+    assert_eq!(count(&f.db, "folder_sync_cursors"), 1);
+    assert_rejected(&mut f.service, &next_sent);
+}
+
+#[test]
+fn non_inbox_filters_and_keyset_pages_never_include_matching_mail_from_other_folders() {
+    let mut f = setup();
+    let sent = target_for(&f, "Sent", 10);
+    f.service.ensure_generation(&sent, "2026-09-18").unwrap();
+    let rows: Vec<_> = (1..=31)
+        .map(|uid| {
+            let mut message = record(uid);
+            message.subject = "项目 100%".into();
+            message.is_read = uid % 2 == 0;
+            message.has_attachment = uid % 2 != 0;
+            message
+        })
+        .collect();
+    put(&mut f, &rows);
+    f.service.store_message_batch(&sent, &rows, 31).unwrap();
+    let scoped = EmailListQuery {
+        folder_id: Some(sent.folder_id.clone()),
+        unread: Some(true),
+        has_attachment: Some(true),
+        text: Some(" 100% ".into()),
+        received_after: Some("2026-10-18T00:00:00Z".into()),
+        received_before: Some("2026-10-19T00:00:00Z".into()),
+        limit: Some(3),
+        ..Default::default()
+    };
+    let mut query = scoped.clone();
+    let mut ids = vec![];
+    loop {
+        let page = f.service.list_emails(&query).unwrap();
+        assert!(
+            page.items
+                .iter()
+                .all(|mail| mail.folder_id == sent.folder_id)
+        );
+        ids.extend(page.items.into_iter().map(|mail| mail.id));
+        match page.next_cursor {
+            Some(cursor) => query.cursor = Some(cursor),
+            None => break,
+        }
+    }
+    assert_eq!(ids.len(), 16);
+    assert!(ids.windows(2).all(|pair| pair[0] > pair[1]));
+    let by_role = f
+        .service
+        .list_emails(&EmailListQuery {
+            folder_id: None,
+            folder_role: Some(FolderRole::Sent),
+            limit: Some(200),
+            ..scoped
+        })
+        .unwrap();
+    assert_eq!(
+        by_role
+            .items
+            .into_iter()
+            .map(|mail| mail.id)
+            .collect::<Vec<_>>(),
+        ids
+    );
+    assert!(
+        f.service
+            .list_emails(&inbox_query())
+            .unwrap()
+            .items
+            .iter()
+            .all(|mail| mail.folder_id == f.target.folder_id)
+    );
+}
+
+#[test]
+fn noselect_hides_cached_mail_rejects_late_writes_and_excludes_coverage() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    f.service.finish_backfill(&f.target, true).unwrap();
+    let old_id = f
+        .service
+        .list_emails(&inbox_query())
+        .unwrap()
+        .items
+        .remove(0)
+        .id;
+    let sent = target_for(&f, "Sent", 10);
+    f.service.ensure_generation(&sent, "2026-09-20").unwrap();
+    f.service.finish_backfill(&sent, false).unwrap();
+    let mut container = folder("INBOX", FolderRole::Inbox);
+    container.selectable = false;
+    container.status = None;
+    let mut child = folder("INBOX/Child", FolderRole::Other);
+    child.parent_remote_name = Some("INBOX".into());
+    f.service
+        .store_folders(
+            &f.account.id,
+            &f.account.mailbox_source_id,
+            &[container, child, folder("Sent", FolderRole::Sent)],
+        )
+        .unwrap();
+    let child_target = target_for(&f, "INBOX/Child", 10);
+    f.service
+        .ensure_generation(&child_target, "2026-09-25")
+        .unwrap();
+    f.service
+        .store_message_batch(&child_target, &[record(1)], 1)
+        .unwrap();
+    f.service.finish_backfill(&child_target, false).unwrap();
+    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let container = folders
+        .iter()
+        .find(|folder| folder.id == f.target.folder_id)
+        .unwrap();
+    assert!(!container.selectable);
+    assert!(!container.counts_known);
+    assert!(
+        f.service
+            .list_emails(&inbox_query())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        f.service.get_email(&old_id).unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert_rejected(&mut f.service, &f.target);
+    assert!(
+        f.service
+            .ensure_generation(&f.target, "2026-10-01")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !f.service
+            .update_folder_counts(
+                &f.account.id,
+                &f.account.mailbox_source_id,
+                &f.target.folder_id,
+                1,
+                1
+            )
+            .unwrap()
+    );
+    let page = f.service.list_emails(&EmailListQuery::default()).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].folder_id, child_target.folder_id);
+    assert!(page.coverage.headers_complete);
+    assert!(!page.coverage.window_capped);
+    assert_eq!(page.coverage.synced_after.as_deref(), Some("2026-09-25"));
+    let none = f.service.list_emails(&inbox_query()).unwrap().coverage;
+    assert!(!none.headers_complete);
+    assert!(!none.window_capped);
+    assert_eq!(none.synced_after, None);
 }
 
 #[test]

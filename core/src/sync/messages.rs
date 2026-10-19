@@ -1,4 +1,4 @@
-//! Bounded inbox metadata synchronization. Plans are pure; network operations
+//! Bounded per-folder metadata synchronization. Plans are pure; network operations
 //! never hold the account service or a SQLite transaction.
 
 use std::collections::HashSet;
@@ -10,7 +10,7 @@ use crate::error::{AppError, ErrorCode};
 use crate::imap::{ImapError, Session};
 
 use super::headers::parse_header;
-use super::manager::{Shared, SyncError, with_store};
+use super::manager::{Shared, SyncError, WorkerToken, with_store};
 
 const WINDOW_DAYS: i64 = 30;
 const WINDOW_LIMIT: usize = 1_000;
@@ -67,118 +67,112 @@ fn current(written: bool) -> Result<(), SyncError> {
     }
 }
 
-pub(super) async fn sync_inboxes(
+pub(super) async fn sync_folder(
     shared: &std::sync::Arc<Shared>,
-    account_id: &str,
-    source: &str,
+    token: &WorkerToken,
+    folder_id: &str,
+    remote_name: &str,
     session: &mut Session,
 ) -> Result<(), SyncError> {
+    let account_id = &token.account_id;
+    let source = &token.source;
+    let status = session.status(remote_name).await?;
     let id = account_id.to_owned();
     let source_id = source.to_owned();
-    let folders = with_store(shared, move |service| {
-        service.inbox_folders(&id, &source_id)
-    })
-    .await?;
-    for (folder_id, remote_name) in folders {
-        let status = session.status(&remote_name).await?;
-        let id = account_id.to_owned();
-        let source_id = source.to_owned();
-        let folder = folder_id.clone();
-        current(
-            with_store(shared, move |service| {
-                service.update_folder_counts(
-                    &id,
-                    &source_id,
-                    &folder,
-                    status.unseen,
-                    status.messages,
-                )
-            })
-            .await?,
-        )?;
-
-        let mailbox = session.examine(&remote_name).await?;
-        let target = SyncTarget {
-            account_id: account_id.to_owned(),
-            mailbox_source_id: source.to_owned(),
-            folder_id,
-            uid_validity: mailbox.uid_validity,
-        };
-        let now = Utc::now();
-        let window_start = (now.date_naive() - Duration::days(WINDOW_DAYS)).to_string();
-        let guard = target.clone();
-        let cursor = with_store(shared, move |service| {
-            service.ensure_generation(&guard, &window_start)
+    let folder = folder_id.to_owned();
+    current(
+        with_store(shared, token, move |service| {
+            service.update_folder_counts(&id, &source_id, &folder, status.unseen, status.messages)
         })
-        .await?
-        .ok_or(SyncError::Stale)?;
-        let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
-            .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
-        let remote = session.search_since(since).await?;
-        let guard = target.clone();
-        let cached = with_store(shared, move |service| service.cached_uids(&guard)).await?;
-        let plan = plan_messages(&cursor, &cached, &remote);
-        let guard = target.clone();
-        let capped = plan.capped;
-        current(
-            with_store(shared, move |service| {
-                service.begin_backfill(&guard, capped)
-            })
-            .await?,
-        )?;
+        .await?,
+    )?;
 
-        let mut highest_uid = cursor.highest_uid;
-        for batch in plan.fetch.chunks(HEADER_BATCH_SIZE) {
-            let headers = session.fetch_headers(batch).await?;
-            let fetched: HashSet<u32> = headers.iter().map(|header| header.uid).collect();
-            let complete = batch.iter().all(|uid| fetched.contains(uid));
-            let records: Vec<_> = headers
-                .iter()
-                .map(|header| parse_header(header, now))
-                .collect();
-            highest_uid =
-                highest_uid.max(records.iter().map(|record| record.uid).max().unwrap_or(0));
-            let guard = target.clone();
-            current(
-                with_store(shared, move |service| {
-                    service.store_message_batch(&guard, &records, highest_uid)
-                })
-                .await?,
-            )?;
-            if !complete {
-                // A concurrent expunge may remove a searched UID. Keep committed
-                // records but re-enumerate before claiming complete coverage.
-                return Err(
-                    ImapError::Protocol("mailbox changed during header fetch".into()).into(),
-                );
-            }
-        }
+    shared.folder_update(token, folder_id, |folder| {
+        folder.data_revision = folder.data_revision.saturating_add(1);
+    });
+    let mailbox = session.examine(remote_name).await?;
+    let target = SyncTarget {
+        account_id: account_id.to_owned(),
+        mailbox_source_id: source.to_owned(),
+        folder_id: folder_id.to_owned(),
+        uid_validity: mailbox.uid_validity,
+    };
+    let now = Utc::now();
+    let window_start = (now.date_naive() - Duration::days(WINDOW_DAYS)).to_string();
+    let guard = target.clone();
+    let cursor = with_store(shared, token, move |service| {
+        service.ensure_generation(&guard, &window_start)
+    })
+    .await?
+    .ok_or(SyncError::Stale)?;
+    let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
+        .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
+    let remote = session.search_since(since).await?;
+    let guard = target.clone();
+    let cached = with_store(shared, token, move |service| service.cached_uids(&guard)).await?;
+    let plan = plan_messages(&cursor, &cached, &remote);
+    let guard = target.clone();
+    let capped = plan.capped;
+    current(
+        with_store(shared, token, move |service| {
+            service.begin_backfill(&guard, capped)
+        })
+        .await?,
+    )?;
 
+    let mut highest_uid = cursor.highest_uid;
+    for batch in plan.fetch.chunks(HEADER_BATCH_SIZE) {
+        let headers = session.fetch_headers(batch).await?;
+        let fetched: HashSet<u32> = headers.iter().map(|header| header.uid).collect();
+        let complete = batch.iter().all(|uid| fetched.contains(uid));
+        let records: Vec<_> = headers
+            .iter()
+            .map(|header| parse_header(header, now))
+            .collect();
+        highest_uid = highest_uid.max(records.iter().map(|record| record.uid).max().unwrap_or(0));
         let guard = target.clone();
         current(
-            with_store(shared, move |service| {
-                service.mark_deleted(&guard, &plan.deleted)
+            with_store(shared, token, move |service| {
+                service.store_message_batch(&guard, &records, highest_uid)
             })
             .await?,
         )?;
-        for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
-            let flags = session.fetch_flags(batch).await?;
-            let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
-            let complete = batch.iter().all(|uid| fetched.contains(uid));
-            let guard = target.clone();
-            current(with_store(shared, move |service| service.apply_flags(&guard, &flags)).await?)?;
-            if !complete {
-                return Err(ImapError::Protocol("mailbox changed during flag fetch".into()).into());
-            }
+        if !complete {
+            // A concurrent expunge may remove a searched UID. Keep committed
+            // records but re-enumerate before claiming complete coverage.
+            return Err(ImapError::Mailbox("mailbox changed during header fetch".into()).into());
         }
-        let guard = target;
-        current(
-            with_store(shared, move |service| {
-                service.finish_backfill(&guard, capped)
-            })
-            .await?,
-        )?;
     }
+
+    let guard = target.clone();
+    current(
+        with_store(shared, token, move |service| {
+            service.mark_deleted(&guard, &plan.deleted)
+        })
+        .await?,
+    )?;
+    for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
+        let flags = session.fetch_flags(batch).await?;
+        let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
+        let complete = batch.iter().all(|uid| fetched.contains(uid));
+        let guard = target.clone();
+        current(
+            with_store(shared, token, move |service| {
+                service.apply_flags(&guard, &flags)
+            })
+            .await?,
+        )?;
+        if !complete {
+            return Err(ImapError::Mailbox("mailbox changed during flag fetch".into()).into());
+        }
+    }
+    let guard = target;
+    current(
+        with_store(shared, token, move |service| {
+            service.finish_backfill(&guard, capped)
+        })
+        .await?,
+    )?;
     Ok(())
 }
 

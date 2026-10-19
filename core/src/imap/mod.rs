@@ -1,4 +1,4 @@
-//! Read-only IMAP operations for folder and inbox-header synchronization.
+//! Read-only IMAP operations for folder and header synchronization.
 
 pub(crate) mod utf7;
 
@@ -42,7 +42,7 @@ pub(crate) struct RemoteFolder {
     pub delimiter: Option<String>,
     /// LIST attributes such as `\Noselect` or `\Sent`, as the server wrote them.
     pub attributes: Vec<String>,
-    /// `None` for folders that cannot be selected and so have no status.
+    /// LIST discovery does not fetch counts; STATUS is queried per folder.
     pub status: Option<FolderStatus>,
 }
 
@@ -63,6 +63,10 @@ pub(crate) enum ImapError {
     Unsupported(String),
     /// The server answered with something the client could not use.
     Protocol(String),
+    /// A completed tagged NO/BAD, with all response data consumed.
+    Rejected,
+    /// A completed command whose mailbox data is unusable; connection is healthy.
+    Mailbox(String),
     Timeout,
 }
 
@@ -73,8 +77,16 @@ impl fmt::Display for ImapError {
             Self::Authentication(reason) => write!(formatter, "login rejected: {reason}"),
             Self::Unsupported(reason) => write!(formatter, "unsupported by server: {reason}"),
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
+            Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
+            Self::Mailbox(reason) => write!(formatter, "mailbox response error: {reason}"),
             Self::Timeout => formatter.write_str("server stopped responding"),
         }
+    }
+}
+
+impl ImapError {
+    pub(crate) fn session_usable(&self) -> bool {
+        matches!(self, Self::Rejected | Self::Mailbox(_))
     }
 }
 
@@ -159,7 +171,7 @@ pub(crate) async fn test_session(
 /// Compatibility wrapper for callers that only need a folder snapshot.
 #[expect(
     dead_code,
-    reason = "Retained folder-only entry point; inbox workers share a session."
+    reason = "Retained folder-only entry point; workers share sessions across folders."
 )]
 pub(crate) async fn fetch_folders(
     route: &NetRoute,
@@ -207,27 +219,38 @@ async fn authenticate(
     })?;
 
     let capabilities = step(inner.capabilities()).await?;
+    let mut session = Session { inner };
     if capabilities.has_str("ID") {
-        // Some providers refuse to open folders for unidentified clients.
-        let _ = step(inner.id([
-            ("name", Some("MailX")),
-            ("version", Some(env!("CARGO_PKG_VERSION"))),
-        ]))
-        .await;
+        // Identification is optional, but timeout/EOF cannot leave a partially
+        // consumed response on the connection used for mailbox commands.
+        let command = format!(
+            "ID (\"name\" \"MailX\" \"version\" \"{}\")",
+            env!("CARGO_PKG_VERSION")
+        );
+        match session
+            .checked_command::<()>(&command, |_, _| Ok(None))
+            .await
+        {
+            Ok(_) | Err(ImapError::Rejected) => {}
+            Err(error) => return Err(error),
+        }
     }
-    Ok(Session { inner })
+    Ok(session)
 }
 
 impl Session {
     pub(crate) async fn list_folders(&mut self) -> Result<Vec<RemoteFolder>, ImapError> {
         // async-imap 0.12's LIST stream drops tagged NO/BAD. Wait for an
         // explicit OK ourselves before allowing folder deletion reconciliation.
-        let mut folders = self
-            .checked_command("LIST \"\" *", |response| {
+        let folders = self
+            .checked_command("LIST \"\" *", |response, raw| {
                 Ok(match response {
                     Response::MailboxData(MailboxDatum::List(name)) => Some(RemoteFolder {
-                        name: name.name.to_string(),
-                        delimiter: name.delimiter.as_ref().map(ToString::to_string),
+                        name: mailbox_text(&name.name, raw),
+                        delimiter: name
+                            .delimiter
+                            .as_ref()
+                            .map(|delimiter| mailbox_text(delimiter, raw)),
                         attributes: name.name_attributes.iter().map(attribute_name).collect(),
                         status: None,
                     }),
@@ -235,15 +258,6 @@ impl Session {
                 })
             })
             .await?;
-        for folder in &mut folders {
-            let selectable = !folder.attributes.iter().any(|attribute| {
-                attribute.eq_ignore_ascii_case("\\Noselect")
-                    || attribute.eq_ignore_ascii_case("\\NonExistent")
-            });
-            if selectable {
-                folder.status = Some(self.status(&folder.name).await?);
-            }
-        }
         Ok(folders)
     }
 
@@ -254,11 +268,12 @@ impl Session {
             quoted_mailbox(name)?
         );
         let statuses = self
-            .checked_command(&command, |response| {
+            .checked_command(&command, |response, raw| {
                 let Response::MailboxData(MailboxDatum::Status { mailbox, status }) = response
                 else {
                     return Ok(None);
                 };
+                let mailbox = mailbox_text(mailbox, raw);
                 if mailbox != name
                     && !(mailbox.eq_ignore_ascii_case("INBOX")
                         && name.eq_ignore_ascii_case("INBOX"))
@@ -271,14 +286,27 @@ impl Session {
                     uid_next: None,
                     uid_validity: None,
                 };
+                let mut has_messages = false;
+                let mut has_unseen = false;
                 for attribute in status {
                     match attribute {
-                        StatusAttribute::Messages(value) => result.messages = *value,
-                        StatusAttribute::Unseen(value) => result.unseen = *value,
+                        StatusAttribute::Messages(value) => {
+                            result.messages = *value;
+                            has_messages = true;
+                        }
+                        StatusAttribute::Unseen(value) => {
+                            result.unseen = *value;
+                            has_unseen = true;
+                        }
                         StatusAttribute::UidNext(value) => result.uid_next = Some(*value),
                         StatusAttribute::UidValidity(value) => result.uid_validity = Some(*value),
                         _ => {}
                     }
+                }
+                if !has_messages || !has_unseen {
+                    return Err(ImapError::Protocol(
+                        "STATUS omitted requested counts".into(),
+                    ));
                 }
                 Ok(Some(result))
             })
@@ -286,7 +314,7 @@ impl Session {
         statuses
             .into_iter()
             .next()
-            .ok_or_else(|| ImapError::Protocol("STATUS did not return mailbox data".into()))
+            .ok_or_else(|| ImapError::Mailbox("STATUS did not return mailbox data".into()))
     }
 
     pub(crate) async fn examine(&mut self, name: &str) -> Result<MailboxInfo, ImapError> {
@@ -296,7 +324,7 @@ impl Session {
             uid_next: None,
             exists: 0,
         };
-        self.checked_command::<()>(&command, |response| {
+        self.checked_command::<()>(&command, |response, _| {
             match response {
                 Response::MailboxData(MailboxDatum::Exists(value)) => result.exists = *value,
                 Response::Data {
@@ -313,7 +341,7 @@ impl Session {
         })
         .await?;
         if result.uid_validity == 0 {
-            return Err(ImapError::Protocol(
+            return Err(ImapError::Mailbox(
                 "EXAMINE did not return a valid UIDVALIDITY".into(),
             ));
         }
@@ -325,7 +353,7 @@ impl Session {
         // may be interpolated into async-imap's unescaped SEARCH expression.
         let query = format!("UID SEARCH SINCE {}", date.format("%d-%b-%Y"));
         let batches = self
-            .checked_command(&query, |response| {
+            .checked_command(&query, |response, _| {
                 Ok(match response {
                     Response::MailboxData(MailboxDatum::Search(uids)) => Some(uids.clone()),
                     _ => None,
@@ -333,7 +361,7 @@ impl Session {
             })
             .await?;
         if batches.is_empty() {
-            return Err(ImapError::Protocol(
+            return Err(ImapError::Mailbox(
                 "SEARCH did not return enumeration data".into(),
             ));
         }
@@ -359,7 +387,7 @@ impl Session {
             "UID FETCH {} (UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)])",
             uid_set(uids)
         );
-        self.checked_command(&query, |response| {
+        self.checked_command(&query, |response, _| {
             let Response::Fetch(_, attributes) = response else {
                 return Ok(None);
             };
@@ -420,7 +448,7 @@ impl Session {
         for chunk in uids.chunks(500) {
             let query = format!("UID FETCH {} (UID FLAGS)", uid_set(chunk));
             let fetched = self
-                .checked_command(&query, |response| match response {
+                .checked_command(&query, |response, _| match response {
                     Response::Fetch(_, attributes) => fetch_identity(attributes, chunk),
                     _ => Ok(None),
                 })
@@ -436,11 +464,12 @@ impl Session {
     async fn checked_command<T>(
         &mut self,
         command: &str,
-        mut collect: impl FnMut(&Response<'_>) -> Result<Option<T>, ImapError>,
+        mut collect: impl FnMut(&Response<'_>, &[u8]) -> Result<Option<T>, ImapError>,
     ) -> Result<Vec<T>, ImapError> {
         step(async {
             let tag = self.inner.run_command(command).await?;
             let mut results = Vec::new();
+            let mut collection_failed = false;
             loop {
                 let response = self
                     .inner
@@ -450,16 +479,20 @@ impl Session {
                     .ok_or_else(|| {
                         ImapError::Protocol("IMAP connection closed before completion".into())
                     })?;
+                let raw = response.borrow_owner();
                 match response.parsed() {
                     Response::Done {
                         tag: response_tag,
                         status,
                         ..
                     } if response_tag == &tag => {
-                        return if *status == Status::Ok {
-                            Ok(results)
-                        } else {
-                            Err(ImapError::Protocol("IMAP command failed".into()))
+                        return match status {
+                            Status::Ok if collection_failed => Err(ImapError::Mailbox(
+                                "command returned invalid mailbox data".into(),
+                            )),
+                            Status::Ok => Ok(results),
+                            Status::No | Status::Bad => Err(ImapError::Rejected),
+                            _ => Err(ImapError::Protocol("unexpected completion status".into())),
                         };
                     }
                     Response::Data {
@@ -470,9 +503,18 @@ impl Session {
                             "IMAP connection closed before completion".into(),
                         ));
                     }
+                    Response::Done { .. } => {
+                        return Err(ImapError::Protocol(
+                            "unexpected command completion tag".into(),
+                        ));
+                    }
                     response => {
-                        if let Some(result) = collect(response)? {
-                            results.push(result);
+                        // Drain to the tagged completion even if one parsed row is
+                        // invalid, so a healthy connection can serve later folders.
+                        match collect(response, raw) {
+                            Ok(Some(result)) => results.push(result),
+                            Ok(None) => {}
+                            Err(_) => collection_failed = true,
                         }
                     }
                 }
@@ -484,6 +526,33 @@ impl Session {
     pub(crate) async fn logout(mut self) -> Result<(), ImapError> {
         step(self.inner.logout()).await
     }
+}
+
+/// imap-proto 0.17 retains escapes in quoted strings. Its borrowed mailbox
+/// slice still points into the parsed response, so identify quoted versus
+/// literal representation without reparsing IMAP or altering literal bytes.
+fn mailbox_text(name: &str, response: &[u8]) -> String {
+    let offset = (name.as_ptr() as usize).checked_sub(response.as_ptr() as usize);
+    let quoted = offset.is_some_and(|offset| {
+        offset > 0
+            && response.get(offset - 1) == Some(&b'"')
+            && response.get(offset + name.len()) == Some(&b'"')
+    });
+    if !quoted {
+        return name.to_owned();
+    }
+    let mut chars = name.chars();
+    let mut decoded = String::with_capacity(name.len());
+    while let Some(character) = chars.next() {
+        if character == '\\' {
+            if let Some(escaped) = chars.next() {
+                decoded.push(escaped);
+            }
+        } else {
+            decoded.push(character);
+        }
+    }
+    decoded
 }
 
 fn quoted_mailbox(name: &str) -> Result<String, ImapError> {
@@ -706,11 +775,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lists_folders_with_attributes_and_status() {
+    async fn lists_folders_without_coupling_discovery_to_status() {
         let folders = run(vec![
-            (r#"LOGIN "lin@example.com" "app \"pass\"""#, "{tag} OK LOGIN completed\r\n"),
-            ("CAPABILITY", "* CAPABILITY IMAP4rev1 ID SPECIAL-USE\r\n{tag} OK done\r\n"),
-            ("ID (\"name\" \"MailX\"", "* ID NIL\r\n{tag} OK ID completed\r\n"),
+            (
+                r#"LOGIN "lin@example.com" "app \"pass\"""#,
+                "{tag} OK LOGIN completed\r\n",
+            ),
+            (
+                "CAPABILITY",
+                "* CAPABILITY IMAP4rev1 ID SPECIAL-USE\r\n{tag} OK done\r\n",
+            ),
+            (
+                "ID (\"name\" \"MailX\"",
+                "* ID NIL\r\n{tag} OK ID completed\r\n",
+            ),
             (
                 "LIST \"\" *",
                 "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
@@ -719,9 +797,6 @@ mod tests {
                  * LIST (\\HasNoChildren) \"/\" \"Clients/East\"\r\n\
                  {tag} OK LIST completed\r\n",
             ),
-            ("STATUS \"INBOX\"", "* STATUS INBOX (MESSAGES 12 UNSEEN 3 UIDNEXT 40 UIDVALIDITY 7)\r\n{tag} OK\r\n"),
-            ("STATUS \"&XfJT0ZAB-\"", "* STATUS \"&XfJT0ZAB-\" (MESSAGES 4 UNSEEN 0 UIDNEXT 5 UIDVALIDITY 7)\r\n{tag} OK\r\n"),
-            ("STATUS \"Clients/East\"", "* STATUS \"Clients/East\" (MESSAGES 1 UNSEEN 1 UIDNEXT 2 UIDVALIDITY 9)\r\n{tag} OK\r\n"),
             ("LOGOUT", "* BYE\r\n{tag} OK LOGOUT completed\r\n"),
         ])
         .await
@@ -729,15 +804,7 @@ mod tests {
 
         let names: Vec<_> = folders.iter().map(|folder| folder.name.as_str()).collect();
         assert_eq!(names, ["INBOX", "&XfJT0ZAB-", "Clients", "Clients/East"]);
-        assert_eq!(
-            folders[0].status,
-            Some(FolderStatus {
-                messages: 12,
-                unseen: 3,
-                uid_next: Some(40),
-                uid_validity: Some(7)
-            })
-        );
+        assert!(folders.iter().all(|folder| folder.status.is_none()));
         assert!(
             folders[1]
                 .attributes
@@ -770,15 +837,31 @@ mod tests {
             ("LOGIN", "{tag} OK\r\n"),
             ("CAPABILITY", "* CAPABILITY IMAP4rev1\r\n{tag} OK\r\n"),
             ("LIST", "* LIST () \".\" INBOX\r\n{tag} OK\r\n"),
-            (
-                "STATUS",
-                "* STATUS INBOX (MESSAGES 0 UNSEEN 0)\r\n{tag} OK\r\n",
-            ),
             ("LOGOUT", "{tag} OK\r\n"),
         ])
         .await
         .unwrap();
         assert_eq!(folders.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn optional_id_refusal_is_safe_but_connection_loss_is_not() {
+        let login = ("LOGIN", "{tag} OK\r\n");
+        let capabilities = ("CAPABILITY", "* CAPABILITY IMAP4rev1 ID\r\n{tag} OK\r\n");
+        let folders = run(vec![
+            login,
+            capabilities,
+            ("ID", "{tag} NO optional ID unavailable\r\n"),
+            ("LIST", "* LIST () \"/\" INBOX\r\n{tag} OK\r\n"),
+            ("LOGOUT", "{tag} OK\r\n"),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(folders.len(), 1);
+        let error = run(vec![login, capabilities, ("ID", "* BYE disconnected\r\n")])
+            .await
+            .unwrap_err();
+        assert!(!error.session_usable());
     }
 
     async fn header_session(
@@ -874,7 +957,7 @@ mod tests {
         .await;
         assert!(matches!(
             session.examine("INBOX").await,
-            Err(ImapError::Protocol(_))
+            Err(ImapError::Mailbox(_))
         ));
         server.await.unwrap();
     }
@@ -989,7 +1072,7 @@ mod tests {
             session
                 .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap())
                 .await,
-            Err(ImapError::Protocol(_))
+            Err(ImapError::Rejected)
         ));
         server.await.unwrap();
     }
@@ -1005,7 +1088,7 @@ mod tests {
             ),
         ])
         .await;
-        assert!(matches!(result, Err(ImapError::Protocol(_))));
+        assert!(matches!(result, Err(ImapError::Rejected)));
     }
 
     #[tokio::test]
@@ -1057,6 +1140,91 @@ mod tests {
                 ImapError::from(error).to_string(),
                 "protocol error: IMAP command failed"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn escaped_quoted_and_literal_mailbox_names_keep_distinct_identity() {
+        let literal_name = "Literal \\\"team\\\"";
+        let list = format!(
+            "* LIST () \"/\" \"Quoted \\\"team\\\"\\\\box\"\r\n* LIST () \"/\" {{{}}}\r\n{}\r\n{{tag}} OK\r\n",
+            literal_name.len(),
+            literal_name
+        );
+        let (mut session, server) = header_session(vec![
+            ("LIST".into(), list),
+            (
+                "STATUS \"Quoted \\\"team\\\"\\\\box\"".into(),
+                "* STATUS \"Quoted \\\"team\\\"\\\\box\" (MESSAGES 1 UNSEEN 1)\r\n{tag} OK\r\n"
+                    .into(),
+            ),
+            (
+                format!("STATUS {}", quoted_mailbox(literal_name).unwrap()),
+                format!(
+                    "* STATUS {{{}}}\r\n{} (MESSAGES 2 UNSEEN 1)\r\n{{tag}} OK\r\n",
+                    literal_name.len(),
+                    literal_name
+                ),
+            ),
+            ("LOGOUT".into(), "{tag} OK\r\n".into()),
+        ])
+        .await;
+        let listed = session.list_folders().await.unwrap();
+        assert_eq!(listed[0].name, "Quoted \"team\"\\box");
+        assert_eq!(listed[1].name, literal_name);
+        assert_eq!(session.status(&listed[0].name).await.unwrap().messages, 1);
+        assert_eq!(session.status(&listed[1].name).await.unwrap().messages, 2);
+        session.logout().await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_completed_mailbox_data_is_drained_before_next_folder() {
+        let (mut session, server) = header_session(vec![
+            (
+                "UID FETCH".into(),
+                "* 1 FETCH (UID 1 RFC822.SIZE 20)\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "STATUS".into(),
+                "* STATUS Later (MESSAGES 2)\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "EXAMINE".into(),
+                "* OK [UIDVALIDITY 0] invalid\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "EXAMINE".into(),
+                "* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n".into(),
+            ),
+            ("LOGOUT".into(), "{tag} OK\r\n".into()),
+        ])
+        .await;
+        assert!(
+            session
+                .fetch_flags(&[1])
+                .await
+                .unwrap_err()
+                .session_usable()
+        );
+        assert!(session.status("Later").await.unwrap_err().session_usable());
+        assert!(session.examine("Later").await.unwrap_err().session_usable());
+        assert_eq!(session.examine("Later").await.unwrap().uid_validity, 9);
+        session.logout().await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn eof_bye_and_unexpected_completion_tags_poison_the_connection() {
+        for reply in ["* SEARCH 1\r\n", "* BYE private\r\n", "wrong OK\r\n"] {
+            let (mut session, server) =
+                header_session(vec![("UID SEARCH".into(), reply.into())]).await;
+            let error = session
+                .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap())
+                .await
+                .unwrap_err();
+            assert!(!error.session_usable());
+            server.await.unwrap();
         }
     }
 

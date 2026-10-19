@@ -2,7 +2,7 @@
 //!
 //! Account configuration is persisted here; hosts supply a data directory,
 //! system secret store and async runtime. Read-only background IMAP sync keeps
-//! folders and inbox message headers in a local cache for paginated queries.
+//! folders and per-folder message headers in a local cache for paginated queries.
 //! Message bodies, flag writes and sending are not implemented yet.
 
 pub mod accounts;
@@ -22,7 +22,10 @@ pub use app::MailxCore;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use mail::*;
 pub use startup::StartupStatus;
-pub use sync::manager::{AccountSyncState, SyncFailure, SyncFailureCode, SyncListener, SyncPhase};
+pub use sync::manager::{
+    AccountSyncState, FolderSyncPhase, FolderSyncState, SyncFailure, SyncFailureCode, SyncListener,
+    SyncPhase,
+};
 
 /// The core crate version, available without initializing storage or networking.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

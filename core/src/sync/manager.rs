@@ -1,10 +1,11 @@
-//! Per-account background workers for folders and inbox message headers.
+//! Per-account background workers for all selectable folder headers.
 //!
 //! Each account gets one task that owns its IMAP connections. Workers never
 //! hold the account database lock across network I/O: they read a sync plan,
 //! talk to the server unlocked, then store the result in a short transaction.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ use super::{folders, messages};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::{AppError, ErrorCode};
-use crate::imap::{self, ImapError};
+use crate::imap::{self, ImapError, Session};
 use crate::net::NetError;
 
 const MESSAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
@@ -66,18 +67,45 @@ pub enum SyncFailureCode {
 pub struct SyncFailure {
     pub code: SyncFailureCode,
     pub message: String,
-    /// Technical reason from the server or network stack, for display only.
+    /// Sanitized protocol or network reason, for display only.
     pub detail: Option<String>,
     /// Whether the worker will try again on its own.
     pub will_retry: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum FolderSyncPhase {
+    Waiting,
+    Syncing,
+    Idle,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSyncState {
+    pub folder_id: String,
+    pub phase: FolderSyncPhase,
+    pub last_synced_at: Option<String>,
+    pub failure: Option<SyncFailure>,
+    pub data_revision: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSyncState {
     pub account_id: String,
+    pub mailbox_source_id: Option<String>,
+    /// Incremented synchronously whenever account settings restart the worker.
+    pub generation: u32,
+    /// Event order within the worker generation.
+    pub sequence: u32,
+    /// Complete LIST commits; consumers refresh the folder tree on change.
+    pub folder_revision: u32,
+    pub folders: Vec<FolderSyncState>,
     pub phase: SyncPhase,
-    /// RFC 3339 time of the last successful inbox sync in this session.
+    /// RFC 3339 time of the last entirely successful round in this session.
     pub last_synced_at: Option<String>,
     pub failure: Option<SyncFailure>,
 }
@@ -85,36 +113,99 @@ pub struct AccountSyncState {
 /// Receives every sync state change, e.g. to forward it to a UI as a hint to refetch.
 pub type SyncListener = Arc<dyn Fn(&AccountSyncState) + Send + Sync>;
 
+#[derive(Clone)]
+pub(super) struct WorkerToken {
+    pub(super) account_id: String,
+    pub(super) source: String,
+    revision: u32,
+    generation: u32,
+}
+
 pub(super) struct Shared {
-    /// Weak so that closing the core releases the store (and its directory
-    /// lock) at once; a worker that finds it gone simply stops.
     service: Weak<Mutex<AccountService>>,
     states: Mutex<HashMap<String, AccountSyncState>>,
     listener: SyncListener,
 }
 
 impl Shared {
-    fn publish(&self, state: AccountSyncState) {
-        if let Ok(mut states) = self.states.lock() {
-            states.insert(state.account_id.clone(), state.clone());
-        }
+    fn active(state: &AccountSyncState, token: &WorkerToken) -> bool {
+        state.generation == token.generation
+            && state.mailbox_source_id.as_deref() == Some(token.source.as_str())
+    }
+
+    fn update(&self, token: &WorkerToken, change: impl FnOnce(&mut AccountSyncState)) {
+        let state = {
+            let Ok(mut states) = self.states.lock() else {
+                return;
+            };
+            let Some(state) = states.get_mut(&token.account_id) else {
+                return;
+            };
+            if !Self::active(state, token) {
+                return;
+            }
+            change(state);
+            state.sequence = state.sequence.saturating_add(1);
+            state.clone()
+        };
+        // The monotonic token lets consumers reject any reordered delivery.
         (self.listener)(&state);
     }
 
-    fn update(&self, account_id: &str, change: impl FnOnce(&mut AccountSyncState)) {
-        let mut state = self
-            .states
-            .lock()
-            .ok()
-            .and_then(|states| states.get(account_id).cloned())
-            .unwrap_or_else(|| AccountSyncState {
-                account_id: account_id.to_owned(),
-                phase: SyncPhase::Idle,
-                last_synced_at: None,
-                failure: None,
-            });
-        change(&mut state);
-        self.publish(state);
+    pub(super) fn folder_update(
+        &self,
+        token: &WorkerToken,
+        folder_id: &str,
+        change: impl FnOnce(&mut FolderSyncState),
+    ) {
+        self.update(token, |state| {
+            if let Some(folder) = state
+                .folders
+                .iter_mut()
+                .find(|folder| folder.folder_id == folder_id)
+            {
+                change(folder);
+            }
+        });
+    }
+
+    fn begin_round(&self, token: &WorkerToken) {
+        self.update(token, |state| {
+            state.phase = SyncPhase::Syncing;
+            state.failure = None;
+            for folder in &mut state.folders {
+                // Idle describes a successful attempt in this round. Retain
+                // last success and cache revisions, but let an early account
+                // failure apply to every folder still waiting for its attempt.
+                folder.phase = FolderSyncPhase::Waiting;
+                folder.failure = None;
+            }
+        });
+    }
+
+    fn reconcile_targets(&self, token: &WorkerToken, targets: &[(String, String)], listed: bool) {
+        self.update(token, |state| {
+            let mut old: HashMap<_, _> = state
+                .folders
+                .drain(..)
+                .map(|folder| (folder.folder_id.clone(), folder))
+                .collect();
+            state.folders = targets
+                .iter()
+                .map(|(id, _)| {
+                    old.remove(id).unwrap_or_else(|| FolderSyncState {
+                        folder_id: id.clone(),
+                        phase: FolderSyncPhase::Waiting,
+                        last_synced_at: None,
+                        failure: None,
+                        data_revision: 0,
+                    })
+                })
+                .collect();
+            if listed {
+                state.folder_revision = state.folder_revision.saturating_add(1);
+            }
+        });
     }
 }
 
@@ -150,9 +241,49 @@ impl SyncManager {
         if let Some(worker) = workers.remove(account_id) {
             worker.abort();
         }
+        let Some(service) = self.shared.service.upgrade() else {
+            return;
+        };
+        let Ok(service) = service.lock() else {
+            return;
+        };
+        let Ok(account) = service.get(account_id) else {
+            return;
+        };
+        let token = {
+            let Ok(mut states) = self.shared.states.lock() else {
+                return;
+            };
+            let generation = states
+                .get(account_id)
+                .map_or(1, |state| state.generation.saturating_add(1));
+            states.insert(
+                account_id.to_owned(),
+                AccountSyncState {
+                    account_id: account_id.to_owned(),
+                    mailbox_source_id: Some(account.mailbox_source_id.clone()),
+                    generation,
+                    sequence: 0,
+                    folder_revision: 0,
+                    folders: Vec::new(),
+                    phase: SyncPhase::Syncing,
+                    last_synced_at: None,
+                    failure: None,
+                },
+            );
+            WorkerToken {
+                account_id: account_id.to_owned(),
+                source: account.mailbox_source_id,
+                revision: account.revision,
+                generation,
+            }
+        };
+        drop(service);
         let shared = self.shared.clone();
-        let id = account_id.to_owned();
-        workers.insert(account_id.to_owned(), self.runtime.spawn(run(shared, id)));
+        workers.insert(
+            account_id.to_owned(),
+            self.runtime.spawn(run(shared, token)),
+        );
     }
 
     pub(crate) fn states(&self) -> Vec<AccountSyncState> {
@@ -174,6 +305,8 @@ impl Drop for SyncManager {
 
 enum Outcome {
     Synced,
+    /// All folders attempted; failures remain visible until the next round.
+    Partial(SyncFailure),
     /// Retry after backoff.
     Transient(SyncFailure),
     /// Wait for the account to change; retrying cannot help and may lock the account.
@@ -182,33 +315,41 @@ enum Outcome {
     Gone,
 }
 
-async fn run(shared: Arc<Shared>, account_id: String) {
+async fn run(shared: Arc<Shared>, token: WorkerToken) {
     let mut failures = 0u32;
     let mut last_folder_refresh = None;
     loop {
-        shared.update(&account_id, |state| state.phase = SyncPhase::Syncing);
-        let wait = match sync_once(&shared, &account_id, &mut last_folder_refresh).await {
+        shared.begin_round(&token);
+        let wait = match sync_once(&shared, &token, &mut last_folder_refresh).await {
             Outcome::Synced => {
                 failures = 0;
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                shared.update(&account_id, |state| {
+                shared.update(&token, |state| {
                     state.phase = SyncPhase::Idle;
                     state.last_synced_at = Some(now);
                     state.failure = None;
                 });
                 MESSAGE_REFRESH_INTERVAL
             }
+            Outcome::Partial(failure) => {
+                failures = 0;
+                shared.update(&token, |state| {
+                    state.phase = SyncPhase::Failed;
+                    state.failure = Some(failure);
+                });
+                MESSAGE_REFRESH_INTERVAL
+            }
             Outcome::Transient(failure) => {
                 let wait = backoff(failures);
                 failures = failures.saturating_add(1);
-                shared.update(&account_id, |state| {
+                shared.update(&token, |state| {
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
                 });
                 wait
             }
             Outcome::Blocked(failure) => {
-                shared.update(&account_id, |state| {
+                shared.update(&token, |state| {
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
                 });
@@ -216,36 +357,18 @@ async fn run(shared: Arc<Shared>, account_id: String) {
             }
             // The account was removed, or the core closed.
             Outcome::Gone => {
-                if let Ok(mut states) = shared.states.lock() {
-                    states.remove(&account_id);
+                if let Ok(mut states) = shared.states.lock()
+                    && states
+                        .get(&token.account_id)
+                        .is_some_and(|state| Shared::active(state, &token))
+                {
+                    states.remove(&token.account_id);
                 }
                 return;
             }
         };
         tokio::time::sleep(wait).await;
     }
-}
-
-enum Access<T> {
-    Done(T),
-    /// The core was closed; the worker should stop.
-    Closed,
-    Failed,
-}
-
-async fn with_service<T: Send + 'static>(
-    shared: &Arc<Shared>,
-    operation: impl FnOnce(&mut AccountService) -> T + Send + 'static,
-) -> Access<T> {
-    let Some(service) = shared.service.upgrade() else {
-        return Access::Closed;
-    };
-    tokio::task::spawn_blocking(move || match service.lock() {
-        Ok(mut service) => Access::Done(operation(&mut service)),
-        Err(_) => Access::Failed,
-    })
-    .await
-    .unwrap_or(Access::Failed)
 }
 
 #[derive(Debug)]
@@ -268,15 +391,39 @@ impl From<AppError> for SyncError {
     }
 }
 
+/// Guard inside the blocking closure, after the service lock is acquired.
+/// Aborting an async worker does not cancel already queued spawn_blocking work.
 pub(super) async fn with_store<T: Send + 'static>(
     shared: &Arc<Shared>,
+    token: &WorkerToken,
     operation: impl FnOnce(&mut AccountService) -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, SyncError> {
-    match with_service(shared, operation).await {
-        Access::Done(result) => result.map_err(SyncError::Storage),
-        Access::Closed => Err(SyncError::Closed),
-        Access::Failed => Err(AppError::new(ErrorCode::StorageUnavailable).into()),
-    }
+    let service = shared.service.upgrade().ok_or(SyncError::Closed)?;
+    let shared = shared.clone();
+    let token = token.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut service = service
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
+        let account = service.get(&token.account_id)?;
+        if account.mailbox_source_id != token.source || account.revision != token.revision {
+            return Err(SyncError::Stale);
+        }
+        let states = shared
+            .states
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        if !states
+            .get(&token.account_id)
+            .is_some_and(|state| Shared::active(state, &token))
+        {
+            return Err(SyncError::Stale);
+        }
+        // Keep the generation guard until the short transaction is finished.
+        operation(&mut service).map_err(SyncError::Storage)
+    })
+    .await
+    .map_err(|_| AppError::new(ErrorCode::Internal))?
 }
 
 fn folders_due(last_refresh: Option<Instant>) -> bool {
@@ -285,66 +432,190 @@ fn folders_due(last_refresh: Option<Instant>) -> bool {
 
 async fn sync_once(
     shared: &Arc<Shared>,
-    account_id: &str,
+    token: &WorkerToken,
     last_folder_refresh: &mut Option<Instant>,
 ) -> Outcome {
-    let id = account_id.to_owned();
-    let plan = match with_service(shared, move |service| service.sync_plan(&id)).await {
-        Access::Done(Ok(plan)) => plan,
-        Access::Done(Err(PlanError::Account(error))) if error.code == ErrorCode::NotFound => {
+    let id = token.account_id.clone();
+    let plan = match with_store(shared, token, move |service| Ok(service.sync_plan(&id))).await {
+        Ok(Ok(plan)) => plan,
+        Ok(Err(PlanError::Account(error))) if error.code == ErrorCode::NotFound => {
             return Outcome::Gone;
         }
-        Access::Done(Err(PlanError::CredentialUntrusted)) => {
+        Ok(Err(PlanError::CredentialUntrusted)) => {
             return Outcome::Blocked(failure(SyncFailureCode::CredentialUntrusted, None, false));
         }
-        Access::Done(Err(PlanError::CredentialMissing)) => {
+        Ok(Err(PlanError::CredentialMissing)) => {
             return Outcome::Blocked(failure(SyncFailureCode::CredentialMissing, None, false));
         }
-        Access::Done(Err(PlanError::Account(error))) => {
-            return Outcome::Transient(failure(
-                SyncFailureCode::Storage,
-                Some(error.message),
-                true,
-            ));
-        }
-        Access::Closed => return Outcome::Gone,
-        Access::Failed => return Outcome::Transient(failure(SyncFailureCode::Storage, None, true)),
+        Ok(Err(PlanError::Account(error))) => return from_sync_error(error.into()),
+        Err(error) => return from_sync_error(error),
     };
-
+    if plan.mailbox_source_id != token.source {
+        return Outcome::Gone;
+    }
+    let id = token.account_id.clone();
+    let source = token.source.clone();
+    let cached = match with_store(shared, token, move |service| {
+        service.sync_folders(&id, &source)
+    })
+    .await
+    {
+        Ok(targets) => targets,
+        Err(error) => return from_sync_error(error),
+    };
+    shared.reconcile_targets(token, &cached, false);
     let mut session = match imap::open_session(&plan.route, &plan.login).await {
         Ok(session) => session,
         Err(error) => return classify(error),
     };
-    let result: Result<(), SyncError> = async {
-        if folders_due(*last_folder_refresh) {
+    let listed = folders_due(*last_folder_refresh);
+    if listed {
+        let result = async {
             let remote = session.list_folders().await?;
             let records = folders::interpret(&remote);
-            let id = account_id.to_owned();
-            let source = plan.mailbox_source_id.clone();
-            if !with_store(shared, move |service| {
+            let id = token.account_id.clone();
+            let source = token.source.clone();
+            if !with_store(shared, token, move |service| {
                 service.store_folders(&id, &source, &records)
             })
             .await?
             {
                 return Err(SyncError::Stale);
             }
-            *last_folder_refresh = Some(Instant::now());
+            Ok(())
         }
-        messages::sync_inboxes(shared, account_id, &plan.mailbox_source_id, &mut session).await
+        .await;
+        if let Err(error) = result {
+            return from_sync_error(error);
+        }
+        *last_folder_refresh = Some(Instant::now());
     }
-    .await;
-    // Failed or timed-out sessions are dropped immediately. Only a fully
-    // synchronized session is still known to be safe for a final LOGOUT.
-    if result.is_ok() {
+    let id = token.account_id.clone();
+    let source = token.source.clone();
+    let targets = match with_store(shared, token, move |service| {
+        service.sync_folders(&id, &source)
+    })
+    .await
+    {
+        Ok(targets) => targets,
+        Err(error) => return from_sync_error(error),
+    };
+    shared.reconcile_targets(token, &targets, listed);
+    sync_targets(shared, token, targets, session, || {
+        imap::open_session(&plan.route, &plan.login)
+    })
+    .await
+}
+
+/// Each target is attempted once per round. A poisoned session is dropped,
+/// then reconnects (with bounded exponential backoff) resume at the next target.
+/// Persistent account outages retain that position rather than restarting INBOX.
+async fn sync_targets<F, Fut>(
+    shared: &Arc<Shared>,
+    token: &WorkerToken,
+    targets: Vec<(String, String)>,
+    session: Session,
+    mut connect: F,
+) -> Outcome
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Session, ImapError>>,
+{
+    let mut session = Some(session);
+    let mut reconnect_failures = 0u32;
+    let mut failed = None;
+    for (folder_id, remote_name) in targets {
+        while session.is_none() {
+            tokio::time::sleep(backoff(reconnect_failures.saturating_sub(1))).await;
+            match connect().await {
+                Ok(connected) => {
+                    session = Some(connected);
+                    shared.update(token, |state| {
+                        state.phase = SyncPhase::Syncing;
+                        state.failure = failed.clone();
+                    });
+                }
+                Err(error) => match classify(error) {
+                    Outcome::Transient(failure) => {
+                        reconnect_failures = reconnect_failures.saturating_add(1);
+                        shared.update(token, |state| {
+                            state.phase = SyncPhase::Failed;
+                            state.failure = Some(failure);
+                        });
+                    }
+                    outcome => return outcome,
+                },
+            }
+        }
+        shared.folder_update(token, &folder_id, |folder| {
+            folder.phase = FolderSyncPhase::Syncing;
+            folder.failure = None;
+        });
+        let result = messages::sync_folder(
+            shared,
+            token,
+            &folder_id,
+            &remote_name,
+            session.as_mut().expect("connected session"),
+        )
+        .await;
+        match result {
+            Ok(()) => {
+                reconnect_failures = 0;
+                shared.folder_update(token, &folder_id, |folder| {
+                    folder.phase = FolderSyncPhase::Idle;
+                    folder.last_synced_at = Some(
+                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    );
+                    folder.failure = None;
+                    folder.data_revision = folder.data_revision.saturating_add(1);
+                });
+            }
+            Err(SyncError::Imap(error)) => {
+                let usable = error.session_usable();
+                let failure = match classify(error) {
+                    Outcome::Transient(failure) => failure,
+                    outcome => return outcome,
+                };
+                shared.folder_update(token, &folder_id, |folder| {
+                    folder.phase = FolderSyncPhase::Failed;
+                    folder.failure = Some(failure.clone());
+                    folder.data_revision = folder.data_revision.saturating_add(1);
+                });
+                failed.get_or_insert(failure);
+                if !usable {
+                    session = None;
+                    reconnect_failures = reconnect_failures.saturating_add(1);
+                }
+            }
+            Err(error) => {
+                if let SyncError::Storage(error) = &error {
+                    let failure =
+                        failure(SyncFailureCode::Storage, Some(error.message.clone()), true);
+                    shared.folder_update(token, &folder_id, |folder| {
+                        folder.phase = FolderSyncPhase::Failed;
+                        folder.failure = Some(failure);
+                        folder.data_revision = folder.data_revision.saturating_add(1);
+                    });
+                }
+                return from_sync_error(error);
+            }
+        }
+    }
+    if let Some(session) = session {
         let _ = session.logout().await;
     }
-    match result {
-        Ok(()) => Outcome::Synced,
-        Err(SyncError::Imap(error)) => classify(error),
-        Err(SyncError::Storage(error)) => {
+    failed.map_or(Outcome::Synced, Outcome::Partial)
+}
+
+fn from_sync_error(error: SyncError) -> Outcome {
+    match error {
+        SyncError::Imap(error) => classify(error),
+        SyncError::Storage(error) if error.code == ErrorCode::NotFound => Outcome::Gone,
+        SyncError::Storage(error) => {
             Outcome::Transient(failure(SyncFailureCode::Storage, Some(error.message), true))
         }
-        Err(SyncError::Stale | SyncError::Closed) => Outcome::Gone,
+        SyncError::Stale | SyncError::Closed => Outcome::Gone,
     }
 }
 
@@ -369,7 +640,7 @@ fn classify(error: ImapError) -> Outcome {
         ImapError::Net(NetError::Timeout) | ImapError::Timeout => {
             Outcome::Transient(failure(SyncFailureCode::Timeout, detail, true))
         }
-        ImapError::Protocol(_) => {
+        ImapError::Protocol(_) | ImapError::Mailbox(_) | ImapError::Rejected => {
             Outcome::Transient(failure(SyncFailureCode::Protocol, detail, true))
         }
     }
