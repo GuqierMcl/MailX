@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
@@ -91,6 +91,32 @@ describe('synced inbox headers', () => {
     expect(client.listFolders).toHaveBeenCalledTimes(2)
   })
 
+  it('refetches a cached list that changed while another mailbox was shown', async () => {
+    const { client, idle } = setup([email('before')])
+    render(<Workbench client={client} />)
+    await screen.findByText('邮件 before')
+    await userEvent.click(screen.getByRole('button', { name: '已发送' }))
+    await screen.findByRole('heading', { name: '已发送' })
+
+    // New inbox mail arrives while Sent is on screen.
+    client.listEmails.mockResolvedValue(page([email('after'), email('before')]))
+    idle()
+    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    expect(await screen.findByText('邮件 after')).toBeInTheDocument()
+  })
+
+  it('serves an unchanged mailbox from cache when switching back', async () => {
+    const { client } = setup([email('cached')])
+    render(<Workbench client={client} />)
+    await screen.findByText('邮件 cached')
+    await userEvent.click(screen.getByRole('button', { name: '已发送' }))
+    await screen.findByRole('heading', { name: '已发送' })
+    const calls = client.listEmails.mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    expect(screen.getByText('邮件 cached')).toBeInTheDocument()
+    expect(client.listEmails).toHaveBeenCalledTimes(calls)
+  })
+
   it('refreshes the first page and folders on idle without clearing the selected header or flashing skeletons', async () => {
     const selected = email('selected')
     const { client, idle } = setup([selected])
@@ -105,7 +131,8 @@ describe('synced inbox headers', () => {
     expect(screen.getByRole('heading', { name: selected.subject })).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: '正在加载邮件' })).not.toBeInTheDocument()
     await act(async () => refreshed.resolve(page([email('new'), { ...selected, isRead: true }])))
-    expect(rows()[1]).toHaveAttribute('aria-current', 'true')
+    // Query results reach components on the next notification tick.
+    await waitFor(() => expect(rows()[1]).toHaveAttribute('aria-current', 'true'))
     expect(within(rows()[1]).queryByLabelText('未读')).not.toBeInTheDocument()
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, limit: 100 }))
     // Folder reloads are coalesced, so they land shortly after the event.
@@ -380,7 +407,7 @@ describe('synced inbox headers', () => {
     expect(screen.queryByRole('heading', { name: selected.subject })).not.toBeInTheDocument()
     emit(exampleSyncState({ generation: 99, sequence: 99, folders: [exampleFolderSyncState('inbox', { dataRevision: 99 })] }))
     await act(async () => replacement.resolve(page([email('replacement')])))
-    expect(rows()).toHaveLength(1)
+    await waitFor(() => expect(rows()).toHaveLength(1))
     expect(rows()[0]).toHaveTextContent('邮件 replacement')
     expect(screen.queryByText(selected.subject)).not.toBeInTheDocument()
   })

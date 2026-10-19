@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
-import type { Account, AccountSyncState, EmailDetail, EmailListQuery, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { AccountSyncState } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
 import { EmailView } from './email-view'
 import { emailQuery } from './format'
@@ -17,77 +19,44 @@ import { MailSidebar } from './mail-sidebar'
 import { mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 
-type Loadable<T> = { data: T; loading: boolean; error: string | null }
-type EmailListState = Loadable<EmailSummary[]> & {
-  query: EmailListQuery | null
-  sourceIdentity: string
-  coverage: EmailPage['coverage'] | null
-  nextCursor: string | null
-  refreshing: boolean
-  loadingMore: boolean
-  loadMoreError: string | null
-}
-
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
+const PAGE_SIZE = 100
 
 export function Workbench({ client }: { client: MailxClient }) {
+  const queryClient = useQueryClient()
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
-  const [treeVersion, setTreeVersion] = useState(0)
-  const [tree, setTree] = useState<Loadable<{ accounts: Account[]; folders: Folder[] }>>({
-    data: { accounts: [], folders: [] },
-    loading: true,
-    error: null,
-  })
   const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
-  const [list, setList] = useState<EmailListState>({
-    data: [],
-    loading: true,
-    error: null,
-    query: null,
-    sourceIdentity: '',
-    coverage: null,
-    nextCursor: null,
-    refreshing: false,
-    loadingMore: false,
-    loadMoreError: null,
-  })
-  const listRequest = useRef(0)
-  const loadedPages = useRef<{ query: EmailListQuery | null; count: number }>({ query: null, count: 1 })
-  const listSource = useRef('')
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<Loadable<EmailDetail | null>>({ data: null, loading: false, error: null })
 
-  useEffect(() => {
-    let active = true
-    ;(async () => {
-      try {
-        const accounts = await client.listAccounts()
-        const folders = (await Promise.all(accounts.map((account) => client.listFolders(account.id)))).flat()
-        if (active) setTree({ data: { accounts, folders }, loading: false, error: null })
-      } catch (cause) {
-        if (active) setTree((current) => ({ ...current, loading: false, error: clientFailure(cause).message }))
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [client, treeVersion])
+  const tree = useQuery({
+    queryKey: mailKeys.tree(),
+    queryFn: async () => {
+      const accounts = await client.listAccounts()
+      const folders = (await Promise.all(accounts.map((account) => client.listFolders(account.id)))).flat()
+      return { accounts, folders }
+    },
+  })
+  const treeLoading = tree.isPending
+  const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
+  const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
 
-  const { accounts, folders } = tree.data
   // One sync round can change many folders; reload the tree once for the burst.
   // The timer outlives the subscription effect below: snapshots are already
   // updated when it is scheduled, so dropping it on re-subscribe would lose the reload.
   const treeReloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scheduleTreeReload = useCallback(() => {
     clearTimeout(treeReloadTimer.current)
-    treeReloadTimer.current = setTimeout(() => setTreeVersion((version) => version + 1), TREE_RELOAD_DELAY_MS)
-  }, [])
+    treeReloadTimer.current = setTimeout(
+      () => void queryClient.invalidateQueries({ queryKey: mailKeys.tree() }),
+      TREE_RELOAD_DELAY_MS,
+    )
+  }, [queryClient])
   useEffect(() => () => clearTimeout(treeReloadTimer.current), [])
 
   const accountIdentity = JSON.stringify(accounts.map(({ id, mailboxSourceId }) => [id, mailboxSourceId]).sort())
@@ -108,6 +77,10 @@ export function Workbench({ client }: { client: MailxClient }) {
       if (state.folderRevision !== (previousGeneration?.folderRevision ?? 0) ||
         state.folders.some((folder) => folder.dataRevision !== (previousGeneration?.folders.find((item) => item.folderId === folder.folderId)?.dataRevision ?? 0))) {
         scheduleTreeReload()
+        // Cached lists for other mailboxes may now be out of date. Mark them
+        // stale without refetching; each refetches when shown again. The list on
+        // screen refreshes through its own scope check below.
+        void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists(), refetchType: 'none' })
       }
     }
     const stop = client.onSyncState(apply)
@@ -119,7 +92,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       active = false
       stop()
     }
-  }, [client, accountIdentity, scheduleTreeReload])
+  }, [client, accountIdentity, scheduleTreeReload, queryClient])
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), SEARCH_DELAY_MS)
@@ -127,7 +100,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [search])
 
   const currentFolder = mailbox.kind === 'folder' ? folders.find((folder) => folder.id === mailbox.folder.id && folder.selectable) : null
-  const activeMailbox: Mailbox = mailbox.kind === 'folder' && !tree.loading
+  const activeMailbox: Mailbox = mailbox.kind === 'folder' && !treeLoading
     ? currentFolder ? { kind: 'folder', folder: currentFolder } : { kind: 'unified', role: 'inbox' }
     : mailbox
   const folderId = activeMailbox.kind === 'folder' ? activeMailbox.folder.id : null
@@ -151,120 +124,60 @@ export function Workbench({ client }: { client: MailxClient }) {
     folderRole,
     unread: filter === 'unread' ? true : null,
     text: query || null,
-    limit: 100,
+    limit: PAGE_SIZE,
   }), [folderId, folderRole, filter, query])
-  useEffect(() => {
-    if (tree.loading) return
-    const request = ++listRequest.current
-    const sameSource = listSource.current === sourceIdentity
-    if (!sameSource) {
-      listSource.current = sourceIdentity
-      setSelectedId(null)
-      setDetail({ data: null, loading: false, error: null })
-    }
-    const pageCount = sameSource && loadedPages.current.query === listQuery ? loadedPages.current.count : 1
-    loadedPages.current = { query: listQuery, count: pageCount }
-    setList((current) => ({
-      ...current,
-      data: sameSource && current.query === listQuery ? current.data : [],
-      loading: !sameSource || current.query !== listQuery,
-      refreshing: true,
-      loadingMore: false,
-      error: null,
-      loadMoreError: null,
-      query: listQuery,
-      sourceIdentity,
-    }))
-    const refresh = async () => {
-      let page = await client.listEmails(listQuery)
-      const items = [...page.items]
-      let count = 1
-      while (page.nextCursor && count < pageCount && request === listRequest.current) {
-        page = await client.listEmails({ ...listQuery, cursor: page.nextCursor })
-        items.push(...page.items)
-        count += 1
-      }
-      if (request === listRequest.current) loadedPages.current = { query: listQuery, count }
-      return { ...page, items: [...new Map(items.map((item) => [item.id, item])).values()] }
-    }
-    refresh().then(
-      (page) => {
-        if (request !== listRequest.current) return
-        setList({
-          data: page.items,
-          loading: false,
-          error: null,
-          query: listQuery,
-          sourceIdentity,
-          coverage: page.coverage,
-          nextCursor: page.nextCursor,
-          refreshing: false,
-          loadingMore: false,
-          loadMoreError: null,
-        })
-        setSelectedId((current) => page.items.some((email) => email.id === current) ? current : null)
-        setDetail((current) => {
-          const summary = page.items.find((email) => email.id === current.data?.summary.id)
-          return summary && current.data ? { ...current, data: { ...current.data, summary } } : current
-        })
-      },
-      (cause) => {
-        if (request !== listRequest.current) return
-        setList((current) => ({ ...current, loading: false, refreshing: false, error: clientFailure(cause).message }))
-      },
-    )
-    return () => {
-      // Invalidate both the first page and any outstanding pagination from this view.
-      listRequest.current += 1
-    }
-  }, [client, listQuery, scopeRevision, sourceIdentity, tree.loading])
+  const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
 
-  const loadMore = async () => {
-    if (!list.nextCursor || list.refreshing || list.loadingMore) return
-    const request = listRequest.current
-    setList((current) => ({ ...current, loadingMore: true, loadMoreError: null }))
-    try {
-      const page = await client.listEmails({ ...listQuery, cursor: list.nextCursor })
-      if (request !== listRequest.current) return
-      loadedPages.current.count += 1
-      setList((current) => {
-        const ids = new Set(current.data.map((email) => email.id))
-        return {
-          ...current,
-          data: [...current.data, ...page.items.filter((email) => !ids.has(email.id))],
-          coverage: page.coverage,
-          nextCursor: page.nextCursor,
-          loadingMore: false,
-        }
-      })
-    } catch (cause) {
-      if (request !== listRequest.current) return
-      setList((current) => ({ ...current, loadingMore: false, loadMoreError: clientFailure(cause).message }))
+  const list = useInfiniteQuery({
+    queryKey: listKey,
+    queryFn: ({ pageParam }) => client.listEmails({ ...listQuery, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.nextCursor,
+    enabled: !treeLoading,
+  })
+
+  // Only data in this view's folders refreshes it; a refetch reloads every
+  // page already shown, so scrolling position and "load more" progress survive.
+  const listedRevision = useRef({ key: listKey, revision: scopeRevision })
+  useEffect(() => {
+    const listed = listedRevision.current
+    listedRevision.current = { key: listKey, revision: scopeRevision }
+    if (listed.key === listKey && listed.revision !== scopeRevision) {
+      void queryClient.invalidateQueries({ queryKey: listKey, exact: true })
     }
+  }, [queryClient, listKey, scopeRevision])
+
+  const pages = list.data?.pages
+  const emails = useMemo(
+    () => [...new Map((pages ?? []).flatMap((page) => page.items).map((email) => [email.id, email])).values()],
+    [pages],
+  )
+  // A selection lasts only while the email is in the current list, so a
+  // refresh that drops it, a filter that hides it or a server change clears it.
+  const selected = selectedId && emails.some((email) => email.id === selectedId) ? selectedId : null
+
+  const detail = useQuery({
+    queryKey: mailKeys.email(selected ?? ''),
+    queryFn: () => client.getEmail(selected as string),
+    enabled: selected !== null,
+  })
+  // List refreshes carry the latest flags; show them without refetching the detail.
+  const listedSummary = emails.find((email) => email.id === selected)
+  const detailData = detail.data && listedSummary ? { ...detail.data, summary: listedSummary } : (detail.data ?? null)
+
+  const loadMore = () => {
+    if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
-
-  useEffect(() => {
-    if (!selectedId) return
-    let active = true
-    setDetail({ data: null, loading: true, error: null })
-    client.getEmail(selectedId).then(
-      (email) => active && setDetail({ data: email, loading: false, error: null }),
-      (cause) => active && setDetail({ data: null, loading: false, error: clientFailure(cause).message }),
-    )
-    return () => {
-      active = false
-    }
-  }, [client, selectedId])
 
   const dialog = (
     <SettingsDialog
       client={client}
       target={settings}
       onClose={() => setSettings(null)}
-      onAccountsChanged={() => setTreeVersion((version) => version + 1)}
+      onAccountsChanged={() => void queryClient.invalidateQueries({ queryKey: mailKeys.all })}
     />
   )
-  if (!tree.loading && !tree.error && accounts.length === 0) {
+  if (!treeLoading && !tree.isError && accounts.length === 0) {
     return (
       <>
         <NoAccounts onAddAccount={() => setSettings({ section: 'accounts', newAccount: true })} />
@@ -273,12 +186,11 @@ export function Workbench({ client }: { client: MailxClient }) {
     )
   }
   const showAccountBadges = activeMailbox.kind === 'unified' && accounts.length > 1
-  const currentView = list.sourceIdentity === sourceIdentity && list.query === listQuery
+  const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
 
   const selectMailbox = (next: Mailbox) => {
     setMailbox(next)
     setSelectedId(null)
-    setDetail({ data: null, loading: false, error: null })
   }
 
   return (
@@ -287,7 +199,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         <MailSidebar
           accounts={accounts}
           folders={folders}
-          loading={tree.loading}
+          loading={treeLoading}
           syncStates={currentSyncStates}
           mailbox={activeMailbox}
           onSelect={selectMailbox}
@@ -301,18 +213,18 @@ export function Workbench({ client }: { client: MailxClient }) {
             <ResizablePanel defaultSize="40" minSize={300}>
               <EmailList
                 title={mailboxTitle(activeMailbox)}
-                emails={currentView ? list.data : []}
+                emails={emails}
                 accounts={showAccountBadges ? accounts : null}
-                loading={!currentView || list.loading}
-                syncStatus={folderSyncStatus(scopedFolders, currentSyncStates, list.coverage?.windowCapped ?? false)}
-                hasMore={list.nextCursor !== null}
-                loadingMore={list.loadingMore}
-                refreshing={list.refreshing}
-                loadMoreError={list.loadMoreError}
-                error={tree.error ?? list.error}
+                loading={treeLoading || list.isPending}
+                syncStatus={folderSyncStatus(scopedFolders, currentSyncStates, pages?.at(-1)?.coverage.windowCapped ?? false)}
+                hasMore={list.hasNextPage}
+                loadingMore={list.isFetchingNextPage}
+                refreshing={list.isFetching && !list.isFetchingNextPage}
+                loadMoreError={list.isFetchNextPageError ? clientFailure(list.error).message : null}
+                error={tree.isError ? clientFailure(tree.error).message : firstPageError}
                 filter={filter}
                 search={search}
-                selectedId={currentView ? selectedId : null}
+                selectedId={selected}
                 onFilterChange={setFilter}
                 onSearchChange={setSearch}
                 onSelect={(email) => setSelectedId(email.id)}
@@ -321,7 +233,11 @@ export function Workbench({ client }: { client: MailxClient }) {
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize="60" minSize={360}>
-              <EmailView email={currentView && selectedId ? detail.data : null} loading={currentView && selectedId !== null && detail.loading} error={currentView && selectedId ? detail.error : null} />
+              <EmailView
+                email={selected ? detailData : null}
+                loading={selected !== null && detail.isPending}
+                error={selected && detail.isError ? clientFailure(detail.error).message : null}
+              />
             </ResizablePanel>
           </ResizablePanelGroup>
         </SidebarInset>
