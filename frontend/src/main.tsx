@@ -1,4 +1,5 @@
 import { StrictMode } from 'react'
+import { CSPProvider } from '@base-ui/react/csp-provider'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
@@ -9,6 +10,10 @@ applyTheme(storedTheme())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* The desktop CSP (style-src 'self') blocks the <style> tags Base UI would
+        inject to hide native scrollbars; index.css carries those rules instead. */}
+    <CSPProvider disableStyleElements>
+      <App />
+    </CSPProvider>
   </StrictMode>,
 )
