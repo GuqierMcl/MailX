@@ -20,7 +20,7 @@ async function visit(directory) {
         passed: report.assertions.filter((item) => item.passed).length,
         total: report.assertions.length, failure: report.failure,
         failures: report.assertions.filter((item) => !item.passed),
-        capabilities: report.capabilities, subscriptionDiagnostics: report.subscriptionDiagnostics,
+        capabilities: report.capabilities, subscriptionDiagnostics: report.subscriptionDiagnostics, lastObservation: report.lastObservation,
       };
       const severity = report.status === 'passed' ? 'notice' : 'error';
       console.log(`::${severity} title=Native WebView evidence::${escape(JSON.stringify(summary))}`);

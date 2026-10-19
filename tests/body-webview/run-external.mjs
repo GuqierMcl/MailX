@@ -56,10 +56,13 @@ function check(name, condition, detail) {
 async function until(operation, predicate, label, timeout = 30_000) {
   const deadline = Date.now() + timeout;
   let error;
+  let last;
   while (Date.now() < deadline) {
-    try { const value = await operation(); if (predicate(value)) return value; } catch (cause) { error = cause; }
+    try { last = await operation(); if (predicate(last)) return last; } catch (cause) { error = cause; }
     await delay(100);
   }
+  // Synthetic fixtures only: the last observation says which condition never held.
+  report.lastObservation = { label, value: last };
   throw new Error(`${label} timed out${error ? `: ${error.message}` : ''}`);
 }
 const frame = (snapshot) => snapshot.observations.at(-1);
