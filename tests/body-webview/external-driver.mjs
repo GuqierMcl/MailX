@@ -148,6 +148,14 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
 
     const execute = (script, ...args) => command('POST', `/session/${session}/execute/sync`, { script, args });
     const executeAsync = (script, ...args) => command('POST', `/session/${session}/execute/async`, { script, args });
+    // A frame whose scripts never run cannot deliver the callback; report that
+    // as an outcome so isolation assertions see the evidence instead of a hang.
+    const asyncProbe = async (script) => {
+      try { return await executeAsync(script); } catch (error) {
+        if (/script timeout/.test(error.message)) return 'callback-never-ran';
+        throw error;
+      }
+    };
     const top = () => command('POST', `/session/${session}/frame`, { id: null });
     const find = (selector) => command('POST', `/session/${session}/element`, { using: 'css selector', value: selector });
     async function inFrame(operation) {
@@ -184,13 +192,15 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
         // delivers an async-script callback (WebView2 timed out here). Decide
         // synchronously when invoke is absent; only an exposed invoke, itself
         // an isolation failure, is probed asynchronously.
-        snapshot.ipcProbe = snapshot.tauriInvokePresent ? await executeAsync(`
+        snapshot.ipcProbe = snapshot.tauriInvokePresent ? await asyncProbe(`
           const done=arguments[arguments.length-1];
           if (typeof window.__TAURI_INTERNALS__?.invoke!=='function') { done('unavailable'); return; }
           Promise.race([
             window.__TAURI_INTERNALS__.invoke('app_get_startup_status',{}).then(()=> 'unexpectedly-resolved',()=> 'denied'),
             new Promise(resolve=>setTimeout(()=>resolve('timed-out'),3000))
           ]).then(done,()=>done('probe-failed'));`) : 'unavailable';
+        snapshot.tauriInternalsKeys = snapshot.tauriInvokePresent
+          ? await execute('return Object.keys(window.__TAURI_INTERNALS__ ?? {}).sort();') : [];
         return snapshot;
       });
     }
