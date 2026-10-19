@@ -268,7 +268,8 @@ describe('synced inbox headers', () => {
     await screen.findByRole('list', { name: '邮件列表' })
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '邮件' } })
     await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '邮件' })))
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    // The search starts a new query; its first page renders a notification tick after the call.
+    await userEvent.click(await screen.findByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(103))
     await userEvent.click(rows()[102])
     await screen.findByRole('heading', { name: items[102].subject })
