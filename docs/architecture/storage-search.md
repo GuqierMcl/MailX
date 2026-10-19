@@ -31,9 +31,11 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | `folder_sync_cursors`（v3） | folder_id、uid_validity、window_start、window_capped、backfill_done、highest_uid、updated_at | folder_id 是主键，外键引用 folders 并级联删除；邮件批次和 highest_uid 在同一事务推进 |
 | `messages`（v3） | id、account_id、mailbox_source_id、folder_id、uid_validity、uid、message_id_header、subject、from_name、from_address、to_addresses、cc_addresses、reply_to_addresses、received_at、sent_at、size、is_read、is_flagged、flags、has_attachment、remote_state、updated_at | `UNIQUE(folder_id, uid_validity, uid)`；复合外键引用 folders 的 id / account_id / mailbox_source_id 并级联删除 |
 
+`folders.synced_at` 记录最后一次成功 STATUS 计数观测的时间；新发现且尚无计数的目录使用空串。LIST-only 更新保留旧计数和此时间，`Folder.countsKnown` 由可选目录且该时间非空派生，未知计数不能当成服务器真实零值。此调整不改写已应用迁移；既有版本存储可选目录前已完成 STATUS。
+
 以上为 `STRICT` 表；布尔字段使用 0 / 1 CHECK，`remote_state` 限定为三种值：
 
-- `present`：远端位置仍有效；只有所属账号的当前来源及文件夹游标的当前 UIDVALIDITY 才能查询到。
+- `present`：远端位置仍有效；只有所属账号的当前来源、可选文件夹及其游标的当前 UIDVALIDITY 才能查询到。
 - `deleted`：窗口内完整 UID SEARCH 成功后确认位置已不存在；保留本地行但不展示，不等同于只设置了服务端 `\Deleted` 标记。
 - `stale`：UIDVALIDITY 改变后失效的旧代际；保留本地行但不展示，不把旧 UID 套用到新邮件。
 
@@ -82,7 +84,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 `text` 去除首尾空白，对主题、发件人显示名和邮箱地址做参数化 LIKE 子串匹配；转义 `%`、`_` 和反斜杠，用户文本不作为 SQL 或搜索表达式。当前没有 FTS 索引，不搜索正文，也没有三字符最短限制。时间范围左闭右开，RFC 3339 参数先转为 UTC 毫秒格式。查询默认每页 50 条，上限 200；前端请求 100 条，按 `(receivedAt DESC, id DESC)` 游标分页并防抖搜索，丢弃过期响应。
 
-返回 `coverage { headersComplete, bodiesComplete, syncedAfter, syncedBefore }`：对账号 / 文件夹作用域内的全部当前文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。
+返回 `coverage { headersComplete, windowCapped, bodiesComplete, syncedAfter, syncedBefore }`：对账号 / 文件夹作用域内的全部当前可选文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。`windowCapped=true` 表示至少一个匹配目录的窗口超过本轮选取上限；coverage 不表达当前任务是否正在运行。
 
 完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要固定 `preview=""`、`bodyState=missing`、`pendingChanges=false`，详情 body 为 null、attachments 为空数组。
 

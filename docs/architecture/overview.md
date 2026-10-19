@@ -1,6 +1,6 @@
 # MailX 第一版架构
 
-状态：**部分 Implemented / 其余 Initial draft** · 2026-10-18。已建立 core、Tauri 宿主、shadcn 邮件工作台与设置弹窗，接通配置持久化、系统凭据库、账号路由及 IMAP 文件夹和收件箱邮件头同步。桌面端可分页查询缓存头部、搜索主题和发件人；正文、标记写回与发信尚未实现，真实服务商已有部分冒烟证据，完整兼容性仍待验证。下文区分当前能力与后续设想，所有设计仍可演化。
+状态：**部分 Implemented / 其余 Initial draft** · 2026-10-19。已建立 core、Tauri 宿主、shadcn 邮件工作台与设置弹窗，接通配置持久化、系统凭据库、账号路由及 IMAP 文件夹和所有可选目录的邮件头同步。桌面端可分页查询缓存头部、搜索主题和发件人；正文、标记写回与发信尚未实现，真实服务商已有部分冒烟证据，完整兼容性仍待验证。下文区分当前能力与后续设想，所有设计仍可演化。
 
 ## 1. 总体结构
 
@@ -33,11 +33,11 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 
 | 层 | 设计选择 | 实施约束 |
 | --- | --- | --- |
-| UI | React + TypeScript + Vite，已初始化 | 三栏工作台与设置弹窗；桌面通过 MailxClient 读取同步文件夹、收件箱头部、统一列表与分页，普通浏览器预览使用 mock；HTTP 留待后续 |
+| UI | React + TypeScript + Vite，已初始化 | 三栏工作台与设置弹窗；桌面通过 MailxClient 读取同步文件夹、各目录头部、统一列表与分页，普通浏览器预览使用 mock；HTTP 留待后续 |
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文隔离待实现 |
 | 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
-| 接收 / 发送 | `async-imap` 0.12 用于文件夹与收件箱头部同步；`lettre` 候选 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
+| 接收 / 发送 | `async-imap` 0.12 用于文件夹与各目录头部同步；`lettre` 候选 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 已用于头部；`ammonia` 候选 | 多字符集头部解码、BODYSTRUCTURE 附件标志；正文解析、HTML 净化与 iframe + CSP 待实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号、文件夹、邮件头与游标使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；头部使用参数化 LIKE 查询，FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
@@ -107,7 +107,7 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 
 当前账号配置链路为：shadcn 表单 → MailxClient → 受限 Tauri IPC → AccountService → SecretStore 与 SQLite 更新恢复。保存配置的短事务不连接邮箱，成功后宿主启动或重启该账号的后台同步任务；完整模型与操作边界见[账号配置](account-configuration.md)。下列头部同步已实现，正文、发送与 AI 链路仍为后续设计。
 
-1. **同步（当前）**：账号配置 → 路由与认证 → `STATUS` / `EXAMINE` / `UID SEARCH` → 每批最多 200 封头部 → 短事务写入与游标推进 → `idle` 事件 → UI 重新查询。每 60 秒重新登录并对账收件箱，文件夹目录每 10 分钟刷新；不下载正文。
+1. **同步（当前）**：账号配置 → 路由与认证 → `STATUS` / `EXAMINE` / `UID SEARCH` → 每批最多 200 封头部 → 短事务写入与游标推进 → 逐目录数据版本事件 → UI 重新查询。账号之间并发且暂不设全局上限，账号内顺序对账所有可选文件夹；逐目录完成后提示 UI 查询，整轮后等待 60 秒，目录每 10 分钟到期刷新；不下载正文。
 2. **阅读（后续）**：缓存查询 → 缺失则创建获取任务 → MIME 解码 → 纯文本与净化 HTML → 隔离渲染。远程图片由受控资源加载器按单封授权处理。
 3. **发送**：本地草稿 → 用户检查完整收件人与附件 → 固化版本与 MIME → 单个队列项 → SMTP → 记录 accepted / failed / unknown。网络不确定时不自动重发。
 4. **AI**：用户选定内容与模型 → 披露策略检查 → 后端请求模型 → 流式展示 → 保存建议或新草稿。建议不直接变成已发送邮件。

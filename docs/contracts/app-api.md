@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、文件夹、同步状态与邮件头读取接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-18。桌面通过受限 Tauri IPC 读取本地邮件头；HTTP、MCP、连接测试、正文下载和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、文件夹、同步状态与邮件头读取接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-19。桌面通过受限 Tauri IPC 读取本地邮件头；HTTP、MCP、连接测试、正文下载和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -73,6 +73,7 @@ type EmailPage = {
   nextCursor: string | null;
   coverage: {
     headersComplete: boolean;
+    windowCapped: boolean;
     bodiesComplete: boolean;
     syncedAfter: string | null;
     syncedBefore: string | null;
@@ -82,13 +83,14 @@ type EmailPage = {
 
 `EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、pendingChanges。当前 `preview=""`、`bodyState="missing"`、`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
 
-`coverage` 按查询的账号 / 文件夹作用域汇总当前文件夹游标：
+`coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
 
 - 至少有一个匹配文件夹，且每个都存在游标、`backfill_done=1`、`window_capped=0` 时，`headersComplete=true`。任一文件夹尚未同步、抓取未完成或窗口超过 1,000 封上限时为 false；不存在匹配文件夹时同样为 false。
 - `syncedAfter` 是这些游标中最晚的固定 `window_start`，格式为 UTC 日期 `YYYY-MM-DD`；无游标时为 null。起点是各文件夹首次同步或代际切换当日减 30 天，之后不每日滚动。
+- `windowCapped=true` 表示至少一个匹配目录达到每轮 1,000 封选取上限；它与是否仍在同步分别表达。
 - `syncedBefore=null`、`bodiesComplete=false`。头部完整性只声明同步窗口，不表示整箱历史完整；文本、未读、附件与时间筛选不改变参与计算的文件夹范围。查询窗口之前的历史时，必须结合 `syncedAfter` 解读结果。
 
-前端列表空且收件箱覆盖未完成时显示“正在同步邮件…”；其他空文件夹显示“当前版本只同步收件箱”；完整的空收件箱显示“这里还没有邮件”，搜索和未读筛选保留各自空提示。同步 `idle` 刷新第一页期间保留列表与选择；选中邮件不在新第一页中才取消选择。“加载更多”追加游标页，切换查询或刷新后丢弃旧请求结果。
+任意可选文件夹使用相同的列表、搜索、未读筛选及分页。空状态依据实际目录同步状态区分等待、同步、失败和成功空目录；覆盖数量受限单独提示，不能从 `headersComplete=false` 推断正在同步。搜索和未读筛选保留各自空提示，详情保持“正文尚未下载”。相关目录数据版本变化后刷新已加载结果并保留仍有效的选中；无关目录通知不重置当前分页。切换查询后丢弃旧请求结果。
 
 ### 详情与错误
 
@@ -128,10 +130,18 @@ type EmailPage = {
 
 | 命令与参数 | 结果 |
 | --- | --- |
-| `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）与未读 / 总数 |
-| `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt` 与 `failure` |
+| `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）、`countsKnown` 与未读 / 总数；countsKnown=false 时计数未知 |
+| `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt`、`failure`、来源 / 运行版本和每目录状态 |
 
-状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷为单个 `AccountSyncState`；事件只提示前端重新查询；`idle` 后工作台刷新文件夹与当前邮件列表第一页，事件本身不携带邮件内容，存储中的缓存仍是读取依据。`failure.willRetry` 为 `false` 时（登录被拒、凭证需重新确认或缺失、服务器不支持所需功能）后台不再重试，直到账号配置被修改，以免错误密码反复登录导致账号被锁。账号创建或修改后，宿主重启该账号的同步任务，旧服务器、路由或凭证下建立的连接不会继续使用。
+状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷仍是单个 `AccountSyncState`，`sync_states` 返回同形状快照：
+
+- `mailboxSourceId`：当前邮箱来源；`generation`：本进程内账号 worker 重启版本；`sequence`：本代任务内递增的状态版本。前端按当前账号来源及版本拒绝旧快照，包括初始查询与事件的竞态。
+- `folderRevision`：成功提交目录列表后的版本；`folders` 为当前可选目录的状态快照。
+- 每个 `FolderSyncState` 包含 `folderId`、`phase`（waiting / syncing / idle / failed）、`lastSyncedAt`、`failure` 和 `dataRevision`。目录数据提交后递增版本，前端仅刷新相关查询及目录计数；统一收件箱只响应 inbox，消息内容仍从本地缓存查询。
+- 目录状态与数据 coverage 各有职责：同步失败保留已有缓存；`windowCapped` 说明窗口超限；尚未获得 STATUS 的计数用 `countsKnown=false` 表示。
+- 账号 `lastSyncedAt` 仅在整轮全部成功时推进；局部目录失败不得宣称账号整轮成功。目录状态为运行态，重启后重建；窗口、邮件和最后已知计数仍持久化。
+
+`failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改；单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
 
 ### 后续应用操作草案
 
