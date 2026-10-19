@@ -28,7 +28,10 @@ if (mode === 'build') {
   await writeFile(configuration, JSON.stringify({
     productName: 'MailX Body WebView Test',
     identifier: 'dev.mailx.body-webview-test',
-    build: { beforeBuildCommand: null, beforeDevCommand: null, devUrl: null, frontendDist: resolve(root, 'tests/body-webview/assets') },
+    // Relative to desktop/, like production's "../frontend/dist". An absolute
+    // Windows path such as D:\a\... parses as a URL with scheme "d" (Tauri tries
+    // FrontendDist::Url first), so the app opened the folder as a file:// page.
+    build: { beforeBuildCommand: null, beforeDevCommand: null, devUrl: null, frontendDist: '../tests/body-webview/assets' },
     app: { security: { csp: original.app.security.csp } },
     bundle: { active: false },
   }));
