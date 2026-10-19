@@ -29,8 +29,9 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
   const [port, nativePort, embeddedPort] = await Promise.all([freePort(), freePort(), freePort()]);
   if (new Set([port, nativePort, embeddedPort]).size !== 3) throw new Error('Driver port allocation collided; retry the test.');
   const windows = process.platform === 'win32';
-  // Match tauri-driver's WebView2 capabilities while preserving Microsoft's
-  // native session-start diagnostics, including failures before a session exists.
+  // Preserve Microsoft's native diagnostics. On Windows, launch the synthetic
+  // app ourselves and attach to its explicit loopback debugging port: the
+  // driver's launch mode could not discover this app's DevToolsActivePort file.
   const args = windows ? [`--port=${port}`, '--verbose', ...(nativeLog ? [`--log-path=${nativeLog}`] : [])]
     : ['--port', String(port), '--native-port', String(nativePort)];
   if (!windows && nativeDriver) args.push('--native-driver', nativeDriver);
@@ -44,6 +45,8 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
   child.on('error', (error) => { spawnError = error; });
   const origin = `http://127.0.0.1:${port}`;
   let session;
+  let application;
+  let applicationError;
 
   async function command(method, path, body, timeout = 30_000) {
     if (spawnError) throw spawnError;
@@ -68,6 +71,7 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
       session = undefined;
     }
     child.kill();
+    application?.kill();
     // Delete the session before terminating this driver. Never issue a broad
     // browser-process kill, which could affect the user's own sessions.
   }
@@ -83,9 +87,35 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
       await delay(100);
     }
     if (!ready) throw new Error('Native WebDriver startup timed out.');
+    if (windows) {
+      application = spawn(binary, [], {
+        cwd, stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env, ...env,
+          WEBVIEW2_USER_DATA_FOLDER: resolve(env.MAILX_BODY_WEBVIEW_ROOT, 'webview'),
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${nativePort} --remote-debugging-address=127.0.0.1`,
+        },
+      });
+      application.stdout.on('data', (data) => onLog(`[synthetic app stdout] ${data}`));
+      application.stderr.on('data', (data) => onLog(`[synthetic app stderr] ${data}`));
+      application.on('error', (error) => { applicationError = error; });
+      const debugDeadline = Date.now() + 60_000;
+      let debuggingReady = false;
+      while (Date.now() < debugDeadline) {
+        if (applicationError) throw applicationError;
+        if (application.exitCode !== null) throw new Error(`Synthetic WebView2 app exited with code ${application.exitCode}.`);
+        try {
+          const response = await fetch(`http://127.0.0.1:${nativePort}/json/version`, { signal: AbortSignal.timeout(2_000) });
+          debuggingReady = response.ok && Boolean((await response.json()).webSocketDebuggerUrl);
+        } catch { /* WebView2 initialization */ }
+        if (debuggingReady) break;
+        await delay(100);
+      }
+      if (!debuggingReady) throw new Error('Synthetic WebView2 debugging endpoint did not become ready.');
+    }
     const created = await command('POST', '/session', {
       capabilities: { alwaysMatch: {
-        ...(windows ? { browserName: 'webview2', 'ms:edgeChromium': true, 'ms:edgeOptions': { binary, args: [] } }
+        ...(windows ? { browserName: 'webview2', 'ms:edgeChromium': true, 'ms:edgeOptions': { debuggerAddress: `127.0.0.1:${nativePort}` } }
           : { 'tauri:options': { application: binary } }),
         pageLoadStrategy: 'normal',
       } },

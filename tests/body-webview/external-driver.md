@@ -36,9 +36,14 @@ Windows uses the corresponding `win32-external` directory.
 ## Windows CI
 
 Use the existing `windows-2025` runner's interactive desktop and WebView2 Runtime.
-The adapter starts Microsoft Edge WebDriver directly with the same WebView2
-capabilities used by tauri-driver, preserving verbose native-driver logs even
-when session creation fails. The embedded macOS driver is not initialized.
+The adapter starts Microsoft Edge WebDriver directly, preserving verbose
+native-driver logs even when session creation fails. Its launch mode failed to
+discover `DevToolsActivePort` before any assertions ran. The adapter now uses
+Microsoft's documented attach approach: it launches only the synthetic test app,
+captures that process's output, and attaches through a dynamically allocated
+loopback debugging port. The WebView2 profile stays under the synthetic test
+root. These process-local test options do not alter the production application,
+sandbox or CSP. The embedded macOS driver is not initialized.
 Install a driver matching that Runtime, rather than matching Microsoft Edge:
 
 ```powershell
@@ -58,8 +63,8 @@ machine registry settings.
 
 The existing test runner creates the loopback canary, random nonce, and temporary
 root containing `.mailx-synthetic-webview-test`. Pass those through `env`; the
-adapter launches the application through the driver, so do not separately spawn
-the application for this route.
+adapter owns application startup (directly on Windows, through the driver on
+Linux), so do not separately spawn the application for this route.
 
 ```js
 import { startExternalDriver } from '../tests/body-webview/external-driver.mjs';
