@@ -5,6 +5,7 @@ export type FolderNode = {
   children: FolderNode[]
   /** Unread count of this folder and every descendant, shown when it is collapsed. */
   unreadWithChildren: number
+  countsKnown: boolean
 }
 
 const ROLE_ORDER: FolderRole[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash', 'other']
@@ -33,7 +34,8 @@ export function buildFolderTree(folders: Folder[]): FolderNode[] {
       return {
         folder,
         children,
-        unreadWithChildren: folder.unreadCount + children.reduce((total, child) => total + child.unreadWithChildren, 0),
+        unreadWithChildren: (folder.selectable ? folder.unreadCount : 0) + children.reduce((total, child) => total + child.unreadWithChildren, 0),
+        countsKnown: (!folder.selectable || folder.countsKnown) && children.every((child) => child.countsKnown),
       }
     })
   return build(null)

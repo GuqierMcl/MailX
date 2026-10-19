@@ -40,7 +40,7 @@ export interface MailxClient {
   updateAccount(request: UpdateAccountRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
-  /** Hears each account's sync state change; returns an unsubscribe function. */
+  /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>

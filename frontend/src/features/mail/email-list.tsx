@@ -14,13 +14,19 @@ import { displayName, formatListTime } from './format'
 
 export type ListFilter = 'all' | 'unread'
 
+export type ListSyncStatus = {
+  phase: 'waiting' | 'syncing' | 'idle' | 'failed'
+  failure: string | null
+  windowCapped: boolean
+}
+
 type EmailListProps = {
   title: string
   emails: EmailSummary[]
   /** Shown as a badge on each row when the list spans several accounts. */
   accounts: Account[] | null
   loading: boolean
-  emptyState: 'syncing' | 'unsupported' | 'empty'
+  syncStatus: ListSyncStatus
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
@@ -72,7 +78,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, emptyState, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, loadMoreError, onLoadMore }: EmailListProps) {
   if (loading && emails.length === 0) {
     return (
       <div className="flex flex-col gap-2 px-3" role="status" aria-label="正在加载邮件">
@@ -92,15 +98,28 @@ function EmailRows({ emails, accounts, loading, emptyState, error, filter, searc
       </Empty>
     )
   }
-  if (emails.length === 0 && emptyState !== 'empty') {
+  const syncTitle = {
+    waiting: '等待同步邮件…',
+    syncing: '正在同步邮件…',
+    failed: '邮件同步失败',
+    idle: '这里还没有邮件',
+  }[syncStatus.phase]
+  const syncDescription = syncStatus.phase === 'failed'
+    ? syncStatus.failure ?? '稍后会自动重试，已有邮件仍可查看。'
+    : syncStatus.phase === 'waiting'
+      ? '轮到这个文件夹时会自动同步。'
+      : '邮件头同步后会显示在这里。'
+  const filtered = Boolean(search) || filter === 'unread'
+  if (emails.length === 0 && !filtered) {
     return (
       <Empty>
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <HugeiconsIcon icon={InboxIcon} />
           </EmptyMedia>
-          <EmptyTitle>{emptyState === 'syncing' ? '正在同步邮件…' : '当前版本只同步收件箱'}</EmptyTitle>
-          <EmptyDescription>{emptyState === 'syncing' ? '邮件头同步后会显示在这里。' : '请切换到收件箱查看邮件。'}</EmptyDescription>
+          <EmptyTitle>{syncTitle}</EmptyTitle>
+          <EmptyDescription>{syncDescription}</EmptyDescription>
+          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
@@ -114,12 +133,20 @@ function EmailRows({ emails, accounts, loading, emptyState, error, filter, searc
           </EmptyMedia>
           <EmptyTitle>{search ? '没有匹配的邮件' : filter === 'unread' ? '没有未读邮件' : '这里还没有邮件'}</EmptyTitle>
           <EmptyDescription>{search ? '换个关键词试试。' : '新邮件同步后会显示在这里。'}</EmptyDescription>
+          {syncStatus.phase !== 'idle' && <EmptyDescription>{syncTitle} {syncDescription}</EmptyDescription>}
+          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
   }
   return (
     <ScrollArea className="min-h-0 flex-1">
+      {(syncStatus.phase !== 'idle' || syncStatus.windowCapped) && (
+        <div role="status" aria-label="邮件同步状态" className="space-y-1 px-3 pb-3 text-xs text-muted-foreground">
+          {syncStatus.phase !== 'idle' && <p>{syncTitle} {syncStatus.phase === 'failed' && syncDescription}</p>}
+          {syncStatus.windowCapped && <p>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</p>}
+        </div>
+      )}
       <div role="list" aria-label="邮件列表" className="flex flex-col gap-2 px-3 pb-3">
         {emails.map((email) => (
           <EmailRow

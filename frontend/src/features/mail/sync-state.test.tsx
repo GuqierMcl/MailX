@@ -2,13 +2,13 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, Folder } from '@/generated/accounts'
-import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
+import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Workbench } from './workbench'
 
 const account = exampleAccount()
 
 function folder(id: string, overrides: Partial<Folder> = {}): Folder {
-  return { id, accountId: account.id, parentId: null, name: id, role: 'other', selectable: true, unreadCount: 0, totalCount: 0, ...overrides }
+  return { id, accountId: account.id, parentId: null, name: id, role: 'other', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, ...overrides }
 }
 
 function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
@@ -16,7 +16,7 @@ function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
   let emit: (state: AccountSyncState) => void = () => undefined
   client.listFolders.mockResolvedValue(folders)
   client.listSyncStates.mockResolvedValue(states)
-  client.listEmails.mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null } })
+  client.listEmails.mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null, windowCapped: false } })
   client.onSyncState.mockImplementation((listener) => {
     emit = listener
     return () => undefined
@@ -24,12 +24,12 @@ function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
   return { client, emit: (state: AccountSyncState) => act(() => emit(state)) }
 }
 
-const failed: AccountSyncState = {
+const failed: AccountSyncState = exampleSyncState({
   accountId: account.id,
   phase: 'failed',
   lastSyncedAt: null,
   failure: { code: 'authentication', message: '服务器拒绝了登录，请检查用户名和密码或授权码。', detail: 'login rejected: Invalid credentials', willRetry: false },
-}
+})
 
 describe('folder sync in the workbench', () => {
   it('shows server folders under their system names', async () => {
@@ -47,7 +47,7 @@ describe('folder sync in the workbench', () => {
     expect(await screen.findByText('正在同步文件夹…')).toBeInTheDocument()
 
     client.listFolders.mockResolvedValue([folder('INBOX', { role: 'inbox', unreadCount: 2 })])
-    emit({ accountId: account.id, phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null })
+    emit(exampleSyncState({ folderRevision: 1, folders: [exampleFolderSyncState('INBOX')] }))
     expect(await screen.findByRole('button', { name: '收件箱' })).toBeInTheDocument()
     expect(screen.queryByText('正在同步文件夹…')).not.toBeInTheDocument()
   })
@@ -63,9 +63,18 @@ describe('folder sync in the workbench', () => {
   })
 
   it('tells the user inbox headers are syncing', async () => {
-    const { client } = desktopLike([folder('INBOX', { role: 'inbox' })])
+    const { client } = desktopLike([folder('INBOX', { role: 'inbox' })], [exampleSyncState({ phase: 'syncing', folders: [exampleFolderSyncState('INBOX', { phase: 'syncing' })] })])
     render(<Workbench client={client} />)
     expect(await screen.findByText('正在同步邮件…')).toBeInTheDocument()
     await waitFor(() => expect(client.listEmails).toHaveBeenCalled())
+  })
+
+  it('shows unknown counts instead of a verified zero', async () => {
+    const { client } = desktopLike([folder('INBOX', { role: 'inbox', countsKnown: false }), folder('Unknown', { countsKnown: false })])
+    render(<Workbench client={client} />)
+    await screen.findByRole('button', { name: 'Unknown' })
+    const count = screen.getByRole('button', { name: 'Unknown' }).closest('li')!.querySelector('[aria-label="未读数待刷新"]')
+    expect(count).toHaveTextContent('—')
+    expect(count).not.toHaveTextContent('0')
   })
 })

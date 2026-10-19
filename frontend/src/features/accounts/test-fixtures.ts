@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { Account } from '@/generated/accounts'
+import type { Account, AccountSyncState, FolderSyncState } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { MailxClient } from '@/lib/mailx-client'
 
@@ -15,6 +15,17 @@ export function exampleAccount(overrides: Partial<Account> = {}): Account {
   }
 }
 
+export function exampleFolderSyncState(folderId: string, overrides: Partial<FolderSyncState> = {}): FolderSyncState {
+  return { folderId, phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, dataRevision: 0, ...overrides }
+}
+
+export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): AccountSyncState {
+  return {
+    accountId: exampleAccount().id, mailboxSourceId: 'source-a', generation: 1, sequence: 1, folderRevision: 0,
+    phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, folders: [], ...overrides,
+  }
+}
+
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
   return {
     available: true,
@@ -25,9 +36,9 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
     updateAccount: vi.fn<MailxClient['updateAccount']>().mockResolvedValue(exampleAccount({ revision: 4 })),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
-    listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue([]),
+    listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
-    listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null } }),
+    listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
   }
 }

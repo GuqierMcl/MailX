@@ -69,9 +69,9 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
     saveCollapsed(next)
   }
 
-  const unifiedUnread = folders
-    .filter((folder) => folder.role === 'inbox')
-    .reduce((total, folder) => total + folder.unreadCount, 0)
+  const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
+  const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
+  const unifiedCountsKnown = inboxes.every((folder) => folder.countsKnown)
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
 
   return (
@@ -95,7 +95,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                   <HugeiconsIcon icon={InboxIcon} />
                   <span>全部收件箱</span>
                 </SidebarMenuButton>
-                {unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
+                {!unifiedCountsKnown ? <SidebarMenuBadge aria-label="未读数待刷新">—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
@@ -113,6 +113,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
               {accounts.map((account) => {
                 const tree = buildFolderTree(folders.filter((folder) => folder.accountId === account.id))
                 const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
+                const countsKnown = tree.every((node) => node.countsKnown)
                 const open = !collapsed.has(account.id)
                 const sync = syncStates[account.id]
                 return (
@@ -128,14 +129,14 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
-                    {unread > 0 && <SidebarMenuBadge className={cn(sync?.failure && 'right-7')}>{unread}</SidebarMenuBadge>}
+                    {(!countsKnown || unread > 0) && <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(sync?.failure && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>}
                     {sync?.failure && <SyncFailureAction failure={sync.failure} />}
                     <CollapsibleContent>
                       <SidebarMenuSub>
                         {tree.length === 0 && (
                           <SidebarMenuItem>
                             <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
-                              {sync?.phase === 'failed' ? '暂无文件夹' : (
+                              {sync?.phase === 'failed' || sync?.phase === 'idle' ? '暂无文件夹' : (
                                 <>
                                   <Spinner className="size-3.5" aria-label="正在同步" />
                                   正在同步文件夹…
@@ -190,7 +191,8 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
   const hasChildren = children.length > 0
   const open = hasChildren && !collapsed.has(folder.id)
   // A collapsed parent carries its children's unread mail so nothing is hidden.
-  const unread = open || !hasChildren ? folder.unreadCount : node.unreadWithChildren
+  const unread = open || !hasChildren ? folder.selectable ? folder.unreadCount : 0 : node.unreadWithChildren
+  const countsKnown = open || !hasChildren ? !folder.selectable || folder.countsKnown : node.countsKnown
   const label = (
     <>
       <HugeiconsIcon icon={ROLE_ICONS[folder.role]} />
@@ -212,7 +214,7 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
         // IMAP \Noselect containers only group their children.
         <CollapsibleTrigger render={<SidebarMenuButton className="text-sidebar-foreground/70" />}>{label}</CollapsibleTrigger>
       )}
-      {unread > 0 && <SidebarMenuBadge className={cn(hasChildren && 'right-7')}>{unread}</SidebarMenuBadge>}
+      {(!countsKnown || unread > 0) && <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(hasChildren && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>}
       {hasChildren && (
         <>
           <CollapsibleTrigger render={<SidebarMenuAction aria-label={`${open ? '收起' : '展开'}${folderLabel(folder)}`} />}>
