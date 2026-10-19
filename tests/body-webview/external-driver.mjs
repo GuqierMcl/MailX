@@ -180,13 +180,17 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
             inlineImageLoaded:Boolean(image?.complete && image.naturalWidth>0), inlineImageWidth:image?.naturalWidth??0,
             linkRectangle:rect?{x:rect.x,y:rect.y,width:rect.width,height:rect.height}:null, linkHref:link?.href??null
           };`);
-        snapshot.ipcProbe = await executeAsync(`
+        // The body frame runs with scripts disabled, where Chromium never
+        // delivers an async-script callback (WebView2 timed out here). Decide
+        // synchronously when invoke is absent; only an exposed invoke, itself
+        // an isolation failure, is probed asynchronously.
+        snapshot.ipcProbe = snapshot.tauriInvokePresent ? await executeAsync(`
           const done=arguments[arguments.length-1];
           if (typeof window.__TAURI_INTERNALS__?.invoke!=='function') { done('unavailable'); return; }
           Promise.race([
             window.__TAURI_INTERNALS__.invoke('app_get_startup_status',{}).then(()=> 'unexpectedly-resolved',()=> 'denied'),
             new Promise(resolve=>setTimeout(()=>resolve('timed-out'),3000))
-          ]).then(done,()=>done('probe-failed'));`);
+          ]).then(done,()=>done('probe-failed'));`) : 'unavailable';
         return snapshot;
       });
     }
