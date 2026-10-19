@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountSyncState, EmailDetail, EmailListQuery, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
@@ -29,6 +29,7 @@ type EmailListState = Loadable<EmailSummary[]> & {
 }
 
 const SEARCH_DELAY_MS = 200
+const TREE_RELOAD_DELAY_MS = 250
 
 export function Workbench({ client }: { client: MailxClient }) {
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
@@ -79,6 +80,16 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [client, treeVersion])
 
   const { accounts, folders } = tree.data
+  // One sync round can change many folders; reload the tree once for the burst.
+  // The timer outlives the subscription effect below: snapshots are already
+  // updated when it is scheduled, so dropping it on re-subscribe would lose the reload.
+  const treeReloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scheduleTreeReload = useCallback(() => {
+    clearTimeout(treeReloadTimer.current)
+    treeReloadTimer.current = setTimeout(() => setTreeVersion((version) => version + 1), TREE_RELOAD_DELAY_MS)
+  }, [])
+  useEffect(() => () => clearTimeout(treeReloadTimer.current), [])
+
   const accountIdentity = JSON.stringify(accounts.map(({ id, mailboxSourceId }) => [id, mailboxSourceId]).sort())
   useEffect(() => {
     let active = true
@@ -96,7 +107,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       // Revision zero is the initial baseline, so an unchanged snapshot cannot loop.
       if (state.folderRevision !== (previousGeneration?.folderRevision ?? 0) ||
         state.folders.some((folder) => folder.dataRevision !== (previousGeneration?.folders.find((item) => item.folderId === folder.folderId)?.dataRevision ?? 0))) {
-        setTreeVersion((version) => version + 1)
+        scheduleTreeReload()
       }
     }
     const stop = client.onSyncState(apply)
@@ -108,7 +119,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       active = false
       stop()
     }
-  }, [client, accountIdentity])
+  }, [client, accountIdentity, scheduleTreeReload])
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), SEARCH_DELAY_MS)

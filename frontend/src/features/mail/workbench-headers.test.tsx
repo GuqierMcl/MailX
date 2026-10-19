@@ -72,6 +72,25 @@ describe('synced inbox headers', () => {
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
   })
 
+  it('reloads folders once for a burst of folder changes, and not at all when revisions stay put', async () => {
+    const { client, emit } = setup([email('one')])
+    render(<Workbench client={client} />)
+    await screen.findByRole('list', { name: '邮件列表' })
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(1))
+
+    // A round that changed nothing repeats the same revisions.
+    emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent')] }))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(client.listFolders).toHaveBeenCalledTimes(1)
+
+    for (const [sequence, revision] of [[3, 2], [4, 3], [5, 4]]) {
+      emit(exampleSyncState({ sequence, folders: [exampleFolderSyncState('inbox', { dataRevision: revision }), exampleFolderSyncState('sent', { dataRevision: revision })] }))
+    }
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(client.listFolders).toHaveBeenCalledTimes(2)
+  })
+
   it('refreshes the first page and folders on idle without clearing the selected header or flashing skeletons', async () => {
     const selected = email('selected')
     const { client, idle } = setup([selected])
@@ -89,7 +108,8 @@ describe('synced inbox headers', () => {
     expect(rows()[1]).toHaveAttribute('aria-current', 'true')
     expect(within(rows()[1]).queryByLabelText('未读')).not.toBeInTheDocument()
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, limit: 100 }))
-    expect(client.listFolders).toHaveBeenCalledTimes(2)
+    // Folder reloads are coalesced, so they land shortly after the event.
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
     expect(client.getEmail).toHaveBeenCalledTimes(1)
     expect(screen.getByText('正文尚未下载')).toBeInTheDocument()
   })
@@ -227,7 +247,7 @@ describe('synced inbox headers', () => {
     await screen.findByRole('heading', { name: items[102].subject })
     const calls = client.listEmails.mock.calls.length
     emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent', { dataRevision: 1 })] }))
-    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
     expect(client.listEmails).toHaveBeenCalledTimes(calls)
     expect(rows()).toHaveLength(103)
     expect(rows()[102]).toHaveAttribute('aria-current', 'true')
@@ -332,7 +352,7 @@ describe('synced inbox headers', () => {
     render(<Workbench client={client} />)
     await screen.findByRole('button', { name: 'Removed' })
     await screen.findByText('邮件 before-restart')
-    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
     client.listFolders.mockResolvedValue([inbox])
     client.listEmails.mockResolvedValue(page([email('after-restart')]))
     emit(exampleSyncState({
