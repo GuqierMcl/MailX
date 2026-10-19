@@ -55,10 +55,10 @@ Tauri 的信任边界和能力机制要求限制 WebView 对原生能力的访�
 
 处理链：原始 MIME → 有界解码 → 纯文本提取 → `ammonia` 白名单 HTML → 资源 URL 重写 → sandbox iframe。iframe 不启用 `allow-scripts`、`allow-same-origin`、表单、弹窗或顶层导航；正文内无脚本，无 Tauri bridge。应用 CSP 与正文 CSP 分开维护。
 
-- 删除 script、事件属性、form、object、embed、meta refresh、远程字体、CSS `url()` / `@import`、SVG 和其他主动内容。净化器是其中一层，不能替代沙箱。
+- 删除 script、事件属性、form、object、embed、meta refresh、远程字体、CSS `url()` / `@import`、SVG 和其他主动内容。CSS 属性与样式块结构化清理，处理转义和注释，保留安全排版；不能以危险子串过滤替代。净化器是其中一层，不能替代沙箱。
 - 默认 CSP `default-src 'none'`，仅允许处理后样式与由父应用生成的安全图片资源。禁止正文自行发起 fetch、加载原始外部 URL 或自动下载。
-- `cid:` 仅解析当前邮件的 MIME 附件，受大小和内容类型限制；图片先验证格式，不把任意附件当 HTML 加载。
-- 外链由应用接管，仅在用户交互后允许 http / https / mailto；显示目标地址，拒绝 javascript / file / 自定义系统协议。iframe 无脚本时，M0 必须验证各 WebView 的宿主导航拦截；不可用则将链接改为编号，在可信父界面列出可打开链接。
+- 按需正文的实施目标：`cid:` 仅解析当前可见邮件的 MIME 部分；协议资源绑定当前文档，改为其它邮件 id / CID 时拒绝。图片须验证真实的被动栅格格式与大小，拒绝 SVG、HTML、未知或伪造类型；单个内嵌资源最多 50 MiB。有限 `data:` 图片也先验证，仅保留完整地址不超过 1 MiB 的安全图片，不为此放开通用 data URL。
+- 外链由应用接管，仅在用户确认后允许 http / https / mailto；显示完整目标地址，宿主从数据库重新读取并校验索引，拒绝 javascript / file / 自定义系统协议。协议 GET 只产生确认请求，不能直接打开系统浏览器。iframe 无脚本时，必须在三平台真实 WebView 验证导航拦截与 204 行为；仅链接路径失败可以改用可信父界面编号链接。文档加载、脚本禁用或父应用 / IPC 隔离失败必须阻塞并修改渲染设计，编号链接不能替代安全边界。
 - 加载远程图片是逐封显式动作，通过 Rust 资源加载器取回后转为受控图片；不携带邮箱凭证、Cookie 或 Referer，设置大小与超时限制。该动作仍可能让发件人获知阅读行为。
 
 ## 6. 端点与 SSRF
