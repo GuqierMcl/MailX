@@ -1,7 +1,7 @@
 // Standard native WebDriver adapter for Linux WebKitGTK and Windows WebView2.
 // This is test instrumentation: frame selection happens in the native driver,
 // never by reading parent.contentWindow or changing an iframe's sandbox/CSP.
-import { access } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -90,11 +90,10 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
     if (windows) {
       application = spawn(binary, [], {
         cwd, stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env, ...env,
-          WEBVIEW2_USER_DATA_FOLDER: resolve(env.MAILX_BODY_WEBVIEW_ROOT, 'webview'),
-          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${nativePort} --remote-debugging-address=127.0.0.1`,
-        },
+        // The test binary passes this port to WebView2 through Tauri's builder
+        // and keeps the profile inside the synthetic root. Do not also set
+        // WEBVIEW2_* overrides, which merge with wry's own arguments.
+        env: { ...process.env, ...env, MAILX_BODY_WEBVIEW_DEBUG_PORT: String(nativePort) },
       });
       application.stdout.on('data', (data) => onLog(`[synthetic app stdout] ${data}`));
       application.stderr.on('data', (data) => onLog(`[synthetic app stderr] ${data}`));
@@ -115,14 +114,24 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
         // Inspect only this synthetic process and its direct children. Exclude
         // command lines/environment values; no user's browser is enumerated.
         if (Number.isInteger(application.pid)) {
+          // WMI's first query on a fresh runner can take well over 5 seconds.
           const snapshot = spawnSync('pwsh', ['-NoProfile', '-Command', `
             $testProcess = Get-Process -Id ${application.pid} -ErrorAction SilentlyContinue
             $testChildren = Get-CimInstance Win32_Process -Filter "ParentProcessId = ${application.pid}"
             @{ application = $testProcess | Select-Object Id, ProcessName, Responding, MainWindowTitle;
                children = @($testChildren | Select-Object ProcessId, Name) } | ConvertTo-Json -Compress -Depth 3
-          `], { encoding: 'utf8', timeout: 5_000 });
-          onLog(`[synthetic app process] ${snapshot.stdout ?? 'snapshot unavailable'}\n`);
+          `], { encoding: 'utf8', timeout: 30_000 });
+          const outcome = snapshot.error ? `failed: ${snapshot.error.message}` : `exit ${snapshot.status}`;
+          onLog(`[synthetic app process] ${outcome} ${snapshot.stdout?.trim() || '(no output)'} ${snapshot.stderr?.trim() ?? ''}\n`);
         }
+        // Names only, from the synthetic profile: whether WebView2 created the
+        // profile and wrote DevToolsActivePort tells which side failed.
+        const profile = resolve(env.MAILX_BODY_WEBVIEW_ROOT, 'webview');
+        let entries;
+        try { entries = (await readdir(profile)).sort().join(', ') || '(empty)'; } catch (error) { entries = `unreadable: ${error.code}`; }
+        let activePort = 'absent';
+        try { activePort = (await readFile(resolve(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]; } catch { /* absent */ }
+        onLog(`[synthetic WebView2 profile] entries: ${entries}; DevToolsActivePort: ${activePort}; expected port ${nativePort}\n`);
         throw new Error('Synthetic WebView2 debugging endpoint did not become ready.');
       }
     }

@@ -201,16 +201,42 @@ pub(crate) fn create_window(
     }
     let config = serde_json::json!({ "nonce": nonce, "documents": documents, "numberedLinks": cfg!(not(target_os = "windows")) });
     let bootstrap = format!("window.__MAILX_BODY_TEST_CONFIG={config};");
-    Ok(
-        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-            .title(TITLE)
-            .inner_size(900.0, 700.0)
-            .position(100.0, 100.0)
-            .decorations(false)
-            .resizable(false)
-            .initialization_script(bootstrap)
-            .build()?,
-    )
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title(TITLE)
+        .inner_size(900.0, 700.0)
+        .position(100.0, 100.0)
+        .decorations(false)
+        .resizable(false)
+        .initialization_script(bootstrap);
+    #[cfg(target_os = "windows")]
+    let builder = webview2_debugging(builder)?;
+    Ok(builder.build()?)
+}
+
+/// wry's defaults; `additional_browser_args` replaces them, so they are restated.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WRY_DEFAULT_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// Opens WebView2's loopback debugging port for the native WebDriver to attach.
+/// Set on the builder rather than through WEBVIEW2_* environment variables:
+/// wry always passes its own browser arguments and user data folder, and the
+/// environment overrides merged with them left the port closed on CI runners.
+/// The profile lives inside the synthetic root, so DevToolsActivePort is
+/// written where the harness looks for it.
+// Compiled everywhere so its types are checked on every CI platform.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn webview2_debugging<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> Result<WebviewWindowBuilder<'a, R, M>, Box<dyn std::error::Error>> {
+    let port: u16 = std::env::var("MAILX_BODY_WEBVIEW_DEBUG_PORT")?
+        .parse()
+        .map_err(|_| "invalid WebView2 debugging port")?;
+    Ok(builder
+        .data_directory(isolated_root()?.join("webview"))
+        .additional_browser_args(&format!(
+            "{WRY_DEFAULT_BROWSER_ARGS} --remote-debugging-port={port}"
+        )))
 }
 
 /// Call after the production handler has formed its response. Paths/tokens and
