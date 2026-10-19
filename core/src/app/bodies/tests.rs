@@ -107,6 +107,13 @@ async fn old_bindings_fail_after_every_visibility_or_account_identity_change() {
         let document = core.body_document(ids[0].clone()).await.unwrap();
         db.execute(mutation, []).unwrap();
         assert_missing(
+            core.body_links(ids[0].clone(), Some(document.binding.clone()))
+                .await,
+        );
+        if !mutation.starts_with("UPDATE accounts SET revision") {
+            assert_missing(core.body_links(ids[0].clone(), None).await);
+        }
+        assert_missing(
             core.body_part(document.binding.clone(), "logo".into())
                 .await,
         );
@@ -122,11 +129,16 @@ async fn replacement_raw_and_sanitizer_invalidate_existing_bindings() {
     let (raw, _image) = synthetic_mail([1, 2, 3], "bound", "logo");
     for mutation in [
         "UPDATE message_bodies SET raw_sha256 = printf('%064d', 0)",
+        "UPDATE message_bodies SET raw_size = raw_size + 1",
         "UPDATE message_bodies SET sanitizer_version = 0",
     ] {
         let (_directory, core, ids, db) = fixture(&[&raw]);
         let document = core.body_document(ids[0].clone()).await.unwrap();
         db.execute(mutation, []).unwrap();
+        assert_missing(
+            core.body_links(ids[0].clone(), Some(document.binding.clone()))
+                .await,
+        );
         assert_missing(
             core.body_part(document.binding.clone(), "logo".into())
                 .await,
@@ -142,7 +154,25 @@ async fn replacement_raw_and_sanitizer_invalidate_existing_bindings() {
 async fn old_sanitizer_rebuilds_from_local_mime_without_credentials_or_workers() {
     let (raw, expected_image) = synthetic_mail([32, 64, 128], "locally-rebuilt", "logo");
     let (_directory, core, ids, db) = fixture(&[&raw]);
-    db.execute("UPDATE message_bodies SET sanitizer_version = 0, sanitized_html = '<p>OLD_UNSAFE_CACHE</p>'", []).unwrap();
+    let old_binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    db.execute("UPDATE message_bodies SET sanitizer_version = 0, sanitized_html = '<p>OLD_UNSAFE_CACHE</p>', links = '[\"https://example.invalid/obsolete\"]'", []).unwrap();
+    assert_missing(core.body_links(ids[0].clone(), Some(old_binding)).await);
+    assert_eq!(
+        db.query_row("SELECT sanitizer_version FROM message_bodies", [], |row| {
+            row.get::<_, u32>(0)
+        })
+        .unwrap(),
+        0,
+        "a stale document binding must not rebuild and silently rebind"
+    );
+    let links = tokio::time::timeout(
+        Duration::from_secs(5),
+        core.body_links(ids[0].clone(), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(links.links, ["https://example.invalid/locally-rebuilt"]);
     let document = tokio::time::timeout(Duration::from_secs(5), core.body_document(ids[0].clone()))
         .await
         .unwrap()
@@ -171,6 +201,7 @@ async fn old_sanitizer_rebuilds_from_local_mime_without_credentials_or_workers()
 async fn non_ready_document_reads_cannot_start_a_network_fetch() {
     let (raw, _image) = synthetic_mail([1, 1, 1], "cache", "logo");
     let (_directory, core, ids, db) = fixture(&[&raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
     for state in ["missing", "fetching", "failed"] {
         db.execute("UPDATE messages SET body_state = ?1", [state])
             .unwrap();
@@ -179,6 +210,16 @@ async fn non_ready_document_reads_cannot_start_a_network_fetch() {
                 .await
                 .unwrap(),
         );
+        for binding in [None, Some(binding.clone())] {
+            assert_missing(
+                tokio::time::timeout(
+                    Duration::from_secs(1),
+                    core.body_links(ids[0].clone(), binding),
+                )
+                .await
+                .unwrap(),
+            );
+        }
         assert_eq!(
             db.query_row("SELECT body_state FROM messages", [], |row| row
                 .get::<_, String>(0))
@@ -188,6 +229,96 @@ async fn non_ready_document_reads_cannot_start_a_network_fetch() {
     }
     assert!(core.sync_states().is_empty());
     assert_missing(core.body_document(uuid::Uuid::new_v4().to_string()).await);
+    assert_missing(
+        core.body_links(uuid::Uuid::new_v4().to_string(), None)
+            .await,
+    );
+}
+
+#[tokio::test]
+async fn numbered_links_preserve_indices_without_loading_html() {
+    let (raw, _image) = synthetic_mail([3, 3, 3], "numbered", "logo");
+    let (_directory, core, ids, db) = fixture(&[&raw, &raw]);
+    let document = core.body_document(ids[0].clone()).await.unwrap();
+    let expected = [
+        "https://example.invalid/first",
+        "mailto:fixture@example.invalid",
+        "http://example.invalid/third",
+        "https://example.invalid/first",
+    ];
+    db.execute(
+        "UPDATE message_bodies SET sanitized_html = NULL, links = ?1 WHERE message_id = ?2",
+        params![serde_json::to_string(&expected).unwrap(), ids[0]],
+    )
+    .unwrap();
+    let links = core
+        .body_links(ids[0].clone(), Some(document.binding))
+        .await
+        .unwrap();
+    assert_eq!(links.links, expected);
+    assert_eq!(links.binding.email_id(), ids[0]);
+    assert_eq!(
+        core.body_links(ids[0].clone(), None).await.unwrap().links,
+        expected
+    );
+    assert_missing(core.body_document(ids[0].clone()).await);
+    assert_missing(
+        core.body_links(ids[1].clone(), Some(links.binding.clone()))
+            .await,
+    );
+    for (index, url) in expected.iter().enumerate() {
+        assert_eq!(
+            core.body_link(ids[0].clone(), index, Some(links.binding.clone()))
+                .await
+                .unwrap(),
+            *url
+        );
+    }
+    db.execute(
+        "UPDATE message_bodies SET links = '[]' WHERE message_id = ?1",
+        [&ids[0]],
+    )
+    .unwrap();
+    assert!(
+        core.body_links(ids[0].clone(), Some(links.binding))
+            .await
+            .unwrap()
+            .links
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn numbered_links_reject_invalid_members_without_renumbering() {
+    let (raw, _image) = synthetic_mail([4, 4, 4], "numbered", "logo");
+    let (_directory, core, ids, db) = fixture(&[&raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    for blocked in [
+        "javascript:alert(1)",
+        "file:///private",
+        "data:text/html,bad",
+        "mailx-body://localhost/link/other/0",
+    ] {
+        db.execute(
+            "UPDATE message_bodies SET links = ?1",
+            [serde_json::to_string(&[
+                "https://example.invalid/first",
+                blocked,
+                "https://example.invalid/third",
+            ])
+            .unwrap()],
+        )
+        .unwrap();
+        assert_missing(core.body_links(ids[0].clone(), None).await);
+        assert_missing(core.body_links(ids[0].clone(), Some(binding.clone())).await);
+        // The existing single-link API still addresses the original index.
+        assert_eq!(
+            core.body_link(ids[0].clone(), 2, Some(binding.clone()))
+                .await
+                .unwrap(),
+            "https://example.invalid/third"
+        );
+    }
 }
 
 #[tokio::test]

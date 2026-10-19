@@ -29,6 +29,13 @@ pub struct BodyDocument {
     pub binding: BodyBinding,
 }
 
+/// Host-only numbered links retain the exact database order and an opaque
+/// binding. This is not a serializable application DTO or an opener grant.
+pub struct BodyLinks {
+    pub links: Vec<String>,
+    pub binding: BodyBinding,
+}
+
 fn missing() -> AppError {
     AppError::new(ErrorCode::NotFound)
 }
@@ -46,7 +53,63 @@ fn check(service: &AccountService, binding: &BodyBinding) -> Result<(), AppError
     Ok(())
 }
 
+/// `None` requests one local sanitizer refresh; missing/invisible bodies fail.
+fn read_links(
+    service: &AccountService,
+    email_id: &str,
+    binding: Option<&BodyBinding>,
+) -> Result<Option<BodyLinks>, AppError> {
+    let identity = service.body_identity(email_id)?;
+    if let Some(binding) = binding {
+        if binding.email_id() != email_id {
+            return Err(missing());
+        }
+        check(service, binding)?;
+    }
+    let (raw, sanitizer_version) = service.body_stamp(&identity)?.ok_or_else(missing)?;
+    if sanitizer_version != SANITIZER_VERSION {
+        return Ok(None);
+    }
+    let links = service.body_links(&identity)?.ok_or_else(missing)?;
+    // Dropping an invalid item would renumber every subsequent link. Reject the
+    // whole list instead; confirmation must keep the original database indices.
+    if links.iter().any(|url| !render::is_allowed_link(url)) {
+        return Err(missing());
+    }
+    Ok(Some(BodyLinks {
+        links,
+        binding: BodyBinding {
+            identity,
+            raw,
+            sanitizer_version,
+        },
+    }))
+}
+
 impl MailxCore {
+    /// Enumerate already-cached links for a trusted host without loading HTML.
+    /// An unbound outdated cache may rebuild locally; a supplied document binding
+    /// must still be current and is never silently rebound. Missing bodies never download.
+    pub async fn body_links(
+        &self,
+        email_id: String,
+        binding: Option<BodyBinding>,
+    ) -> Result<BodyLinks, AppError> {
+        let read = || {
+            let core = self.clone();
+            let email_id = email_id.clone();
+            let binding = binding.clone();
+            tokio::task::spawn_blocking(move || {
+                read_links(&*core.accounts()?, &email_id, binding.as_ref())
+            })
+        };
+        if let Some(links) = read().await.map_err(|_| internal())?? {
+            return Ok(links);
+        }
+        self.bodies.refresh(email_id.clone()).await?;
+        read().await.map_err(|_| internal())??.ok_or_else(missing)
+    }
+
     /// A URL read never authorizes a new download. Only already-cached bodies
     /// can be served; an older sanitizer version is rebuilt from the local blob.
     pub async fn body_document(&self, email_id: String) -> Result<BodyDocument, AppError> {

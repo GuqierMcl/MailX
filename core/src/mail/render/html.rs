@@ -30,6 +30,24 @@ pub enum ResourceBinding<'a> {
 /// the matching resource route. Email text is never inspected or substituted.
 pub fn bind_resources(
     sanitized_html: &str,
+    resolve: impl FnMut(ResourceBinding<'_>) -> Option<String>,
+) -> String {
+    bind(sanitized_html, false, resolve)
+}
+
+/// Bind images while replacing link slots with passive, one-based text labels.
+/// The trusted parent presents the corresponding database URLs. No email anchor
+/// retains an href, and literal email text cannot create or alter a link slot.
+pub fn bind_numbered_resources(
+    sanitized_html: &str,
+    resolve: impl FnMut(ResourceBinding<'_>) -> Option<String>,
+) -> String {
+    bind(sanitized_html, true, resolve)
+}
+
+fn bind(
+    sanitized_html: &str,
+    numbered_links: bool,
     mut resolve: impl FnMut(ResourceBinding<'_>) -> Option<String>,
 ) -> String {
     let mut document = Html::parse_fragment(sanitized_html);
@@ -58,7 +76,24 @@ pub fn bind_resources(
         element
             .attrs
             .retain(|(name, _)| !name.local.starts_with("data-mailx-"));
+        if numbered_links && element.name() == "a" {
+            element
+                .attrs
+                .retain(|(name, _)| name.local.as_ref() != "href");
+        }
         let Some((value, part)) = slot else { continue };
+        if numbered_links && !part {
+            if let Some(number) = value
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| index.checked_add(1))
+            {
+                node.append(Node::Text(scraper::node::Text {
+                    text: format!(" [{number}]").into(),
+                }));
+            }
+            continue;
+        }
         let resolved = if part {
             resolve(ResourceBinding::Part { content_id: &value })
         } else {

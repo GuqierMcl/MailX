@@ -558,6 +558,16 @@ impl Storage {
         identity: &BodyIdentity,
         index: usize,
     ) -> Result<Option<String>, AppError> {
+        Ok(self
+            .body_links(identity)?
+            .and_then(|links| links.get(index).cloned()))
+    }
+
+    /// Link enumeration never selects cached HTML or MIME payloads.
+    pub(crate) fn body_links(
+        &self,
+        identity: &BodyIdentity,
+    ) -> Result<Option<Vec<String>>, AppError> {
         if !current(&self.db, identity)? {
             return Err(AppError::new(ErrorCode::NotFound));
         }
@@ -570,10 +580,7 @@ impl Storage {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        links
-            .map(|links| decode::<Vec<String>>(&links).map(|links| links.get(index).cloned()))
-            .transpose()
-            .map(Option::flatten)
+        links.map(|links| decode(&links)).transpose()
     }
 
     /// `blob` has already been durably written outside the service lock. A failed

@@ -52,6 +52,13 @@ impl AccountService {
         self.storage.body_link(identity, index)
     }
 
+    pub(crate) fn body_links(
+        &self,
+        identity: &BodyIdentity,
+    ) -> Result<Option<Vec<String>>, AppError> {
+        self.storage.body_links(identity)
+    }
+
     pub(crate) fn body_fail(
         &mut self,
         identity: &BodyIdentity,

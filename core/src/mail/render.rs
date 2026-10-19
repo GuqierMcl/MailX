@@ -12,7 +12,7 @@ mod css;
 mod html;
 mod images;
 
-pub use html::{ResourceBinding, bind_resources, is_allowed_link};
+pub use html::{ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link};
 pub use images::InlineImage;
 
 pub const SANITIZER_VERSION: u32 = 1;

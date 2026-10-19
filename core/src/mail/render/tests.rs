@@ -336,6 +336,32 @@ fn binding_handles_both_platforms_without_rewriting_attacker_text_or_slots() {
 }
 
 #[test]
+fn numbered_binding_keeps_order_and_cids_without_creating_navigable_anchors() {
+    let rendered = rendered_html(
+        r#"<p>literal [1] data-mailx-link="1"</p><a data-mailx-link="999" href="https://first.invalid">first</a><a data-mailx-link="0">forged [99]</a><a href="mailto:second@example.invalid"><b>second</b></a><img src="cid:logo">"#,
+    );
+    assert_eq!(
+        rendered.links,
+        ["https://first.invalid/", "mailto:second@example.invalid"]
+    );
+    let bound =
+        bind_numbered_resources(&rendered.sanitized_html.unwrap(), |binding| match binding {
+            ResourceBinding::Part { content_id } => Some(format!(
+                "mailx-body://localhost/part/owner/{content_id}?token=opaque"
+            )),
+            ResourceBinding::Link { .. } => {
+                panic!("numbered links must never resolve navigable URLs")
+            }
+        });
+    assert!(!bound.contains("href=") && !bound.contains("999"));
+    assert!(bound.contains("<p>literal [1] data-mailx-link=\"1\"</p>"));
+    assert!(bound.contains("first [1]</a>"));
+    assert!(bound.contains(">forged [99]</a>"));
+    assert!(bound.contains("<b>second</b> [2]</a>"));
+    assert!(bound.contains("src=\"mailx-body://localhost/part/owner/logo?token=opaque\""));
+}
+
+#[test]
 fn only_valid_passive_data_images_are_restored() {
     let data = format!("data:image/png;base64,{PNG}");
     let result = rendered_html(&format!(

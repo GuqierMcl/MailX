@@ -1,5 +1,5 @@
 pub(crate) mod bodies;
-#[cfg(test)]
+#[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 pub(crate) mod messages;
 pub(crate) mod model;

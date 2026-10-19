@@ -17,9 +17,9 @@ use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
 
 mod bodies;
-#[cfg(test)]
+#[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
-pub use bodies::{BodyBinding, BodyDocument};
+pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
