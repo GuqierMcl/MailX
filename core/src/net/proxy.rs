@@ -85,24 +85,41 @@ fn connect_request(proxy: &ProxyRoute, host: &str, port: u16) -> String {
 }
 
 fn check_connect_response(response: &[u8]) -> Result<(), NetError> {
+    // The proxy controls the entire response and may echo credentials in it.
+    // Only retain a validated numeric status; never display its text or headers.
     let status_line = response
         .split(|byte| *byte == b'\n')
         .next()
-        .map(|line| String::from_utf8_lossy(line).trim().to_owned())
-        .unwrap_or_default();
-    let mut parts = status_line.split_whitespace();
-    let version = parts.next().unwrap_or_default();
-    let code = parts.next().unwrap_or_default();
-    if version.starts_with("HTTP/1.") && code == "200" {
-        Ok(())
-    } else if code == "407" {
-        Err(NetError::Proxy(
+        .and_then(|line| line.strip_suffix(b"\r"));
+    let status = status_line.and_then(|line| {
+        let rest = line
+            .strip_prefix(b"HTTP/1.0 ")
+            .or_else(|| line.strip_prefix(b"HTTP/1.1 "))?;
+        if rest.len() < 4
+            || rest[3] != b' '
+            || !(b'1'..=b'5').contains(&rest[0])
+            || !rest[1..3].iter().all(u8::is_ascii_digit)
+            || !rest[4..]
+                .iter()
+                .all(|byte| *byte == b'\t' || (*byte >= b' ' && *byte != 0x7f))
+        {
+            return None;
+        }
+        Some(
+            u16::from(rest[0] - b'0') * 100
+                + u16::from(rest[1] - b'0') * 10
+                + u16::from(rest[2] - b'0'),
+        )
+    });
+    match status {
+        Some(200) => Ok(()),
+        Some(407) => Err(NetError::Proxy(
             "proxy authentication required or rejected".into(),
-        ))
-    } else {
-        Err(NetError::Proxy(format!(
-            "proxy refused the tunnel: {status_line}"
-        )))
+        )),
+        Some(code) => Err(NetError::Proxy(format!(
+            "proxy refused the tunnel (HTTP {code})"
+        ))),
+        None => Err(NetError::Proxy("invalid HTTP proxy response".into())),
     }
 }
 
@@ -144,6 +161,57 @@ mod tests {
         ));
         assert!(check_connect_response(b"HTTP/1.1 403 Forbidden\r\n\r\n").is_err());
         assert!(check_connect_response(b"SSH-2.0-OpenSSH\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn connect_rejections_discard_reason_phrases_and_headers() {
+        for code in [100, 199, 201, 301, 403, 407, 502, 599] {
+            let response = format!(
+                "HTTP/1.1 {code} private-password-marker\r\nProxy-Authorization: private-password-marker\r\n\r\n"
+            );
+            let expected = if code == 407 {
+                "proxy authentication required or rejected".to_owned()
+            } else {
+                format!("proxy refused the tunnel (HTTP {code})")
+            };
+            assert_eq!(
+                check_connect_response(response.as_bytes()),
+                Err(NetError::Proxy(expected))
+            );
+        }
+        // HTTP reason phrases can contain non-UTF-8 bytes; none are retained.
+        assert_eq!(
+            check_connect_response(b"HTTP/1.1 502 private-password-marker\xff\r\n\r\n"),
+            Err(NetError::Proxy(
+                "proxy refused the tunnel (HTTP 502)".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn malformed_connect_status_never_becomes_a_tunnel_or_display_text() {
+        for response in [
+            b"private-password-marker\r\n\r\n".as_slice(),
+            b"HTTP/1.private-password-marker 200 OK\r\n\r\n",
+            b"HTTP/2.0 200 private-password-marker\r\n\r\n",
+            b"HTTP/1.1 200private-password-marker\r\n\r\n",
+            b"HTTP/1.1 2000 private-password-marker\r\n\r\n",
+            b"HTTP/1.1 20x private-password-marker\r\n\r\n",
+            b"HTTP/1.1 099 private-password-marker\r\n\r\n",
+            b"HTTP/1.1 600 private-password-marker\r\n\r\n",
+            b"HTTP/1.1  200 private-password-marker\r\n\r\n",
+            b"HTTP/1.1 200\tprivate-password-marker\r\n\r\n",
+            b"HTTP/1.1 200 private-password-marker\x00\r\n\r\n",
+            b"HTTP/1.1 200 private-password-marker\n\r\n\r\n",
+            b"HTTP/1.1 2\xff0 private-password-marker\r\n\r\n",
+            b"HTTP/1.1 200",
+            b"",
+        ] {
+            assert_eq!(
+                check_connect_response(response),
+                Err(NetError::Proxy("invalid HTTP proxy response".into()))
+            );
+        }
     }
 
     #[tokio::test]

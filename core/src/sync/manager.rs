@@ -841,4 +841,66 @@ mod tests {
         assert_eq!(failure.code, SyncFailureCode::Proxy);
         assert!(failure.detail.unwrap().contains("407"));
     }
+
+    #[tokio::test]
+    async fn proxy_response_secrets_do_not_reach_sync_state_or_trigger_direct_fallback() {
+        use crate::accounts::types::ProxyKind;
+        use crate::net::{self, NetRoute, ProxyRoute};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        for (response, detail) in [
+            (
+                "HTTP/1.1 403 private-password-marker\r\nX-Private: private-header-marker\r\n\r\n",
+                "proxy failed: proxy refused the tunnel (HTTP 403)",
+            ),
+            (
+                "HTTP/1.1 407 private-password-marker\r\nX-Private: private-header-marker\r\n\r\n",
+                "proxy failed: proxy authentication required or rejected",
+            ),
+            (
+                "HTTP/1.1 200private-password-marker\r\nX-Private: private-header-marker\r\n\r\n",
+                "proxy failed: invalid HTTP proxy response",
+            ),
+        ] {
+            let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let target_port = target.local_addr().unwrap().port();
+            let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_port = proxy.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = proxy.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                    assert!(request.len() < 4096);
+                }
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+            let route = NetRoute {
+                proxy: Some(ProxyRoute {
+                    kind: ProxyKind::HttpConnect,
+                    host: "127.0.0.1".into(),
+                    port: proxy_port,
+                    auth: None,
+                }),
+            };
+            let error = net::connect(&route, "127.0.0.1", target_port)
+                .await
+                .expect_err("proxy rejection must stop the connection");
+            let Outcome::Transient(failure) = classify(error.into()) else {
+                panic!("proxy rejection should remain retryable");
+            };
+            assert_eq!(failure.code, SyncFailureCode::Proxy);
+            assert!(failure.will_retry);
+            assert_eq!(failure.detail.as_deref(), Some(detail));
+            let state_payload = serde_json::to_string(&failure).unwrap();
+            assert!(!state_payload.contains("private-password-marker"));
+            assert!(!state_payload.contains("private-header-marker"));
+            server.await.unwrap();
+            assert!(matches!(
+                target.into_std().unwrap().accept(),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+            ));
+        }
+    }
 }

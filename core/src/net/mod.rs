@@ -90,27 +90,61 @@ pub(crate) async fn connect(
 /// Runs a TLS handshake for `host` over an established stream.
 pub(crate) async fn upgrade_tls(stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
     let config = tls_config()?;
-    let name =
-        ServerName::try_from(host.to_owned()).map_err(|error| NetError::Tls(error.to_string()))?;
+    let name = ServerName::try_from(host.to_owned())
+        .map_err(|_| NetError::Tls("invalid TLS server name".into()))?;
     let handshake = TlsConnector::from(config).connect(name, stream);
     let stream = timeout(CONNECT_TIMEOUT, handshake)
         .await
         .map_err(|_| NetError::Timeout)?
-        .map_err(|error| NetError::Tls(error.to_string()))?;
+        .map_err(tls_handshake_error)?;
     Ok(Box::new(stream))
 }
 
+fn tls_handshake_error(_error: std::io::Error) -> NetError {
+    // rustls and platform diagnostics can contain names from peer certificates.
+    NetError::Tls("handshake or certificate verification failed".into())
+}
+
 fn tls_config() -> Result<Arc<ClientConfig>, NetError> {
-    static CONFIG: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
+    static CONFIG: OnceLock<Result<Arc<ClientConfig>, &'static str>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
             ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
                 .with_safe_default_protocol_versions()
-                .map_err(|error| error.to_string())?
+                .map_err(|_| "TLS protocol configuration unavailable")?
                 .with_platform_verifier()
                 .map(|builder| Arc::new(builder.with_no_client_auth()))
-                .map_err(|error| error.to_string())
+                .map_err(|_| "platform certificate verifier unavailable")
         })
         .clone()
-        .map_err(NetError::Tls)
+        .map_err(|reason| NetError::Tls(reason.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tls_diagnostics_do_not_expose_peer_names_or_platform_details() {
+        let certificate_error =
+            rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForNameContext {
+                expected: ServerName::try_from("expected.example".to_owned()).unwrap(),
+                presented: vec!["private-password-marker.example".into()],
+            });
+        let general_error = rustls::Error::General("private-password-marker".into());
+        for error in [
+            std::io::Error::new(std::io::ErrorKind::InvalidData, certificate_error),
+            std::io::Error::new(std::io::ErrorKind::InvalidData, general_error),
+            std::io::Error::other("platform private-password-marker"),
+        ] {
+            // Prove the source actually contains the sensitive diagnostic.
+            assert!(error.to_string().contains("private-password-marker"));
+            let sanitized = tls_handshake_error(error);
+            assert_eq!(
+                sanitized.to_string(),
+                "TLS failed: handshake or certificate verification failed"
+            );
+            assert!(!format!("{sanitized:?}").contains("private-password-marker"));
+        }
+    }
 }
