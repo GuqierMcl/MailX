@@ -247,7 +247,7 @@ impl SyncManager {
         let Ok(service) = service.lock() else {
             return;
         };
-        let Ok(account) = service.get(account_id) else {
+        let Ok(account) = service.sync_identity(account_id) else {
             return;
         };
         let token = {
@@ -405,7 +405,7 @@ pub(super) async fn with_store<T: Send + 'static>(
         let mut service = service
             .lock()
             .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
-        let account = service.get(&token.account_id)?;
+        let account = service.sync_identity(&token.account_id)?;
         if account.mailbox_source_id != token.source || account.revision != token.revision {
             return Err(SyncError::Stale);
         }
@@ -676,6 +676,103 @@ mod message_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::sync_plan::tests::config;
+    use crate::secrets::test_support::MemorySecrets;
+    use crate::secrets::{SecretStore, SecretStoreError, SecretValue};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use tempfile::TempDir;
+
+    #[derive(Default)]
+    struct LockableSecrets {
+        inner: MemorySecrets,
+        locked: AtomicBool,
+        reads: AtomicUsize,
+    }
+
+    impl SecretStore for LockableSecrets {
+        fn get(&self, key: &str) -> Result<Option<SecretValue>, SecretStoreError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if self.locked.load(Ordering::SeqCst) {
+                Err(SecretStoreError::Locked)
+            } else {
+                self.inner.get(key)
+            }
+        }
+
+        fn set(&self, key: &str, value: &SecretValue) -> Result<(), SecretStoreError> {
+            self.inner.set(key, value)
+        }
+
+        fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
+            self.inner.delete(key)
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_identity_guards_do_not_read_credentials() {
+        let directory = TempDir::new().unwrap();
+        let secrets = Arc::new(LockableSecrets::default());
+        let mut service = AccountService::open(directory.path(), secrets.clone()).unwrap();
+        let account = service
+            .create(
+                serde_json::from_value(json!({
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "config": config(json!({"kind": "direct"}))
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let service = Arc::new(Mutex::new(service));
+        let manager = SyncManager::new(service.clone(), Handle::current(), Arc::new(|_| {}));
+        secrets.reads.store(0, Ordering::SeqCst);
+        secrets.locked.store(true, Ordering::SeqCst);
+
+        manager.restart(&account.id);
+        assert_eq!(secrets.reads.load(Ordering::SeqCst), 0);
+        let state = manager
+            .states()
+            .pop()
+            .expect("worker created from metadata");
+        // On this current-thread runtime the worker has not yet been polled.
+        // Stop it before yielding so the test performs no credential or network work.
+        manager
+            .workers
+            .lock()
+            .unwrap()
+            .remove(&account.id)
+            .unwrap()
+            .abort();
+        let token = WorkerToken {
+            account_id: account.id.clone(),
+            source: account.mailbox_source_id.clone(),
+            revision: account.revision,
+            generation: state.generation,
+        };
+        let id = account.id;
+        let source = account.mailbox_source_id;
+        let folders = with_store(&manager.shared, &token, move |service| {
+            service.sync_folders(&id, &source)
+        })
+        .await
+        .unwrap();
+        assert!(folders.is_empty());
+        assert_eq!(secrets.reads.load(Ordering::SeqCst), 0);
+
+        manager
+            .shared
+            .states
+            .lock()
+            .unwrap()
+            .get_mut(&token.account_id)
+            .unwrap()
+            .generation += 1;
+        assert!(matches!(
+            with_store(&manager.shared, &token, |_| Ok(())).await,
+            Err(SyncError::Stale)
+        ));
+        assert_eq!(secrets.reads.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test(start_paused = true)]
     async fn inbox_ticks_do_not_repeat_folder_listing_until_ten_minutes() {

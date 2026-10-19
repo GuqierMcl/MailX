@@ -2,9 +2,9 @@
 //! route, and with which credentials. Built inside core only; nothing here is
 //! ever returned to a frontend.
 
-use super::AccountService;
 use super::model::TrustEndpoint;
 use super::types::{CredentialTrust, RouteConfig};
+use super::{AccountService, validate_uuid};
 use crate::error::{AppError, ErrorCode};
 use crate::imap::ImapLogin;
 use crate::mail::Folder;
@@ -18,6 +18,11 @@ pub(crate) struct SyncPlan {
     pub mailbox_source_id: String,
     pub login: ImapLogin,
     pub route: NetRoute,
+}
+
+pub(crate) struct SyncIdentity {
+    pub mailbox_source_id: String,
+    pub revision: u32,
 }
 
 #[derive(Debug)]
@@ -42,6 +47,17 @@ impl From<SecretStoreError> for PlanError {
 }
 
 impl AccountService {
+    /// Guard cached work using durable metadata, without consulting the host's
+    /// credential store. Credentials are resolved only when building a sync plan.
+    pub(crate) fn sync_identity(&self, account_id: &str) -> Result<SyncIdentity, AppError> {
+        validate_uuid(account_id, "accountId")?;
+        let account = self.storage.load(account_id)?.account;
+        Ok(SyncIdentity {
+            mailbox_source_id: account.mailbox_source_id,
+            revision: account.revision,
+        })
+    }
+
     /// Resolves credentials for an IMAP sync. A credential is only used for the
     /// exact endpoint it was confirmed for; anything else needs re-entry.
     pub(crate) fn sync_plan(&self, account_id: &str) -> Result<SyncPlan, PlanError> {

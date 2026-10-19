@@ -122,7 +122,7 @@ export type SyncFailureCode = "authentication" | "credentialUntrusted" | "creden
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**
- * Technical reason from the server or network stack, for display only.
+ * Sanitized protocol or network reason, for display only.
  */
 detail: string | null,
 /**

@@ -413,6 +413,167 @@ async fn scripted_session(script: Script) -> (Session, JoinHandle<()>) {
 }
 
 #[tokio::test]
+async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers() {
+    let fixture = fixture();
+    // Start with no directory cache: LIST alone must establish selectable
+    // targets, while their counts remain unknown until the individual STATUS.
+    fixture
+        .service
+        .lock()
+        .unwrap()
+        .store_folders(&fixture.account_id, &fixture.source, &[])
+        .unwrap();
+    let names = [
+        "INBOX",
+        "Archive",
+        "Drafts",
+        "Empty",
+        "Junk",
+        "Projects/&XfJT0ZAB-",
+        "Sent Items",
+        "Trash",
+    ];
+    let mut script = authenticate_commands();
+    script.push((
+        "LIST \"\" *".into(),
+        concat!(
+            "* LIST () \"/\" INBOX\r\n",
+            "* LIST (\\Noselect \\Sent) \"/\" Legacy\r\n",
+            "* LIST (\\Sent) \"/\" \"Sent Items\"\r\n",
+            "* LIST (\\Drafts) \"/\" Drafts\r\n",
+            "* LIST (\\Archive) \"/\" Archive\r\n",
+            "* LIST (\\Junk) \"/\" Junk\r\n",
+            "* LIST (\\Trash) \"/\" Trash\r\n",
+            "* LIST (\\Noselect \\HasChildren) \"/\" Projects\r\n",
+            "* LIST () \"/\" \"Projects/&XfJT0ZAB-\"\r\n",
+            "* LIST () \"/\" Empty\r\n",
+            "* LIST (\\NonExistent) \"/\" Missing\r\n",
+            "{tag} OK complete listing\r\n",
+        )
+        .into(),
+    ));
+    for name in names {
+        let uids: &[u32] = if name == "Empty" { &[] } else { &[7] };
+        script.extend(folder_commands(name, 21, uids));
+        if !uids.is_empty() {
+            add_headers(&mut script, &[(7, name)]);
+        }
+    }
+    script.push(("LOGOUT".into(), "{tag} OK\r\n".into()));
+    let (mut session, server) = scripted_session(script).await;
+    let remote = session.list_folders().await.unwrap();
+    assert_eq!(remote.len(), 11);
+    assert!(remote.iter().all(|folder| folder.status.is_none()));
+    let records = folders::interpret(&remote);
+    let targets = {
+        let mut service = fixture.service.lock().unwrap();
+        assert!(
+            service
+                .store_folders(&fixture.account_id, &fixture.source, &records)
+                .unwrap()
+        );
+        let stored = service.list_folders(&fixture.account_id).unwrap();
+        assert_eq!(stored.iter().filter(|folder| folder.selectable).count(), 8);
+        assert!(stored.iter().all(|folder| !folder.counts_known));
+        for role in [
+            FolderRole::Inbox,
+            FolderRole::Sent,
+            FolderRole::Drafts,
+            FolderRole::Archive,
+            FolderRole::Junk,
+            FolderRole::Trash,
+        ] {
+            assert_eq!(
+                stored
+                    .iter()
+                    .filter(|folder| folder.role == role && folder.selectable)
+                    .count(),
+                1
+            );
+        }
+        let parent = stored
+            .iter()
+            .find(|folder| folder.name == "Projects")
+            .unwrap();
+        let child = stored
+            .iter()
+            .find(|folder| folder.name == "已发送")
+            .unwrap();
+        assert!(!parent.selectable);
+        assert!(child.selectable);
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.role, FolderRole::Other);
+        assert!(
+            !service
+                .list_emails(&EmailListQuery::default())
+                .unwrap()
+                .coverage
+                .headers_complete
+        );
+        service
+            .sync_folders(&fixture.account_id, &fixture.source)
+            .unwrap()
+    };
+    assert_eq!(
+        targets
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>(),
+        names
+    );
+    fixture
+        .shared
+        .reconcile_targets(&fixture.token, &targets, true);
+    assert!(matches!(
+        sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            || async { Err(ImapError::Timeout) }
+        )
+        .await,
+        Outcome::Synced
+    ));
+    server.await.unwrap();
+
+    let service = fixture.service.lock().unwrap();
+    let stored = service.list_folders(&fixture.account_id).unwrap();
+    for folder in &stored {
+        assert_eq!(folder.counts_known, folder.selectable);
+    }
+    let page = service.list_emails(&EmailListQuery::default()).unwrap();
+    assert_eq!(page.items.len(), 7);
+    assert!(page.coverage.headers_complete);
+    for (folder_id, name) in &targets {
+        let page = service
+            .list_emails(&EmailListQuery {
+                folder_id: Some(folder_id.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page.items.len(), usize::from(name != "Empty"));
+        assert!(page.coverage.headers_complete);
+    }
+    let inbox = service
+        .list_emails(&EmailListQuery {
+            folder_role: Some(FolderRole::Inbox),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(inbox.items.len(), 1);
+    assert_eq!(inbox.items[0].subject, "INBOX");
+    let states = fixture.shared.states.lock().unwrap();
+    let folders = &states[&fixture.account_id].folders;
+    assert_eq!(folders.len(), 8);
+    assert!(
+        folders
+            .iter()
+            .all(|folder| folder.phase == FolderSyncPhase::Idle)
+    );
+}
+
+#[tokio::test]
 async fn every_completed_folder_rejection_continues_on_the_same_connection() {
     // STATUS, EXAMINE, SEARCH, header FETCH and flags FETCH each reject a
     // complete command; the second folder must still succeed without reconnect.
