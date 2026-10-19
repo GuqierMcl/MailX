@@ -24,7 +24,7 @@ fn main() {
             .open_js_links_on_click(false)
             .build(),
     );
-    #[cfg(feature = "body-webview-test")]
+    #[cfg(all(feature = "body-webview-test", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     body_protocol::register(builder)
         .setup(|app| {
@@ -69,6 +69,7 @@ fn main() {
             commands::emails_list,
             commands::emails_get,
             commands::emails_fetch_body,
+            commands::emails_prepare_body,
             commands::emails_body_links,
             commands::links_request,
             commands::links_open,

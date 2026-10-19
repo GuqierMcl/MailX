@@ -11,6 +11,7 @@ fn main() {
             "emails_list",
             "emails_get",
             "emails_fetch_body",
+            "emails_prepare_body",
             "emails_body_links",
             "links_request",
             "links_open",

@@ -178,7 +178,7 @@ pub(crate) fn create_window(
     if nonce.len() != 64 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("invalid test nonce".into());
     }
-    let config = serde_json::json!({ "nonce": nonce, "documents": documents, "numberedLinks": cfg!(target_os = "macos") });
+    let config = serde_json::json!({ "nonce": nonce, "documents": documents, "numberedLinks": cfg!(not(target_os = "windows")) });
     let bootstrap = format!("window.__MAILX_BODY_TEST_CONFIG={config};");
     Ok(
         WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

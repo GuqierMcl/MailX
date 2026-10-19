@@ -87,13 +87,15 @@ jobs:
             xvfb xauth dbus-x11 webkit2gtk-driver
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run body-webview:build
       - name: Install native WebDriver adapter
-        if: runner.os != 'macOS'
+        if: runner.os == 'Linux'
         run: cargo install tauri-driver --locked --version 2.1.0
       - name: Exercise WKWebView
         if: runner.os == 'macOS'

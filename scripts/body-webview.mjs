@@ -126,9 +126,10 @@ async function visualSnapshot(name, snapshot) {
 async function waitForFixture(name) {
   await execute('return window.__MAILX_BODY_TEST.load(arguments[0]);', name);
   const loaded = await until(state, (snapshot) => snapshot?.selected === name &&
+    snapshot.documentToken && snapshot.bodyLinksLoaded && !snapshot.prepareError && !snapshot.numberedError &&
     snapshot.observations.filter((item) => item.kind === 'native-sandbox-probe' && item.url === snapshot.frameUrl).length === 7 &&
     (name !== 'safe' || snapshot.numberedLinks.length === 1) &&
-    snapshot.requests.some((item) => item.route === 'part' && item.status === 200 && item.emailId === snapshot.frameUrl.split('/').at(-1)), `${name} document, CID and native frame probes`);
+    snapshot.requests.some((item) => item.route === 'part' && item.status === 200 && item.emailId === snapshot.emailId), `${name} prepared document, CID and native frame probes`);
   return visualSnapshot(name, loaded);
 }
 function checkMacVisual(name, snapshot) {
@@ -141,6 +142,9 @@ function checkMacVisual(name, snapshot) {
 }
 function checkIsolation(name, snapshot) {
   checkMacVisual(name, snapshot);
+  const documentUrl = new URL(snapshot.frameUrl);
+  check(`${name}: document URL carries the prepared binding`, documentUrl.pathname === `/document/${snapshot.emailId}` &&
+    documentUrl.searchParams.get('token') === snapshot.documentToken && snapshot.bodyLinksLoaded && !snapshot.prepareError);
   check(`${name}: sandbox remains empty`, snapshot.sandbox === '');
   check(`${name}: no referrer`, snapshot.referrerPolicy === 'no-referrer');
   for (const probe of ['page-script', 'page-globals', 'page-parent-dom', 'page-parent-state', 'page-parent-invoke', 'page-ipc']) {
@@ -163,7 +167,7 @@ async function nativeClick(snapshot) {
   if (inputMode === 'instrumented') {
     await execute('window.__MAILX_NATIVE_CLICK_REQUEST={x:arguments[0],y:arguments[1]}; return true;', viewportX, viewportY);
     await until(() => execute('return window.__MAILX_NATIVE_CLICK_DELIVERED===true'), Boolean, 'AppKit native mouse event delivery');
-    report.nativeInput = { method: 'public NSApplication.sendEvent mouseDown/mouseUp', x: viewportX, y: viewportY };
+    report.nativeInput = { method: 'public NSWindow.sendEvent mouseDown/mouseUp', x: viewportX, y: viewportY };
     return;
   }
   if (inputMode === 'manual') {
@@ -212,8 +216,16 @@ try {
   await delay(500);
   const afterLink = await visualSnapshot('safe-after-link', await state());
   report.stages.afterLink = afterLink;
-  check('link: correct DB URL emitted', afterLink.links.at(-1)?.url === 'https://example.invalid/confirmed-link');
+  const requestedLink = afterLink.links.at(-1);
+  check('link: correct DB URL emitted', requestedLink?.url === 'https://example.invalid/confirmed-link');
+  check('link: exact document binding emitted', requestedLink?.emailId === safe.emailId && requestedLink?.documentToken === safe.documentToken);
+  check('link: unique confirmation request emitted', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestedLink?.requestId ?? '') &&
+    !safe.links.some((previous) => previous.requestId === requestedLink.requestId));
+  check('link: trusted view accepted the exact request', afterLink.currentLinkRequest?.requestId === requestedLink?.requestId &&
+    afterLink.currentLinkRequest?.documentToken === safe.documentToken && afterLink.currentLinkRequest?.viewGeneration === safe.viewGeneration &&
+    afterLink.acceptedLinks.length === safe.acceptedLinks.length + 1);
   check('link: numbered request succeeded', afterLink.numberedRequestSucceeded && afterLink.numberedError === null);
+  check('link: trusted native pointer reached numbered button', afterLink.numberedInput?.trusted === true && afterLink.nativePointer?.target === 'BUTTON');
   check('link: no protocol link navigation requested', !afterLink.requests.some((request) => request.route === 'link'));
   checkMacVisual('link retained document', afterLink);
   check('link: no new document request', afterLink.requests.filter((item) => item.route === 'document').length === safe.requests.filter((item) => item.route === 'document').length);
@@ -227,6 +239,7 @@ try {
     const final = await visualSnapshot(name, await state());
     report.stages[name] = final;
     checkIsolation(name, final);
+    check(`${name}: previous link confirmation cleared`, final.currentLinkRequest === null);
     check(`${name}: no forged link authorization`, final.links.length === afterLink.links.length);
     check(`${name}: no image request to link route`, !final.requests.some((request) => request.route === 'link'));
     await screenshot(name);

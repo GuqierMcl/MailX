@@ -6,21 +6,34 @@
     document.querySelector('#status').textContent = '测试构建缺少合成样本配置';
     return;
   }
-  const frame = document.querySelector('#body');
+  let frame = document.querySelector('#body');
+  let viewGeneration = 0;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   const evidence = {
     ready: false,
     selected: null,
+    emailId: null,
+    documentToken: null,
+    viewGeneration: 0,
+    bodyLinksLoaded: false,
+    prepareError: null,
     frameLoads: 0,
     observations: [],
     links: [],
+    acceptedLinks: [],
+    currentLinkRequest: null,
     requests: [],
     numberedLinks: [],
     numberedRequestSucceeded: false,
+    numberedInput: null,
     numberedError: null,
     unexpectedMessages: 0,
     parentSecret: 'synthetic-parent-state',
   };
   window.__MAILX_BODY_TEST_EVIDENCE = evidence;
+  document.addEventListener('mousedown', (event) => {
+    evidence.nativePointer = { target: event.target.tagName, x: event.clientX, y: event.clientY, trusted: event.isTrusted };
+  }, true);
   window.__MAILX_TEST_SECRET = 'synthetic-parent-state';
   function display() {
     document.querySelector('#evidence').textContent = JSON.stringify({
@@ -40,45 +53,94 @@
     evidence.unexpectedMessages += 1;
     display();
   });
-  frame.addEventListener('load', async () => {
-    evidence.frameLoads += 1;
-    display();
-    if (!config.numberedLinks) return;
-    const loadedUrl = frame.src;
-    const emailId = loadedUrl.split('/').at(-1);
+  async function prepareFrame(name, generation, emailId, nextFrame) {
+    const current = () => viewGeneration === generation;
     try {
-      const response = await window.__TAURI__.core.invoke('emails_body_links', { emailId });
-      if (!response.ok) throw new Error(response.error.code);
-      if (frame.src !== loadedUrl) return;
-      const { documentToken, links } = response.data;
-      evidence.numberedLinks = links;
-      const container = document.querySelector('#numbered-links');
-      container.replaceChildren();
-      for (const link of links) {
-        const button = document.createElement('button');
-        button.textContent = `Link ${link.index + 1}: ${link.url}`;
-        button.addEventListener('click', async () => {
-          // Real main-window command and real event; no system opener is called.
-          const result = await window.__TAURI__.core.invoke('links_request', { emailId, index: link.index, documentToken });
-          evidence.numberedRequestSucceeded = result.ok;
-          if (!result.ok) evidence.numberedError = result.error.code;
-        });
-        container.append(button);
-      }
-    } catch (error) { evidence.numberedError = error.message; }
-  });
+      const prepared = await window.__TAURI__.core.invoke('emails_prepare_body', { emailId });
+      if (!prepared.ok) throw new Error(prepared.error.code);
+      if (!current()) return;
+      const documentToken = prepared.data.documentToken;
+      if (!uuid.test(documentToken)) throw new Error('Invalid prepared document token');
+      // convertFileSrc encodes its entire argument. Ask it for the platform
+      // origin, then construct route/query components with the URL API.
+      const url = new URL(window.__TAURI__.core.convertFileSrc('', 'mailx-body'));
+      url.pathname = `/document/${emailId}`;
+      url.searchParams.set('token', documentToken);
+      const loadedUrl = url.href;
+      const bound = () => current() && frame === nextFrame && evidence.documentToken === documentToken;
+      nextFrame.addEventListener('load', async () => {
+        if (!bound() || nextFrame.src !== loadedUrl) return;
+        evidence.frameLoads += 1;
+        display();
+        try {
+          const response = await window.__TAURI__.core.invoke('emails_body_links', { emailId, documentToken });
+          if (!response.ok) throw new Error(response.error.code);
+          if (!bound()) return;
+          const { documentToken: listedToken, links } = response.data;
+          if (listedToken !== documentToken) throw new Error('Link metadata changed document binding');
+          if (!config.numberedLinks && links.length) throw new Error('Unexpected numbered-link fallback');
+          evidence.numberedLinks = links;
+          evidence.bodyLinksLoaded = true;
+          const container = document.querySelector('#numbered-links');
+          container.replaceChildren();
+          for (const link of links) {
+            const button = document.createElement('button');
+            button.textContent = `Link ${link.index + 1}: ${link.url}`;
+            button.addEventListener('click', async (event) => {
+              if (!bound()) return;
+              evidence.numberedInput = { trusted: event.isTrusted, x: event.clientX, y: event.clientY };
+              // Real main-window command and real event; no system opener is called.
+              try {
+                const result = await window.__TAURI__.core.invoke('links_request', { emailId, index: link.index, documentToken });
+                if (!bound()) return;
+                evidence.numberedRequestSucceeded = result.ok;
+                if (!result.ok) evidence.numberedError = result.error.code;
+              } catch (error) {
+                if (bound()) evidence.numberedError = error.message;
+              }
+            });
+            container.append(button);
+          }
+          display();
+        } catch (error) {
+          if (bound()) evidence.numberedError = error.message;
+        }
+      });
+      evidence.documentToken = documentToken;
+      // A fresh element makes a previous view's late load callback distinguishable.
+      nextFrame.src = loadedUrl;
+      frame.replaceWith(nextFrame);
+      frame = nextFrame;
+      document.querySelector('#status').textContent = `测试样本：${name}`;
+    } catch (error) {
+      if (current()) evidence.prepareError = error.message;
+    }
+  }
   window.__MAILX_BODY_TEST = {
     load(name) {
       const url = config.documents[name];
       if (!url) throw new Error('Unknown synthetic fixture');
+      const emailId = new URL(url).pathname.split('/').at(-1);
+      if (!uuid.test(emailId)) throw new Error('Invalid synthetic fixture identity');
+      const generation = ++viewGeneration;
       evidence.selected = name;
+      evidence.emailId = emailId;
+      evidence.documentToken = null;
+      evidence.viewGeneration = generation;
+      evidence.bodyLinksLoaded = false;
+      evidence.prepareError = null;
+      evidence.currentLinkRequest = null;
       evidence.numberedLinks = [];
       evidence.numberedError = null;
       evidence.numberedRequestSucceeded = false;
       document.querySelector('#numbered-links').replaceChildren();
-      frame.src = url;
-      document.querySelector('#status').textContent = `测试样本：${name}`;
-      return url;
+      const nextFrame = frame.cloneNode(false);
+      nextFrame.removeAttribute('src');
+      frame.removeAttribute('src');
+      document.querySelector('#status').textContent = `正在准备测试样本：${name}`;
+      // Keep the driver's synchronous entry point; runners poll the bound state.
+      void prepareFrame(name, generation, emailId, nextFrame);
+      return generation;
     },
     state() {
       let parentCanReadFrame = false;
@@ -109,7 +171,15 @@
   };
   // This is the real Tauri event surface. A forged postMessage never enters it.
   window.__TAURI__.event.listen('mailx://link-request', (event) => {
-    evidence.links.push(event.payload);
+    const request = event.payload;
+    // Preserve every real event for zero-forgery assertions, even when rejected.
+    evidence.links.push(request);
+    if (request.emailId === evidence.emailId && request.documentToken === evidence.documentToken &&
+      uuid.test(request.documentToken) && uuid.test(request.requestId) &&
+      Number.isSafeInteger(request.index) && request.index >= 0 && typeof request.url === 'string') {
+      evidence.acceptedLinks.push(request);
+      evidence.currentLinkRequest = { ...request, viewGeneration };
+    }
     display();
   }).then(() => {
     evidence.ready = true;

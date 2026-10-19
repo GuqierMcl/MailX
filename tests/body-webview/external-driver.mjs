@@ -17,7 +17,7 @@ async function freePort() {
   return port;
 }
 
-export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativeDriver, onLog = () => {} }) {
+export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativeDriver, nativeLog, onLog = () => {} }) {
   if (!['linux', 'win32'].includes(process.platform)) {
     throw new Error('The official external tauri-driver supports Linux and Windows only.');
   }
@@ -28,9 +28,13 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
   await access(resolve(env.MAILX_BODY_WEBVIEW_ROOT, '.mailx-synthetic-webview-test'));
   const [port, nativePort, embeddedPort] = await Promise.all([freePort(), freePort(), freePort()]);
   if (new Set([port, nativePort, embeddedPort]).size !== 3) throw new Error('Driver port allocation collided; retry the test.');
-  const args = ['--port', String(port), '--native-port', String(nativePort)];
-  if (nativeDriver) args.push('--native-driver', nativeDriver);
-  const child = spawn(tauriDriver ?? (process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver'), args, {
+  const windows = process.platform === 'win32';
+  // Match tauri-driver's WebView2 capabilities while preserving Microsoft's
+  // native session-start diagnostics, including failures before a session exists.
+  const args = windows ? [`--port=${port}`, '--verbose', ...(nativeLog ? [`--log-path=${nativeLog}`] : [])]
+    : ['--port', String(port), '--native-port', String(nativePort)];
+  if (!windows && nativeDriver) args.push('--native-driver', nativeDriver);
+  const child = spawn(windows ? (nativeDriver ?? 'msedgedriver.exe') : (tauriDriver ?? 'tauri-driver'), args, {
     cwd, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...env, TAURI_WEBVIEW_AUTOMATION: 'true', TAURI_WEBDRIVER_PORT: String(embeddedPort) },
   });
@@ -44,10 +48,13 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
   async function command(method, path, body, timeout = 30_000) {
     if (spawnError) throw spawnError;
     if (child.exitCode !== null) throw new Error(`External driver exited with code ${child.exitCode}.`);
-    const response = await fetch(`${origin}${path}`, {
-      method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeout),
-    });
+    let response;
+    try {
+      response = await fetch(`${origin}${path}`, {
+        method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeout),
+      });
+    } catch (error) { throw new Error(`Native WebDriver ${method} ${path}: ${error.message}`, { cause: error }); }
     const result = await response.json();
     if (!response.ok || result.value?.error) {
       throw new Error(`Native WebDriver ${path}: ${result.value?.error ?? response.status}: ${result.value?.message ?? ''}`);
@@ -77,8 +84,12 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
     }
     if (!ready) throw new Error('Native WebDriver startup timed out.');
     const created = await command('POST', '/session', {
-      capabilities: { alwaysMatch: { 'tauri:options': { application: binary }, pageLoadStrategy: 'normal' } },
-    }, 60_000);
+      capabilities: { alwaysMatch: {
+        ...(windows ? { browserName: 'webview2', 'ms:edgeChromium': true, 'ms:edgeOptions': { binary, args: [] } }
+          : { 'tauri:options': { application: binary } }),
+        pageLoadStrategy: 'normal',
+      } },
+    }, 90_000);
     session = created.sessionId;
     if (!session) throw new Error('Native driver did not return a session id.');
     await command('POST', `/session/${session}/timeouts`, { script: 10_000, pageLoad: 30_000, implicit: 0 });
@@ -144,10 +155,22 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
         await command('POST', `/session/${session}/element/${link[ELEMENT]}/click`, {});
       });
     }
+    async function clickNumberedLink() {
+      await top();
+      try {
+        const button = await find('#numbered-links button');
+        // The numbered fallback is rendered by the trusted parent. Keep this
+        // as a W3C element click so the test exercises the native event path,
+        // rather than invoking a child or parent DOM .click() from script.
+        await command('POST', `/session/${session}/element/${button[ELEMENT]}/click`, {});
+      } finally {
+        await top();
+      }
+    }
     return {
       child, capabilities: created.capabilities, origin, session,
-      driver: 'official tauri-driver with native WebKitWebDriver / Microsoft Edge WebDriver',
-      execute, executeAsync, command, top, inFrame, frameSnapshot, state, observe, clickLink, close,
+      driver: windows ? 'Microsoft Edge WebDriver (WebView2)' : 'official tauri-driver with WebKitWebDriver',
+      execute, executeAsync, command, top, inFrame, frameSnapshot, state, observe, clickLink, clickNumberedLink, close,
       screenshot: async () => { await top(); return command('GET', `/session/${session}/screenshot`); },
     };
   } catch (error) {

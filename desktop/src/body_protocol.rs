@@ -38,7 +38,7 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
             tauri::async_runtime::spawn(async move {
                 #[cfg(feature = "body-webview-test")]
                 let trace = parse_route(&request.uri().to_string()).map(|(route, _)| match route {
-                    Route::Document { id } => ("document", id),
+                    Route::Document { id, .. } => ("document", id),
                     Route::Part { id, .. } => ("part", id),
                     Route::Link { id, .. } => ("link", id),
                 });
@@ -78,37 +78,51 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
 struct Document {
     token: String,
     binding: BodyBinding,
-    created: Instant,
+    expires_at: Instant,
 }
 
 #[derive(Clone)]
 struct Confirmation {
     document: Document,
+    index: usize,
     url: String,
 }
 
 pub(crate) struct BodyProtocol {
     numbered_links: bool,
     documents: Mutex<HashMap<String, Document>>,
-    numbered_documents: Mutex<HashMap<String, String>>,
-    confirmations: Mutex<HashMap<(String, usize), Confirmation>>,
+    confirmations: Mutex<HashMap<String, Confirmation>>,
     #[cfg(feature = "body-webview-test")]
     test_policy_probe: Mutex<Option<(String, String)>>,
 }
 
 impl Default for BodyProtocol {
     fn default() -> Self {
-        // WKWebView replaces the frame with a blank document after a custom
+        // WKWebView and WebKitGTK replace the frame after a custom
         // protocol 204. Use the specification's trusted numbered-link fallback.
-        Self::new(cfg!(target_os = "macos"))
+        Self::new(cfg!(not(target_os = "windows")))
     }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BodyLinks {
-    pub document_token: Option<String>,
-    pub links: Vec<LinkRequest>,
+    pub document_token: String,
+    pub links: Vec<ListedLink>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreparedBody {
+    pub document_token: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListedLink {
+    pub email_id: String,
+    pub index: usize,
+    pub url: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -117,12 +131,15 @@ pub(crate) struct LinkRequest {
     pub email_id: String,
     pub index: usize,
     pub url: String,
+    pub document_token: String,
+    pub request_id: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Route {
     Document {
         id: String,
+        token: String,
     },
     Part {
         id: String,
@@ -178,19 +195,20 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
     if Uuid::parse_str(id).ok()?.to_string() != *id {
         return None;
     }
+    let pairs: Vec<_> = url.query_pairs().collect();
+    if pairs.len() != 1 || pairs[0].0 != "token" {
+        return None;
+    }
+    let token = pairs[0].1.to_string();
+    if Uuid::parse_str(&token).ok()?.to_string() != token {
+        return None;
+    }
     let route = match segments.first()?.as_str() {
-        "document" if segments.len() == 2 && url.query().is_none() => {
-            Route::Document { id: id.clone() }
-        }
+        "document" if segments.len() == 2 => Route::Document {
+            id: id.clone(),
+            token,
+        },
         kind @ ("part" | "link") if segments.len() == 3 => {
-            let pairs: Vec<_> = url.query_pairs().collect();
-            if pairs.len() != 1 || pairs[0].0 != "token" {
-                return None;
-            }
-            let token = pairs[0].1.to_string();
-            if Uuid::parse_str(&token).ok()?.to_string() != token {
-                return None;
-            }
             if kind == "part" {
                 if segments[2].is_empty() {
                     return None;
@@ -255,7 +273,6 @@ impl BodyProtocol {
         Self {
             numbered_links,
             documents: Mutex::new(HashMap::new()),
-            numbered_documents: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
             #[cfg(feature = "body-webview-test")]
             test_policy_probe: Mutex::new(None),
@@ -270,30 +287,41 @@ impl BodyProtocol {
     }
     fn issue(&self, binding: BodyBinding) -> Result<String, AppError> {
         let mut documents = self.documents.lock().map_err(|_| missing())?;
-        documents.retain(|_, document| document.created.elapsed() < TOKEN_LIFETIME);
+        documents.retain(|_, document| Instant::now() < document.expires_at);
         if documents.len() >= MAX_DOCUMENTS
             && let Some(oldest) = documents
                 .iter()
-                .min_by_key(|(_, document)| document.created)
+                .min_by_key(|(_, document)| document.expires_at)
                 .map(|(token, _)| token.clone())
         {
             documents.remove(&oldest);
         }
         let token = Uuid::new_v4().to_string();
-        if self.numbered_links {
-            let mut numbered = self.numbered_documents.lock().map_err(|_| missing())?;
-            numbered.retain(|_, token| documents.contains_key(token));
-            numbered.insert(binding.email_id().to_owned(), token.clone());
-        }
         documents.insert(
             token.clone(),
             Document {
                 token: token.clone(),
                 binding,
-                created: Instant::now(),
+                expires_at: Instant::now() + TOKEN_LIFETIME,
             },
         );
         Ok(token)
+    }
+
+    /// Each preparation creates an independent capability. There is deliberately
+    /// no email-to-current-token pointer: a late prepare/GET for A cannot replace
+    /// the token selected by a newer A -> B -> A view. The trusted UI accepts
+    /// results/events only for its current view generation and exact token.
+    /// Unselected tokens expire by TTL/eviction; they never authorize other views.
+    pub(crate) async fn prepare(
+        &self,
+        core: &MailxCore,
+        id: String,
+    ) -> Result<PreparedBody, AppError> {
+        let links = core.body_links(id, None).await?;
+        Ok(PreparedBody {
+            document_token: self.issue(links.binding)?,
+        })
     }
 
     fn resolve(&self, id: &str, token: &str) -> Result<Document, AppError> {
@@ -302,7 +330,7 @@ impl BodyProtocol {
             .map_err(|_| missing())?
             .get(token)
             .filter(|document| {
-                document.binding.email_id() == id && document.created.elapsed() < TOKEN_LIFETIME
+                document.binding.email_id() == id && Instant::now() < document.expires_at
             })
             .cloned()
             .ok_or_else(missing)
@@ -361,9 +389,10 @@ impl BodyProtocol {
         app_origin: &str,
     ) -> Result<(Response<Vec<u8>>, Option<LinkRequest>), AppError> {
         match route {
-            Route::Document { id } => {
-                let document = core.body_document(id.clone()).await?;
-                let token = self.issue(document.binding)?;
+            Route::Document { id, token } => {
+                let document = self.resolve(&id, &token)?;
+                let document = core.body_document_bound(document.binding).await?;
+                self.resolve(&id, &token)?;
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
                         ResourceBinding::Part { content_id } => {
@@ -448,51 +477,28 @@ impl BodyProtocol {
         &self,
         core: &MailxCore,
         id: String,
+        token: String,
     ) -> Result<BodyLinks, AppError> {
-        if !self.numbered_links {
-            core.body_links(id, None).await?;
-            return Ok(BodyLinks {
-                document_token: None,
-                links: vec![],
-            });
-        }
-        let token = self
-            .numbered_documents
-            .lock()
-            .map_err(|_| missing())?
-            .get(&id)
-            .cloned()
-            .ok_or_else(missing)?;
         let document = self.resolve(&id, &token)?;
         let links = core.body_links(id.clone(), Some(document.binding)).await?;
-        self.check_numbered_document(&id, &token)?;
+        self.resolve(&id, &token)?;
         Ok(BodyLinks {
-            document_token: Some(token),
-            links: links
-                .links
-                .into_iter()
-                .enumerate()
-                .map(|(index, url)| LinkRequest {
-                    email_id: id.clone(),
-                    index,
-                    url,
-                })
-                .collect(),
+            document_token: token,
+            links: if self.numbered_links {
+                links
+                    .links
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, url)| ListedLink {
+                        email_id: id.clone(),
+                        index,
+                        url,
+                    })
+                    .collect()
+            } else {
+                vec![]
+            },
         })
-    }
-
-    fn check_numbered_document(&self, id: &str, token: &str) -> Result<(), AppError> {
-        if !self.numbered_links
-            || self
-                .numbered_documents
-                .lock()
-                .map_err(|_| missing())?
-                .get(id)
-                .is_none_or(|current| current != token)
-        {
-            return Err(missing());
-        }
-        Ok(())
     }
 
     pub(crate) async fn request_link(
@@ -502,7 +508,9 @@ impl BodyProtocol {
         index: usize,
         token: String,
     ) -> Result<LinkRequest, AppError> {
-        self.check_numbered_document(&id, &token)?;
+        if !self.numbered_links {
+            return Err(missing());
+        }
         let document = self.resolve(&id, &token)?;
         self.prepare_link(core, document, id, index).await
     }
@@ -517,19 +525,19 @@ impl BodyProtocol {
         let url = core
             .body_link(id.clone(), index, Some(document.binding.clone()))
             .await?;
-        if self.numbered_links {
-            self.check_numbered_document(&id, &document.token)?;
-        }
+        self.resolve(&id, &document.token)?;
+        let request_id = Uuid::new_v4().to_string();
+        let document_token = document.token.clone();
         let mut confirmations = self.confirmations.lock().map_err(|_| missing())?;
-        confirmations
-            .retain(|_, confirmation| confirmation.document.created.elapsed() < TOKEN_LIFETIME);
+        confirmations.retain(|_, confirmation| Instant::now() < confirmation.document.expires_at);
         if confirmations.len() >= MAX_DOCUMENTS {
             confirmations.clear();
         }
         confirmations.insert(
-            (id.clone(), index),
+            request_id.clone(),
             Confirmation {
                 document,
+                index,
                 url: url.clone(),
             },
         );
@@ -537,6 +545,8 @@ impl BodyProtocol {
             email_id: id,
             index,
             url,
+            document_token,
+            request_id,
         })
     }
 
@@ -548,25 +558,26 @@ impl BodyProtocol {
         core: &MailxCore,
         id: String,
         index: usize,
+        token: String,
+        request_id: String,
     ) -> Result<String, AppError> {
-        let confirmation = self
-            .confirmations
-            .lock()
-            .map_err(|_| missing())?
-            .remove(&(id.clone(), index))
-            .ok_or_else(missing)?;
-        if confirmation.document.created.elapsed() >= TOKEN_LIFETIME {
-            return Err(missing());
-        }
-        if self.numbered_links {
-            self.check_numbered_document(&id, &confirmation.document.token)?;
-        }
+        let confirmation = {
+            let mut confirmations = self.confirmations.lock().map_err(|_| missing())?;
+            // A mismatched request must not consume a different dialog's grant.
+            let pending = confirmations.get(&request_id).ok_or_else(missing)?;
+            if pending.document.binding.email_id() != id
+                || pending.index != index
+                || pending.document.token != token
+            {
+                return Err(missing());
+            }
+            confirmations.remove(&request_id).ok_or_else(missing)?
+        };
+        self.resolve(&id, &token)?;
         let url = core
             .body_link(id.clone(), index, Some(confirmation.document.binding))
             .await?;
-        if self.numbered_links {
-            self.check_numbered_document(&id, &confirmation.document.token)?;
-        }
+        self.resolve(&id, &token)?;
         if url != confirmation.url {
             return Err(missing());
         }

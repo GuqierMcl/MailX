@@ -135,6 +135,29 @@ impl MailxCore {
         .map_err(|_| internal())?
     }
 
+    /// Serve a previously prepared document without refreshing or rebinding it.
+    /// Identity validation and the HTML read share the account-service lock.
+    pub async fn body_document_bound(
+        &self,
+        binding: BodyBinding,
+    ) -> Result<BodyDocument, AppError> {
+        let core = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let service = core.accounts()?;
+            check(&service, &binding)?;
+            let body = service.body_cache(&binding.identity)?.ok_or_else(missing)?;
+            if body.raw != binding.raw || body.sanitizer_version != binding.sanitizer_version {
+                return Err(missing());
+            }
+            Ok(BodyDocument {
+                html: body.rendered.sanitized_html.ok_or_else(missing)?,
+                binding,
+            })
+        })
+        .await
+        .map_err(|_| internal())?
+    }
+
     pub async fn body_part(
         &self,
         binding: BodyBinding,

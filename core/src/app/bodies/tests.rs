@@ -106,6 +106,7 @@ async fn old_bindings_fail_after_every_visibility_or_account_identity_change() {
         let (_directory, core, ids, db) = fixture(&[&raw]);
         let document = core.body_document(ids[0].clone()).await.unwrap();
         db.execute(mutation, []).unwrap();
+        assert_missing(core.body_document_bound(document.binding.clone()).await);
         assert_missing(
             core.body_links(ids[0].clone(), Some(document.binding.clone()))
                 .await,
@@ -135,6 +136,7 @@ async fn replacement_raw_and_sanitizer_invalidate_existing_bindings() {
         let (_directory, core, ids, db) = fixture(&[&raw]);
         let document = core.body_document(ids[0].clone()).await.unwrap();
         db.execute(mutation, []).unwrap();
+        assert_missing(core.body_document_bound(document.binding.clone()).await);
         assert_missing(
             core.body_links(ids[0].clone(), Some(document.binding.clone()))
                 .await,

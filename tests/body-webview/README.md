@@ -11,8 +11,8 @@ all three platforms have evidence.
 | Platform | Driver and opaque-frame observation | Link input |
 | --- | --- | --- |
 | macOS | Embedded `tauri-plugin-wdio-webdriver` 1.5.0 for the main window; public WKWebView frame evaluation, Vision OCR and screenshot pixels for the body | AppKit mouse events on a trusted numbered-link button |
-| Windows | Official `tauri-driver` 2.1.0 + matching `msedgedriver`, native WebDriver frame selection | W3C native element click in the body |
-| Linux | Official `tauri-driver` 2.1.0 + WebKitWebDriver, native WebDriver frame selection | W3C native element click in the body |
+| Windows | Matching Microsoft `msedgedriver` with WebView2 capabilities, native WebDriver frame selection | W3C native element click in the body |
+| Linux | Official `tauri-driver` 2.1.0 + WebKitWebDriver, native WebDriver frame selection | W3C native element click on a trusted numbered-link button |
 
 The embedded driver's frame implementation uses parent `contentWindow.eval`,
 which cannot access an opaque sandboxed child. Its synthetic DOM click path is
@@ -67,12 +67,29 @@ records actual `SecurityError` exceptions when accessing the body frame.
 Real AppKit click evidence found that WKWebView delivers the original `/link`
 request and 204 response but replaces the document with a blank frame. That
 failed evidence is retained separately; it is never relabeled as passing. The
-macOS production fallback removes anchor hrefs, adds passive `[N]` labels, and
+macOS and Linux production fallback removes anchor hrefs, adds passive `[N]` labels, and
 lets the trusted parent display database URLs. After the document loads, the
 test parent calls `emails_body_links` and a real button calls `links_request`
 with the current document token. The test checks the real link event and URL,
 no extra frame load/document request, preserved rendered content, and zero
 `/link` protocol requests. It never calls `links_open` or opens a browser.
+
+The initial Ubuntu 24.04 run reproduced the same direct-link failure in
+WebKitGTK: the protocol returned 204 and emitted the expected event, but frame
+loads increased from one to two, the URL changed to `/link`, and the title and
+CID image disappeared. The first 13 assertions passed and the document-marker
+assertion failed. This result justifies testing the numbered fallback; it does
+not establish a passing Linux gate. The original evidence is preserved in
+[CI run 39235950064](https://github.com/GuqierMcl/MailX/actions/runs/39235950064).
+That run's macOS 15 report passed all 60 assertions. CI checks a generated PR
+merge commit, so a report's Git SHA can differ from the branch head.
+
+Before loading any document, the trusted parent obtains a host-issued token
+through `emails_prepare_body`. The document URL and subsequent link metadata
+use this exact token; a document GET never creates a token or changes another
+view's binding. Events carry both the token and a unique request ID. The parent
+rejects events from a previous view, including a previous view of the same
+email. Link confirmation consumes that exact request once.
 
 ## Run
 
@@ -89,7 +106,7 @@ bun scripts/body-webview.mjs run --native-driver=C:/path/to/msedgedriver.exe
 On macOS, `--input=native` additionally supports the CoreGraphics helper in
 `native/click.swift` and requires Accessibility permission. `--input=manual`
 writes `click-ready.json` and waits up to 60 seconds for CUA or a physical click.
-`--input=instrumented` uses public `NSApplication.sendEvent` mouseDown/mouseUp,
+`--input=instrumented` uses public `NSWindow.sendEvent` mouseDown/mouseUp,
 not DOM `.click()`, and labels it as native event injection, not physical input.
 Windows/Linux always use the external runner regardless of the macOS input flag.
 
@@ -98,4 +115,5 @@ user agent, capabilities, input method, assertions, protocol statuses, remote
 canary requests and screenshots. The macOS report also hashes its native/helper
 sources. Failure returns nonzero and preserves evidence. Neither sandbox tokens
 nor CSP are relaxed, and a missing platform/driver/observation never counts as
-passing. CI uploads evidence even on failure.
+passing. CI uploads evidence even on failure and publishes a synthetic-only
+summary through GitHub check annotations for easier failure diagnosis.

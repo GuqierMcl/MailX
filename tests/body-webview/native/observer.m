@@ -74,10 +74,14 @@ static void nativeClick(WKWebView *webview, NSDictionary *target) {
     NSPoint local = NSMakePoint(x, webview.isFlipped ? y : webview.bounds.size.height - y);
     NSPoint point = [webview convertPoint:local toView:nil];
     NSWindow *window = webview.window;
+    [NSApplication.sharedApplication activateIgnoringOtherApps:YES];
     [window makeKeyAndOrderFront:nil];
+    record(webview, @{@"kind": @"native-input", @"x": @(x), @"y": @(y),
+        @"windowX": @(point.x), @"windowY": @(point.y), @"flipped": @(webview.isFlipped),
+        @"active": @(NSApplication.sharedApplication.isActive), @"key": @(window.isKeyWindow)});
     for (NSNumber *type in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
         NSEvent *event = [NSEvent mouseEventWithType:type.unsignedIntegerValue location:point modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1.0];
-        [NSApplication.sharedApplication sendEvent:event];
+        [window sendEvent:event];
     }
     [webview evaluateJavaScript:@"window.__MAILX_NATIVE_CLICK_DELIVERED=true" completionHandler:nil];
 }

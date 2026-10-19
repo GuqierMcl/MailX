@@ -18,6 +18,8 @@ const output = resolve(option('output', resolve(root, 'target/body-webview-evide
 const nativeDriver = option('native-driver', undefined);
 const tauriDriver = option('tauri-driver', undefined);
 const delay = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
+const numberedFallback = process.platform === 'linux';
+const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const hash = createHash('sha256');
 for await (const bytes of createReadStream(binary)) hash.update(bytes);
 const sourceStatus = spawnSync('git', ['status', '--porcelain=v1'], { cwd: root, encoding: 'utf8' }).stdout;
@@ -38,9 +40,11 @@ const report = {
   sourceDirty: sourceStatus.length !== 0, sourceStatus: sourceStatus.trimEnd(),
   trackedDiffSha256: createHash('sha256').update(trackedDiff).digest('hex'),
   binary, binarySha256: hash.digest('hex'), testRoot, source: 'synthetic-only',
-  driver: 'official tauri-driver + native platform WebDriver',
+  driver: process.platform === 'win32' ? 'Microsoft Edge WebDriver (WebView2)' : 'official tauri-driver + WebKitWebDriver',
   instrumentation: 'Native WebDriver frame selection/execute; unchanged empty sandbox and production CSP.',
-  linkInputEvidence: 'W3C native WebDriver element click; no DOM element.click() fallback',
+  linkInputEvidence: numberedFallback
+    ? 'W3C native WebDriver element click on trusted parent numbered button; no DOM element.click() fallback'
+    : 'W3C native WebDriver element click in the body frame; no DOM element.click() fallback',
   status: 'running', assertions: [], stages: {}, canaryRequests,
 };
 let driver;
@@ -69,9 +73,20 @@ async function screenshot(name) {
 }
 async function load(name) {
   await driver.execute('return window.__MAILX_BODY_TEST.load(arguments[0]);', name);
-  return until(() => driver.observe(), (snapshot) => snapshot.selected === name
-    && frame(snapshot).url === snapshot.frameUrl && frame(snapshot).documentReady === 'complete'
-    && frame(snapshot).inlineImageLoaded, `${name} native frame observation and CID`);
+  return until(() => driver.observe(), (snapshot) => {
+    const observed = frame(snapshot);
+    if (!snapshot || !observed || snapshot.selected !== name || !snapshot.emailId || !snapshot.documentToken
+      || !snapshot.bodyLinksLoaded || snapshot.prepareError || snapshot.numberedError
+      || observed.url !== snapshot.frameUrl || observed.documentReady !== 'complete' || !observed.inlineImageLoaded) {
+      return false;
+    }
+    if (!Array.isArray(snapshot.numberedLinks)) return false;
+    let documentUrl;
+    try { documentUrl = new URL(snapshot.frameUrl); } catch { return false; }
+    return documentUrl.pathname === `/document/${snapshot.emailId}`
+      && documentUrl.searchParams.get('token') === snapshot.documentToken
+      && snapshot.numberedLinks.length === (numberedFallback && name !== 'malicious' ? 1 : 0);
+  }, `${name} bound document, native frame observation and CID`);
 }
 function isolation(name, snapshot) {
   const observed = frame(snapshot);
@@ -90,7 +105,7 @@ function isolation(name, snapshot) {
 
 try {
   driver = await startExternalDriver({
-    binary, cwd: root, nativeDriver, tauriDriver, onLog: (text) => { logs += text; },
+    binary, cwd: root, nativeDriver, tauriDriver, nativeLog: resolve(output, 'native-driver.log'), onLog: (text) => { logs += text; },
     env: { MAILX_BODY_WEBVIEW_ROOT: testRoot, MAILX_BODY_WEBVIEW_NONCE: randomBytes(32).toString('hex'), MAILX_BODY_CANARY_ORIGIN: `http://127.0.0.1:${canary.address().port}` },
   });
   report.capabilities = driver.capabilities;
@@ -98,16 +113,41 @@ try {
   const safe = await load('safe');
   report.stages.safe = safe;
   isolation('safe', safe);
+  if (numberedFallback) {
+    check('numbered fallback: trusted list preserves DB URL', safe.numberedLinks.length === 1
+      && safe.numberedLinks[0]?.emailId === safe.emailId
+      && safe.numberedLinks[0]?.index === 0
+      && safe.numberedLinks[0]?.url === 'https://example.invalid/confirmed-link');
+    check('numbered fallback: trusted parent button is visible', safe.numberedLinkRectangle?.width > 0
+      && safe.numberedLinkRectangle?.height > 0, safe.numberedLinkRectangle);
+  }
   await screenshot('safe-before-link');
-  await driver.clickLink();
-  await until(() => driver.state(), (snapshot) => snapshot.links.length > safe.links.length, 'real link protocol event');
+  if (numberedFallback) await driver.clickNumberedLink();
+  else await driver.clickLink();
+  await until(() => driver.state(), (snapshot) => snapshot.links.length > safe.links.length
+    && (numberedFallback ? snapshot.numberedRequestSucceeded : true), 'real link event');
   await delay(500);
   const linked = await driver.observe();
   report.stages.afterLink = linked;
-  check('link: correct database URL', linked.links.at(-1)?.url === 'https://example.invalid/confirmed-link');
-  check('link: protocol returned 204', linked.requests.some((request) => request.route === 'link' && request.status === 204));
+  const requestedLink = linked.links.at(-1);
+  check('link: correct database URL', requestedLink?.url === 'https://example.invalid/confirmed-link');
+  check('link: exact email binding emitted', requestedLink?.emailId === safe.emailId);
+  check('link: exact document token emitted', requestedLink?.documentToken === safe.documentToken);
+  check('link: unique request ID emitted', requestIdPattern.test(requestedLink?.requestId ?? '')
+    && !safe.links.some((previous) => previous.requestId === requestedLink.requestId));
+  check('link: trusted view accepted exact request', linked.currentLinkRequest?.requestId === requestedLink?.requestId
+    && linked.currentLinkRequest?.documentToken === safe.documentToken
+    && linked.currentLinkRequest?.emailId === safe.emailId);
+  if (numberedFallback) {
+    check('link: numbered request succeeded', linked.numberedRequestSucceeded && linked.numberedError === null);
+    check('link: no link protocol request', !linked.requests.some((request) => request.route === 'link'));
+  } else {
+    check('link: protocol returned 204', linked.requests.some((request) => request.route === 'link' && request.status === 204));
+  }
   check('link: same document marker', frame(linked).documentMarker === frame(safe).documentMarker);
   check('link: document did not navigate', linked.frameUrl === safe.frameUrl && frame(linked).url === frame(safe).url && linked.frameLoads === safe.frameLoads);
+  check('link: title retained', frame(linked).title === titles.safe);
+  check('link: CID retained', frame(linked).inlineImageLoaded && frame(linked).inlineImageWidth > 0);
   check('link: no remote requests', canaryRequests.length === 0);
   await screenshot('safe-after-link');
   for (const name of ['malicious', 'policyProbe']) {

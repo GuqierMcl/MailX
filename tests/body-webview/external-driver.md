@@ -1,8 +1,11 @@
 # Native WebDriver route for the synthetic body harness
 
-This route is prepared for Linux and Windows. It has not been run on those
-platforms merely because these files exist. macOS has no official `tauri-driver`
-backend; keep its separate native verification path.
+This route exercises Linux and Windows. Evidence from each actual run is
+required; the presence of these files does not establish a passing gate.
+The initial Linux run loaded the isolated document and CID image, but its 204
+link response navigated to a blank document. Linux therefore uses the numbered
+fallback described in [README.md](README.md). macOS has no official
+`tauri-driver` backend; keep its separate native verification path.
 
 The embedded driver's frame helper evaluates through `parent.contentWindow`,
 which cannot observe an opaque sandboxed frame. The native adapter instead uses
@@ -33,10 +36,12 @@ Windows uses the corresponding `win32-external` directory.
 ## Windows CI
 
 Use the existing `windows-2025` runner's interactive desktop and WebView2 Runtime.
+The adapter starts Microsoft Edge WebDriver directly with the same WebView2
+capabilities used by tauri-driver, preserving verbose native-driver logs even
+when session creation fails. The embedded macOS driver is not initialized.
 Install a driver matching that Runtime, rather than matching Microsoft Edge:
 
 ```powershell
-cargo install tauri-driver --locked --version 2.1.0
 pwsh -File tests/body-webview/install-webview2-driver.ps1
 bun run body-webview:build
 bun tests/body-webview/run-external.mjs --native-driver="$((Resolve-Path target/body-webview-driver/msedgedriver.exe).Path)"
