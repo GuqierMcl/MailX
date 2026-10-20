@@ -19,6 +19,17 @@ afterEach(() => {
 })
 
 describe('settings dialog', () => {
+  it('offers all remote image policies on the security page and saves only that section', async () => {
+    const { client, dialog } = renderDialog(testClient(), { section: 'security' })
+    const select = await within(dialog).findByRole('combobox', { name: '加载远程图片' })
+    expect(select).toHaveTextContent('每次询问')
+    await userEvent.click(select)
+    expect(screen.getByRole('option', { name: '自动加载' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: '永不加载' }))
+    await waitFor(() => expect(select).toHaveTextContent('永不加载'))
+    expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never' } })
+  })
+
   it('starts an empty account list with a new-account form', async () => {
     const { dialog } = renderDialog()
     await userEvent.click(await within(dialog).findByRole('button', { name: '添加第一个账号' }))
@@ -99,7 +110,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

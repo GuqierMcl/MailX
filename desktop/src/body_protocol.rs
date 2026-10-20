@@ -49,11 +49,34 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                     Route::Document { id, .. } => ("document", id),
                     Route::Part { id, .. } => ("part", id),
                     Route::Link { id, .. } => ("link", id),
+                    Route::Remote { id, .. } => ("remote", id),
                 });
-                let core = (label == "main")
+                let mut core = (label == "main")
                     .then(|| app.try_state::<crate::state::DesktopState>())
                     .flatten()
                     .and_then(|state| state.core().ok());
+                if matches!(
+                    parse_route(&request.uri().to_string()),
+                    Some((Route::Remote { .. }, _))
+                ) {
+                    let allowed = if let Some(state) = app.try_state::<crate::state::DesktopState>()
+                    {
+                        state
+                            .settings(|store| store.get())
+                            .await
+                            .is_ok_and(|snapshot| {
+                                protocol.permits_remote_request(
+                                    &request.uri().to_string(),
+                                    snapshot.settings.security.remote_images,
+                                )
+                            })
+                    } else {
+                        false
+                    };
+                    if !allowed {
+                        core = None;
+                    }
+                }
                 let (reply, event) = match core {
                     Some(core) => protocol.serve(&core, request, &origin).await,
                     None => (
@@ -82,11 +105,38 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
         })
 }
 
+/// Cancel before WebKit commits a custom-scheme subframe navigation. WebView2
+/// can also reach this hook; its subframe protocol fallback remains a 204.
+pub(crate) fn navigation(app: &tauri::AppHandle, url: &Url) -> bool {
+    use tauri::{Emitter, EventTarget, Manager};
+    let Some((Route::Link { id, index, token }, _)) = parse_route(url.as_str()) else {
+        return true;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let protocol = app.state::<std::sync::Arc<BodyProtocol>>();
+        let Some(core) = app
+            .try_state::<crate::state::DesktopState>()
+            .and_then(|s| s.core().ok())
+        else {
+            return;
+        };
+        if let Ok(document) = protocol.resolve(&id, &token)
+            && let Ok(event) = protocol.prepare_link(&core, document, id, index).await
+        {
+            let _ = app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, event);
+        }
+    });
+    false
+}
+
 #[derive(Clone)]
 struct Document {
     token: String,
     binding: BodyBinding,
     expires_at: Instant,
+    remote_images: bool,
+    explicit_images: bool,
 }
 
 #[derive(Clone)]
@@ -106,9 +156,9 @@ pub(crate) struct BodyProtocol {
 
 impl Default for BodyProtocol {
     fn default() -> Self {
-        // WKWebView and WebKitGTK replace the frame after a custom
-        // protocol 204. Use the specification's trusted numbered-link fallback.
-        Self::new(cfg!(not(target_os = "windows")))
+        // Native navigation cancellation keeps WKWebView/WebKitGTK frames intact.
+        // WebView2 also retains its document for the protocol's 204 fallback.
+        Self::new(false)
     }
 }
 
@@ -147,6 +197,11 @@ pub(crate) struct LinkRequest {
 enum Route {
     Document {
         id: String,
+        token: String,
+    },
+    Remote {
+        id: String,
+        index: usize,
         token: String,
     },
     Part {
@@ -213,6 +268,17 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
         return None;
     }
     let route = match segments.first()?.as_str() {
+        "remote" if segments.len() == 3 => {
+            let index = segments[2].parse::<usize>().ok()?;
+            if index.to_string() != segments[2] {
+                return None;
+            }
+            Route::Remote {
+                id: id.clone(),
+                index,
+                token,
+            }
+        }
         "document" if segments.len() == 2 => Route::Document {
             id: id.clone(),
             token,
@@ -296,14 +362,22 @@ impl BodyProtocol {
     }
     fn issue(&self, binding: BodyBinding) -> Result<String, AppError> {
         let mut documents = self.documents.lock().map_err(|_| missing())?;
-        documents.retain(|_, document| Instant::now() < document.expires_at);
+        documents.retain(|_, document| {
+            if Instant::now() < document.expires_at {
+                true
+            } else {
+                document.binding.release_remote_images();
+                false
+            }
+        });
         if documents.len() >= MAX_DOCUMENTS
             && let Some(oldest) = documents
                 .iter()
                 .min_by_key(|(_, document)| document.expires_at)
                 .map(|(token, _)| token.clone())
+            && let Some(document) = documents.remove(&oldest)
         {
-            documents.remove(&oldest);
+            document.binding.release_remote_images();
         }
         let token = Uuid::new_v4().to_string();
         documents.insert(
@@ -312,6 +386,8 @@ impl BodyProtocol {
                 token: token.clone(),
                 binding,
                 expires_at: Instant::now() + TOKEN_LIFETIME,
+                remote_images: false,
+                explicit_images: false,
             },
         );
         Ok(token)
@@ -321,7 +397,7 @@ impl BodyProtocol {
     /// no email-to-current-token pointer: a late prepare/GET for A cannot replace
     /// the token selected by a newer A -> B -> A view. The trusted UI accepts
     /// results/events only for its current view generation and exact token.
-    /// Unselected tokens expire by TTL/eviction; they never authorize other views.
+    /// The UI releases unselected tokens; TTL/eviction is a fallback.
     pub(crate) async fn prepare(
         &self,
         core: &MailxCore,
@@ -331,6 +407,67 @@ impl BodyProtocol {
         Ok(PreparedBody {
             document_token: self.issue(links.binding)?,
         })
+    }
+
+    pub(crate) async fn prepare_with_images(
+        &self,
+        core: &MailxCore,
+        id: String,
+        allow: bool,
+        explicit: bool,
+    ) -> Result<PreparedBody, AppError> {
+        let prepared = self.prepare(core, id).await?;
+        if allow {
+            let mut documents = self.documents.lock().map_err(|_| missing())?;
+            let document = documents
+                .get_mut(&prepared.document_token)
+                .ok_or_else(missing)?;
+            document.remote_images = true;
+            document.explicit_images = explicit;
+        }
+        Ok(prepared)
+    }
+
+    fn permits_remote_request(&self, value: &str, policy: mailx_core::RemoteImagePolicy) -> bool {
+        let Some((Route::Remote { id, token, .. }, _)) = parse_route(value) else {
+            return false;
+        };
+        self.resolve(&id, &token).is_ok_and(|document| {
+            document.remote_images
+                && match policy {
+                    mailx_core::RemoteImagePolicy::Never => false,
+                    mailx_core::RemoteImagePolicy::Ask => document.explicit_images,
+                    mailx_core::RemoteImagePolicy::Automatic => true,
+                }
+        })
+    }
+
+    pub(crate) fn revoke_remote_images(&self) {
+        if let Ok(mut documents) = self.documents.lock() {
+            for document in documents.values_mut() {
+                document.remote_images = false;
+                document.binding.release_remote_images();
+            }
+        }
+    }
+
+    /// End one reading without affecting a newer opening of the same email.
+    pub(crate) fn release(&self, id: &str, token: &str) -> Result<(), AppError> {
+        {
+            let mut documents = self.documents.lock().map_err(|_| missing())?;
+            if let Some(document) = documents.get(token) {
+                if document.binding.email_id() != id {
+                    return Err(missing());
+                }
+                document.binding.release_remote_images();
+                documents.remove(token);
+            }
+        }
+        self.confirmations
+            .lock()
+            .map_err(|_| missing())?
+            .retain(|_, confirmation| confirmation.document.token != token);
+        Ok(())
     }
 
     fn resolve(&self, id: &str, token: &str) -> Result<Document, AppError> {
@@ -400,10 +537,17 @@ impl BodyProtocol {
         match route {
             Route::Document { id, token } => {
                 let document = self.resolve(&id, &token)?;
+                let allow_remote = document.remote_images;
                 let document = core.body_document_bound(document.binding).await?;
                 self.resolve(&id, &token)?;
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
+                        ResourceBinding::Remote { index } => {
+                            if !allow_remote {
+                                return None;
+                            }
+                            resource_url(origin, "remote", &id, &index.to_string(), &token)
+                        }
                         ResourceBinding::Part { content_id } => {
                             resource_url(origin, "part", &id, content_id, &token)
                         }
@@ -436,7 +580,7 @@ impl BodyProtocol {
                         html
                     }
                 };
-                let scope = format!("{origin}/part/{id}/");
+                let scope = format!("{origin}/part/{id}/ {origin}/remote/{id}/");
                 Ok((
                     response(
                         StatusCode::OK,
@@ -444,6 +588,26 @@ impl BodyProtocol {
                         html.into_bytes(),
                         app_origin,
                         Some(&scope),
+                    ),
+                    None,
+                ))
+            }
+            Route::Remote { id, index, token } => {
+                let document = self.resolve(&id, &token)?;
+                if !document.remote_images {
+                    return Err(missing());
+                }
+                let image = core.body_remote_image(document.binding, index).await?;
+                if !self.resolve(&id, &token)?.remote_images {
+                    return Err(missing());
+                }
+                Ok((
+                    response(
+                        StatusCode::OK,
+                        &image.mime_type,
+                        image.bytes,
+                        app_origin,
+                        None,
                     ),
                     None,
                 ))

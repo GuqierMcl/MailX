@@ -234,6 +234,8 @@ fn css_is_structurally_rebuilt_and_remote_image_references_count_once() {
     );
     let html = result.sanitized_html.unwrap();
     assert_eq!(result.remote_images_blocked, 10);
+    assert_eq!(remote_images(&html), ["https://evil.invalid/src"]);
+    let html = bind_resources(&html, |_| None);
     assert!(
         html.contains("color:red")
             && html.contains("font-size:14px")
@@ -314,6 +316,7 @@ fn binding_handles_both_platforms_without_rewriting_attacker_text_or_slots() {
     for origin in ["mailx-body://localhost", "http://mailx-body.localhost"] {
         let mut calls = Vec::new();
         let bound = bind_resources(&html, |binding| match binding {
+            ResourceBinding::Remote { .. } => None,
             ResourceBinding::Link { index } => {
                 calls.push("link");
                 Some(format!("{origin}/link/owner/{index}?binding=opaque"))
@@ -346,6 +349,7 @@ fn numbered_binding_keeps_order_and_cids_without_creating_navigable_anchors() {
     );
     let bound =
         bind_numbered_resources(&rendered.sanitized_html.unwrap(), |binding| match binding {
+            ResourceBinding::Remote { .. } => None,
             ResourceBinding::Part { content_id } => Some(format!(
                 "mailx-body://localhost/part/owner/{content_id}?token=opaque"
             )),
@@ -468,4 +472,46 @@ fn animated_png_and_declared_decoding_bombs_are_rejected() {
     }
     bomb[29..33].copy_from_slice(&(!crc).to_be_bytes());
     assert!(images::validate(&bomb, "image/png").is_err());
+}
+
+#[test]
+fn remote_images_are_inert_until_host_binding_and_forged_slots_are_removed() {
+    let rendered = rendered_html(
+        r#"<img src="https://example.com/pixel"><img data-mailx-remote="https://evil.invalid/forged"><a title="misleading" href="https://example.com/real">link</a>"#,
+    );
+    let html = rendered.sanitized_html.unwrap();
+    assert_eq!(remote_images(&html), ["https://example.com/pixel"]);
+    let blocked = bind_resources(&html, |_| None);
+    assert!(!blocked.contains("src="));
+    assert!(!blocked.contains("data-mailx-"));
+    assert!(blocked.contains("title=\"https://example.com/real\""));
+    let allowed = bind_resources(&html, |slot| match slot {
+        ResourceBinding::Remote { index } => Some(format!(
+            "mailx-body://localhost/remote/owner/{index}?token=opaque"
+        )),
+        _ => None,
+    });
+    assert!(allowed.contains("src=\"mailx-body://localhost/remote/owner/0?token=opaque\""));
+    assert!(!allowed.contains("evil.invalid"));
+}
+
+#[test]
+fn gif_and_webp_are_validated_and_rendered_as_a_bounded_first_frame() {
+    use image::{DynamicImage, ImageFormat};
+    for (format, mime) in [
+        (ImageFormat::Gif, "image/gif"),
+        (ImageFormat::WebP, "image/webp"),
+    ] {
+        let mut data = std::io::Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(2, 3)
+            .write_to(&mut data, format)
+            .unwrap();
+        let rendered = validate_image(data.get_ref(), mime).unwrap();
+        assert_eq!(rendered.mime_type, "image/png");
+        assert_eq!(
+            image::guess_format(&rendered.bytes).unwrap(),
+            ImageFormat::Png
+        );
+        assert!(validate_image(b"not an image", mime).is_err());
+    }
 }

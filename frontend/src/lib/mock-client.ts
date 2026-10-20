@@ -20,7 +20,7 @@ export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
-  let settings = { settings: { appearance: cachedAppearance() }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -86,10 +86,22 @@ export function createMockClient(): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async fetchBody(emailId) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      return structuredClone(email)
+    },
+    prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
+    releaseBody: async () => undefined,
+    bodyLinks: async (_emailId, documentToken) => ({ documentToken, links: [] }),
+    requestLink: async () => { throw notFound() },
+    openLink: async () => { throw notFound() },
+    onLinkRequest: () => () => undefined,
     getSettings: async () => structuredClone(settings),
     async updateSettings(next) {
-      const interfaceFont = parseFontFamilies(next.appearance.interfaceFont).join(', ')
-      settings = { settings: { appearance: { ...next.appearance, interfaceFont } }, stored: true, recovered: false }
+      const appearance = next.appearance ?? settings.settings.appearance
+      const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
+      settings = { settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont } }, stored: true, recovered: false }
       return structuredClone(settings)
     },
   }
@@ -378,7 +390,7 @@ function buildEmails(): EmailDetail[] {
       to: sent ? [{ name: '团队', address: 'team@example.com' }] : [me],
       cc: [],
       replyTo: [],
-      body: { text: seed.text, hasHtml: false, truncated: false, remoteImagesBlocked: 0 },
+      body: { text: seed.text, hasHtml: index === 0, truncated: false, remoteImagesBlocked: index === 0 ? 1 : 0 },
       bodyFailure: null,
       attachments: (seed.attachments ?? []).map(([filename, mimeType, size], position) => ({
         id: `${id}-attachment-${position + 1}`,

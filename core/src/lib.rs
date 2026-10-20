@@ -23,7 +23,8 @@ pub use app::{BodyBinding, BodyDocument, BodyLinks, MailxCore};
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use mail::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, FontSize, SettingsSnapshot, SettingsStore, ThemeMode,
+    AppSettings, AppearanceSettings, FontSize, RemoteImagePolicy, SecuritySettings, SettingsPatch,
+    SettingsSnapshot, SettingsStore, ThemeMode,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

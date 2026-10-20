@@ -91,7 +91,9 @@ async fn document(
         &response,
         "text/html; charset=utf-8",
         APP_ORIGIN,
-        Some(&format!("{BODY_ORIGIN}/part/{id}/")),
+        Some(&format!(
+            "{BODY_ORIGIN}/part/{id}/ {BODY_ORIGIN}/remote/{id}/"
+        )),
     );
     let html = String::from_utf8(response.into_body()).unwrap();
     assert!(html.contains("Synthetic protocol fixture"));
@@ -487,11 +489,8 @@ async fn numbered_document(
 }
 
 #[test]
-fn non_windows_defaults_to_the_verified_numbered_link_fallback() {
-    assert_eq!(
-        BodyProtocol::default().numbered_links,
-        cfg!(not(target_os = "windows"))
-    );
+fn all_platforms_use_inline_links() {
+    assert!(!BodyProtocol::default().numbered_links);
 }
 
 #[tokio::test]
@@ -827,5 +826,103 @@ async fn numbered_links_recheck_identity_mapping_and_binding_before_confirmation
                     .is_err()
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn remote_routes_require_a_current_document_grant_and_policy() {
+    use mailx_core::RemoteImagePolicy::{Ask, Automatic, Never};
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://example.invalid/image\">";
+    let directory = TempDir::new().unwrap();
+    let (core, ids) =
+        MailxCore::body_test_fixture(directory.path(), tokio::runtime::Handle::current(), &[raw])
+            .unwrap();
+    let protocol = BodyProtocol::default();
+    let id = &ids[0];
+    let blocked = protocol.prepare(&core, id.clone()).await.unwrap();
+    let remote = |token: &str| format!("{BODY_ORIGIN}/remote/{id}/0?token={token}");
+    let (reply, _) = protocol
+        .serve(
+            &core,
+            request(Method::GET, &remote(&blocked.document_token)),
+            APP_ORIGIN,
+        )
+        .await;
+    assert_eq!(reply.status(), StatusCode::NOT_FOUND);
+    let one_time = protocol
+        .prepare_with_images(&core, id.clone(), true, true)
+        .await
+        .unwrap();
+    assert!(protocol.permits_remote_request(&remote(&one_time.document_token), Ask));
+    assert!(!protocol.permits_remote_request(&remote(&one_time.document_token), Never));
+    let automatic = protocol
+        .prepare_with_images(&core, id.clone(), true, false)
+        .await
+        .unwrap();
+    assert!(protocol.permits_remote_request(&remote(&automatic.document_token), Automatic));
+    assert!(!protocol.permits_remote_request(&remote(&automatic.document_token), Ask));
+    let (reply, _) = protocol
+        .serve(
+            &core,
+            request(
+                Method::GET,
+                &format!(
+                    "{BODY_ORIGIN}/document/{id}?token={}",
+                    one_time.document_token
+                ),
+            ),
+            APP_ORIGIN,
+        )
+        .await;
+    let html = String::from_utf8(reply.into_body()).unwrap();
+    assert!(html.contains(&remote(&one_time.document_token)));
+    assert!(!html.contains("https://example.invalid/image"));
+    protocol.revoke_remote_images();
+    assert!(!protocol.permits_remote_request(&remote(&one_time.document_token), Ask));
+    assert!(!protocol.permits_remote_request(&remote(&automatic.document_token), Automatic));
+}
+
+#[tokio::test]
+async fn releasing_a_reading_revokes_its_resources_and_pending_links_only() {
+    let (_directory, core, ids, _db) = fixture();
+    let protocol = BodyProtocol::default();
+    let first = protocol.prepare(&core, ids[0].clone()).await.unwrap();
+    let current = protocol.prepare(&core, ids[0].clone()).await.unwrap();
+    let token = &first.document_token;
+    let event = protocol
+        .prepare_link(
+            &core,
+            protocol.resolve(&ids[0], token).unwrap(),
+            ids[0].clone(),
+            0,
+        )
+        .await
+        .unwrap();
+    assert!(protocol.release(&ids[1], token).is_err());
+    assert!(protocol.resolve(&ids[0], token).is_ok());
+    protocol.release(&ids[0], token).unwrap();
+    protocol.release(&ids[0], token).unwrap();
+    assert!(protocol.confirmations.lock().unwrap().is_empty());
+    assert!(protocol.resolve(&ids[0], token).is_err());
+    assert!(protocol.resolve(&ids[0], &current.document_token).is_ok());
+    assert!(
+        protocol
+            .confirm_link(&core, ids[0].clone(), 0, token.clone(), event.request_id)
+            .await
+            .is_err()
+    );
+    for path in [
+        format!("document/{}", ids[0]),
+        format!("part/{}/pixel", ids[0]),
+        format!("remote/{}/0", ids[0]),
+    ] {
+        let (reply, _) = protocol
+            .serve(
+                &core,
+                request(Method::GET, &format!("{BODY_ORIGIN}/{path}?token={token}")),
+                APP_ORIGIN,
+            )
+            .await;
+        assert_eq!(reply.status(), StatusCode::NOT_FOUND);
     }
 }

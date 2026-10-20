@@ -8,6 +8,7 @@ use super::{css, images};
 
 const CID_SLOT: &str = "data-mailx-cid";
 const LINK_SLOT: &str = "data-mailx-link";
+const REMOTE_SLOT: &str = "data-mailx-remote";
 const DATA_SLOT: &str = "data-mailx-data";
 
 pub(super) struct Sanitized {
@@ -23,6 +24,7 @@ pub(super) struct Sanitized {
 pub enum ResourceBinding<'a> {
     Part { content_id: &'a str },
     Link { index: usize },
+    Remote { index: usize },
 }
 
 /// Bind a trusted renderer result at serving time. Unresolved slots are removed.
@@ -57,11 +59,25 @@ fn bind(
         .descendants()
         .map(|node| node.id())
         .collect();
+    let mut remote_index = 0;
     for id in ids {
         let mut node = document.tree.get_mut(id).unwrap();
         let Node::Element(element) = node.value() else {
             continue;
         };
+        let remote = element.name() == "img" && element.attr(REMOTE_SLOT).is_some();
+        if remote {
+            if let Some(url) = resolve(ResourceBinding::Remote {
+                index: remote_index,
+            })
+            .filter(|url| {
+                valid_resource_url(url, true)
+                    && Url::parse(url).is_ok_and(|url| url.path().starts_with("/remote/"))
+            }) {
+                set_attr(element, "src", &url);
+            }
+            remote_index += 1;
+        }
         let slot = match element.name() {
             "img" => element
                 .attr(CID_SLOT)
@@ -121,7 +137,13 @@ fn valid_resource_url(value: &str, part: bool) -> bool {
         && url.port().is_none()
         && url
             .path()
-            .starts_with(if part { "/part/" } else { "/link/" })
+            .starts_with(if part && url.path().starts_with("/remote/") {
+                "/remote/"
+            } else if part {
+                "/part/"
+            } else {
+                "/link/"
+            })
 }
 
 pub fn is_allowed_link(value: &str) -> bool {
@@ -138,6 +160,45 @@ fn canonical_link(value: &str) -> Option<String> {
         "mailto" if !url.path().is_empty() => Some(url.to_string()),
         _ => None,
     }
+}
+
+pub const MAX_REMOTE_IMAGES: usize = 32;
+
+fn remote_url(value: &str) -> Option<String> {
+    if value.len() > 8192 || value.chars().any(char::is_control) {
+        return None;
+    }
+    let value = value.trim();
+    let url = Url::parse(&if value.starts_with("//") {
+        format!("https:{value}")
+    } else {
+        value.to_owned()
+    })
+    .ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none())
+    .then(|| url.to_string())
+}
+
+/// Only read from a versioned sanitizer result; these slots never reach the WebView.
+pub fn remote_images(html: &str) -> Vec<String> {
+    Html::parse_fragment(html)
+        .tree
+        .root()
+        .descendants()
+        .filter_map(|node| {
+            let Node::Element(element) = node.value() else {
+                return None;
+            };
+            (element.name() == "img")
+                .then(|| element.attr(REMOTE_SLOT))
+                .flatten()
+                .and_then(remote_url)
+        })
+        .take(MAX_REMOTE_IMAGES)
+        .collect()
 }
 
 pub(super) fn is_remote(value: &str) -> bool {
@@ -277,7 +338,11 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                     }
                 }
                 "src" if tag == "img" => {
-                    if is_remote(&value) {
+                    if let Some(url) = remote_url(&value) {
+                        // Keep a provenance-marked inert URL; never an external src.
+                        if blocked < MAX_REMOTE_IMAGES as u32 {
+                            set_attr(element, REMOTE_SLOT, &url);
+                        }
                         blocked = blocked.saturating_add(1);
                     } else if value
                         .get(..4)
@@ -299,6 +364,7 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                 "href" if tag == "a" => {
                     if let Some(link) = canonical_link(&value) {
                         set_attr(element, LINK_SLOT, &links.len().to_string());
+                        set_attr(element, "title", &link);
                         links.push(link);
                     }
                 }
@@ -309,6 +375,14 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                 | "lowsrc" | "dynsrc" => {}
                 _ => element.attrs.push((name, value)),
             }
+        }
+        if tag == "a"
+            && let Some(link) = element
+                .attr(LINK_SLOT)
+                .and_then(|v| v.parse::<usize>().ok())
+                .and_then(|i| links.get(i))
+        {
+            set_attr(element, "title", link);
         }
     }
     let mut builder = ammonia::Builder::default();
@@ -322,7 +396,7 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
         .add_tags(&["style"])
         .rm_clean_content_tags(&["style"])
         .add_generic_attributes(&["style", "class"])
-        .add_tag_attributes("img", &[CID_SLOT, DATA_SLOT])
+        .add_tag_attributes("img", &[CID_SLOT, DATA_SLOT, REMOTE_SLOT])
         .add_tag_attributes("a", &[LINK_SLOT])
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true);

@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、文件夹、同步状态与邮件头读取接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-19。桌面通过受限 Tauri IPC 读取本地邮件头；HTTP、MCP、连接测试、正文下载和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-20。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP、连接测试和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -81,7 +81,7 @@ type EmailPage = {
 };
 ```
 
-`EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、pendingChanges。当前 `preview=""`、`bodyState="missing"`、`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
+`EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、pendingChanges。`preview` 为缓存纯文本前 200 个 Unicode 字符，尚未下载时为空；`bodyState` 为 missing / fetching / ready / failed，`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
 
 `coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
 
@@ -90,13 +90,41 @@ type EmailPage = {
 - `windowCapped=true` 表示至少一个匹配目录达到每轮 1,000 封选取上限；它与是否仍在同步分别表达。
 - `syncedBefore=null`、`bodiesComplete=false`。头部完整性只声明同步窗口，不表示整箱历史完整；文本、未读、附件与时间筛选不改变参与计算的文件夹范围。查询窗口之前的历史时，必须结合 `syncedAfter` 解读结果。
 
-任意可选文件夹使用相同的列表、搜索、未读筛选及分页。空状态依据实际目录同步状态区分等待、同步、失败和成功空目录；覆盖数量受限单独提示，不能从 `headersComplete=false` 推断正在同步。搜索和未读筛选保留各自空提示，详情保持“正文尚未下载”。相关目录数据版本变化后刷新已加载结果并保留仍有效的选中；无关目录通知不重置当前分页。切换查询后丢弃旧请求结果。
+任意可选文件夹使用相同的列表、搜索、未读筛选及分页。空状态依据实际目录同步状态区分等待、同步、失败和成功空目录；覆盖数量受限单独提示，不能从 `headersComplete=false` 推断正在同步。搜索和未读筛选保留各自空提示；打开缺少正文的详情会自动请求一次下载，失败后仅手动重试。相关目录数据版本变化后刷新已加载结果并保留仍有效的选中；无关目录通知不重置当前分页。切换查询后丢弃旧请求结果。
 
 ### 详情与错误
 
-`emails_get` 接受本地 `emailId` UUID，只能读取与列表相同可见范围中的邮件；返回 summary、to、cc、replyTo，当前 body 为 null、attachments 为空数组。即使 summary.hasAttachment 为 true，也只代表远端结构含附件，不能据此生成下载链接。详情不会触发正文抓取，界面保留“正文尚未下载”提示。
+`emails_get` 接受本地 `emailId` UUID，只能读取与列表相同可见范围中的邮件；返回 summary、to、cc、replyTo、body、bodyFailure 与 attachments。正文未就绪时 body 为 null；就绪时返回纯文本和安全元数据，attachments 来自非内联 MIME 部分。hasAttachment 仍来自远端结构，不能据此生成附件下载链接。此读取命令本身不触发网络下载；UI 单独调用 emails_fetch_body。
 
 非法查询、游标、时间或 UUID 返回 `validation`；邮件不存在、已删除、旧来源或旧 UIDVALIDITY 不可见时返回 `notFound`。数据库错误使用现有 `storageUnavailable` 等脱敏错误；启动未 Ready 使用 `coreNotReady`，宿主来源或负载错误沿用受控 IPC 边界。无网络访问，因此这两个读取命令不报告 IMAP 登录错误；后台错误通过同步状态单独表达。
+
+### 按需正文与外链
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `fetchBody(emailId)` | `emails_fetch_body`，`{ emailId }` | 最新 `EmailDetail` |
+| `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
+| `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
+| `bodyLinks(emailId, documentToken)` | `emails_body_links`，`{ emailId, documentToken }` | `{ documentToken, links: [{ emailId, index, url }] }` |
+| `requestLink(identity)` | `links_request`，`{ emailId, index, documentToken }` | null；旧编号兼容入口，生产模式拒绝 |
+| `openLink(grant)` | `links_open`，`{ emailId, index, documentToken, requestId }` | null |
+
+`EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number }`。
+`bodyFailure` 为 null 或 `tooLarge | stale | network | authentication | protocol | storage`。
+`AttachmentSummary` 包含 id、filename、mimeType、size、isInline；本轮不提供附件保存接口。
+HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
+
+正文界面自动选择格式：hasHtml 为 true 时显示隔离的 HTML，否则显示纯文本；不提供格式切换或“重新加载正文”按钮。缺失正文仍自动下载，下载失败时保留“重试”入口。
+
+下载使用独立的账号路由连接、EXAMINE 和 UID BODY.PEEK[]，不改变服务端已读状态。同一邮件共享 flight，每账号正文串行，账号之间无全局限额。已缓存正文只读本地数据；失败通常以 bodyState=failed 的成功详情返回，前端不能仅靠 Promise rejection 判断失败。邮件不可见时返回 notFound，存储不可写时返回受控错误，不假称已保存失败状态。
+
+每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。离开本次阅读时调用 release，删除令牌、待处理链接授权并释放远程图片内存；迟到的 prepare 结果同样释放，重复 release 无副作用。令牌有效期 30 分钟、最多 128 个，作为清理后备，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。
+
+`mailx://link-request` 载荷为 `{ emailId, index, url, documentToken, requestId }`。点击正文原位置的链接时，原生导航回调先取消 WebView 跳转，再产生受控事件；WebView2 保留协议 204 后备路径。UI 只接受当前已加载、可见文档的事件，立即提交身份与一次性 requestId 给 links_open，不提交 URL，不再显示编号列表或逐次确认弹窗。宿主重新读取链接并限制 http / https / mailto，由系统浏览器或邮件应用打开；悬停通过链接 title 显示真实地址。重复事件、切换邮件、隐藏或文档意外重载后的旧事件均被丢弃。旧编号接口保留内部兼容，生产模式返回空列表且拒绝 links_request。
+
+远程图片策略来自 `settings.security.remoteImages`：`ask`（默认）、`automatic`、`never`。ask 在 HTML 正文上方显示单行提示；“加载图片”只授权当前打开，“不再提示”单独勾选不生效，勾选后加载须先成功保存 automatic；关闭仅隐藏本次提示。重新打开重新询问，never 不显示提示。CID 和已验证 data 图片不受策略影响。prepare 的 loadRemoteImages 默认 false，只有可信主窗口可提交；never 即使收到 true 仍不放行。图片协议每次检查当前策略和文档授权，收紧设置还会撤销已有授权。
+
+正文只包含 `/remote/<emailId>/<index>?token=…`，原始图片 URL 不交给 WebView。Rust 按净化结果解析索引、沿账号路由加载、验证，并仅在本次阅读的内存中复用（保留字节最多 64 MiB，超出部分不额外缓存），不写入数据库或磁盘；列表、搜索和头部同步不会下载图片。当前支持 `<img src>` 的 http/https（含 // 地址），每封最多 32 个资源、响应最多 8 MiB、30 秒、至多 3 次重定向；远程 SVG 可由 Rust 转为静态 PNG 后显示，仅支持有界矢量图形，不加载关联资源；CSS URL、srcset、正文内联 SVG 等继续移除。系统 TUN 的 Fake-IP DNS 映射仅对通过原始域名 TLS 验证的 HTTPS 图片兼容，地址字面量和明文 HTTP 不适用。账号自定义代理代解析无法校验实际 IP 的域名请求仍拒绝加载，不使用本地 DNS 或直连绕行。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束刷新详情和已加载列表页并保留有效选中。
 
 ## 3. 当前账号操作
 
@@ -148,11 +176,11 @@ type EmailPage = {
 | MailxClient 方法 | Tauri 命令与参数 | 核心组件 | 成功结果 |
 | --- | --- | --- | --- |
 | `getSettings()` | `settings_get`，无参数 | `SettingsStore::get` | `SettingsSnapshot` |
-| `updateSettings(settings)` | `settings_update`，`{ request: AppSettings }` | `SettingsStore::update` | `SettingsSnapshot` |
+| `updateSettings(settings)` | `settings_update`，`{ request: Partial<AppSettings> }` | `SettingsStore::patch` | `SettingsSnapshot` |
 
 偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
 
-`AppSettings` 目前只有 `appearance`：`theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont`（空字符串或逗号分隔的字体名）和 `fontSize`（`small` / `default` / `large`）。空字符串表示使用内置默认值；非空的字体列表按用户顺序依次回退，前端只在末尾补通用 `sans-serif`。更新替换全部设置，核心校验后返回规范形式：颜色转小写；字体名去首尾空白和成对引号并丢弃空项，含引号、反斜杠、分号、括号、尖括号或控制字符，超过 16 个或单个超过 64 个字符时返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont`。
+`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont`（空字符串或逗号分隔的字体名）和 `fontSize`（`small` / `default` / `large`）。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont`。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 
@@ -160,7 +188,7 @@ type EmailPage = {
 
 启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号、文件夹和邮件操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。
 
-下表描述后续应用能力和拟定 HTTP 映射；不存在对应 HTTP 端点。邮件列表与头部详情已通过上文桌面命令提供，正文及其他操作仍未实现；当前接口不因此开放网络访问。
+下表描述后续应用能力和拟定 HTTP 映射；不存在对应 HTTP 端点。邮件列表、详情与按需正文已通过上文桌面命令提供，其他操作仍未实现；当前接口不因此开放网络访问。
 
 | 应用操作 | 主要输入 → 输出 | 拟定 HTTP 映射 |
 | --- | --- | --- |
@@ -168,7 +196,7 @@ type EmailPage = {
 | `accounts.reauthorize` | accountId / authProfileId / expectedRevision → 受控授权流程 | POST `/api/v1/accounts/{id}/reauthorize` |
 | `emails.list`（桌面 `emails_list` 已有） | 结构化过滤 / 游标 → EmailPage | GET `/api/v1/emails` |
 | `emails.search` | query / 过滤 / 游标 → Page + coverage | POST `/api/v1/search` |
-| `emails.read`（桌面 `emails_get` 当前仅头部） | emailId → 正文缓存状态、正文、附件元信息（后续） | GET `/api/v1/emails/{id}` |
+| `emails.read`（桌面 `emails_get`） | emailId → 正文缓存状态、纯文本、附件元信息 | GET `/api/v1/emails/{id}` |
 | `emails.fetchBody` | emailId → jobId | POST `/api/v1/emails/{id}/fetch` |
 | `emails.setFlags` | emailId / flags / clientMutationId → mutationId | PATCH `/api/v1/emails/{id}/flags` |
 | `attachments.fetch` | attachmentId → jobId | POST `/api/v1/attachments/{id}/fetch` |

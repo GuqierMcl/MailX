@@ -381,3 +381,76 @@ async fn fixture_rejects_nonempty_profiles_before_opening_them() {
         b"untouched"
     );
 }
+
+#[tokio::test]
+async fn remote_cache_is_reading_scoped_and_rechecks_identity() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://example.invalid/pixel\">";
+    let (_directory, core, ids, db) = fixture(&[raw, raw]);
+    let first = core.body_document(ids[0].clone()).await.unwrap();
+    let second = core.body_document(ids[1].clone()).await.unwrap();
+    let reopened = core.body_document(ids[0].clone()).await.unwrap();
+    let (_, bytes) = synthetic_mail([0, 0, 255], "cache", "pixel");
+    let image = render::validate_image(&bytes, "image/png").unwrap();
+    let url = "https://example.invalid/pixel";
+    let version = || {
+        db.pragma_query_value(None, "data_version", |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    let before = version();
+    first
+        .binding
+        .cache_remote_image(url.into(), &image)
+        .unwrap();
+    assert!(second.binding.cached_remote_image(url).unwrap().is_none());
+    assert!(reopened.binding.cached_remote_image(url).unwrap().is_none());
+    for _ in 0..2 {
+        assert_eq!(
+            core.body_remote_image(first.binding.clone(), 0)
+                .await
+                .unwrap()
+                .bytes,
+            bytes
+        );
+    }
+    assert_eq!(
+        version(),
+        before,
+        "reading an image must not write to SQLite"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name='remote_images'",
+            [],
+            |row| row.get::<_, u32>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_missing(core.body_remote_image(first.binding.clone(), 1).await);
+    db.execute(
+        "UPDATE messages SET remote_state='deleted' WHERE id=?1",
+        [&ids[0]],
+    )
+    .unwrap();
+    assert_missing(core.body_remote_image(first.binding, 0).await);
+}
+
+#[tokio::test]
+async fn ending_a_reading_drops_images_and_rejects_late_cache_writes() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://example.invalid/pixel\">";
+    let (_directory, core, ids, _db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    let pending = binding.clone();
+    let (_, bytes) = synthetic_mail([0, 0, 255], "cache", "pixel");
+    let image = render::validate_image(&bytes, "image/png").unwrap();
+    let url = "https://example.invalid/pixel";
+    binding.cache_remote_image(url.into(), &image).unwrap();
+    binding.release_remote_images();
+    binding.release_remote_images();
+    assert!(pending.remote_images.lock().unwrap().images.is_empty());
+    assert_missing(pending.cache_remote_image(url.into(), &image));
+    assert_missing(core.body_remote_image(pending, 0).await);
+    let reopened = core.body_document(ids[0].clone()).await.unwrap().binding;
+    assert!(reopened.cached_remote_image(url).unwrap().is_none());
+    reopened.cache_remote_image(url.into(), &image).unwrap();
+}

@@ -9,7 +9,7 @@ import {
   MailReplyAll01Icon,
   StarIcon,
 } from '@hugeicons/core-free-icons'
-import type { EmailDetail, MailAddress } from '@/generated/accounts'
+import type { BodyFailureCode, EmailDetail, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -17,15 +17,20 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { MailxClient } from '@/lib/mailx-client'
+import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime, formatSize, initials } from './format'
 
 type EmailViewProps = {
+  client: MailxClient
+  downloading: boolean
+  onDownload: () => void
   email: EmailDetail | null
   loading: boolean
   error: string | null
 }
 
-export function EmailView({ email, loading, error }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload }: EmailViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Toolbar disabled={!email} />
@@ -44,7 +49,7 @@ export function EmailView({ email, loading, error }: EmailViewProps) {
           </EmptyHeader>
         </Empty>
       ) : email ? (
-        <EmailContent email={email} />
+        <EmailContent email={email} client={client} downloading={downloading} onDownload={onDownload} />
       ) : (
         <Empty>
           <EmptyHeader>
@@ -97,11 +102,13 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-function EmailContent({ email }: { email: EmailDetail }) {
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload'> & { email: EmailDetail }
+
+function EmailContent({ email, ...props }: ContentProps) {
   const { summary, attachments } = email
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <article className="flex flex-col">
+    <article className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <ScrollArea className="max-h-[35%] shrink-0">
         <header className="flex flex-col gap-4 p-4">
           <h2 className="text-lg font-semibold">{summary.subject || '（无主题）'}</h2>
           <div className="flex items-start gap-3 text-sm">
@@ -121,20 +128,22 @@ function EmailContent({ email }: { email: EmailDetail }) {
             </time>
           </div>
         </header>
+      </ScrollArea>
         <Separator />
-        <div className="p-4 text-sm">
-          <Body email={email} />
+        <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
+          <Body email={email} {...props} />
         </div>
         {attachments.length > 0 && (
           <>
             <Separator />
-            <section className="flex flex-col gap-2 p-4" aria-label="附件">
+            <section className="flex max-h-36 shrink-0 flex-col gap-2 overflow-auto p-4" aria-label="附件">
               <h3 className="text-xs font-medium text-muted-foreground">{attachments.length} 个附件</h3>
               <ul className="flex flex-wrap gap-2">
                 {attachments.map((attachment) => (
                   <li key={attachment.id} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
                     <HugeiconsIcon icon={Attachment01Icon} className="size-3.5 text-muted-foreground" />
-                    <span className="max-w-60 truncate">{attachment.filename}</span>
+                    <span className="max-w-60 break-all">{attachment.filename}</span>
+                    <span className="text-muted-foreground">{attachment.mimeType}</span>
                     <span className="text-muted-foreground">{formatSize(attachment.size)}</span>
                   </li>
                 ))}
@@ -142,27 +151,35 @@ function EmailContent({ email }: { email: EmailDetail }) {
             </section>
           </>
         )}
-      </article>
-    </ScrollArea>
+    </article>
   )
 }
 
-function Body({ email }: { email: EmailDetail }) {
-  const { body, summary } = email
-  if (!body) {
-    return (
-      <Alert>
-        <AlertTitle>{summary.bodyState === 'failed' ? '正文获取失败' : '正文尚未下载'}</AlertTitle>
-        <AlertDescription>正文会在连接邮箱后按需获取。</AlertDescription>
-      </Alert>
-    )
-  }
-  if (body.text) return <div className="whitespace-pre-wrap break-words">{body.text}</div>
-  // HTML is untrusted and needs the isolated, script-free frame that is not built yet.
-  return (
-    <Alert>
-      <AlertTitle>这封邮件只有 HTML 正文</AlertTitle>
-      <AlertDescription>安全的 HTML 隔离显示尚未实现。</AlertDescription>
-    </Alert>
-  )
+const BODY_FAILURE: Record<BodyFailureCode, string> = {
+  tooLarge: '邮件超过 100 MB，暂不支持下载',
+  stale: '邮件已移动、删除或邮箱状态已变化，请刷新列表后重试。',
+  network: '连接邮箱失败，请检查网络后重试。',
+  authentication: '邮箱认证失败，请检查账号设置后重试。',
+  protocol: '邮件下载或解析失败，请重试。',
+  storage: '正文无法保存到本机，请检查可用空间后重试。',
+}
+
+function Body({ email, client, downloading, onDownload }: ContentProps) {
+  const { body, summary, bodyFailure } = email
+  if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
+  if (!body) return <Alert variant="destructive">
+    <AlertTitle>正文获取失败</AlertTitle>
+    <AlertDescription>{bodyFailure ? BODY_FAILURE[bodyFailure] : '未能获取正文，请重试。'}</AlertDescription>
+    <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>重试</Button>
+  </Alert>
+  return <div className="flex min-h-0 flex-1 flex-col gap-3">
+    {body.truncated && <Alert><AlertDescription>正文过长，当前仅显示截断后的内容。</AlertDescription></Alert>}
+    {body.hasHtml
+      ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0} />
+      : <PlainText text={body.text} />}
+  </div>
+}
+
+function PlainText({ text }: { text: string | null }) {
+  return <ScrollArea className="h-full min-h-0 flex-1"><div className="whitespace-pre-wrap break-words">{text || '这封邮件没有正文内容。'}</div></ScrollArea>
 }

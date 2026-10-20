@@ -168,7 +168,7 @@ impl DesktopState {
     }
 
     #[cfg(feature = "body-webview-test")]
-    pub(crate) fn for_body_test(core: MailxCore) -> Self {
+    pub(crate) fn for_body_test(core: MailxCore, directory: PathBuf) -> Self {
         struct NoSecrets;
         impl SecretStore for NoSecrets {
             fn get(
@@ -191,11 +191,7 @@ impl DesktopState {
                 panic!("test must not delete credentials")
             }
         }
-        let state = Self::new(
-            Err(AppError::new(ErrorCode::CoreNotReady)),
-            Arc::new(NoSecrets),
-            Arc::new(|_| {}),
-        );
+        let state = Self::new(Ok(directory), Arc::new(NoSecrets), Arc::new(|_| {}));
         state.finish_initialization(Ok(core));
         state
     }
@@ -339,17 +335,27 @@ mod tests {
             Arc::new(|_| {}),
         );
         state.start_initialization();
-        for _ in 0..100 {
-            if matches!(state.startup_status(), StartupStatus::Ready { .. }) {
-                let accounts =
-                    tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
-                        .expect("ready service should accept business calls");
-                assert!(accounts.is_empty());
-                return;
+        // This checks readiness ordering, not startup performance. Migrations
+        // and durable writes can exceed 500 ms on a busy CI filesystem.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match state.startup_status() {
+                StartupStatus::Ready { .. } => break,
+                failure @ StartupStatus::Failed { .. } => {
+                    panic!("startup failed: {failure:?}");
+                }
+                status @ StartupStatus::Initializing { .. } => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "startup did not reach Ready: {status:?}"
+                    );
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        panic!("startup did not reach Ready: {:?}", state.startup_status());
+        let accounts = tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
+            .expect("ready service should accept business calls");
+        assert!(accounts.is_empty());
     }
 
     #[test]

@@ -79,7 +79,7 @@ const report = {
   commit, sourceDirty: sourceStatus.length !== 0, sourceStatus: sourceStatus.trimEnd(),
   trackedDiffSha256: createHash('sha256').update(trackedDiff).digest('hex'), binarySha256: binaryHash.digest('hex'),
   harnessSources,
-  driver: 'tauri-plugin-wdio-webdriver embedded 1.5.0', inputMode, linkMode: 'numbered-parent',
+  driver: 'tauri-plugin-wdio-webdriver embedded 1.5.0', inputMode, linkMode: 'inline-native-navigation',
   source: 'synthetic-only', testRoot, binary, status: 'running', assertions: [], stages: {}, canaryRequests,
   instrumentation: 'Public WKWebView frame evaluation records explicit sandbox denials; Vision OCR and pixel samples verify rendering; AppKit supplies mouse events. Globals blocked by sandbox remain unobservable, not absent.',
   osVersion: spawnSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).stdout.trim(),
@@ -122,8 +122,8 @@ async function screenshot(name) {
 }
 async function visualSnapshot(name, snapshot) {
   await screenshot(name);
-  const inspected = spawnSync(nativeInspector, [resolve(output, `${name}.png`)], { encoding: 'utf8', timeout: 30_000 });
-  if (inspected.status !== 0) throw new Error(`Native screenshot inspection failed: ${inspected.stderr}`);
+  const inspected = spawnSync(nativeInspector, [resolve(output, `${name}.png`)], { encoding: 'utf8', timeout: 60_000 });
+  if (inspected.status !== 0) throw new Error(`Native screenshot inspection failed: ${inspected.error?.message ?? inspected.signal ?? inspected.status}: ${inspected.stderr}`);
   return { ...snapshot, visual: JSON.parse(inspected.stdout) };
 }
 async function waitForFixture(name) {
@@ -131,7 +131,7 @@ async function waitForFixture(name) {
   const loaded = await until(state, (snapshot) => snapshot?.selected === name &&
     snapshot.documentToken && snapshot.bodyLinksLoaded && !snapshot.prepareError && !snapshot.numberedError &&
     snapshot.observations.filter((item) => item.kind === 'native-sandbox-probe' && item.url === snapshot.frameUrl).length === 7 &&
-    (name !== 'safe' || snapshot.numberedLinks.length === 1) &&
+    snapshot.numberedLinks.length === 0 &&
     snapshot.requests.some((item) => item.route === 'part' && item.status === 200 && item.emailId === snapshot.emailId), `${name} prepared document, CID and native frame probes`);
   return visualSnapshot(name, loaded);
 }
@@ -161,8 +161,10 @@ function checkIsolation(name, snapshot) {
 }
 
 async function nativeClick(snapshot) {
-  const rectangle = snapshot.numberedLinkRectangle;
-  assert.ok(rectangle?.width > 0 && rectangle?.height > 0, 'trusted numbered link button has a visible rectangle');
+  const pixels = snapshot.visual.recognizedText.find((item) => item.text === 'Open synthetic link')?.rectangle;
+  const scale = snapshot.visual.width / snapshot.viewport.width;
+  const rectangle = pixels && Object.fromEntries(Object.entries(pixels).map(([key, value]) => [key, value / scale]));
+  assert.ok(rectangle?.width > 0 && rectangle?.height > 0, 'inline link has a visible OCR rectangle');
   const viewportX = rectangle.x + rectangle.width / 2;
   const viewportY = rectangle.y + rectangle.height / 2;
   const target = { x: Math.round(snapshot.screen.x + viewportX), y: Math.round(snapshot.screen.y + viewportY), pid: child.pid };
@@ -210,12 +212,12 @@ try {
   const safe = await waitForFixture('safe');
   report.stages.safe = safe;
   checkIsolation('safe', safe);
-  check('numbered fallback: trusted list preserves DB URL', safe.numberedLinks[0]?.url === 'https://example.invalid/confirmed-link' && safe.numberedLinks[0]?.index === 0);
-  check('numbered fallback: document has passive label', safe.visual.recognizedText.some((item) => item.text === 'Open synthetic link [1]' && item.rectangle.y >= safe.frameRectangle.y * safe.visual.width / safe.viewport.width));
+  check('inline link: no numbered list', safe.numberedLinks.length === 0);
+  check('inline link: original text is visible', safe.visual.recognizedText.some((item) => item.text === 'Open synthetic link' && item.rectangle.y >= safe.frameRectangle.y * safe.visual.width / safe.viewport.width));
   assert.ok(report.assertions.every((item) => item.passed), 'safe fixture isolation prerequisites');
   await screenshot('safe-before-link');
   await nativeClick(safe);
-  await until(state, (snapshot) => snapshot.links.length > safe.links.length && snapshot.numberedRequestSucceeded, 'real numbered-link command and event', inputMode === 'manual' ? 60_000 : 20_000);
+  await until(state, (snapshot) => snapshot.links.length > safe.links.length, 'real inline link navigation and event', inputMode === 'manual' ? 60_000 : 20_000);
   await delay(500);
   const afterLink = await visualSnapshot('safe-after-link', await state());
   report.stages.afterLink = afterLink;
@@ -227,8 +229,7 @@ try {
   check('link: trusted view accepted the exact request', afterLink.currentLinkRequest?.requestId === requestedLink?.requestId &&
     afterLink.currentLinkRequest?.documentToken === safe.documentToken && afterLink.currentLinkRequest?.viewGeneration === safe.viewGeneration &&
     afterLink.acceptedLinks.length === safe.acceptedLinks.length + 1);
-  check('link: numbered request succeeded', afterLink.numberedRequestSucceeded && afterLink.numberedError === null);
-  check('link: trusted native pointer reached numbered button', afterLink.numberedInput?.trusted === true && afterLink.nativePointer?.target === 'BUTTON');
+  check('link: no parent fallback command', afterLink.numberedRequestSucceeded === false && afterLink.numberedError === null);
   check('link: no protocol link navigation requested', !afterLink.requests.some((request) => request.route === 'link'));
   checkMacVisual('link retained document', afterLink);
   check('link: no new document request', afterLink.requests.filter((item) => item.route === 'document').length === safe.requests.filter((item) => item.route === 'document').length);

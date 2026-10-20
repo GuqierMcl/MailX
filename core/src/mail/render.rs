@@ -12,10 +12,12 @@ mod css;
 mod html;
 mod images;
 
-pub use html::{ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link};
-pub use images::InlineImage;
+pub use html::{
+    ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
+};
+pub use images::{InlineImage, validate as validate_image};
 
-pub const SANITIZER_VERSION: u32 = 1;
+pub const SANITIZER_VERSION: u32 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 100 * 1024 * 1024;
 pub const MAX_BODY_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_MIME_DEPTH: usize = 30;

@@ -64,4 +64,22 @@ describe('desktop client boundary', () => {
     await expect(client.getEmail('email-id')).rejects.toBeInstanceOf(MailxClientError)
     expect(invoke).not.toHaveBeenCalled()
   })
+
+  it('fetches and prepares bodies, and confirms only the bound link identity without forwarding a URL', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'response' })
+    const client = createDesktopClient()
+    await client.fetchBody('email')
+    await client.prepareBody('email')
+    await client.bodyLinks('email', 'document')
+    const request = { emailId: 'email', index: 3, documentToken: 'document', requestId: 'grant', url: 'https://ignored.example' }
+    await client.requestLink(request)
+    await client.openLink(request)
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['emails_fetch_body', { emailId: 'email' }],
+      ['emails_prepare_body', { emailId: 'email', loadRemoteImages: false }],
+      ['emails_body_links', { emailId: 'email', documentToken: 'document' }],
+      ['links_request', { emailId: 'email', index: 3, documentToken: 'document' }],
+      ['links_open', { emailId: 'email', index: 3, documentToken: 'document', requestId: 'grant' }],
+    ])
+  })
 })
