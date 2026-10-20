@@ -122,7 +122,8 @@ fn both_platform_forms_round_trip_encoded_cids_and_canonical_links() {
             Some((
                 Route::Document {
                     id: id.clone(),
-                    token: token.clone()
+                    token: token.clone(),
+                    dark: false
                 },
                 BODY_ORIGIN.into()
             ))
@@ -156,6 +157,25 @@ fn both_platform_forms_round_trip_encoded_cids_and_canonical_links() {
 }
 
 #[test]
+fn only_documents_accept_the_dark_scheme_hint() {
+    let id = Uuid::new_v4().to_string();
+    let token = Uuid::new_v4().to_string();
+    assert_eq!(
+        parse_route(&format!(
+            "mailx-body://localhost/document/{id}?token={token}&scheme=dark"
+        )),
+        Some((
+            Route::Document {
+                id,
+                token,
+                dark: true
+            },
+            BODY_ORIGIN.into()
+        ))
+    );
+}
+
+#[test]
 fn malformed_routes_cannot_create_an_authorized_resource() {
     let id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
@@ -182,6 +202,10 @@ fn malformed_routes_cannot_create_an_authorized_resource() {
         format!("mailx-body://localhost/link/{id}/01?token={token}"),
         format!("mailx-body://localhost/link/{id}/999999999999999999999999999999?token={token}"),
         format!("mailx-body://localhost/unknown/{id}"),
+        format!("mailx-body://localhost/document/{id}?token={token}&scheme=light"),
+        format!("mailx-body://localhost/document/{id}?token={token}&scheme=dark&x=1"),
+        format!("mailx-body://localhost/document/{id}?scheme=dark&token={token}"),
+        format!("mailx-body://localhost/part/{id}/pixel?token={token}&scheme=dark"),
     ] {
         assert!(
             parse_route(&url).is_none(),
