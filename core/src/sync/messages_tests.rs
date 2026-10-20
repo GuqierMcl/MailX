@@ -139,7 +139,7 @@ fn header(uid: u32, subject: &str) -> String {
         "From: Sender <sender@example.com>\r\nSubject: {subject}\r\nTo: lin@example.com\r\n\r\n"
     );
     format!(
-        "* 1 FETCH (UID {uid} FLAGS () INTERNALDATE \"{date} 12:00:00 +0000\" RFC822.SIZE 200 BODYSTRUCTURE (\"TEXT\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" 10 1) BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)] {{{}}}\r\n{bytes})\r\n",
+        "* 1 FETCH (UID {uid} FLAGS () INTERNALDATE \"{date} 12:00:00 +0000\" RFC822.SIZE 200 BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)] {{{}}}\r\n{bytes})\r\n",
         bytes.len()
     )
 }

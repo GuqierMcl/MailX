@@ -13,8 +13,8 @@ use std::time::Duration;
 use async_imap::Client;
 use async_imap::error::Error as ImapProtocolError;
 use async_imap::imap_proto::{
-    AttributeValue, BodyStructure, MailboxDatum, MessageSection, Response, ResponseCode,
-    SectionPath, Status, StatusAttribute,
+    AttributeValue, MailboxDatum, MessageSection, Response, ResponseCode, SectionPath, Status,
+    StatusAttribute,
 };
 use async_imap::types::{Flag, NameAttribute};
 use chrono::{DateTime, FixedOffset, NaiveDate};
@@ -111,6 +111,34 @@ impl From<ImapProtocolError> for ImapError {
     }
 }
 
+/// Names the failing command and a coarse cause without forwarding any
+/// server-controlled text: the library's parse errors embed the raw response.
+fn read_failure(command: &str, error: &std::io::Error) -> ImapError {
+    use std::io::ErrorKind;
+    let verb = command
+        .split_whitespace()
+        .take(2)
+        .filter(|word| word.chars().all(|c| c.is_ascii_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cause = match error.kind() {
+        // The library reports undecodable responses as `io::ErrorKind::Other`.
+        ErrorKind::Other => "server response could not be parsed",
+        ErrorKind::InvalidData => "invalid data in the connection stream",
+        ErrorKind::UnexpectedEof => "connection ended in the middle of a response",
+        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
+            "connection was reset by the server or network"
+        }
+        ErrorKind::OutOfMemory => "response exceeded the buffer limit",
+        _ => "network error while reading response",
+    };
+    ImapError::Protocol(if verb.is_empty() {
+        cause.into()
+    } else {
+        format!("{verb}: {cause}")
+    })
+}
+
 async fn step<T, E: Into<ImapError>>(
     future: impl Future<Output = Result<T, E>>,
 ) -> Result<T, ImapError> {
@@ -140,7 +168,6 @@ pub(crate) struct RemoteHeader {
     pub internal_date: Option<DateTime<FixedOffset>>,
     pub size: Option<u32>,
     pub header: Vec<u8>,
-    pub has_attachment: bool,
 }
 
 /// Connects only along the account route. Credentials are sent after TLS.
@@ -394,8 +421,12 @@ impl Session {
         if uids.len() > 200 {
             return Err(ImapError::Protocol("header batch exceeds 200 UIDs".into()));
         }
+        // BODYSTRUCTURE is deliberately not requested: some servers (2925) write
+        // Content-Disposition types as bare atoms, which the response parser
+        // rejects, and one such message would fail every retry of its batch.
+        // Attachments are inferred from CONTENT-TYPE / CONTENT-DISPOSITION.
         let query = format!(
-            "UID FETCH {} (UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)])",
+            "UID FETCH {} (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)])",
             uid_set(uids)
         );
         self.checked_command(&query, |response, _| {
@@ -416,7 +447,6 @@ impl Session {
                 internal_date: None,
                 size: None,
                 header: Vec::new(),
-                has_attachment: false,
             };
             let mut found_header = false;
             for attribute in attributes {
@@ -426,9 +456,6 @@ impl Session {
                             DateTime::parse_from_str(value, "%d-%b-%Y %H:%M:%S %z").ok();
                     }
                     AttributeValue::Rfc822Size(value) => result.size = Some(*value),
-                    AttributeValue::BodyStructure(value) => {
-                        result.has_attachment = has_attachment(value, false)
-                    }
                     AttributeValue::BodySection {
                         section: Some(SectionPath::Full(MessageSection::Header)),
                         data: Some(value),
@@ -486,7 +513,7 @@ impl Session {
                     .inner
                     .read_response()
                     .await
-                    .map_err(|_| ImapError::Protocol("failed to read IMAP response".into()))?
+                    .map_err(|error| read_failure(command, &error))?
                     .ok_or_else(|| {
                         ImapError::Protocol("IMAP connection closed before completion".into())
                     })?;
@@ -685,25 +712,6 @@ fn flag_name(flag: Flag<'_>) -> String {
     }
 }
 
-fn has_attachment(body: &BodyStructure<'_>, under_multipart: bool) -> bool {
-    match body {
-        BodyStructure::Multipart { bodies, .. } => {
-            bodies.iter().any(|body| has_attachment(body, true))
-        }
-        BodyStructure::Basic { common, .. }
-        | BodyStructure::Text { common, .. }
-        | BodyStructure::Message { common, .. } => {
-            let disposition = common.disposition.as_ref().map(|value| value.ty.as_ref());
-            disposition.is_some_and(|value| value.eq_ignore_ascii_case("attachment"))
-                || (under_multipart
-                    && !common.ty.ty.eq_ignore_ascii_case("text")
-                    && !common.ty.ty.eq_ignore_ascii_case("multipart")
-                    && !disposition.is_some_and(|value| value.eq_ignore_ascii_case("inline")))
-                || matches!(body, BodyStructure::Message { body, .. } if has_attachment(body, under_multipart))
-        }
-    }
-}
-
 fn attribute_name(attribute: &NameAttribute<'_>) -> String {
     match attribute {
         NameAttribute::NoInferiors => "\\Noinferiors".into(),
@@ -727,6 +735,48 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
     use super::*;
+
+    #[test]
+    fn read_failures_name_the_command_and_cause_without_server_text() {
+        use std::io::{Error as IoError, ErrorKind};
+        let secret = "SUBJECT leaked-secret";
+        let cases = [
+            (
+                IoError::other(format!("Error(..) during parsing of {secret}")),
+                "UID FETCH: server response could not be parsed",
+            ),
+            (
+                IoError::new(ErrorKind::UnexpectedEof, secret),
+                "UID FETCH: connection ended in the middle of a response",
+            ),
+            (
+                IoError::new(ErrorKind::ConnectionReset, secret),
+                "UID FETCH: connection was reset by the server or network",
+            ),
+            (
+                IoError::new(ErrorKind::TimedOut, secret),
+                "UID FETCH: network error while reading response",
+            ),
+        ];
+        for (error, expected) in cases {
+            let ImapError::Protocol(text) = read_failure("UID FETCH 1:5 (UID FLAGS)", &error)
+            else {
+                panic!("not a protocol error");
+            };
+            assert_eq!(text, expected);
+            assert!(!text.contains("leaked-secret"));
+        }
+        let ImapError::Protocol(text) = read_failure(
+            "STATUS \"Inbox\" (MESSAGES)",
+            &IoError::new(ErrorKind::BrokenPipe, "x"),
+        ) else {
+            panic!()
+        };
+        assert_eq!(
+            text,
+            "STATUS: connection was reset by the server or network"
+        );
+    }
 
     fn login() -> ImapLogin {
         ImapLogin {
@@ -915,7 +965,7 @@ mod tests {
     async fn reads_headers_through_a_read_only_session() {
         let header = b"Date: Fri, 18 Sep 2026 10:00:00 +0800\r\nSubject: hello\r\nFrom: Lin <lin@example.com>\r\n\r\n";
         let response = format!(
-            "* 1 FETCH (UID 42 FLAGS (\\seen \\Flagged $Forwarded) INTERNALDATE \"18-Sep-2026 10:00:00 +0800\" RFC822.SIZE 2048 BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL NIL NIL \"7BIT\" 100 3) BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)] {{{}}}\r\n{})\r\n{{tag}} OK fetched\r\n",
+            "* 1 FETCH (UID 42 FLAGS (\\seen \\Flagged $Forwarded) INTERNALDATE \"18-Sep-2026 10:00:00 +0800\" RFC822.SIZE 2048 BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)] {{{}}}\r\n{})\r\n{{tag}} OK fetched\r\n",
             header.len(),
             String::from_utf8_lossy(header),
         );
@@ -923,7 +973,7 @@ mod tests {
             ("STATUS \"INBOX\" (MESSAGES UNSEEN UIDNEXT UIDVALIDITY)".into(), "* STATUS INBOX (MESSAGES 3 UNSEEN 2 UIDNEXT 43 UIDVALIDITY 9)\r\n{tag} OK\r\n".into()),
             ("EXAMINE \"INBOX\"".into(), "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n* OK [UIDNEXT 43] next\r\n{tag} OK [READ-ONLY]\r\n".into()),
             ("UID SEARCH SINCE 18-Sep-2026".into(), "* SEARCH 42 7 19\r\n{tag} OK\r\n".into()),
-            ("UID FETCH 42 (UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID)])".into(), response),
+            ("UID FETCH 42 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)])".into(), response),
             ("UID FETCH 42 (UID FLAGS)".into(), "* 1 FETCH (UID 42 FLAGS (\\Seen))\r\n{tag} OK\r\n".into()),
             ("LOGOUT".into(), "{tag} OK\r\n".into()),
         ]).await;
@@ -954,7 +1004,6 @@ mod tests {
             "2026-09-18T10:00:00+08:00"
         );
         assert_eq!(fetched.size, Some(2048));
-        assert!(!fetched.has_attachment);
         assert_eq!(
             session.fetch_flags(&[42]).await.unwrap(),
             vec![(42, vec!["\\Seen".into()])]
@@ -1241,48 +1290,5 @@ mod tests {
             assert!(!error.session_usable());
             server.await.unwrap();
         }
-    }
-
-    fn attachment_from_structure(structure: &str) -> bool {
-        use async_imap::imap_proto::{AttributeValue, Response};
-        let wire = format!("* 1 FETCH (BODYSTRUCTURE {structure})\r\n");
-        let (_, Response::Fetch(_, attributes)) = Response::parse(wire.as_bytes()).unwrap() else {
-            panic!("expected a fetch response");
-        };
-        let AttributeValue::BodyStructure(body) = &attributes[0] else {
-            panic!("expected a body structure");
-        };
-        has_attachment(body, false)
-    }
-
-    #[test]
-    fn explicit_attachment_disposition_includes_text_parts() {
-        assert!(attachment_from_structure(
-            r#"("TEXT" "PLAIN" NIL NIL NIL "7BIT" 10 1 NIL ("ATTACHMENT" ("FILENAME" "note.txt")))"#
-        ));
-    }
-
-    #[test]
-    fn multipart_binary_parts_are_attachments_unless_inline() {
-        let text = r#"("TEXT" "PLAIN" NIL NIL NIL "7BIT" 10 1)"#;
-        let binary = r#"("APPLICATION" "PDF" NIL NIL NIL "BASE64" 20)"#;
-        assert!(attachment_from_structure(&format!(
-            r#"({text}{binary} "MIXED")"#
-        )));
-        let inline = r#"("IMAGE" "PNG" NIL NIL NIL "BASE64" 20 NIL ("INLINE" NIL))"#;
-        assert!(!attachment_from_structure(&format!(
-            r#"({text}{inline} "RELATED")"#
-        )));
-    }
-
-    #[test]
-    fn plain_html_and_alternative_messages_have_no_attachment() {
-        let text = r#"("TEXT" "PLAIN" NIL NIL NIL "7BIT" 10 1)"#;
-        let html = r#"("TEXT" "HTML" NIL NIL NIL "7BIT" 10 1)"#;
-        assert!(!attachment_from_structure(text));
-        assert!(!attachment_from_structure(html));
-        assert!(!attachment_from_structure(&format!(
-            r#"({text}{html} "ALTERNATIVE")"#
-        )));
     }
 }
