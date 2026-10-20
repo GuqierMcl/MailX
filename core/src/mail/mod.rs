@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod render;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum FolderRole {
@@ -49,6 +51,18 @@ pub enum BodyState {
     Fetching,
     Ready,
     Failed,
+}
+
+/// Controlled reasons only; server text and local paths are never persisted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BodyFailureCode {
+    TooLarge,
+    Stale,
+    Network,
+    Authentication,
+    Protocol,
+    Storage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -121,13 +135,14 @@ pub struct AttachmentSummary {
     pub is_inline: bool,
 }
 
-/// Body parts as received. `html` is untrusted and must only be rendered in an
-/// isolated, script-free frame.
+/// Safe reading metadata. HTML is served only by the isolated body protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailBody {
     pub text: Option<String>,
-    pub html: Option<String>,
+    pub has_html: bool,
+    pub truncated: bool,
+    pub remote_images_blocked: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -139,5 +154,6 @@ pub struct EmailDetail {
     pub reply_to: Vec<MailAddress>,
     /// `None` until `summary.body_state` is `ready`.
     pub body: Option<EmailBody>,
+    pub body_failure: Option<BodyFailureCode>,
     pub attachments: Vec<AttachmentSummary>,
 }

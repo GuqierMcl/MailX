@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MailX Body WebView Test</title>
+    <link rel="stylesheet" href="harness.css">
+    <script src="harness.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>合成正文隔离验收</h1>
+      <p id="status">正在初始化测试入口</p>
+      <div id="numbered-links"></div>
+    </header>
+    <iframe id="body" title="合成邮件正文" sandbox="" referrerpolicy="no-referrer"></iframe>
+    <pre id="evidence" aria-live="polite"></pre>
+  </body>
+</html>

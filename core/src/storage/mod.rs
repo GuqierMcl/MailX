@@ -10,12 +10,14 @@ use std::{
     time::Duration,
 };
 
+pub(crate) mod bodies;
 mod folders;
 pub(crate) mod messages;
 mod migrations;
 
 pub(crate) struct Storage {
     pub db: Connection,
+    pub(crate) blobs: bodies::BlobStore,
     _lock: File,
 }
 
@@ -52,7 +54,14 @@ impl Storage {
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", true)?;
         migrations::apply(&mut db, migrations::MIGRATIONS)?;
-        Ok(Self { db, _lock: lock })
+        let blobs = bodies::BlobStore::open(directory)?;
+        let mut storage = Self {
+            db,
+            blobs,
+            _lock: lock,
+        };
+        storage.recover_bodies()?;
+        Ok(storage)
     }
 
     pub fn account_ids(&self) -> Result<Vec<String>, AppError> {

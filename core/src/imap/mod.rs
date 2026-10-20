@@ -1,6 +1,10 @@
-//! Read-only IMAP operations for folder and header synchronization.
+//! Read-only IMAP operations for folder/header synchronization and body loading.
 
+mod body;
 pub(crate) mod utf7;
+pub(crate) use body::open_body_session;
+#[cfg(test)]
+pub(crate) use body::test_body_session;
 
 use std::fmt;
 use std::future::Future;
@@ -67,6 +71,8 @@ pub(crate) enum ImapError {
     Rejected,
     /// A completed command whose mailbox data is unusable; connection is healthy.
     Mailbox(String),
+    /// A declared or received body exceeds the bounded message budget.
+    TooLarge,
     Timeout,
 }
 
@@ -79,6 +85,7 @@ impl fmt::Display for ImapError {
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
             Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
             Self::Mailbox(reason) => write!(formatter, "mailbox response error: {reason}"),
+            Self::TooLarge => formatter.write_str("message exceeds size limit"),
             Self::Timeout => formatter.write_str("server stopped responding"),
         }
     }
@@ -116,6 +123,7 @@ async fn step<T, E: Into<ImapError>>(
 /// An authenticated connection; every network operation has a bounded timeout.
 pub(crate) struct Session {
     inner: async_imap::Session<BoxedStream>,
+    body_guard: Option<body::ReceiveGuard>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,7 +227,10 @@ async fn authenticate(
     })?;
 
     let capabilities = step(inner.capabilities()).await?;
-    let mut session = Session { inner };
+    let mut session = Session {
+        inner,
+        body_guard: None,
+    };
     if capabilities.has_str("ID") {
         // Identification is optional, but timeout/EOF cannot leave a partially
         // consumed response on the connection used for mailbox commands.
@@ -466,7 +477,7 @@ impl Session {
         command: &str,
         mut collect: impl FnMut(&Response<'_>, &[u8]) -> Result<Option<T>, ImapError>,
     ) -> Result<Vec<T>, ImapError> {
-        step(async {
+        let result = step(async {
             let tag = self.inner.run_command(command).await?;
             let mut results = Vec::new();
             let mut collection_failed = false;
@@ -520,7 +531,11 @@ impl Session {
                 }
             }
         })
-        .await
+        .await;
+        match &self.body_guard {
+            Some(guard) => guard.check(result),
+            None => result,
+        }
     }
 
     pub(crate) async fn logout(mut self) -> Result<(), ImapError> {

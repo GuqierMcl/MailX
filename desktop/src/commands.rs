@@ -36,6 +36,30 @@ struct EmailGetArgs {
     email_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LinkOpenArgs {
+    email_id: String,
+    index: usize,
+    document_token: String,
+    request_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BodyLinksArgs {
+    email_id: String,
+    document_token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LinkRequestArgs {
+    email_id: String,
+    index: usize,
+    document_token: String,
+}
+
 fn parse<T: DeserializeOwned>(body: &InvokeBody) -> Result<T, AppError> {
     match body {
         InvokeBody::Json(value) => {
@@ -213,6 +237,117 @@ pub(crate) async fn emails_get(
 }
 
 #[tauri::command]
+pub(crate) async fn emails_fetch_body(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<EmailDetail>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.fetch_body(args.email_id).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_prepare_body(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<crate::body_protocol::PreparedBody>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        protocol.prepare(&state.core()?, args.email_id).await
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_body_links(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<crate::body_protocol::BodyLinks>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<BodyLinksArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        protocol
+            .list_links(&state.core()?, args.email_id, args.document_token)
+            .await
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn links_request(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    use tauri::Emitter;
+    let args = authorize(&window).and_then(|()| parse::<LinkRequestArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        let event = protocol
+            .request_link(
+                &state.core()?,
+                args.email_id,
+                args.index,
+                args.document_token,
+            )
+            .await?;
+        window
+            .emit_to(
+                tauri::EventTarget::webview_window("main"),
+                crate::body_protocol::LINK_EVENT,
+                event,
+            )
+            .map_err(|_| AppError::new(ErrorCode::Internal))
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn links_open(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    use tauri_plugin_opener::OpenerExt;
+    let args = authorize(&window).and_then(|()| parse::<LinkOpenArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        let core = state.core()?;
+        let url = protocol
+            .confirm_link(
+                &core,
+                args.email_id,
+                args.index,
+                args.document_token,
+                args.request_id,
+            )
+            .await?;
+        window
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| AppError::new(ErrorCode::Internal))
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
 pub(crate) async fn sync_states(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
@@ -274,6 +409,8 @@ mod tests {
             "http://localhost:5174",
             "https://localhost:5173",
             "http://tauri.localhost:9000",
+            "mailx-body://localhost/document/example",
+            "http://mailx-body.localhost/document/example",
         ] {
             assert!(!caller_allowed("main", &tauri::Url::parse(url).unwrap()));
         }
@@ -328,5 +465,36 @@ mod tests {
             parse::<EmailGetArgs>(&InvokeBody::Json(json!({"emailId":id,"path":"secret"})))
                 .is_err()
         );
+        let token = uuid::Uuid::new_v4().to_string();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let link = parse::<LinkOpenArgs>(&InvokeBody::Json(json!({
+            "emailId":id,
+            "index":0,
+            "documentToken":token,
+            "requestId":request_id
+        })))
+        .unwrap();
+        assert_eq!(link.email_id, id);
+        assert_eq!(link.index, 0);
+        assert!(
+            parse::<LinkRequestArgs>(&InvokeBody::Json(json!({
+                "emailId": id, "index": 0, "documentToken": token
+            })))
+            .is_ok()
+        );
+        for body in [
+            json!({"emailId":id,"index":0}),
+            json!({"emailId":id,"index":0,"documentToken":token,"url":"https://example.invalid"}),
+            json!({"emailId":id,"index":-1,"documentToken":token}),
+        ] {
+            assert!(parse::<LinkRequestArgs>(&InvokeBody::Json(body)).is_err());
+        }
+        for body in [
+            json!({"emailId":id,"index":-1,"documentToken":token,"requestId":request_id}),
+            json!({"emailId":id,"index":0,"documentToken":token}),
+            json!({"emailId":id,"index":0,"documentToken":token,"requestId":request_id,"url":"https://untrusted.invalid"}),
+        ] {
+            assert!(parse::<LinkOpenArgs>(&InvokeBody::Json(body)).is_err());
+        }
     }
 }
