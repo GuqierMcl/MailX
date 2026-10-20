@@ -149,4 +149,12 @@ body { margin: 0; min-width: 320px; }
   body {
     @apply bg-background text-foreground;}
   html {
-    @apply font-sans;}}
+    @apply font-sans;}
+  /* The app lays out its own scroll areas inside a fixed-height shell, so the
+     document itself never scrolls. Without this, the WebView rubber-bands the
+     whole window on trackpad overscroll, including when an inner list reaches
+     its end and hands the gesture up to the root. */
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;}}
