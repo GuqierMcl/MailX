@@ -1,6 +1,6 @@
 use mailx_core::{
-    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
-    EmailListQuery, EmailPage, ErrorCode, Folder, UpdateAccountRequest,
+    Account, AccountSyncState, ApiResult, AppError, AppSettings, CreateAccountRequest, EmailDetail,
+    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsSnapshot, UpdateAccountRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -364,6 +364,36 @@ pub(crate) async fn sync_states(
 #[serde(deny_unknown_fields)]
 struct WindowPerformArgs {
     action: WindowAction,
+}
+
+#[tauri::command]
+pub(crate) async fn settings_get(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<SettingsSnapshot>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state.settings(|store| store.get()).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn settings_update(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<SettingsSnapshot>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<WriteArgs<AppSettings>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .settings(move |store| store.update(args.request))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
 }
 
 // Window commands stay synchronous so they run on the main thread, which

@@ -4,12 +4,14 @@ import type {
   Account,
   AccountSyncState,
   AppError,
+  AppSettings,
   ApiResult,
   CreateAccountRequest,
   EmailDetail,
   EmailListQuery,
   EmailPage,
   Folder,
+  SettingsSnapshot,
   UpdateAccountRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
@@ -44,6 +46,10 @@ export interface MailxClient {
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
+  /** App preferences from the core's `settings.json`; available even when startup failed. */
+  getSettings(): Promise<SettingsSnapshot>
+  /** Replaces all preferences; the core validates them and returns the canonical form. */
+  updateSettings(settings: AppSettings): Promise<SettingsSnapshot>
 }
 
 const SYNC_STATE_EVENT = 'mailx://sync-state'
@@ -94,5 +100,7 @@ export function createDesktopClient(): MailxClient {
     },
     listEmails: (query) => call<EmailPage>('emails_list', { query }),
     getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
+    getSettings: () => call<SettingsSnapshot>('settings_get'),
+    updateSettings: (request) => call<SettingsSnapshot>('settings_update', { request }),
   }
 }

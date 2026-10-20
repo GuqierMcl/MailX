@@ -1,4 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
+import { AppearanceSync } from '@/features/settings/settings-queries'
 import { StartupGate } from '@/features/startup/startup-gate'
 import { TitleBar, TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
 import {
@@ -22,6 +23,8 @@ const windowHost = previewPlatform ? createPreviewWindowHost(previewPlatform) : 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      {/* Outside the startup gate: appearance applies even when the core failed to start. */}
+      <AppearanceSync client={client} />
       <TitleBarSlotsProvider>
         <div className="flex h-svh flex-col overflow-hidden">
           <TitleBar host={windowHost} title="MailX" />

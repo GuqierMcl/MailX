@@ -153,3 +153,29 @@ folderRevision: number, folders: Array<FolderSyncState>, phase: SyncPhase,
  * RFC 3339 time of the last entirely successful round in this session.
  */
 lastSyncedAt: string | null, failure: SyncFailure | null, };
+
+export type ThemeMode = "system" | "light" | "dark";
+
+export type FontSize = "small" | "default" | "large";
+
+export type AppearanceSettings = { theme: ThemeMode,
+/**
+ * `""` or a lowercase `#rrggbb` color.
+ */
+accentColor: string,
+/**
+ * `""` or comma-separated font families, tried in order.
+ */
+interfaceFont: string, fontSize: FontSize, };
+
+export type AppSettings = { appearance: AppearanceSettings, };
+
+export type SettingsSnapshot = { settings: AppSettings,
+/**
+ * False until a settings file exists on disk.
+ */
+stored: boolean,
+/**
+ * The previous file could not be used and was moved to `settings.json.bak`.
+ */
+recovered: boolean, };

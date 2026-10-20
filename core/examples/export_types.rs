@@ -53,5 +53,10 @@ fn main() {
         FolderSyncPhase,
         FolderSyncState,
         AccountSyncState,
+        ThemeMode,
+        FontSize,
+        AppearanceSettings,
+        AppSettings,
+        SettingsSnapshot,
     );
 }

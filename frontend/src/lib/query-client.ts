@@ -24,3 +24,8 @@ export const mailKeys = {
   emails: (sources: string, query: EmailListQuery) => [...mailKeys.emailLists(), sources, query] as const,
   email: (id: string) => [...mailKeys.all, 'email', id] as const,
 }
+
+/** App preferences; sync rounds never touch them. */
+export const settingsKeys = {
+  all: ['settings'] as const,
+}

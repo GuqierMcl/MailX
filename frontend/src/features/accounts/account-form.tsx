@@ -3,12 +3,13 @@ import type { Account, AuthenticationMode, TlsMode } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSeparator, FieldSet } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
 import { clearSecrets, draftToConfig, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 
 type FormProps = {
@@ -53,10 +54,8 @@ function ConnectionFields({ protocol, value, onChange, error }: {
   const isImap = protocol === 'imap'
   const name = protocol.toUpperCase()
   return (
-    <FieldSet>
-      <FieldLegend>{isImap ? '收信服务器' : '发信服务器'} <Badge variant="secondary">{name}</Badge></FieldLegend>
-      <FieldDescription>{isImap ? '填写服务商提供的 IMAP 参数。' : '收发服务器与登录用户名可以不同。'}</FieldDescription>
-      <FieldGroup>
+    <SettingsGroup title={isImap ? '收信服务器' : '发信服务器'} badge={<Badge variant="secondary">{name}</Badge>}
+      description={isImap ? '填写服务商提供的 IMAP 参数。' : '收发服务器与登录用户名可以不同。'}>
         <TextField id={`${protocol}.host`} label={`${name} 主机`} value={value.host} error={error}
           placeholder={isImap ? 'imap.example.com' : 'smtp.example.com'} onChange={(host) => onChange({ ...value, host })} />
         <div className="grid grid-cols-2 gap-4">
@@ -73,8 +72,7 @@ function ConnectionFields({ protocol, value, onChange, error }: {
         </div>
         <TextField id={`${protocol}.username`} label={`${name} 登录用户名`} value={value.username}
           placeholder="通常为完整邮箱地址" error={error} onChange={(username) => onChange({ ...value, username })} />
-      </FieldGroup>
-    </FieldSet>
+    </SettingsGroup>
   )
 }
 
@@ -174,8 +172,10 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
   }
 
   return (
-    <div className="flex min-h-full flex-col">
-      <div className="flex flex-col gap-6 p-6">
+    <SettingsPage footer={<>
+      <FieldDescription>{saving ? '正在安全保存配置…' : '凭证不会显示在账号详情中。'}</FieldDescription>
+      <Button onClick={() => { void save() }} disabled={saving || !client.available}>{saving ? '保存中…' : account ? '保存更改' : '保存账号'}</Button>
+    </>}>
         <Alert role="status">
           <AlertTitle>{account ? '尚未验证连接' : '手动配置 · 密码或授权码'}</AlertTitle>
           <AlertDescription>保存后 MailX 会登录收信服务器同步文件夹列表；暂不收取邮件，也不会发送邮件。</AlertDescription>
@@ -190,23 +190,15 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
           </Alert>
         )}
         <FieldSet disabled={saving} aria-label="邮箱账号配置" aria-busy={saving} className="gap-6">
-          <FieldSet>
-            <FieldLegend>基本信息</FieldLegend>
-            <FieldDescription>账号名称只用于 MailX 中的显示。</FieldDescription>
-            <FieldGroup className="grid grid-cols-2 gap-4">
+          <SettingsGroup title="基本信息" description="账号名称只用于 MailX 中的显示。">
+            <div className="grid grid-cols-2 gap-4">
               <TextField id="displayName" label="账号名称" value={draft.displayName} onChange={(value) => change('displayName', value)} placeholder="例如：工作邮箱" error={error} />
               <TextField id="emailAddress" label="邮箱地址" value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
-            </FieldGroup>
-          </FieldSet>
-          <FieldSeparator />
+            </div>
+          </SettingsGroup>
           <ConnectionFields protocol="imap" value={draft.imap} onChange={(value) => change('imap', value)} error={error} />
-          <FieldSeparator />
           <ConnectionFields protocol="smtp" value={draft.smtp} onChange={(value) => change('smtp', value)} error={error} />
-          <FieldSeparator />
-          <FieldSet>
-            <FieldLegend>认证凭证</FieldLegend>
-            <FieldDescription>支持密码、授权码与应用专用密码，安全保存在系统凭据库。</FieldDescription>
-            <FieldGroup>
+          <SettingsGroup title="认证凭证" description="支持密码、授权码与应用专用密码，安全保存在系统凭据库。">
               <RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label="收发认证方式">
                 <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">收发使用相同密码</FieldLabel></Field>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-separate" value="separate" /><FieldLabel htmlFor="auth-separate">收发分别设置密码</FieldLabel></Field>
@@ -218,13 +210,8 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
                     <PasswordField id="imapPassword" label="收信密码" value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} />
                     <PasswordField id="smtpPassword" label="发信密码" value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} />
                   </>}
-            </FieldGroup>
-          </FieldSet>
-          <FieldSeparator />
-          <FieldSet>
-            <FieldLegend>网络路由</FieldLegend>
-            <FieldDescription>为这个账号指定连接方式。保存配置不会测试代理。</FieldDescription>
-            <FieldGroup>
+          </SettingsGroup>
+          <SettingsGroup title="网络路由" description="为这个账号指定连接方式。保存配置不会测试代理。">
               <Field>
                 <FieldLabel htmlFor="routeKind">连接方式</FieldLabel>
                 <Select value={draft.routeKind} onValueChange={(value) => {
@@ -259,14 +246,8 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
                   <PasswordField id="proxyPassword" label="代理密码" value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} />
                 </>}
               </>}
-            </FieldGroup>
-          </FieldSet>
+          </SettingsGroup>
         </FieldSet>
-      </div>
-      <footer className="sticky bottom-0 mt-auto flex items-center justify-between gap-4 border-t bg-background px-6 py-3">
-        <FieldDescription>{saving ? '正在安全保存配置…' : '凭证不会显示在账号详情中。'}</FieldDescription>
-        <Button onClick={() => { void save() }} disabled={saving || !client.available}>{saving ? '保存中…' : account ? '保存更改' : '保存账号'}</Button>
-      </footer>
-    </div>
+    </SettingsPage>
   )
 }

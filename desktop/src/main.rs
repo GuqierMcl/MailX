@@ -78,6 +78,8 @@ fn main() {
             commands::links_request,
             commands::links_open,
             commands::sync_states,
+            commands::settings_get,
+            commands::settings_update,
             commands::window_get_chrome,
             commands::window_perform,
         ])

@@ -119,6 +119,13 @@ cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored
 
 上述是检查范围和复现方法；当前执行结论应以当次命令及实际宿主结果记录，不因测试文件存在就宣称通过。真实邮箱兼容性、HTML、同步退出、OAuth 刷新及 SMTP 结果恢复仍需独立验证，未实现能力先保留为计划；已有 CI 工作流与单次运行结果分别记录。
 
+### 应用偏好的可重复检查
+
+- `core/src/settings/tests.rs`：缺文件不落盘、原子写入后重开读取、目录缺失时创建、字体列表按序拆分与去引号、可能逃逸 CSS 的字体名被拒、无效更新不改变状态、损坏 / 新版本 / 缺版本文件改名为 `.bak`、手改的单个字段回到默认值，以及前端看到的 camelCase 形状。
+- `desktop/src/state.rs` 测试检查核心未 Ready 时偏好仍可读写，数据目录不可用时返回 `storageUnavailable`。
+- `frontend/src/lib/appearance.test.ts` 检查字体栈（空值才用默认、按用户顺序、通用字体不加引号、末尾补 `sans-serif`）、强调色前景对比、CSSOM 变量应用与重置、首帧缓存的容错；`features/settings/` 测试检查设置弹窗标题与导航、外观保存、字体提交与拒绝提示、损坏文件提示，以及旧 `mailx.theme` 的一次性导入。
+- 手动运行 `bun run tauri dev`：修改主题、强调色、字体与字号后重启，确认保持且启动无闪烁；把 `settings.json` 改坏后启动，确认出现 `.bak` 与提示；把窗口缩到 768px 以下确认设置导航仍可用。三平台的字体回退、原生取色器与 WebView 表现需在对应系统上分别确认。
+
 ### 收件箱邮件头同步的检查与证据
 
 以下为实现对应的回归范围，不能仅因测试文件存在就视为通过：

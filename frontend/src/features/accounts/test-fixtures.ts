@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import type { Account, AccountSyncState, FolderSyncState } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
+import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
@@ -40,5 +41,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
+    getSettings: vi.fn<MailxClient['getSettings']>().mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE }, stored: true, recovered: false }),
+    updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (settings) => ({ settings, stored: true, recovered: false })),
   }
 }

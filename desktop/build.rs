@@ -16,6 +16,8 @@ fn main() {
             "links_request",
             "links_open",
             "sync_states",
+            "settings_get",
+            "settings_update",
             "window_get_chrome",
             "window_perform",
         ]),

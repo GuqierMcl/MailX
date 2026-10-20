@@ -49,7 +49,7 @@ describe('workbench', () => {
     await renderWorkbench()
     await userEvent.click(screen.getByRole('button', { name: '设置' }))
     expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument()
-    expect(screen.getByRole('radiogroup', { name: '外观' })).toBeInTheDocument()
+    expect(await screen.findByRole('radiogroup', { name: '颜色模式' })).toBeInTheDocument()
   })
 
   it('opens a new account form when there are no accounts', async () => {

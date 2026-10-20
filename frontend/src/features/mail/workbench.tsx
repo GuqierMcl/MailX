@@ -203,7 +203,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           syncStates={currentSyncStates}
           mailbox={activeMailbox}
           onSelect={selectMailbox}
-          onOpenSettings={() => setSettings({ section: 'general' })}
+          onOpenSettings={() => setSettings({ section: 'appearance' })}
         />
         <TitleBarActions side="leading">
           <SidebarTrigger aria-label="折叠或展开侧边栏" />

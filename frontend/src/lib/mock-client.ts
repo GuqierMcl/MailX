@@ -8,16 +8,19 @@ import type {
   MailAddress,
   RouteConfig,
 } from '@/generated/accounts'
+import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
  * Data is synthetic and lost on reload; nothing touches the network or disk.
+ * Settings start from the first-paint appearance cache so a reload keeps them.
  */
 export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
+  let settings = { settings: { appearance: cachedAppearance() }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -82,6 +85,12 @@ export function createMockClient(): MailxClient {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
       return structuredClone(email)
+    },
+    getSettings: async () => structuredClone(settings),
+    async updateSettings(next) {
+      const interfaceFont = parseFontFamilies(next.appearance.interfaceFont).join(', ')
+      settings = { settings: { appearance: { ...next.appearance, interfaceFont } }, stored: true, recovered: false }
+      return structuredClone(settings)
     },
   }
 }
