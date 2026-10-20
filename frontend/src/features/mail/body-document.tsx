@@ -11,10 +11,11 @@ import { useSettings, useUpdateSecurity } from '@/features/settings/settings-que
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
   ? lazy(() => import('./development-body')) : null
 
-function bodyDocumentUrl(emailId: string, documentToken: string) {
+function bodyDocumentUrl(emailId: string, documentToken: string, dark: boolean) {
   const url = new URL(convertFileSrc('', 'mailx-body'))
   url.pathname = `/document/${encodeURIComponent(emailId)}`
   url.searchParams.set('token', documentToken)
+  if (dark) url.searchParams.set('scheme', 'dark')
   return url.href
 }
 
@@ -23,20 +24,28 @@ function subscribeVisibility(listener: () => void) {
   return () => document.removeEventListener('visibilitychange', listener)
 }
 
+function subscribeAppTheme(listener: () => void) {
+  const observer = new MutationObserver(listener)
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  return () => observer.disconnect()
+}
+
 export function BodyDocument({ client, emailId, hasRemoteImages = false }: { client: MailxClient; emailId: string; hasRemoteImages?: boolean }) {
   const visible = useSyncExternalStore(subscribeVisibility, () => document.visibilityState !== 'hidden')
   const settings = useSettings(client)
+  const appDark = useSyncExternalStore(subscribeAppTheme, () => document.documentElement.classList.contains('dark'))
   const [version, setVersion] = useState(0)
   if (!visible) return null
   if (settings.isPending) return <BodySkeleton />
   // A settings read failure never silently grants remote access.
   const policy = settings.data?.settings.security.remoteImages ?? 'ask'
-  return <Reader key={`${emailId}:${version}:${policy}`} client={client} emailId={emailId} policy={policy}
+  const dark = appDark && (settings.data?.settings.appearance.mailTheme ?? 'follow') === 'follow'
+  return <Reader key={`${emailId}:${version}:${policy}:${dark}`} client={client} emailId={emailId} policy={policy} dark={dark}
     hasRemoteImages={hasRemoteImages} onReload={() => setVersion((value) => value + 1)} />
 }
 
-function Reader({ client, emailId, policy, hasRemoteImages, onReload }: {
-  client: MailxClient; emailId: string; policy: RemoteImagePolicy; hasRemoteImages: boolean; onReload: () => void
+function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
+  client: MailxClient; emailId: string; policy: RemoteImagePolicy; dark: boolean; hasRemoteImages: boolean; onReload: () => void
 }) {
   const [granted, setGranted] = useState(false)
   const [dismissed, setDismissed] = useState(false)
@@ -57,11 +66,11 @@ function Reader({ client, emailId, policy, hasRemoteImages, onReload }: {
       </div>}
     {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
     {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
-      <DocumentSession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} onReload={onReload} />}
+      <DocumentSession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} dark={dark} onReload={onReload} />}
   </div>
 }
 
-function DocumentSession({ client, emailId, allowImages, onReload }: { client: MailxClient; emailId: string; allowImages: boolean; onReload: () => void }) {
+function DocumentSession({ client, emailId, allowImages, dark, onReload }: { client: MailxClient; emailId: string; allowImages: boolean; dark: boolean; onReload: () => void }) {
   const [documentToken, setDocumentToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const loaded = useRef(false)
@@ -99,7 +108,7 @@ function DocumentSession({ client, emailId, allowImages, onReload }: { client: M
     {error && <Alert variant="destructive"><AlertTitle>正文显示或链接操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
     {!documentToken ? !error && <BodySkeleton /> :
       <iframe title="邮件 HTML 正文" sandbox="" referrerPolicy="no-referrer"
-        src={bodyDocumentUrl(emailId, documentToken)} className="min-h-0 w-full flex-1 border-0 bg-white"
+        src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => {
           if (loaded.current) { active.current = false; onReload() }
           else loaded.current = true

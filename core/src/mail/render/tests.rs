@@ -15,15 +15,78 @@ fn rendered_html(body: &str) -> Rendered {
 }
 
 #[test]
-fn plain_text_does_not_become_synthetic_html() {
+fn plain_text_is_escaped_never_parsed_as_markup() {
     let result = render(
-        &email("text/plain; charset=utf-8", "正文 <b>literal</b>"),
+        &email(
+            "text/plain; charset=utf-8",
+            "正文 <b>literal</b> & <script>x()</script>",
+        ),
         "owner",
     )
     .unwrap();
-    assert_eq!(result.plain_text.as_deref(), Some("正文 <b>literal</b>"));
-    assert!(result.sanitized_html.is_none());
+    assert_eq!(
+        result.plain_text.as_deref(),
+        Some("正文 <b>literal</b> & <script>x()</script>")
+    );
+    let html = result.sanitized_html.unwrap();
+    assert!(
+        html.contains("&lt;b&gt;literal&lt;/b&gt; &amp; &lt;script&gt;"),
+        "{html}"
+    );
+    assert!(!html.contains("<b>") && !html.contains("<script"), "{html}");
     assert!(result.links.is_empty() && result.parts.is_empty());
+}
+
+#[test]
+fn plain_text_links_are_clickable_and_stop_at_punctuation_and_cjk() {
+    let result = render(
+        &email(
+            "text/plain; charset=utf-8",
+            "见 https://a.example/x?a=1&b=2，谢谢。(https://b.example/p). http://c.example/ok! \"https://d.example\"; https:// javascript:alert(1)",
+        ),
+        "owner",
+    )
+    .unwrap();
+    assert_eq!(
+        result.links,
+        [
+            "https://a.example/x?a=1&b=2",
+            "https://b.example/p",
+            "http://c.example/ok",
+            "https://d.example/"
+        ]
+    );
+    let html = result.sanitized_html.unwrap();
+    assert!(
+        !html.contains("javascript:") || !html.contains("href=\"javascript:"),
+        "{html}"
+    );
+}
+
+#[test]
+fn plain_text_quotes_become_nested_blockquotes_with_bounded_depth() {
+    let deep = format!("{} deep", ">".repeat(40));
+    let result = render(
+        &email(
+            "text/plain; charset=utf-8",
+            &format!("new\n> one\n> > two\nback\n{deep}"),
+        ),
+        "owner",
+    )
+    .unwrap();
+    let html = result.sanitized_html.unwrap();
+    assert_eq!(html.matches("<blockquote").count(), 2 + 8, "{html}");
+    assert_eq!(html.matches("</blockquote>").count(), 2 + 8, "{html}");
+    assert!(
+        html.starts_with("<div style=\"white-space:pre-wrap\">new"),
+        "{html}"
+    );
+}
+
+#[test]
+fn blank_plain_text_has_no_document() {
+    let result = render(&email("text/plain", "  \n "), "owner").unwrap();
+    assert!(result.sanitized_html.is_none());
 }
 
 #[test]
@@ -49,7 +112,11 @@ fn gbk_plain_and_html_decode_by_declared_charset() {
         }
         let result = render(&raw, "owner").unwrap();
         assert_eq!(result.plain_text.as_deref(), Some("正文测试"));
-        assert_eq!(result.sanitized_html.is_some(), markup);
+        assert!(
+            result.sanitized_html.unwrap().contains("正文测试"),
+            "{mime}"
+        );
+        let _ = markup;
     }
 }
 
@@ -106,7 +173,7 @@ fn nested_message_entities_do_not_disappear_or_replace_outer_body() {
     );
     let result = render(&raw, "owner").unwrap();
     assert_eq!(result.plain_text.as_deref(), Some("outer"));
-    assert!(result.sanitized_html.is_none());
+    assert!(result.sanitized_html.unwrap().contains("outer"));
     assert!(
         result
             .parts
@@ -514,4 +581,112 @@ fn gif_and_webp_are_validated_and_rendered_as_a_bounded_first_frame() {
         );
         assert!(validate_image(b"not an image", mime).is_err());
     }
+}
+
+#[test]
+fn document_title_text_does_not_leak_into_the_body() {
+    let result = rendered_html(
+        "<html><head><title>Subject line</title></head><body><p>Hello</p></body></html>",
+    );
+    let html = result.sanitized_html.unwrap();
+    assert!(!html.contains("Subject line"), "{html}");
+    assert!(html.contains("Hello"));
+    assert_eq!(result.plain_text.as_deref(), Some("Hello"));
+}
+
+#[test]
+fn body_and_legacy_layout_attributes_survive_for_centering() {
+    let html = rendered_html(
+        r##"<html><body bgcolor="#eee" style="text-align:center" onload="x()"><table align="center" width="600" cellpadding="0" border="0"><tr><td align="center" valign="top">x</td></tr></table><div align="center">y</div></body></html>"##,
+    )
+    .sanitized_html
+    .unwrap();
+    assert!(
+        !html.contains("<body") && !html.contains("onload"),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"class="mailx-body""#) && html.contains(r##"bgcolor="#eee""##),
+        "{html}"
+    );
+    for expected in [
+        r#"width="600""#,
+        r#"cellpadding="0""#,
+        r#"valign="top""#,
+        r#"<div align="center">y"#,
+    ] {
+        assert!(html.contains(expected), "{expected} in {html}");
+    }
+}
+
+#[test]
+fn harmless_presentational_markup_and_css_are_kept() {
+    let html = rendered_html(
+        r##"<style>
+        #hdr{color:red} a[href^="https"]{color:blue} td:not(.x){padding:1px}
+        @media (max-width:600px){.w{width:100%}} @media (prefers-color-scheme:dark){p{color:white}}
+        .b{background:linear-gradient(#fff,#eee);box-shadow:0 0 1px #000;word-wrap:break-word;border-top-color:#ccc}
+        </style><section id="hdr"><font color="red" size="2">a</font><big>b</big>
+        <table><tfoot><tr><td nowrap>c</td></tr></tfoot></table></section>"##,
+    )
+    .sanitized_html
+    .unwrap();
+    for expected in [
+        "#hdr{color:red}",
+        r#"a[href^="https"]{color:blue}"#,
+        "td:not(.x){padding:1px}",
+        "@media (max-width:600px){.w{width:100%}}",
+        "linear-gradient(",
+        "box-shadow:",
+        "word-wrap:break-word",
+        "border-top-color:#ccc",
+        "<font",
+        "<tfoot",
+        "<section",
+        r#"id="hdr""#,
+    ] {
+        assert!(html.contains(expected), "{expected} in {html}");
+    }
+    assert!(!html.contains("prefers-color-scheme"), "{html}");
+}
+
+#[test]
+fn relaxed_css_and_markup_still_block_active_or_remote_content() {
+    let result = rendered_html(
+        r##"<style>a[x="\3c /style>"]{color:red}
+        .a{background:linear-gradient(url(https://t.example/x.png),#fff)}
+        .b{background-image:url("https://t.example/y.png")}
+        @media screen{.c{background:url(https://t.example/z.png)}}
+        @import url(https://t.example/i.css); @font-face{src:url(https://t.example/f.woff)}
+        </style><form action="https://t.example"><input name=x></form><button>go</button>
+        <svg><script>1</script></svg><video src="https://t.example/v.mp4"></video>
+        <div id="x" onclick="alert(1)" aria-label="ok">kept</div>"##,
+    );
+    let html = result.sanitized_html.unwrap();
+    for forbidden in [
+        "<script",
+        "alert(1)",
+        "t.example",
+        "<form",
+        "<input",
+        "<button",
+        "<svg",
+        "<video",
+        "onclick",
+    ] {
+        assert!(!html.contains(forbidden), "{forbidden} in {html}");
+    }
+    assert!(
+        html.contains("kept") && html.contains(r#"aria-label="ok""#),
+        "{html}"
+    );
+}
+
+#[test]
+fn body_marker_merges_with_existing_class_and_cannot_be_forged_into_other_attributes() {
+    let html = rendered_html(r#"<body class="x"><p data-mailx-body="1" class="y">t</p></body>"#)
+        .sanitized_html
+        .unwrap();
+    assert!(html.contains(r#"class="mailx-body x""#), "{html}");
+    assert!(!html.contains("data-mailx-body"), "{html}");
 }

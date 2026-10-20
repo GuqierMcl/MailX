@@ -25,7 +25,7 @@ describe('settings dialog', () => {
     expect(select).toHaveTextContent('每次询问')
     await userEvent.click(select)
     expect(screen.getByRole('option', { name: '自动加载' })).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('option', { name: '永不加载' }))
+    await userEvent.click(await screen.findByRole('option', { name: '永不加载' }))
     await waitFor(() => expect(select).toHaveTextContent('永不加载'))
     expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never' } })
   })
@@ -94,6 +94,25 @@ describe('settings dialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '恢复默认' }))
     expect(client.updateSettings).toHaveBeenLastCalledWith({ appearance: DEFAULT_APPEARANCE })
+  })
+
+  it('saves the mail body font separately from the interface font', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    await userEvent.type(await screen.findByLabelText('邮件内容字体'), 'Georgia{Enter}')
+    expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, mailFont: 'Georgia' },
+    })
+  })
+
+  it('saves the mail body dark mode choice', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    await userEvent.click(await screen.findByRole('combobox', { name: '邮件内容深色适配' }))
+    await userEvent.click(await screen.findByRole('option', { name: '始终白底' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' },
+    }))
   })
 
   it('keeps a rejected font list in the field with an error', async () => {

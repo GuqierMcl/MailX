@@ -43,7 +43,7 @@ describe('font families', () => {
 
 describe('applyAppearance', () => {
   it('applies the theme, accent, font and size, and resets them', () => {
-    applyAppearance({ theme: 'dark', accentColor: '#facc15', interfaceFont: 'Georgia', fontSize: 'large' })
+    applyAppearance({ theme: 'dark', accentColor: '#facc15', interfaceFont: 'Georgia', mailFont: '', mailTheme: 'follow', fontSize: 'large' })
     expect(root()).toHaveClass('dark')
     expect(root().style.getPropertyValue('--primary')).toBe('#facc15')
     expect(root().style.getPropertyValue('--primary-foreground')).toBe('#171717')

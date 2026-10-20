@@ -101,7 +101,8 @@ export function createMockClient(): MailxClient {
     async updateSettings(next) {
       const appearance = next.appearance ?? settings.settings.appearance
       const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
-      settings = { settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont } }, stored: true, recovered: false }
+      const mailFont = parseFontFamilies(appearance.mailFont).join(', ')
+      settings = { settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
       return structuredClone(settings)
     },
   }

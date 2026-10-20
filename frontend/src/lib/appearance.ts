@@ -1,9 +1,11 @@
-import type { AppearanceSettings, FontSize, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   theme: 'system',
   accentColor: '',
   interfaceFont: '',
+  mailFont: '',
+  mailTheme: 'follow',
   fontSize: 'default',
 }
 
@@ -18,6 +20,23 @@ export const DEFAULT_INTERFACE_FONTS = [
   'Noto Sans SC',
   'Source Han Sans SC',
   'system-ui',
+  'sans-serif',
+]
+
+/** Preview-only mirror of core's default message font stack (`DEFAULT_MAIL_FONTS`). */
+export const DEFAULT_MAIL_FONTS = [
+  '-apple-system',
+  'BlinkMacSystemFont',
+  'Segoe UI',
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Noto Sans SC',
+  'Roboto',
+  'Helvetica Neue',
+  'Arial',
   'sans-serif',
 ]
 
@@ -52,9 +71,9 @@ export function parseFontFamilies(value: string): string[] {
  * order; only an empty one falls back to the defaults. A trailing generic
  * family keeps text sans-serif when none of the listed fonts is installed.
  */
-export function fontFamilyCss(interfaceFont: string): string {
+export function fontFamilyCss(interfaceFont: string, defaults: string[] = DEFAULT_INTERFACE_FONTS): string {
   const user = parseFontFamilies(interfaceFont).filter((family) => !/["\\]/.test(family))
-  const families = user.length ? user : DEFAULT_INTERFACE_FONTS
+  const families = user.length ? user : defaults
   const css = families.map((family) => (GENERIC_FAMILIES.has(family.toLowerCase()) ? family : `"${family}"`))
   if (!families.some((family) => GENERIC_FAMILIES.has(family.toLowerCase()))) css.push('sans-serif')
   return css.join(', ')
@@ -116,6 +135,7 @@ const CACHE_KEY = 'mailx.appearance'
 const LEGACY_THEME_KEY = 'mailx.theme'
 
 const THEMES: readonly string[] = ['system', 'light', 'dark'] satisfies ThemeMode[]
+const MAIL_THEMES: readonly string[] = ['follow', 'light'] satisfies MailTheme[]
 const FONT_SIZES: readonly string[] = ['small', 'default', 'large'] satisfies FontSize[]
 
 /**
@@ -131,6 +151,8 @@ export function cachedAppearance(): AppearanceSettings {
         theme: THEMES.includes(cached.theme as string) ? (cached.theme as ThemeMode) : 'system',
         accentColor: typeof cached.accentColor === 'string' ? cached.accentColor : '',
         interfaceFont: typeof cached.interfaceFont === 'string' ? cached.interfaceFont : '',
+        mailFont: typeof cached.mailFont === 'string' ? cached.mailFont : '',
+        mailTheme: MAIL_THEMES.includes(cached.mailTheme as string) ? (cached.mailTheme as MailTheme) : 'follow',
         fontSize: FONT_SIZES.includes(cached.fontSize as string) ? (cached.fontSize as FontSize) : 'default',
       }
     }

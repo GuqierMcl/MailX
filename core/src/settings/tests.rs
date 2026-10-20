@@ -197,6 +197,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "theme": "system",
                     "accentColor": "",
                     "interfaceFont": "",
+                    "mailFont": "",
+                    "mailTheme": "follow",
                     "fontSize": "default"
                 },
                 "security": { "remoteImages": "ask" }
@@ -246,4 +248,44 @@ fn older_settings_default_to_ask_and_section_patches_preserve_other_settings() {
         RemoteImagePolicy::Automatic
     );
     assert_eq!(restored.settings.appearance.font_size, FontSize::Large);
+}
+
+#[test]
+fn mail_body_css_uses_defaults_user_fonts_and_font_size() {
+    let default = mail_body_css(&AppearanceSettings::default());
+    assert!(default.contains("font-family:-apple-system"), "{default}");
+    assert!(default.contains("font-size:14px"));
+    assert!(default.contains("overflow-wrap:break-word"));
+    assert!(!default.contains("anywhere"));
+
+    let custom = mail_body_css(&AppearanceSettings {
+        mail_font: "LXGW WenKai, Georgia".into(),
+        font_size: FontSize::Large,
+        ..AppearanceSettings::default()
+    });
+    assert!(
+        custom.contains("font-family:\"LXGW WenKai\", \"Georgia\", sans-serif;font-size:16px"),
+        "{custom}"
+    );
+
+    let generic = mail_body_css(&AppearanceSettings {
+        mail_font: "Georgia, serif".into(),
+        ..AppearanceSettings::default()
+    });
+    assert!(
+        generic.contains("font-family:\"Georgia\", serif;"),
+        "{generic}"
+    );
+}
+
+#[test]
+fn mail_font_is_validated_like_the_interface_font() {
+    let mut settings = AppSettings::default();
+    settings.appearance.mail_font = " 'Noto Serif SC' , , Georgia".into();
+    assert_eq!(
+        settings.clone().normalized().unwrap().appearance.mail_font,
+        "Noto Serif SC, Georgia"
+    );
+    settings.appearance.mail_font = "Bad;Font".into();
+    assert!(settings.normalized().is_err());
 }

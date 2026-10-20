@@ -10,8 +10,8 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, ThemeMode } from '@/generated/accounts'
-import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
+import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
+import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
 import { useSettings, useUpdateAppearance } from './settings-queries'
@@ -21,6 +21,8 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: IconSvgElement }[]
   { value: 'light', label: '浅色', icon: Sun03Icon },
   { value: 'dark', label: '深色', icon: Moon02Icon },
 ]
+
+const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: '跟随颜色模式', light: '始终白底' }
 
 const FONT_SIZE_LABELS: Record<FontSize, string> = { small: '较小', default: '标准', large: '较大' }
 
@@ -49,6 +51,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
   const change = (patch: Partial<AppearanceSettings>) => update.mutate({ ...appearance, ...patch })
   const failure = update.error ? clientFailure(update.error) : null
   const fontRejected = failure?.field === 'appearance.interfaceFont'
+  const mailFontRejected = failure?.field === 'appearance.mailFont'
 
   return (
     <SettingsPage>
@@ -58,7 +61,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
           <AlertDescription>原文件已保留为数据目录中的 settings.json.bak，当前使用默认设置；修改任意一项后会写入新文件。</AlertDescription>
         </Alert>
       )}
-      {failure && !fontRejected && (
+      {failure && !fontRejected && !mailFontRejected && (
         <Alert variant="destructive">
           <AlertTitle>未能保存设置</AlertTitle>
           <AlertDescription>{failure.message}</AlertDescription>
@@ -69,6 +72,15 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         <SettingsRow label="颜色模式" description="跟随系统时会随操作系统的浅色或深色设置切换。">
           <ThemeChoice value={appearance.theme} onChange={(theme) => change({ theme })} />
         </SettingsRow>
+        <SettingsRow label="邮件内容深色适配" description="深色模式下将邮件正文反色显示，图片保持原色；邮件自带的配色可能不完全适配，可改为始终白底。已打开的邮件会自动刷新。" htmlFor="appearance.mailTheme">
+          <Select value={appearance.mailTheme} items={MAIL_THEME_LABELS}
+            onValueChange={(mailTheme: MailTheme | null) => { if (mailTheme) change({ mailTheme }) }}>
+            <SelectTrigger id="appearance.mailTheme" className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(MAIL_THEME_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
         <SettingsRow label="强调色" description="用于主要按钮、选中项与焦点。">
           <AccentChoice value={appearance.accentColor} onChange={(accentColor) => change({ accentColor })} />
         </SettingsRow>
@@ -76,9 +88,22 @@ export function AppearancePane({ client }: { client: MailxClient }) {
 
       <SettingsGroup title="文字">
         <FontField
+          id="appearance.interfaceFont"
+          label="界面字体"
           value={appearance.interfaceFont}
+          defaults={DEFAULT_INTERFACE_FONTS}
           rejected={fontRejected}
           onCommit={(interfaceFont) => change({ interfaceFont })}
+        />
+        <FontField
+          id="appearance.mailFont"
+          label="邮件内容字体"
+          description="仅作用于邮件正文中未自行指定字体的文字；邮件自带的字体设置优先。已打开的邮件在重新打开后生效。"
+          value={appearance.mailFont}
+          defaults={DEFAULT_MAIL_FONTS}
+          rejected={mailFontRejected}
+          resetLabel="恢复默认邮件字体"
+          onCommit={(mailFont) => change({ mailFont })}
         />
         <SettingsRow label="字号" description="同时缩放界面间距。" htmlFor="appearance.fontSize">
           <Select value={appearance.fontSize} items={FONT_SIZE_LABELS}
@@ -153,7 +178,16 @@ function AccentChoice({ value: saved, onChange }: { value: string; onChange: (ac
   )
 }
 
-function FontField({ value, rejected, onCommit }: { value: string; rejected: boolean; onCommit: (font: string) => void }) {
+function FontField({ id, label, description, value, defaults, rejected, resetLabel, onCommit }: {
+  id: string
+  label: string
+  description?: string
+  value: string
+  defaults: string[]
+  rejected: boolean
+  resetLabel?: string
+  onCommit: (font: string) => void
+}) {
   // Only this field edits the font, so the draft is local; a rejected list
   // stays in the input for correction while the applied font rolls back.
   const [draft, setDraft] = useState(value)
@@ -172,16 +206,16 @@ function FontField({ value, rejected, onCommit }: { value: string; rejected: boo
   }
   return (
     <Field data-invalid={rejected || undefined}>
-      <FieldLabel htmlFor="appearance.interfaceFont">界面字体</FieldLabel>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <div className="flex gap-2">
-        <Input id="appearance.interfaceFont" value={draft} placeholder={`留空使用默认：${DEFAULT_INTERFACE_FONTS.slice(0, 3).join(', ')} …`}
+        <Input id={id} value={draft} placeholder={`留空使用默认：${defaults.slice(0, 3).join(', ')} …`}
           spellCheck={false} autoComplete="off" aria-invalid={rejected || undefined}
           onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={onKeyDown} />
-        <Button variant="outline" disabled={!value && !draft} onClick={() => { setDraft(''); if (value) onCommit('') }}>恢复默认</Button>
+        <Button variant="outline" aria-label={resetLabel} disabled={!value && !draft} onClick={() => { setDraft(''); if (value) onCommit('') }}>恢复默认</Button>
       </div>
-      <FieldDescription>多个字体用英文逗号分隔，按顺序尝试，前一个未安装时使用下一个。留空时使用内置默认字体。</FieldDescription>
+      <FieldDescription>多个字体用英文逗号分隔，按顺序尝试，前一个未安装时使用下一个。留空时使用内置默认字体。{description}</FieldDescription>
       {rejected && <FieldError>字体名不能包含引号、反斜杠、分号、括号或尖括号；最多 16 个，每个不超过 64 个字符。</FieldError>}
-      <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-sm text-foreground" style={{ fontFamily: fontFamilyCss(draft) }}>
+      <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-sm text-foreground" style={{ fontFamily: fontFamilyCss(draft, defaults) }}>
         {FONT_PREVIEW}
       </p>
     </Field>
