@@ -72,6 +72,33 @@ describe('synced inbox headers', () => {
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
   })
 
+  it('retains both loaded pages and the selection when a body completes and refreshes previews', async () => {
+    const first = email('first')
+    const last = email('last')
+    const { client } = setup([first, last])
+    let ready = false
+    client.listEmails.mockImplementation(async (query) => query.cursor
+      ? page([{ ...last, preview: ready ? 'new preview' : '', bodyState: ready ? 'ready' : 'missing' }])
+      : page([first], 'second-page'))
+    const pending = deferred<EmailDetail>()
+    client.fetchBody.mockReturnValue(pending.promise)
+    render(<Workbench client={client} />)
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    await userEvent.click(rows()[1])
+    await screen.findByRole('status', { name: '正在加载正文' })
+    ready = true
+    await act(async () => pending.resolve({ ...detail({ ...last, preview: 'new preview', bodyState: 'ready' }),
+      body: { text: 'downloaded body', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } }))
+    expect(await screen.findByText('downloaded body')).toBeInTheDocument()
+    await waitFor(() => expect(rows()[1]).toHaveTextContent('new preview'))
+    expect(rows()).toHaveLength(2)
+    expect(rows()[1]).toHaveAttribute('aria-current', 'true')
+    expect(client.fetchBody).toHaveBeenCalledTimes(1)
+    expect(client.listEmails.mock.calls.slice(-2).map(([query]) => query.cursor)).toEqual([null, 'second-page'])
+  })
+
   it('reloads folders once for a burst of folder changes, and not at all when revisions stay put', async () => {
     const { client, emit } = setup([email('one')])
     render(<Workbench client={client} />)
@@ -138,7 +165,7 @@ describe('synced inbox headers', () => {
     // Folder reloads are coalesced, so they land shortly after the event.
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
     expect(client.getEmail).toHaveBeenCalledTimes(1)
-    expect(screen.getByText('正文尚未下载')).toBeInTheDocument()
+    expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
   })
 
   it('clears a selection missing from the refreshed first page and ignores its pending detail', async () => {
@@ -237,7 +264,7 @@ describe('synced inbox headers', () => {
     await act(async () => pending.resolve(page()))
   })
 
-  it('shows a missing subject, omits a missing preview and keeps the header-only body notice', async () => {
+  it('shows a missing subject, omits a missing preview and shows a controlled body download failure', async () => {
     const { client } = setup([email('empty-fields', { subject: '', preview: '' })])
     render(<Workbench client={client} />)
     await screen.findByRole('list', { name: '邮件列表' })
@@ -245,7 +272,7 @@ describe('synced inbox headers', () => {
     expect(rows()[0].querySelector('p')).toBeNull()
     await userEvent.click(rows()[0])
     expect(await screen.findByRole('heading', { name: '（无主题）' })).toBeInTheDocument()
-    expect(screen.getByText('正文尚未下载')).toBeInTheDocument()
+    expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '附件' })).not.toBeInTheDocument()
   })
 

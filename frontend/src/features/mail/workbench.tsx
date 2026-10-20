@@ -18,6 +18,7 @@ import { SettingsDialog, type SettingsTarget } from '@/features/settings/setting
 import { MailSidebar } from './mail-sidebar'
 import { mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
+import { useEmailBody } from './use-email-body'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -156,14 +157,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   // refresh that drops it, a filter that hides it or a server change clears it.
   const selected = selectedId && emails.some((email) => email.id === selectedId) ? selectedId : null
 
-  const detail = useQuery({
-    queryKey: mailKeys.email(selected ?? ''),
-    queryFn: () => client.getEmail(selected as string),
-    enabled: selected !== null,
-  })
-  // List refreshes carry the latest flags; show them without refetching the detail.
   const listedSummary = emails.find((email) => email.id === selected)
-  const detailData = detail.data && listedSummary ? { ...detail.data, summary: listedSummary } : (detail.data ?? null)
+  const body = useEmailBody(client, listedSummary, accounts, currentSyncStates)
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
@@ -234,9 +229,13 @@ export function Workbench({ client }: { client: MailxClient }) {
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize="60" minSize={360}>
               <EmailView
-                email={selected ? detailData : null}
-                loading={selected !== null && detail.isPending}
-                error={selected && detail.isError ? clientFailure(detail.error).message : null}
+                key={`${selected}:${body.identity}`}
+                client={client}
+                email={selected ? body.email : null}
+                loading={selected !== null && body.detail.isPending}
+                error={selected && body.detail.isError ? clientFailure(body.detail.error).message : null}
+                downloading={body.pending}
+                onDownload={body.download}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

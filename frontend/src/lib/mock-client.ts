@@ -86,6 +86,16 @@ export function createMockClient(): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async fetchBody(emailId) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      return structuredClone(email)
+    },
+    prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
+    bodyLinks: async (_emailId, documentToken) => ({ documentToken, links: [] }),
+    requestLink: async () => { throw notFound() },
+    openLink: async () => { throw notFound() },
+    onLinkRequest: () => () => undefined,
     getSettings: async () => structuredClone(settings),
     async updateSettings(next) {
       const interfaceFont = parseFontFamilies(next.appearance.interfaceFont).join(', ')
@@ -378,7 +388,7 @@ function buildEmails(): EmailDetail[] {
       to: sent ? [{ name: '团队', address: 'team@example.com' }] : [me],
       cc: [],
       replyTo: [],
-      body: { text: seed.text, hasHtml: false, truncated: false, remoteImagesBlocked: 0 },
+      body: { text: seed.text, hasHtml: index === 0, truncated: false, remoteImagesBlocked: index === 0 ? 1 : 0 },
       bodyFailure: null,
       attachments: (seed.attachments ?? []).map(([filename, mimeType, size], position) => ({
         id: `${id}-attachment-${position + 1}`,
