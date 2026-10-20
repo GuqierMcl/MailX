@@ -70,8 +70,24 @@ pub(crate) fn parse_header(remote: &RemoteHeader, sync_time: DateTime<Utc>) -> M
             .iter()
             .any(|flag| flag.eq_ignore_ascii_case("\\Flagged")),
         flags: remote.flags.clone(),
-        has_attachment: remote.has_attachment,
+        has_attachment: parsed.as_ref().is_some_and(looks_like_attachment),
     }
+}
+
+/// A header-only guess: a `multipart/mixed` container, a non-text single part
+/// such as a bare PDF, or an explicit attachment disposition.
+fn looks_like_attachment(message: &mail_parser::Message<'_>) -> bool {
+    use mail_parser::MimeHeaders;
+    let content_type = message.content_type();
+    let kind = |value: &str| content_type.is_some_and(|ty| ty.ctype().eq_ignore_ascii_case(value));
+    (kind("multipart")
+        && content_type
+            .and_then(|ty| ty.subtype())
+            .is_some_and(|sub| sub.eq_ignore_ascii_case("mixed")))
+        || (content_type.is_some() && !kind("text") && !kind("multipart") && !kind("message"))
+        || message
+            .content_disposition()
+            .is_some_and(|disposition| disposition.ctype().eq_ignore_ascii_case("attachment"))
 }
 
 fn addresses(addresses: Option<&Address<'_>>) -> Vec<MailAddress> {
@@ -144,7 +160,6 @@ mod tests {
             internal_date: None,
             size: Some(1024),
             header: header.as_ref().to_vec(),
-            has_attachment: true,
         }
     }
 
@@ -215,7 +230,7 @@ mod tests {
             Some("unique@example.com")
         );
         assert_eq!(record.size, Some(1024));
-        assert!(record.is_read && record.is_flagged && record.has_attachment);
+        assert!(record.is_read && record.is_flagged && !record.has_attachment);
         assert_eq!(record.flags, ["\\sEeN", "\\FLAGGED", "$Forwarded"]);
     }
 
@@ -296,7 +311,6 @@ mod tests {
         let mut message = remote("\r\n");
         message.flags.clear();
         message.size = None;
-        message.has_attachment = false;
         let record = parse_header(&message, sync_time());
         assert!(!record.is_read && !record.is_flagged && !record.has_attachment);
         assert!(record.message_id_header.is_none());
@@ -306,5 +320,38 @@ mod tests {
                 && record.reply_to_addresses.is_empty()
         );
         assert!(record.size.is_none());
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+
+    fn has_attachment(headers: &str) -> bool {
+        let remote = RemoteHeader {
+            uid: 1,
+            flags: Vec::new(),
+            internal_date: None,
+            size: None,
+            header: format!("{headers}\r\n\r\n").into_bytes(),
+        };
+        parse_header(&remote, Utc::now()).has_attachment
+    }
+
+    #[test]
+    fn attachment_is_inferred_from_content_type_and_disposition() {
+        assert!(has_attachment("Content-Type: multipart/mixed; boundary=b"));
+        assert!(has_attachment("Content-Type: application/pdf; name=a.pdf"));
+        assert!(has_attachment(
+            "Content-Type: text/plain\r\nContent-Disposition: attachment; filename=n.txt"
+        ));
+        for plain in [
+            "Content-Type: text/html; charset=utf-8",
+            "Content-Type: multipart/alternative; boundary=b",
+            "Content-Type: multipart/related; boundary=b",
+            "Subject: no content type",
+        ] {
+            assert!(!has_attachment(plain), "{plain}");
+        }
     }
 }
