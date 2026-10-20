@@ -1,6 +1,6 @@
 # 存储、搜索与备份
 
-状态：**账号、文件夹与邮件头存储和头部查询已有实现 / 正文、全文索引与备份为 Initial draft** · 2026-10-18。当前使用 `rusqlite`，编号 schema 位于 `core/src/storage/migrations/`：v1 为账号和凭证恢复，v2 为文件夹，v3 为邮件头与同步游标。真实服务商和平台运行证据见[验证策略](../development/validation.md)。
+状态：**账号、文件夹与邮件头、正文缓存和头部查询已有实现 / 全文索引与备份为 Initial draft** · 2026-10-20。当前使用 `rusqlite`，编号 schema 位于 `core/src/storage/migrations/`：v1 为账号和凭证恢复，v2 为文件夹，v3 为邮件头与同步游标，v4 为正文与 MIME 部分。真实服务商和平台运行证据见[验证策略](../development/validation.md)。
 
 ## 1. 所有权与目录
 
@@ -8,12 +8,13 @@
 
 ```text
 user-data-dir/
-  mailx.sqlite3             # 当前：账号、连接、认证、路由、文件夹、邮件头与游标
+  mailx.sqlite3             # 当前：账号、连接、认证、路由、文件夹、邮件头、正文与游标
   mailx.sqlite3-wal / -shm  # SQLite 管理的运行文件
   mailx.lock                # 核心实例持有的文件锁
+  blobs/<前两位>/<SHA-256>  # 不可变原始 MIME
 ```
 
-`blobs/`、`tmp/`、`logs/` 随邮件、附件与诊断功能引入，当前尚未建立这些存储流程。
+正文 blob 按内容哈希保存，临时文件与最终文件在同一文件系统；不保存主题或文件名作为路径。
 
 密钥不在该 SQLite 中明文保存。桌面存系统凭据库，服务端用外部注入主密钥保护独立密钥库，详见[网络与安全](network-security.md)。正文和附件首版默认不做应用层整体加密，磁盘与备份的加密由部署者承担。
 
@@ -43,11 +44,15 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 
 游标的 `window_start` 是首次同步或 UIDVALIDITY 切换时的 UTC 当日减 30 天，代际内保持不变。`window_capped` 表示完整搜索匹配超过每轮 1,000 封上限；`backfill_done` 表示当轮选中的 UID 头部均已抓取，且删除与 flags 对账成功，不能用 `highest_uid` 推断所有历史已完成。文件夹 STATUS 更新的 UIDNEXT / UIDVALIDITY 与已提交的邮件同步游标分开存储，避免目录刷新覆盖旧代际判断依据。
 
+### 正文缓存（v4）
+
+`messages` 追加 body_state（missing / fetching / ready / failed）、body_failure 和 preview。
+`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。净化规则从版本 1 开始，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。
+
 ### 后续模型（尚未建表）
 
 | 表 | 核心字段 | 关键约束 |
 | --- | --- | --- |
-| message_bodies | message_id, plain_text, sanitized_html, sanitizer_version, raw_blob_id | 1:1 messages；HTML 净化版本可重建 |
 | attachments | id, message_id, mime_part, file_name, media_type, size, blob_id, content_id | 文件名仅用于展示；下载用 ID |
 | blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
 | pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
@@ -66,7 +71,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 - 当前连接设置外键校验和 `busy_timeout`，启用 WAL、`synchronous=FULL`，为配置提交提供持久化基础。未来草稿与发送状态沿用该边界。性能调整需基准与 ADR。
 - 网络、MIME 大文件解析和模型请求不能占用数据库事务；当前 `rusqlite` 调用隔离到宿主阻塞执行器，未来连接池与事务调度必须继续避免阻塞异步任务。
-- 后续 blob 先写受配额限制的临时文件、校验和持久化，再在同卷原子重命名；之后事务写引用。文件写成功而事务失败产生的孤儿由延迟 GC 清理，不能先提交数据库再补文件。
+- 当前 blob 先写临时文件、同步并原子重命名，文件持久化后短事务写入正文、parts、preview 与 ready；已存在哈希复用。启动持目录独占锁、后台任务开始前恢复 fetching 并清理未引用的严格哈希文件 / 本程序临时文件，不跟随符号链接。运行期 GC、配额与 LRU 尚未实现。
 - 后续正文与对应全文索引同事务更新，避免搜索结果指向不存在的内容；索引是派生数据，可以重建。
 - 后续 GC 不删除被草稿、outbox 或备份引用的 blob。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
 
@@ -76,7 +81,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 后续正文和接收附件拟使用 LRU 配额，初始合计 2 GiB，可配置。草稿、待发送 MIME 与用户固定的离线内容不参与自动淘汰，单独显示占用。缓存被淘汰后 `bodyState=missing`，同步状态不能仍宣称可离线阅读。
 
-按需正文的实施目标：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。运行期配额与 LRU 尚不实现；这些行为须完成对应实现及验收后再标为可用。
+当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
 
 ## 5. 当前头部查询与后续全文搜索
 
@@ -86,13 +91,13 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 返回 `coverage { headersComplete, windowCapped, bodiesComplete, syncedAfter, syncedBefore }`：对账号 / 文件夹作用域内的全部当前可选文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。`windowCapped=true` 表示至少一个匹配目录的窗口超过本轮选取上限；coverage 不表达当前任务是否正在运行。
 
-完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要固定 `preview=""`、`bodyState=missing`、`pendingChanges=false`，详情 body 为 null、attachments 为空数组。
+完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要的 preview / bodyState 来自 v4 缓存列，pendingChanges=false。详情返回缓存纯文本、HTML 存在标志、截断和远程图片计数，以及非内联附件元数据；没有全文搜索。
 
 FTS5 trigram 对主题、地址显示文本和已缓存纯文本的检索仍是后续候选；其三字符限制与中文短词体验需要在接入时重新评审，不套用到当前 LIKE 查询。[SQLite FTS5 文档](https://www.sqlite.org/fts5.html)。向量索引、云端 embedding 和自然语言转 SQL 不在本阶段范围内。
 
 ## 6. 迁移与恢复
 
-当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按序以逐步事务执行，当前登记至 v3，可从已有 v1 / v2 顺序升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与写入前还恢复凭证更新 journal，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
+当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按序以逐步事务执行，当前登记至 v4，可从已有 v1 / v2 / v3 顺序升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与写入前还恢复凭证更新 journal，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
 
 [数据库迁移与启动方案](database-migrations.md)记录本轮已实现的迁移核心和启动准入；升级前备份、恢复入口和完整故障矩阵仍是后续要求。
 

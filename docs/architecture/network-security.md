@@ -1,6 +1,6 @@
 # 网络、凭证与不可信内容边界
 
-状态：**账号配置、凭证边界与只读 IMAP 同步路由已实现 / SMTP、OAuth、正文及 AI 边界为后续设计**。保存账号后会由后台同步任务按账号路由连接 IMAP；具体机制可随后续设计调整并重新验证。
+状态：**账号配置、凭证边界、只读 IMAP 路由与按需正文隔离已有实现；SMTP、OAuth 及 AI 边界为后续设计**。保存账号后会由后台同步任务按账号路由连接 IMAP；具体机制可随后续设计调整并重新验证。
 
 ## 1. 信任边界
 
@@ -53,13 +53,17 @@ token 刷新按实际 grant 做 single-flight，避免同一 refresh token 并�
 
 Tauri 的信任边界和能力机制要求限制 WebView 对原生能力的访问；MailX 将正文视作独立不可信资源，不让它获得应用权限。[Tauri 安全文档](https://v2.tauri.app/security/)。
 
-处理链：原始 MIME → 有界解码 → 纯文本提取 → `ammonia` 白名单 HTML → 资源 URL 重写 → sandbox iframe。iframe 不启用 `allow-scripts`、`allow-same-origin`、表单、弹窗或顶层导航；正文内无脚本，无 Tauri bridge。应用 CSP 与正文 CSP 分开维护。
+处理链：原始 MIME → 有界解码 → 纯文本提取 → `ammonia` 白名单 HTML → 资源 URL 重写 → sandbox iframe。iframe 不启用 `allow-scripts`、`allow-same-origin`、表单、弹窗或顶层导航；邮件脚本不可执行，宿主阻止子框架初始化可调用的 Tauri API。WebView2 可能保留冻结的 internals 中 plugins / postMessage 两个底层成员；不能将其描述为对象完全不存在，权限隔离由真实 WebView 测试核查。应用 CSP 与正文 CSP 分开维护。
 
 - 删除 script、事件属性、form、object、embed、meta refresh、远程字体、CSS `url()` / `@import`、SVG 和其他主动内容。CSS 属性与样式块结构化清理，处理转义和注释，保留安全排版；不能以危险子串过滤替代。净化器是其中一层，不能替代沙箱。
 - 默认 CSP `default-src 'none'`，仅允许处理后样式与由父应用生成的安全图片资源。禁止正文自行发起 fetch、加载原始外部 URL 或自动下载。
-- 按需正文的实施目标：`cid:` 仅解析当前可见邮件的 MIME 部分；协议资源绑定当前文档，改为其它邮件 id / CID 时拒绝。图片须验证真实的被动栅格格式与大小，拒绝 SVG、HTML、未知或伪造类型；单个内嵌资源最多 50 MiB。有限 `data:` 图片也先验证，仅保留完整地址不超过 1 MiB 的安全图片，不为此放开通用 data URL。
+- 当前按需正文：`cid:` 仅解析当前可见邮件的 MIME 部分；协议资源绑定当前文档，改为其它邮件 id / CID 时拒绝。图片须验证真实的被动栅格格式与大小，拒绝 SVG、HTML、未知或伪造类型；当前支持 PNG / JPEG，单个内嵌资源最多 50 MiB，边长最多 8192、解码预算 64 MiB。有限 `data:` 图片也先验证，仅保留完整地址不超过 1 MiB 的安全图片，不为此放开通用 data URL。
 - 外链由应用接管，仅在用户确认后允许 http / https / mailto；显示完整目标地址，宿主从数据库重新读取并校验索引，拒绝 javascript / file / 自定义系统协议。协议 GET 只产生确认请求，不能直接打开系统浏览器。iframe 无脚本时，必须在三平台真实 WebView 验证导航拦截与 204 行为；仅链接路径失败可以改用可信父界面编号链接。文档加载、脚本禁用或父应用 / IPC 隔离失败必须阻塞并修改渲染设计，编号链接不能替代安全边界。
-- 加载远程图片是逐封显式动作，通过 Rust 资源加载器取回后转为受控图片；不携带邮箱凭证、Cookie 或 Referer，设置大小与超时限制。该动作仍可能让发件人获知阅读行为。
+- 当前远程图片全部阻止并显示计数，不提供放行按钮。后续若实现逐封显式放行，通过 Rust 资源加载器取回后转为受控图片；不携带邮箱凭证、Cookie 或 Referer，设置大小与超时限制。该动作仍可能让发件人获知阅读行为。
+
+实际协议为 macOS / Linux 的 `mailx-body://localhost` 和 Windows 的 `http://mailx-body.localhost`。Wry 会重写 Windows 传入请求的 scheme，因此资源与 CSP 必须按浏览器实际 origin 生成。协议仅 GET；404 不暴露原因，其他方法为 405；所有响应包含 CSP、nosniff、no-referrer、no-store。图片 CSP 限定当前邮件 /part 路径，不能通过资源加载触发 /link。每次 document / part / link / links_open 都重新验证绑定。
+
+三平台合成 WebView 验证已通过，具体提交与记录见[验证策略](../development/validation.md)。macOS / Linux 的 204 会清空 iframe，已采用并验证父界面编号链接；Windows 直接链接返回 204 后保留正文。此平台差异不改变脚本、父 DOM 或 IPC 隔离要求。
 
 ## 6. 端点与 SSRF
 

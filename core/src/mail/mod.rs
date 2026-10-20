@@ -1,6 +1,6 @@
 //! Mail read contract shared by local storage and host adapters. Folder and
-//! per-folder header queries are implemented; bodies and attachment contents remain
-//! unavailable until their retrieval is implemented.
+//! per-folder header queries and cached body metadata are available. HTML and
+//! inline resources remain behind the host-isolated body protocol.
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
