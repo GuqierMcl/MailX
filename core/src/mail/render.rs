@@ -11,13 +11,14 @@ use mail_parser::{Message, MessageParser, MessagePart, MimeHeaders, PartType};
 mod css;
 mod html;
 mod images;
+mod plain;
 
 pub use html::{
     ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
 };
 pub use images::{InlineImage, validate as validate_image};
 
-pub const SANITIZER_VERSION: u32 = 2;
+pub const SANITIZER_VERSION: u32 = 5;
 pub const MAX_MESSAGE_BYTES: usize = 100 * 1024 * 1024;
 pub const MAX_BODY_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_MIME_DEPTH: usize = 30;
@@ -78,7 +79,12 @@ pub fn render(raw: &[u8], message_id: &str) -> Result<Rendered, RenderError> {
     let entities = entities(&message)?;
     let mut truncated = false;
     let mut plain_text = collect_body(&message, false, &mut truncated);
-    let raw_html = collect_body(&message, true, &mut truncated);
+    let mut raw_html = collect_body(&message, true, &mut truncated);
+    if raw_html.is_none()
+        && let Some(text) = plain_text.as_deref().filter(|text| !text.trim().is_empty())
+    {
+        raw_html = Some(plain::to_html(text));
+    }
     let mut links = Vec::new();
     let mut remote_images_blocked = 0;
     let sanitized_html = raw_html.map(|body| {

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { testClient } from '@/features/accounts/test-fixtures'
 import type { BodyLinkRequest } from '@/lib/mailx-client'
+import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import { BodyDocument } from './body-document'
 import { EmailView } from './email-view'
 import type { EmailDetail } from '@/generated/accounts'
@@ -28,6 +29,21 @@ async function frame() {
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('isolated body, inline links and image policy', () => {
+  it('requests the dark document only when the app is dark and mail follows it', async () => {
+    const { client } = setup()
+    document.documentElement.classList.add('dark')
+    try {
+      render(<BodyDocument client={client} emailId="one" />)
+      expect(await frame()).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=token-1&scheme=dark')
+      vi.mocked(client.getSettings).mockResolvedValue({
+        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask' } },
+        stored: true, recovered: false,
+      })
+    } finally {
+      document.documentElement.classList.remove('dark')
+    }
+  })
+
   it('keeps the empty sandbox and opens a current inline link once without a list or dialog', async () => {
     const { client, emit } = setup()
     render(<BodyDocument client={client} emailId="one" />)

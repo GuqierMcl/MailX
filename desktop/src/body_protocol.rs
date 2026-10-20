@@ -57,6 +57,14 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                     .and_then(|state| state.core().ok());
                 if matches!(
                     parse_route(&request.uri().to_string()),
+                    Some((Route::Document { .. }, _))
+                ) && let Some(state) = app.try_state::<crate::state::DesktopState>()
+                    && let Ok(snapshot) = state.settings(|store| store.get()).await
+                {
+                    protocol.set_base_css(mailx_core::mail_body_css(&snapshot.settings.appearance));
+                }
+                if matches!(
+                    parse_route(&request.uri().to_string()),
                     Some((Route::Remote { .. }, _))
                 ) {
                     let allowed = if let Some(state) = app.try_state::<crate::state::DesktopState>()
@@ -148,6 +156,7 @@ struct Confirmation {
 
 pub(crate) struct BodyProtocol {
     numbered_links: bool,
+    base_css: Mutex<String>,
     documents: Mutex<HashMap<String, Document>>,
     confirmations: Mutex<HashMap<String, Confirmation>>,
     #[cfg(feature = "body-webview-test")]
@@ -193,11 +202,16 @@ pub(crate) struct LinkRequest {
     pub request_id: String,
 }
 
+/// Inverts the whole page, then inverts images back so photos keep their colors.
+/// The canvas color is the inverse of the app's near-black background.
+const DARK_CSS: &str = "html{background:#e8e8e8;filter:invert(1) hue-rotate(180deg)}img{filter:invert(1) hue-rotate(180deg)}";
+
 #[derive(Debug, PartialEq, Eq)]
 enum Route {
     Document {
         id: String,
         token: String,
+        dark: bool,
     },
     Remote {
         id: String,
@@ -260,7 +274,19 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
         return None;
     }
     let pairs: Vec<_> = url.query_pairs().collect();
-    if pairs.len() != 1 || pairs[0].0 != "token" {
+    // Only a document may carry a presentation hint; it grants nothing.
+    let dark = match pairs.get(1) {
+        None => false,
+        Some((key, value))
+            if segments.first().map(String::as_str) == Some("document")
+                && key == "scheme"
+                && value == "dark" =>
+        {
+            true
+        }
+        Some(_) => return None,
+    };
+    if pairs.len() > 2 || pairs.first().is_none_or(|pair| pair.0 != "token") {
         return None;
     }
     let token = pairs[0].1.to_string();
@@ -282,6 +308,7 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
         "document" if segments.len() == 2 => Route::Document {
             id: id.clone(),
             token,
+            dark,
         },
         kind @ ("part" | "link") if segments.len() == 3 => {
             if kind == "part" {
@@ -347,6 +374,7 @@ impl BodyProtocol {
     fn new(numbered_links: bool) -> Self {
         Self {
             numbered_links,
+            base_css: Mutex::new(mailx_core::mail_body_css(&Default::default())),
             documents: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
             #[cfg(feature = "body-webview-test")]
@@ -426,6 +454,12 @@ impl BodyProtocol {
             document.explicit_images = explicit;
         }
         Ok(prepared)
+    }
+
+    fn set_base_css(&self, css: String) {
+        if let Ok(mut current) = self.base_css.lock() {
+            *current = css;
+        }
     }
 
     fn permits_remote_request(&self, value: &str, policy: mailx_core::RemoteImagePolicy) -> bool {
@@ -535,7 +569,7 @@ impl BodyProtocol {
         app_origin: &str,
     ) -> Result<(Response<Vec<u8>>, Option<LinkRequest>), AppError> {
         match route {
-            Route::Document { id, token } => {
+            Route::Document { id, token, dark } => {
                 let document = self.resolve(&id, &token)?;
                 let allow_remote = document.remote_images;
                 let document = core.body_document_bound(document.binding).await?;
@@ -562,7 +596,9 @@ impl BodyProtocol {
                     render::bind_resources(&document.html, resolve)
                 };
                 let html = format!(
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>邮件正文</title><style>html{{background:white;color:black}}body{{overflow-wrap:anywhere}}</style></head><body>{html}</body></html>"
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>邮件正文</title><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
+                    base_css = self.base_css.lock().map_err(|_| missing())?,
+                    dark_css = if dark { DARK_CSS } else { "" }
                 );
                 #[cfg(feature = "body-webview-test")]
                 let html = {

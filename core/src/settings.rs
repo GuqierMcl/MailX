@@ -40,6 +40,17 @@ pub enum FontSize {
     Large,
 }
 
+/// How message bodies follow the app's color mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MailTheme {
+    /// Adapt message bodies to dark mode when the app is dark.
+    #[default]
+    Follow,
+    /// Always show message bodies on a white page.
+    Light,
+}
+
 /// Empty strings mean "use the built-in default".
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
@@ -49,6 +60,9 @@ pub struct AppearanceSettings {
     pub accent_color: String,
     /// `""` or comma-separated font families, tried in order.
     pub interface_font: String,
+    /// `""` or comma-separated font families for message bodies, tried in order.
+    pub mail_font: String,
+    pub mail_theme: MailTheme,
     pub font_size: FontSize,
 }
 
@@ -117,6 +131,8 @@ impl AppSettings {
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
                 interface_font: normalize_font_families(&appearance.interface_font)
                     .ok_or_else(|| AppError::validation("appearance.interfaceFont"))?,
+                mail_font: normalize_font_families(&appearance.mail_font)
+                    .ok_or_else(|| AppError::validation("appearance.mailFont"))?,
                 ..appearance
             },
         })
@@ -133,6 +149,8 @@ impl AppSettings {
                     .unwrap_or(defaults.accent_color),
                 interface_font: normalize_font_families(&appearance.interface_font)
                     .unwrap_or(defaults.interface_font),
+                mail_font: normalize_font_families(&appearance.mail_font)
+                    .unwrap_or(defaults.mail_font),
                 ..appearance
             },
         }
@@ -174,6 +192,64 @@ fn normalize_font_families(value: &str) -> Option<String> {
         families.push(family);
     }
     (families.len() <= MAX_FONT_FAMILIES).then(|| families.join(", "))
+}
+
+const DEFAULT_MAIL_FONTS: &str = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", Roboto, \"Helvetica Neue\", Arial, sans-serif";
+const GENERIC_FAMILIES: &[&str] = &[
+    "serif",
+    "sans-serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+    "math",
+    "emoji",
+    "fangsong",
+    "ui-serif",
+    "ui-sans-serif",
+    "ui-monospace",
+    "ui-rounded",
+];
+
+/// Base style for the message document: only what the message itself does not
+/// specify. Family names were validated by `normalized`, so quoting is safe.
+pub fn mail_body_css(appearance: &AppearanceSettings) -> String {
+    let families: Vec<&str> = appearance
+        .mail_font
+        .split(',')
+        .map(str::trim)
+        .filter(|family| !family.is_empty() && !family.chars().any(|c| "\"'\\;{}()<>".contains(c)))
+        .collect();
+    let mut font = if families.is_empty() {
+        DEFAULT_MAIL_FONTS.to_owned()
+    } else {
+        let mut css: Vec<String> = families
+            .iter()
+            .map(|family| {
+                if GENERIC_FAMILIES.contains(&family.to_ascii_lowercase().as_str()) {
+                    (*family).to_owned()
+                } else {
+                    format!("\"{family}\"")
+                }
+            })
+            .collect();
+        if !families
+            .iter()
+            .any(|family| GENERIC_FAMILIES.contains(&family.to_ascii_lowercase().as_str()))
+        {
+            css.push("sans-serif".into());
+        }
+        css.join(", ")
+    };
+    font.insert_str(0, "font-family:");
+    let size = match appearance.font_size {
+        FontSize::Small => "13px",
+        FontSize::Default => "14px",
+        FontSize::Large => "16px",
+    };
+    format!(
+        "html{{background:white;color:black}}body{{margin:0;{font};font-size:{size};line-height:1.5}}.mailx-page{{box-sizing:border-box;min-height:100vh;padding:16px;overflow-wrap:break-word}}.mailx-body{{box-sizing:border-box;min-height:100vh;margin:-16px;padding:16px}}img{{max-width:100%;height:auto}}"
+    )
 }
 
 struct State {

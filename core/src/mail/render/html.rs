@@ -10,6 +10,7 @@ const CID_SLOT: &str = "data-mailx-cid";
 const LINK_SLOT: &str = "data-mailx-link";
 const REMOTE_SLOT: &str = "data-mailx-remote";
 const DATA_SLOT: &str = "data-mailx-data";
+const BODY_MARK: &str = "data-mailx-body";
 
 pub(super) struct Sanitized {
     pub html: String,
@@ -212,8 +213,52 @@ pub(super) fn is_remote(value: &str) -> bool {
         || Url::parse(&normalized).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
 }
 
+/// Fragment parsing discards `<body>`, and with it the page-level `style`,
+/// `align` and `bgcolor` that many layouts rely on for centering. Keep them on
+/// a `div` that goes through the same attribute sanitization as any other.
+fn body_as_div(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let mut out = String::with_capacity(value.len());
+    let mut at = 0;
+    while let Some(found) = lower[at..].find("<body") {
+        let start = at + found;
+        let after = start + "<body".len();
+        if !matches!(
+            lower.as_bytes().get(after),
+            Some(b' ' | b'\t' | b'\r' | b'\n' | b'>' | b'/')
+        ) {
+            out.push_str(&value[at..after]);
+            at = after;
+            continue;
+        }
+        let mut quote = None;
+        let mut end = None;
+        for (offset, byte) in value.bytes().enumerate().skip(after) {
+            match (quote, byte) {
+                (Some(q), b) if b == q => quote = None,
+                (None, b'"' | b'\'') => quote = Some(byte),
+                (None, b'>') => {
+                    end = Some(offset);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { break };
+        out.push_str(&value[at..start]);
+        out.push_str("<div data-mailx-body");
+        out.push_str(&value[after..end]);
+        out.push('>');
+        at = end + 1;
+    }
+    out.push_str(&value[at..]);
+    out.replace("</body>", "</div>")
+        .replace("</BODY>", "</div>")
+}
+
 pub(super) fn sanitize(value: &str) -> Sanitized {
-    let mut document = Html::parse_fragment(value);
+    let value = body_as_div(value);
+    let mut document = Html::parse_fragment(&value);
     let mut links = Vec::new();
     let mut data_images = Vec::new();
     let mut blocked = 0u32;
@@ -240,6 +285,7 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                             | "input"
                             | "button"
                             | "meta"
+                            | "title"
                             | "base"
                             | "link"
                             | "svg"
@@ -318,9 +364,11 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
         };
         let tag = element.name().to_owned();
         let attrs = std::mem::take(&mut element.attrs);
+        let mut is_body = false;
         for (name, value) in attrs {
             let attr = name.local.as_ref();
             if !name.ns.is_empty() || attr.starts_with("data-mailx-") {
+                is_body |= name.local.as_ref() == BODY_MARK;
                 continue;
             }
             match attr {
@@ -376,6 +424,14 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                 _ => element.attrs.push((name, value)),
             }
         }
+        if is_body {
+            let class = element
+                .attr("class")
+                .map_or("mailx-body".to_owned(), |class| {
+                    format!("mailx-body {class}")
+                });
+            set_attr(element, "class", &class);
+        }
         if tag == "a"
             && let Some(link) = element
                 .attr(LINK_SLOT)
@@ -393,9 +449,38 @@ pub(super) fn sanitize(value: &str) -> Sanitized {
                 .collect::<HashSet<_>>(),
         )
         .url_relative(ammonia::UrlRelative::Deny)
-        .add_tags(&["style"])
+        .add_tags(&[
+            "style", "font", "big", "tfoot", "section", "main", "address", "nobr", "dir", "menu",
+            "label",
+        ])
         .rm_clean_content_tags(&["style"])
-        .add_generic_attributes(&["style", "class"])
+        .add_generic_attributes(&[
+            "style",
+            "class",
+            "align",
+            "valign",
+            "bgcolor",
+            "width",
+            "height",
+            "border",
+            "cellpadding",
+            "cellspacing",
+            "nowrap",
+            "hspace",
+            "vspace",
+            "bordercolor",
+            "dir",
+            "id",
+            "role",
+        ])
+        .add_generic_attribute_prefixes(&["aria-"])
+        .add_tag_attributes("font", &["color", "size", "face"])
+        .add_tag_attributes("ol", &["type", "reversed"])
+        .add_tag_attributes("ul", &["type"])
+        .add_tag_attributes("li", &["type", "value"])
+        .add_tag_attributes("table", &["frame", "rules"])
+        .add_tag_attributes("hr", &["color", "noshade"])
+        .add_tag_attributes("br", &["clear"])
         .add_tag_attributes("img", &[CID_SLOT, DATA_SLOT, REMOTE_SLOT])
         .add_tag_attributes("a", &[LINK_SLOT])
         .link_rel(Some("noopener noreferrer"))

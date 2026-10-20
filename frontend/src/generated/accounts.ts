@@ -158,6 +158,8 @@ export type ThemeMode = "system" | "light" | "dark";
 
 export type FontSize = "small" | "default" | "large";
 
+export type MailTheme = "follow" | "light";
+
 export type AppearanceSettings = { theme: ThemeMode,
 /**
  * `""` or a lowercase `#rrggbb` color.
@@ -166,7 +168,11 @@ accentColor: string,
 /**
  * `""` or comma-separated font families, tried in order.
  */
-interfaceFont: string, fontSize: FontSize, };
+interfaceFont: string,
+/**
+ * `""` or comma-separated font families for message bodies, tried in order.
+ */
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 

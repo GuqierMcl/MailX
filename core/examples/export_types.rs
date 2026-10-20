@@ -55,6 +55,7 @@ fn main() {
         AccountSyncState,
         ThemeMode,
         FontSize,
+        MailTheme,
         AppearanceSettings,
         RemoteImagePolicy,
         SecuritySettings,

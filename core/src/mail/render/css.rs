@@ -74,7 +74,7 @@ impl<'i> DeclarationParser<'i> for Rules {
 }
 
 impl<'i> AtRuleParser<'i> for Rules {
-    type Prelude = bool;
+    type Prelude = Option<String>;
     type AtRule = String;
     type Error = ();
 
@@ -82,30 +82,142 @@ impl<'i> AtRuleParser<'i> for Rules {
         &mut self,
         name: CowRcStr<'i>,
         input: &mut Parser<'i, 't>,
-    ) -> Result<bool, ParseError<'i, ()>> {
-        // All at-rules are removed, including imports and downloadable fonts.
-        while input.next().is_ok() {}
-        Ok(name.eq_ignore_ascii_case("font-face"))
+    ) -> Result<Option<String>, ParseError<'i, ()>> {
+        // Imports, downloadable fonts and every other at-rule are removed. Only
+        // `@media` survives, with a prelude rebuilt from passive tokens; dark
+        // mode queries are dropped because the document is always light.
+        if !name.eq_ignore_ascii_case("media") {
+            while input.next().is_ok() {}
+            return Ok(None);
+        }
+        let mut prelude = String::new();
+        let mut valid = true;
+        media_tokens(input, &mut prelude, &mut valid, 0);
+        Ok(valid.then(|| prelude.trim().to_owned()))
     }
 
-    fn rule_without_block(&mut self, _: bool, _: &ParserState) -> Result<String, ()> {
+    fn rule_without_block(&mut self, _: Option<String>, _: &ParserState) -> Result<String, ()> {
         Ok(String::new())
     }
 
     fn parse_block<'t>(
         &mut self,
-        is_font: bool,
+        prelude: Option<String>,
         _: &ParserState,
         input: &mut Parser<'i, 't>,
     ) -> Result<String, ParseError<'i, ()>> {
-        if !is_font && self.depth < 30 {
-            self.depth += 1;
-            let _ = sheet(input, self);
-            self.depth -= 1;
-        } else {
+        let (Some(prelude), true) = (prelude, self.depth < 30) else {
             while input.next().is_ok() {}
+            return Ok(String::new());
+        };
+        self.depth += 1;
+        let inner = sheet(input, self);
+        self.depth -= 1;
+        Ok(if inner.is_empty() {
+            String::new()
+        } else {
+            format!("@media {prelude}{{{inner}}}")
+        })
+    }
+}
+
+fn media_tokens<'i>(input: &mut Parser<'i, '_>, out: &mut String, valid: &mut bool, depth: usize) {
+    if depth > 8 {
+        *valid = false;
+        return;
+    }
+    while let Ok(token) = input.next_including_whitespace().cloned() {
+        match token {
+            Token::Ident(ref ident) => {
+                if ident.to_ascii_lowercase().starts_with("prefers-") {
+                    *valid = false;
+                }
+                out.push_str(&token.to_css_string());
+            }
+            Token::Number { .. }
+            | Token::Percentage { .. }
+            | Token::Dimension { .. }
+            | Token::WhiteSpace(_)
+            | Token::Comma
+            | Token::Colon
+            | Token::Delim('/') => out.push_str(&token.to_css_string()),
+            Token::ParenthesisBlock => {
+                out.push('(');
+                let _ = input.parse_nested_block(|inner| {
+                    media_tokens(inner, out, valid, depth + 1);
+                    Ok::<(), ParseError<'i, ()>>(())
+                });
+                out.push(')');
+            }
+            _ => *valid = false,
         }
-        Ok(String::new())
+    }
+}
+
+const SELECTOR_FUNCTIONS: &[&str] = &[
+    "not",
+    "is",
+    "where",
+    "nth-child",
+    "nth-last-child",
+    "nth-of-type",
+    "nth-last-of-type",
+    "lang",
+];
+
+/// Selectors cannot load anything, so the only constraint is that the output
+/// stays within tokens that cannot end the style element or the rule.
+fn selector_tokens<'i>(
+    input: &mut Parser<'i, '_>,
+    out: &mut String,
+    valid: &mut bool,
+    depth: usize,
+) {
+    if depth > 8 {
+        *valid = false;
+        return;
+    }
+    while let Ok(token) = input.next_including_whitespace_and_comments().cloned() {
+        match token {
+            Token::Ident(_)
+            | Token::IDHash(_)
+            | Token::Hash(_)
+            | Token::WhiteSpace(_)
+            | Token::Comma
+            | Token::Colon
+            | Token::Number { .. }
+            | Token::Dimension { .. }
+            | Token::Percentage { .. }
+            | Token::IncludeMatch
+            | Token::DashMatch
+            | Token::PrefixMatch
+            | Token::SuffixMatch
+            | Token::SubstringMatch
+            | Token::Delim('.' | '*' | '>' | '+' | '~' | '|' | '^' | '$' | '=' | '-') => {
+                out.push_str(&token.to_css_string());
+            }
+            Token::QuotedString(_) => out.push_str(&token.to_css_string().replace('<', "\\3c ")),
+            Token::Comment(_) => out.push(' '),
+            Token::SquareBracketBlock => {
+                out.push('[');
+                let _ = input.parse_nested_block(|inner| {
+                    selector_tokens(inner, out, valid, depth + 1);
+                    Ok::<(), ParseError<'i, ()>>(())
+                });
+                out.push(']');
+            }
+            Token::Function(ref name) => {
+                let name = name.to_ascii_lowercase();
+                *valid &= SELECTOR_FUNCTIONS.contains(&name.as_str());
+                out.push_str(&format!("{name}("));
+                let _ = input.parse_nested_block(|inner| {
+                    selector_tokens(inner, out, valid, depth + 1);
+                    Ok::<(), ParseError<'i, ()>>(())
+                });
+                out.push(')');
+            }
+            _ => *valid = false,
+        }
     }
 }
 
@@ -120,20 +232,7 @@ impl<'i> QualifiedRuleParser<'i> for Rules {
     ) -> Result<Self::Prelude, ParseError<'i, ()>> {
         let mut selector = String::new();
         let mut valid = true;
-        while let Ok(token) = input.next_including_whitespace_and_comments() {
-            match token {
-                Token::Ident(_)
-                | Token::IDHash(_)
-                | Token::WhiteSpace(_)
-                | Token::Comma
-                | Token::Colon
-                | Token::Delim('.' | '*' | '>' | '+' | '~') => {
-                    selector.push_str(&token.to_css_string());
-                }
-                Token::Comment(_) => selector.push(' '),
-                _ => valid = false,
-            }
-        }
+        selector_tokens(input, &mut selector, &mut valid, 0);
         Ok((selector, valid))
     }
 
@@ -198,7 +297,19 @@ fn tokens<'i>(
                 let name = name.to_ascii_lowercase();
                 let safe = matches!(
                     name.as_str(),
-                    "rgb" | "rgba" | "hsl" | "hsla" | "calc" | "min" | "max" | "clamp"
+                    "rgb"
+                        | "rgba"
+                        | "hsl"
+                        | "hsla"
+                        | "calc"
+                        | "min"
+                        | "max"
+                        | "clamp"
+                        | "linear-gradient"
+                        | "radial-gradient"
+                        | "conic-gradient"
+                        | "repeating-linear-gradient"
+                        | "repeating-radial-gradient"
                 );
                 *valid &= safe;
                 output.push_str(&format!("{name}("));
@@ -326,5 +437,79 @@ fn allowed_property(name: &str) -> bool {
             | "overflow-x"
             | "overflow-y"
             | "opacity"
+            | "background-image"
+            | "background-repeat"
+            | "background-position"
+            | "background-size"
+            | "background-clip"
+            | "background-origin"
+            | "list-style"
+            | "border-top-color"
+            | "border-right-color"
+            | "border-bottom-color"
+            | "border-left-color"
+            | "border-top-style"
+            | "border-right-style"
+            | "border-bottom-style"
+            | "border-left-style"
+            | "border-top-width"
+            | "border-right-width"
+            | "border-bottom-width"
+            | "border-left-width"
+            | "border-top-left-radius"
+            | "border-top-right-radius"
+            | "border-bottom-left-radius"
+            | "border-bottom-right-radius"
+            | "outline"
+            | "outline-color"
+            | "outline-style"
+            | "outline-width"
+            | "outline-offset"
+            | "box-shadow"
+            | "text-shadow"
+            | "text-decoration-line"
+            | "text-decoration-color"
+            | "text-decoration-style"
+            | "text-decoration-thickness"
+            | "text-underline-offset"
+            | "text-size-adjust"
+            | "-webkit-text-size-adjust"
+            | "-ms-text-size-adjust"
+            | "word-wrap"
+            | "line-break"
+            | "hyphens"
+            | "tab-size"
+            | "font-stretch"
+            | "visibility"
+            | "position"
+            | "top"
+            | "right"
+            | "bottom"
+            | "left"
+            | "z-index"
+            | "flex"
+            | "flex-direction"
+            | "flex-wrap"
+            | "flex-flow"
+            | "flex-grow"
+            | "flex-shrink"
+            | "flex-basis"
+            | "justify-content"
+            | "justify-items"
+            | "justify-self"
+            | "align-items"
+            | "align-self"
+            | "align-content"
+            | "order"
+            | "gap"
+            | "row-gap"
+            | "column-gap"
+            | "object-fit"
+            | "object-position"
+            | "aspect-ratio"
+            | "margin-inline"
+            | "margin-block"
+            | "padding-inline"
+            | "padding-block"
     )
 }
