@@ -21,11 +21,13 @@ const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 fn main() {
     #[cfg(feature = "body-webview-test")]
     body_webview_test::checkpoint("main entered");
-    let builder = tauri::Builder::default().plugin(
-        tauri_plugin_opener::Builder::new()
-            .open_js_links_on_click(false)
-            .build(),
-    );
+    let builder = tauri::Builder::default()
+        .append_invoke_initialization_script(include_str!("subframe_guard.js"))
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        );
     #[cfg(all(feature = "body-webview-test", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     body_protocol::register(builder)

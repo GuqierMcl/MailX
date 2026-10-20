@@ -98,7 +98,10 @@ function isolation(name, snapshot) {
   check(`${name}: no referrer`, snapshot.referrerPolicy === 'no-referrer');
   check(`${name}: CID image loaded`, observed.inlineImageLoaded && observed.inlineImageWidth > 0);
   check(`${name}: page scripts disabled`, observed.pageScriptExecuted === false);
-  check(`${name}: no Tauri globals or invoke`, !observed.tauriGlobalPresent && !observed.tauriInvokePresent, { global: observed.tauriGlobalPresent, invoke: observed.tauriInvokePresent, internals: observed.tauriInternalsKeys });
+  // WebView2 injects Tauri's scripts into every frame; the subframe guard must
+  // leave at most the inert `plugins` object and the keyed postMessage sender.
+  const bridge = (observed.tauriInternalsKeys ?? []).filter((key) => !['plugins', 'postMessage'].includes(key));
+  check(`${name}: no Tauri globals or invoke`, !observed.tauriGlobalPresent && !observed.tauriInvokePresent && bridge.length === 0, { global: observed.tauriGlobalPresent, invoke: observed.tauriInvokePresent, internals: observed.tauriInternalsKeys });
   check(`${name}: IPC unavailable or denied`, ['unavailable', 'denied'].includes(observed.ipcProbe), observed.ipcProbe);
   check(`${name}: parent DOM and frame DOM isolated`, !observed.parentDomReadable && !snapshot.parentCanReadFrame);
   check(`${name}: parent state and invoke isolated`, !observed.parentStateReadable && !observed.parentInvokeReadable && !snapshot.parentCanReadFrameInternals);

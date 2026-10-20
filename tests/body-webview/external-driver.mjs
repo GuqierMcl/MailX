@@ -199,8 +199,10 @@ export async function startExternalDriver({ binary, cwd, env, tauriDriver, nativ
             window.__TAURI_INTERNALS__.invoke('app_get_startup_status',{}).then(()=> 'unexpectedly-resolved',()=> 'denied'),
             new Promise(resolve=>setTimeout(()=>resolve('timed-out'),3000))
           ]).then(done,()=>done('probe-failed'));`) : 'unavailable';
-        snapshot.tauriInternalsKeys = snapshot.tauriInvokePresent
-          ? await execute('return Object.keys(window.__TAURI_INTERNALS__ ?? {}).sort();') : [];
+        // Own names include non-enumerable members such as postMessage, so a
+        // partly installed bridge stays visible in the report.
+        snapshot.tauriInternalsKeys = await execute(
+          'return Object.getOwnPropertyNames(window.__TAURI_INTERNALS__ ?? {}).sort();');
         return snapshot;
       });
     }
