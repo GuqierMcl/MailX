@@ -545,3 +545,34 @@ async fn examine_keeps_its_thirty_second_command_budget() {
     assert_eq!(started.elapsed(), COMMAND_TIMEOUT);
     server.abort();
 }
+
+#[tokio::test]
+async fn short_command_tags_interoperate_with_servers_that_limit_tag_echoes() {
+    let (client, server) = tokio::io::duplex(16 * 1024);
+    let server = tokio::spawn(async move {
+        let mut server = BufReader::new(server);
+        authenticated_peer(&mut server).await;
+        let tag = command(&mut server, "EXAMINE").await;
+        server
+            .get_mut()
+            .write_all(format!("* OK [UIDVALIDITY 123]\r\n{tag} OK [READ-ONLY]\r\n").as_bytes())
+            .await
+            .unwrap();
+        let tag = command(&mut server, "UID FETCH 42 (UID BODY.PEEK[])").await;
+        // A real provider returned a 15-byte completion tag for the previous
+        // UUID-length tag. Keep exact completion validation; send a short tag.
+        let echoed: String = tag.chars().take(15).collect();
+        server
+            .get_mut()
+            .write_all(&response(b"fixture", format!("{echoed} OK\r\n").as_bytes()))
+            .await
+            .unwrap();
+    });
+    let mut session = test_body_session(Box::new(client), &login()).await.unwrap();
+    session.examine("INBOX").await.unwrap();
+    assert_eq!(
+        session.fetch_message(42, Some(7)).await.unwrap(),
+        Some(b"fixture".to_vec())
+    );
+    server.await.unwrap();
+}

@@ -100,10 +100,13 @@ impl Session {
             return Err(ImapError::TooLarge);
         }
         let guard = self.body_guard.clone().ok_or_else(protocol)?;
-        let tag = format!("MAILXBODY{}", uuid::Uuid::new_v4().simple());
+        // Some providers truncate long tags. This is the final command on a
+        // consumed, dedicated session, so a short tag distinct from async-imap's
+        // tags is sufficient; completion matching remains exact.
+        let tag = "MAILXBODY";
         let result = timeout(
             body_timeout(size),
-            fetch(self.inner.get_mut(), &tag, uid, Limits::default()),
+            fetch(self.inner.get_mut(), tag, uid, Limits::default()),
         )
         .await
         .map_err(|_| ImapError::Timeout)?;
