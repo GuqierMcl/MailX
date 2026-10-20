@@ -11,6 +11,8 @@ fn main() {
             "emails_list",
             "emails_get",
             "sync_states",
+            "settings_get",
+            "settings_update",
             "window_get_chrome",
             "window_perform",
         ]),

@@ -143,6 +143,19 @@ type EmailPage = {
 
 `failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改；单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
 
+### 应用偏好设置
+
+| MailxClient 方法 | Tauri 命令与参数 | 核心组件 | 成功结果 |
+| --- | --- | --- | --- |
+| `getSettings()` | `settings_get`，无参数 | `SettingsStore::get` | `SettingsSnapshot` |
+| `updateSettings(settings)` | `settings_update`，`{ request: AppSettings }` | `SettingsStore::update` | `SettingsSnapshot` |
+
+偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
+
+`AppSettings` 目前只有 `appearance`：`theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont`（空字符串或逗号分隔的字体名）和 `fontSize`（`small` / `default` / `large`）。空字符串表示使用内置默认值；非空的字体列表按用户顺序依次回退，前端只在末尾补通用 `sans-serif`。更新替换全部设置，核心校验后返回规范形式：颜色转小写；字体名去首尾空白和成对引号并丢弃空项，含引号、反斜杠、分号、括号、尖括号或控制字符，超过 16 个或单个超过 64 个字符时返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont`。
+
+`SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
+
 ### 后续应用操作草案
 
 启动状态查询 `app_get_startup_status`、手动重试 `app_retry_startup`、`StartupStatus` 和 `coreNotReady` 错误已按[数据库迁移与启动方案](../architecture/database-migrations.md#6-启动-ipc-与前端边界)注册并生成。账号、文件夹和邮件操作通过宿主的 Ready 检查；这不是前端可修改的权限状态。

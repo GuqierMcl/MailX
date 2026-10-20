@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { Add01Icon, ArrowRight01Icon, InformationCircleIcon, Mail01Icon, Settings01Icon, UserMultipleIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, ArrowRight01Icon, InformationCircleIcon, Mail01Icon, PaintBoardIcon, UserMultipleIcon } from '@hugeicons/core-free-icons'
 import type { Account } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -25,14 +25,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldSet, FieldTitle } from '@/components/ui/field'
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@/components/ui/item'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -41,14 +40,15 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountForm } from '@/features/accounts/account-form'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { useTheme, type ThemePreference } from '@/lib/theme'
+import { AppearancePane } from './appearance-pane'
+import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 
-export type SettingsSection = 'general' | 'accounts' | 'about'
+export type SettingsSection = 'appearance' | 'accounts' | 'about'
 /** Where the dialog opens; `newAccount` goes straight to an empty account form. */
 export type SettingsTarget = { section: SettingsSection; newAccount?: boolean }
 
 const SECTIONS: { id: SettingsSection; name: string; icon: IconSvgElement }[] = [
-  { id: 'general', name: '通用', icon: Settings01Icon },
+  { id: 'appearance', name: '外观', icon: PaintBoardIcon },
   { id: 'accounts', name: '账号', icon: UserMultipleIcon },
   { id: 'about', name: '关于', icon: InformationCircleIcon },
 ]
@@ -62,7 +62,7 @@ type SettingsDialogProps = {
 
 /** Application settings. Unsaved account edits are confirmed before any navigation or close. */
 export function SettingsDialog({ client, target, onClose, onAccountsChanged }: SettingsDialogProps) {
-  const [section, setSection] = useState<SettingsSection>('general')
+  const [section, setSection] = useState<SettingsSection>('appearance')
   // `undefined`: account list; `null`: new account; otherwise the account id being edited.
   const [editing, setEditing] = useState<string | null | undefined>(undefined)
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -98,15 +98,19 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
   return (
     <>
       <Dialog open={target !== null} onOpenChange={(open) => !open && leaveForm(onClose)}>
-        <DialogContent className="overflow-hidden p-0 md:max-h-[640px] md:max-w-[760px] lg:max-w-[880px]">
-          <DialogTitle className="sr-only">设置</DialogTitle>
+        <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
           <DialogDescription className="sr-only">管理 MailX 的外观与邮箱账号。</DialogDescription>
-          <SidebarProvider className="min-h-0 items-start">
-            <Sidebar collapsible="none" className="hidden md:flex">
+          {/* Narrow windows turn the side navigation into a top strip instead of hiding it. */}
+          <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
+            <Sidebar collapsible="none"
+              className="h-auto w-full shrink-0 flex-row items-center border-b pr-12 md:h-full md:w-(--sidebar-width) md:flex-col md:items-stretch md:border-b-0 md:pr-0">
+              <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
+                <DialogTitle className="text-base font-semibold">设置</DialogTitle>
+              </SidebarHeader>
               <SidebarContent>
-                <SidebarGroup>
+                <SidebarGroup className="py-2 md:p-2">
                   <SidebarGroupContent>
-                    <SidebarMenu>
+                    <SidebarMenu className="flex-row md:flex-col">
                       {SECTIONS.map((item) => (
                         <SidebarMenuItem key={item.id}>
                           <SidebarMenuButton
@@ -128,12 +132,10 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
                 </SidebarGroup>
               </SidebarContent>
             </Sidebar>
-            <main className="flex h-[600px] flex-1 flex-col overflow-hidden">
-              <header className="flex h-16 shrink-0 items-center gap-2 px-6">
+            <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <header className="flex h-14 shrink-0 items-center gap-2 px-6 md:h-16 md:pr-12">
                 <Breadcrumb>
-                  <BreadcrumbList>
-                    <BreadcrumbItem className="hidden md:block">设置</BreadcrumbItem>
-                    <BreadcrumbSeparator className="hidden md:block" />
+                  <BreadcrumbList className="text-sm">
                     {formTitle ? (
                       <>
                         <BreadcrumbItem>
@@ -148,14 +150,14 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
                       </>
                     ) : (
                       <BreadcrumbItem>
-                        <BreadcrumbPage>{sectionName}</BreadcrumbPage>
+                        <BreadcrumbPage className="font-medium">{sectionName}</BreadcrumbPage>
                       </BreadcrumbItem>
                     )}
                   </BreadcrumbList>
                 </Breadcrumb>
               </header>
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                {section === 'general' && <GeneralSection />}
+                {section === 'appearance' && <AppearancePane client={client} />}
                 {section === 'accounts' && (
                   <AccountsSection
                     client={client}
@@ -197,56 +199,19 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
   )
 }
 
-function SectionBody({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-6 px-6 pb-6">{children}</div>
-}
-
-const THEMES: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-]
-
-function GeneralSection() {
-  const [theme, setTheme] = useTheme()
-  return (
-    <SectionBody>
-      <FieldSet>
-        <FieldGroup>
-          <Field>
-            <FieldTitle>外观</FieldTitle>
-            <FieldDescription>选择界面的颜色主题。</FieldDescription>
-            <RadioGroup value={theme} onValueChange={(value) => setTheme(value as ThemePreference)} aria-label="外观">
-              {THEMES.map((option) => (
-                <Field key={option.value} orientation="horizontal">
-                  <RadioGroupItem id={`theme-${option.value}`} value={option.value} />
-                  <FieldLabel htmlFor={`theme-${option.value}`}>{option.label}</FieldLabel>
-                </Field>
-              ))}
-            </RadioGroup>
-          </Field>
-        </FieldGroup>
-      </FieldSet>
-    </SectionBody>
-  )
-}
-
 function AboutSection() {
   return (
-    <SectionBody>
-      <Field>
-        <FieldContent>
-          <FieldTitle>MailX</FieldTitle>
-          <FieldDescription>版本 {__APP_VERSION__}</FieldDescription>
-        </FieldContent>
-      </Field>
-      <Field>
-        <FieldContent>
-          <FieldTitle>数据与凭证</FieldTitle>
-          <FieldDescription>账号配置保存在本机，密码由系统凭据库管理，不会显示在应用中。</FieldDescription>
-        </FieldContent>
-      </Field>
-    </SectionBody>
+    <SettingsPage>
+      <SettingsGroup title="MailX">
+        <SettingsRow label="版本">
+          <span className="text-sm text-muted-foreground tabular-nums">{__APP_VERSION__}</span>
+        </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="数据与凭证">
+        <SettingsRow label="本机数据" description="账号配置、邮件缓存与偏好设置（settings.json）都保存在本机的数据目录中。" />
+        <SettingsRow label="密码" description="密码由系统凭据库管理，不会显示在应用中。" />
+      </SettingsGroup>
+    </SettingsPage>
   )
 }
 
@@ -316,15 +281,15 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
   )
 
   if (editing !== undefined) {
-    if (loadFailure) return <SectionBody>{loadFailure}</SectionBody>
+    if (loadFailure) return <SettingsPage>{loadFailure}</SettingsPage>
     if (editing && !account) {
       return (
-        <SectionBody>
+        <SettingsPage>
           <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-3">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-48 w-full" />
           </div>
-        </SectionBody>
+        </SettingsPage>
       )
     }
     return (
@@ -348,7 +313,7 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
   }
 
   return (
-    <SectionBody>
+    <SettingsPage>
       {loadFailure}
       {!accounts && !error && (
         <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-2">
@@ -374,7 +339,7 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
         </Empty>
       )}
       {accounts && accounts.length > 0 && (
-        <>
+        <SettingsGroup title="邮箱账号" description="选择一个账号查看或修改收信、发信与网络路由配置。">
           <ItemGroup className="gap-2" aria-label="邮箱账号列表">
             {accounts.map((row) => (
               <Item key={row.id} variant="outline" render={<button type="button" onClick={() => onEdit(row.id)} />}>
@@ -397,8 +362,8 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
             <HugeiconsIcon icon={Add01Icon} />
             添加账号
           </Button>
-        </>
+        </SettingsGroup>
       )}
-    </SectionBody>
+    </SettingsPage>
   )
 }

@@ -3,10 +3,11 @@ import { CSPProvider } from '@base-ui/react/csp-provider'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { applyTheme, storedTheme } from './lib/theme'
+import { applyAppearance, cachedAppearance } from './lib/appearance'
 
-// Apply the saved theme before the first paint to avoid a light flash.
-applyTheme(storedTheme())
+// Apply the last known appearance before the first paint to avoid a flash;
+// the core's settings replace it once IPC answers.
+applyAppearance(cachedAppearance())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

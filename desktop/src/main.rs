@@ -49,6 +49,8 @@ fn main() {
             commands::emails_list,
             commands::emails_get,
             commands::sync_states,
+            commands::settings_get,
+            commands::settings_update,
             commands::window_get_chrome,
             commands::window_perform,
         ])

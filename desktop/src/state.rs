@@ -7,13 +7,16 @@ use std::{
 };
 
 pub(crate) use mailx_core::StartupStatus;
-use mailx_core::{AppError, ErrorCode, MailxCore, SyncListener, secrets::SecretStore};
+use mailx_core::{
+    AppError, ErrorCode, MailxCore, SettingsStore, SyncListener, secrets::SecretStore,
+};
 
 struct Inner {
     data_dir: Result<PathBuf, AppError>,
     secrets: Arc<dyn SecretStore>,
     sync_listener: SyncListener,
     core: Mutex<Option<MailxCore>>,
+    settings: Mutex<Option<Arc<SettingsStore>>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
 }
@@ -32,6 +35,7 @@ impl DesktopState {
             secrets,
             sync_listener,
             core: Mutex::new(None),
+            settings: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
@@ -127,6 +131,35 @@ impl DesktopState {
         tauri::async_runtime::spawn_blocking(move || operation(&core))
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    /// Preferences only need the data directory, so they stay available when
+    /// the business service could not start. A failed open is retried on the
+    /// next call.
+    pub(crate) async fn settings<T, F>(&self, operation: F) -> Result<T, AppError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&SettingsStore) -> Result<T, AppError> + Send + 'static,
+    {
+        let state = self.clone();
+        tauri::async_runtime::spawn_blocking(move || operation(&*state.settings_store()?))
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {
+        let mut slot = self
+            .0
+            .settings
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        if let Some(store) = slot.as_ref() {
+            return Ok(store.clone());
+        }
+        let directory = self.0.data_dir.as_ref().map_err(Clone::clone)?;
+        let store = Arc::new(SettingsStore::open(directory)?);
+        *slot = Some(store.clone());
+        Ok(store)
     }
 
     fn is_ready(&self) -> bool {
@@ -291,6 +324,37 @@ mod tests {
         let error =
             tauri::async_runtime::block_on(state.run(|_| Ok::<_, AppError>(()))).unwrap_err();
         assert_eq!(error.code, ErrorCode::CoreNotReady);
+    }
+
+    #[test]
+    fn settings_work_before_the_business_service_is_ready() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = DesktopState::new(
+            Ok(directory.path().to_owned()),
+            Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
+        );
+        let mut settings = mailx_core::AppSettings::default();
+        settings.appearance.interface_font = "Inter, PingFang SC".into();
+        let saved =
+            tauri::async_runtime::block_on(state.settings(move |store| store.update(settings)))
+                .unwrap();
+        assert!(saved.stored);
+        assert!(!state.is_ready());
+        let loaded = tauri::async_runtime::block_on(state.settings(|store| store.get())).unwrap();
+        assert_eq!(loaded, saved);
+    }
+
+    #[test]
+    fn settings_report_an_unavailable_data_directory() {
+        let state = DesktopState::new(
+            Err(AppError::new(ErrorCode::StorageUnavailable)),
+            Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
+        );
+        let error =
+            tauri::async_runtime::block_on(state.settings(|store| store.get())).unwrap_err();
+        assert_eq!(error.code, ErrorCode::StorageUnavailable);
     }
 
     #[test]

@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
+import { DEFAULT_APPEARANCE } from '@/lib/appearance'
+import { MailxClientError } from '@/lib/mailx-client'
 import { SettingsDialog, type SettingsTarget } from './settings-dialog'
 
 function renderDialog(client = testClient(), target: SettingsTarget = { section: 'accounts' }) {
@@ -42,7 +44,7 @@ describe('settings dialog', () => {
     await userEvent.click(await within(dialog).findByRole('button', { name: /工作邮箱/ }))
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '改过的名称' } })
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '通用' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '外观' }))
     const confirm = await screen.findByRole('alertdialog')
     await userEvent.click(within(confirm).getByRole('button', { name: '继续编辑' }))
     expect(within(dialog).getByLabelText('账号名称')).toHaveValue('改过的名称')
@@ -52,13 +54,53 @@ describe('settings dialog', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('switches and remembers the appearance', async () => {
-    renderDialog(testClient(), { section: 'general' })
-    await userEvent.click(screen.getByRole('radio', { name: '深色' }))
-    expect(document.documentElement).toHaveClass('dark')
-    expect(localStorage.getItem('mailx.theme')).toBe('dark')
-    await userEvent.click(screen.getByRole('radio', { name: '跟随系统' }))
-    expect(document.documentElement).not.toHaveClass('dark')
-    expect(localStorage.getItem('mailx.theme')).toBeNull()
+  it('shows a visible title and keeps navigation on narrow windows', () => {
+    const { dialog } = renderDialog()
+    expect(within(dialog).getByRole('heading', { name: '设置' })).toBeVisible()
+    for (const name of ['外观', '账号', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+  })
+
+  it('saves appearance choices through the client', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    await userEvent.click(await screen.findByRole('radio', { name: '深色' }))
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ appearance: { ...DEFAULT_APPEARANCE, theme: 'dark' } })
+    expect(await screen.findByRole('radio', { name: '深色' })).toBeChecked()
+
+    await userEvent.click(screen.getByRole('radio', { name: '紫' }))
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ appearance: expect.objectContaining({ theme: 'dark', accentColor: '#7c3aed' }) })
+  })
+
+  it('commits the font list on Enter, normalized and in order, and clears it back to the default', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    const input = await screen.findByLabelText('界面字体')
+    await userEvent.type(input, `  'Noto Serif SC', , Georgia{Enter}`)
+    expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, interfaceFont: 'Noto Serif SC, Georgia' },
+    })
+    expect(await screen.findByLabelText('界面字体')).toHaveValue('Noto Serif SC, Georgia')
+
+    await userEvent.click(screen.getByRole('button', { name: '恢复默认' }))
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ appearance: DEFAULT_APPEARANCE })
+  })
+
+  it('keeps a rejected font list in the field with an error', async () => {
+    const client = testClient()
+    vi.mocked(client.updateSettings).mockRejectedValue(
+      new MailxClientError({ code: 'validation', message: '输入内容无效。', field: 'appearance.interfaceFont' }),
+    )
+    renderDialog(client, { section: 'appearance' })
+    await userEvent.type(await screen.findByLabelText('界面字体'), 'Bad;Font{Enter}')
+    expect(await screen.findByText(/字体名不能包含引号/)).toBeInTheDocument()
+    expect(screen.getByLabelText('界面字体')).toHaveValue('Bad;Font')
+    expect(screen.getByLabelText('界面字体')).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('explains a settings file that had to be moved aside', async () => {
+    const client = testClient()
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE }, stored: false, recovered: true })
+    renderDialog(client, { section: 'appearance' })
+    expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })
 })
