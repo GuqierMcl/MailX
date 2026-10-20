@@ -56,6 +56,8 @@ fn main() {
         ThemeMode,
         FontSize,
         AppearanceSettings,
+        RemoteImagePolicy,
+        SecuritySettings,
         AppSettings,
         SettingsSnapshot,
     );

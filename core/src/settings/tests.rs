@@ -3,6 +3,7 @@ use tempfile::TempDir;
 
 fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
+        security: SecuritySettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -197,10 +198,52 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "accentColor": "",
                     "interfaceFont": "",
                     "fontSize": "default"
-                }
+                },
+                "security": { "remoteImages": "ask" }
             },
             "stored": false,
             "recovered": false
         })
     );
+}
+
+#[test]
+fn older_settings_default_to_ask_and_section_patches_preserve_other_settings() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(
+        store.get().unwrap().settings.security.remote_images,
+        RemoteImagePolicy::Ask
+    );
+    store
+        .patch(SettingsPatch {
+            security: Some(SecuritySettings {
+                remote_images: RemoteImagePolicy::Automatic,
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    store
+        .patch(SettingsPatch {
+            appearance: Some(AppearanceSettings {
+                font_size: FontSize::Large,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(
+        restored.settings.security.remote_images,
+        RemoteImagePolicy::Automatic
+    );
+    assert_eq!(restored.settings.appearance.font_size, FontSize::Large);
 }

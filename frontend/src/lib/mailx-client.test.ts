@@ -76,7 +76,7 @@ describe('desktop client boundary', () => {
     await client.openLink(request)
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['emails_fetch_body', { emailId: 'email' }],
-      ['emails_prepare_body', { emailId: 'email' }],
+      ['emails_prepare_body', { emailId: 'email', loadRemoteImages: false }],
       ['emails_body_links', { emailId: 'email', documentToken: 'document' }],
       ['links_request', { emailId: 'email', index: 3, documentToken: 'document' }],
       ['links_open', { emailId: 'email', index: 3, documentToken: 'document', requestId: 'grant' }],

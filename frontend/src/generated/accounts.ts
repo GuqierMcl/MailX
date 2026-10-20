@@ -168,7 +168,11 @@ accentColor: string,
  */
 interfaceFont: string, fontSize: FontSize, };
 
-export type AppSettings = { appearance: AppearanceSettings, };
+export type RemoteImagePolicy = "ask" | "automatic" | "never";
+
+export type SecuritySettings = { remoteImages: RemoteImagePolicy, };
+
+export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**

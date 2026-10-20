@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
@@ -18,7 +17,6 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { MailxClient } from '@/lib/mailx-client'
 import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime, formatSize, initials } from './format'
@@ -167,7 +165,6 @@ const BODY_FAILURE: Record<BodyFailureCode, string> = {
 }
 
 function Body({ email, client, downloading, onDownload }: ContentProps) {
-  const [tab, setTab] = useState<string>('html')
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
   if (!body) return <Alert variant="destructive">
@@ -176,15 +173,10 @@ function Body({ email, client, downloading, onDownload }: ContentProps) {
     <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>重试</Button>
   </Alert>
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
-    {body.remoteImagesBlocked > 0 && <Alert><AlertDescription>已阻止 {body.remoteImagesBlocked} 张远程图片</AlertDescription></Alert>}
     {body.truncated && <Alert><AlertDescription>正文过长，当前仅显示截断后的内容。</AlertDescription></Alert>}
-    {body.hasHtml ? <Tabs value={tab} onValueChange={(value) => setTab(String(value))} className="min-h-0 flex-1">
-      <TabsList aria-label="正文格式"><TabsTrigger value="html">HTML</TabsTrigger><TabsTrigger value="text">纯文本</TabsTrigger></TabsList>
-      <TabsContent value="html" className="flex min-h-0 flex-col">
-        {tab === 'html' && <BodyDocument client={client} emailId={summary.id} />}
-      </TabsContent>
-      <TabsContent value="text" className="min-h-0 overflow-hidden"><PlainText text={body.text} /></TabsContent>
-    </Tabs> : <PlainText text={body.text} />}
+    {body.hasHtml
+      ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0} />
+      : <PlainText text={body.text} />}
   </div>
 }
 

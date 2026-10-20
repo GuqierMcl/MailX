@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-20。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和确认外链；HTML 仅由隔离协议提供。HTTP、MCP、连接测试和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-20。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP、连接测试和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -103,9 +103,10 @@ type EmailPage = {
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
 | `fetchBody(emailId)` | `emails_fetch_body`，`{ emailId }` | 最新 `EmailDetail` |
-| `prepareBody(emailId)` | `emails_prepare_body`，`{ emailId }` | `{ documentToken }` |
+| `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
+| `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
 | `bodyLinks(emailId, documentToken)` | `emails_body_links`，`{ emailId, documentToken }` | `{ documentToken, links: [{ emailId, index, url }] }` |
-| `requestLink(identity)` | `links_request`，`{ emailId, index, documentToken }` | null；产生确认事件 |
+| `requestLink(identity)` | `links_request`，`{ emailId, index, documentToken }` | null；旧编号兼容入口，生产模式拒绝 |
 | `openLink(grant)` | `links_open`，`{ emailId, index, documentToken, requestId }` | null |
 
 `EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number }`。
@@ -113,11 +114,17 @@ type EmailPage = {
 `AttachmentSummary` 包含 id、filename、mimeType、size、isInline；本轮不提供附件保存接口。
 HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
+正文界面自动选择格式：hasHtml 为 true 时显示隔离的 HTML，否则显示纯文本；不提供格式切换或“重新加载正文”按钮。缺失正文仍自动下载，下载失败时保留“重试”入口。
+
 下载使用独立的账号路由连接、EXAMINE 和 UID BODY.PEEK[]，不改变服务端已读状态。同一邮件共享 flight，每账号正文串行，账号之间无全局限额。已缓存正文只读本地数据；失败通常以 bodyState=failed 的成功详情返回，前端不能仅靠 Promise rejection 判断失败。邮件不可见时返回 notFound，存储不可写时返回受控错误，不假称已保存失败状态。
 
-每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。令牌有效期 30 分钟、最多 128 个，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。
+每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。离开本次阅读时调用 release，删除令牌、待处理链接授权并释放远程图片内存；迟到的 prepare 结果同样释放，重复 release 无副作用。令牌有效期 30 分钟、最多 128 个，作为清理后备，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。
 
-`mailx://link-request` 载荷为 `{ emailId, index, url, documentToken, requestId }`。UI 只接受当前已加载、可见文档的事件，完整显示 URL；确认只提交身份与一次性 requestId，不提交 URL。宿主重新读取链接并限制 http / https / mailto。取消、重复确认、切换邮件 / 标签、隐藏或重新加载时的旧事件不能打开系统链接。Windows 使用正文内改写链接；macOS / Linux 使用可信父界面的编号链接，经 links_request 生成相同确认事件，避免协议 204 清空文档。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束写回详情、刷新已加载列表页并保留有效选中。
+`mailx://link-request` 载荷为 `{ emailId, index, url, documentToken, requestId }`。点击正文原位置的链接时，原生导航回调先取消 WebView 跳转，再产生受控事件；WebView2 保留协议 204 后备路径。UI 只接受当前已加载、可见文档的事件，立即提交身份与一次性 requestId 给 links_open，不提交 URL，不再显示编号列表或逐次确认弹窗。宿主重新读取链接并限制 http / https / mailto，由系统浏览器或邮件应用打开；悬停通过链接 title 显示真实地址。重复事件、切换邮件、隐藏或文档意外重载后的旧事件均被丢弃。旧编号接口保留内部兼容，生产模式返回空列表且拒绝 links_request。
+
+远程图片策略来自 `settings.security.remoteImages`：`ask`（默认）、`automatic`、`never`。ask 在 HTML 正文上方显示单行提示；“加载图片”只授权当前打开，“不再提示”单独勾选不生效，勾选后加载须先成功保存 automatic；关闭仅隐藏本次提示。重新打开重新询问，never 不显示提示。CID 和已验证 data 图片不受策略影响。prepare 的 loadRemoteImages 默认 false，只有可信主窗口可提交；never 即使收到 true 仍不放行。图片协议每次检查当前策略和文档授权，收紧设置还会撤销已有授权。
+
+正文只包含 `/remote/<emailId>/<index>?token=…`，原始图片 URL 不交给 WebView。Rust 按净化结果解析索引、沿账号路由加载、验证，并仅在本次阅读的内存中复用（保留字节最多 64 MiB，超出部分不额外缓存），不写入数据库或磁盘；列表、搜索和头部同步不会下载图片。当前支持 `<img src>` 的 http/https（含 // 地址），每封最多 32 个资源、响应最多 8 MiB、30 秒、至多 3 次重定向；远程 SVG 可由 Rust 转为静态 PNG 后显示，仅支持有界矢量图形，不加载关联资源；CSS URL、srcset、正文内联 SVG 等继续移除。系统 TUN 的 Fake-IP DNS 映射仅对通过原始域名 TLS 验证的 HTTPS 图片兼容，地址字面量和明文 HTTP 不适用。账号自定义代理代解析无法校验实际 IP 的域名请求仍拒绝加载，不使用本地 DNS 或直连绕行。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束刷新详情和已加载列表页并保留有效选中。
 
 ## 3. 当前账号操作
 
@@ -169,11 +176,11 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | MailxClient 方法 | Tauri 命令与参数 | 核心组件 | 成功结果 |
 | --- | --- | --- | --- |
 | `getSettings()` | `settings_get`，无参数 | `SettingsStore::get` | `SettingsSnapshot` |
-| `updateSettings(settings)` | `settings_update`，`{ request: AppSettings }` | `SettingsStore::update` | `SettingsSnapshot` |
+| `updateSettings(settings)` | `settings_update`，`{ request: Partial<AppSettings> }` | `SettingsStore::patch` | `SettingsSnapshot` |
 
 偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
 
-`AppSettings` 目前只有 `appearance`：`theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont`（空字符串或逗号分隔的字体名）和 `fontSize`（`small` / `default` / `large`）。空字符串表示使用内置默认值；非空的字体列表按用户顺序依次回退，前端只在末尾补通用 `sans-serif`。更新替换全部设置，核心校验后返回规范形式：颜色转小写；字体名去首尾空白和成对引号并丢弃空项，含引号、反斜杠、分号、括号、尖括号或控制字符，超过 16 个或单个超过 64 个字符时返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont`。
+`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont`（空字符串或逗号分隔的字体名）和 `fontSize`（`small` / `default` / `large`）。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont`。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 

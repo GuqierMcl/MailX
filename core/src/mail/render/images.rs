@@ -8,7 +8,7 @@ use super::{MAX_DATA_IMAGE_URL_BYTES, MAX_INLINE_IMAGE_BYTES, RenderError};
 const MAX_IMAGE_DIMENSION: u32 = 8_192;
 const MAX_DECODED_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Only fully decoded, static PNG and JPEG images are served. Other declared
+/// PNG/JPEG are fully decoded; GIF/WebP become a static PNG first frame. Other declared
 /// image/* types, animated PNG, oversized dimensions and decode bombs fail closed.
 /// The decode allocation budget is 64 MiB, independent of the 50 MiB input limit.
 #[derive(Clone, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub struct InlineImage {
     pub mime_type: String,
 }
 
-pub(super) fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, RenderError> {
+pub fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, RenderError> {
     if bytes.len() > MAX_INLINE_IMAGE_BYTES {
         return Err(RenderError::InvalidImage);
     }
@@ -32,6 +32,12 @@ pub(super) fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, Rend
             }
             (ImageFormat::Jpeg, "image/jpeg")
         }
+        Ok(ImageFormat::Gif) if declared.eq_ignore_ascii_case("image/gif") => {
+            (ImageFormat::Gif, "image/gif")
+        }
+        Ok(ImageFormat::WebP) if declared.eq_ignore_ascii_case("image/webp") => {
+            (ImageFormat::WebP, "image/webp")
+        }
         _ => return Err(RenderError::InvalidImage),
     };
     let mut limits = Limits::default();
@@ -41,7 +47,19 @@ pub(super) fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, Rend
     let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
     reader.limits(limits);
     // A magic-number match alone is insufficient. Decode under explicit limits.
-    reader.decode().map_err(|_| RenderError::InvalidImage)?;
+    let decoded = reader.decode().map_err(|_| RenderError::InvalidImage)?;
+    // Render a bounded first frame for animation-capable formats. Serving the
+    // original would expose frames that were never decoded under our budget.
+    if matches!(format, ImageFormat::Gif | ImageFormat::WebP) {
+        let mut png = Cursor::new(Vec::new());
+        decoded
+            .write_to(&mut png, ImageFormat::Png)
+            .map_err(|_| RenderError::InvalidImage)?;
+        return Ok(InlineImage {
+            bytes: png.into_inner(),
+            mime_type: "image/png".into(),
+        });
+    }
     Ok(InlineImage {
         bytes: bytes.to_vec(),
         mime_type: mime.to_owned(),

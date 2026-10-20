@@ -1,0 +1,70 @@
+name: Body WebView
+
+# Native-engine checks remain available on demand during MVP development.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: body-webview-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  body-webview:
+    name: Body WebView (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux WebView and display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev pkg-config \
+            xvfb xauth dbus-x11 webkit2gtk-driver
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run body-webview:build
+      - name: Install native WebDriver adapter
+        if: runner.os == 'Linux'
+        run: cargo install tauri-driver --locked --version 2.1.0
+      - name: Exercise WKWebView
+        if: runner.os == 'macOS'
+        run: bun scripts/body-webview.mjs run --input=instrumented
+      - name: Match WebView2 Runtime and exercise WebView2
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $driverPath = ./tests/body-webview/install-webview2-driver.ps1
+          New-Item -ItemType Directory -Force target/body-webview-evidence | Out-Null
+          Copy-Item target/body-webview-driver/versions.json target/body-webview-evidence/windows-driver-versions.json
+          bun tests/body-webview/run-external.mjs "--native-driver=$driverPath"
+      - name: Exercise WebKitGTK
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a bun tests/body-webview/run-external.mjs
+      - name: Summarize native WebView evidence
+        if: always()
+        run: bun tests/body-webview/ci-summary.mjs
+      - name: Preserve WebView evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: body-webview-${{ matrix.os }}
+          path: target/body-webview-evidence
+          if-no-files-found: warn

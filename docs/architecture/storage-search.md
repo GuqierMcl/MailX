@@ -47,7 +47,13 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 ### 正文缓存（v4）
 
 `messages` 追加 body_state（missing / fetching / ready / failed）、body_failure 和 preview。
-`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。净化规则从版本 1 开始，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。
+`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。当前净化版本为 2，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。
+
+### 远程图片的阅读期内存缓存
+
+远程图片不建表、不写入 blob，也不复用跨阅读缓存。验证后的图片只保存在当前文档绑定的内存中，按 URL 复用，保留字节总预算 64 MiB；超过预算的图片本次仍可显示，但不额外保留。切换邮件、关闭阅读、隐藏或文档意外重载时，UI 释放对应令牌与缓存；收紧图片策略同样释放缓存，在途请求不能重新写回已释放的绑定。再次打开会建立新的空缓存，继续按 ask / automatic / never 策略决定是否加载。
+
+当前净化版本为 2，旧正文缓存从本地 MIME 重建，不重新下载邮件。远程图片功能没有新增数据库迁移，schema 仍为 v4；原始 MIME 与 CID 的持久化行为不变。
 
 ### 后续模型（尚未建表）
 
@@ -81,7 +87,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 后续正文和接收附件拟使用 LRU 配额，初始合计 2 GiB，可配置。草稿、待发送 MIME 与用户固定的离线内容不参与自动淘汰，单独显示占用。缓存被淘汰后 `bodyState=missing`，同步状态不能仍宣称可离线阅读。
 
-当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
+当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。原始 MIME 的运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
 
 ## 5. 当前头部查询与后续全文搜索
 

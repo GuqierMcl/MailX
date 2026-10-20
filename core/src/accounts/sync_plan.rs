@@ -78,6 +78,25 @@ impl AccountService {
             .get(&profile.secret_ref)?
             .ok_or(PlanError::CredentialMissing)?;
 
+        let route = self.image_route(account_id)?;
+
+        Ok(SyncPlan {
+            mailbox_source_id: account.mailbox_source_id.clone(),
+            login: ImapLogin {
+                host: account.imap.host.clone(),
+                port: account.imap.port,
+                tls: account.imap.tls,
+                username: account.imap.username.clone(),
+                password,
+            },
+            route,
+        })
+    }
+
+    /// Resolves only proxy credentials; image requests never read mail credentials.
+    pub(crate) fn image_route(&self, account_id: &str) -> Result<NetRoute, PlanError> {
+        let snapshot = self.storage.load(account_id)?;
+        let account = &snapshot.account;
         let route = match &account.route {
             // The application default route is direct until a default proxy setting exists.
             RouteConfig::Direct | RouteConfig::Inherit => NetRoute::default(),
@@ -117,18 +136,7 @@ impl AccountService {
                 }
             }
         };
-
-        Ok(SyncPlan {
-            mailbox_source_id: account.mailbox_source_id.clone(),
-            login: ImapLogin {
-                host: account.imap.host.clone(),
-                port: account.imap.port,
-                tls: account.imap.tls,
-                username: account.imap.username.clone(),
-                password,
-            },
-            route,
-        })
+        Ok(route)
     }
 
     /// Stores a folder listing taken with `sync_plan`. Returns `false` when the

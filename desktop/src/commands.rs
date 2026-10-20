@@ -1,6 +1,7 @@
 use mailx_core::{
-    Account, AccountSyncState, ApiResult, AppError, AppSettings, CreateAccountRequest, EmailDetail,
-    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsSnapshot, UpdateAccountRequest,
+    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
+    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsPatch, SettingsSnapshot,
+    UpdateAccountRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -252,6 +253,14 @@ pub(crate) async fn emails_fetch_body(
     }))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareBodyArgs {
+    email_id: String,
+    #[serde(default)]
+    load_remote_images: bool,
+}
+
 #[tauri::command]
 pub(crate) async fn emails_prepare_body(
     window: WebviewWindow,
@@ -259,13 +268,44 @@ pub(crate) async fn emails_prepare_body(
     protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<crate::body_protocol::PreparedBody>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    let args = authorize(&window).and_then(|()| parse::<PrepareBodyArgs>(request.body()));
     let result = async {
         let args = args?;
-        protocol.prepare(&state.core()?, args.email_id).await
+        let policy = state
+            .settings(|store| store.get())
+            .await?
+            .settings
+            .security
+            .remote_images;
+        let allow = match policy {
+            mailx_core::RemoteImagePolicy::Automatic => true,
+            mailx_core::RemoteImagePolicy::Ask => args.load_remote_images,
+            mailx_core::RemoteImagePolicy::Never => false,
+        };
+        protocol
+            .prepare_with_images(
+                &state.core()?,
+                args.email_id,
+                allow,
+                policy == mailx_core::RemoteImagePolicy::Ask && args.load_remote_images,
+            )
+            .await
     }
     .await;
     Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_release_body(
+    window: WebviewWindow,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    Ok(respond(
+        authorize(&window)
+            .and_then(|()| parse::<BodyLinksArgs>(request.body()))
+            .and_then(|args| protocol.release(&args.email_id, &args.document_token)),
+    ))
 }
 
 #[tauri::command]
@@ -383,14 +423,22 @@ pub(crate) async fn settings_get(
 pub(crate) async fn settings_update(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<SettingsSnapshot>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<WriteArgs<AppSettings>>(request.body()));
+    let args = authorize(&window).and_then(|()| parse::<WriteArgs<SettingsPatch>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
-            state
-                .settings(move |store| store.update(args.request))
-                .await
+            let changes_security = args.request.security.is_some();
+            let result = state.settings(move |store| store.patch(args.request)).await;
+            if changes_security
+                && result.as_ref().is_ok_and(|s| {
+                    s.settings.security.remote_images != mailx_core::RemoteImagePolicy::Automatic
+                })
+            {
+                protocol.revoke_remote_images();
+            }
+            result
         }
         Err(error) => Err(error),
     }))

@@ -74,6 +74,7 @@ fn main() {
             commands::emails_get,
             commands::emails_fetch_body,
             commands::emails_prepare_body,
+            commands::emails_release_body,
             commands::emails_body_links,
             commands::links_request,
             commands::links_open,

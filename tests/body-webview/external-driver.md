@@ -3,8 +3,9 @@
 This route exercises Linux and Windows. Evidence from each actual run is
 required; the presence of these files does not establish a passing gate.
 The initial Linux run loaded the isolated document and CID image, but its 204
-link response navigated to a blank document. Linux therefore uses the numbered
-fallback described in [README.md](README.md). macOS has no official
+link response navigated to a blank document. Current builds cancel navigation
+before commitment and test the inline link as described in [README.md](README.md).
+macOS has no official
 `tauri-driver` backend; keep its separate native verification path.
 
 The embedded driver's frame helper evaluates through `parent.contentWindow`,

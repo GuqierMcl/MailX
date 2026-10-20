@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppearanceSettings, SettingsSnapshot } from '@/generated/accounts'
+import type { AppearanceSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
 import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
@@ -13,9 +13,9 @@ export function useSettings(client: MailxClient) {
 export function useUpdateAppearance(client: MailxClient) {
   const queryClient = useQueryClient()
   return useMutation({
+    scope: { id: 'appearance-settings' },
     mutationFn: (appearance: AppearanceSettings) => {
-      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
-      return client.updateSettings({ ...current?.settings, appearance })
+      return client.updateSettings({ appearance })
     },
     onMutate: async (appearance) => {
       await queryClient.cancelQueries({ queryKey: settingsKeys.all })
@@ -29,9 +29,24 @@ export function useUpdateAppearance(client: MailxClient) {
       return { previous }
     },
     onError: (_error, _appearance, context) => {
-      if (context?.previous) queryClient.setQueryData(settingsKeys.all, context.previous)
+      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
+        ...current, settings: { ...current.settings, appearance: context.previous!.settings.appearance },
+      }))
     },
-    onSuccess: (snapshot) => queryClient.setQueryData(settingsKeys.all, snapshot),
+    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
+      ...snapshot, settings: { ...snapshot.settings, security: current?.settings.security ?? snapshot.settings.security },
+    })),
+  })
+}
+
+export function useUpdateSecurity(client: MailxClient) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    scope: { id: 'security-settings' },
+    mutationFn: (security: SecuritySettings) => client.updateSettings({ security }),
+    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
+      ...snapshot, settings: { ...snapshot.settings, appearance: current?.settings.appearance ?? snapshot.settings.appearance },
+    })),
   })
 }
 

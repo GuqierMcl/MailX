@@ -18,7 +18,7 @@ const output = resolve(option('output', resolve(root, 'target/body-webview-evide
 const nativeDriver = option('native-driver', undefined);
 const tauriDriver = option('tauri-driver', undefined);
 const delay = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
-const numberedFallback = process.platform === 'linux';
+const numberedFallback = false;
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const hash = createHash('sha256');
 for await (const bytes of createReadStream(binary)) hash.update(bytes);
@@ -167,7 +167,7 @@ try {
     check('link: numbered request succeeded', linked.numberedRequestSucceeded && linked.numberedError === null);
     check('link: no link protocol request', !linked.requests.some((request) => request.route === 'link'));
   } else {
-    check('link: protocol returned 204', linked.requests.some((request) => request.route === 'link' && request.status === 204));
+    check('link: native cancellation or 204 fallback', !linked.requests.some((request) => request.route === 'link' && request.status !== 204));
   }
   check('link: same document marker', frame(linked).documentMarker === frame(safe).documentMarker);
   check('link: document did not navigate', linked.frameUrl === safe.frameUrl && frame(linked).url === frame(safe).url && linked.frameLoads === safe.frameLoads);

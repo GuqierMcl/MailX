@@ -20,7 +20,7 @@ export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
-  let settings = { settings: { appearance: cachedAppearance() }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -92,14 +92,16 @@ export function createMockClient(): MailxClient {
       return structuredClone(email)
     },
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
+    releaseBody: async () => undefined,
     bodyLinks: async (_emailId, documentToken) => ({ documentToken, links: [] }),
     requestLink: async () => { throw notFound() },
     openLink: async () => { throw notFound() },
     onLinkRequest: () => () => undefined,
     getSettings: async () => structuredClone(settings),
     async updateSettings(next) {
-      const interfaceFont = parseFontFamilies(next.appearance.interfaceFont).join(', ')
-      settings = { settings: { appearance: { ...next.appearance, interfaceFont } }, stored: true, recovered: false }
+      const appearance = next.appearance ?? settings.settings.appearance
+      const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
+      settings = { settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont } }, stored: true, recovered: false }
       return structuredClone(settings)
     },
   }

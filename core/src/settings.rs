@@ -52,10 +52,35 @@ pub struct AppearanceSettings {
     pub font_size: FontSize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteImagePolicy {
+    #[default]
+    Ask,
+    Automatic,
+    Never,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SecuritySettings {
+    pub remote_images: RemoteImagePolicy,
+}
+
+/// Section updates merge under the store lock so simultaneous saves cannot
+/// overwrite another settings page with a stale frontend snapshot.
+#[derive(Clone, Debug, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingsPatch {
+    pub appearance: Option<AppearanceSettings>,
+    pub security: Option<SecuritySettings>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub appearance: AppearanceSettings,
+    pub security: SecuritySettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -86,6 +111,7 @@ impl AppSettings {
     pub fn normalized(self) -> Result<Self, AppError> {
         let appearance = self.appearance;
         Ok(Self {
+            security: self.security,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -101,6 +127,7 @@ impl AppSettings {
         let defaults = AppearanceSettings::default();
         let appearance = self.appearance;
         Self {
+            security: self.security,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .unwrap_or(defaults.accent_color),
@@ -211,6 +238,26 @@ impl SettingsStore {
 
     pub fn get(&self) -> Result<SettingsSnapshot, AppError> {
         Ok(self.state.lock().map_err(|_| storage_error())?.snapshot())
+    }
+
+    pub fn patch(&self, patch: SettingsPatch) -> Result<SettingsSnapshot, AppError> {
+        let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let settings = AppSettings {
+            appearance: patch
+                .appearance
+                .unwrap_or_else(|| state.settings.appearance.clone()),
+            security: patch
+                .security
+                .unwrap_or_else(|| state.settings.security.clone()),
+        }
+        .normalized()?;
+        write_file(&self.directory, &settings)?;
+        *state = State {
+            settings,
+            stored: true,
+            recovered: false,
+        };
+        Ok(state.snapshot())
     }
 
     /// Replaces all settings. The file is written atomically before the

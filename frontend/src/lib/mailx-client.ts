@@ -47,15 +47,16 @@ export interface MailxClient {
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
   fetchBody(emailId: string): Promise<EmailDetail>
-  prepareBody(emailId: string): Promise<{ documentToken: string }>
+  prepareBody(emailId: string, loadRemoteImages?: boolean): Promise<{ documentToken: string }>
+  releaseBody(emailId: string, documentToken: string): Promise<void>
   bodyLinks(emailId: string, documentToken: string): Promise<BodyLinks>
   requestLink(request: BodyLinkIdentity): Promise<void>
   openLink(request: BodyLinkIdentity & { requestId: string }): Promise<void>
   onLinkRequest(listener: (request: BodyLinkRequest) => void): () => void
   /** App preferences from the core's `settings.json`; available even when startup failed. */
   getSettings(): Promise<SettingsSnapshot>
-  /** Replaces all preferences; the core validates them and returns the canonical form. */
-  updateSettings(settings: AppSettings): Promise<SettingsSnapshot>
+  /** Updates the supplied preference sections; the core validates them and returns the canonical form. */
+  updateSettings(settings: Partial<AppSettings>): Promise<SettingsSnapshot>
 }
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -111,7 +112,8 @@ export function createDesktopClient(): MailxClient {
     listEmails: (query) => call<EmailPage>('emails_list', { query }),
     getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),
-    prepareBody: (emailId) => call('emails_prepare_body', { emailId }),
+    prepareBody: (emailId, loadRemoteImages = false) => call('emails_prepare_body', { emailId, loadRemoteImages }),
+    releaseBody: (emailId, documentToken) => call('emails_release_body', { emailId, documentToken }),
     bodyLinks: (emailId, documentToken) => call('emails_body_links', { emailId, documentToken }),
     requestLink: ({ emailId, index, documentToken }) => call('links_request', { emailId, index, documentToken }),
     openLink: ({ emailId, index, documentToken, requestId }) => call('links_open', { emailId, index, documentToken, requestId }),

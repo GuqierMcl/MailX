@@ -55,7 +55,10 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     let (core, ids) =
         mailx_core::MailxCore::body_test_fixture(&root.join("profile"), runtime, &raws)?;
     checkpoint("synthetic cache ready");
-    app.manage(crate::state::DesktopState::for_body_test(core));
+    app.manage(crate::state::DesktopState::for_body_test(
+        core,
+        root.join("profile"),
+    ));
     let origin = crate::body_protocol::BODY_ORIGIN;
     let mut documents = BTreeMap::new();
     for (fixture, id) in fixtures.iter().zip(ids) {
@@ -195,9 +198,12 @@ pub(crate) fn create_window(
     if nonce.len() != 64 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("invalid test nonce".into());
     }
-    let config = serde_json::json!({ "nonce": nonce, "documents": documents, "numberedLinks": cfg!(not(target_os = "windows")) });
+    let config =
+        serde_json::json!({ "nonce": nonce, "documents": documents, "numberedLinks": false });
     let bootstrap = format!("window.__MAILX_BODY_TEST_CONFIG={config};");
+    let navigation_app = app.clone();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url))
         .title(TITLE)
         .inner_size(900.0, 700.0)
         .position(100.0, 100.0)

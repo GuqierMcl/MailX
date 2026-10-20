@@ -168,7 +168,7 @@ impl DesktopState {
     }
 
     #[cfg(feature = "body-webview-test")]
-    pub(crate) fn for_body_test(core: MailxCore) -> Self {
+    pub(crate) fn for_body_test(core: MailxCore, directory: PathBuf) -> Self {
         struct NoSecrets;
         impl SecretStore for NoSecrets {
             fn get(
@@ -191,11 +191,7 @@ impl DesktopState {
                 panic!("test must not delete credentials")
             }
         }
-        let state = Self::new(
-            Err(AppError::new(ErrorCode::CoreNotReady)),
-            Arc::new(NoSecrets),
-            Arc::new(|_| {}),
-        );
+        let state = Self::new(Ok(directory), Arc::new(NoSecrets), Arc::new(|_| {}));
         state.finish_initialization(Ok(core));
         state
     }

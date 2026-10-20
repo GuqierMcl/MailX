@@ -87,7 +87,9 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
         .find(|window| window.label == MAIN_WINDOW)
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
-    let builder = WebviewWindowBuilder::from_config(app, &config)?;
+    let navigation_app = app.clone();
+    let builder = WebviewWindowBuilder::from_config(app, &config)?
+        .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url));
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)

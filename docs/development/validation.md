@@ -97,7 +97,10 @@ git diff --check
 
 - Ubuntu：`version:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
-- 三平台 `Body WebView`：用隔离数据目录和合成 MIME，在真实 WKWebView、WebView2、WebKitGTK 中检查正文协议、沙箱与外链路径，并上传 `body-webview-<os>` 证据。此任务使用仅测试构建入口，不能将其桥接能力带入正式应用。
+
+MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.yml`，仅由 `workflow_dispatch` 手动触发，不再随每个 PR 或 main 推送自动运行。测试代码、平台矩阵与证据上传保留；在 GitHub Actions 的 `Body WebView` 工作流中选择目标分支运行。工作流合入默认分支后才会提供手动入口。
+
+修改正文渲染、CSP、资源协议、链接拦截或升级 Tauri / Wry 时，建议按受影响行为补跑；发布前再进行三平台检查。该检查使用隔离数据目录和合成 MIME，在真实 WKWebView、WebView2、WebKitGTK 中检查正文协议、沙箱与外链路径，并上传 `body-webview-<os>` 证据。仅测试构建入口与桥接能力仍不能进入正式应用。常规前端与 Rust 测试继续覆盖净化、协议和权限相关回归。
 
 只有对应运行通过时，CI 才能证明该提交在三平台能编译并通过所配置的自动测试；工作流存在不等于本次运行成功，也不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
 
@@ -204,9 +207,9 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 自动回归按层覆盖以下行为，真实服务商证据另列：
 
 - `core/src/mail/render/`：真实 HTML 与纯文本区分、GBK / GB2312 解码、alternative / mixed 与嵌套附件、UTF-8 边界截断、MIME 深度、脚本 / URL / CSS 净化、远程图片计数、CID 与 data 图片的真实格式和预算。
-- `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：仅追加 v4、blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取 / 净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除 / 任务代际保护。离线单元测试不代替真实断网后的桌面阅读验收。
+- `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：追加 v4、blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取 / 净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除 / 任务代际保护。离线单元测试不代替真实断网后的桌面阅读验收。
 - `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝、累计 payload 和控制数据预算、截断 / 重复 / 错误 UID / 超时拒绝。短命令 tag 回归模拟服务器最多回显 15 字节的情况，同时保持精确匹配。
-- `desktop/src/body_protocol/`：两种平台 URL、响应头、当前邮件资源范围、跨邮件拒绝、文档令牌、一次性确认请求、失效身份重检与编号链接。启动测试等待 Ready 或明确失败，设置 30 秒诊断上限；这是顺序检查，不是启动性能目标。
+- `desktop/src/body_protocol/`：两种平台 URL、响应头、当前邮件资源范围、跨邮件拒绝、文档令牌、一次性链接请求、失效身份重检与远程图片策略。启动测试等待 Ready 或明确失败，设置 30 秒诊断上限；这是顺序检查，不是启动性能目标。
 - `use-email-body.test.tsx`、`body-document.test.tsx`、`workbench-headers.test.tsx` 与 `mailx-client.test.ts`：StrictMode 下自动下载一次、手动重试、迟到结果与账号身份变化、HTML / 纯文本切换、空 sandbox、完整外链确认、旧令牌 / 隐藏 / 重载事件、一次性打开、保留分页及有效选择、IPC 不传任意 URL。
 
 三平台前置门槛已在开始正文阅读 UI 之前完成：[PR #8 的运行 39373345400](https://github.com/GuqierMcl/MailX/actions/runs/39373345400)，head `07d1229273c94e620234cb3d7f5a1958b2e62c65`，测试合并提交 `728a741d0dbb8770e2b63609a33d5de67ff59d4f`。全部 7 个任务成功；正文 WebView 报告如下：
@@ -219,7 +222,7 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 检查涵盖自定义协议加载、CID 显示、脚本零执行、远程资源零请求、父 DOM 与应用状态隔离、Tauri 命令不可调用，以及各自的链接路径。WebView2 可能保留冻结的 `__TAURI_INTERNALS__` 中 `plugins` / `postMessage` 底层成员；断言的是邮件无法执行脚本或获得可调用的应用 IPC，不能宣称该对象完全不存在。Windows 资源地址和 CSP 使用浏览器实际 origin，不能直接沿用 Wry 重写后的请求 scheme。
 
-复现入口为 `bun run body-webview:build`、`bun run body-webview:test`，外部驱动入口与平台依赖以 `.github/workflows/ci.yml` 为准。macOS 使用受限测试驱动，Windows / Linux 使用外部 WebDriver；这些证据针对真实引擎中的合成页面，不等于三平台都完成真实邮箱人工阅读。测试桥由 `body-webview-test` feature 隔离，正式前端构建另检查不包含开发预览模块。
+复现入口为 `bun run body-webview:build`、`bun run body-webview:test`，外部驱动入口与平台依赖以 `.github/workflows/body-webview.yml` 为准。macOS 使用受限测试驱动，Windows / Linux 使用外部 WebDriver；这些证据针对真实引擎中的合成页面，不等于三平台都完成真实邮箱人工阅读。测试桥由 `body-webview-test` feature 隔离，正式前端构建另检查不包含开发预览模块。
 
 2026-10-20 正文 UI 与兼容修复的检查：
 
@@ -257,3 +260,28 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 隔离冒烟可通过 `bun run tauri build --debug --bundles app --config <测试配置文件>` 覆盖 identifier。根脚本先加载仓库配置，再应用显式覆盖；不要将测试配置和合成账号写入正式用户数据目录。测试完成后清理合成凭据与对应测试目录。
 
 按变更范围运行检查：核心改动跑相关测试，跨宿主契约改动增加两个 adapter 验证，发布前再执行完整平台矩阵。结果以命令输出和可复现实验为准，未执行项明确标注。
+
+### 2026-10-20 图片策略与正文链接改造
+
+本次直接改造未开启 Comet。新增安全性页与 ask / automatic / never 策略，旧配置默认 ask；单行提示的本次授权、关闭、不再提示保存及失败恢复已有前端回归。设置按节原子合并。图片经账号路由、地址校验、有限 HTTP 响应和真实栅格解码后仅在本次阅读的内存中复用，不写入数据库或 blob（schema 保持 v4）；测试覆盖无凭证请求、重定向、私网拒绝、响应大小、缓存身份隔离及授权撤销。GIF / WebP 当前提供静态首帧；CSS URL / srcset / SVG 未开放，代理远端 DNS 无法验证目标 IP 的域名图片保持拒绝。
+
+- 移除远程图片持久化后，`bun run check` 通过，包含 113 项前端测试；覆盖关闭、切换邮件 / 纯文本、隐藏、重新加载、策略改变以及 prepare 迟到结果的释放。
+- `cargo test --workspace --locked`：core 207、账号集成 25、desktop 28 项通过，共 260；1 项真实凭据库测试默认忽略。内存缓存用例覆盖同次复用、重新打开隔离、邮件失效、释放后迟到写入拒绝、无新增图片表与缓存读取不写 SQLite；协议用例覆盖旧令牌撤销、待处理链接清理和不影响新阅读。Rust 格式、Clippy 与差异检查通过。
+- 内存缓存调整前，macOS arm64 实际 WKWebView 合成检查 68/68；本次缓存生命周期调整未重跑 WebView。该记录通过原生鼠标事件点击正文链接；没有编号列表、没有额外 iframe 导航或文档请求，正文文字和 CID 图片保留，脚本 / IPC 隔离及零非授权外部请求保持。使用独立合成数据目录，不连接真实邮箱。首次截图分析超过旧 30 秒上限，单独运行成功后调整为 60 秒并补诊断，再完整通过；失败记录未记为通过。
+- 本机证据位于 `target/body-webview-evidence/image-policy-retry/`，报告记录未提交源码差异与二进制摘要。Windows / Linux 本次未运行，不能沿用上方旧版本三平台结果；远程图片真实服务商页面与代理兼容矩阵也未实测。
+- Body WebView 三平台任务移至 `workflow_dispatch` 手动工作流；自动 frontend / Rust 作业与原触发条件逐项比较保持一致。工作流文件进入默认分支后，GitHub 才会显示手动运行入口。
+
+
+### 2026-10-20 远程图片 Fake-IP 与 SVG 兼容修复
+
+用户反馈点击加载后图片仍为破图。只读排查确认本机 DNS 将多个图片域名映射至 198.18.0.0/15，旧地址校验将其全部拒绝。新加载器仅对 HTTPS 域名的 Fake-IP DNS 结果开放传输映射，仍在请求前校验原始域名 TLS 证书；地址字面量、明文 HTTP、常规私网 / 元数据地址与混合不安全 DNS 结果继续拒绝，自定义账号代理的策略不变。
+
+同封 SQLark 邮件顶部 Logo 为 image/svg+xml，另受旧格式白名单影响。远程 SVG 现经受限 resvg 转为 PNG，仅保留矢量图形；所有图片 / 文件资源解析器关闭，不启用字体、嵌套图片或 SVGZ。单独限制输入、XML 节点 / 深度及输出像素，拒绝 DTD 和滤镜。渲染结果沿用阅读期内存缓存，不增加迁移或落盘。
+
+验证：7 项图片加载器定向测试及全套 Rust 测试通过（core 210、账号集成 25、desktop 28，共 263；1 项真实凭据库测试忽略），Clippy、Rust 格式与差异检查通过。前端生产构建和 macOS release 构建 / app 打包成功。用最新 app 在授权 QQ 测试账号中打开用户截图对应的 SQLark 邮件，现场确认顶部 SVG Logo 与 JPEG 主图均恢复显示；未发送、删除或写回邮件标记。该现场结果只覆盖本机 Fake-IP 网络和本封样本，Windows / Linux 未重跑。
+
+### 2026-10-20 正文阅读控件简化
+
+移除 HTML / 纯文本格式切换与“重新加载正文”按钮；存在 HTML 时自动显示隔离正文，否则显示纯文本。下载失败的“重试”入口保留。现有测试改为通过切换邮件和文档意外重载验证令牌失效与阅读缓存释放，并覆盖自动格式选择、提示与附件元数据保留；不再依赖已移除的控件。
+
+`bun run typecheck`、`bun run lint`、`bun run frontend:test`（18 个文件、113 项测试）、`bun run build` 与差异检查通过。Vite 仍有既有的大 chunk 提示。本次仅调整前端展示，未重跑 Rust 或原生 WebView 验证，未重新打包桌面应用。

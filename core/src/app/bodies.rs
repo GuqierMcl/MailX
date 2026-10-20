@@ -1,4 +1,9 @@
 //! Host-only body resources. None of these contents or identities is an IPC DTO.
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
 use super::MailxCore;
 use crate::{
     AppError, ErrorCode,
@@ -14,11 +19,50 @@ pub struct BodyBinding {
     identity: BodyIdentity,
     raw: StoredBlob,
     sanitizer_version: u32,
+    remote_images: Arc<Mutex<RemoteImages>>,
+}
+
+const MAX_REMOTE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Default)]
+struct RemoteImages {
+    images: HashMap<String, InlineImage>,
+    released: bool,
 }
 
 impl BodyBinding {
     pub fn email_id(&self) -> &str {
         &self.identity.message_id
+    }
+
+    /// Ends image reuse for this reading, including all clones and pending loads.
+    pub fn release_remote_images(&self) {
+        if let Ok(mut cache) = self.remote_images.lock() {
+            cache.images.clear();
+            cache.released = true;
+        }
+    }
+
+    fn cached_remote_image(&self, url: &str) -> Result<Option<InlineImage>, AppError> {
+        let cache = self.remote_images.lock().map_err(|_| internal())?;
+        if cache.released {
+            return Err(missing());
+        }
+        Ok(cache.images.get(url).cloned())
+    }
+
+    fn cache_remote_image(&self, url: String, image: &InlineImage) -> Result<(), AppError> {
+        let mut cache = self.remote_images.lock().map_err(|_| internal())?;
+        if cache.released {
+            return Err(missing());
+        }
+        let retained: usize = cache.images.values().map(|image| image.bytes.len()).sum();
+        if !cache.images.contains_key(&url)
+            && retained + image.bytes.len() <= MAX_REMOTE_CACHE_BYTES
+        {
+            cache.images.insert(url, image.clone());
+        }
+        Ok(())
     }
 }
 
@@ -82,6 +126,7 @@ fn read_links(
             identity,
             raw,
             sanitizer_version,
+            remote_images: Arc::default(),
         },
     }))
 }
@@ -128,6 +173,7 @@ impl MailxCore {
                     identity,
                     raw: body.raw,
                     sanitizer_version: body.sanitizer_version,
+                    remote_images: Arc::default(),
                 },
             })
         })
@@ -182,6 +228,53 @@ impl MailxCore {
         })
         .await
         .map_err(|_| internal())?
+    }
+
+    /// Loads only a renderer-created image index from a current document. The
+    /// trusted host must check its image policy/document grant before calling.
+    /// Validated bytes live only in this reading binding; nothing is persisted.
+    pub async fn body_remote_image(
+        &self,
+        binding: BodyBinding,
+        index: usize,
+    ) -> Result<InlineImage, AppError> {
+        let core = self.clone();
+        let saved = binding.clone();
+        let url = tokio::task::spawn_blocking(move || {
+            let service = core.accounts()?;
+            check(&service, &saved)?;
+            let body = service.body_cache(&saved.identity)?.ok_or_else(missing)?;
+            render::remote_images(
+                body.rendered
+                    .sanitized_html
+                    .as_deref()
+                    .ok_or_else(missing)?,
+            )
+            .get(index)
+            .cloned()
+            .ok_or_else(missing)
+        })
+        .await
+        .map_err(|_| internal())??;
+        if let Some(image) = binding.cached_remote_image(&url)? {
+            check(&*self.accounts()?, &binding)?;
+            return Ok(image);
+        }
+        let core = self.clone();
+        let saved = binding.clone();
+        let route = tokio::task::spawn_blocking(move || {
+            let service = core.accounts()?;
+            check(&service, &saved)?;
+            service
+                .image_route(&saved.identity.account_id)
+                .map_err(|_| missing())
+        })
+        .await
+        .map_err(|_| internal())??;
+        let image = crate::net::images::fetch(route, url.clone()).await?;
+        check(&*self.accounts()?, &binding)?;
+        binding.cache_remote_image(url, &image)?;
+        Ok(image)
     }
 
     /// Protocol requests supply their opaque binding. The trusted confirmation

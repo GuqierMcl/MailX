@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { Add01Icon, ArrowRight01Icon, InformationCircleIcon, Mail01Icon, PaintBoardIcon, UserMultipleIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, ArrowRight01Icon, InformationCircleIcon, Mail01Icon, PaintBoardIcon, Shield01Icon, UserMultipleIcon } from '@hugeicons/core-free-icons'
 import type { Account } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -40,15 +40,17 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountForm } from '@/features/accounts/account-form'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { SecurityPane } from './security-pane'
 import { AppearancePane } from './appearance-pane'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 
-export type SettingsSection = 'appearance' | 'accounts' | 'about'
+export type SettingsSection = 'appearance' | 'security' | 'accounts' | 'about'
 /** Where the dialog opens; `newAccount` goes straight to an empty account form. */
 export type SettingsTarget = { section: SettingsSection; newAccount?: boolean }
 
 const SECTIONS: { id: SettingsSection; name: string; icon: IconSvgElement }[] = [
   { id: 'appearance', name: '外观', icon: PaintBoardIcon },
+  { id: 'security', name: '安全性', icon: Shield01Icon },
   { id: 'accounts', name: '账号', icon: UserMultipleIcon },
   { id: 'about', name: '关于', icon: InformationCircleIcon },
 ]
@@ -99,7 +101,7 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
     <>
       <Dialog open={target !== null} onOpenChange={(open) => !open && leaveForm(onClose)}>
         <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
-          <DialogDescription className="sr-only">管理 MailX 的外观与邮箱账号。</DialogDescription>
+          <DialogDescription className="sr-only">管理 MailX 的外观、安全性与邮箱账号。</DialogDescription>
           {/* Narrow windows turn the side navigation into a top strip instead of hiding it. */}
           <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
             <Sidebar collapsible="none"
@@ -158,6 +160,7 @@ export function SettingsDialog({ client, target, onClose, onAccountsChanged }: S
               </header>
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 {section === 'appearance' && <AppearancePane client={client} />}
+                {section === 'security' && <SecurityPane client={client} />}
                 {section === 'accounts' && (
                   <AccountsSection
                     client={client}

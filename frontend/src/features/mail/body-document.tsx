@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { clientFailure, type BodyLinkRequest, type BodyLinks, type MailxClient } from '@/lib/mailx-client'
+import type { RemoteImagePolicy } from '@/generated/accounts'
+import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import { useSettings, useUpdateSecurity } from '@/features/settings/settings-queries'
 
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
   ? lazy(() => import('./development-body')) : null
@@ -22,24 +23,53 @@ function subscribeVisibility(listener: () => void) {
   return () => document.removeEventListener('visibilitychange', listener)
 }
 
-export function BodyDocument({ client, emailId }: { client: MailxClient; emailId: string }) {
+export function BodyDocument({ client, emailId, hasRemoteImages = false }: { client: MailxClient; emailId: string; hasRemoteImages?: boolean }) {
   const visible = useSyncExternalStore(subscribeVisibility, () => document.visibilityState !== 'hidden')
+  const settings = useSettings(client)
   const [version, setVersion] = useState(0)
   if (!visible) return null
-  if (DevelopmentBody) return <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense>
-  return <DocumentSession key={`${emailId}:${version}`} client={client} emailId={emailId} onReload={() => setVersion((value) => value + 1)} />
+  if (settings.isPending) return <BodySkeleton />
+  // A settings read failure never silently grants remote access.
+  const policy = settings.data?.settings.security.remoteImages ?? 'ask'
+  return <Reader key={`${emailId}:${version}:${policy}`} client={client} emailId={emailId} policy={policy}
+    hasRemoteImages={hasRemoteImages} onReload={() => setVersion((value) => value + 1)} />
 }
 
-function DocumentSession({ client, emailId, onReload }: { client: MailxClient; emailId: string; onReload: () => void }) {
-  const [documentData, setDocumentData] = useState<BodyLinks | null>(null)
+function Reader({ client, emailId, policy, hasRemoteImages, onReload }: {
+  client: MailxClient; emailId: string; policy: RemoteImagePolicy; hasRemoteImages: boolean; onReload: () => void
+}) {
+  const [granted, setGranted] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
+  const [remember, setRemember] = useState(false)
+  const update = useUpdateSecurity(client)
+  const allowImages = policy === 'automatic' || (policy === 'ask' && granted)
+  const load = () => {
+    if (remember) update.mutate({ remoteImages: 'automatic' })
+    else setGranted(true)
+  }
+  return <div className="flex min-h-0 flex-1 flex-col gap-2">
+    {policy === 'ask' && hasRemoteImages && !granted && !dismissed &&
+      <div role="status" aria-label="远程图片提示" className="flex h-9 w-full shrink-0 items-center gap-3 rounded-md bg-muted px-3 text-xs">
+        <span className="min-w-0 flex-1 truncate" title="此邮件包含远程图片。">此邮件包含远程图片。</span>
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5"><Checkbox checked={remember} onCheckedChange={(value) => setRemember(value === true)} disabled={update.isPending} />不再提示</label>
+        <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" onClick={load} disabled={update.isPending}>{update.isPending ? '保存中…' : '加载图片'}</Button>
+        <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label="关闭远程图片提示" onClick={() => setDismissed(true)} disabled={update.isPending}>×</Button>
+      </div>}
+    {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
+    {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
+      <DocumentSession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} onReload={onReload} />}
+  </div>
+}
+
+function DocumentSession({ client, emailId, allowImages, onReload }: { client: MailxClient; emailId: string; allowImages: boolean; onReload: () => void }) {
+  const [documentToken, setDocumentToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [request, setRequest] = useState<BodyLinkRequest | null>(null)
   const loaded = useRef(false)
   const active = useRef(false)
-  const consumed = useRef(new Set<string>())
   useEffect(() => {
     let live = true
     let token: string | null = null
+    const release = (value: string) => { void client.releaseBody(emailId, value).catch(() => undefined) }
     active.current = true
     const seen = new Set<string>()
     const stop = client.onLinkRequest((event) => {
@@ -47,64 +77,34 @@ function DocumentSession({ client, emailId, onReload }: { client: MailxClient; e
         event.documentToken !== token || !event.requestId || seen.has(event.requestId) ||
         !Number.isSafeInteger(event.index) || event.index < 0 || !/^(https?:|mailto:)/i.test(event.url)) return
       seen.add(event.requestId)
-      setRequest(event)
+      const { emailId: id, index, documentToken, requestId } = event
+      void client.openLink({ emailId: id, index, documentToken, requestId }).catch((failure: unknown) => {
+        if (live && active.current) setError(clientFailure(failure).message)
+      })
     })
-    void client.prepareBody(emailId).then(async (prepared) => {
-      if (!live) return
-      const links = await client.bodyLinks(emailId, prepared.documentToken)
-      if (!live || links.documentToken !== prepared.documentToken) return
+    void client.prepareBody(emailId, allowImages).then((prepared) => {
+      if (!live) { release(prepared.documentToken); return }
       token = prepared.documentToken
-      setDocumentData(links)
+      setDocumentToken(token)
     }).catch((failure: unknown) => { if (live) setError(clientFailure(failure).message) })
-    return () => { live = false; active.current = false; stop() }
-  }, [client, emailId])
+    return () => {
+      live = false
+      active.current = false
+      stop()
+      if (token) release(token)
+    }
+  }, [client, emailId, allowImages])
 
-  const confirm = () => {
-    if (!request || !active.current || document.visibilityState === 'hidden' || consumed.current.has(request.requestId)) return
-    consumed.current.add(request.requestId)
-    setRequest(null)
-    const { emailId: id, index, documentToken, requestId } = request
-    void client.openLink({ emailId: id, index, documentToken, requestId }).catch((failure: unknown) => {
-      if (active.current) setError(clientFailure(failure).message)
-    })
-  }
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex justify-end"><Button size="sm" variant="ghost" onClick={onReload}>重新加载正文</Button></div>
-      {error && <Alert variant="destructive"><AlertTitle>正文显示或链接操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-      {!documentData ? !error && <BodySkeleton /> : <>
-        <iframe title="邮件 HTML 正文" sandbox="" referrerPolicy="no-referrer"
-          src={bodyDocumentUrl(emailId, documentData.documentToken)} className="min-h-0 w-full flex-1 border-0 bg-white"
-          onLoad={() => {
-            // A second navigation must rotate the binding before any new event
-            // can authorize a link from the previous document.
-            if (loaded.current) { active.current = false; onReload() }
-            else loaded.current = true
-          }} />
-        {documentData.links.length > 0 && <section aria-label="正文链接" className="max-h-32 shrink-0 overflow-auto">
-          <p className="text-xs text-muted-foreground">正文中的编号对应以下链接：</p>
-          <ol className="flex flex-col items-start">
-            {documentData.links.map((link) => <li key={link.index} className="max-w-full">
-              <Button variant="link" size="sm" className="h-auto max-w-full whitespace-normal break-all text-left" onClick={() => {
-                void client.requestLink({ emailId, index: link.index, documentToken: documentData.documentToken })
-                  .catch((failure: unknown) => { if (active.current) setError(clientFailure(failure).message) })
-              }}>[{link.index + 1}] {link.url}</Button>
-            </li>)}
-          </ol>
-        </section>}
-      </>}
-      <AlertDialog open={request !== null} onOpenChange={(open) => { if (!open) setRequest(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>打开外部链接？</AlertDialogTitle>
-            <AlertDialogDescription>即将使用系统应用打开以下完整地址，请确认目的地。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="max-h-60 overflow-auto whitespace-pre-wrap break-all text-sm"><bdi dir="ltr">{request?.url}</bdi></div>
-          <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction onClick={confirm}>确认打开</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  )
+  return <div className="flex min-h-0 flex-1 flex-col gap-2">
+    {error && <Alert variant="destructive"><AlertTitle>正文显示或链接操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+    {!documentToken ? !error && <BodySkeleton /> :
+      <iframe title="邮件 HTML 正文" sandbox="" referrerPolicy="no-referrer"
+        src={bodyDocumentUrl(emailId, documentToken)} className="min-h-0 w-full flex-1 border-0 bg-white"
+        onLoad={() => {
+          if (loaded.current) { active.current = false; onReload() }
+          else loaded.current = true
+        }} />}
+  </div>
 }
 
 export function BodySkeleton() {
