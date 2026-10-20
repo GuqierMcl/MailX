@@ -116,16 +116,7 @@ impl DesktopState {
         T: Send + 'static,
         F: FnOnce(&MailxCore) -> Result<T, AppError> + Send + 'static,
     {
-        if !self.is_ready() {
-            return Err(AppError::new(ErrorCode::CoreNotReady));
-        }
-        let core = self
-            .0
-            .core
-            .lock()
-            .map_err(|_| AppError::new(ErrorCode::Internal))?
-            .clone()
-            .ok_or_else(|| AppError::new(ErrorCode::CoreNotReady))?;
+        let core = self.core()?;
         // The core serializes store access itself; this only keeps the
         // blocking call off the async runtime.
         tauri::async_runtime::spawn_blocking(move || operation(&core))
@@ -160,6 +151,53 @@ impl DesktopState {
         let store = Arc::new(SettingsStore::open(directory)?);
         *slot = Some(store.clone());
         Ok(store)
+    }
+
+    /// Clone a ready core for its asynchronous body operations. No database or
+    /// credential access takes place on the WebView event thread here.
+    pub(crate) fn core(&self) -> Result<MailxCore, AppError> {
+        if !self.is_ready() {
+            return Err(AppError::new(ErrorCode::CoreNotReady));
+        }
+        self.0
+            .core
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .clone()
+            .ok_or_else(|| AppError::new(ErrorCode::CoreNotReady))
+    }
+
+    #[cfg(feature = "body-webview-test")]
+    pub(crate) fn for_body_test(core: MailxCore) -> Self {
+        struct NoSecrets;
+        impl SecretStore for NoSecrets {
+            fn get(
+                &self,
+                _: &str,
+            ) -> Result<
+                Option<mailx_core::secrets::SecretValue>,
+                mailx_core::secrets::SecretStoreError,
+            > {
+                panic!("test must not read credentials")
+            }
+            fn set(
+                &self,
+                _: &str,
+                _: &mailx_core::secrets::SecretValue,
+            ) -> Result<(), mailx_core::secrets::SecretStoreError> {
+                panic!("test must not write credentials")
+            }
+            fn delete(&self, _: &str) -> Result<(), mailx_core::secrets::SecretStoreError> {
+                panic!("test must not delete credentials")
+            }
+        }
+        let state = Self::new(
+            Err(AppError::new(ErrorCode::CoreNotReady)),
+            Arc::new(NoSecrets),
+            Arc::new(|_| {}),
+        );
+        state.finish_initialization(Ok(core));
+        state
     }
 
     fn is_ready(&self) -> bool {

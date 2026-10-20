@@ -74,6 +74,8 @@ export type MailAddress = { name: string | null, address: string, };
 
 export type BodyState = "missing" | "fetching" | "ready" | "failed";
 
+export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication" | "protocol" | "storage";
+
 export type EmailSummary = { id: string, accountId: string, folderId: string, subject: string, from: MailAddress,
 /**
  * Short plain-text excerpt for list rows, never HTML.
@@ -108,13 +110,13 @@ export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null,
 
 export type AttachmentSummary = { id: string, filename: string, mimeType: string, size: number, isInline: boolean, };
 
-export type EmailBody = { text: string | null, html: string | null, };
+export type EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number, };
 
 export type EmailDetail = { summary: EmailSummary, to: Array<MailAddress>, cc: Array<MailAddress>, replyTo: Array<MailAddress>,
 /**
  * `None` until `summary.body_state` is `ready`.
  */
-body: EmailBody | null, attachments: Array<AttachmentSummary>, };
+body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<AttachmentSummary>, };
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 

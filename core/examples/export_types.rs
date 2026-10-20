@@ -39,6 +39,7 @@ fn main() {
         Folder,
         MailAddress,
         BodyState,
+        BodyFailureCode,
         EmailSummary,
         EmailListQuery,
         Coverage,

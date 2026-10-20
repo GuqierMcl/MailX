@@ -378,7 +378,8 @@ function buildEmails(): EmailDetail[] {
       to: sent ? [{ name: '团队', address: 'team@example.com' }] : [me],
       cc: [],
       replyTo: [],
-      body: { text: seed.text, html: null },
+      body: { text: seed.text, hasHtml: false, truncated: false, remoteImagesBlocked: 0 },
+      bodyFailure: null,
       attachments: (seed.attachments ?? []).map(([filename, mimeType, size], position) => ({
         id: `${id}-attachment-${position + 1}`,
         filename,

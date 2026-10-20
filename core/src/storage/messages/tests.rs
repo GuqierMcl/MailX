@@ -179,6 +179,152 @@ fn repeated_uid_keeps_local_id_and_reopens_with_header_only_detail() {
     assert_eq!(reopened.get_email(&first.id).unwrap(), second);
 }
 
+fn cache_body_for_query(f: &mut Fixture) -> String {
+    put(f, &[record(7)]);
+    let id = f.service.list_emails(&inbox_query()).unwrap().items[0]
+        .id
+        .clone();
+    f.db.execute(
+        "INSERT INTO message_bodies(message_id, raw_sha256, raw_size, plain_text,
+         sanitized_html, sanitizer_version, links, remote_images_blocked, truncated, fetched_at)
+         VALUES (?1, ?2, 20, '仅正文纯文本', '<p>PRIVATE_HTML_SENTINEL</p>', 1,
+         '[\"https://example.invalid/private-link\"]', 3, 1, '2026-10-19')",
+        params![id, "a".repeat(64)],
+    )
+    .unwrap();
+    for (index, name, inline) in [
+        (1, Some("报告.pdf"), false),
+        (2, Some("logo.png"), true),
+        (3, None, false),
+    ] {
+        f.db.execute(
+            "INSERT INTO message_parts(message_id, part_index, content_id, filename, mime_type, size, is_inline)
+             VALUES (?1, ?2, ?3, ?4, ?5, 123, ?6)",
+            params![id, index, inline.then_some("logo"), name, if inline { "image/png" } else { "application/pdf" }, inline],
+        ).unwrap();
+    }
+    f.db.execute(
+        "UPDATE messages SET preview = '摘要🙂', body_state = 'ready', body_failure = NULL WHERE id = ?1",
+        [&id],
+    ).unwrap();
+    id
+}
+
+#[test]
+fn ready_queries_return_safe_body_metadata_preview_and_non_inline_attachments() {
+    let mut f = setup();
+    let id = cache_body_for_query(&mut f);
+    let page = f.service.list_emails(&inbox_query()).unwrap();
+    assert_eq!(page.items[0].preview, "摘要🙂");
+    assert_eq!(page.items[0].body_state, BodyState::Ready);
+    assert!(!page.coverage.bodies_complete);
+    let detail = f.service.get_email(&id).unwrap();
+    let body = detail.body.as_ref().unwrap();
+    assert_eq!(body.text.as_deref(), Some("仅正文纯文本"));
+    assert!(body.has_html && body.truncated);
+    assert_eq!(body.remote_images_blocked, 3);
+    assert!(detail.body_failure.is_none());
+    assert_eq!(detail.attachments.len(), 2);
+    assert_eq!(detail.attachments[0].filename, "报告.pdf");
+    assert_eq!(detail.attachments[0].mime_type, "application/pdf");
+    assert_eq!(detail.attachments[0].size, 123);
+    assert_eq!(detail.attachments[0].id, format!("{id}:1"));
+    assert_eq!(detail.attachments[1].filename, "未命名附件");
+    assert!(detail.attachments.iter().all(|part| !part.is_inline));
+    let wire = serde_json::to_value(&detail).unwrap();
+    assert!(wire["body"].get("html").is_none());
+    let wire = wire.to_string();
+    assert!(!wire.contains("PRIVATE_HTML_SENTINEL"));
+    assert!(!wire.contains("private-link"));
+    assert!(!wire.contains(&"a".repeat(64)));
+    assert!(!wire.contains("raw_sha256"));
+
+    let mut changed_header = record(7);
+    changed_header.subject = "Updated header".into();
+    put(&mut f, &[changed_header]);
+    let updated = f.service.get_email(&id).unwrap();
+    assert_eq!(updated.summary.subject, "Updated header");
+    assert_eq!(updated.summary.preview, "摘要🙂");
+    assert_eq!(updated.body, detail.body);
+    assert_eq!(updated.attachments, detail.attachments);
+}
+
+#[test]
+fn failed_and_in_progress_queries_never_expose_previous_ready_content() {
+    use crate::mail::BodyFailureCode;
+
+    let mut f = setup();
+    let id = cache_body_for_query(&mut f);
+    for (reason, expected) in [
+        ("tooLarge", BodyFailureCode::TooLarge),
+        ("stale", BodyFailureCode::Stale),
+        ("network", BodyFailureCode::Network),
+        ("authentication", BodyFailureCode::Authentication),
+        ("protocol", BodyFailureCode::Protocol),
+        ("storage", BodyFailureCode::Storage),
+    ] {
+        f.db.execute(
+            "UPDATE messages SET body_state = 'failed', body_failure = ?1",
+            [reason],
+        )
+        .unwrap();
+        let detail = f.service.get_email(&id).unwrap();
+        assert_eq!(detail.body_failure, Some(expected));
+        assert_eq!(detail.summary.body_state, BodyState::Failed);
+        assert!(detail.body.is_none() && detail.attachments.is_empty());
+    }
+    for (state, expected) in [
+        ("missing", BodyState::Missing),
+        ("fetching", BodyState::Fetching),
+    ] {
+        f.db.execute(
+            "UPDATE messages SET body_state = ?1, body_failure = NULL",
+            [state],
+        )
+        .unwrap();
+        let detail = f.service.get_email(&id).unwrap();
+        assert_eq!(detail.summary.body_state, expected);
+        assert!(detail.body_failure.is_none());
+        assert!(detail.body.is_none() && detail.attachments.is_empty());
+    }
+    f.db.execute(
+        "UPDATE messages SET body_state = 'failed', body_failure = 'untrusted server text'",
+        [],
+    )
+    .unwrap();
+    let error = f.service.get_email(&id).unwrap_err();
+    assert_eq!(error.code, ErrorCode::StorageIncompatible);
+    assert!(!serde_json::to_string(&error).unwrap().contains("untrusted"));
+}
+
+#[test]
+fn ready_body_cache_does_not_bypass_current_message_visibility() {
+    for change in [
+        "UPDATE accounts SET mailbox_source_id = 'new-source'",
+        "UPDATE folders SET selectable = 0",
+        "UPDATE folder_sync_cursors SET uid_validity = 11",
+        "UPDATE messages SET remote_state = 'deleted'",
+        "UPDATE messages SET remote_state = 'stale'",
+    ] {
+        let mut f = setup();
+        let id = cache_body_for_query(&mut f);
+        f.db.execute(change, []).unwrap();
+        assert_eq!(
+            f.service.get_email(&id).unwrap_err().code,
+            ErrorCode::NotFound,
+            "{change}"
+        );
+        assert!(
+            f.service
+                .list_emails(&inbox_query())
+                .unwrap()
+                .items
+                .is_empty(),
+            "{change}"
+        );
+    }
+}
+
 #[test]
 fn same_generation_keeps_window_and_progress_and_new_generation_hides_old_rows() {
     let mut f = setup();

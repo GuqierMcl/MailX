@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Allow only the local main window to manage accounts, read cached mail, read and save app settings, and control its own title bar.",
   "windows": ["main"],
-  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update", "allow-folders-list", "allow-emails-list", "allow-emails-get", "allow-sync-states", "allow-settings-get", "allow-settings-update", "allow-window-get-chrome", "allow-window-perform", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-app-get-startup-status", "allow-app-retry-startup", "allow-accounts-list", "allow-accounts-get", "allow-accounts-create", "allow-accounts-update", "allow-folders-list", "allow-emails-list", "allow-emails-get", "allow-emails-fetch-body", "allow-emails-prepare-body", "allow-emails-body-links", "allow-links-request", "allow-links-open", "allow-sync-states", "allow-settings-get", "allow-settings-update", "allow-window-get-chrome", "allow-window-perform", "core:event:allow-listen", "core:event:allow-unlisten"]
 }
