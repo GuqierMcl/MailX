@@ -20,6 +20,14 @@ use uuid::Uuid;
 const TOKEN_LIFETIME: Duration = Duration::from_secs(30 * 60);
 const MAX_DOCUMENTS: usize = 128;
 pub(crate) const LINK_EVENT: &str = "mailx://link-request";
+/// The origin body frames load from. wry hands the handler a request rewritten
+/// to `mailx-body://localhost` on every platform, so bound URLs must come from
+/// here rather than from the request.
+pub(crate) const BODY_ORIGIN: &str = if cfg!(target_os = "windows") {
+    "http://mailx-body.localhost"
+} else {
+    "mailx-body://localhost"
+};
 
 pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     use std::sync::Arc;
@@ -177,11 +185,12 @@ fn decode_segment(value: &str) -> Option<String> {
 
 fn parse_route(value: &str) -> Option<(Route, String)> {
     let url = Url::parse(value).ok()?;
-    let origin = match (url.scheme(), url.host_str(), url.port()) {
-        ("mailx-body", Some("localhost"), None) => "mailx-body://localhost",
-        ("http", Some("mailx-body.localhost"), None) => "http://mailx-body.localhost",
-        _ => return None,
-    };
+    if !matches!(
+        (url.scheme(), url.host_str(), url.port()),
+        ("mailx-body", Some("localhost"), None) | ("http", Some("mailx-body.localhost"), None)
+    ) {
+        return None;
+    }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return None;
     }
@@ -232,7 +241,7 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
         }
         _ => return None,
     };
-    Some((route, origin.into()))
+    Some((route, BODY_ORIGIN.into()))
 }
 
 fn resource_url(origin: &str, route: &str, id: &str, tail: &str, token: &str) -> String {

@@ -91,12 +91,23 @@ async fn document(
         &response,
         "text/html; charset=utf-8",
         APP_ORIGIN,
-        Some(&format!("{origin}/part/{id}/")),
+        Some(&format!("{BODY_ORIGIN}/part/{id}/")),
     );
     let html = String::from_utf8(response.into_body()).unwrap();
     assert!(html.contains("Synthetic protocol fixture"));
     assert!(!html.contains("untrustedExecuted"));
-    (attribute(&html, "src"), attribute(&html, "href"))
+    let (src, href) = (attribute(&html, "src"), attribute(&html, "href"));
+    // Whichever form the request arrived in, bound URLs use the origin the
+    // frame actually loads from on this platform.
+    assert!(
+        src.starts_with(&format!("{BODY_ORIGIN}/part/{id}/")),
+        "{src}"
+    );
+    assert!(
+        href.starts_with(&format!("{BODY_ORIGIN}/link/{id}/")),
+        "{href}"
+    );
+    (src, href)
 }
 
 #[test]
@@ -111,7 +122,7 @@ fn both_platform_forms_round_trip_encoded_cids_and_canonical_links() {
                     id: id.clone(),
                     token: token.clone()
                 },
-                origin.into()
+                BODY_ORIGIN.into()
             ))
         );
         for cid in ["pixel", "中文/section?x=#% @mail"] {
@@ -124,7 +135,7 @@ fn both_platform_forms_round_trip_encoded_cids_and_canonical_links() {
                         cid: cid.into(),
                         token: token.clone()
                     },
-                    origin.into()
+                    BODY_ORIGIN.into()
                 ))
             );
         }
@@ -136,7 +147,7 @@ fn both_platform_forms_round_trip_encoded_cids_and_canonical_links() {
                     index: 0,
                     token: token.clone()
                 },
-                origin.into()
+                BODY_ORIGIN.into()
             ))
         );
     }

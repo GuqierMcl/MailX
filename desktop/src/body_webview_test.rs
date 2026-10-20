@@ -56,11 +56,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         mailx_core::MailxCore::body_test_fixture(&root.join("profile"), runtime, &raws)?;
     checkpoint("synthetic cache ready");
     app.manage(crate::state::DesktopState::for_body_test(core));
-    let origin = if cfg!(target_os = "windows") {
-        "http://mailx-body.localhost"
-    } else {
-        "mailx-body://localhost"
-    };
+    let origin = crate::body_protocol::BODY_ORIGIN;
     let mut documents = BTreeMap::new();
     for (fixture, id) in fixtures.iter().zip(ids) {
         if fixture.name == "policyProbe" {
