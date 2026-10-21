@@ -157,11 +157,11 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(TRAFFIC_LIGHT_POSITION);
+        .traffic_light_position(TRAFFIC_LIGHT_POSITION)
+        // No link preview popup on long press; the builder method is macOS-only.
+        .allow_link_preview(false);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
-    // No link preview popup on long press (macOS).
-    let builder = builder.allow_link_preview(false);
     let window = builder.build()?;
     watch_state(&window);
     window.show()?;
