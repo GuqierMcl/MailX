@@ -9,8 +9,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
 import { displayName, formatListTime } from './format'
+import { SenderAvatar } from './sender-avatar'
 
 export type ListFilter = 'all' | 'unread'
 
@@ -30,6 +32,8 @@ type EmailListProps = {
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
+  /** Rows are the previous mailbox's while the new one loads. */
+  stale: boolean
   loadMoreError: string | null
   error: string | null
   filter: ListFilter
@@ -78,15 +82,19 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, loadMoreError, onLoadMore }: EmailListProps) {
-  if (loading && emails.length === 0) {
-    return (
-      <div className="flex flex-col gap-2 px-3" role="status" aria-label="正在加载邮件">
+function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+  const pending = loading && emails.length === 0
+  const showSkeleton = useDelayedFlag(pending)
+  if (pending || showSkeleton) {
+    // Nothing for the first moments: local data usually arrives before a
+    // placeholder would be worth showing, and a flash is worse than a blink of blank.
+    return showSkeleton ? (
+      <div className="flex animate-in flex-col gap-2 px-3 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
         {Array.from({ length: 6 }, (_, index) => (
           <Skeleton key={index} className="h-20 w-full" />
         ))}
       </div>
-    )
+    ) : <div className="min-h-0 flex-1" />
   }
   if (error) {
     return (
@@ -141,13 +149,15 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
   }
   return (
     <ScrollArea className="min-h-0 flex-1">
-      {(syncStatus.phase !== 'idle' || syncStatus.windowCapped) && (
-        <div role="status" aria-label="邮件同步状态" className="space-y-1 px-3 pb-3 text-xs text-muted-foreground">
-          {syncStatus.phase !== 'idle' && <p>{syncTitle} {syncStatus.phase === 'failed' && syncDescription}</p>}
-          {syncStatus.windowCapped && <p>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</p>}
-        </div>
-      )}
-      <div role="list" aria-label="邮件列表" className="flex flex-col gap-2 px-3 pb-3">
+      <div
+        role="list"
+        aria-label="邮件列表"
+        aria-busy={stale || undefined}
+        className={cn(
+          'flex animate-in flex-col gap-2 px-3 pb-3 duration-150 fade-in-0 transition-opacity',
+          stale && 'pointer-events-none opacity-50',
+        )}
+      >
         {emails.map((email) => (
           <EmailRow
             key={email.id}
@@ -166,6 +176,9 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
           </Button>
         </div>
       )}
+      {syncStatus.windowCapped && (
+        <p className="px-3 pb-3 text-center text-xs text-muted-foreground">同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</p>
+      )}
     </ScrollArea>
   )
 }
@@ -180,28 +193,31 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
       aria-current={selected ? 'true' : undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent',
+        'flex w-full items-start gap-3 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent',
         selected && 'bg-muted',
       )}
     >
-      <div className="flex w-full flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
-          {!email.isRead && <span aria-label="未读" className="size-2 shrink-0 rounded-full bg-primary" />}
-          <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
-            {formatListTime(email.receivedAt)}
-          </span>
+      <SenderAvatar sender={email.from} accountId={email.accountId} className="mt-0.5" />
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+        <div className="flex w-full flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
+            {!email.isRead && <span aria-label="未读" className="size-2 shrink-0 rounded-full bg-primary" />}
+            <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
+              {formatListTime(email.receivedAt)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-medium">
+            <span className="truncate">{email.subject || '（无主题）'}</span>
+            {email.hasAttachment && (
+              <HugeiconsIcon icon={Attachment01Icon} aria-label="有附件" className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            {email.isStarred && <HugeiconsIcon icon={StarIcon} aria-label="已加星标" className="size-3.5 shrink-0 text-muted-foreground" />}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 text-xs font-medium">
-          <span className="truncate">{email.subject || '（无主题）'}</span>
-          {email.hasAttachment && (
-            <HugeiconsIcon icon={Attachment01Icon} aria-label="有附件" className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          {email.isStarred && <HugeiconsIcon icon={StarIcon} aria-label="已加星标" className="size-3.5 shrink-0 text-muted-foreground" />}
-        </div>
+        {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
+        {account && <Badge variant="outline">{account.displayName}</Badge>}
       </div>
-      {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
-      {account && <Badge variant="outline">{account.displayName}</Badge>}
     </button>
   )
 }

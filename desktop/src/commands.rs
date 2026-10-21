@@ -388,6 +388,58 @@ pub(crate) async fn links_open(
 }
 
 #[tauri::command]
+pub(crate) async fn sync_refresh(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<GetArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.refresh_sync(&args.account_id))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AvatarArgs {
+    account_id: String,
+    address: String,
+}
+
+/// No lookup, and so nothing sent to a third party, unless the user opted in.
+#[tauri::command]
+pub(crate) async fn avatars_get(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Option<mailx_core::AvatarImage>>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<AvatarArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        if !state
+            .settings(|store| store.get())
+            .await?
+            .settings
+            .security
+            .sender_avatars
+        {
+            return Ok(None);
+        }
+        state
+            .core()?
+            .sender_avatar(args.account_id, args.address)
+            .await
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
 pub(crate) async fn sync_states(
     window: WebviewWindow,
     state: State<'_, DesktopState>,

@@ -201,7 +201,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailTheme": "follow",
                     "fontSize": "default"
                 },
-                "security": { "remoteImages": "ask" }
+                "security": { "remoteImages": "ask", "senderAvatars": false }
             },
             "stored": false,
             "recovered": false
@@ -226,6 +226,7 @@ fn older_settings_default_to_ask_and_section_patches_preserve_other_settings() {
         .patch(SettingsPatch {
             security: Some(SecuritySettings {
                 remote_images: RemoteImagePolicy::Automatic,
+                sender_avatars: true,
             }),
             ..Default::default()
         })

@@ -6,6 +6,7 @@ import type {
   AppError,
   AppSettings,
   ApiResult,
+  AvatarImage,
   CreateAccountRequest,
   EmailDetail,
   EmailListQuery,
@@ -42,6 +43,10 @@ export interface MailxClient {
   updateAccount(request: UpdateAccountRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
+  /** Asks the account's sync worker to run its next round now. */
+  refreshSync(accountId: string): Promise<void>
+  /** `null` unless the user enabled sender avatars and the sender has one. */
+  getAvatar(accountId: string, address: string): Promise<AvatarImage | null>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
@@ -97,6 +102,8 @@ export function createDesktopClient(): MailxClient {
     updateAccount: (request) => call<Account>('accounts_update', { request }),
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
+    refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
+    getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
     onSyncState(listener) {
       if (!available) return () => undefined
       let disposed = false

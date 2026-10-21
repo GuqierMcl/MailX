@@ -20,7 +20,7 @@ export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -91,6 +91,8 @@ export function createMockClient(): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    refreshSync: async () => undefined,
+    getAvatar: async () => null,
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
     releaseBody: async () => undefined,
     bodyLinks: async (_emailId, documentToken) => ({ documentToken, links: [] }),

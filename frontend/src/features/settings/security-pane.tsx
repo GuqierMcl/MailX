@@ -1,7 +1,9 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import type { RemoteImagePolicy } from '@/generated/accounts'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
@@ -12,7 +14,7 @@ const POLICIES: Record<RemoteImagePolicy, string> = { ask: '每次询问', autom
 export function SecurityPane({ client }: { client: MailxClient }) {
   const settings = useSettings(client)
   const update = useUpdateSecurity(client)
-  if (settings.isPending) return <div className="flex justify-center p-10"><Spinner className="size-5" /></div>
+  if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
   if (settings.isError) return <SettingsPage>
     <Alert variant="destructive"><AlertTitle>无法读取设置</AlertTitle><AlertDescription>{clientFailure(settings.error).message}</AlertDescription></Alert>
     <Button variant="outline" onClick={() => void settings.refetch()}>重试</Button>
@@ -26,6 +28,13 @@ export function SecurityPane({ client }: { client: MailxClient }) {
           <SelectTrigger id="security.remoteImages" className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>{Object.entries(POLICIES).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
+      </SettingsRow>
+    </SettingsGroup>
+    <SettingsGroup title="发件人头像">
+      <SettingsRow label="从 Gravatar 获取头像" htmlFor="security.senderAvatars"
+        description="开启后，会把发件人邮箱地址的 SHA-256 摘要发给 Gravatar（经该账号的网络路由）以查找头像，Gravatar 因此可能得知你收到了某人的邮件；使用自定义代理的账号不会获取头像。关闭时只显示首字母头像，不发送任何请求。">
+        <Switch id="security.senderAvatars" checked={settings.data.settings.security.senderAvatars} disabled={update.isPending}
+          onCheckedChange={(senderAvatars) => update.mutate({ senderAvatars })} />
       </SettingsRow>
     </SettingsGroup>
   </SettingsPage>

@@ -28,7 +28,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' } }
+  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false } }
   return {
     available: true,
     getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
@@ -39,6 +39,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     updateAccount: vi.fn<MailxClient['updateAccount']>().mockResolvedValue(exampleAccount({ revision: 4 })),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
+    refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),
+    getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),

@@ -176,7 +176,12 @@ mailFont: string, mailTheme: MailTheme, fontSize: FontSize, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
-export type SecuritySettings = { remoteImages: RemoteImagePolicy, };
+export type SecuritySettings = { remoteImages: RemoteImagePolicy,
+/**
+ * Look sender avatars up on Gravatar, which learns a hash of each sender
+ * address. Off by default.
+ */
+senderAvatars: boolean, };
 
 export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, };
 
@@ -189,3 +194,9 @@ stored: boolean,
  * The previous file could not be used and was moved to `settings.json.bak`.
  */
 recovered: boolean, };
+
+export type AvatarImage = { mimeType: string,
+/**
+ * Base64 of the re-encoded, validated image.
+ */
+data: string, };

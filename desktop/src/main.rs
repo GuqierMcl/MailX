@@ -79,6 +79,8 @@ fn main() {
             commands::links_request,
             commands::links_open,
             commands::sync_states,
+            commands::sync_refresh,
+            commands::avatars_get,
             commands::settings_get,
             commands::settings_update,
             commands::window_get_chrome,

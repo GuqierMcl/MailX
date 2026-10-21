@@ -3,6 +3,7 @@ import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { RemoteImagePolicy } from '@/generated/accounts'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
@@ -117,5 +118,5 @@ function DocumentSession({ client, emailId, allowImages, dark, onReload }: { cli
 }
 
 export function BodySkeleton() {
-  return <div role="status" aria-label="正在加载正文" className="flex flex-col gap-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-40 w-full" /></div>
+  return <Delayed><div role="status" aria-label="正在加载正文" className="flex flex-col gap-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-40 w-full" /></div></Delayed>
 }

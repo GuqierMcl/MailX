@@ -159,6 +159,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | 命令与参数 | 结果 |
 | --- | --- |
 | `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）、`countsKnown` 与未读 / 总数；countsKnown=false 时计数未知 |
+| `refreshSync(accountId)` | `sync_refresh`，`{ accountId }` | 无数据；让该账号的同步 worker 立即开始下一轮，跳过等待或退避。账号不存在返回 `notFound`；登录被拒、需改设置才会重试的账号不会被唤醒（避免锁号），也不报错。重复请求合并为一次 |
 | `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt`、`failure`、来源 / 运行版本和每目录状态 |
 
 状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷仍是单个 `AccountSyncState`，`sync_states` 返回同形状快照：
@@ -180,7 +181,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
 
-`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 
@@ -270,3 +271,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 | `CANCELED` / `INTERNAL` | 取消 / 脱敏内部故障 | 409 / 500 |
 
 未知内部异常不原样泄漏路径、SQL、凭证或正文。未来若增加 `details`，按错误类型白名单输出，例如 `retryAfterMs`、`currentRevision`，禁止直接序列化底层异常对象。
+
+### 发件人头像
+
+`getAvatar(accountId, address)` 对应 `avatars_get`，`{ accountId, address }`，返回 `AvatarImage { mimeType, data }`（`data` 为 base64）或 `null`。`security.senderAvatars` 为 false 时宿主直接返回 null，不发任何请求。开启后，核心把规范化（去空白、转小写）地址的 SHA-256 拼入 `https://www.gravatar.com/avatar/<hash>?s=96&d=404`，经**该账号的网络路由**下载，复用远程图片的下载约束（公网地址、重定向复检、大小与解码校验，结果重新编码）；自定义代理路由无法验证目的地，因此不取头像、也不回退直连。Gravatar 因此可得知某地址的邮件被该用户收到，设置页对此有明确说明。结果（含无头像）在核心内存缓存，找到的 24 小时、未找到或失败的 1 小时，不落盘。前端始终先显示按地址稳定着色的首字母头像，取到真实头像后覆盖。应用自身 CSP 的 `img-src` 为此增加了 `data:`；邮件正文所在的隔离文档不受影响。

@@ -356,7 +356,10 @@ describe('synced inbox headers', () => {
     expect(screen.queryByText('正在同步邮件…')).not.toBeInTheDocument()
     emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox', { phase: 'failed', failure: { code: 'protocol', message: '目录暂时不可用。', detail: null, willRetry: true } })] }))
     expect(rows()[0]).toHaveTextContent('邮件 cached')
-    expect(screen.getByRole('status', { name: '邮件同步状态' })).toHaveTextContent('邮件同步失败 目录暂时不可用。')
+    // A failure no longer inserts a banner above the rows (it made the list jump);
+    // the empty and filtered states below still explain it.
+    expect(screen.queryByRole('status', { name: '邮件同步状态' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/邮件同步失败/)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))
     client.listEmails.mockResolvedValue(page([], null, false))
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '没有' } })

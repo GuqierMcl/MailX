@@ -17,6 +17,8 @@ fn main() {
             "links_request",
             "links_open",
             "sync_states",
+            "sync_refresh",
+            "avatars_get",
             "settings_get",
             "settings_update",
             "window_get_chrome",

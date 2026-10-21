@@ -24,10 +24,18 @@ describe('settings dialog', () => {
     const select = await within(dialog).findByRole('combobox', { name: '加载远程图片' })
     expect(select).toHaveTextContent('每次询问')
     await userEvent.click(select)
-    expect(screen.getByRole('option', { name: '自动加载' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: '自动加载' })).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('option', { name: '永不加载' }))
     await waitFor(() => expect(select).toHaveTextContent('永不加载'))
-    expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never' } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never', senderAvatars: false } })
+  })
+
+  it('keeps sender avatar lookups off until the Gravatar switch is turned on', async () => {
+    const { client } = renderDialog(testClient(), { section: 'security' })
+    const toggle = await screen.findByRole('switch', { name: '从 Gravatar 获取头像' })
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ security: { remoteImages: 'ask', senderAvatars: true } })
   })
 
   it('starts an empty account list with a new-account form', async () => {
@@ -129,7 +137,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

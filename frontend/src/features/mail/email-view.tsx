@@ -11,15 +11,16 @@ import {
 } from '@hugeicons/core-free-icons'
 import type { BodyFailureCode, EmailDetail, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import type { MailxClient } from '@/lib/mailx-client'
 import { BodyDocument, BodySkeleton } from './body-document'
-import { displayName, formatFullTime, formatSize, initials } from './format'
+import { displayName, formatFullTime, formatSize } from './format'
+import { SenderAvatar } from './sender-avatar'
 
 type EmailViewProps = {
   client: MailxClient
@@ -31,16 +32,19 @@ type EmailViewProps = {
 }
 
 export function EmailView({ email, loading, error, client, downloading, onDownload }: EmailViewProps) {
+  const showSkeleton = useDelayedFlag(loading)
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Toolbar disabled={!email} />
       <Separator />
-      {loading ? (
-        <div className="flex flex-col gap-3 p-4" role="status" aria-label="正在加载邮件">
-          <Skeleton className="h-6 w-2/3" />
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-40 w-full" />
-        </div>
+      {loading || showSkeleton ? (
+        showSkeleton ? (
+          <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        ) : <div className="min-h-0 flex-1" />
       ) : error ? (
         <Empty>
           <EmptyHeader>
@@ -107,14 +111,12 @@ type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload'
 function EmailContent({ email, ...props }: ContentProps) {
   const { summary, attachments } = email
   return (
-    <article className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <article className="flex min-h-0 flex-1 animate-in flex-col overflow-hidden duration-150 fade-in-0">
       <ScrollArea className="max-h-[35%] shrink-0">
         <header className="flex flex-col gap-4 p-4">
           <h2 className="text-lg font-semibold">{summary.subject || '（无主题）'}</h2>
           <div className="flex items-start gap-3 text-sm">
-            <Avatar>
-              <AvatarFallback>{initials(summary.from)}</AvatarFallback>
-            </Avatar>
+            <SenderAvatar sender={summary.from} accountId={summary.accountId} size="lg" />
             <div className="grid min-w-0 flex-1 gap-0.5">
               <div className="font-medium">
                 {displayName(summary.from)}

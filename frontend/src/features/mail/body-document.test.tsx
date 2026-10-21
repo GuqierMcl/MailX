@@ -36,7 +36,7 @@ describe('isolated body, inline links and image policy', () => {
       render(<BodyDocument client={client} emailId="one" />)
       expect(await frame()).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=token-1&scheme=dark')
       vi.mocked(client.getSettings).mockResolvedValue({
-        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask' } },
+        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask', senderAvatars: false } },
         stored: true, recovered: false,
       })
     } finally {
@@ -156,14 +156,14 @@ describe('isolated body, inline links and image policy', () => {
     await userEvent.click(screen.getByRole('button', { name: '加载图片' }))
     await waitFor(() => expect(client.prepareBody).toHaveBeenLastCalledWith('one', true))
     expect(client.releaseBody).toHaveBeenCalledWith('one', 'token-1')
-    expect(client.updateSettings).toHaveBeenLastCalledWith({ security: { remoteImages: 'automatic' } })
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ security: { remoteImages: 'automatic', senderAvatars: false } })
     expect(screen.queryByLabelText('远程图片提示')).not.toBeInTheDocument()
   })
 
   it.each(['automatic', 'never'] as const)('obeys %s without a prompt', async (policy) => {
     const { client } = setup()
     const initial = await client.getSettings()
-    client.getSettings.mockResolvedValue({ ...initial, settings: { ...initial.settings, security: { remoteImages: policy } } })
+    client.getSettings.mockResolvedValue({ ...initial, settings: { ...initial.settings, security: { remoteImages: policy, senderAvatars: false } } })
     render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
     await frame()
     expect(client.prepareBody).toHaveBeenCalledWith('one', policy === 'automatic')
