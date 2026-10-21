@@ -20,6 +20,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 percent-encoding = "2"
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }
@@ -39,6 +41,7 @@ tempfile = "3"
 mailx-core = { workspace = true, features = ["body-webview-test"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tauri = { workspace = true, features = ["test"] }
 
 [features]
 # Enable the custom protocol for loading bundled frontend assets in production builds.

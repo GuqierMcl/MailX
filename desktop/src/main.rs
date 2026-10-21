@@ -21,13 +21,22 @@ const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 fn main() {
     #[cfg(feature = "body-webview-test")]
     body_webview_test::checkpoint("main entered");
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Registered first, as the plugin requires. A second launch hands over to the
+    // running instance and exits, so it never reaches the data-directory lock.
+    #[cfg(not(feature = "body-webview-test"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        window_chrome::focus_main_window(app)
+    }));
+    let builder = builder
         .append_invoke_initialization_script(include_str!("subframe_guard.js"))
         .plugin(
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
                 .build(),
         );
+    #[cfg(not(feature = "body-webview-test"))]
+    let builder = builder.plugin(window_chrome::window_state_plugin());
     #[cfg(all(feature = "body-webview-test", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     body_protocol::register(builder)
