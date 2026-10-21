@@ -10,15 +10,18 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
+import { CommandPalette } from './command-palette'
+import { MailSearch } from './mail-search'
 import { EmailView } from './email-view'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
+import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { ShellLayout } from '@/features/shell/shell-layout'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
 import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
-import { mailboxTitle, type Mailbox } from './mailbox'
+import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody } from './use-email-body'
 
@@ -33,6 +36,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -192,6 +196,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     )
   }
   const showAccountBadges = activeMailbox.kind === 'unified' && accounts.length > 1
+  const searchScope = activeMailbox.kind === 'folder'
+    ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
+    : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
 
   const selectMailbox = (next: Mailbox) => {
@@ -219,8 +226,30 @@ export function Workbench({ client }: { client: MailxClient }) {
           />
         )}
       >
+        <TitleBarActions side="center">
+          <MailSearch value={search} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
+        </TitleBarActions>
+        <CommandPalette
+          client={client}
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          scope={searchScope}
+          search={search}
+          folderId={folderId}
+          folderRole={folderRole}
+          sourceIdentity={sourceIdentity}
+          accounts={accounts}
+          folders={folders}
+          onApplySearch={setSearch}
+          onOpenEmail={(email, text) => {
+            setSearch(text)
+            setSelectedId(email.id)
+          }}
+          onSelectMailbox={selectMailbox}
+          onOpenSettings={setSettings}
+        />
         <ResizablePanelGroup orientation="horizontal" className="min-h-0">
-          <ResizablePanel defaultSize="40" minSize={300}>
+          <ResizablePanel defaultSize="40" minSize={300} className="bg-muted/40">
             <EmailList
               title={mailboxTitle(activeMailbox)}
               emails={emails}
@@ -237,12 +266,11 @@ export function Workbench({ client }: { client: MailxClient }) {
               search={search}
               selectedId={selected}
               onFilterChange={setFilter}
-              onSearchChange={setSearch}
               onSelect={(email) => setSelectedId(email.id)}
               onLoadMore={loadMore}
             />
           </ResizablePanel>
-          <ResizableHandle withHandle />
+          <ResizableHandle />
           <ResizablePanel defaultSize="60" minSize={360}>
             <EmailView
               key={`${selected}:${body.identity}`}

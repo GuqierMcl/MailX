@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { withTitleBar } from '@/test/title-bar'
 import { ShellLayout } from './shell-layout'
 import { NAV_DEFAULT, NAV_MAX, NAV_MIN } from './nav-width'
 
@@ -47,5 +48,19 @@ describe('nav rail resizing', () => {
     fireEvent.doubleClick(handle)
     expect(width()).toBe(NAV_DEFAULT)
     expect(onNavWidthChange).toHaveBeenCalledWith(NAV_DEFAULT)
+  })
+})
+
+describe('nav rail trigger', () => {
+  it('uses a different icon and label for each state instead of a toggle', () => {
+    render(withTitleBar(
+      <ShellLayout navLabel="导航" nav={<p>菜单</p>} navWidth={NAV_DEFAULT} onNavWidthChange={vi.fn()}><p>内容</p></ShellLayout>,
+    ))
+    const open = screen.getByRole('button', { name: '收起侧边栏' })
+    expect(open).not.toHaveAttribute('aria-expanded')
+    const openIcon = open.innerHTML
+    fireEvent.click(open)
+    const closed = screen.getByRole('button', { name: '展开侧边栏' })
+    expect(closed.innerHTML).not.toBe(openIcon)
   })
 })

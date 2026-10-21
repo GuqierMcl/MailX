@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { SidebarLeftIcon } from '@hugeicons/core-free-icons'
+import { SidebarLeft01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { NAV_DEFAULT, NAV_MAX, NAV_MIN, clampNavWidth } from './nav-width'
@@ -105,8 +105,8 @@ export function NavRail({ open, label, width, resizing, onResizeStart, onResize,
 
 export function NavRailTrigger({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
-    <Button variant="ghost" size="icon-sm" aria-label="折叠或展开侧边栏" aria-expanded={open} onClick={onToggle}>
-      <HugeiconsIcon icon={SidebarLeftIcon} strokeWidth={2} />
+    <Button variant="ghost" size="icon-sm" aria-label={open ? '收起侧边栏' : '展开侧边栏'} onClick={onToggle}>
+      <HugeiconsIcon icon={open ? SidebarLeftIcon : SidebarLeft01Icon} strokeWidth={2} />
     </Button>
   )
 }

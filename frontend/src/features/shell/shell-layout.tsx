@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { Island } from './island'
 import { NavRail, NavRailTrigger } from './nav-rail'
+import { ShellContext } from './shell-context'
 
 type ShellLayoutProps = {
   navLabel: string
@@ -24,6 +25,8 @@ export function ShellLayout({ navLabel, nav, navWidth, onNavWidthChange, childre
   // (`from` is the saved width it was chosen against).
   const [draft, setDraft] = useState<{ from: number; value: number } | null>(null)
   const width = draft && draft.from === navWidth ? draft.value : navWidth
+
+  const controls = useMemo(() => ({ navOpen, toggleNav: () => setNavOpen((open) => !open) }), [navOpen])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -55,7 +58,9 @@ export function ShellLayout({ navLabel, nav, navWidth, onNavWidthChange, childre
       >
         {nav}
       </NavRail>
-      <Island className={resizing ? 'pointer-events-none' : undefined}>{children}</Island>
+      <ShellContext.Provider value={controls}>
+        <Island className={resizing ? 'pointer-events-none' : undefined}>{children}</Island>
+      </ShellContext.Provider>
     </div>
   )
 }

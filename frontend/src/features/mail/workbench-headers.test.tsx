@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
+import { searchFor } from '@/test/search'
+import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
 const account = exampleAccount()
@@ -61,7 +63,7 @@ describe('synced inbox headers', () => {
     const items = Array.from({ length: 103 }, (_, index) => email(String(index)))
     const { client } = setup(items)
     client.listEmails.mockImplementation(async (query) => query.cursor ? page(items.slice(100)) : page(items.slice(0, 100), 'page-two'))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     expect(rows()).toHaveLength(100)
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, cursor: null, folderRole: 'inbox' }))
@@ -82,7 +84,7 @@ describe('synced inbox headers', () => {
       : page([first], 'second-page'))
     const pending = deferred<EmailDetail>()
     client.fetchBody.mockReturnValue(pending.promise)
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(2))
@@ -101,7 +103,7 @@ describe('synced inbox headers', () => {
 
   it('reloads folders once for a burst of folder changes, and not at all when revisions stay put', async () => {
     const { client, emit } = setup([email('one')])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(1))
 
@@ -120,7 +122,7 @@ describe('synced inbox headers', () => {
 
   it('refetches a cached list that changed while another mailbox was shown', async () => {
     const { client, idle } = setup([email('before')])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('邮件 before')
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     await screen.findByRole('heading', { name: '已发送' })
@@ -134,7 +136,7 @@ describe('synced inbox headers', () => {
 
   it('serves an unchanged mailbox from cache when switching back', async () => {
     const { client } = setup([email('cached')])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('邮件 cached')
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     await screen.findByRole('heading', { name: '已发送' })
@@ -147,7 +149,7 @@ describe('synced inbox headers', () => {
   it('refreshes the first page and folders on idle without clearing the selected header or flashing skeletons', async () => {
     const selected = email('selected')
     const { client, idle } = setup([selected])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
     await screen.findByRole('heading', { name: selected.subject })
@@ -173,7 +175,7 @@ describe('synced inbox headers', () => {
     const { client, idle } = setup([selected])
     const pendingDetail = deferred<EmailDetail>()
     client.getEmail.mockReturnValue(pendingDetail.promise)
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
     client.listEmails.mockResolvedValue(page([email('remaining')]))
@@ -190,7 +192,7 @@ describe('synced inbox headers', () => {
     const { client, idle } = setup([email('initial')])
     client.listEmails.mockResolvedValue(page([email('initial')], 'old-cursor'))
     const pendingPage = deferred<EmailPage>()
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     client.listEmails.mockReturnValueOnce(pendingPage.promise)
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
@@ -207,7 +209,7 @@ describe('synced inbox headers', () => {
     const { client } = setup()
     const pendingAll = deferred<EmailPage>()
     client.listEmails.mockImplementation((query) => query.unread ? Promise.resolve(page([email('unread')])) : pendingAll.promise)
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('button', { name: '收件箱' })
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))
     await screen.findByRole('list', { name: '邮件列表' })
@@ -220,7 +222,7 @@ describe('synced inbox headers', () => {
   it('keeps existing rows and retries the same cursor after a pagination failure', async () => {
     const { client } = setup([email('first')])
     client.listEmails.mockResolvedValue(page([email('first')], 'retry-cursor'))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     client.listEmails.mockRejectedValueOnce(new Error('private transport detail'))
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
@@ -236,7 +238,7 @@ describe('synced inbox headers', () => {
     const { client, emit } = setup()
     client.listEmails.mockResolvedValue(page([], null, false))
     client.listSyncStates.mockResolvedValue([exampleSyncState({ folders: [exampleFolderSyncState('inbox', { phase: 'syncing' }), exampleFolderSyncState('sent', { phase: 'waiting' })] })])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     expect(await screen.findByText('正在同步邮件…')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     expect(await screen.findByText('等待同步邮件…')).toBeInTheDocument()
@@ -254,7 +256,7 @@ describe('synced inbox headers', () => {
 
   it('does not show a loading skeleton when an empty completed inbox refreshes', async () => {
     const { client, idle } = setup()
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('这里还没有邮件')
     const pending = deferred<EmailPage>()
     client.listEmails.mockReturnValueOnce(pending.promise)
@@ -266,7 +268,7 @@ describe('synced inbox headers', () => {
 
   it('shows a missing subject, omits a missing preview and shows a controlled body download failure', async () => {
     const { client } = setup([email('empty-fields', { subject: '', preview: '' })])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     expect(within(rows()[0]).getByText('（无主题）')).toBeInTheDocument()
     expect(rows()[0].querySelector('p')).toBeNull()
@@ -279,10 +281,10 @@ describe('synced inbox headers', () => {
   it('starts a search with the first-page cursor and preserves the page limit', async () => {
     const { client } = setup([email('first')])
     client.listEmails.mockResolvedValue(page([email('first')], 'unused-cursor'))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     client.listEmails.mockResolvedValueOnce(page())
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '  收件人  ' } })
+    await searchFor('  收件人  ')
     await screen.findByText('没有匹配的邮件')
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '收件人', cursor: null, limit: 100 }))
   })
@@ -291,9 +293,9 @@ describe('synced inbox headers', () => {
     const items = Array.from({ length: 103 }, (_, index) => email(String(index)))
     const { client, emit } = setup(items)
     client.listEmails.mockImplementation(async (query) => query.cursor ? page(items.slice(100)) : page(items.slice(0, 100), 'page-two'))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '邮件' } })
+    await searchFor('邮件')
     await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '邮件' })))
     // The search starts a new query; its first page renders a notification tick after the call.
     await userEvent.click(await screen.findByRole('button', { name: '加载更多' }))
@@ -306,14 +308,14 @@ describe('synced inbox headers', () => {
     expect(client.listEmails).toHaveBeenCalledTimes(calls)
     expect(rows()).toHaveLength(103)
     expect(rows()[102]).toHaveAttribute('aria-current', 'true')
-    expect(screen.getByRole('searchbox', { name: '搜索邮件' })).toHaveValue('邮件')
+    expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('邮件')
   })
 
   it('shows committed folder results before the account finishes and refreshes all loaded pages', async () => {
     let items = Array.from({ length: 103 }, (_, index) => email(String(index)))
     const { client, emit } = setup(items)
     client.listEmails.mockImplementation(async (query) => query.cursor ? page(items.slice(100)) : page(items.slice(0, 100), 'page-two'))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(103))
@@ -331,7 +333,7 @@ describe('synced inbox headers', () => {
 
   it('rejects stale source and task events without replacing cache or the current status', async () => {
     const { client, emit } = setup([email('cached')])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     emit(exampleSyncState({ generation: 2, sequence: 1, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent')] }))
     const calls = client.listEmails.mock.calls.length
@@ -350,7 +352,7 @@ describe('synced inbox headers', () => {
   it('keeps cached rows on sync failure and distinguishes a capped idle window from syncing', async () => {
     const { client, emit } = setup([email('cached')])
     client.listEmails.mockResolvedValue({ ...page([email('cached')], null, false), coverage: { ...page().coverage, headersComplete: false, windowCapped: true } })
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     expect(screen.getByText(/同步覆盖受限/)).toBeInTheDocument()
     expect(screen.queryByText('正在同步邮件…')).not.toBeInTheDocument()
@@ -362,7 +364,7 @@ describe('synced inbox headers', () => {
     expect(screen.queryByText(/邮件同步失败/)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))
     client.listEmails.mockResolvedValue(page([], null, false))
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '没有' } })
+    await searchFor('没有')
     expect(await screen.findByText('没有匹配的邮件')).toBeInTheDocument()
     expect(screen.getByText(/邮件同步失败/)).toBeInTheDocument()
   })
@@ -371,7 +373,7 @@ describe('synced inbox headers', () => {
     const { client, emit } = setup()
     const snapshot = deferred<AccountSyncState[]>()
     client.listSyncStates.mockReturnValue(snapshot.promise)
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('等待同步邮件…')
     emit(exampleSyncState({ sequence: 5, folders: [exampleFolderSyncState('inbox', { phase: 'syncing' })] }))
     expect(await screen.findByText('正在同步邮件…')).toBeInTheDocument()
@@ -387,7 +389,7 @@ describe('synced inbox headers', () => {
     client.listFolders.mockReturnValueOnce(oldFolders.promise).mockResolvedValue([sent])
     const fresh = exampleSyncState({ sequence: 20, folderRevision: 1, folders: [exampleFolderSyncState('sent', { dataRevision: 2 })] })
     client.listSyncStates.mockResolvedValue([fresh])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(1))
     // The initial account identity is not known yet, so this event cannot be accepted.
     emit(fresh)
@@ -407,7 +409,7 @@ describe('synced inbox headers', () => {
       generation: 1, sequence: 20, folderRevision: 1,
       folders: [exampleFolderSyncState('inbox', { dataRevision: 1 }), exampleFolderSyncState('archive', { dataRevision: 1 })],
     })])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('button', { name: 'Removed' })
     await screen.findByText('邮件 before-restart')
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
@@ -426,7 +428,7 @@ describe('synced inbox headers', () => {
   it('hides old source rows and detail while the replacement query is still pending', async () => {
     const selected = email('old-source')
     const { client, emit } = setup([selected])
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
     await screen.findByRole('heading', { name: selected.subject })
@@ -447,7 +449,7 @@ describe('synced inbox headers', () => {
     const sentMail = email('sent-only', { folderId: 'sent' })
     const { client, emit } = setup([sentMail])
     client.listEmails.mockImplementation(async (query) => page(query.folderId === 'sent' ? [sentMail] : []))
-    render(<Workbench client={client} />)
+    render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('button', { name: '已发送' })
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     await screen.findByRole('list', { name: '邮件列表' })

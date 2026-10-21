@@ -11,5 +11,6 @@
 | [存储与搜索](storage-search.md) | 数据身份、表结构、缓存、全文索引和一致性备份 |
 | [网络与安全](network-security.md) | 代理、OAuth、密钥、HTML、日志和外部数据访问 |
 | [桌面与 Web](desktop-web.md) | 两种宿主、前端数据流、进程生命周期和部署 |
+| [界面设计语言](ui-design.md) | 画布与浮动岛屿、无分割线、自有外壳组件、标题栏插槽与命令面板 |
 
 接口结构以[应用契约](../contracts/app-api.md)与 [MCP 契约](../contracts/mcp.md)为入口；模型执行另见 [AI Runtime](../ai-runtime/README.md)。

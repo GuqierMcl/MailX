@@ -1,12 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
 import { testClient } from '@/features/accounts/test-fixtures'
+import { searchFor } from '@/test/search'
+import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
 async function renderWorkbench() {
-  render(<Workbench client={createMockClient()} />)
+  render(withTitleBar(<Workbench client={createMockClient()} />))
   const list = await screen.findByRole('list', { name: '邮件列表' })
   return { list }
 }
@@ -39,8 +41,7 @@ describe('workbench', () => {
       for (const row of rows()) expect(within(row).getByLabelText('未读')).toBeInTheDocument()
     })
 
-    // jsdom has no layout, so the resize handle's hit test swallows pointer input; set the value directly.
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索邮件' }), { target: { value: '不存在的关键词' } })
+    await searchFor('不存在的关键词')
     expect(await screen.findByText('没有匹配的邮件')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
   })
@@ -53,7 +54,7 @@ describe('workbench', () => {
   })
 
   it('opens a new account form when there are no accounts', async () => {
-    render(<Workbench client={testClient()} />)
+    render(withTitleBar(<Workbench client={testClient()} />))
     await userEvent.click(await screen.findByRole('button', { name: '添加邮箱账号' }))
     const dialog = await screen.findByRole('dialog', { name: '设置' })
     expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue('')

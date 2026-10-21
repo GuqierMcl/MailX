@@ -14,7 +14,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -36,7 +35,6 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Toolbar disabled={!email} />
-      <Separator />
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
@@ -88,8 +86,7 @@ function Toolbar({ disabled }: { disabled: boolean }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
       {ACTIONS.map((group, index) => (
-        <div key={index} className="flex items-center gap-1">
-          {index > 0 && <Separator orientation="vertical" className="mx-1 h-5" />}
+        <div key={index} className="flex items-center gap-1 not-first:ml-3">
           {group.map(([label, icon]) => (
             <Button key={label} variant="ghost" size="icon" aria-label={label} title={`${label}（尚未实现）`} disabled>
               <HugeiconsIcon icon={icon} />
@@ -131,13 +128,11 @@ function EmailContent({ email, ...props }: ContentProps) {
           </div>
         </header>
       </ScrollArea>
-        <Separator />
         <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
           <Body email={email} {...props} />
         </div>
         {attachments.length > 0 && (
           <>
-            <Separator />
             <section className="flex max-h-36 shrink-0 flex-col gap-2 overflow-auto p-4" aria-label="附件">
               <h3 className="text-xs font-medium text-muted-foreground">{attachments.length} 个附件</h3>
               <ul className="flex flex-wrap gap-2">

@@ -28,7 +28,7 @@ function isDragSurface(event: MouseEvent<HTMLElement>) {
 
 /** Lets pages place actions into the title bar with `TitleBarActions`, keeping their React context. */
 export function TitleBarSlotsProvider({ children }: { children: ReactNode }) {
-  const [slots, setSlots] = useState<TitleBarSlotElements>({ leading: null, trailing: null })
+  const [slots, setSlots] = useState<TitleBarSlotElements>({ leading: null, center: null, trailing: null })
   const register = useCallback((side: TitleBarSide, element: HTMLElement | null) => {
     setSlots((current) => (current[side] === element ? current : { ...current, [side]: element }))
   }, [])
@@ -38,7 +38,8 @@ export function TitleBarSlotsProvider({ children }: { children: ReactNode }) {
 
 /**
  * Renders actions into the title bar: `leading` sits right after the macOS
- * traffic lights (or the left edge), `trailing` just before the window controls.
+ * traffic lights (or the left edge), `center` fills the space between the two
+ * sides, `trailing` just before the window controls.
  */
 export function TitleBarActions({ side, children }: { side: TitleBarSide; children: ReactNode }) {
   const target = useContext(TitleBarSlotsContext)?.slots[side]
@@ -60,6 +61,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
   const chrome = useWindowChrome(host)
   const register = useContext(TitleBarSlotsContext)?.register
   const leadingSlot = useCallback((element: HTMLElement | null) => register?.('leading', element), [register])
+  const centerSlot = useCallback((element: HTMLElement | null) => register?.('center', element), [register])
   const trailingSlot = useCallback((element: HTMLElement | null) => register?.('trailing', element), [register])
   const pendingDoubleClick = useRef<{ x: number; y: number } | null>(null)
   const platform = chrome?.platform
@@ -119,6 +121,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
           </span>
         )}
         {children}
+        <div ref={centerSlot} data-slot="title-bar-center" className="flex min-w-0 flex-1 items-center justify-center empty:hidden" />
       </div>
       <div ref={trailingSlot} data-slot="title-bar-trailing" className="flex shrink-0 items-center gap-1 px-2 empty:px-0" />
       {platform && chrome.trailing.length > 0 && (
