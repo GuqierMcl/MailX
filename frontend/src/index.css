@@ -52,8 +52,17 @@
 
 body { margin: 0; min-width: 320px; }
 
-/* The shadcn sidebar is fixed to the viewport; keep it below the custom title bar. */
-[data-slot="sidebar-container"] { top: var(--titlebar-height); height: calc(100svh - var(--titlebar-height)); }
+/* The canvas under the title bar and navigation; islands float above it. */
+.app-canvas {
+  --sidebar: oklch(0.95 0 0);
+  --sidebar-accent: oklch(0.905 0 0);
+  --sidebar-border: oklch(0.88 0 0);
+}
+.dark .app-canvas {
+  --sidebar: oklch(0.115 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+}
 
 @theme inline {
   --font-heading: var(--font-sans);

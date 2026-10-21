@@ -104,6 +104,7 @@ describe('TitleBarActions', () => {
       <TitleBarSlotsProvider>
         <TitleBar host={host} title="MailX" />
         <TitleBarActions side="leading"><button type="button">折叠</button></TitleBarActions>
+        <TitleBarActions side="center"><input aria-label="搜索" /></TitleBarActions>
         <TitleBarActions side="trailing"><button type="button">更多</button></TitleBarActions>
       </TitleBarSlotsProvider>,
     )
@@ -113,6 +114,7 @@ describe('TitleBarActions', () => {
     const trailing = header.querySelector('[data-slot="title-bar-trailing"]')!
     expect(leading).toContainElement(await screen.findByRole('button', { name: '折叠' }))
     expect(trailing).toContainElement(screen.getByRole('button', { name: '更多' }))
+    expect(header.querySelector('[data-slot="title-bar-center"]')).toContainElement(screen.getByRole('textbox', { name: '搜索' }))
     // The trailing actions sit directly before the window controls.
     expect(trailing.nextElementSibling).toHaveAttribute('data-slot', 'window-controls')
 

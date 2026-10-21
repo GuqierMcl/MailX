@@ -6,19 +6,22 @@ import type { AccountSyncState } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
+import { CommandPalette } from './command-palette'
+import { MailSearch } from './mail-search'
 import { EmailView } from './email-view'
 import { emailQuery } from './format'
+import { NAV_DEFAULT } from '@/features/shell/nav-width'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
+import { ShellLayout } from '@/features/shell/shell-layout'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
-import { useSettings } from '@/features/settings/settings-queries'
+import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
-import { mailboxTitle, type Mailbox } from './mailbox'
+import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody } from './use-email-body'
 
@@ -33,6 +36,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -45,7 +49,10 @@ export function Workbench({ client }: { client: MailxClient }) {
       return { accounts, folders }
     },
   })
-  const senderAvatars = useSettings(client).data?.settings.security.senderAvatars ?? false
+  const settingsQuery = useSettings(client)
+  const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
+  const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
+  const { mutate: saveLayout } = useUpdateLayout(client)
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
   const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
@@ -189,6 +196,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     )
   }
   const showAccountBadges = activeMailbox.kind === 'unified' && accounts.length > 1
+  const searchScope = activeMailbox.kind === 'folder'
+    ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
+    : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
 
   const selectMailbox = (next: Mailbox) => {
@@ -199,59 +209,81 @@ export function Workbench({ client }: { client: MailxClient }) {
   return (
     <TooltipProvider>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
-      <SidebarProvider className="h-full min-h-0">
-        <MailSidebar
+      <ShellLayout
+        navLabel="邮箱导航"
+        navWidth={navWidth}
+        onNavWidthChange={(width) => saveLayout({ navWidth: width })}
+        nav={(
+          <MailSidebar
+            accounts={accounts}
+            folders={folders}
+            loading={treeLoading}
+            syncStates={currentSyncStates}
+            mailbox={activeMailbox}
+            onSelect={selectMailbox}
+            onOpenSettings={() => setSettings({ section: 'appearance' })}
+            onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
+          />
+        )}
+      >
+        <TitleBarActions side="center">
+          <MailSearch value={search} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
+        </TitleBarActions>
+        <CommandPalette
+          client={client}
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          scope={searchScope}
+          search={search}
+          folderId={folderId}
+          folderRole={folderRole}
+          sourceIdentity={sourceIdentity}
           accounts={accounts}
           folders={folders}
-          loading={treeLoading}
-          syncStates={currentSyncStates}
-          mailbox={activeMailbox}
-          onSelect={selectMailbox}
-          onOpenSettings={() => setSettings({ section: 'appearance' })}
-          onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
+          onApplySearch={setSearch}
+          onOpenEmail={(email, text) => {
+            setSearch(text)
+            setSelectedId(email.id)
+          }}
+          onSelectMailbox={selectMailbox}
+          onOpenSettings={setSettings}
         />
-        <TitleBarActions side="leading">
-          <SidebarTrigger aria-label="折叠或展开侧边栏" />
-        </TitleBarActions>
-        <SidebarInset className="min-h-0 min-w-0">
-          <ResizablePanelGroup orientation="horizontal" className="min-h-0">
-            <ResizablePanel defaultSize="40" minSize={300}>
-              <EmailList
-                title={mailboxTitle(activeMailbox)}
-                emails={emails}
-                accounts={showAccountBadges ? accounts : null}
-                loading={treeLoading || list.isPending}
-                syncStatus={folderSyncStatus(scopedFolders, currentSyncStates, pages?.at(-1)?.coverage.windowCapped ?? false)}
-                hasMore={list.hasNextPage}
-                loadingMore={list.isFetchingNextPage}
-                refreshing={list.isFetching && !list.isFetchingNextPage}
-                stale={list.isPlaceholderData}
-                loadMoreError={list.isFetchNextPageError ? clientFailure(list.error).message : null}
-                error={tree.isError ? clientFailure(tree.error).message : firstPageError}
-                filter={filter}
-                search={search}
-                selectedId={selected}
-                onFilterChange={setFilter}
-                onSearchChange={setSearch}
-                onSelect={(email) => setSelectedId(email.id)}
-                onLoadMore={loadMore}
-              />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize="60" minSize={360}>
-              <EmailView
-                key={`${selected}:${body.identity}`}
-                client={client}
-                email={selected ? body.email : null}
-                loading={selected !== null && body.detail.isPending}
-                error={selected && body.detail.isError ? clientFailure(body.detail.error).message : null}
-                downloading={body.pending}
-                onDownload={body.download}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </SidebarInset>
-      </SidebarProvider>
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0">
+          <ResizablePanel defaultSize="40" minSize={300} className="bg-muted/40">
+            <EmailList
+              title={mailboxTitle(activeMailbox)}
+              emails={emails}
+              accounts={showAccountBadges ? accounts : null}
+              loading={treeLoading || list.isPending}
+              syncStatus={folderSyncStatus(scopedFolders, currentSyncStates, pages?.at(-1)?.coverage.windowCapped ?? false)}
+              hasMore={list.hasNextPage}
+              loadingMore={list.isFetchingNextPage}
+              refreshing={list.isFetching && !list.isFetchingNextPage}
+              stale={list.isPlaceholderData}
+              loadMoreError={list.isFetchNextPageError ? clientFailure(list.error).message : null}
+              error={tree.isError ? clientFailure(tree.error).message : firstPageError}
+              filter={filter}
+              search={search}
+              selectedId={selected}
+              onFilterChange={setFilter}
+              onSelect={(email) => setSelectedId(email.id)}
+              onLoadMore={loadMore}
+            />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel defaultSize="60" minSize={360}>
+            <EmailView
+              key={`${selected}:${body.identity}`}
+              client={client}
+              email={selected ? body.email : null}
+              loading={selected !== null && body.detail.isPending}
+              error={selected && body.detail.isError ? clientFailure(body.detail.error).message : null}
+              downloading={body.pending}
+              onDownload={body.download}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </ShellLayout>
       </AvatarSourceProvider>
       {dialog}
     </TooltipProvider>

@@ -18,7 +18,6 @@ import type { Account, AccountSyncState, Folder, FolderRole, SyncFailure } from 
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
-  Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -78,7 +77,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
 
   return (
-    <Sidebar collapsible="offcanvas">
+    <div data-slot="mail-sidebar" className="flex h-full min-h-0 flex-col">
       <SidebarHeader>
         {/* Composing is not implemented yet. */}
         <Button className="w-full" disabled>
@@ -184,7 +183,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
-    </Sidebar>
+    </div>
   )
 }
 

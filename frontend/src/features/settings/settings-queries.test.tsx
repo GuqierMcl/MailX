@@ -14,7 +14,7 @@ describe('AppearanceSync', () => {
   it('applies the core settings and refreshes the first-paint cache', async () => {
     const client = testClient()
     const appearance = { ...DEFAULT_APPEARANCE, theme: 'dark' as const, accentColor: '#16a34a' }
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance, security: { remoteImages: 'ask', senderAvatars: false } }, stored: true, recovered: false })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 } }, stored: true, recovered: false })
     render(<AppearanceSync client={client} />)
 
     await waitFor(() => expect(document.documentElement).toHaveClass('dark'))
@@ -25,7 +25,7 @@ describe('AppearanceSync', () => {
   it('imports the legacy theme once when no settings file exists yet', async () => {
     localStorage.setItem('mailx.theme', 'dark')
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false } }, stored: false, recovered: false })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 } }, stored: false, recovered: false })
     render(<AppearanceSync client={client} />)
 
     await waitFor(() => expect(localStorage.getItem('mailx.theme')).toBeNull())

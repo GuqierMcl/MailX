@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState } from '@/features/accounts/test-fixtures'
 import type { AccountSyncState, Folder } from '@/generated/accounts'
-import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MailSidebar } from './mail-sidebar'
 
@@ -16,18 +15,16 @@ const inbox: Folder = {
 function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRefresh: (accountId: string) => void }) {
   return (
     <TooltipProvider>
-      <SidebarProvider>
-        <MailSidebar
-          accounts={[account]}
-          folders={[inbox]}
-          loading={false}
-          syncStates={sync ? { [account.id]: sync } : {}}
-          mailbox={{ kind: 'unified', role: 'inbox' }}
-          onSelect={vi.fn()}
-          onOpenSettings={vi.fn()}
-          onRefresh={onRefresh}
-        />
-      </SidebarProvider>
+      <MailSidebar
+        accounts={[account]}
+        folders={[inbox]}
+        loading={false}
+        syncStates={sync ? { [account.id]: sync } : {}}
+        mailbox={{ kind: 'unified', role: 'inbox' }}
+        onSelect={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onRefresh={onRefresh}
+      />
     </TooltipProvider>
   )
 }

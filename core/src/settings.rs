@@ -19,6 +19,10 @@ const BACKUP_FILE_NAME: &str = "settings.json.bak";
 const CURRENT_VERSION: u32 = 1;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 
+pub const NAV_WIDTH_MIN: u32 = 220;
+pub const NAV_WIDTH_MAX: u32 = 420;
+const NAV_WIDTH_DEFAULT: u32 = 256;
+
 const MAX_FONT_FAMILIES: usize = 16;
 const MAX_FONT_FAMILY_CHARS: usize = 64;
 
@@ -84,6 +88,22 @@ pub struct SecuritySettings {
     pub sender_avatars: bool,
 }
 
+/// Window layout preferences, in CSS pixels.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LayoutSettings {
+    /// Width of the navigation sidebar, `220..=420`.
+    pub nav_width: u32,
+}
+
+impl Default for LayoutSettings {
+    fn default() -> Self {
+        Self {
+            nav_width: NAV_WIDTH_DEFAULT,
+        }
+    }
+}
+
 /// Section updates merge under the store lock so simultaneous saves cannot
 /// overwrite another settings page with a stale frontend snapshot.
 #[derive(Clone, Debug, Default, Deserialize, TS)]
@@ -91,6 +111,7 @@ pub struct SecuritySettings {
 pub struct SettingsPatch {
     pub appearance: Option<AppearanceSettings>,
     pub security: Option<SecuritySettings>,
+    pub layout: Option<LayoutSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -98,6 +119,7 @@ pub struct SettingsPatch {
 pub struct AppSettings {
     pub appearance: AppearanceSettings,
     pub security: SecuritySettings,
+    pub layout: LayoutSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -127,8 +149,12 @@ impl AppSettings {
     /// Validates client input and returns its canonical form.
     pub fn normalized(self) -> Result<Self, AppError> {
         let appearance = self.appearance;
+        if !(NAV_WIDTH_MIN..=NAV_WIDTH_MAX).contains(&self.layout.nav_width) {
+            return Err(AppError::validation("layout.navWidth"));
+        }
         Ok(Self {
             security: self.security,
+            layout: self.layout,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -147,6 +173,9 @@ impl AppSettings {
         let appearance = self.appearance;
         Self {
             security: self.security,
+            layout: LayoutSettings {
+                nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
+            },
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .unwrap_or(defaults.accent_color),
@@ -328,6 +357,9 @@ impl SettingsStore {
             security: patch
                 .security
                 .unwrap_or_else(|| state.settings.security.clone()),
+            layout: patch
+                .layout
+                .unwrap_or_else(|| state.settings.layout.clone()),
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;

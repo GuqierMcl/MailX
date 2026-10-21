@@ -4,9 +4,7 @@ import type { Account, EmailSummary } from '@/generated/accounts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
@@ -40,13 +38,12 @@ type EmailListProps = {
   search: string
   selectedId: string | null
   onFilterChange: (filter: ListFilter) => void
-  onSearchChange: (search: string) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
 }
 
 export function EmailList(props: EmailListProps) {
-  const { title, filter, search, onFilterChange, onSearchChange } = props
+  const { title, filter, onFilterChange } = props
   return (
     <Tabs
       value={filter}
@@ -60,23 +57,6 @@ export function EmailList(props: EmailListProps) {
           <TabsTrigger value="unread">未读</TabsTrigger>
         </TabsList>
       </div>
-      <Separator />
-      <div className="p-3">
-        <div className="relative">
-          <HugeiconsIcon
-            icon={Search01Icon}
-            className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            type="search"
-            aria-label="搜索邮件"
-            placeholder="搜索主题或发件人"
-            className="pl-7"
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-          />
-        </div>
-      </div>
       <EmailRows {...props} />
     </Tabs>
   )
@@ -89,7 +69,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
     // Nothing for the first moments: local data usually arrives before a
     // placeholder would be worth showing, and a flash is worse than a blink of blank.
     return showSkeleton ? (
-      <div className="flex animate-in flex-col gap-2 px-3 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
+      <div className="flex animate-in flex-col gap-2 px-3 pt-3 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
         {Array.from({ length: 6 }, (_, index) => (
           <Skeleton key={index} className="h-20 w-full" />
         ))}
@@ -154,7 +134,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
         aria-label="邮件列表"
         aria-busy={stale || undefined}
         className={cn(
-          'flex animate-in flex-col gap-2 px-3 pb-3 duration-150 fade-in-0 transition-opacity',
+          'flex animate-in flex-col gap-2 px-3 py-3 duration-150 fade-in-0 transition-opacity',
           stale && 'pointer-events-none opacity-50',
         )}
       >
@@ -193,8 +173,8 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
       aria-current={selected ? 'true' : undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-start gap-3 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent',
-        selected && 'bg-muted',
+        'flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm transition-colors hover:bg-foreground/5',
+        selected && 'bg-background shadow-xs hover:bg-background',
       )}
     >
       <SenderAvatar sender={email.from} accountId={email.accountId} className="mt-0.5" />
@@ -216,7 +196,7 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
           </div>
         </div>
         {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
-        {account && <Badge variant="outline">{account.displayName}</Badge>}
+        {account && <Badge variant="secondary">{account.displayName}</Badge>}
       </div>
     </button>
   )
