@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
 import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
@@ -33,7 +34,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
   const update = useUpdateAppearance(client)
 
   if (settings.isPending) {
-    return <div className="flex justify-center p-10"><Spinner className="size-5 text-muted-foreground" /></div>
+    return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5 text-muted-foreground" /></div></Delayed>
   }
   if (settings.isError) {
     return (

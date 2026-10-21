@@ -690,3 +690,24 @@ fn body_marker_merges_with_existing_class_and_cannot_be_forged_into_other_attrib
     assert!(html.contains(r#"class="mailx-body x""#), "{html}");
     assert!(!html.contains("data-mailx-body"), "{html}");
 }
+
+#[test]
+fn favicons_are_decoded_under_limits_and_always_leave_as_png() {
+    use image::{DynamicImage, ImageFormat};
+    let mut ico = std::io::Cursor::new(Vec::new());
+    DynamicImage::new_rgba8(32, 32)
+        .write_to(&mut ico, ImageFormat::Ico)
+        .unwrap();
+    for mime in ["image/x-icon", "image/vnd.microsoft.icon", "IMAGE/ICO"] {
+        let rendered = validate_image(ico.get_ref(), mime).unwrap();
+        assert_eq!(rendered.mime_type, "image/png", "{mime}");
+        assert_eq!(
+            image::guess_format(&rendered.bytes).unwrap(),
+            ImageFormat::Png
+        );
+    }
+    // The declared type must match, and garbage is not an icon.
+    assert!(validate_image(ico.get_ref(), "image/png").is_err());
+    assert!(validate_image(b"\0\0\x01\0\x01\0 not really an icon", "image/x-icon").is_err());
+    assert!(validate_image(b"", "image/x-icon").is_err());
+}

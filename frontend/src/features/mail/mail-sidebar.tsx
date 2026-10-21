@@ -9,6 +9,7 @@ import {
   Folder01Icon,
   InboxIcon,
   PencilEdit02Icon,
+  RefreshIcon,
   SentIcon,
   Settings01Icon,
   SpamIcon,
@@ -32,8 +33,8 @@ import {
   SidebarMenuSkeleton,
   SidebarMenuSub,
 } from '@/components/ui/sidebar'
-import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
 import { buildFolderTree, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
@@ -57,9 +58,11 @@ type MailSidebarProps = {
   mailbox: Mailbox
   onSelect: (mailbox: Mailbox) => void
   onOpenSettings: () => void
+  /** Starts the account's next sync round now. */
+  onRefresh: (accountId: string) => void
 }
 
-export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenSettings }: MailSidebarProps) {
+export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenSettings, onRefresh }: MailSidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const toggle = (id: string, open: boolean) => {
     const next = new Set(collapsed)
@@ -124,12 +127,19 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                     render={<SidebarMenuItem />}
                   >
                     <CollapsibleTrigger
-                      render={<SidebarMenuButton title={account.emailAddress} className="font-medium" />}
+                      render={<SidebarMenuButton title={account.emailAddress} className={cn('font-medium', sync?.failure ? 'pr-14' : 'pr-8')} />}
                     >
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
-                    {(!countsKnown || unread > 0) && <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(sync?.failure && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>}
+                    <AccountSyncSlot
+                      unread={unread}
+                      countsKnown={countsKnown}
+                      syncing={sync?.phase === 'syncing'}
+                      label={account.displayName}
+                      onRefresh={() => onRefresh(account.id)}
+                      className={cn(sync?.failure && 'right-7')}
+                    />
                     {sync?.failure && <SyncFailureAction failure={sync.failure} />}
                     <CollapsibleContent>
                       <SidebarMenuSub>
@@ -138,7 +148,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                             <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
                               {sync?.phase === 'failed' || sync?.phase === 'idle' ? '暂无文件夹' : (
                                 <>
-                                  <Spinner className="size-3.5" aria-label="正在同步" />
+                                  <SyncIcon className="size-3.5" spinning />
                                   正在同步文件夹…
                                 </>
                               )}
@@ -175,6 +185,66 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+  )
+}
+
+/** The sync glyph; it turns while a round runs. */
+function SyncIcon({ spinning, className }: { spinning: boolean; className?: string }) {
+  return (
+    <HugeiconsIcon
+      icon={RefreshIcon}
+      strokeWidth={2}
+      className={cn(className, spinning && 'animate-spin [animation-duration:1.4s]')}
+    />
+  )
+}
+
+/**
+ * Sync status and manual refresh belong to each account's top-level row only.
+ * While the account syncs (after a short delay, so quick background checks
+ * don't blink) a turning glyph replaces the unread count; otherwise hovering
+ * or focusing this row turns the count into a refresh button. Folder rows
+ * below never react. `--show` is set only by this row's own button or slot,
+ * never by an ancestor, because the account's `li` contains its whole subtree.
+ */
+function AccountSyncSlot({ unread, countsKnown, syncing, label, onRefresh, className }: {
+  unread: number
+  countsKnown: boolean
+  syncing: boolean
+  label: string
+  onRefresh: () => void
+  className?: string
+}) {
+  const turning = useDelayedFlag(syncing, 400, 700)
+  const showCount = !countsKnown || unread > 0
+  const canRefresh = !syncing
+  return (
+    <div
+      className={cn(
+        'absolute top-1.5 right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden [--show:0]',
+        canRefresh && 'peer-hover/menu-button:text-sidebar-accent-foreground peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
+        className,
+      )}
+    >
+      <span className={cn('pointer-events-none flex items-center transition-opacity', canRefresh && 'opacity-[calc(1-var(--show))]')}>
+        {turning ? (
+          <span role="status" aria-label="正在同步"><SyncIcon className="size-3.5" spinning /></span>
+        ) : showCount && (
+          <span aria-label={!countsKnown ? '未读数待刷新' : undefined}>{countsKnown ? unread : '—'}</span>
+        )}
+      </span>
+      {canRefresh && (
+        <button
+          type="button"
+          aria-label={`立即同步 ${label}`}
+          title={`立即同步 ${label}`}
+          onClick={onRefresh}
+          className="absolute inset-0 flex items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <SyncIcon className="size-3.5" spinning={false} />
+        </button>
+      )}
+    </div>
   )
 }
 

@@ -37,6 +37,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar'
+import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountForm } from '@/features/accounts/account-form'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
@@ -288,10 +289,12 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
     if (editing && !account) {
       return (
         <SettingsPage>
-          <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-3">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-48 w-full" />
-          </div>
+          <Delayed>
+            <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          </Delayed>
         </SettingsPage>
       )
     }
@@ -319,10 +322,12 @@ function AccountsSection({ client, editing, onEdit, onEditingName, onBack, onDir
     <SettingsPage>
       {loadFailure}
       {!accounts && !error && (
-        <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-2">
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
-        </div>
+        <Delayed>
+          <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-2">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        </Delayed>
       )}
       {accounts?.length === 0 && (
         <Empty className="border">

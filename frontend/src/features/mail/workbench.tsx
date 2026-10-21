@@ -15,6 +15,8 @@ import { EmailView } from './email-view'
 import { emailQuery } from './format'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
+import { useSettings } from '@/features/settings/settings-queries'
+import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
 import { mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
@@ -43,6 +45,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       return { accounts, folders }
     },
   })
+  const senderAvatars = useSettings(client).data?.settings.security.senderAvatars ?? false
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
   const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
@@ -135,6 +138,11 @@ export function Workbench({ client }: { client: MailxClient }) {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     enabled: !treeLoading,
+    // Keep the previous rows (dimmed) while the next folder or filter loads, so
+    // switching never blanks the list. Rows from another mailbox source (a
+    // changed server) are never carried over.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === sourceIdentity ? previous : undefined,
   })
 
   // Only data in this view's folders refreshes it; a refetch reloads every
@@ -190,6 +198,7 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   return (
     <TooltipProvider>
+      <AvatarSourceProvider client={client} enabled={senderAvatars}>
       <SidebarProvider className="h-full min-h-0">
         <MailSidebar
           accounts={accounts}
@@ -199,6 +208,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           mailbox={activeMailbox}
           onSelect={selectMailbox}
           onOpenSettings={() => setSettings({ section: 'appearance' })}
+          onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
         />
         <TitleBarActions side="leading">
           <SidebarTrigger aria-label="折叠或展开侧边栏" />
@@ -215,6 +225,7 @@ export function Workbench({ client }: { client: MailxClient }) {
                 hasMore={list.hasNextPage}
                 loadingMore={list.isFetchingNextPage}
                 refreshing={list.isFetching && !list.isFetchingNextPage}
+                stale={list.isPlaceholderData}
                 loadMoreError={list.isFetchNextPageError ? clientFailure(list.error).message : null}
                 error={tree.isError ? clientFailure(tree.error).message : firstPageError}
                 filter={filter}
@@ -241,6 +252,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           </ResizablePanelGroup>
         </SidebarInset>
       </SidebarProvider>
+      </AvatarSourceProvider>
       {dialog}
     </TooltipProvider>
   )

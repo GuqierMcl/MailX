@@ -106,32 +106,63 @@ impl Drop for ConnectionTask {
     }
 }
 
-pub(crate) async fn fetch(route: NetRoute, value: String) -> Result<InlineImage, AppError> {
+/// How long the HTTPS attempt for a plain-HTTP image may take before the
+/// original address gets its turn.
+const UPGRADE_ATTEMPT: Duration = Duration::from_secs(10);
+
+/// Many campaigns still reference `http://` images from CDNs that serve the
+/// same file over HTTPS. Only plain default-port URLs on named hosts qualify:
+/// an explicit port means something else, and an IP literal has no certificate.
+fn https_upgrade(url: &Url) -> Option<Url> {
+    if url.scheme() != "http"
+        || url.port().is_some()
+        || !matches!(url.host(), Some(url::Host::Domain(_)))
+    {
+        return None;
+    }
+    let mut secure = url.clone();
+    secure.set_scheme("https").ok()?;
+    Some(secure)
+}
+
+pub(crate) async fn fetch(route: &NetRoute, value: String) -> Result<InlineImage, AppError> {
     tokio::time::timeout(Duration::from_secs(30), async {
         let _permit = DOWNLOADS.acquire().await.map_err(|_| rejected())?;
-        let mut url = checked_url(&value)?;
-        for redirects in 0..=3 {
-            let ip = target(&route, &url).await?;
-            let port = url.port_or_known_default().ok_or_else(rejected)?;
-            let mut stream = super::connect(&route, &ip.to_string(), port)
-                .await
-                .map_err(|_| rejected())?;
-            if url.scheme() == "https" {
-                stream =
-                    super::upgrade_tls(stream, url.host_str().unwrap().trim_matches(['[', ']']))
-                        .await
-                        .map_err(|_| rejected())?;
-            }
-            match exchange(stream, &url).await? {
-                ImageReply::Image(image) => return Ok(image),
-                ImageReply::Redirect(next) if redirects < 3 => url = next,
-                _ => return Err(rejected()),
-            }
+        let url = checked_url(&value)?;
+        // Tried first because plain HTTP cannot be used behind a Fake-IP (TUN)
+        // proxy, where the destination can only be authenticated through TLS,
+        // and because it keeps the image off the network in clear text.
+        if let Some(secure) = https_upgrade(&url)
+            && let Ok(Ok(image)) =
+                tokio::time::timeout(UPGRADE_ATTEMPT, follow(route, secure)).await
+        {
+            return Ok(image);
         }
-        Err(rejected())
+        follow(route, url).await
     })
     .await
     .map_err(|_| rejected())?
+}
+
+async fn follow(route: &NetRoute, mut url: Url) -> Result<InlineImage, AppError> {
+    for redirects in 0..=3 {
+        let ip = target(route, &url).await?;
+        let port = url.port_or_known_default().ok_or_else(rejected)?;
+        let mut stream = super::connect(route, &ip.to_string(), port)
+            .await
+            .map_err(|_| rejected())?;
+        if url.scheme() == "https" {
+            stream = super::upgrade_tls(stream, url.host_str().unwrap().trim_matches(['[', ']']))
+                .await
+                .map_err(|_| rejected())?;
+        }
+        match exchange(stream, &url).await? {
+            ImageReply::Image(image) => return Ok(image),
+            ImageReply::Redirect(next) if redirects < 3 => url = next,
+            _ => return Err(rejected()),
+        }
+    }
+    Err(rejected())
 }
 
 enum ImageReply {
@@ -157,7 +188,7 @@ async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, A
         .header(header::HOST, authority)
         .header(
             header::ACCEPT,
-            "image/png,image/jpeg,image/gif,image/webp,image/svg+xml",
+            "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon",
         )
         .header(header::ACCEPT_ENCODING, "identity")
         .header(header::CONNECTION, "close")
@@ -328,7 +359,7 @@ mod tests {
     async fn blocks_credentials_local_targets_and_proxy_dns_before_connecting() {
         assert!(checked_url("https://user:password@example.com/a").is_err());
         assert!(
-            fetch(NetRoute::default(), "http://127.0.0.1/a".into())
+            fetch(&NetRoute::default(), "http://127.0.0.1/a".into())
                 .await
                 .is_err()
         );
@@ -480,5 +511,26 @@ mod tests {
             .0
             .is_err()
         );
+    }
+
+    #[test]
+    fn plain_http_image_urls_on_named_hosts_are_tried_over_https_first() {
+        let upgrade = |value: &str| https_upgrade(&Url::parse(value).unwrap()).map(String::from);
+        assert_eq!(
+            upgrade("http://cdn.example.com/a/b.png?x=1&y=2"),
+            Some("https://cdn.example.com/a/b.png?x=1&y=2".into())
+        );
+        assert_eq!(
+            upgrade("http://cdn.example.com:80/a.png"),
+            Some("https://cdn.example.com/a.png".into())
+        );
+        for kept in [
+            "https://cdn.example.com/a.png",
+            "http://cdn.example.com:8080/a.png",
+            "http://203.0.113.9/a.png",
+            "http://[2001:db8::1]/a.png",
+        ] {
+            assert_eq!(upgrade(kept), None, "{kept}");
+        }
     }
 }

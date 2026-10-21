@@ -11,9 +11,68 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+#[cfg(not(feature = "body-webview-test"))]
+use tauri::{Runtime, plugin::TauriPlugin};
+#[cfg(not(feature = "body-webview-test"))]
+use tauri_plugin_window_state::StateFlags;
 
 pub(crate) const MAIN_WINDOW: &str = "main";
 const STATE_EVENT: &str = "mailx://window-state";
+
+/// What the window-state plugin saves and restores. Two flags are left out on
+/// purpose. DECORATIONS: this module owns the title bar style per platform.
+/// VISIBLE: the plugin would persist "hidden" if the app is quit while hidden
+/// (macOS Cmd+H), and the next launch would then never show the window.
+#[cfg(not(feature = "body-webview-test"))]
+pub(crate) const WINDOW_STATE_FLAGS: StateFlags = StateFlags::SIZE
+    .union(StateFlags::POSITION)
+    .union(StateFlags::MAXIMIZED)
+    .union(StateFlags::FULLSCREEN);
+
+/// Remembers the main window's size, position and maximized / fullscreen state
+/// between launches. A saved position on a monitor that is gone is ignored by
+/// the plugin, which leaves placement to the operating system.
+#[cfg(not(feature = "body-webview-test"))]
+pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
+    tauri_plugin_window_state::Builder::default()
+        .with_state_flags(WINDOW_STATE_FLAGS)
+        .build()
+}
+
+/// Windows: WebView2 settings that page scripts cannot be relied on for.
+/// Keyboard accelerators are handled by the browser layer, and the form-data
+/// prompts and touch gestures are not events at all. The plugin owns the
+/// `unsafe` COM calls this workspace forbids; its own keyboard and pointer
+/// script is not used (the frontend has one, with an exception for text fields),
+/// and default context menus stay on so text fields keep their edit menu.
+#[cfg(all(windows, not(feature = "body-webview-test")))]
+pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
+    use tauri_plugin_prevent_default::{Builder, Flags, PlatformOptions};
+    Builder::new()
+        .with_flags(Flags::empty())
+        .platform(
+            PlatformOptions::new()
+                .browser_accelerator_keys(false)
+                .swipe_navigation(false)
+                .pinch_zoom(false)
+                // A mail client must not offer to remember or autofill form data.
+                .general_autofill(false)
+                .password_autosave(false),
+        )
+        .build_with_manual_injection()
+}
+
+/// Brings the existing window forward when a second launch is attempted. Before
+/// the window exists (the first instance is still starting) there is nothing to do.
+#[cfg(not(feature = "body-webview-test"))]
+pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
 
 /// Traffic light inset for the 40px title bar. wry treats `y` as the height of
 /// the title bar container minus one button, and the buttons keep their native
@@ -88,17 +147,25 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
     let navigation_app = app.clone();
+    // Created hidden: the window-state plugin restores size and position while
+    // the window is built, and showing it afterwards avoids a jump from the
+    // default geometry.
     let builder = WebviewWindowBuilder::from_config(app, &config)?
+        .visible(false)
         .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url));
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(TRAFFIC_LIGHT_POSITION);
+        .traffic_light_position(TRAFFIC_LIGHT_POSITION)
+        // No link preview popup on long press; the builder method is macOS-only.
+        .allow_link_preview(false);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
     let window = builder.build()?;
     watch_state(&window);
+    window.show()?;
+    window.set_focus()?;
     Ok(window)
 }
 
@@ -328,5 +395,44 @@ mod tests {
             linux_double_click_gesture("lower"),
             TitleBarGesture::Nothing
         );
+    }
+
+    #[cfg(not(feature = "body-webview-test"))]
+    #[test]
+    fn window_state_never_restores_decorations_or_visibility() {
+        assert!(!WINDOW_STATE_FLAGS.contains(StateFlags::DECORATIONS));
+        assert!(!WINDOW_STATE_FLAGS.contains(StateFlags::VISIBLE));
+        for kept in [
+            StateFlags::SIZE,
+            StateFlags::POSITION,
+            StateFlags::MAXIMIZED,
+            StateFlags::FULLSCREEN,
+        ] {
+            assert!(WINDOW_STATE_FLAGS.contains(kept), "{kept:?}");
+        }
+    }
+
+    #[cfg(not(feature = "body-webview-test"))]
+    #[test]
+    fn a_second_launch_before_the_window_exists_is_ignored() {
+        let app = tauri::test::mock_app();
+        focus_main_window(app.handle());
+        assert!(app.get_webview_window(MAIN_WINDOW).is_none());
+    }
+
+    #[cfg(not(feature = "body-webview-test"))]
+    // The mock runtime reports every window as visible, so showing and focusing
+    // can only be checked for not failing here; the real effect needs a real window.
+    #[test]
+    fn a_second_launch_with_a_running_window_leaves_the_windows_in_place() {
+        let app = tauri::test::mock_app();
+        for label in [MAIN_WINDOW, "other"] {
+            WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::default())
+                .build()
+                .unwrap();
+        }
+        focus_main_window(app.handle());
+        assert!(app.get_webview_window(MAIN_WINDOW).is_some());
+        assert!(app.get_webview_window("other").is_some());
     }
 }

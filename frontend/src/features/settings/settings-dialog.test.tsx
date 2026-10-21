@@ -24,10 +24,33 @@ describe('settings dialog', () => {
     const select = await within(dialog).findByRole('combobox', { name: '加载远程图片' })
     expect(select).toHaveTextContent('每次询问')
     await userEvent.click(select)
-    expect(screen.getByRole('option', { name: '自动加载' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: '自动加载' })).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('option', { name: '永不加载' }))
     await waitFor(() => expect(select).toHaveTextContent('永不加载'))
-    expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never' } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never', senderAvatars: false } })
+  })
+
+  it('keeps sender avatar lookups off until the avatar switch is turned on', async () => {
+    const { client } = renderDialog(testClient(), { section: 'security' })
+    const toggle = await screen.findByRole('switch', { name: '获取发件人头像与企业图标' })
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ security: { remoteImages: 'ask', senderAvatars: true } })
+  })
+
+  it('clears the image cache on request and reports the result', async () => {
+    const { client } = renderDialog(testClient(), { section: 'security' })
+    await userEvent.click(await screen.findByRole('button', { name: '清除缓存' }))
+    expect(client.clearImageCache).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('已清除')).toBeInTheDocument()
+  })
+
+  it('says so when the image cache could not be cleared', async () => {
+    const client = testClient()
+    client.clearImageCache.mockRejectedValue(new Error('io'))
+    renderDialog(client, { section: 'security' })
+    await userEvent.click(await screen.findByRole('button', { name: '清除缓存' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('清除失败')
   })
 
   it('starts an empty account list with a new-account form', async () => {
@@ -129,7 +152,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

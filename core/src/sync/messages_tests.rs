@@ -954,7 +954,11 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
             fixture.token.revision = account.revision;
         }
         fixture.events.lock().unwrap().clear();
-        let worker = tokio::spawn(super::run(fixture.shared.clone(), fixture.token.clone()));
+        let worker = tokio::spawn(super::run(
+            fixture.shared.clone(),
+            fixture.token.clone(),
+            Default::default(),
+        ));
         let failed = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let state = fixture.shared.states.lock().unwrap()[&fixture.account_id].clone();
@@ -1016,4 +1020,49 @@ async fn an_unchanged_folder_skips_the_full_round_and_reports_no_change() {
     let (result, changed) = run_with(&fixture, unchanged, true, &mut memory).await;
     result.unwrap();
     assert!(!changed, "nothing changed, so readers need not refetch");
+}
+
+#[tokio::test]
+async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let mut account_config = config(json!({"kind":"direct"}));
+    account_config["imap"]["host"] = json!("127.0.0.1");
+    account_config["imap"]["port"] = json!(port);
+    let fixture = fixture_with_config(account_config);
+    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    let worker = tokio::spawn(super::run(
+        fixture.shared.clone(),
+        fixture.token.clone(),
+        wake.clone(),
+    ));
+    let sequence =
+        |fixture: &Fixture| fixture.shared.states.lock().unwrap()[&fixture.account_id].clone();
+    let failed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = sequence(&fixture);
+            if state.phase == SyncPhase::Failed {
+                break state;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // The first retry is due in at least one second; a wake must beat that.
+    wake.notify_one();
+    let woken = tokio::time::timeout(Duration::from_millis(600), async {
+        loop {
+            let state = sequence(&fixture);
+            if state.sequence > failed.sequence {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await;
+    worker.abort();
+    let _ = worker.await;
+    assert!(woken.is_ok(), "the worker kept waiting out its backoff");
 }

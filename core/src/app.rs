@@ -16,9 +16,11 @@ use crate::secrets::SecretStore;
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
 
+mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
+pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
@@ -29,6 +31,8 @@ pub struct MailxCore {
     service: Arc<Mutex<AccountService>>,
     sync: Arc<SyncManager>,
     bodies: Arc<BodyManager>,
+    avatars: Arc<avatars::AvatarCache>,
+    images: Arc<crate::storage::image_cache::ImageCache>,
 }
 
 impl MailxCore {
@@ -40,6 +44,9 @@ impl MailxCore {
         runtime: Handle,
         listener: SyncListener,
     ) -> Result<Self, AppError> {
+        // The image cache is an optimization; a directory that cannot be used
+        // must not stop mail from working.
+        let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let service = AccountService::open(path, secrets)?;
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
@@ -52,6 +59,8 @@ impl MailxCore {
             service,
             sync,
             bodies,
+            avatars: Arc::default(),
+            images,
         })
     }
 
@@ -108,6 +117,13 @@ impl MailxCore {
     /// waiter cancellation and always honors the account's configured route.
     pub async fn fetch_body(&self, email_id: String) -> Result<EmailDetail, AppError> {
         self.bodies.fetch(email_id).await
+    }
+
+    /// Asks an account's sync worker to run its next round now.
+    pub fn refresh_sync(&self, account_id: &str) -> Result<(), AppError> {
+        self.accounts()?.get(account_id)?;
+        self.sync.refresh(account_id);
+        Ok(())
     }
 
     /// Current sync state of every account that has a worker.

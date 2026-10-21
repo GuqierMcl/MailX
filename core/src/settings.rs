@@ -79,6 +79,9 @@ pub enum RemoteImagePolicy {
 #[serde(rename_all = "camelCase", default)]
 pub struct SecuritySettings {
     pub remote_images: RemoteImagePolicy,
+    /// Look sender avatars up on Gravatar, which learns a hash of each sender
+    /// address. Off by default.
+    pub sender_avatars: bool,
 }
 
 /// Section updates merge under the store lock so simultaneous saves cannot

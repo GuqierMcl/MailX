@@ -159,6 +159,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | 命令与参数 | 结果 |
 | --- | --- |
 | `folders_list`，`{ accountId }` | `Folder[]`：该账号当前服务器身份（`mailboxSourceId`）下最近一次同步的文件夹，含 `parentId` 层级、角色、`selectable`（`false` 对应 IMAP `\Noselect` 分组）、`countsKnown` 与未读 / 总数；countsKnown=false 时计数未知 |
+| `refreshSync(accountId)` | `sync_refresh`，`{ accountId }` | 无数据；让该账号的同步 worker 立即开始下一轮，跳过等待或退避。账号不存在返回 `notFound`；登录被拒、需改设置才会重试的账号不会被唤醒（避免锁号），也不报错。重复请求合并为一次 |
 | `sync_states`，无参数 | `AccountSyncState[]`：每个账号的 `phase`（`syncing` / `idle` / `failed`）、`lastSyncedAt`、`failure`、来源 / 运行版本和每目录状态 |
 
 状态变化通过定向到 main 窗口的 `mailx://sync-state` 事件推送，载荷仍是单个 `AccountSyncState`，`sync_states` 返回同形状快照：
@@ -180,7 +181,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
 
-`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 包含 `appearance` 与 `security`。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 
@@ -270,3 +271,19 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 | `CANCELED` / `INTERNAL` | 取消 / 脱敏内部故障 | 409 / 500 |
 
 未知内部异常不原样泄漏路径、SQL、凭证或正文。未来若增加 `details`，按错误类型白名单输出，例如 `retryAfterMs`、`currentRevision`，禁止直接序列化底层异常对象。
+
+### 发件人头像与图片缓存
+
+`getAvatar(accountId, address)` 对应 `avatars_get`，`{ accountId, address }`，返回 `AvatarImage { mimeType, data, kind }`（`data` 为 base64，`kind` 为 `photo` 或 `icon`）或 `null`。`security.senderAvatars` 为 false 时宿主直接返回 null，不发任何请求。
+
+开启后的查找顺序：
+1. Gravatar：规范化（去空白、转小写）地址的 SHA-256，`https://www.gravatar.com/avatar/<hash>?s=96&d=404`，`kind` 为 `photo`。
+2. 发件域名不属于常见个人邮箱（核心内置名单，含子域名匹配，另加用户已配置账号的域名）时，取域名的网站图标，`kind` 为 `icon`：依次尝试发件域名与其可注册父域名（用常见二级后缀的启发式判断，非公共后缀表），每个域名先 DuckDuckGo（`icons.duckduckgo.com/ip3/<domain>.ico`）、失败再 Google（`www.google.com/s2/favicons?domain=<domain>&sz=128`）。只接受由小写字母、数字、连字符组成的 ASCII 域名。个人邮箱域名跳过这一步，避免所有 Gmail 发件人都显示 Google 标志。
+
+披露范围：Gravatar 得知地址的哈希；图标服务得知发件域名的明文。所有请求都经**该账号的网络路由**下载，复用远程图片的下载约束（公网地址、重定向复检、大小与解码校验，结果重新编码）；自定义代理路由无法验证目的地，因此不取、也不回退直连。图标常为 ICO，核心用受限解码取最大尺寸并重新编码为 PNG，ICO 因此也成为远程图片可接受的类型之一。同一时刻最多 3 个头像查找在途，其余排队，避免长列表尾部因超时被误记为无头像。前端始终先显示按地址稳定着色的首字母头像，取到后覆盖；`icon` 在白底上完整显示而不裁切。
+
+远程图片下载：地址是明文 `http://`、使用默认端口且主机是域名时，先尝试同一地址的 `https://`（单独 10 秒上限），失败才回退到原地址；带显式端口或 IP 字面量的地址不升级。这样既避免明文传输，也让邮件里常见的 `http://` 图片在 TUN / Fake-IP 代理下可用——该环境下域名解析为 198.18.0.0/15 的映射地址，明文 HTTP 无法验证目的地而被拒绝，只有 HTTPS 通过证书校验才放行。HTTPS 到 HTTP 的重定向降级仍然拒绝。
+
+图片缓存：核心在数据目录下维护 `image-cache/`，保存已校验并重新编码的 PNG / JPEG，文件名是键的 SHA-256，磁盘上不出现 URL、地址或域名。内容包括头像（按地址）、域名图标（按域名）和已下载的邮件远程图片（按 URL）。命中后无需联网；邮件图片是否可显示仍由宿主按图片策略和文档授权先判断，命中不放宽策略，也仍要求当前有效的文档绑定。总量上限约 200 MB，超限按最近使用时间清理到约 160 MB；头像与图标保留 7 天，邮件图片保留 30 天，超过 60 天未使用的条目在启动时删除。查不到头像或图标的结果只在内存记 1 小时，不落盘。缓存读写失败一律当作未命中，不影响显示。
+
+`clearImageCache()` 对应 `image_cache_clear`，无参数、无数据：删除磁盘与内存中的全部缓存条目。应用自身 CSP 的 `img-src` 为显示头像增加了 `data:`；邮件正文所在的隔离文档不受影响。

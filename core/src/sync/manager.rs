@@ -213,6 +213,8 @@ pub(crate) struct SyncManager {
     shared: Arc<Shared>,
     runtime: Handle,
     workers: Mutex<HashMap<String, JoinHandle<()>>>,
+    /// Ends the wait between rounds early when the user asks for a refresh.
+    wakers: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
 }
 
 impl SyncManager {
@@ -229,6 +231,31 @@ impl SyncManager {
             }),
             runtime,
             workers: Mutex::new(HashMap::new()),
+            wakers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Starts the next round of an account's worker now instead of after its
+    /// wait or backoff. Returns false when no worker is running, e.g. a login
+    /// the server rejected: retrying that without a settings change could lock
+    /// the account, so it is deliberately not woken.
+    pub(crate) fn refresh(&self, account_id: &str) -> bool {
+        let running = self.workers.lock().is_ok_and(|workers| {
+            workers
+                .get(account_id)
+                .is_some_and(|worker| !worker.is_finished())
+        });
+        let wake = self
+            .wakers
+            .lock()
+            .ok()
+            .and_then(|wakers| wakers.get(account_id).cloned());
+        match (running, wake) {
+            (true, Some(wake)) => {
+                wake.notify_one();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -280,9 +307,13 @@ impl SyncManager {
         };
         drop(service);
         let shared = self.shared.clone();
+        let wake = Arc::new(tokio::sync::Notify::new());
+        if let Ok(mut wakers) = self.wakers.lock() {
+            wakers.insert(account_id.to_owned(), wake.clone());
+        }
         workers.insert(
             account_id.to_owned(),
-            self.runtime.spawn(run(shared, token)),
+            self.runtime.spawn(run(shared, token, wake)),
         );
     }
 
@@ -315,7 +346,7 @@ enum Outcome {
     Gone,
 }
 
-async fn run(shared: Arc<Shared>, token: WorkerToken) {
+async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Notify>) {
     let mut failures = 0u32;
     let mut last_folder_refresh = None;
     let mut memory = messages::FolderMemory::new();
@@ -368,7 +399,10 @@ async fn run(shared: Arc<Shared>, token: WorkerToken) {
                 return;
             }
         };
-        tokio::time::sleep(wait).await;
+        tokio::select! {
+            () = tokio::time::sleep(wait) => {}
+            () = wake.notified() => {}
+        }
     }
 }
 

@@ -43,7 +43,11 @@ export function useUpdateSecurity(client: MailxClient) {
   const queryClient = useQueryClient()
   return useMutation({
     scope: { id: 'security-settings' },
-    mutationFn: (security: SecuritySettings) => client.updateSettings({ security }),
+    // Sections are replaced whole, so merge the change into the current values.
+    mutationFn: (change: Partial<SecuritySettings>) => {
+      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.security
+      return client.updateSettings({ security: { remoteImages: 'ask', senderAvatars: false, ...current, ...change } })
+    },
     onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
       ...snapshot, settings: { ...snapshot.settings, appearance: current?.settings.appearance ?? snapshot.settings.appearance },
     })),

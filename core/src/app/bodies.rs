@@ -23,6 +23,8 @@ pub struct BodyBinding {
 }
 
 const MAX_REMOTE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+/// How long a downloaded message image is reused without asking the sender again.
+const REMOTE_IMAGE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Default)]
 struct RemoteImages {
@@ -259,6 +261,13 @@ impl MailxCore {
         if let Some(image) = binding.cached_remote_image(&url)? {
             check(&*self.accounts()?, &binding)?;
             return Ok(image);
+        } // The host has already checked the user's image policy for this document,
+        // so a hit here shows nothing a fresh download would not have shown.
+        let cache_key = format!("remote:{url}");
+        if let Some(image) = self.images.get(&cache_key, REMOTE_IMAGE_TTL) {
+            check(&*self.accounts()?, &binding)?;
+            binding.cache_remote_image(url, &image)?;
+            return Ok(image);
         }
         let core = self.clone();
         let saved = binding.clone();
@@ -271,8 +280,9 @@ impl MailxCore {
         })
         .await
         .map_err(|_| internal())??;
-        let image = crate::net::images::fetch(route, url.clone()).await?;
+        let image = crate::net::images::fetch(&route, url.clone()).await?;
         check(&*self.accounts()?, &binding)?;
+        self.images.put(&cache_key, &image);
         binding.cache_remote_image(url, &image)?;
         Ok(image)
     }

@@ -21,7 +21,7 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 html5ever = "0.39"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "ico"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 # ring avoids the cmake/nasm toolchain aws-lc needs on Windows.

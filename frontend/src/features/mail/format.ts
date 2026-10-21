@@ -24,6 +24,20 @@ export function initials(address: MailAddress) {
   return Array.from(displayName(address))[0]?.toUpperCase() ?? '?'
 }
 
+/** FNV-1a over the lowercase address, mapped onto the color wheel. */
+export function avatarHue(address: string) {
+  let hash = 0x811c9dc5
+  for (const char of address.trim().toLowerCase()) {
+    hash = Math.imul(hash ^ char.codePointAt(0)!, 0x01000193)
+  }
+  return (hash >>> 0) % 360
+}
+
+/** Site icons are tiny and often transparent: show them whole on white, not cropped like a photo. */
+export function avatarImageClass(kind: 'photo' | 'icon') {
+  return kind === 'icon' ? 'bg-white object-contain p-1.5' : undefined
+}
+
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
