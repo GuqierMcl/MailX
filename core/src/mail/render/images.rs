@@ -38,6 +38,15 @@ pub fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, RenderError
         Ok(ImageFormat::WebP) if declared.eq_ignore_ascii_case("image/webp") => {
             (ImageFormat::WebP, "image/webp")
         }
+        // Favicons. The decoder picks the largest embedded entry; the result is
+        // re-encoded as PNG below, like every other non-static format.
+        Ok(ImageFormat::Ico)
+            if ["image/x-icon", "image/vnd.microsoft.icon", "image/ico"]
+                .iter()
+                .any(|mime| declared.eq_ignore_ascii_case(mime)) =>
+        {
+            (ImageFormat::Ico, "image/png")
+        }
         _ => return Err(RenderError::InvalidImage),
     };
     let mut limits = Limits::default();
@@ -50,7 +59,10 @@ pub fn validate(bytes: &[u8], declared: &str) -> Result<InlineImage, RenderError
     let decoded = reader.decode().map_err(|_| RenderError::InvalidImage)?;
     // Render a bounded first frame for animation-capable formats. Serving the
     // original would expose frames that were never decoded under our budget.
-    if matches!(format, ImageFormat::Gif | ImageFormat::WebP) {
+    if matches!(
+        format,
+        ImageFormat::Gif | ImageFormat::WebP | ImageFormat::Ico
+    ) {
         let mut png = Cursor::new(Vec::new());
         decoded
             .write_to(&mut png, ImageFormat::Png)

@@ -12,6 +12,7 @@ use std::{
 
 pub(crate) mod bodies;
 mod folders;
+pub(crate) mod image_cache;
 pub(crate) mod messages;
 mod migrations;
 

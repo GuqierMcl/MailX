@@ -195,8 +195,10 @@ stored: boolean,
  */
 recovered: boolean, };
 
+export type AvatarKind = "photo" | "icon";
+
 export type AvatarImage = { mimeType: string,
 /**
  * Base64 of the re-encoded, validated image.
  */
-data: string, };
+data: string, kind: AvatarKind, };

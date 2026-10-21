@@ -81,6 +81,7 @@ fn main() {
             commands::sync_states,
             commands::sync_refresh,
             commands::avatars_get,
+            commands::image_cache_clear,
             commands::settings_get,
             commands::settings_update,
             commands::window_get_chrome,

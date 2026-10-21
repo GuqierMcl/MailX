@@ -272,6 +272,18 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 未知内部异常不原样泄漏路径、SQL、凭证或正文。未来若增加 `details`，按错误类型白名单输出，例如 `retryAfterMs`、`currentRevision`，禁止直接序列化底层异常对象。
 
-### 发件人头像
+### 发件人头像与图片缓存
 
-`getAvatar(accountId, address)` 对应 `avatars_get`，`{ accountId, address }`，返回 `AvatarImage { mimeType, data }`（`data` 为 base64）或 `null`。`security.senderAvatars` 为 false 时宿主直接返回 null，不发任何请求。开启后，核心把规范化（去空白、转小写）地址的 SHA-256 拼入 `https://www.gravatar.com/avatar/<hash>?s=96&d=404`，经**该账号的网络路由**下载，复用远程图片的下载约束（公网地址、重定向复检、大小与解码校验，结果重新编码）；自定义代理路由无法验证目的地，因此不取头像、也不回退直连。Gravatar 因此可得知某地址的邮件被该用户收到，设置页对此有明确说明。结果（含无头像）在核心内存缓存，找到的 24 小时、未找到或失败的 1 小时，不落盘。前端始终先显示按地址稳定着色的首字母头像，取到真实头像后覆盖。应用自身 CSP 的 `img-src` 为此增加了 `data:`；邮件正文所在的隔离文档不受影响。
+`getAvatar(accountId, address)` 对应 `avatars_get`，`{ accountId, address }`，返回 `AvatarImage { mimeType, data, kind }`（`data` 为 base64，`kind` 为 `photo` 或 `icon`）或 `null`。`security.senderAvatars` 为 false 时宿主直接返回 null，不发任何请求。
+
+开启后的查找顺序：
+1. Gravatar：规范化（去空白、转小写）地址的 SHA-256，`https://www.gravatar.com/avatar/<hash>?s=96&d=404`，`kind` 为 `photo`。
+2. 发件域名不属于常见个人邮箱（核心内置名单，含子域名匹配，另加用户已配置账号的域名）时，取域名的网站图标，`kind` 为 `icon`：依次尝试发件域名与其可注册父域名（用常见二级后缀的启发式判断，非公共后缀表），每个域名先 DuckDuckGo（`icons.duckduckgo.com/ip3/<domain>.ico`）、失败再 Google（`www.google.com/s2/favicons?domain=<domain>&sz=128`）。只接受由小写字母、数字、连字符组成的 ASCII 域名。个人邮箱域名跳过这一步，避免所有 Gmail 发件人都显示 Google 标志。
+
+披露范围：Gravatar 得知地址的哈希；图标服务得知发件域名的明文。所有请求都经**该账号的网络路由**下载，复用远程图片的下载约束（公网地址、重定向复检、大小与解码校验，结果重新编码）；自定义代理路由无法验证目的地，因此不取、也不回退直连。图标常为 ICO，核心用受限解码取最大尺寸并重新编码为 PNG，ICO 因此也成为远程图片可接受的类型之一。同一时刻最多 3 个头像查找在途，其余排队，避免长列表尾部因超时被误记为无头像。前端始终先显示按地址稳定着色的首字母头像，取到后覆盖；`icon` 在白底上完整显示而不裁切。
+
+远程图片下载：地址是明文 `http://`、使用默认端口且主机是域名时，先尝试同一地址的 `https://`（单独 10 秒上限），失败才回退到原地址；带显式端口或 IP 字面量的地址不升级。这样既避免明文传输，也让邮件里常见的 `http://` 图片在 TUN / Fake-IP 代理下可用——该环境下域名解析为 198.18.0.0/15 的映射地址，明文 HTTP 无法验证目的地而被拒绝，只有 HTTPS 通过证书校验才放行。HTTPS 到 HTTP 的重定向降级仍然拒绝。
+
+图片缓存：核心在数据目录下维护 `image-cache/`，保存已校验并重新编码的 PNG / JPEG，文件名是键的 SHA-256，磁盘上不出现 URL、地址或域名。内容包括头像（按地址）、域名图标（按域名）和已下载的邮件远程图片（按 URL）。命中后无需联网；邮件图片是否可显示仍由宿主按图片策略和文档授权先判断，命中不放宽策略，也仍要求当前有效的文档绑定。总量上限约 200 MB，超限按最近使用时间清理到约 160 MB；头像与图标保留 7 天，邮件图片保留 30 天，超过 60 天未使用的条目在启动时删除。查不到头像或图标的结果只在内存记 1 小时，不落盘。缓存读写失败一律当作未命中，不影响显示。
+
+`clearImageCache()` 对应 `image_cache_clear`，无参数、无数据：删除磁盘与内存中的全部缓存条目。应用自身 CSP 的 `img-src` 为显示头像增加了 `data:`；邮件正文所在的隔离文档不受影响。

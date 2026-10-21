@@ -61,6 +61,7 @@ fn main() {
         SecuritySettings,
         AppSettings,
         SettingsSnapshot,
+        AvatarKind,
         AvatarImage,
     );
 }

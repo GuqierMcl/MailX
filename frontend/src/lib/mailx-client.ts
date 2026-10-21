@@ -47,6 +47,8 @@ export interface MailxClient {
   refreshSync(accountId: string): Promise<void>
   /** `null` unless the user enabled sender avatars and the sender has one. */
   getAvatar(accountId: string, address: string): Promise<AvatarImage | null>
+  /** Deletes cached avatars, site icons and downloaded message images. */
+  clearImageCache(): Promise<void>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
@@ -104,6 +106,7 @@ export function createDesktopClient(): MailxClient {
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
+    clearImageCache: () => call<void>('image_cache_clear'),
     onSyncState(listener) {
       if (!available) return () => undefined
       let disposed = false

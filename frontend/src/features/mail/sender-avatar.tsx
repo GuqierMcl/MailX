@@ -4,7 +4,7 @@ import type { MailAddress } from '@/generated/accounts'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import type { MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
-import { avatarHue, initials } from './format'
+import { avatarHue, avatarImageClass, initials } from './format'
 
 type AvatarSource = { client: MailxClient; enabled: boolean }
 
@@ -16,7 +16,7 @@ export function AvatarSourceProvider({ client, enabled, children }: AvatarSource
 }
 
 /** `null` until a real avatar is known; a lookup failure just keeps the generated one. */
-function useAvatarUrl(accountId: string, address: string) {
+function useAvatar(accountId: string, address: string) {
   const source = useContext(AvatarSourceContext)
   const normalized = address.trim().toLowerCase()
   const query = useQuery({
@@ -26,7 +26,9 @@ function useAvatarUrl(accountId: string, address: string) {
     staleTime: 60 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   })
-  return query.data ? `data:${query.data.mimeType};base64,${query.data.data}` : null
+  return query.data
+    ? { url: `data:${query.data.mimeType};base64,${query.data.data}`, kind: query.data.kind }
+    : null
 }
 
 /** A stable color per sender, so the same person looks the same everywhere. */
@@ -36,10 +38,10 @@ export function SenderAvatar({ sender, accountId, size = 'default', className }:
   size?: 'default' | 'sm' | 'lg'
   className?: string
 }) {
-  const url = useAvatarUrl(accountId, sender.address)
+  const avatar = useAvatar(accountId, sender.address)
   return (
     <Avatar size={size} className={className}>
-      {url && <AvatarImage src={url} alt="" />}
+      {avatar && <AvatarImage src={avatar.url} alt="" className={avatarImageClass(avatar.kind)} />}
       <AvatarFallback
         className={cn('text-white')}
         style={{ backgroundColor: `hsl(${avatarHue(sender.address)} 45% 42%)` }}

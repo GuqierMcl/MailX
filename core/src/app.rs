@@ -20,7 +20,7 @@ mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
-pub use avatars::AvatarImage;
+pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
@@ -32,6 +32,7 @@ pub struct MailxCore {
     sync: Arc<SyncManager>,
     bodies: Arc<BodyManager>,
     avatars: Arc<avatars::AvatarCache>,
+    images: Arc<crate::storage::image_cache::ImageCache>,
 }
 
 impl MailxCore {
@@ -43,6 +44,9 @@ impl MailxCore {
         runtime: Handle,
         listener: SyncListener,
     ) -> Result<Self, AppError> {
+        // The image cache is an optimization; a directory that cannot be used
+        // must not stop mail from working.
+        let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let service = AccountService::open(path, secrets)?;
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
@@ -56,6 +60,7 @@ impl MailxCore {
             sync,
             bodies,
             avatars: Arc::default(),
+            images,
         })
     }
 

@@ -33,6 +33,11 @@ export function avatarHue(address: string) {
   return (hash >>> 0) % 360
 }
 
+/** Site icons are tiny and often transparent: show them whole on white, not cropped like a photo. */
+export function avatarImageClass(kind: 'photo' | 'icon') {
+  return kind === 'icon' ? 'bg-white object-contain p-1.5' : undefined
+}
+
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 

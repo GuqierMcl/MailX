@@ -404,6 +404,26 @@ pub(crate) async fn sync_refresh(
     }))
 }
 
+#[tauri::command]
+pub(crate) async fn image_cache_clear(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => {
+            state
+                .run(|core| {
+                    core.clear_image_cache();
+                    Ok(())
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AvatarArgs {

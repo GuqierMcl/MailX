@@ -19,6 +19,7 @@ fn main() {
             "sync_states",
             "sync_refresh",
             "avatars_get",
+            "image_cache_clear",
             "settings_get",
             "settings_update",
             "window_get_chrome",

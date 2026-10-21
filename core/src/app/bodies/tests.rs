@@ -454,3 +454,47 @@ async fn ending_a_reading_drops_images_and_rejects_late_cache_writes() {
     assert!(reopened.cached_remote_image(url).unwrap().is_none());
     reopened.cache_remote_image(url.into(), &image).unwrap();
 }
+
+#[tokio::test]
+async fn downloaded_message_images_persist_across_readings_but_never_bypass_identity() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://example.invalid/pixel\">";
+    let (_directory, core, ids, db) = fixture(&[raw, raw]);
+    let (_, bytes) = synthetic_mail([0, 0, 255], "cache", "pixel");
+    let image = render::validate_image(&bytes, "image/png").unwrap();
+    // The host fetched and validated this earlier; the host is unreachable now.
+    core.images
+        .put("remote:https://example.invalid/pixel", &image);
+
+    let first = core.body_document(ids[0].clone()).await.unwrap();
+    assert_eq!(
+        core.body_remote_image(first.binding.clone(), 0)
+            .await
+            .unwrap()
+            .bytes,
+        bytes
+    );
+    // Ending the reading drops its in-memory copy, not the persisted one.
+    first.binding.release_remote_images();
+    let reopened = core.body_document(ids[0].clone()).await.unwrap();
+    let other = core.body_document(ids[1].clone()).await.unwrap();
+    for binding in [reopened.binding.clone(), other.binding] {
+        assert_eq!(
+            core.body_remote_image(binding, 0).await.unwrap().bytes,
+            bytes
+        );
+    }
+
+    // A cache hit still requires a current binding and a visible message.
+    assert_missing(core.body_remote_image(first.binding, 0).await);
+    db.execute(
+        "UPDATE messages SET remote_state='deleted' WHERE id=?1",
+        [&ids[0]],
+    )
+    .unwrap();
+    assert_missing(core.body_remote_image(reopened.binding, 0).await);
+
+    // Clearing removes what was persisted: with no network the image is gone.
+    core.clear_image_cache();
+    let after = core.body_document(ids[1].clone()).await.unwrap();
+    assert_missing(core.body_remote_image(after.binding, 0).await);
+}
