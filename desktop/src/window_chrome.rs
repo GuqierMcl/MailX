@@ -39,6 +39,46 @@ pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
         .build()
 }
 
+/// Windows: turns off what makes the webview feel like a browser, through the
+/// WebView2 settings so that it also covers the script-less mail body frame,
+/// which page scripts cannot reach. The plugin owns the `unsafe` COM calls this
+/// workspace forbids; its keyboard and pointer script is not used (the frontend
+/// has its own, with an exception for text fields), so there is no manual
+/// injection either.
+///
+/// The price: with default context menus off, text fields lose the native edit
+/// menu on Windows. Ctrl+X/C/V still work.
+#[cfg(all(windows, not(feature = "body-webview-test")))]
+pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
+    use tauri_plugin_prevent_default::{Builder, Flags, PlatformOptions};
+    Builder::new()
+        .with_flags(Flags::empty())
+        .platform(
+            PlatformOptions::new()
+                .browser_accelerator_keys(false)
+                .default_context_menus(false)
+                .swipe_navigation(false)
+                .pinch_zoom(false)
+                // A mail client must not offer to remember or autofill form data.
+                .general_autofill(false)
+                .password_autosave(false),
+        )
+        .build_with_manual_injection()
+}
+
+/// Linux: WebKitGTK's `context-menu` signal covers the whole webview, mail body
+/// frame included. Returning true means "handled", so no menu is shown, except
+/// for editable fields, which keep theirs.
+#[cfg(target_os = "linux")]
+fn suppress_browser_context_menu(window: &WebviewWindow) {
+    use webkit2gtk::{HitTestResultExt, WebViewExt};
+    let _ = window.with_webview(|webview| {
+        webview
+            .inner()
+            .connect_context_menu(|_, _, _, hit| !hit.context_is_editable());
+    });
+}
+
 /// Brings the existing window forward when a second launch is attempted. Before
 /// the window exists (the first instance is still starting) there is nothing to do.
 #[cfg(not(feature = "body-webview-test"))]
@@ -137,7 +177,13 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
         .traffic_light_position(TRAFFIC_LIGHT_POSITION);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
+    // No link preview popup on long press (macOS).
+    let builder = builder.allow_link_preview(false);
     let window = builder.build()?;
+    #[cfg(target_os = "linux")]
+    if !cfg!(debug_assertions) {
+        suppress_browser_context_menu(&window);
+    }
     watch_state(&window);
     window.show()?;
     window.set_focus()?;

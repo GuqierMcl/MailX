@@ -37,6 +37,13 @@ fn main() {
         );
     #[cfg(not(feature = "body-webview-test"))]
     let builder = builder.plugin(window_chrome::window_state_plugin());
+    // Packaged builds only: development keeps the inspector and reload.
+    #[cfg(all(windows, not(feature = "body-webview-test")))]
+    let builder = if cfg!(debug_assertions) {
+        builder
+    } else {
+        builder.plugin(window_chrome::browser_defaults_plugin())
+    };
     #[cfg(all(feature = "body-webview-test", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     body_protocol::register(builder)
