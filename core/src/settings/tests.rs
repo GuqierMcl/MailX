@@ -4,6 +4,7 @@ use tempfile::TempDir;
 fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
         security: SecuritySettings::default(),
+        layout: LayoutSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -201,7 +202,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailTheme": "follow",
                     "fontSize": "default"
                 },
-                "security": { "remoteImages": "ask", "senderAvatars": false }
+                "security": { "remoteImages": "ask", "senderAvatars": false },
+                "layout": { "navWidth": 256 }
             },
             "stored": false,
             "recovered": false
@@ -289,4 +291,53 @@ fn mail_font_is_validated_like_the_interface_font() {
     );
     settings.appearance.mail_font = "Bad;Font".into();
     assert!(settings.normalized().is_err());
+}
+
+#[test]
+fn nav_width_defaults_persists_and_is_validated() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.nav_width, 256);
+
+    let saved = store
+        .patch(SettingsPatch {
+            layout: Some(LayoutSettings { nav_width: 300 }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.layout.nav_width, 300);
+    assert!(file_text(&directory, SETTINGS_FILE_NAME).contains("\"navWidth\": 300"));
+    assert_eq!(
+        SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .settings
+            .layout
+            .nav_width,
+        300
+    );
+
+    for width in [0, 219, 421] {
+        let error = store
+            .patch(SettingsPatch {
+                layout: Some(LayoutSettings { nav_width: width }),
+                ..SettingsPatch::default()
+            })
+            .unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("layout.navWidth"));
+    }
+    assert_eq!(store.get().unwrap().settings.layout.nav_width, 300);
+}
+
+#[test]
+fn hand_edited_nav_width_is_clamped_on_load() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"layout":{"navWidth":9999}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.nav_width, 420);
 }

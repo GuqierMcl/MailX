@@ -94,7 +94,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
       data-slot="title-bar"
       data-platform={platform}
       data-focused={state?.focused ?? true}
-      className="group/title-bar relative flex h-(--titlebar-height) shrink-0 items-stretch border-b bg-sidebar text-sidebar-foreground select-none"
+      className="group/title-bar relative flex h-(--titlebar-height) shrink-0 items-stretch text-sidebar-foreground select-none"
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onContextMenu={(event) => isDragSurface(event) && event.preventDefault()}

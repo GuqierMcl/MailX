@@ -26,7 +26,7 @@ function App() {
       {/* Outside the startup gate: appearance applies even when the core failed to start. */}
       <AppearanceSync client={client} />
       <TitleBarSlotsProvider>
-        <div className="flex h-svh flex-col overflow-hidden">
+        <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
           <TitleBar host={windowHost} title="MailX" />
           <div className="relative min-h-0 flex-1 overflow-auto">
             <StartupGate client={client} />

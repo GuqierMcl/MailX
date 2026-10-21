@@ -183,7 +183,13 @@ export type SecuritySettings = { remoteImages: RemoteImagePolicy,
  */
 senderAvatars: boolean, };
 
-export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, };
+export type LayoutSettings = {
+/**
+ * Width of the navigation sidebar, `220..=420`.
+ */
+navWidth: number, };
+
+export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**

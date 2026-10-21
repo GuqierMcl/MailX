@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppearanceSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
+import type { AppearanceSettings, LayoutSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
 import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
@@ -34,7 +34,11 @@ export function useUpdateAppearance(client: MailxClient) {
       }))
     },
     onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: { ...snapshot.settings, security: current?.settings.security ?? snapshot.settings.security },
+      ...snapshot, settings: {
+        ...snapshot.settings,
+        security: current?.settings.security ?? snapshot.settings.security,
+        layout: current?.settings.layout ?? snapshot.settings.layout,
+      },
     })),
   })
 }
@@ -49,7 +53,27 @@ export function useUpdateSecurity(client: MailxClient) {
       return client.updateSettings({ security: { remoteImages: 'ask', senderAvatars: false, ...current, ...change } })
     },
     onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: { ...snapshot.settings, appearance: current?.settings.appearance ?? snapshot.settings.appearance },
+      ...snapshot, settings: {
+        ...snapshot.settings,
+        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
+        layout: current?.settings.layout ?? snapshot.settings.layout,
+      },
+    })),
+  })
+}
+
+/** Saves window layout such as the sidebar width; the caller shows its own value meanwhile. */
+export function useUpdateLayout(client: MailxClient) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    scope: { id: 'layout-settings' },
+    mutationFn: (layout: LayoutSettings) => client.updateSettings({ layout }),
+    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
+      ...snapshot, settings: {
+        ...snapshot.settings,
+        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
+        security: current?.settings.security ?? snapshot.settings.security,
+      },
     })),
   })
 }

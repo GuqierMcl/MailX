@@ -59,6 +59,7 @@ fn main() {
         AppearanceSettings,
         RemoteImagePolicy,
         SecuritySettings,
+        LayoutSettings,
         AppSettings,
         SettingsSnapshot,
         AvatarKind,

@@ -23,8 +23,8 @@ pub use app::{AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, Mai
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use mail::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, FontSize, MailTheme, RemoteImagePolicy, SecuritySettings,
-    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    AppSettings, AppearanceSettings, FontSize, LayoutSettings, MailTheme, RemoteImagePolicy,
+    SecuritySettings, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
