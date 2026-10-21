@@ -6,8 +6,7 @@
  * undo) and Tab navigation are untouched.
  *
  * This covers the app document only. The mail body lives in a script-less
- * sandboxed frame that page scripts cannot reach; the desktop host handles
- * that frame natively where the platform allows it.
+ * sandboxed frame that page scripts cannot reach, and is deliberately left as is.
  */
 
 const EDITABLE =

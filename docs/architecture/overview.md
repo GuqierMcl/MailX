@@ -35,7 +35,7 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 | --- | --- | --- |
 | UI | React + TypeScript + Vite，已初始化 | 三栏工作台与设置弹窗；桌面通过 MailxClient 读取同步文件夹、各目录头部、统一列表与分页，普通浏览器预览使用 mock；HTTP 留待后续 |
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
-| 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文经自定义协议与空 sandbox iframe 隔离；`tauri-plugin-single-instance` 使第二次启动只唤起已运行的窗口，`tauri-plugin-window-state` 记住主窗口的大小、位置与最大化 / 全屏（刻意不恢复窗口装饰与可见性，主窗口先隐藏创建、恢复后再显示）；打包版本去掉浏览器默认行为（右键菜单、刷新 / 打印 / 查找 / 检查器快捷键等），主界面靠前端拦截，邮件正文所在的沙箱 iframe 在 Windows / Linux 靠原生设置，macOS 尚未覆盖 |
+| 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文经自定义协议与空 sandbox iframe 隔离；`tauri-plugin-single-instance` 使第二次启动只唤起已运行的窗口，`tauri-plugin-window-state` 记住主窗口的大小、位置与最大化 / 全屏（刻意不恢复窗口装饰与可见性，主窗口先隐藏创建、恢复后再显示）；打包版本去掉浏览器默认行为（右键菜单、刷新 / 打印 / 查找 / 检查器快捷键等），主界面靠前端拦截，Windows 另用 WebView2 设置关闭浏览器快捷键与表单记忆；邮件正文所在的沙箱 iframe 有意不处理 |
 | 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
 | 接收 / 发送 | `async-imap` 0.12 用于文件夹与各目录头部同步；`lettre` 候选 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 与 `ammonia` 4 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |

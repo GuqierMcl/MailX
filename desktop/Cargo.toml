@@ -35,7 +35,6 @@ keyring = { version = "3.6.3", features = ["windows-native"] }
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
 # Already pulled in by Tauri; used to read GtkSettings title bar preferences.
 gtk = "0.18.2"
-webkit2gtk = "2.0.2"
 
 [target."cfg(windows)".dependencies]
 tauri-plugin-prevent-default = { version = "6", features = ["platform-windows"] }
