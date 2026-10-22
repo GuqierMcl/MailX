@@ -166,3 +166,48 @@ fn validate_query(query: &EmailListQuery) -> Result<ValidatedEmailQuery, AppErro
         limit,
     })
 }
+
+impl AccountService {
+    pub(crate) fn set_message_flag(
+        &mut self,
+        message_id: &str,
+        flag: crate::storage::Flag,
+        wanted: bool,
+    ) -> Result<crate::storage::LocalChange, AppError> {
+        validate_uuid(message_id, "emailId")?;
+        self.storage.set_message_flag(message_id, flag, wanted)
+    }
+
+    pub(crate) fn pending_flag_changes(
+        &self,
+        account_id: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::storage::PendingChange>, AppError> {
+        self.storage.pending_changes(account_id, limit)
+    }
+
+    pub(crate) fn finish_flag_change(
+        &mut self,
+        message_id: &str,
+        flag: crate::storage::Flag,
+        sent: bool,
+    ) -> Result<bool, AppError> {
+        self.storage.finish_change(message_id, flag, sent)
+    }
+
+    pub(crate) fn retry_flag_change(
+        &mut self,
+        message_id: &str,
+        flag: crate::storage::Flag,
+    ) -> Result<(), AppError> {
+        self.storage.retry_change(message_id, flag)
+    }
+
+    pub(crate) fn mark_folder_unflaggable(&mut self, folder_id: &str) -> Result<usize, AppError> {
+        self.storage.mark_folder_unflaggable(folder_id)
+    }
+
+    pub(crate) fn mark_folder_flaggable(&mut self, folder_id: &str) -> Result<(), AppError> {
+        self.storage.mark_folder_flaggable(folder_id)
+    }
+}

@@ -44,6 +44,14 @@ impl AccountService {
         self.storage.body_part(identity, cid)
     }
 
+    pub(crate) fn body_attachment(
+        &self,
+        identity: &BodyIdentity,
+        part_index: usize,
+    ) -> Result<Option<(StoredBlob, crate::mail::render::RenderedPart)>, AppError> {
+        self.storage.body_attachment(identity, part_index)
+    }
+
     pub(crate) fn body_link(
         &self,
         identity: &BodyIdentity,

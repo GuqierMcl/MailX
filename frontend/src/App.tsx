@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
+import { Toaster } from '@/components/ui/toast'
 import { StartupGate } from '@/features/startup/startup-gate'
 import { TitleBar, TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
 import {
@@ -26,6 +27,8 @@ function App() {
     <QueryClientProvider client={queryClient}>
       {/* Outside the startup gate: appearance applies even when the core failed to start. */}
       <AppearanceSync client={client} />
+      {/* One global toast outlet; everything short that needs saying goes through `toast`. */}
+      <Toaster />
       <TitleBarSlotsProvider>
         <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
           <TitleBar host={windowHost} />

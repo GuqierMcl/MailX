@@ -66,6 +66,7 @@ fn main() {
         AppSettings,
         SettingsSnapshot,
         AvatarKind,
+        FlagWriteBack,
         AvatarImage,
     );
 }

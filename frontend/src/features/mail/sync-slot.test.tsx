@@ -87,3 +87,48 @@ describe('account sync indicator', () => {
     expect(within(folderRow()).queryByRole('button', { name: /同步/ })).not.toBeInTheDocument()
   })
 })
+
+describe('junk folder badge', () => {
+  const junk: Folder = { ...inbox, id: 'junk', name: 'Junk', role: 'junk', unreadCount: 6, totalCount: 9 }
+
+  function renderWith(folders: Folder[], mailbox: Parameters<typeof MailSidebar>[0]['mailbox'] = { kind: 'unified', role: 'inbox' }) {
+    render(
+      <TooltipProvider>
+        <MailSidebar accounts={[account]} folders={folders} loading={false} syncStates={{}} mailbox={mailbox}
+          onSelect={vi.fn()} onOpenAccounts={vi.fn()} onOpenSettings={vi.fn()} onRefresh={vi.fn()} />
+      </TooltipProvider>,
+    )
+  }
+
+  it('shows a dot instead of a number and keeps junk out of the account and inbox totals', () => {
+    renderWith([inbox, junk])
+    const junkRow = screen.getByRole('button', { name: '垃圾邮件' }).closest('li')!
+    expect(within(junkRow).getByLabelText('有未读邮件')).toBeInTheDocument()
+    expect(within(junkRow).queryByText('6')).not.toBeInTheDocument()
+    // Inbox 3 unread: the account row shows 3 (not 9) and the unified inbox shows 3.
+    const accountRowCount = within(screen.getByRole('button', { name: account.displayName }).closest('li')!)
+    expect(accountRowCount.queryByText('9')).not.toBeInTheDocument()
+    expect(accountRowCount.getAllByText('3').length).toBeGreaterThan(0)
+    const unified = screen.getByRole('button', { name: '全部收件箱' }).closest('li')!
+    expect(within(unified).getByText('3')).toBeInTheDocument()
+  })
+
+  it('shows nothing for junk with no unread mail and no number for an unread-only junk account', () => {
+    renderWith([inbox, { ...junk, unreadCount: 0 }])
+    const junkRow = screen.getByRole('button', { name: '垃圾邮件' }).closest('li')!
+    expect(within(junkRow).queryByLabelText('有未读邮件')).not.toBeInTheDocument()
+    expect(within(junkRow).queryByText('0')).not.toBeInTheDocument()
+  })
+
+  it('keeps a junk folder with unknown counts as "pending", not a dot or a number', () => {
+    renderWith([inbox, { ...junk, countsKnown: false }])
+    const junkRow = screen.getByRole('button', { name: '垃圾邮件' }).closest('li')!
+    expect(within(junkRow).queryByLabelText('有未读邮件')).not.toBeInTheDocument()
+  })
+
+  it('ordinary folders still show their number', () => {
+    renderWith([inbox, junk])
+    const inboxRow = screen.getByRole('button', { name: '收件箱' }).closest('li')!
+    expect(within(inboxRow).getByText('3')).toBeInTheDocument()
+  })
+})

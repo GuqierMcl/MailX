@@ -577,3 +577,61 @@ fn cleanup_and_reads_never_follow_symlinks() {
     assert_eq!(blobs.cleanup(&HashSet::new()).unwrap(), 0);
     assert_eq!(fs::read(target).unwrap(), raw);
 }
+
+fn has_attachment(store: &Storage) -> bool {
+    store
+        .db
+        .query_row(
+            "SELECT has_attachment FROM messages WHERE id = 'message'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn part(index: usize, is_inline: bool) -> RenderedPart {
+    RenderedPart {
+        part_index: index,
+        content_id: is_inline.then(|| format!("cid{index}")),
+        filename: Some(format!("file{index}")),
+        mime_type: "application/octet-stream".into(),
+        size: 3,
+        is_inline,
+    }
+}
+
+/// Commits `parts` as a first download, or as a rebuild of an already ready body.
+fn commit_parts(store: &mut Storage, identity: &BodyIdentity, parts: Vec<RenderedPart>) {
+    let blob = store.blobs.put(b"synthetic MIME").unwrap();
+    let mut value = rendered("body");
+    value.parts = parts;
+    assert!(store.body_begin(identity).unwrap() || store.body_rebuild(identity).unwrap());
+    assert!(store.body_commit(identity, &blob, &value).unwrap());
+}
+
+#[test]
+fn downloading_the_body_replaces_the_header_estimate_with_the_real_attachments() {
+    // The fixture message starts out flagged as having an attachment.
+    let (_directory, mut store, identity) = fixture();
+    assert!(has_attachment(&store));
+    // Only an inline image: the estimate was too high.
+    commit_parts(&mut store, &identity, vec![part(1, true)]);
+    assert!(!has_attachment(&store));
+    // A real attachment next to an inline one: the estimate was too low.
+    commit_parts(&mut store, &identity, vec![part(1, true), part(2, false)]);
+    assert!(has_attachment(&store));
+    // No parts at all.
+    commit_parts(&mut store, &identity, vec![]);
+    assert!(!has_attachment(&store));
+}
+
+#[test]
+fn a_failed_commit_leaves_the_estimate_alone() {
+    let (_directory, mut store, identity) = fixture();
+    let blob = store.blobs.put(b"synthetic MIME").unwrap();
+    let mut value = rendered("body");
+    value.parts = vec![];
+    // Not fetching yet, so the commit is refused and nothing changes.
+    assert!(!store.body_commit(&identity, &blob, &value).unwrap());
+    assert!(has_attachment(&store));
+}

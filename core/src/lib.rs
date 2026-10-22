@@ -19,7 +19,10 @@ mod sync;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
-pub use app::{AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, MailxCore};
+pub use app::{
+    AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks,
+    FlagChange, MailxCore, MessageFlag,
+};
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use mail::*;
 pub use settings::{
@@ -28,8 +31,8 @@ pub use settings::{
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
-    AccountSyncState, FolderSyncPhase, FolderSyncState, SyncFailure, SyncFailureCode, SyncListener,
-    SyncPhase,
+    AccountSyncState, FlagListener, FlagWriteBack, FolderSyncPhase, FolderSyncState, SyncFailure,
+    SyncFailureCode, SyncListener, SyncPhase,
 };
 
 /// The core crate version, available without initializing storage or networking.

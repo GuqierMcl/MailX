@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
 import { CommandPalette } from './command-palette'
@@ -25,11 +25,15 @@ import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
 import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
-import { useEmailBody } from './use-email-body'
+import { useEmailBody, type OpenedEmail } from './use-email-body'
+import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
 const PAGE_SIZE = 100
+
+/** What was opened, and which server of its account it came from at that moment. */
+type OpenedState = OpenedEmail & { source: string | null }
 
 export function Workbench({ client }: { client: MailxClient }) {
   const queryClient = useQueryClient()
@@ -43,7 +47,10 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // The message the reader shows. It is its own state, not "whichever listed message
+  // matches": changing mailbox, filter or search, or the list refreshing, never
+  // closes it. Only opening another message, closing it, or it ceasing to exist does.
+  const [openedState, setOpened] = useState<OpenedState | null>(null)
 
   const tree = useQuery({
     queryKey: mailKeys.tree(),
@@ -172,12 +179,29 @@ export function Workbench({ client }: { client: MailxClient }) {
     () => [...new Map((pages ?? []).flatMap((page) => page.items).map((email) => [email.id, email])).values()],
     [pages],
   )
-  // A selection lasts only while the email is in the current list, so a
-  // refresh that drops it, a filter that hides it or a server change clears it.
-  const selected = selectedId && emails.some((email) => email.id === selectedId) ? selectedId : null
-
-  const listedSummary = emails.find((email) => email.id === selected)
-  const body = useEmailBody(client, listedSummary, accounts, currentSyncStates)
+  const body = useEmailBody(client, openedState, accounts, currentSyncStates)
+  // What must close the reader: the message is gone for good (deleted, or moved out
+  // of sight by the server), or its account was replaced. Neither is a list change.
+  // Being closed is derived, not stored, so there is nothing to keep in step.
+  const accountsKnown = !treeLoading && !tree.isError
+  const source = (accountId: string) => accounts.find((account) => account.id === accountId)?.mailboxSourceId ?? null
+  const closedByAccount = Boolean(
+    openedState && accountsKnown && source(openedState.accountId) !== openedState.source,
+  )
+  const closedByLoss = Boolean(
+    openedState && body.detail.isError && clientFailureCode(body.detail.error) === 'notFound',
+  )
+  const opened = openedState && !closedByAccount && !closedByLoss ? openedState : null
+  // The list only highlights the opened message when it happens to be listed.
+  const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
+  const { setFlag } = useMessageFlags(client)
+  // The mail is "opened" once its detail is on screen; a mail the user only
+  // moved past stays unread.
+  useMarkOpenedAsRead(
+    opened ? body.email?.summary : null,
+    Boolean(opened && body.email && !body.detail.isPending),
+    (email, flag, wanted) => void setFlag(email, flag, wanted),
+  )
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
@@ -224,10 +248,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
 
-  const selectMailbox = (next: Mailbox) => {
-    setMailbox(next)
-    setSelectedId(null)
-  }
+  const selectMailbox = (next: Mailbox) => setMailbox(next)
 
   return (
     <TooltipProvider>
@@ -267,7 +288,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           onApplySearch={setSearch}
           onOpenEmail={(email, text) => {
             setSearch(text)
-            setSelectedId(email.id)
+            setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
           }}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
@@ -290,20 +311,22 @@ export function Workbench({ client }: { client: MailxClient }) {
               error={tree.isError ? clientFailure(tree.error).message : firstPageError}
               filter={filter}
               search={search}
-              selectedId={selected}
+              selectedId={highlighted}
               onFilterChange={setFilter}
-              onSelect={(email) => setSelectedId(email.id)}
+              onSelect={(email) => setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })}
               onLoadMore={loadMore}
             />
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel defaultSize="60" minSize={360}>
             <EmailView
-              key={`${selected}:${body.identity}`}
+              key={`${opened?.id ?? ''}:${body.identity}`}
               client={client}
-              email={selected ? body.email : null}
-              loading={selected !== null && body.detail.isPending}
-              error={selected && body.detail.isError ? clientFailure(body.detail.error).message : null}
+              onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
+              onClose={() => setOpened(null)}
+              email={opened ? body.email : null}
+              loading={opened !== null && body.detail.isPending}
+              error={opened && body.detail.isError ? clientFailure(body.detail.error).message : null}
               downloading={body.pending}
               onDownload={body.download}
             />

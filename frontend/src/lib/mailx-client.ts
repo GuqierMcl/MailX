@@ -7,6 +7,7 @@ import type {
   AppSettings,
   ApiResult,
   AvatarImage,
+  FlagWriteBack,
   CreateAccountRequest,
   EmailDetail,
   EmailListQuery,
@@ -47,10 +48,23 @@ export interface MailxClient {
   updateProfile(request: UpdateProfileRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
+  /**
+   * Changes read / starred in the local copy at once; writing it to the server
+   * happens in the background. `localOnly` means the server cannot keep a starred
+   * flag in that folder, so the star stays on this device.
+   */
+  setFlag(emailId: string, flag: 'read' | 'starred', wanted: boolean): Promise<'unchanged' | 'queued' | 'localOnly'>
+  /** Hears each finished write-back round: what was confirmed, and stars kept local. */
+  onFlagWriteBack(listener: (written: FlagWriteBack) => void): () => void
   /** Asks the account's sync worker to run its next round now. */
   refreshSync(accountId: string): Promise<void>
   /** `null` unless the user enabled sender avatars and the sender has one. */
   getAvatar(accountId: string, address: string): Promise<AvatarImage | null>
+  /**
+   * Opens the system save dialog and writes the attachment where the user picks.
+   * No path crosses this boundary: the page only names the attachment.
+   */
+  saveAttachment(emailId: string, attachmentId: string): Promise<'saved' | 'cancelled'>
   /** Deletes cached avatars, site icons and downloaded message images. */
   clearImageCache(): Promise<void>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
@@ -82,6 +96,11 @@ export function clientFailure(error: unknown): ClientFailure {
   return { code: 'transport', message: '与桌面应用的通信中断，请重新加载配置后重试。', field: null }
 }
 
+/** The machine-readable code of a failure, for deciding what to do rather than what to say. */
+export function clientFailureCode(error: unknown): ClientFailure['code'] {
+  return clientFailure(error).code
+}
+
 export function createDesktopClient(): MailxClient {
   const available = isTauri()
   async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -109,8 +128,19 @@ export function createDesktopClient(): MailxClient {
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
+    setFlag: (emailId, flag, wanted) => call('emails_set_flag', { emailId, flag, wanted }),
+    onFlagWriteBack(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<FlagWriteBack>('mailx://flags', (event) => { if (!disposed) listener(event.payload) })
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => { disposed = true; unlisten?.() }
+    },
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
+    saveAttachment: (emailId, attachmentId) => call<'saved' | 'cancelled'>('attachments_save', { emailId, attachmentId }),
     clearImageCache: () => call<void>('image_cache_clear'),
     onSyncState(listener) {
       if (!available) return () => undefined

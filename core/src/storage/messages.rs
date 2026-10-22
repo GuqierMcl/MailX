@@ -139,11 +139,22 @@ impl Storage {
         if !current_folder(&tx, account_id, source, folder_id)? {
             return Ok(None);
         }
+        // While a read / unread change in this folder has not reached the server, its
+        // STATUS number still counts the old state, and taking it would make the
+        // sidebar jump back. The local number stays until those changes are sent;
+        // the next round then reads the server's own.
+        let waiting: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM flag_changes c JOIN messages m ON m.id = c.message_id
+                           WHERE m.folder_id = ?1 AND c.flag = 'seen' AND c.state = 'pending')",
+            [folder_id],
+            |row| row.get(0),
+        )?;
         // An empty synced_at marks counts as unknown, so filling it in is a change too.
         let changed = tx.execute(
-            "UPDATE folders SET unread_count = ?1, total_count = ?2, synced_at = ?3
-             WHERE id = ?4 AND (unread_count <> ?1 OR total_count <> ?2 OR synced_at = '')",
-            params![unread, total, now(), folder_id],
+            "UPDATE folders SET unread_count = CASE WHEN ?5 AND synced_at <> '' THEN unread_count ELSE ?1 END,
+                    total_count = ?2, synced_at = ?3
+             WHERE id = ?4 AND ((unread_count <> ?1 AND NOT (?5 AND synced_at <> '')) OR total_count <> ?2 OR synced_at = '')",
+            params![unread, total, now(), folder_id, waiting],
         )?;
         tx.commit()?;
         Ok(Some(changed))
@@ -218,7 +229,10 @@ impl Storage {
              to_addresses = excluded.to_addresses, cc_addresses = excluded.cc_addresses, reply_to_addresses = excluded.reply_to_addresses,
              received_at = excluded.received_at, sent_at = excluded.sent_at, size = excluded.size,
              is_read = excluded.is_read, is_flagged = excluded.is_flagged, flags = excluded.flags,
-             has_attachment = excluded.has_attachment, remote_state = 'present', updated_at = excluded.updated_at",
+             -- Once the body is downloaded, has_attachment comes from the real MIME parts;
+             -- a revived message must not fall back to the header-based estimate.
+             has_attachment = CASE WHEN messages.body_state = 'ready' THEN messages.has_attachment ELSE excluded.has_attachment END,
+             remote_state = 'present', updated_at = excluded.updated_at",
         )?;
         for record in records {
             statement.execute(params![
@@ -322,7 +336,21 @@ impl Storage {
         let timestamp = now();
         let mut changed = 0;
         // Rows whose flags already match are left alone so the count reflects real changes.
-        let mut statement = tx.prepare("UPDATE messages SET is_read = ?1, is_flagged = ?2, flags = ?3, updated_at = ?4 WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present' AND (is_read <> ?1 OR is_flagged <> ?2 OR flags <> ?3)")?;
+        // A flag with a change still waiting (or kept only on this device) is the
+        // user's latest word: the server's older value must not undo it. The raw
+        // `flags` list always follows the server, so the two never get mixed up.
+        let mut statement = tx.prepare(
+            "UPDATE messages SET
+                is_read = CASE WHEN EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'seen')
+                               THEN is_read ELSE ?1 END,
+                is_flagged = CASE WHEN EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'flagged')
+                                  THEN is_flagged ELSE ?2 END,
+                flags = ?3, updated_at = ?4
+             WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present'
+               AND (flags <> ?3
+                    OR (is_read <> ?1 AND NOT EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'seen'))
+                    OR (is_flagged <> ?2 AND NOT EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'flagged')))",
+        )?;
         for (uid, values) in flags {
             changed += statement.execute(params![
                 values
@@ -440,10 +468,10 @@ impl Storage {
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(12)?,
                     row.get::<_, String>(13)?,
                     row.get::<_, String>(14)?,
-                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, String>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             })
             .optional()?;
@@ -501,7 +529,7 @@ impl Storage {
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state";
+const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending')";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
@@ -528,7 +556,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             "failed" => BodyState::Failed,
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
-        pending_changes: false,
+        pending_changes: row.get(12)?,
     })
 }
 

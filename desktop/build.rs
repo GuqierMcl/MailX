@@ -19,6 +19,8 @@ fn main() {
             "links_open",
             "sync_states",
             "sync_refresh",
+            "emails_set_flag",
+            "attachments_save",
             "avatars_get",
             "image_cache_clear",
             "settings_get",

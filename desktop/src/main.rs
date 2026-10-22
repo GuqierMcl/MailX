@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attachment_save;
 mod body_protocol;
 #[cfg(feature = "body-webview-test")]
 mod body_webview_test;
@@ -17,6 +18,10 @@ use tauri::{Emitter, EventTarget, Manager};
 /// Pushed to the main window whenever an account's sync state changes.
 #[cfg(not(feature = "body-webview-test"))]
 const SYNC_STATE_EVENT: &str = "mailx://sync-state";
+/// Pushed after a read / starred write-back round, for refreshing markers and
+/// telling the user a star stayed on this device.
+#[cfg(not(feature = "body-webview-test"))]
+const FLAG_EVENT: &str = "mailx://flags";
 
 fn main() {
     #[cfg(feature = "body-webview-test")]
@@ -29,6 +34,7 @@ fn main() {
         window_chrome::focus_main_window(app)
     }));
     let builder = builder
+        .plugin(tauri_plugin_dialog::init())
         .append_invoke_initialization_script(include_str!("subframe_guard.js"))
         .plugin(
             tauri_plugin_opener::Builder::new()
@@ -69,7 +75,16 @@ fn main() {
                         sync_state,
                     );
                 });
-                let state = state::DesktopState::new(data_dir, secrets, sync_listener);
+                let flag_events = app.handle().clone();
+                let flag_listener: mailx_core::FlagListener = Arc::new(move |written| {
+                    let _ = flag_events.emit_to(
+                        EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                        FLAG_EVENT,
+                        written,
+                    );
+                });
+                let state =
+                    state::DesktopState::new(data_dir, secrets, sync_listener, flag_listener);
                 app.manage(state.clone());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
@@ -97,6 +112,8 @@ fn main() {
             commands::links_open,
             commands::sync_states,
             commands::sync_refresh,
+            commands::emails_set_flag,
+            commands::attachments_save,
             commands::avatars_get,
             commands::image_cache_clear,
             commands::settings_get,

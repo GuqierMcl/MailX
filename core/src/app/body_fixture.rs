@@ -48,7 +48,13 @@ impl MailxCore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(AppError::new(ErrorCode::StorageUnavailable)),
         }
-        let core = Self::open(path, Arc::new(NoSecrets), runtime, Arc::new(|_| {}))?;
+        let core = Self::open(
+            path,
+            Arc::new(NoSecrets),
+            runtime,
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        )?;
         let identities = core
             .accounts()?
             .body_fixture_seed(&raws.iter().map(|raw| raw.len()).collect::<Vec<_>>())?;

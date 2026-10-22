@@ -179,18 +179,21 @@ describe('isolated body, inline links and image policy', () => {
       body: { text: '<script>plain text</script>', hasHtml: true, truncated: true, remoteImagesBlocked: 3 },
       attachments: [{ id: 'part', filename: 'document.pdf', mimeType: 'application/pdf', size: 2048, isInline: false }],
     }
-    const { rerender } = render(<EmailView client={client} email={email} loading={false} error={null} downloading={false} onDownload={() => undefined} />)
+    const { rerender } = render(<EmailView client={client} email={email} loading={false} error={null} downloading={false} onDownload={() => undefined} onFlag={() => undefined} onClose={() => undefined} />)
     await frame()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重新加载正文' })).not.toBeInTheDocument()
     expect(screen.queryByText('<script>plain text</script>')).not.toBeInTheDocument()
     expect(screen.getByLabelText('远程图片提示')).toBeInTheDocument()
     expect(screen.getByText('正文过长，当前仅显示截断后的内容。')).toBeInTheDocument()
-    expect(screen.getByText('application/pdf')).toBeInTheDocument()
+    // Name and size are shown; the sender-claimed type is not, since it can lie.
+    expect(screen.getByText('document.pdf')).toBeInTheDocument()
+    expect(screen.getByText('2 KB')).toBeInTheDocument()
+    expect(screen.queryByText('application/pdf')).not.toBeInTheDocument()
     emit('token-1')
     const plainEmail: EmailDetail = { ...email, summary: { ...email.summary, id: 'two' },
       body: { text: '<script>plain text</script>', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } }
-    rerender(<EmailView client={client} email={plainEmail} loading={false} error={null} downloading={false} onDownload={() => undefined} />)
+    rerender(<EmailView client={client} email={plainEmail} loading={false} error={null} downloading={false} onDownload={() => undefined} onFlag={() => undefined} onClose={() => undefined} />)
     expect(await screen.findByText('<script>plain text</script>')).toBeInTheDocument()
     expect(screen.queryByTitle('邮件 HTML 正文')).not.toBeInTheDocument()
     expect(client.releaseBody).toHaveBeenCalledWith('one', 'token-1')

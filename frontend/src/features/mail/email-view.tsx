@@ -1,15 +1,16 @@
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
-  Attachment01Icon,
+  Cancel01Icon,
   Delete02Icon,
   Forward01Icon,
+  Mail01Icon,
   MailOpen01Icon,
   MailReply01Icon,
   MailReplyAll01Icon,
   StarIcon,
 } from '@hugeicons/core-free-icons'
-import type { BodyFailureCode, EmailDetail, MailAddress } from '@/generated/accounts'
+import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -17,12 +18,18 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import type { MailxClient } from '@/lib/mailx-client'
+import { AttachmentList } from './attachment-list'
 import { BodyDocument, BodySkeleton } from './body-document'
-import { displayName, formatFullTime, formatSize } from './format'
+import { displayName, formatFullTime } from './format'
 import { SenderAvatar } from './sender-avatar'
+import { useCloseOnEscape } from './use-close-on-escape'
 
 type EmailViewProps = {
   client: MailxClient
+  /** Marks the open message read or starred; the list shows it at once. */
+  onFlag: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
+  /** Closes the reader. Nothing else closes it except opening another message. */
+  onClose: () => void
   downloading: boolean
   onDownload: () => void
   email: EmailDetail | null
@@ -30,11 +37,15 @@ type EmailViewProps = {
   error: string | null
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose }: EmailViewProps) {
   const showSkeleton = useDelayedFlag(loading)
+  // A message is open while it is loading, shown, or failed to open. Only with
+  // nothing open does the reader have no actions to offer.
+  const open = Boolean(email) || loading || Boolean(error)
+  useCloseOnEscape(open, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar disabled={!email} />
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
@@ -67,9 +78,9 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
   )
 }
 
-// Mail actions need the outbox and flag sync in core; until then the buttons
-// only show where the actions will live.
-const ACTIONS: [string, IconSvgElement][][] = [
+// Reply, forward, archive and delete need the outbox and mailbox moves; until
+// then those buttons only show where the actions will live.
+const PLACEHOLDER_ACTIONS: [string, IconSvgElement][][] = [
   [
     ['归档', Archive02Icon],
     ['删除', Delete02Icon],
@@ -79,13 +90,12 @@ const ACTIONS: [string, IconSvgElement][][] = [
     ['回复全部', MailReplyAll01Icon],
     ['转发', Forward01Icon],
   ],
-  [['加星标', StarIcon]],
 ]
 
-function Toolbar({ disabled }: { disabled: boolean }) {
+function Toolbar({ summary, onFlag, onClose }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
-      {ACTIONS.map((group, index) => (
+      {PLACEHOLDER_ACTIONS.map((group, index) => (
         <div key={index} className="flex items-center gap-1 not-first:ml-3">
           {group.map(([label, icon]) => (
             <Button key={label} variant="ghost" size="icon" aria-label={label} title={`${label}（尚未实现）`} disabled>
@@ -94,7 +104,40 @@ function Toolbar({ disabled }: { disabled: boolean }) {
           ))}
         </div>
       ))}
-      <span className="sr-only">{disabled ? '未选择邮件' : '邮件操作尚未实现'}</span>
+      <div className="flex items-center gap-1 not-first:ml-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!summary}
+          aria-label={summary?.isRead === false ? '标为已读' : '标为未读'}
+          title={summary?.isRead === false ? '标为已读' : '标为未读'}
+          onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
+        >
+          <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!summary}
+          aria-label={summary?.isStarred ? '取消星标' : '加星标'}
+          aria-pressed={summary?.isStarred ?? false}
+          title={summary?.isStarred ? '取消星标' : '加星标'}
+          onClick={() => summary && onFlag(summary, 'starred', !summary.isStarred)}
+          className={summary?.isStarred ? 'text-amber-500 hover:text-amber-500' : undefined}
+        >
+          <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
+        </Button>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="ml-auto"
+        aria-label="关闭邮件"
+        title="关闭邮件（Esc）"
+        onClick={onClose}
+      >
+        <HugeiconsIcon icon={Cancel01Icon} />
+      </Button>
     </div>
   )
 }
@@ -131,23 +174,7 @@ function EmailContent({ email, ...props }: ContentProps) {
         <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
           <Body email={email} {...props} />
         </div>
-        {attachments.length > 0 && (
-          <>
-            <section className="flex max-h-36 shrink-0 flex-col gap-2 overflow-auto p-4" aria-label="附件">
-              <h3 className="text-xs font-medium text-muted-foreground">{attachments.length} 个附件</h3>
-              <ul className="flex flex-wrap gap-2">
-                {attachments.map((attachment) => (
-                  <li key={attachment.id} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                    <HugeiconsIcon icon={Attachment01Icon} className="size-3.5 text-muted-foreground" />
-                    <span className="max-w-60 break-all">{attachment.filename}</span>
-                    <span className="text-muted-foreground">{attachment.mimeType}</span>
-                    <span className="text-muted-foreground">{formatSize(attachment.size)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </>
-        )}
+        {attachments.length > 0 && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
     </article>
   )
 }

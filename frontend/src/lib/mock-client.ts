@@ -101,8 +101,26 @@ export function createMockClient(): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async setFlag(emailId, flag, wanted) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      const key = flag === 'read' ? 'isRead' : 'isStarred'
+      if (email.summary[key] === wanted) return 'unchanged' as const
+      email.summary[key] = wanted
+      // Like the core: a read change moves its folder's unread number in the same
+      // step, and only the folder tree is where a client reads that number from.
+      if (flag === 'read') {
+        const folder = folders.find((row) => row.id === email.summary.folderId)
+        if (folder?.countsKnown) folder.unreadCount = Math.max(0, folder.unreadCount + (wanted ? -1 : 1))
+      }
+      // The second account stands in for a server that cannot keep stars.
+      if (flag === 'starred' && email.summary.accountId === accounts[1]?.id) return 'localOnly' as const
+      return 'queued' as const
+    },
+    onFlagWriteBack: () => () => undefined,
     refreshSync: async () => undefined,
     getAvatar: async () => null,
+    saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
     releaseBody: async () => undefined,

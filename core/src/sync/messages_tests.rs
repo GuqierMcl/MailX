@@ -66,6 +66,7 @@ fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
         service: Arc::downgrade(&service),
         states: Mutex::new(HashMap::new()),
         listener: Arc::new(move |state| observed.lock().unwrap().push(state.clone())),
+        flag_listener: Arc::new(|_| {}),
     });
     let token = WorkerToken {
         account_id: account.id.clone(),

@@ -407,6 +407,119 @@ pub(crate) async fn links_open(
     Ok(respond(result))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentArgs {
+    email_id: String,
+    attachment_id: String,
+}
+
+/// Shows the system save dialog and writes the attachment where the user says.
+/// The request carries no path, so a compromised page can only ask the user.
+#[tauri::command]
+pub(crate) async fn attachments_save(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<crate::attachment_save::SaveOutcome>, ()> {
+    use crate::attachment_save::{SaveOutcome, write_atomically};
+    use tauri_plugin_dialog::DialogExt;
+    let args = authorize(&window).and_then(|()| parse::<AttachmentArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        let core = state.core()?;
+        // Reads the local copy; the metadata is checked before any dialog opens.
+        let file = core
+            .attachment_content(args.email_id, args.attachment_id)
+            .await?;
+        // The callback form never blocks the event loop; the wait happens on the
+        // blocking pool. A dropped sender (the dialog could not open) reads as
+        // "cancelled".
+        let (reply, answer) = std::sync::mpsc::sync_channel(1);
+        app.dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("保存附件")
+            .set_file_name(&file.info.file_name)
+            .set_can_create_directories(true)
+            .save_file(move |path| {
+                let _ = reply.send(path);
+            });
+        let picked = tauri::async_runtime::spawn_blocking(move || answer.recv().ok().flatten())
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        let Some(picked) = picked else {
+            return Ok(SaveOutcome::Cancelled);
+        };
+        let destination = picked
+            .into_path()
+            .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
+        tauri::async_runtime::spawn_blocking(move || write_atomically(&destination, &file.bytes))
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))??;
+        Ok(SaveOutcome::Saved)
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetFlagArgs {
+    email_id: String,
+    flag: FlagName,
+    wanted: bool,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+enum FlagName {
+    Read,
+    Starred,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum FlagOutcome {
+    Unchanged,
+    /// Saved; the server is updated in the background.
+    Queued,
+    /// Saved on this device only: the server cannot keep a starred flag here.
+    LocalOnly,
+}
+
+/// Changes read / starred locally at once; the write to the server is queued.
+#[tauri::command]
+pub(crate) async fn emails_set_flag(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<FlagOutcome>, ()> {
+    use mailx_core::{FlagChange, MessageFlag};
+    let args = authorize(&window).and_then(|()| parse::<SetFlagArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| {
+                    let flag = match args.flag {
+                        FlagName::Read => MessageFlag::Read,
+                        FlagName::Starred => MessageFlag::Starred,
+                    };
+                    Ok(
+                        match core.set_message_flag(&args.email_id, flag, args.wanted)? {
+                            FlagChange::Unchanged => FlagOutcome::Unchanged,
+                            FlagChange::Queued => FlagOutcome::Queued,
+                            FlagChange::LocalOnly => FlagOutcome::LocalOnly,
+                        },
+                    )
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[tauri::command]
 pub(crate) async fn sync_refresh(
     window: WebviewWindow,

@@ -1485,3 +1485,442 @@ fn writes_report_only_real_changes() {
         .unwrap();
     assert!(created.created, "a new UIDVALIDITY starts a new generation");
 }
+
+#[test]
+fn a_revived_message_keeps_the_attachment_flag_its_downloaded_body_established() {
+    let mut fixture = setup();
+    let mut first = record(1);
+    first.has_attachment = true;
+    put(&mut fixture, &[first]);
+    let id: String = fixture
+        .db
+        .query_row("SELECT id FROM messages WHERE uid = 1", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .unwrap();
+    let flag = |fixture: &Fixture| -> bool {
+        fixture
+            .db
+            .query_row(
+                "SELECT has_attachment FROM messages WHERE id = ?1",
+                [&id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+    };
+    // The body showed there is no real attachment; then the server deletes and
+    // later re-lists the message, whose header still guesses "attachment".
+    fixture
+        .db
+        .execute(
+            "UPDATE messages SET body_state = 'ready', has_attachment = 0, remote_state = 'deleted' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+    let mut again = record(1);
+    again.has_attachment = true;
+    put(&mut fixture, &[again]);
+    assert!(
+        !flag(&fixture),
+        "the header estimate overwrote the real answer"
+    );
+
+    // Without a downloaded body the new header's estimate still applies.
+    fixture
+        .db
+        .execute(
+            "UPDATE messages SET body_state = 'missing', remote_state = 'deleted' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+    let mut third = record(1);
+    third.has_attachment = true;
+    put(&mut fixture, &[third]);
+    assert!(flag(&fixture));
+}
+
+// ---- local flag changes -------------------------------------------------
+
+use crate::storage::{Flag, LocalChange};
+
+fn message_id(f: &Fixture, uid: u32) -> String {
+    f.db.query_row("SELECT id FROM messages WHERE uid = ?1", [uid], |row| {
+        row.get::<_, String>(0)
+    })
+    .unwrap()
+}
+
+fn flags_of(f: &Fixture, id: &str) -> (bool, bool) {
+    f.db.query_row(
+        "SELECT is_read, is_flagged FROM messages WHERE id = ?1",
+        [id],
+        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+    )
+    .unwrap()
+}
+
+fn server_flags(f: &mut Fixture, uid: u32, flags: &[&str]) {
+    let flags: Vec<String> = flags.iter().map(|flag| (*flag).to_owned()).collect();
+    f.service
+        .apply_flags(&f.target.clone(), &[(uid, flags)])
+        .unwrap();
+}
+
+#[test]
+fn a_local_change_is_visible_at_once_and_marked_as_waiting() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    assert_eq!(flags_of(&f, &id), (false, false));
+    assert_eq!(
+        f.service.set_message_flag(&id, Flag::Seen, true).unwrap(),
+        LocalChange::Queued
+    );
+    assert_eq!(flags_of(&f, &id), (true, false));
+    let listed = f.service.list_emails(&inbox_query()).unwrap().items;
+    assert!(listed[0].is_read && listed[0].pending_changes);
+    assert!(f.service.get_email(&id).unwrap().summary.pending_changes);
+    // Setting what it already is records nothing.
+    assert_eq!(
+        f.service.set_message_flag(&id, Flag::Seen, true).unwrap(),
+        LocalChange::Unchanged
+    );
+    assert_eq!(count(&f.db, "flag_changes"), 1);
+}
+
+#[test]
+fn toggling_twice_keeps_one_row_with_the_latest_wish() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    f.service
+        .set_message_flag(&id, Flag::Flagged, false)
+        .unwrap();
+    assert_eq!(count(&f.db, "flag_changes"), 1);
+    let wanted: bool =
+        f.db.query_row("SELECT wanted FROM flag_changes", [], |row| row.get(0))
+            .unwrap();
+    assert!(!wanted);
+    assert_eq!(flags_of(&f, &id), (false, false));
+}
+
+#[test]
+fn a_sync_round_never_undoes_a_flag_that_is_still_waiting() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    // The server still reports the old values: neither toggle snaps back.
+    server_flags(&mut f, 1, &[]);
+    assert_eq!(flags_of(&f, &id), (true, true));
+    // The raw flag list does follow the server.
+    let raw: String =
+        f.db.query_row("SELECT flags FROM messages WHERE id = ?1", [&id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(raw, "[]");
+    // A flag with no waiting change is still taken from the server.
+    f.db.execute("DELETE FROM flag_changes WHERE flag = 'seen'", [])
+        .unwrap();
+    server_flags(&mut f, 1, &["\\Flagged"]);
+    assert_eq!(flags_of(&f, &id), (false, true));
+}
+
+#[test]
+fn confirming_a_change_removes_it_unless_the_user_changed_their_mind_meanwhile() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    // The write of "seen = true" is in flight; the user marks it unread again.
+    f.service.set_message_flag(&id, Flag::Seen, false).unwrap();
+    assert!(!f.service.finish_flag_change(&id, Flag::Seen, true).unwrap());
+    assert_eq!(
+        count(&f.db, "flag_changes"),
+        1,
+        "the newer wish must stay queued"
+    );
+    assert!(
+        f.service
+            .finish_flag_change(&id, Flag::Seen, false)
+            .unwrap()
+    );
+    assert_eq!(count(&f.db, "flag_changes"), 0);
+    assert!(!f.service.get_email(&id).unwrap().summary.pending_changes);
+}
+
+#[test]
+fn an_unflaggable_folder_keeps_stars_on_this_device_only() {
+    let mut f = setup();
+    put(&mut f, &[record(1), record(2)]);
+    let (one, two) = (message_id(&f, 1), message_id(&f, 2));
+    f.service
+        .set_message_flag(&one, Flag::Flagged, true)
+        .unwrap();
+    f.service.set_message_flag(&two, Flag::Seen, true).unwrap();
+    assert_eq!(
+        f.service
+            .mark_folder_unflaggable(&f.target.folder_id)
+            .unwrap(),
+        1,
+        "only the star moves to local-only"
+    );
+    let states: Vec<(String, String)> = {
+        let mut statement =
+            f.db.prepare("SELECT flag, state FROM flag_changes ORDER BY flag")
+                .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(
+        states,
+        [
+            ("flagged".into(), "local".into()),
+            ("seen".into(), "pending".into())
+        ]
+    );
+    // New stars in that folder are local-only right away; read still goes out.
+    assert_eq!(
+        f.service
+            .set_message_flag(&two, Flag::Flagged, true)
+            .unwrap(),
+        LocalChange::LocalOnly
+    );
+    assert_eq!(
+        f.service.set_message_flag(&two, Flag::Seen, false).unwrap(),
+        LocalChange::Queued
+    );
+    // Local-only stars survive a sync that reports no star, and are not "pending".
+    server_flags(&mut f, 1, &[]);
+    assert_eq!(flags_of(&f, &one), (false, true));
+    assert!(!f.service.get_email(&one).unwrap().summary.pending_changes);
+    let waiting = f.service.pending_flag_changes(&f.account.id, 10).unwrap();
+    assert!(waiting.iter().all(|change| change.flag == Flag::Seen));
+}
+
+#[test]
+fn only_visible_messages_can_be_changed_and_deleted_ones_drop_their_changes() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    assert_eq!(
+        f.service
+            .set_message_flag("00000000-0000-4000-8000-000000000000", Flag::Seen, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    f.db.execute(
+        "UPDATE messages SET remote_state = 'deleted' WHERE id = ?1",
+        [&id],
+    )
+    .unwrap();
+    // A deleted message is neither editable nor sent to the server.
+    assert_eq!(
+        f.service
+            .set_message_flag(&id, Flag::Flagged, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert!(
+        f.service
+            .pending_flag_changes(&f.account.id, 10)
+            .unwrap()
+            .is_empty()
+    );
+    // Removing the row removes its changes with it.
+    f.db.execute("DELETE FROM messages WHERE id = ?1", [&id])
+        .unwrap();
+    assert_eq!(count(&f.db, "flag_changes"), 0);
+}
+
+#[test]
+fn pending_changes_carry_everything_needed_to_address_the_message() {
+    let mut f = setup();
+    put(&mut f, &[record(7)]);
+    let id = message_id(&f, 7);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    let waiting = f.service.pending_flag_changes(&f.account.id, 10).unwrap();
+    assert_eq!(waiting.len(), 1);
+    let change = &waiting[0];
+    assert_eq!(
+        (
+            change.message_id.as_str(),
+            change.uid,
+            change.uid_validity,
+            change.remote_name.as_str()
+        ),
+        (id.as_str(), 7, 10, "INBOX")
+    );
+    assert!(change.wanted && change.flag == Flag::Seen && change.attempts == 0);
+    f.service.retry_flag_change(&id, Flag::Seen).unwrap();
+    assert_eq!(
+        f.service.pending_flag_changes(&f.account.id, 10).unwrap()[0].attempts,
+        1
+    );
+    assert!(
+        f.service
+            .pending_flag_changes("another-account", 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// ---- unread counts follow local read changes ----------------------------
+
+fn folder_counts(f: &Fixture) -> (u32, bool) {
+    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let inbox = folders
+        .iter()
+        .find(|folder| folder.id == f.target.folder_id)
+        .unwrap();
+    (inbox.unread_count, inbox.counts_known)
+}
+
+fn server_counts(f: &mut Fixture, unread: u32) {
+    f.service
+        .update_folder_counts(
+            &f.target.account_id,
+            &f.target.mailbox_source_id,
+            &f.target.folder_id,
+            unread,
+            9,
+        )
+        .unwrap();
+}
+
+#[test]
+fn marking_read_or_unread_moves_the_folders_unread_number_at_once() {
+    let mut f = setup();
+    put(&mut f, &[record(1), record(2)]);
+    server_counts(&mut f, 2);
+    assert_eq!(folder_counts(&f), (2, true));
+    let (one, two) = (message_id(&f, 1), message_id(&f, 2));
+    f.service.set_message_flag(&one, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f).0, 1);
+    f.service.set_message_flag(&two, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f).0, 0);
+    f.service.set_message_flag(&one, Flag::Seen, false).unwrap();
+    assert_eq!(folder_counts(&f).0, 1);
+}
+
+#[test]
+fn a_change_that_changes_nothing_and_the_starred_flag_leave_the_number_alone() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    server_counts(&mut f, 1);
+    let id = message_id(&f, 1);
+    // Already unread: asking for unread again is a no-op, not a second +1.
+    f.service.set_message_flag(&id, Flag::Seen, false).unwrap();
+    assert_eq!(folder_counts(&f).0, 1);
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    assert_eq!(folder_counts(&f).0, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    // Setting it read twice must not go below what is really unread.
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f).0, 0);
+}
+
+#[test]
+fn the_number_never_goes_negative_and_an_unknown_one_stays_unknown() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    // The count is unknown (no STATUS has succeeded for this folder) and must stay so.
+    f.db.execute(
+        "UPDATE folders SET synced_at = '', unread_count = 0 WHERE id = ?1",
+        [&f.target.folder_id],
+    )
+    .unwrap();
+    assert!(!folder_counts(&f).1);
+    let id = message_id(&f, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f), (0, false));
+    f.service.set_message_flag(&id, Flag::Seen, false).unwrap();
+    assert_eq!(folder_counts(&f), (0, false));
+    // A stale server value of 0 for a folder that has this one unread read stays >= 0.
+    server_counts(&mut f, 0);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    f.service.set_message_flag(&id, Flag::Seen, false).unwrap();
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f).0, 0);
+}
+
+#[test]
+fn a_sync_round_does_not_bounce_the_number_back_while_the_change_is_waiting() {
+    let mut f = setup();
+    put(&mut f, &[record(1), record(2)]);
+    server_counts(&mut f, 2);
+    let one = message_id(&f, 1);
+    f.service.set_message_flag(&one, Flag::Seen, true).unwrap();
+    assert_eq!(folder_counts(&f).0, 1);
+    // The server has not seen the change yet and still says 2 unread.
+    server_counts(&mut f, 2);
+    assert_eq!(
+        folder_counts(&f).0,
+        1,
+        "the number snapped back to the server's old value"
+    );
+    // Total still follows the server, so only the unread number is held.
+    let total: u32 =
+        f.db.query_row(
+            "SELECT total_count FROM folders WHERE id = ?1",
+            [&f.target.folder_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(total, 9);
+    // Once the change is confirmed, the next round takes the server's own number.
+    f.service
+        .finish_flag_change(&one, Flag::Seen, true)
+        .unwrap();
+    server_counts(&mut f, 1);
+    assert_eq!(folder_counts(&f).0, 1);
+    server_counts(&mut f, 5);
+    assert_eq!(
+        folder_counts(&f).0,
+        5,
+        "a new server value must be adopted again"
+    );
+}
+
+#[test]
+fn only_read_changes_in_that_folder_hold_the_number_and_a_star_never_does() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    server_counts(&mut f, 3);
+    let id = message_id(&f, 1);
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    server_counts(&mut f, 6);
+    assert_eq!(
+        folder_counts(&f).0,
+        6,
+        "a waiting star must not hold the unread number"
+    );
+    // A read change in another folder does not hold this one either.
+    let other =
+        f.db.query_row(
+            "SELECT id FROM folders WHERE id <> ?1 LIMIT 1",
+            [&f.target.folder_id],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap();
+    f.db.execute("INSERT OR IGNORE INTO flag_changes (message_id, flag, wanted, state, attempts, created_at, updated_at) SELECT id, 'seen', 1, 'pending', 0, 'x', 'x' FROM messages WHERE folder_id = ?1", [&other]).unwrap();
+    server_counts(&mut f, 7);
+    assert_eq!(folder_counts(&f).0, 7);
+}

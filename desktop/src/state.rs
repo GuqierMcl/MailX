@@ -8,13 +8,14 @@ use std::{
 
 pub(crate) use mailx_core::StartupStatus;
 use mailx_core::{
-    AppError, ErrorCode, MailxCore, SettingsStore, SyncListener, secrets::SecretStore,
+    AppError, ErrorCode, FlagListener, MailxCore, SettingsStore, SyncListener, secrets::SecretStore,
 };
 
 struct Inner {
     data_dir: Result<PathBuf, AppError>,
     secrets: Arc<dyn SecretStore>,
     sync_listener: SyncListener,
+    flag_listener: FlagListener,
     core: Mutex<Option<MailxCore>>,
     settings: Mutex<Option<Arc<SettingsStore>>>,
     startup: Mutex<StartupStatus>,
@@ -29,11 +30,13 @@ impl DesktopState {
         data_dir: Result<PathBuf, AppError>,
         secrets: Arc<dyn SecretStore>,
         sync_listener: SyncListener,
+        flag_listener: FlagListener,
     ) -> Self {
         Self(Arc::new(Inner {
             data_dir,
             secrets,
             sync_listener,
+            flag_listener,
             core: Mutex::new(None),
             settings: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
@@ -191,7 +194,13 @@ impl DesktopState {
                 panic!("test must not delete credentials")
             }
         }
-        let state = Self::new(Ok(directory), Arc::new(NoSecrets), Arc::new(|_| {}));
+        let state = Self::new(
+            Ok(directory),
+            Arc::new(NoSecrets),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        );
         state.finish_initialization(Ok(core));
         state
     }
@@ -211,6 +220,7 @@ impl DesktopState {
             self.0.secrets.clone(),
             runtime,
             self.0.sync_listener.clone(),
+            self.0.flag_listener.clone(),
         )
     }
 
@@ -312,6 +322,7 @@ mod tests {
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
             Arc::new(|_| {}),
+            Arc::new(|_| {}),
         );
         assert!(matches!(
             state.startup_status(),
@@ -332,6 +343,7 @@ mod tests {
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
             Arc::new(|_| {}),
         );
         state.start_initialization();
@@ -364,6 +376,7 @@ mod tests {
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
             Arc::new(|_| {}),
+            Arc::new(|_| {}),
         );
         let error =
             tauri::async_runtime::block_on(state.run(|_| Ok::<_, AppError>(()))).unwrap_err();
@@ -376,6 +389,7 @@ mod tests {
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
             Arc::new(|_| {}),
         );
         let mut settings = mailx_core::AppSettings::default();
@@ -395,6 +409,7 @@ mod tests {
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
             Arc::new(|_| {}),
+            Arc::new(|_| {}),
         );
         let error =
             tauri::async_runtime::block_on(state.settings(|store| store.get())).unwrap_err();
@@ -406,6 +421,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageIncompatible)),
             Arc::new(MemorySecrets::default()),
+            Arc::new(|_| {}),
             Arc::new(|_| {}),
         );
         *state.0.startup.lock().unwrap() = StartupStatus::Failed {
