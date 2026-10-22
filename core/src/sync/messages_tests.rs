@@ -1,7 +1,7 @@
 //! Scripted IMAP plus real temporary SQLite tests for the per-folder driver.
 
 use super::*;
-use crate::accounts::sync_plan::tests::config;
+use crate::accounts::sync_plan::tests::{config, connection_update};
 use crate::imap::{FolderStatus, ImapLogin};
 use crate::mail::{EmailListQuery, FolderRole};
 use crate::secrets::{SecretValue, test_support::MemorySecrets};
@@ -942,13 +942,11 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
                 .service
                 .lock()
                 .unwrap()
-                .update(
-                    serde_json::from_value(json!({
-                        "accountId": fixture.account_id, "expectedRevision": fixture.token.revision,
-                        "config": account_config,
-                    }))
-                    .unwrap(),
-                )
+                .update_connection(connection_update(
+                    &fixture.account_id,
+                    fixture.token.revision,
+                    account_config.clone(),
+                ))
                 .unwrap();
             assert_eq!(account.mailbox_source_id, fixture.source);
             fixture.token.revision = account.revision;

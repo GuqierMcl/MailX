@@ -133,15 +133,21 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `listAccounts()` | `accounts_list`，无参数 | `AccountService::list` | `Account[]` |
 | `getAccount(accountId)` | `accounts_get`，`{ accountId }` | `AccountService::get` | `Account` |
 | `createAccount(request)` | `accounts_create`，`{ request: { requestId, config } }` | `AccountService::create` | `Account` |
-| `updateAccount(request)` | `accounts_update`，`{ request: { accountId, expectedRevision, config } }` | `AccountService::update` | `Account` |
+| `updateConnection(request)` | `accounts_update_connection`，`{ request: { accountId, expectedRevision, connection } }` | `AccountService::update_connection` | `Account` |
+| `updateProfile(request)` | `accounts_update_profile`，`{ request: { accountId, profile } }` | `AccountService::update_profile` | `Account` |
 
-`config` 包含 `displayName`、`emailAddress`、可空 `providerId`、独立的 `imap` / `smtp` 连接配置、`authentication` 和 `route`。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
+账号分两部分，各自一个修改请求，生命周期不同：
 
-`Account` 返回账号与来源 ID、revision、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
+- **资料**（`profile`：`displayName`、`color`）只影响显示。修改不推进 `revision`、不读写凭证、不重启同步；以最后一次写入为准，不做乐观锁。`color` 为 `#rrggbb`（规范为小写）或 `null`，空字符串等同 `null`。
+- **连接**（`connection`：`emailAddress`、可空 `providerId`、`imap` / `smtp`、`authentication`、`route`）决定 MailX 如何访问邮箱。修改必须匹配 `expectedRevision`，成功后推进 `revision`，宿主立即重启该账号的同步与正文下载，旧连接不会沿用。修改连接不会改动资料。
+
+创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color`）和全部连接字段。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
+
+`Account` 返回账号与来源 ID、连接配置的 `revision`、名称与 `color`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
 
-创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。
+创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改连接必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。修改资料只校验账号存在，`expectedRevision` 不参与。
 
 ### 桌面窗口命令
 

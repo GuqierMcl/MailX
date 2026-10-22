@@ -93,9 +93,14 @@ fn keep_config() -> Value {
     value["authentication"]["password"] = json!({"action":"keep"});
     value
 }
-fn update_request(account: &Account, value: Value) -> UpdateAccountRequest {
+/// Builds a connection update from a full account config; the profile fields
+/// (name, color) belong to a separate request.
+fn update_request(account: &Account, mut value: Value) -> UpdateConnectionRequest {
+    let object = value.as_object_mut().unwrap();
+    object.remove("displayName");
+    object.remove("color");
     serde_json::from_value(
-        json!({"accountId":account.id,"expectedRevision":account.revision,"config":value}),
+        json!({"accountId":account.id,"expectedRevision":account.revision,"connection":value}),
     )
     .unwrap()
 }
@@ -193,7 +198,7 @@ fn identical_creates_are_idempotent_but_changes_and_secret_changes_conflict() {
         ErrorCode::IdempotencyConflict
     );
     let updated = service
-        .update(update_request(&first, keep_config()))
+        .update_connection(update_request(&first, keep_config()))
         .unwrap();
     assert_eq!(updated.revision, 2);
     assert_eq!(
@@ -212,7 +217,7 @@ fn shared_and_separate_authentication_preserve_ownership_and_versions() {
     let mut separate = keep_config();
     separate["authentication"] = json!({"kind":"password","mode":"separate","imapPassword":{"action":"keep"},"smtpPassword":{"action":"keep"}});
     let split = service
-        .update(update_request(&original, separate.clone()))
+        .update_connection(update_request(&original, separate.clone()))
         .unwrap();
     assert_ne!(split.authentication.imap.id, split.authentication.smtp.id);
     assert_eq!(split.authentication.imap.generation, 1);
@@ -220,13 +225,15 @@ fn shared_and_separate_authentication_preserve_ownership_and_versions() {
     assert_eq!(secrets.len(), 2);
     separate["authentication"]["smtpPassword"] =
         json!({"action":"replace","value":"new-smtp-password"});
-    let rotated = service.update(update_request(&split, separate)).unwrap();
+    let rotated = service
+        .update_connection(update_request(&split, separate))
+        .unwrap();
     assert_eq!(rotated.authentication.smtp.generation, 2);
     assert_eq!(rotated.authentication.imap.generation, 1);
     assert_eq!(rotated.mailbox_source_id, original.mailbox_source_id);
     assert_eq!(secrets.len(), 2);
     let merged = service
-        .update(update_request(&rotated, keep_config()))
+        .update_connection(update_request(&rotated, keep_config()))
         .unwrap();
     assert_eq!(merged.authentication.imap.id, merged.authentication.smtp.id);
     assert_eq!(secrets.len(), 1);
@@ -240,7 +247,7 @@ fn new_target_requires_credential_confirmation_and_new_mailbox_source() {
     let mut moved = keep_config();
     moved["imap"]["host"] = json!("new.example.com");
     let pending = service
-        .update(update_request(&original, moved.clone()))
+        .update_connection(update_request(&original, moved.clone()))
         .unwrap();
     assert_eq!(pending.id, original.id);
     assert_ne!(pending.mailbox_source_id, original.mailbox_source_id);
@@ -251,7 +258,9 @@ fn new_target_requires_credential_confirmation_and_new_mailbox_source() {
     assert_eq!(pending.authentication.smtp.trust, CredentialTrust::Trusted);
     moved["authentication"]["password"] =
         json!({"action":"replace","value":"replacement-password"});
-    let confirmed = service.update(update_request(&pending, moved)).unwrap();
+    let confirmed = service
+        .update_connection(update_request(&pending, moved))
+        .unwrap();
     assert_eq!(
         confirmed.authentication.imap.trust,
         CredentialTrust::Trusted
@@ -259,7 +268,7 @@ fn new_target_requires_credential_confirmation_and_new_mailbox_source() {
     assert_eq!(confirmed.mailbox_source_id, pending.mailbox_source_id);
     assert_eq!(
         service
-            .update(update_request(&original, keep_config()))
+            .update_connection(update_request(&original, keep_config()))
             .unwrap_err()
             .code,
         ErrorCode::Conflict
@@ -272,7 +281,9 @@ fn tls_change_does_not_expand_trust_or_change_mailbox_identity() {
     let account = create(&mut service);
     let mut config = keep_config();
     config["imap"]["tls"] = json!("startTls");
-    let updated = service.update(update_request(&account, config)).unwrap();
+    let updated = service
+        .update_connection(update_request(&account, config))
+        .unwrap();
     assert_eq!(updated.mailbox_source_id, account.mailbox_source_id);
     assert_eq!(
         updated.authentication.imap.trust,
@@ -350,20 +361,20 @@ fn route_variants_persist_and_proxy_credentials_obey_trust() {
     let mut input = keep_config();
     input["route"] = json!({"kind":"inherit"});
     let inherited = service
-        .update(update_request(&initial, input.clone()))
+        .update_connection(update_request(&initial, input.clone()))
         .unwrap();
     assert_eq!(inherited.default_route_revision, Some(1));
     assert_eq!(inherited.route_revision, 2);
     input["route"] = json!({"kind":"custom","proxyKind":"socks5","host":"proxy.example.com","port":1080,"dns":"proxy","authentication":{"username":"proxy-user","password":{"action":"replace","value":"proxy-password"}}});
     let proxy = service
-        .update(update_request(&inherited, input.clone()))
+        .update_connection(update_request(&inherited, input.clone()))
         .unwrap();
     assert_eq!(proxy.route_revision, 3);
     assert_eq!(secrets.len(), 2);
     input["route"]["proxyKind"] = json!("httpConnect");
     input["route"]["authentication"]["password"] = json!({"action":"keep"});
     let moved = service
-        .update(update_request(&proxy, input.clone()))
+        .update_connection(update_request(&proxy, input.clone()))
         .unwrap();
     assert!(matches!(
         &moved.route,
@@ -388,14 +399,14 @@ fn route_variants_persist_and_proxy_credentials_obey_trust() {
         input["route"]["host"] = json!(host);
         assert_eq!(
             service
-                .update(update_request(&moved, input.clone()))
+                .update_connection(update_request(&moved, input.clone()))
                 .unwrap_err()
                 .code,
             ErrorCode::Validation
         );
     }
     let direct = service
-        .update(update_request(&moved, keep_config()))
+        .update_connection(update_request(&moved, keep_config()))
         .unwrap();
     assert_eq!(direct.route, RouteConfig::Direct);
     assert_eq!(secrets.len(), 1);
@@ -511,7 +522,7 @@ fn partial_credential_update_rolls_back_new_entries_and_keeps_old_config() {
     secrets.fail_next_set(2, false);
     assert_eq!(
         service
-            .update(update_request(&original, input))
+            .update_connection(update_request(&original, input))
             .unwrap_err()
             .code,
         ErrorCode::SecretStoreUnavailable
@@ -529,7 +540,11 @@ fn unavailable_secret_store_does_not_discard_pending_or_existing_credentials() {
     let (directory, secrets, mut service) = setup();
     let original = create(&mut service);
     secrets.fail_next_set(1, true);
-    assert!(service.update(update_request(&original, config())).is_err());
+    assert!(
+        service
+            .update_connection(update_request(&original, config()))
+            .is_err()
+    );
     assert_eq!(secrets.len(), 2);
     drop(service);
     secrets.state.lock().unwrap().get_error = Some(SecretStoreError::Locked);
@@ -553,7 +568,9 @@ fn cleanup_failure_is_retried_without_deleting_new_valid_secret() {
     let (directory, secrets, mut service) = setup();
     let original = create(&mut service);
     secrets.state.lock().unwrap().fail_delete = true;
-    let changed = service.update(update_request(&original, config())).unwrap();
+    let changed = service
+        .update_connection(update_request(&original, config()))
+        .unwrap();
     assert_eq!(changed.revision, 2);
     assert_eq!(secrets.len(), 2);
     assert_eq!(count(&db(directory.path()), "credential_journal"), 1);
@@ -577,7 +594,7 @@ fn failed_database_commit_preserves_intent_and_old_config_then_recovers() {
     database.execute_batch("CREATE TRIGGER fail_account_update BEFORE UPDATE ON accounts BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
     assert_eq!(
         service
-            .update(update_request(&original, config()))
+            .update_connection(update_request(&original, config()))
             .unwrap_err()
             .code,
         ErrorCode::StorageUnavailable
@@ -616,7 +633,11 @@ fn recovery_cannot_overwrite_newer_revision() {
     let (directory, secrets, mut service) = setup();
     let original = create(&mut service);
     secrets.fail_next_set(1, true);
-    assert!(service.update(update_request(&original, config())).is_err());
+    assert!(
+        service
+            .update_connection(update_request(&original, config()))
+            .is_err()
+    );
     drop(service);
     db(directory.path())
         .execute("UPDATE accounts SET revision=3,display_name='Newer'", [])
@@ -637,7 +658,7 @@ fn missing_secret_is_not_reported_as_configured_or_treated_as_temporary_failure(
     assert!(!missing.authentication.imap.password_configured);
     assert_eq!(
         service
-            .update(update_request(&original, keep_config()))
+            .update_connection(update_request(&original, keep_config()))
             .unwrap_err()
             .code,
         ErrorCode::SecretMissing
@@ -705,7 +726,7 @@ fn same_process_split_recovery_preserves_pending_trust_and_rejects_old_revision(
     secrets.fail_next_set(1, true);
     assert_eq!(
         service
-            .update(update_request(&original, split.clone()))
+            .update_connection(update_request(&original, split.clone()))
             .unwrap_err()
             .code,
         ErrorCode::SecretStoreUnavailable
@@ -714,7 +735,7 @@ fn same_process_split_recovery_preserves_pending_trust_and_rejects_old_revision(
     assert_eq!(secrets.len(), 2);
     assert_eq!(
         service
-            .update(update_request(&original, split))
+            .update_connection(update_request(&original, split))
             .unwrap_err()
             .code,
         ErrorCode::Conflict
@@ -747,7 +768,7 @@ fn separate_merge_split_does_not_transfer_the_other_passwords_trust() {
         .create(create_request(&Uuid::new_v4().to_string(), separate))
         .unwrap();
     let merged = service
-        .update(update_request(&original, keep_config()))
+        .update_connection(update_request(&original, keep_config()))
         .unwrap();
     assert_eq!(merged.authentication.imap.trust, CredentialTrust::Trusted);
     assert_eq!(
@@ -757,7 +778,9 @@ fn separate_merge_split_does_not_transfer_the_other_passwords_trust() {
     assert_eq!(secrets.len(), 1);
     let mut split = keep_config();
     split["authentication"] = json!({"kind":"password","mode":"separate","imapPassword":{"action":"keep"},"smtpPassword":{"action":"keep"}});
-    let split = service.update(update_request(&merged, split)).unwrap();
+    let split = service
+        .update_connection(update_request(&merged, split))
+        .unwrap();
     assert_eq!(split.authentication.imap.trust, CredentialTrust::Trusted);
     assert_eq!(
         split.authentication.smtp.trust,
@@ -796,7 +819,7 @@ fn same_process_partial_update_cleanup_never_deletes_other_accounts_credentials(
     secrets.fail_next_set(2, false);
     assert_eq!(
         service
-            .update(update_request(&first, separate))
+            .update_connection(update_request(&first, separate))
             .unwrap_err()
             .code,
         ErrorCode::SecretStoreUnavailable
@@ -804,10 +827,131 @@ fn same_process_partial_update_cleanup_never_deletes_other_accounts_credentials(
     assert_eq!(secrets.len(), 3);
     // Any subsequent write resolves the pending intent before taking its base.
     let updated_second = service
-        .update(update_request(&second, keep_config()))
+        .update_connection(update_request(&second, keep_config()))
         .unwrap();
     assert_eq!(updated_second.revision, 2);
     assert_eq!(service.get(&first.id).unwrap(), first);
     assert_eq!(secrets.len(), 2);
     assert_eq!(count(&db(directory.path()), "credential_journal"), 0);
+}
+
+fn profile_request(account: &Account, display_name: &str, color: Value) -> UpdateProfileRequest {
+    serde_json::from_value(
+        json!({"accountId":account.id,"profile":{"displayName":display_name,"color":color}}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn creates_with_a_normalized_color_and_defaults_to_none() {
+    let (_directory, _secrets, mut service) = setup();
+    assert_eq!(create(&mut service).color, None);
+    let mut value = config();
+    value["color"] = json!("  #3B82F6 ");
+    let account = service
+        .create(create_request(&Uuid::new_v4().to_string(), value))
+        .unwrap();
+    assert_eq!(account.color.as_deref(), Some("#3b82f6"));
+    assert_eq!(
+        service.get(&account.id).unwrap().color.as_deref(),
+        Some("#3b82f6")
+    );
+}
+
+#[test]
+fn profile_updates_leave_the_connection_revision_and_credentials_alone() {
+    let (directory, secrets, mut service) = setup();
+    let original = create(&mut service);
+    let renamed = service
+        .update_profile(profile_request(&original, "  Work ", json!("#16A34A")))
+        .unwrap();
+    assert_eq!(renamed.display_name, "Work");
+    assert_eq!(renamed.color.as_deref(), Some("#16a34a"));
+    // The connection version is what sync work is guarded by; it must not move.
+    assert_eq!(renamed.revision, original.revision);
+    assert_eq!(renamed.mailbox_source_id, original.mailbox_source_id);
+    assert_eq!(renamed.authentication, original.authentication);
+    assert_eq!(renamed.route_revision, original.route_revision);
+    assert_eq!(secrets.len(), 1);
+    assert_eq!(count(&db(directory.path()), "credential_journal"), 0);
+
+    let cleared = service
+        .update_profile(profile_request(&renamed, "Work", json!(null)))
+        .unwrap();
+    assert_eq!(cleared.color, None);
+    let emptied = service
+        .update_profile(profile_request(&renamed, "Work", json!("")))
+        .unwrap();
+    assert_eq!(emptied.color, None);
+
+    // A stale connection revision is still the only optimistic check.
+    let reconnected = service
+        .update_connection(update_request(&original, keep_config()))
+        .unwrap();
+    assert_eq!(reconnected.revision, original.revision + 1);
+}
+
+#[test]
+fn connection_updates_keep_the_profile() {
+    let (_directory, _secrets, mut service) = setup();
+    let original = create(&mut service);
+    let profiled = service
+        .update_profile(profile_request(&original, "Renamed", json!("#7c3aed")))
+        .unwrap();
+    let mut moved = keep_config();
+    moved["imap"]["port"] = json!(143);
+    moved["imap"]["tls"] = json!("startTls");
+    let updated = service
+        .update_connection(update_request(&profiled, moved))
+        .unwrap();
+    assert_eq!(updated.display_name, "Renamed");
+    assert_eq!(updated.color.as_deref(), Some("#7c3aed"));
+    assert_eq!(service.get(&original.id).unwrap(), updated);
+}
+
+#[test]
+fn profile_updates_validate_before_writing() {
+    let (_directory, _secrets, mut service) = setup();
+    let original = create(&mut service);
+    for color in ["blue", "#12345", "#1234567", "123456", "#gggggg"] {
+        assert_eq!(
+            service
+                .update_profile(profile_request(&original, "Work", json!(color)))
+                .unwrap_err(),
+            AppError::validation("color"),
+            "{color}"
+        );
+    }
+    assert_eq!(
+        service
+            .update_profile(profile_request(&original, "   ", json!(null)))
+            .unwrap_err(),
+        AppError::validation("displayName")
+    );
+    let mut missing = original.clone();
+    missing.id = Uuid::new_v4().to_string();
+    assert_eq!(
+        service
+            .update_profile(profile_request(&missing, "Work", json!(null)))
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(service.get(&original.id).unwrap(), original);
+    // The profile request accepts nothing else, so it cannot reach a connection.
+    assert!(
+        serde_json::from_value::<UpdateProfileRequest>(json!({
+            "accountId": original.id,
+            "profile": {"displayName": "Work", "color": null, "imap": {"host": "evil.example"}},
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateConnectionRequest>(json!({
+            "accountId": original.id, "expectedRevision": original.revision,
+            "connection": config(),
+        }))
+        .is_err(),
+        "a connection update must not carry the profile"
+    );
 }

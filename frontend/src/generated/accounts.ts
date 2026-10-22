@@ -34,11 +34,25 @@ export type ProxyAuthenticationInput = { username: string, password: SecretUpdat
 
 export type RouteInput = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy, authentication: ProxyAuthenticationInput | null, };
 
-export type AccountConfigInput = { displayName: string, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+export type AccountProfileInput = { displayName: string,
+/**
+ * `#rrggbb`, or `null` for the neutral default.
+ */
+color: string | null, };
+
+export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+
+export type AccountConfigInput = { displayName: string,
+/**
+ * `#rrggbb`; omitted or `null` for the neutral default.
+ */
+color: string | null, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
-export type UpdateAccountRequest = { accountId: string, expectedRevision: number, config: AccountConfigInput, };
+export type UpdateConnectionRequest = { accountId: string, expectedRevision: number, connection: ConnectionInput, };
+
+export type UpdateProfileRequest = { accountId: string, profile: AccountProfileInput, };
 
 export type CredentialTrust = "trusted" | "needsConfirmation";
 
@@ -52,7 +66,16 @@ export type RouteConfig = { "kind": "direct" } | { "kind": "inherit" } | { "kind
 
 export type ConnectionStatus = "unverified";
 
-export type Account = { id: string, revision: number, displayName: string, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
+export type Account = { id: string,
+/**
+ * Version of the connection settings. Profile changes do not advance it.
+ */
+revision: number, displayName: string,
+/**
+ * `#rrggbb`, or `null` for the neutral default. Defaulted so credential
+ * journals written before colors existed still load.
+ */
+color: string | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */

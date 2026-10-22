@@ -69,9 +69,9 @@ desktop/                    # mailx-desktop，Tauri 宿主
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位
 frontend/                   # React + TypeScript + Vite + shadcn 前端
-  src/features/accounts/    # 账号配置表单
+  src/features/accounts/    # 账号管理、修改连接与添加账号弹窗，资料与连接表单
   src/features/mail/        # 三栏邮件工作台
-  src/features/settings/    # 设置弹窗
+  src/features/settings/    # 设置弹窗（外观、安全性、关于）
   src/lib/mailx-client.ts    # 传输适配
   src/generated/            # Rust DTO 生成的 TypeScript
   package.json              # 前端脚本与依赖

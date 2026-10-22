@@ -51,6 +51,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_bodies", "message_parts"],
         sql: include_str!("migrations/0004_message_bodies.sql"),
     },
+    Migration {
+        version: 5,
+        description: "account display color",
+        required_tables: &["accounts"],
+        sql: include_str!("migrations/0005_account_color.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {

@@ -75,8 +75,8 @@ impl Storage {
     }
 
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
-        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at FROM accounts WHERE id=?1", [id], |r| {
-            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?))
+        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color FROM accounts WHERE id=?1", [id], |r| {
+            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?))
         }).optional()?.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
         let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json FROM auth_profiles WHERE account_id=?1 AND kind='password'")?;
         let records = profile_statement
@@ -139,6 +139,7 @@ impl Storage {
                 id: id.into(),
                 revision: basic.0,
                 display_name: basic.1,
+                color: basic.7,
                 email_address: basic.2,
                 provider_id: basic.3,
                 mailbox_source_id: basic.4,
@@ -244,6 +245,23 @@ impl Storage {
         Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM auth_profiles WHERE secret_ref=?1 UNION ALL SELECT 1 FROM network_routes WHERE secret_ref=?1)",[key],|r| r.get(0))?)
     }
 
+    /// Writes only profile columns; `revision` and connection rows are untouched.
+    pub fn update_profile(
+        &self,
+        id: &str,
+        profile: &AccountProfileInput,
+        updated_at: &str,
+    ) -> Result<(), AppError> {
+        let changed = self.db.execute(
+            "UPDATE accounts SET display_name=?2,color=?3,updated_at=?4 WHERE id=?1",
+            params![id, profile.display_name, profile.color, updated_at],
+        )?;
+        if changed == 0 {
+            return Err(AppError::new(ErrorCode::NotFound));
+        }
+        Ok(())
+    }
+
     pub fn apply(&mut self, journal: &Journal) -> Result<(), AppError> {
         let snapshot = &journal.snapshot;
         let account = &snapshot.account;
@@ -259,9 +277,11 @@ impl Storage {
             return Err(AppError::new(ErrorCode::Conflict));
         }
         if current.is_none() {
-            tx.execute("INSERT INTO accounts(id,revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![account.id,account.revision,account.display_name,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
+            tx.execute("INSERT INTO accounts(id,revision,display_name,color,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![account.id,account.revision,account.display_name,account.color,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
         } else {
-            tx.execute("UPDATE accounts SET revision=?2,display_name=?3,email_address=?4,provider_id=?5,mailbox_source_id=?6,updated_at=?7 WHERE id=?1",params![account.id,account.revision,account.display_name,account.email_address,account.provider_id,account.mailbox_source_id,account.updated_at])?;
+            // A connection commit never writes the profile (name, color); those
+            // have their own update and must not be reverted by a replayed journal.
+            tx.execute("UPDATE accounts SET revision=?2,email_address=?3,provider_id=?4,mailbox_source_id=?5,updated_at=?6 WHERE id=?1",params![account.id,account.revision,account.email_address,account.provider_id,account.mailbox_source_id,account.updated_at])?;
         }
         tx.execute(
             "DELETE FROM mail_connections WHERE account_id=?1",

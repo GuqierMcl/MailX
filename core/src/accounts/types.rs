@@ -114,16 +114,60 @@ pub enum RouteInput {
     },
 }
 
+/// How the account appears in MailX. Changing it never touches a connection.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AccountConfigInput {
+pub struct AccountProfileInput {
     pub display_name: String,
+    /// `#rrggbb`, or `null` for the neutral default.
+    pub color: Option<String>,
+}
+
+/// How MailX reaches the mailbox: identity, servers, credentials and route.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConnectionInput {
     pub email_address: String,
     pub provider_id: Option<String>,
     pub imap: ConnectionConfig,
     pub smtp: ConnectionConfig,
     pub authentication: AuthenticationInput,
     pub route: RouteInput,
+}
+
+/// A new account: its profile and its connection in one request.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountConfigInput {
+    pub display_name: String,
+    /// `#rrggbb`; omitted or `null` for the neutral default.
+    #[serde(default)]
+    pub color: Option<String>,
+    pub email_address: String,
+    pub provider_id: Option<String>,
+    pub imap: ConnectionConfig,
+    pub smtp: ConnectionConfig,
+    pub authentication: AuthenticationInput,
+    pub route: RouteInput,
+}
+
+impl AccountConfigInput {
+    pub(crate) fn split(self) -> (AccountProfileInput, ConnectionInput) {
+        (
+            AccountProfileInput {
+                display_name: self.display_name,
+                color: self.color,
+            },
+            ConnectionInput {
+                email_address: self.email_address,
+                provider_id: self.provider_id,
+                imap: self.imap,
+                smtp: self.smtp,
+                authentication: self.authentication,
+                route: self.route,
+            },
+        )
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, TS)]
@@ -133,13 +177,23 @@ pub struct CreateAccountRequest {
     pub config: AccountConfigInput,
 }
 
+/// Replaces the connection. Advances `revision` and restarts sync.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct UpdateAccountRequest {
+pub struct UpdateConnectionRequest {
     pub account_id: String,
     #[ts(type = "number")]
     pub expected_revision: u32,
-    pub config: AccountConfigInput,
+    pub connection: ConnectionInput,
+}
+
+/// Replaces the profile. Leaves `revision` and any running sync untouched;
+/// the last write wins.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProfileRequest {
+    pub account_id: String,
+    pub profile: AccountProfileInput,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -203,9 +257,14 @@ pub enum ConnectionStatus {
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub id: String,
+    /// Version of the connection settings. Profile changes do not advance it.
     #[ts(type = "number")]
     pub revision: u32,
     pub display_name: String,
+    /// `#rrggbb`, or `null` for the neutral default. Defaulted so credential
+    /// journals written before colors existed still load.
+    #[serde(default)]
+    pub color: Option<String>,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub mailbox_source_id: String,

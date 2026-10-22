@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import type { Account, AuthenticationMode, TlsMode } from '@/generated/accounts'
+import { useRef, useState, type ReactNode } from 'react'
+import type { Account, AuthenticationMode, ConnectionInput, TlsMode } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,17 +8,35 @@ import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { clientFailure, type ClientFailure } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
-import { clearSecrets, draftToConfig, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
+import { clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 
 type FormProps = {
+  /** The saved account whose connection is edited; `null` for a new one. */
   account: Account | null
-  client: MailxClient
-  onSaved(account: Account): void
+  /** Where to resume, e.g. coming back to this step of the add-account wizard. */
+  initialDraft?: AccountDraft
+  /** A failure to show on arrival, e.g. a later step's save rejected this connection. */
+  initialError?: ClientFailure | null
+  /** Shown above the fields. */
+  intro: { title: string; description: ReactNode }
+  submitLabel: string
+  submittingLabel: string
+  /**
+   * Receives the validated connection and the draft it came from (with its
+   * secrets). Throw to report a failure; the form's secret inputs are cleared
+   * once a submission begins either way.
+   */
+  onSubmit(connection: ConnectionInput, draft: AccountDraft): Promise<void> | void
   onBusyChange(busy: boolean): void
   onDirtyChange(dirty: boolean): void
-  onReload(): void
+  /** Offered after a conflict or an uncertain outcome. */
+  onReload?(): void
+  /** Disables submission, e.g. when no host backend is available. */
+  unavailable?: boolean
+  /** Adds a back button beside submit, e.g. in a wizard. */
+  onBack?(): void
 }
 
 type InputFieldProps = {
@@ -109,12 +127,19 @@ function PasswordField({ id, label, value, onChange, canKeep, error }: {
   )
 }
 
-export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyChange, onReload }: FormProps) {
-  const [draft, setDraft] = useState(() => initialDraft(account))
-  const [error, setError] = useState<ClientFailure | null>(null)
+/**
+ * How MailX reaches a mailbox: address, servers, credentials and route. Shared
+ * by the add-account wizard and the "edit connection" dialog; the caller
+ * decides what submitting means.
+ */
+export function ConnectionForm({
+  account, initialDraft: resume, initialError = null, intro, submitLabel, submittingLabel,
+  onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack,
+}: FormProps) {
+  const [draft, setDraft] = useState(() => resume ?? initialDraft(account))
+  const [error, setError] = useState<ClientFailure | null>(initialError)
   const [saving, setSaving] = useState(false)
   const pending = useRef(false)
-  const requestId = useRef(crypto.randomUUID())
   const sameMode = account?.authentication.mode === draft.mode
   const oldProxyAuth = account?.route.kind === 'custom' ? account.route.authentication : null
   const needsTrust = account && (account.authentication.imap.trust === 'needsConfirmation'
@@ -141,9 +166,9 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
   async function save() {
     if (pending.current) return
     setError(null)
-    let config
+    let connection
     try {
-      config = draftToConfig(draft, account)
+      connection = draftToConnection(draft, account)
     } catch (cause) {
       const failure = clientFailure(cause)
       setDraft(clearSecrets)
@@ -151,17 +176,15 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
       if (failure.field) document.getElementById(failure.field)?.focus()
       return
     }
+    const submitted = draft
     pending.current = true
     setSaving(true)
     onBusyChange(true)
-    // Secrets exist only in this in-flight request after a submission begins.
+    // Secrets exist only in this in-flight submission after it begins.
     setDraft(clearSecrets)
     try {
-      const saved = account
-        ? await client.updateAccount({ accountId: account.id, expectedRevision: account.revision, config })
-        : await client.createAccount({ requestId: requestId.current, config })
+      await onSubmit(connection, submitted)
       onDirtyChange(false)
-      onSaved(saved)
     } catch (cause) {
       setError(clientFailure(cause))
     } finally {
@@ -174,27 +197,27 @@ export function AccountForm({ account, client, onSaved, onBusyChange, onDirtyCha
   return (
     <SettingsPage footer={<>
       <FieldDescription>{saving ? '正在安全保存配置…' : '凭证不会显示在账号详情中。'}</FieldDescription>
-      <Button onClick={() => { void save() }} disabled={saving || !client.available}>{saving ? '保存中…' : account ? '保存更改' : '保存账号'}</Button>
+      <div className="flex shrink-0 gap-2">
+        {onBack && <Button variant="outline" onClick={onBack} disabled={saving}>上一步</Button>}
+        <Button onClick={() => { void save() }} disabled={saving || unavailable}>{saving ? submittingLabel : submitLabel}</Button>
+      </div>
     </>}>
         <Alert role="status">
-          <AlertTitle>{account ? '尚未验证连接' : '手动配置 · 密码或授权码'}</AlertTitle>
-          <AlertDescription>保存后 MailX 会登录收信服务器同步文件夹列表；暂不收取邮件，也不会发送邮件。</AlertDescription>
+          <AlertTitle>{intro.title}</AlertTitle>
+          <AlertDescription>{intro.description}</AlertDescription>
         </Alert>
         {needsTrust && <Alert variant="destructive"><AlertTitle>凭证需要重新确认</AlertTitle><AlertDescription>服务器或登录身份已改变。请为受影响的收信、发信或代理配置重新输入密码，以确认新的使用范围。</AlertDescription></Alert>}
         {error && (
           <Alert variant="destructive">
             <AlertTitle>{error.code === 'conflict' ? '配置已在其他位置更新' : '尚未保存'}</AlertTitle>
             <AlertDescription>{error.message} 已输入的密码已清空，需要时请重新输入。</AlertDescription>
-            {(error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
+            {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
               <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>重新加载配置</Button>}
           </Alert>
         )}
         <FieldSet disabled={saving} aria-label="邮箱账号配置" aria-busy={saving} className="gap-6">
-          <SettingsGroup title="基本信息" description="账号名称只用于 MailX 中的显示。">
-            <div className="grid grid-cols-2 gap-4">
-              <TextField id="displayName" label="账号名称" value={draft.displayName} onChange={(value) => change('displayName', value)} placeholder="例如：工作邮箱" error={error} />
-              <TextField id="emailAddress" label="邮箱地址" value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
-            </div>
+          <SettingsGroup title="邮箱地址" description="收发邮件所用的地址。">
+            <TextField id="emailAddress" label="邮箱地址" value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
           </SettingsGroup>
           <ConnectionFields protocol="imap" value={draft.imap} onChange={(value) => change('imap', value)} error={error} />
           <ConnectionFields protocol="smtp" value={draft.smtp} onChange={(value) => change('smtp', value)} error={error} />

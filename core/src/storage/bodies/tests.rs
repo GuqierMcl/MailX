@@ -85,7 +85,7 @@ fn v3_upgrade_preserves_headers_and_previous_migration_history() {
             .db
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        4
+        MIGRATIONS.last().unwrap().version
     );
     assert_eq!(store.body_identity("message").unwrap().uid, 7);
     assert_eq!(body_state(&store), ("missing".into(), None, String::new()));

@@ -4,6 +4,7 @@ import {
   Alert02Icon,
   Archive02Icon,
   ArrowRight01Icon,
+  AtSignIcon,
   Delete02Icon,
   File01Icon,
   Folder01Icon,
@@ -37,6 +38,7 @@ import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
 import { buildFolderTree, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
+import { AccountAvatar } from '@/features/accounts/account-avatar'
 
 const ROLE_ICONS: Record<FolderRole, IconSvgElement> = {
   inbox: InboxIcon,
@@ -56,12 +58,13 @@ type MailSidebarProps = {
   syncStates: Record<string, AccountSyncState>
   mailbox: Mailbox
   onSelect: (mailbox: Mailbox) => void
+  onOpenAccounts: () => void
   onOpenSettings: () => void
   /** Starts the account's next sync round now. */
   onRefresh: (accountId: string) => void
 }
 
-export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenSettings, onRefresh }: MailSidebarProps) {
+export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onRefresh }: MailSidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const toggle = (id: string, open: boolean) => {
     const next = new Set(collapsed)
@@ -75,6 +78,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
   const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
   const unifiedCountsKnown = inboxes.every((folder) => folder.countsKnown)
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
+  const hasSyncFailure = accounts.some((account) => syncStates[account.id]?.failure)
 
   return (
     <div data-slot="mail-sidebar" className="flex h-full min-h-0 flex-col">
@@ -129,6 +133,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                       render={<SidebarMenuButton title={account.emailAddress} className={cn('font-medium', sync?.failure ? 'pr-14' : 'pr-8')} />}
                     >
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
+                      <AccountAvatar displayName={account.displayName} color={account.color} className="size-[18px] text-[10px]" />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
                     <AccountSyncSlot
@@ -175,6 +180,13 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={onOpenAccounts}>
+              <HugeiconsIcon icon={AtSignIcon} />
+              <span>账号</span>
+            </SidebarMenuButton>
+            {hasSyncFailure && <SidebarMenuBadge aria-label="有账号同步失败" className="text-destructive">!</SidebarMenuBadge>}
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenSettings}>
               <HugeiconsIcon icon={Settings01Icon} />

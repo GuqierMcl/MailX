@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 
 use crate::accounts::AccountService;
-use crate::accounts::types::{Account, CreateAccountRequest, UpdateAccountRequest};
+use crate::accounts::types::{
+    Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
+};
 use crate::error::{AppError, ErrorCode};
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
@@ -85,12 +87,15 @@ impl MailxCore {
         Ok(account)
     }
 
-    /// Updates an account and restarts its sync with the new settings, so no
-    /// connection made under the old server, route or credentials survives.
-    pub fn update_account(&self, request: UpdateAccountRequest) -> Result<Account, AppError> {
+    /// Replaces an account's connection and restarts its sync right away, so
+    /// no connection made under the old server, route or credentials survives.
+    pub fn update_account_connection(
+        &self,
+        request: UpdateConnectionRequest,
+    ) -> Result<Account, AppError> {
         let (account, body_restart) = {
             let mut service = self.accounts()?;
-            let account = service.update(request)?;
+            let account = service.update_connection(request)?;
             let body_restart = self.bodies.restart(&account.id, &mut service);
             (account, body_restart)
         };
@@ -99,6 +104,14 @@ impl MailxCore {
         self.sync.restart(&account.id);
         body_restart?;
         Ok(account)
+    }
+
+    /// Renames or recolors an account. Sync and body downloads keep running.
+    pub fn update_account_profile(
+        &self,
+        request: UpdateProfileRequest,
+    ) -> Result<Account, AppError> {
+        self.accounts()?.update_profile(request)
     }
 
     pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
@@ -142,7 +155,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::accounts::sync_plan::tests::config;
+    use crate::accounts::sync_plan::tests::{config, connection_update};
     use crate::secrets::test_support::MemorySecrets;
     use crate::sync::manager::{SyncFailureCode, SyncPhase};
 
@@ -228,17 +241,43 @@ mod tests {
         value["imap"]["host"] = json!("127.0.0.2");
         value["imap"]["port"] = json!(closed_port());
         value["authentication"]["password"] = json!({"action":"keep"});
-        core.update_account(
-            serde_json::from_value(
-                json!({"accountId": account.id, "expectedRevision": account.revision, "config": value}),
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        core.update_account_connection(connection_update(&account.id, account.revision, value))
+            .unwrap();
 
         let failure = next_failure(&states).failure.unwrap();
         assert_eq!(failure.code, SyncFailureCode::CredentialUntrusted);
         assert!(!failure.will_retry);
+    }
+
+    #[test]
+    fn a_profile_change_keeps_the_running_sync_while_a_connection_change_restarts_it() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        let (core, states) = open(&directory, &runtime);
+        let account = create(&core, closed_port());
+        let generation = next_failure(&states).generation;
+
+        let renamed = core
+            .update_account_profile(
+                serde_json::from_value(json!({
+                    "accountId": account.id,
+                    "profile": {"displayName": "Renamed", "color": "#2563eb"},
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(renamed.revision, account.revision);
+        assert_eq!(core.sync_states()[0].generation, generation);
+
+        let mut value = config(json!({"kind":"direct"}));
+        value["imap"]["host"] = json!("127.0.0.1");
+        value["imap"]["port"] = json!(closed_port());
+        value["authentication"]["password"] = json!({"action":"keep"});
+        let moved = core
+            .update_account_connection(connection_update(&account.id, account.revision, value))
+            .unwrap();
+        assert_eq!(moved.display_name, "Renamed");
+        assert_eq!(core.sync_states()[0].generation, generation + 1);
     }
 
     #[test]

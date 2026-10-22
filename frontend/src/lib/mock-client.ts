@@ -40,13 +40,23 @@ export function createMockClient(): MailxClient {
       folders.push(...buildFolders(account.id, emails))
       return structuredClone(account)
     },
-    async updateAccount({ accountId, expectedRevision, config }) {
+    async updateConnection({ accountId, expectedRevision, connection }) {
       const index = accounts.findIndex((row) => row.id === accountId)
       if (index < 0) throw notFound()
-      if (accounts[index].revision !== expectedRevision) {
+      const current = accounts[index]
+      if (current.revision !== expectedRevision) {
         throw new MailxClientError({ code: 'conflict', message: '配置已被修改，请重新加载后重试。', field: null })
       }
-      accounts[index] = { ...accountFromConfig(accountId, expectedRevision + 1, config), createdAt: accounts[index].createdAt }
+      const config = { ...connection, displayName: current.displayName, color: current.color }
+      accounts[index] = { ...accountFromConfig(accountId, expectedRevision + 1, config), createdAt: current.createdAt }
+      return structuredClone(accounts[index])
+    },
+    async updateProfile({ accountId, profile }) {
+      const index = accounts.findIndex((row) => row.id === accountId)
+      if (index < 0) throw notFound()
+      const displayName = profile.displayName.trim()
+      if (!displayName) throw new MailxClientError({ code: 'validation', message: '请填写账号名称。', field: 'displayName' })
+      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, updatedAt: new Date().toISOString() }
       return structuredClone(accounts[index])
     },
     listFolders: async (accountId) => structuredClone(folders.filter((folder) => folder.accountId === accountId)),
@@ -135,6 +145,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     id,
     revision,
     displayName: config.displayName,
+    color: config.color ?? null,
     emailAddress: config.emailAddress,
     providerId: config.providerId,
     mailboxSourceId: `mock-${id}`,
@@ -155,6 +166,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
 const MOCK_ACCOUNTS: Account[] = [
   accountFromConfig(WORK, 1, {
     displayName: '工作邮箱',
+    color: '#2563eb',
     emailAddress: 'lin.wei@example.com',
     providerId: null,
     imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'lin.wei@example.com' },
@@ -164,6 +176,7 @@ const MOCK_ACCOUNTS: Account[] = [
   }),
   accountFromConfig(PERSONAL, 1, {
     displayName: '个人邮箱',
+    color: '#16a34a',
     emailAddress: 'linwei.home@example.org',
     providerId: null,
     imap: { host: 'imap.example.org', port: 993, tls: 'implicit', username: 'linwei.home@example.org' },

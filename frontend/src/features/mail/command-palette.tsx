@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
+  AtSignIcon,
   Cancel01Icon,
   Folder01Icon,
   InboxIcon,
@@ -51,6 +52,8 @@ export type CommandPaletteProps = {
   /** Applies the search and selects the message once the list shows it. */
   onOpenEmail: (email: EmailSummary, text: string) => void
   onSelectMailbox: (mailbox: Mailbox) => void
+  onOpenAccounts: () => void
+  onAddAccount: () => void
   onOpenSettings: (target: SettingsTarget) => void
 }
 
@@ -72,7 +75,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 
 function PaletteBody({
   client, onOpenChange, scope, search, folderId, folderRole, sourceIdentity, accounts, folders,
-  onApplySearch, onOpenEmail, onSelectMailbox, onOpenSettings,
+  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings,
 }: CommandPaletteProps) {
   const [text, setText] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -117,7 +120,8 @@ function PaletteBody({
 
   const commands: Entry[] = [
     { id: 'cmd:settings', title: '打开设置', keywords: 'settings 偏好', icon: Settings01Icon, run: () => onOpenSettings({ section: 'appearance' }) },
-    { id: 'cmd:add-account', title: '添加邮箱账号', keywords: 'account 新增', icon: UserAdd01Icon, run: () => onOpenSettings({ section: 'accounts', newAccount: true }) },
+    { id: 'cmd:accounts', title: '管理邮箱账号', keywords: 'account 账号 邮箱', icon: AtSignIcon, run: onOpenAccounts },
+    { id: 'cmd:add-account', title: '添加邮箱账号', keywords: 'account 新增', icon: UserAdd01Icon, run: onAddAccount },
     ...(['light', 'dark', 'system'] as const).filter((mode) => mode !== theme).map((mode): Entry => ({
       id: `cmd:theme:${mode}`,
       title: `外观：${THEME_LABELS[mode]}`,

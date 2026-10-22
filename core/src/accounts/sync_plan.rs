@@ -169,7 +169,7 @@ pub(crate) mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::accounts::types::{Account, CreateAccountRequest, UpdateAccountRequest};
+    use crate::accounts::types::{Account, CreateAccountRequest, UpdateConnectionRequest};
     use crate::imap::FolderStatus;
     use crate::mail::FolderRole;
     use crate::secrets::test_support::MemorySecrets;
@@ -194,6 +194,22 @@ pub(crate) mod tests {
         (directory, service, account)
     }
 
+    /// A connection update built from a full account config: the profile
+    /// fields belong to their own request and are dropped here.
+    pub(crate) fn connection_update(
+        account_id: &str,
+        expected_revision: u32,
+        mut value: Value,
+    ) -> UpdateConnectionRequest {
+        let object = value.as_object_mut().unwrap();
+        object.remove("displayName");
+        object.remove("color");
+        serde_json::from_value(json!({
+            "accountId": account_id, "expectedRevision": expected_revision, "connection": value,
+        }))
+        .unwrap()
+    }
+
     fn update(
         service: &mut AccountService,
         account: &Account,
@@ -202,11 +218,9 @@ pub(crate) mod tests {
         let mut value = config(json!({"kind":"direct"}));
         value["authentication"]["password"] = json!({"action":"keep"});
         change(&mut value);
-        let request: UpdateAccountRequest = serde_json::from_value(
-            json!({"accountId": account.id, "expectedRevision": account.revision, "config": value}),
-        )
-        .unwrap();
-        service.update(request).unwrap()
+        service
+            .update_connection(connection_update(&account.id, account.revision, value))
+            .unwrap()
     }
 
     fn record(
