@@ -200,3 +200,16 @@ describe('toast outlet', () => {
     expect(screen.getByRole('region', { name: 'Notifications' })).toHaveAttribute('aria-live', 'polite')
   })
 })
+
+describe('the open message follows its own flags', () => {
+  it('updates the reader\'s copy even when the list does not contain the message', async () => {
+    const { hook, queryClient } = setup(email({ id: 'listed' }))
+    const detail = {
+      summary: email({ id: 'open-only' }), to: [], cc: [], replyTo: [], attachments: [], bodyFailure: null, body: null,
+    }
+    queryClient.setQueryData([...mailKeys.email('open-only'), 'identity'], detail)
+    await act(async () => { await hook.result.current.setFlag(email({ id: 'open-only' }), 'starred', true) })
+    const copy = queryClient.getQueryData<typeof detail>([...mailKeys.email('open-only'), 'identity'])!
+    expect(copy.summary).toMatchObject({ isStarred: true, pendingChanges: true })
+  })
+})

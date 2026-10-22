@@ -1,6 +1,7 @@
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
+  Cancel01Icon,
   Delete02Icon,
   Forward01Icon,
   Mail01Icon,
@@ -21,11 +22,14 @@ import { AttachmentList } from './attachment-list'
 import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime } from './format'
 import { SenderAvatar } from './sender-avatar'
+import { useCloseOnEscape } from './use-close-on-escape'
 
 type EmailViewProps = {
   client: MailxClient
   /** Marks the open message read or starred; the list shows it at once. */
   onFlag: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
+  /** Closes the reader. Nothing else closes it except opening another message. */
+  onClose: () => void
   downloading: boolean
   onDownload: () => void
   email: EmailDetail | null
@@ -33,11 +37,15 @@ type EmailViewProps = {
   error: string | null
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose }: EmailViewProps) {
   const showSkeleton = useDelayedFlag(loading)
+  // A message is open while it is loading, shown, or failed to open. Only with
+  // nothing open does the reader have no actions to offer.
+  const open = Boolean(email) || loading || Boolean(error)
+  useCloseOnEscape(open, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar summary={email?.summary ?? null} onFlag={onFlag} />
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
@@ -84,7 +92,7 @@ const PLACEHOLDER_ACTIONS: [string, IconSvgElement][][] = [
   ],
 ]
 
-function Toolbar({ summary, onFlag }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag'] }) {
+function Toolbar({ summary, onFlag, onClose }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
       {PLACEHOLDER_ACTIONS.map((group, index) => (
@@ -120,6 +128,16 @@ function Toolbar({ summary, onFlag }: { summary: EmailSummary | null; onFlag: Em
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </Button>
       </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="ml-auto"
+        aria-label="关闭邮件"
+        title="关闭邮件（Esc）"
+        onClick={onClose}
+      >
+        <HugeiconsIcon icon={Cancel01Icon} />
+      </Button>
     </div>
   )
 }

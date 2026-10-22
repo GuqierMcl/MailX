@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
+import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, FlagWriteBack, Folder } from '@/generated/accounts'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
+import { MailxClientError } from '@/lib/mailx-client'
 import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
@@ -57,6 +58,8 @@ function setup(items: EmailSummary[] = []) {
 }
 
 const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
+/** Like `rows`, but an empty list (which renders an empty state instead of a list) counts as no rows. */
+const listedRows = () => screen.queryAllByRole('listitem').filter((row) => row.closest('[aria-label="邮件列表"]'))
 
 describe('synced inbox headers', () => {
   it('requests 100 headers, appends the cursor page and hides load more at the end', async () => {
@@ -170,22 +173,20 @@ describe('synced inbox headers', () => {
     expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
   })
 
-  it('clears a selection missing from the refreshed first page and ignores its pending detail', async () => {
-    const selected = email('removed')
-    const { client, idle } = setup([selected])
-    const pendingDetail = deferred<EmailDetail>()
-    client.getEmail.mockReturnValue(pendingDetail.promise)
+  it('keeps the opened message when a refreshed list no longer contains it, and only drops the highlight', async () => {
+    const opened = email('removed')
+    const { client, idle } = setup([opened])
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: opened.subject })
     client.listEmails.mockResolvedValue(page([email('remaining')]))
     idle()
     await waitFor(() => expect(rows()[0]).toHaveTextContent('邮件 remaining'))
+    // The list moved on; the reader did not.
     expect(rows()[0]).not.toHaveAttribute('aria-current')
-    expect(screen.queryByRole('status', { name: '正在加载邮件' })).not.toBeInTheDocument()
-    await act(async () => pendingDetail.resolve(detail(selected)))
-    expect(screen.queryByRole('heading', { name: selected.subject })).not.toBeInTheDocument()
-    expect(screen.getAllByText('未选择邮件').length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
+    expect(screen.queryByText('未选择邮件')).not.toBeInTheDocument()
   })
 
   it('ignores a pagination response that arrives after a sync refresh', async () => {
@@ -445,7 +446,7 @@ describe('synced inbox headers', () => {
     expect(screen.queryByText(selected.subject)).not.toBeInTheDocument()
   })
 
-  it('leaves a folder that becomes a Noselect container and hides its old selected mail', async () => {
+  it('leaves a folder that becomes a Noselect container, and keeps the message that was open in it', async () => {
     const sentMail = email('sent-only', { folderId: 'sent' })
     const { client, emit } = setup([sentMail])
     client.listEmails.mockImplementation(async (query) => page(query.folderId === 'sent' ? [sentMail] : []))
@@ -458,9 +459,94 @@ describe('synced inbox headers', () => {
     client.listFolders.mockResolvedValue([inbox, { ...inbox, id: 'sent', name: 'Sent', role: 'sent', selectable: false }])
     emit(exampleSyncState({ sequence: 2, folderRevision: 1, folders: [exampleFolderSyncState('inbox')] }))
     await screen.findByRole('heading', { name: '全部收件箱' })
-    expect(screen.queryByText(sentMail.subject)).not.toBeInTheDocument()
+    // The list is back on the unified inbox and no longer lists the message...
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderRole: 'inbox', folderId: null }))
+    expect(listedRows()).toHaveLength(0)
+    // ...but the reader is not part of the list, so the message stays open.
+    expect(screen.getByRole('heading', { name: sentMail.subject })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     expect(screen.getByRole('heading', { name: '全部收件箱' })).toBeInTheDocument()
+  })
+
+  it('keeps the open message when the user switches to another mailbox', async () => {
+    const opened = email('keep-me')
+    const { client } = setup([opened])
+    client.listEmails.mockImplementation(async (query) => page(query.folderId === 'sent' ? [] : [opened]))
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: opened.subject })
+    await userEvent.click(screen.getByRole('button', { name: '已发送' }))
+    await screen.findByRole('heading', { name: '已发送' })
+    expect(listedRows()).toHaveLength(0)
+    expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
+  })
+
+  it('keeps a message open after reading it removes it from the unread filter', async () => {
+    const unread = email('unread-one', { isRead: false })
+    const { client } = setup([unread])
+    // The list answers like the core: once a message is read it is not unread any more.
+    let readIds = new Set<string>()
+    let confirmWriteBack: (written: FlagWriteBack) => void = () => undefined
+    client.onFlagWriteBack.mockImplementation((listener) => { confirmWriteBack = listener; return () => undefined })
+    client.setFlag.mockImplementation(async (id) => { readIds = new Set([...readIds, id]); return 'queued' })
+    client.listEmails.mockImplementation(async (query) => page(query.unread && readIds.has(unread.id) ? [] : [{ ...unread, isRead: readIds.has(unread.id) }]))
+    client.getEmail.mockImplementation(async (id) => ({ ...detail(unread), summary: { ...unread, id, isRead: readIds.has(id) } }))
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('tab', { name: '未读' }))
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: unread.subject })
+    await waitFor(() => expect(client.setFlag).toHaveBeenCalledWith(unread.id, 'read', true))
+    // Until the list is refreshed the row stays, now shown as read: nothing jumps.
+    await waitFor(() => expect(within(rows()[0]).queryByLabelText('未读')).not.toBeInTheDocument())
+    // The server confirms, the list is re-read and the message leaves the unread filter...
+    act(() => confirmWriteBack({ accountId: unread.accountId, sent: 1, localOnlyStars: 0 }))
+    await waitFor(() => expect(listedRows()).toHaveLength(0))
+    // ...and the message is still open, and can be marked unread again.
+    expect(screen.getByRole('heading', { name: unread.subject })).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: '标为未读' }))
+    await waitFor(() => expect(client.setFlag).toHaveBeenLastCalledWith(unread.id, 'read', false))
+    expect(screen.getByRole('heading', { name: unread.subject })).toBeInTheDocument()
+  })
+
+  it('closes the reader when the message turns out to be gone for good', async () => {
+    const gone = email('gone')
+    const { client } = setup([gone])
+    // The core refuses a message that was deleted or replaced: its detail is "not found".
+    client.getEmail.mockRejectedValue(new MailxClientError({ code: 'notFound', message: '内容不存在。', field: null }))
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    await waitFor(() => expect(screen.getAllByText('未选择邮件').length).toBeGreaterThan(0))
+    expect(screen.queryByRole('button', { name: '关闭邮件' })).not.toBeInTheDocument()
+  })
+
+  it('closes with the close button and with Esc, and a search box keeps Esc for itself', async () => {
+    const opened = email('closable')
+    const { client } = setup([opened])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    await userEvent.click(await screen.findByRole('button', { name: '关闭邮件' }))
+    expect(screen.getAllByText('未选择邮件').length).toBeGreaterThan(0)
+    // With nothing open there is nothing to act on, so the toolbar is gone entirely.
+    expect(screen.queryByRole('toolbar', { name: '邮件操作' })).not.toBeInTheDocument()
+
+    await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: opened.subject })
+    expect(screen.getByRole('toolbar', { name: '邮件操作' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.getAllByText('未选择邮件').length).toBeGreaterThan(0))
+
+    // Esc inside the search palette dismisses the palette, not the message.
+    await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: opened.subject })
+    await userEvent.click(screen.getByRole('button', { name: '搜索邮件' }))
+    await screen.findByRole('combobox')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('combobox')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
   })
 })

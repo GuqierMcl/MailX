@@ -35,7 +35,7 @@ describe('on-demand body queries', () => {
   it('downloads once in StrictMode, keeps ready metadata over old headers, and never retries failed DTOs automatically', async () => {
     const { client, wrapper } = setup()
     client.fetchBody.mockResolvedValueOnce({ ...mail(), summary: { ...mail().summary, bodyState: 'failed' }, bodyFailure: 'network' })
-    const { result, rerender } = renderHook(({ id }) => useEmailBody(client, mail(id).summary, [account], { [account.id]: state }), { wrapper, initialProps: { id: 'one' } })
+    const { result, rerender } = renderHook(({ id }) => useEmailBody(client, { id, accountId: account.id }, [account], { [account.id]: state }), { wrapper, initialProps: { id: 'one' } })
     await waitFor(() => expect(result.current.email?.bodyFailure).toBe('network'))
     rerender({ id: 'two' })
     await waitFor(() => expect(result.current.email?.summary.bodyState).toBe('failed'))
@@ -54,7 +54,7 @@ describe('on-demand body queries', () => {
     const { client, cache, wrapper } = setup()
     const download = deferred<EmailDetail>()
     client.fetchBody.mockReturnValue(download.promise)
-    const { result } = renderHook(() => useEmailBody(client, mail().summary, [account], { [account.id]: state }), { wrapper })
+    const { result } = renderHook(() => useEmailBody(client, { id: 'one', accountId: account.id }, [account], { [account.id]: state }), { wrapper })
     await waitFor(() => expect(client.fetchBody).toHaveBeenCalledTimes(1))
     const stale = deferred<EmailDetail>()
     client.getEmail.mockReturnValue(stale.promise)
@@ -84,7 +84,7 @@ describe('on-demand body queries', () => {
     const { client, wrapper } = setup()
     const first = deferred<EmailDetail>()
     client.fetchBody.mockImplementation((id) => id === 'one' ? first.promise : Promise.resolve(mail(id, true)))
-    const { result, rerender } = renderHook(({ id }) => useEmailBody(client, mail(id).summary, [account], { [account.id]: state }), { wrapper, initialProps: { id: 'one' } })
+    const { result, rerender } = renderHook(({ id }) => useEmailBody(client, { id, accountId: account.id }, [account], { [account.id]: state }), { wrapper, initialProps: { id: 'one' } })
     await waitFor(() => expect(client.fetchBody).toHaveBeenCalledTimes(1))
     rerender({ id: 'two' })
     await waitFor(() => expect(result.current.email?.summary.bodyState).toBe('ready'))
@@ -93,5 +93,22 @@ describe('on-demand body queries', () => {
     rerender({ id: 'one' })
     await waitFor(() => expect(result.current.email?.summary.bodyState).toBe('ready'))
     expect(client.fetchBody).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the message\'s own flags, so a message missing from every list still reads correctly', async () => {
+    const { client, wrapper } = setup()
+    client.getEmail.mockImplementation(async (id) => ({
+      ...mail(id, true), summary: { ...mail(id, true).summary, isRead: true, isStarred: true, pendingChanges: true },
+    }))
+    const { result } = renderHook(() => useEmailBody(client, { id: 'only-here', accountId: account.id }, [account], { [account.id]: state }), { wrapper })
+    await waitFor(() => expect(result.current.email).not.toBeNull())
+    expect(result.current.email?.summary).toMatchObject({ isRead: true, isStarred: true, pendingChanges: true })
+  })
+
+  it('opens nothing without a message', () => {
+    const { client, wrapper } = setup()
+    const { result } = renderHook(() => useEmailBody(client, null, [account], { [account.id]: state }), { wrapper })
+    expect(result.current.email).toBeNull()
+    expect(client.getEmail).not.toHaveBeenCalled()
   })
 })

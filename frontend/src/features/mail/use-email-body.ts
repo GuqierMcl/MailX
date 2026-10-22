@@ -11,12 +11,19 @@ export function bodyIdentity(account: Account, state?: AccountSyncState) {
     state?.mailboxSourceId === account.mailboxSourceId ? state.generation : 0])
 }
 
-export function useEmailBody(client: MailxClient, summary: EmailSummary | undefined,
+/**
+ * The message the reader shows. It is only an id and the account it belongs to:
+ * the reader reads everything else, flags included, from the message itself, so
+ * it never depends on whether the list currently contains this message.
+ */
+export type OpenedEmail = Pick<EmailSummary, 'id' | 'accountId'>
+
+export function useEmailBody(client: MailxClient, opened: OpenedEmail | null,
   accounts: Account[], states: Record<string, AccountSyncState>) {
   const queryClient = useQueryClient()
   const identities = new Map(accounts.map((account) => [account.id, bodyIdentity(account, states[account.id])]))
-  const identity = summary ? identities.get(summary.accountId) ?? '' : ''
-  const id = summary?.id ?? ''
+  const identity = opened ? identities.get(opened.accountId) ?? '' : ''
+  const id = opened?.id ?? ''
   const key = useMemo(() => [...mailKeys.email(id), identity] as const, [id, identity])
   const attempted = useRef(new Set<string>())
   const flights = useRef(new Set<string>())
@@ -70,11 +77,9 @@ export function useEmailBody(client: MailxClient, summary: EmailSummary | undefi
     predicate: (mutation) => (mutation.state.variables as { flight?: string } | undefined)?.flight === JSON.stringify(key),
   }) > 0
 
-  // Only flags come from the header list: an older list must never overwrite a
-  // newly fetched ready state, body preview or attachment metadata.
-  const email = detail.data && summary ? {
-    ...detail.data,
-    summary: { ...detail.data.summary, isRead: summary.isRead, isStarred: summary.isStarred, pendingChanges: summary.pendingChanges },
-  } : null
+  // The message is the single source for what the reader shows, flags included:
+  // the core returns the same read, starred and waiting-change values the list
+  // gets. A change made elsewhere reaches it through `refreshOpened`.
+  const email = detail.data ?? null
   return { detail, email, identity, pending, download }
 }

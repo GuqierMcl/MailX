@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { toast } from '@/components/ui/toast'
-import type { EmailPage, EmailSummary } from '@/generated/accounts'
+import type { EmailDetail, EmailPage, EmailSummary } from '@/generated/accounts'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 
@@ -31,6 +31,33 @@ function patchLists(
 }
 
 /**
+ * Applies `change` to the reader's own copy of a message, wherever it is cached.
+ * The reader no longer borrows its flags from the list, and the list may not even
+ * contain the message (a filter, another mailbox), so it is updated directly.
+ */
+function patchOpened(
+  client: ReturnType<typeof useQueryClient>,
+  emailId: string,
+  change: (summary: EmailSummary) => EmailSummary,
+) {
+  client.setQueriesData<EmailDetail>({ queryKey: mailKeys.email(emailId) }, (detail) =>
+    detail && { ...detail, summary: change(detail.summary) })
+}
+
+/** `mailKeys.email(id)` entries, as opposed to lists and the folder tree. */
+const isEmailDetail = (query: { queryKey: readonly unknown[] }) => query.queryKey[1] === 'email'
+
+/** Both places a message's flags are shown: the list rows and the open reader. */
+function patchEverywhere(
+  client: ReturnType<typeof useQueryClient>,
+  emailId: string,
+  change: (summary: EmailSummary) => EmailSummary,
+) {
+  patchLists(client, emailId, change)
+  patchOpened(client, emailId, change)
+}
+
+/**
  * Read and starred changes. The list shows the new value at once (that is where
  * the reader gets these flags from) and the server is written in the background.
  * A rejected change puts the old value back and says so.
@@ -45,7 +72,7 @@ export function useMessageFlags(client: MailxClient) {
     const field = FIELD[flag]
     const before = email[field]
     if (before === wanted) return
-    patchLists(queryClient, email.id, (item) => ({ ...item, [field]: wanted, pendingChanges: true }))
+    patchEverywhere(queryClient, email.id, (item) => ({ ...item, [field]: wanted, pendingChanges: true }))
     // The sidebar's numbers live in the folder tree, a separate query that only a
     // sync event refreshes. The core moves the folder's unread number in the same
     // step as the change, so re-reading it (a local read, no network) is all it takes.
@@ -58,12 +85,12 @@ export function useMessageFlags(client: MailxClient) {
       refreshCounts()
       if (outcome === 'localOnly') {
         // Not pending: it is final. Tell the user, once for this change.
-        patchLists(queryClient, email.id, (item) => ({ ...item, pendingChanges: false }))
+        patchEverywhere(queryClient, email.id, (item) => ({ ...item, pendingChanges: false }))
         if (wanted) toast.info(LOCAL_STAR_TITLE, { description: LOCAL_STAR_BODY, timeout: 9000 })
       }
     } catch (error) {
       refreshCounts()
-      patchLists(queryClient, email.id, (item) => ({ ...item, [field]: before, pendingChanges: false }))
+      patchEverywhere(queryClient, email.id, (item) => ({ ...item, [field]: before, pendingChanges: false }))
       toast.error(flag === 'read' ? '无法更改已读状态' : '无法更改星标', { description: clientFailure(error).message })
     }
   }, [client, queryClient])
@@ -72,6 +99,8 @@ export function useMessageFlags(client: MailxClient) {
   // may carry stars that turned out to be local-only.
   useEffect(() => client.onFlagWriteBack((written) => {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
+    // The open message holds its own copy of "waiting"; re-read it as well.
+    void queryClient.invalidateQueries({ queryKey: mailKeys.all, predicate: isEmailDetail })
     if (written.localOnlyStars > 0) {
       toast.info(LOCAL_STAR_TITLE, { description: LOCAL_STAR_BODY, timeout: 9000 })
     }

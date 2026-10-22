@@ -96,6 +96,11 @@ export function clientFailure(error: unknown): ClientFailure {
   return { code: 'transport', message: '与桌面应用的通信中断，请重新加载配置后重试。', field: null }
 }
 
+/** The machine-readable code of a failure, for deciding what to do rather than what to say. */
+export function clientFailureCode(error: unknown): ClientFailure['code'] {
+  return clientFailure(error).code
+}
+
 export function createDesktopClient(): MailxClient {
   const available = isTauri()
   async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
