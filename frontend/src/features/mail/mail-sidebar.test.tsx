@@ -1,4 +1,4 @@
-import { render, screen, within } from '@/test/render'
+import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
@@ -47,5 +47,34 @@ describe('mail sidebar', () => {
     await userEvent.click(screen.getByRole('button', { name: '客户' }))
     expect(screen.queryByRole('button', { name: '华东区' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'MailX' })).toBeInTheDocument()
+  })
+})
+
+describe('sidebar unread numbers follow read changes', () => {
+  // Both accounts have an inbox, so look inside the work account's own tree.
+  const work = () => screen.getByRole('button', { name: '工作邮箱' }).closest('li')!
+  const numberIn = (row: HTMLElement) => {
+    const text = within(row).queryByText(/^\d+$/)?.textContent
+    return text === undefined ? null : Number(text)
+  }
+  const workInbox = () => within(work()).getByRole('button', { name: '收件箱' }).closest('li')!
+  // The account row's own badge is the first number in its subtree.
+  const accountNumber = () => Number(work().querySelector('.tabular-nums')?.textContent)
+
+  it('drops the folder and account numbers when a message is read, and restores them when it is unread again', async () => {
+    await renderSidebar()
+    const before = { folder: numberIn(workInbox()), account: accountNumber() }
+    expect(before.folder).toBeGreaterThan(0)
+
+    await userEvent.click(within(work()).getByRole('button', { name: '收件箱' }))
+    const unreadRows = (await screen.findAllByRole('listitem')).filter((row) => within(row).queryByLabelText('未读'))
+    await userEvent.click(unreadRows[0])
+    // Opening marks it read; the sidebar must follow without any sync event.
+    await waitFor(() => expect(numberIn(workInbox())).toBe((before.folder ?? 0) - 1 || null))
+    expect(accountNumber()).toBe(before.account - 1)
+
+    await userEvent.click(await screen.findByRole('button', { name: '标为未读' }))
+    await waitFor(() => expect(numberIn(workInbox())).toBe(before.folder))
+    expect(accountNumber()).toBe(before.account)
   })
 })

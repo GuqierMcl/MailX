@@ -46,14 +46,23 @@ export function useMessageFlags(client: MailxClient) {
     const before = email[field]
     if (before === wanted) return
     patchLists(queryClient, email.id, (item) => ({ ...item, [field]: wanted, pendingChanges: true }))
+    // The sidebar's numbers live in the folder tree, a separate query that only a
+    // sync event refreshes. The core moves the folder's unread number in the same
+    // step as the change, so re-reading it (a local read, no network) is all it takes.
+    // Done on failure too, since the core may have changed it before refusing.
+    const refreshCounts = () => {
+      if (flag === 'read') void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
+    }
     try {
       const outcome = await client.setFlag(email.id, flag, wanted)
+      refreshCounts()
       if (outcome === 'localOnly') {
         // Not pending: it is final. Tell the user, once for this change.
         patchLists(queryClient, email.id, (item) => ({ ...item, pendingChanges: false }))
         if (wanted) toast.info(LOCAL_STAR_TITLE, { description: LOCAL_STAR_BODY, timeout: 9000 })
       }
     } catch (error) {
+      refreshCounts()
       patchLists(queryClient, email.id, (item) => ({ ...item, [field]: before, pendingChanges: false }))
       toast.error(flag === 'read' ? '无法更改已读状态' : '无法更改星标', { description: clientFailure(error).message })
     }

@@ -58,6 +58,31 @@ describe('read and starred changes', () => {
     expect(listed().isStarred).toBe(true)
   })
 
+  it('re-reads the folder tree after a read change, because that is where the sidebar numbers come from', async () => {
+    const { client, hook, listed, queryClient } = setup()
+    queryClient.setQueryData(mailKeys.tree(), { accounts: [], folders: [] })
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    await act(async () => { await hook.result.current.setFlag(listed(), 'read', true) })
+    expect(client.setFlag).toHaveBeenCalledWith('mail-1', 'read', true)
+    expect(spy).toHaveBeenCalledWith({ queryKey: mailKeys.tree() })
+  })
+
+  it('leaves the folder tree alone for a star, which moves no number', async () => {
+    const { hook, listed, queryClient } = setup()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    await act(async () => { await hook.result.current.setFlag(listed(), 'starred', true) })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: mailKeys.tree() })
+  })
+
+  it('re-reads the tree when a read change is rolled back, so the number returns too', async () => {
+    const { hook, listed, queryClient } = setup(email(), (client) => {
+      client.setFlag.mockRejectedValue(new MailxClientError({ code: 'notFound', message: '内容不存在。', field: null }))
+    })
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    await act(async () => { await hook.result.current.setFlag(listed(), 'read', true) })
+    expect(spy).toHaveBeenCalledWith({ queryKey: mailKeys.tree() })
+  })
+
   it('does nothing for a value the message already has', async () => {
     const { client, hook, listed } = setup(email({ isRead: true }))
     await act(async () => { await hook.result.current.setFlag(listed(), 'read', true) })
