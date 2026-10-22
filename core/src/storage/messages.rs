@@ -218,7 +218,10 @@ impl Storage {
              to_addresses = excluded.to_addresses, cc_addresses = excluded.cc_addresses, reply_to_addresses = excluded.reply_to_addresses,
              received_at = excluded.received_at, sent_at = excluded.sent_at, size = excluded.size,
              is_read = excluded.is_read, is_flagged = excluded.is_flagged, flags = excluded.flags,
-             has_attachment = excluded.has_attachment, remote_state = 'present', updated_at = excluded.updated_at",
+             -- Once the body is downloaded, has_attachment comes from the real MIME parts;
+             -- a revived message must not fall back to the header-based estimate.
+             has_attachment = CASE WHEN messages.body_state = 'ready' THEN messages.has_attachment ELSE excluded.has_attachment END,
+             remote_state = 'present', updated_at = excluded.updated_at",
         )?;
         for record in records {
             statement.execute(params![

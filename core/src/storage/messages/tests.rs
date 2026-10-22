@@ -1485,3 +1485,56 @@ fn writes_report_only_real_changes() {
         .unwrap();
     assert!(created.created, "a new UIDVALIDITY starts a new generation");
 }
+
+#[test]
+fn a_revived_message_keeps_the_attachment_flag_its_downloaded_body_established() {
+    let mut fixture = setup();
+    let mut first = record(1);
+    first.has_attachment = true;
+    put(&mut fixture, &[first]);
+    let id: String = fixture
+        .db
+        .query_row("SELECT id FROM messages WHERE uid = 1", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .unwrap();
+    let flag = |fixture: &Fixture| -> bool {
+        fixture
+            .db
+            .query_row(
+                "SELECT has_attachment FROM messages WHERE id = ?1",
+                [&id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+    };
+    // The body showed there is no real attachment; then the server deletes and
+    // later re-lists the message, whose header still guesses "attachment".
+    fixture
+        .db
+        .execute(
+            "UPDATE messages SET body_state = 'ready', has_attachment = 0, remote_state = 'deleted' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+    let mut again = record(1);
+    again.has_attachment = true;
+    put(&mut fixture, &[again]);
+    assert!(
+        !flag(&fixture),
+        "the header estimate overwrote the real answer"
+    );
+
+    // Without a downloaded body the new header's estimate still applies.
+    fixture
+        .db
+        .execute(
+            "UPDATE messages SET body_state = 'missing', remote_state = 'deleted' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+    let mut third = record(1);
+    third.has_attachment = true;
+    put(&mut fixture, &[third]);
+    assert!(flag(&fixture));
+}

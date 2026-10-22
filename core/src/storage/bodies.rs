@@ -691,9 +691,11 @@ impl Storage {
                 ])?;
             }
         }
+        // The header-based guess becomes the real answer: any listed non-inline part.
+        let has_attachment = rendered.parts.iter().any(|part| !part.is_inline);
         tx.execute(
-            "UPDATE messages SET preview = ?2, body_state = 'ready', body_failure = NULL WHERE id = ?1",
-            params![identity.message_id, preview],
+            "UPDATE messages SET preview = ?2, body_state = 'ready', body_failure = NULL, has_attachment = ?3 WHERE id = ?1",
+            params![identity.message_id, preview, has_attachment],
         )?;
         tx.commit()?;
         Ok(true)
