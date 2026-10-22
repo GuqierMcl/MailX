@@ -120,6 +120,16 @@ impl Storage {
             ),
             params![message_id, wanted, timestamp],
         )?;
+        // The folder's unread number follows at once, in the same transaction, so
+        // the sidebar and the list never disagree. Only a known count is touched:
+        // an unknown one stays unknown instead of being invented.
+        if flag == Flag::Seen {
+            tx.execute(
+                "UPDATE folders SET unread_count = MAX(0, unread_count + ?2)
+                 WHERE id = (SELECT folder_id FROM messages WHERE id = ?1) AND synced_at <> ''",
+                params![message_id, if wanted { -1 } else { 1 }],
+            )?;
+        }
         // The starred flag on a folder known not to keep it is final right away.
         let local_only = flag == Flag::Flagged && folder_can_flag == Some(false);
         tx.execute(

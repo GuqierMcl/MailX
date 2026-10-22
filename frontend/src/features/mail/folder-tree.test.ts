@@ -68,3 +68,30 @@ describe('collapsed state', () => {
     localStorage.clear()
   })
 })
+
+describe('junk mail in unread totals', () => {
+  it('never adds to a parent or an account number, but is remembered for a dot', () => {
+    const tree = buildFolderTree([
+      folder('inbox', { role: 'inbox', unreadCount: 2 }),
+      folder('junk', { role: 'junk', unreadCount: 7 }),
+      folder('work', { unreadCount: 1 }),
+      folder('spam-in-work', { parentId: 'work', role: 'junk', unreadCount: 4 }),
+    ])
+    const byId = Object.fromEntries(tree.map((node) => [node.folder.id, node]))
+    expect(tree.reduce((total, node) => total + node.unreadWithChildren, 0)).toBe(3)
+    expect(byId.junk.unreadWithChildren).toBe(0)
+    expect(byId.junk.junkUnread).toBe(true)
+    // A parent keeps only its own and its ordinary children's mail, and points at junk below.
+    expect(byId.work.unreadWithChildren).toBe(1)
+    expect(byId.work.junkUnread).toBe(true)
+    expect(byId.inbox.junkUnread).toBe(false)
+  })
+
+  it('has no dot for a junk folder with nothing unread or one that is only a container', () => {
+    const tree = buildFolderTree([
+      folder('junk', { role: 'junk', unreadCount: 0 }),
+      folder('box', { role: 'junk', selectable: false, unreadCount: 9 }),
+    ])
+    expect(tree.every((node) => !node.junkUnread && node.unreadWithChildren === 0)).toBe(true)
+  })
+})

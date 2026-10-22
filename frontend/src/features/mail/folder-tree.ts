@@ -3,9 +3,20 @@ import type { Folder, FolderRole } from '@/generated/accounts'
 export type FolderNode = {
   folder: Folder
   children: FolderNode[]
-  /** Unread count of this folder and every descendant, shown when it is collapsed. */
+  /**
+   * Unread count of this folder and every descendant, shown when it is collapsed.
+   * Junk mail is left out: spam arriving is not mail waiting for the user, so it
+   * never inflates a parent's or an account's number.
+   */
   unreadWithChildren: number
+  /** Whether junk mail inside this folder or below it is unread, for a dot. */
+  junkUnread: boolean
   countsKnown: boolean
+}
+
+/** The unread number a folder contributes to totals above it. Junk contributes none. */
+export function countedUnread(folder: Folder) {
+  return folder.selectable && folder.role !== 'junk' ? folder.unreadCount : 0
 }
 
 const ROLE_ORDER: FolderRole[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash', 'other']
@@ -34,7 +45,8 @@ export function buildFolderTree(folders: Folder[]): FolderNode[] {
       return {
         folder,
         children,
-        unreadWithChildren: (folder.selectable ? folder.unreadCount : 0) + children.reduce((total, child) => total + child.unreadWithChildren, 0),
+        unreadWithChildren: countedUnread(folder) + children.reduce((total, child) => total + child.unreadWithChildren, 0),
+        junkUnread: (folder.role === 'junk' && folder.selectable && folder.unreadCount > 0) || children.some((child) => child.junkUnread),
         countsKnown: (!folder.selectable || folder.countsKnown) && children.every((child) => child.countsKnown),
       }
     })

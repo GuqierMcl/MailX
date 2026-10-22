@@ -139,11 +139,22 @@ impl Storage {
         if !current_folder(&tx, account_id, source, folder_id)? {
             return Ok(None);
         }
+        // While a read / unread change in this folder has not reached the server, its
+        // STATUS number still counts the old state, and taking it would make the
+        // sidebar jump back. The local number stays until those changes are sent;
+        // the next round then reads the server's own.
+        let waiting: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM flag_changes c JOIN messages m ON m.id = c.message_id
+                           WHERE m.folder_id = ?1 AND c.flag = 'seen' AND c.state = 'pending')",
+            [folder_id],
+            |row| row.get(0),
+        )?;
         // An empty synced_at marks counts as unknown, so filling it in is a change too.
         let changed = tx.execute(
-            "UPDATE folders SET unread_count = ?1, total_count = ?2, synced_at = ?3
-             WHERE id = ?4 AND (unread_count <> ?1 OR total_count <> ?2 OR synced_at = '')",
-            params![unread, total, now(), folder_id],
+            "UPDATE folders SET unread_count = CASE WHEN ?5 AND synced_at <> '' THEN unread_count ELSE ?1 END,
+                    total_count = ?2, synced_at = ?3
+             WHERE id = ?4 AND ((unread_count <> ?1 AND NOT (?5 AND synced_at <> '')) OR total_count <> ?2 OR synced_at = '')",
+            params![unread, total, now(), folder_id, waiting],
         )?;
         tx.commit()?;
         Ok(Some(changed))

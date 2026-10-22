@@ -36,7 +36,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { buildFolderTree, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
+import { buildFolderTree, countedUnread, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 
@@ -271,9 +271,15 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
   const { folder, children } = node
   const hasChildren = children.length > 0
   const open = hasChildren && !collapsed.has(folder.id)
-  // A collapsed parent carries its children's unread mail so nothing is hidden.
-  const unread = open || !hasChildren ? folder.selectable ? folder.unreadCount : 0 : node.unreadWithChildren
-  const countsKnown = open || !hasChildren ? !folder.selectable || folder.countsKnown : node.countsKnown
+  // A collapsed parent carries its children's unread mail so nothing is hidden,
+  // except junk, which never adds to a number.
+  const isJunk = folder.role === 'junk'
+  const own = open || !hasChildren
+  const unread = own ? countedUnread(folder) : node.unreadWithChildren
+  const countsKnown = own ? !folder.selectable || folder.countsKnown : node.countsKnown
+  // Junk shows a dot, not a number. A collapsed parent shows one when junk below it
+  // has unread mail, so the signal is not hidden by folding the tree.
+  const junkDot = own ? isJunk && folder.selectable && folder.unreadCount > 0 : node.junkUnread
   const label = (
     <>
       <HugeiconsIcon icon={ROLE_ICONS[folder.role]} />
@@ -295,7 +301,13 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
         // IMAP \Noselect containers only group their children.
         <CollapsibleTrigger render={<SidebarMenuButton className="text-sidebar-foreground/70" />}>{label}</CollapsibleTrigger>
       )}
-      {(!countsKnown || unread > 0) && <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(hasChildren && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>}
+      {junkDot && countsKnown && unread === 0 ? (
+        <SidebarMenuBadge aria-label="有未读邮件" className={cn(hasChildren && 'right-7')}>
+          <span className="size-1.5 rounded-full bg-current" />
+        </SidebarMenuBadge>
+      ) : (!countsKnown || unread > 0) && !(isJunk && own) && (
+        <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(hasChildren && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>
+      )}
       {hasChildren && (
         <>
           <CollapsibleTrigger render={<SidebarMenuAction aria-label={`${open ? '收起' : '展开'}${folderLabel(folder)}`} />}>
