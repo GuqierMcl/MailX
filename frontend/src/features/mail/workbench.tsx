@@ -18,6 +18,8 @@ import { NAV_DEFAULT } from '@/features/shell/nav-width'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { ShellLayout } from '@/features/shell/shell-layout'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
+import { AccountsDialog, type AccountsTarget } from '@/features/accounts/accounts-dialog'
+import { AddAccountDialog } from '@/features/accounts/add-account-dialog'
 import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
@@ -32,6 +34,8 @@ const PAGE_SIZE = 100
 export function Workbench({ client }: { client: MailxClient }) {
   const queryClient = useQueryClient()
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
+  const [accountsTarget, setAccountsTarget] = useState<AccountsTarget | null>(null)
+  const [addingAccount, setAddingAccount] = useState(false)
   const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
   const [filter, setFilter] = useState<ListFilter>('all')
   const [search, setSearch] = useState('')
@@ -179,18 +183,37 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
 
+  const refreshAccounts = () => void queryClient.invalidateQueries({ queryKey: mailKeys.all })
   const dialog = (
-    <SettingsDialog
-      client={client}
-      target={settings}
-      onClose={() => setSettings(null)}
-      onAccountsChanged={() => void queryClient.invalidateQueries({ queryKey: mailKeys.all })}
-    />
+    <>
+      <SettingsDialog client={client} target={settings} onClose={() => setSettings(null)} />
+      <AccountsDialog
+        client={client}
+        target={accountsTarget}
+        accounts={accounts}
+        syncStates={currentSyncStates}
+        onClose={() => setAccountsTarget(null)}
+        onAccountsChanged={refreshAccounts}
+        onAddAccount={() => setAddingAccount(true)}
+      />
+      <AddAccountDialog
+        client={client}
+        open={addingAccount}
+        accounts={accounts}
+        onClose={() => setAddingAccount(false)}
+        onCreated={(account) => {
+          refreshAccounts()
+          setAddingAccount(false)
+          // Continue in the account manager with the new account selected.
+          setAccountsTarget({ accountId: account.id })
+        }}
+      />
+    </>
   )
   if (!treeLoading && !tree.isError && accounts.length === 0) {
     return (
       <>
-        <NoAccounts onAddAccount={() => setSettings({ section: 'accounts', newAccount: true })} />
+        <NoAccounts onAddAccount={() => setAddingAccount(true)} />
         {dialog}
       </>
     )
@@ -221,6 +244,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             syncStates={currentSyncStates}
             mailbox={activeMailbox}
             onSelect={selectMailbox}
+            onOpenAccounts={() => setAccountsTarget({})}
             onOpenSettings={() => setSettings({ section: 'appearance' })}
             onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
           />
@@ -246,6 +270,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             setSelectedId(email.id)
           }}
           onSelectMailbox={selectMailbox}
+          onOpenAccounts={() => setAccountsTarget({})}
+          onAddAccount={() => setAddingAccount(true)}
           onOpenSettings={setSettings}
         />
         <ResizablePanelGroup orientation="horizontal" className="min-h-0">

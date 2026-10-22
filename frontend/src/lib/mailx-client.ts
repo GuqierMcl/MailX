@@ -13,7 +13,8 @@ import type {
   EmailPage,
   Folder,
   SettingsSnapshot,
-  UpdateAccountRequest,
+  UpdateConnectionRequest,
+  UpdateProfileRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 
@@ -40,7 +41,10 @@ export interface MailxClient {
   listAccounts(): Promise<Account[]>
   getAccount(accountId: string): Promise<Account>
   createAccount(request: CreateAccountRequest): Promise<Account>
-  updateAccount(request: UpdateAccountRequest): Promise<Account>
+  /** Replaces the connection; the account's sync restarts with it right away. */
+  updateConnection(request: UpdateConnectionRequest): Promise<Account>
+  /** Renames or recolors the account; sync keeps running. */
+  updateProfile(request: UpdateProfileRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
   /** Asks the account's sync worker to run its next round now. */
@@ -101,7 +105,8 @@ export function createDesktopClient(): MailxClient {
     listAccounts: () => call<Account[]>('accounts_list'),
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
-    updateAccount: (request) => call<Account>('accounts_update', { request }),
+    updateConnection: (request) => call<Account>('accounts_update_connection', { request }),
+    updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),

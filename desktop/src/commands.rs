@@ -1,7 +1,7 @@
 use mailx_core::{
     Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
     EmailListQuery, EmailPage, ErrorCode, Folder, SettingsPatch, SettingsSnapshot,
-    UpdateAccountRequest,
+    UpdateConnectionRequest, UpdateProfileRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -176,18 +176,38 @@ pub(crate) async fn accounts_create(
     }))
 }
 
+/// Replaces the connection; the account's sync restarts immediately.
 #[tauri::command]
-pub(crate) async fn accounts_update(
+pub(crate) async fn accounts_update_connection(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Account>, ()> {
+    let args = authorize(&window)
+        .and_then(|()| parse::<WriteArgs<UpdateConnectionRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.update_account_connection(args.request))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+/// Renames or recolors an account without touching its connection or sync.
+#[tauri::command]
+pub(crate) async fn accounts_update_profile(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
     let args =
-        authorize(&window).and_then(|()| parse::<WriteArgs<UpdateAccountRequest>>(request.body()));
+        authorize(&window).and_then(|()| parse::<WriteArgs<UpdateProfileRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.update_account(args.request))
+                .run(move |core| core.update_account_profile(args.request))
                 .await
         }
         Err(error) => Err(error),

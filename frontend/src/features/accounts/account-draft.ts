@@ -1,12 +1,11 @@
-import type { Account, AccountConfigInput, AuthenticationMode, ConnectionConfig, ProxyKind, SecretUpdate } from '@/generated/accounts'
+import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 
 export type ConnectionDraft = Omit<ConnectionConfig, 'port'> & { port: string }
 export type SecretDraft = { replace: boolean; value: string }
 
-// Transient form state, intentionally distinct from the Rust-generated wire types.
+// Transient connection form state, intentionally distinct from the Rust-generated wire types.
 export type AccountDraft = {
-  displayName: string
   emailAddress: string
   imap: ConnectionDraft
   smtp: ConnectionDraft
@@ -14,7 +13,7 @@ export type AccountDraft = {
   sharedPassword: SecretDraft
   imapPassword: SecretDraft
   smtpPassword: SecretDraft
-  routeKind: AccountConfigInput['route']['kind']
+  routeKind: ConnectionInput['route']['kind']
   proxyKind: ProxyKind
   proxyHost: string
   proxyPort: string
@@ -27,7 +26,6 @@ export function initialDraft(account: Account | null): AccountDraft {
   const proxy = account?.route.kind === 'custom' ? account.route : null
   const secret = (configured?: boolean): SecretDraft => ({ replace: !configured, value: '' })
   return {
-    displayName: account?.displayName ?? '',
     emailAddress: account?.emailAddress ?? '',
     imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', port: '993', tls: 'implicit', username: '' },
     smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', port: '465', tls: 'implicit', username: '' },
@@ -85,15 +83,15 @@ function secret(value: SecretDraft, field: string): SecretUpdate {
   return { action: 'replace', value: value.value }
 }
 
-export function draftToConfig(draft: AccountDraft, account: Account | null): AccountConfigInput {
-  if (!draft.displayName.trim()) invalid('displayName', '请填写账号名称。')
+/** Validates the draft into a connection; throws a field error for the first problem. */
+export function draftToConnection(draft: AccountDraft, account: Account | null): ConnectionInput {
   if (!/^[^\s@]+@[^\s@]+$/.test(draft.emailAddress.trim())) invalid('emailAddress', '请填写有效的邮箱地址。')
   const imap = connection(draft.imap, 'imap')
   const smtp = connection(draft.smtp, 'smtp')
-  const authentication: AccountConfigInput['authentication'] = draft.mode === 'shared'
+  const authentication: ConnectionInput['authentication'] = draft.mode === 'shared'
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
-  let route: AccountConfigInput['route'] = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }
+  let route: ConnectionInput['route'] = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }
   if (draft.routeKind === 'custom') {
     if (draft.proxyAuth && !draft.proxyUsername.trim()) invalid('proxyUsername', '请填写代理用户名。')
     route = {
@@ -102,5 +100,5 @@ export function draftToConfig(draft: AccountDraft, account: Account | null): Acc
       authentication: draft.proxyAuth ? { username: draft.proxyUsername.trim(), password: secret(draft.proxyPassword, 'proxyPassword') } : null,
     }
   }
-  return { displayName: draft.displayName.trim(), emailAddress: draft.emailAddress.trim(), providerId: account?.providerId ?? null, imap, smtp, authentication, route }
+  return { emailAddress: draft.emailAddress.trim(), providerId: account?.providerId ?? null, imap, smtp, authentication, route }
 }

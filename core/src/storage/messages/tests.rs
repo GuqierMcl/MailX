@@ -5,7 +5,11 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::{
-    accounts::{AccountService, sync_plan::tests::config, types::Account},
+    accounts::{
+        AccountService,
+        sync_plan::tests::{config, connection_update},
+        types::Account,
+    },
     imap::FolderStatus,
     mail::FolderRole,
     secrets::test_support::MemorySecrets,
@@ -488,7 +492,10 @@ fn source_change_hides_cache_before_folder_refresh_and_rejects_late_work() {
         .id;
     let mut config = config(json!({"kind":"direct"}));
     config["imap"]["host"] = json!("new.example.test");
-    let updated = f.service.update(serde_json::from_value(json!({"accountId": f.account.id, "expectedRevision": f.account.revision, "config": config})).unwrap()).unwrap();
+    let updated = f
+        .service
+        .update_connection(connection_update(&f.account.id, f.account.revision, config))
+        .unwrap();
     assert_ne!(updated.mailbox_source_id, f.target.mailbox_source_id);
     assert!(
         f.service

@@ -71,24 +71,26 @@ impl AccountService {
         Ok(account)
     }
 
-    pub fn create(&mut self, mut request: CreateAccountRequest) -> Result<Account, AppError> {
+    pub fn create(&mut self, request: CreateAccountRequest) -> Result<Account, AppError> {
         validate_uuid(&request.request_id, "requestId")?;
-        validate_config(&mut request.config)?;
-        validate_create_secrets(&request.config)?;
+        let (mut profile, mut connection) = request.config.split();
+        validate_connection(&mut connection)?;
+        validate_profile(&mut profile)?;
+        validate_create_secrets(&connection)?;
         self.recover()?;
-        let canonical = canonical_config(&request.config)?;
+        let canonical = canonical_config(&profile, &connection)?;
         if let Some((id, saved)) = self.storage.create_request(&request.request_id)? {
             let snapshot = self.storage.load(&id)?;
             // A historical request cannot be replayed against later account edits.
             if saved != canonical
                 || snapshot.account.revision != 1
-                || !self.matches_secrets(&snapshot, &request.config)?
+                || !self.matches_secrets(&snapshot, &connection)?
             {
                 return Err(AppError::new(ErrorCode::IdempotencyConflict));
             }
             return self.get(&id);
         }
-        let (snapshot, writes) = self.build(request.config, None)?;
+        let (snapshot, writes) = self.build(connection, profile, None)?;
         let journal = Journal {
             id: new_id(),
             expected_revision: None,
@@ -101,15 +103,24 @@ impl AccountService {
         self.commit(journal, writes)
     }
 
-    pub fn update(&mut self, mut request: UpdateAccountRequest) -> Result<Account, AppError> {
+    /// Replaces the connection settings and advances `revision`; callers must
+    /// restart sync so no connection made under the old settings survives.
+    pub fn update_connection(
+        &mut self,
+        mut request: UpdateConnectionRequest,
+    ) -> Result<Account, AppError> {
         validate_uuid(&request.account_id, "accountId")?;
-        validate_config(&mut request.config)?;
+        validate_connection(&mut request.connection)?;
         self.recover()?;
         let old = self.storage.load(&request.account_id)?;
         if old.account.revision != request.expected_revision {
             return Err(AppError::new(ErrorCode::Conflict));
         }
-        let (snapshot, writes) = self.build(request.config, Some(&old))?;
+        let profile = AccountProfileInput {
+            display_name: old.account.display_name.clone(),
+            color: old.account.color.clone(),
+        };
+        let (snapshot, writes) = self.build(request.connection, profile, Some(&old))?;
         let current_refs = snapshot.refs();
         let journal = Journal {
             id: new_id(),
@@ -125,6 +136,22 @@ impl AccountService {
             applied: false,
         };
         self.commit(journal, writes)
+    }
+
+    /// Replaces the profile. `revision` stays put, so running sync work is not
+    /// invalidated, and no credential is read or written.
+    pub fn update_profile(
+        &mut self,
+        mut request: UpdateProfileRequest,
+    ) -> Result<Account, AppError> {
+        validate_uuid(&request.account_id, "accountId")?;
+        validate_profile(&mut request.profile)?;
+        // Finish any interrupted connection commit first so it cannot later
+        // replace this account row.
+        self.recover()?;
+        self.storage
+            .update_profile(&request.account_id, &request.profile, &now())?;
+        self.get(&request.account_id)
     }
 
     fn commit(
@@ -197,7 +224,8 @@ impl AccountService {
 
     fn build(
         &self,
-        config: AccountConfigInput,
+        config: ConnectionInput,
+        profile: AccountProfileInput,
         old: Option<&Snapshot>,
     ) -> Result<(Snapshot, Vec<(String, SecretValue)>), AppError> {
         let id = old.map(|s| s.account.id.clone()).unwrap_or_else(new_id);
@@ -269,14 +297,15 @@ impl AccountService {
             .filter(|s| same_source(&s.account.imap, &config.imap))
             .map(|s| s.account.mailbox_source_id.clone())
             .unwrap_or_else(new_id);
-        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let now = now();
         let account = Account {
             id,
             revision: old
                 .map(|s| next_version(s.account.revision))
                 .transpose()?
                 .unwrap_or(1),
-            display_name: config.display_name,
+            display_name: profile.display_name,
+            color: profile.color,
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
@@ -432,7 +461,7 @@ impl AccountService {
     fn matches_secrets(
         &self,
         snapshot: &Snapshot,
-        config: &AccountConfigInput,
+        config: &ConnectionInput,
     ) -> Result<bool, AppError> {
         let mut comparisons = vec![];
         let AuthenticationInput::Password { credentials } = &config.authentication else {
@@ -483,6 +512,9 @@ impl AccountService {
     }
 }
 
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
 fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -537,15 +569,32 @@ fn validate_host(host: &mut String, field: &str) -> Result<(), AppError> {
     }
     Ok(())
 }
-fn validate_config(config: &mut AccountConfigInput) -> Result<(), AppError> {
+fn validate_profile(profile: &mut AccountProfileInput) -> Result<(), AppError> {
+    profile.display_name = profile.display_name.trim().to_owned();
+    if !valid_text(&profile.display_name, 120) {
+        return Err(AppError::validation("displayName"));
+    }
+    profile.color = match profile.color.take() {
+        None => None,
+        Some(value) => normalize_color(&value).ok_or_else(|| AppError::validation("color"))?,
+    };
+    Ok(())
+}
+/// `#rrggbb` in lowercase; an empty value clears the color.
+fn normalize_color(value: &str) -> Option<Option<String>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Some(None);
+    }
+    let hex = value.strip_prefix('#')?;
+    (hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| Some(format!("#{}", hex.to_ascii_lowercase())))
+}
+fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
     if !matches!(config.authentication, AuthenticationInput::Password { .. }) {
         return Err(AppError::new(ErrorCode::Unsupported));
     }
-    config.display_name = config.display_name.trim().to_owned();
     config.email_address = config.email_address.trim().to_owned();
-    if !valid_text(&config.display_name, 120) {
-        return Err(AppError::validation("displayName"));
-    }
     if !valid_text(&config.email_address, 320)
         || config.email_address.chars().any(char::is_whitespace)
     {
@@ -612,7 +661,7 @@ fn validate_config(config: &mut AccountConfigInput) -> Result<(), AppError> {
     Ok(())
 }
 
-fn validate_create_secrets(config: &AccountConfigInput) -> Result<(), AppError> {
+fn validate_create_secrets(config: &ConnectionInput) -> Result<(), AppError> {
     let AuthenticationInput::Password { credentials } = &config.authentication else {
         return Err(AppError::new(ErrorCode::Unsupported));
     };
@@ -645,7 +694,10 @@ fn validate_create_secrets(config: &AccountConfigInput) -> Result<(), AppError> 
 }
 
 /// No secret, password digest, or secret-derived value is included in this record.
-fn canonical_config(config: &AccountConfigInput) -> Result<String, AppError> {
+fn canonical_config(
+    profile: &AccountProfileInput,
+    config: &ConnectionInput,
+) -> Result<String, AppError> {
     let mode = match &config.authentication {
         AuthenticationInput::Password {
             credentials: PasswordAuthenticationInput::Shared { .. },
@@ -668,7 +720,10 @@ fn canonical_config(config: &AccountConfigInput) -> Result<String, AppError> {
             serde_json::json!({"kind":"custom","proxyKind":proxy_kind,"host":host,"port":port,"dns":dns,"username":authentication.as_ref().map(|a|&a.username)})
         }
     };
-    encode(
-        &serde_json::json!({"displayName":config.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"imap":config.imap,"smtp":config.smtp,"authenticationMode":mode,"route":route}),
-    )
+    let mut canonical = serde_json::json!({"displayName":profile.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"imap":config.imap,"smtp":config.smtp,"authenticationMode":mode,"route":route});
+    // Added only when set, so requests recorded before colors existed still match.
+    if let Some(color) = &profile.color {
+        canonical["color"] = serde_json::json!(color);
+    }
+    encode(&canonical)
 }

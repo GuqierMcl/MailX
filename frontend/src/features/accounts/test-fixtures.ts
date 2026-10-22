@@ -7,7 +7,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
-    displayName: '工作邮箱', emailAddress: 'work@example.com', providerId: null,
+    displayName: '工作邮箱', color: null, emailAddress: 'work@example.com', providerId: null,
     mailboxSourceId: 'source-a', imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'receive@example.com' },
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'send@example.com' },
     authentication: { mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
@@ -36,7 +36,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     listAccounts: vi.fn<MailxClient['listAccounts']>().mockResolvedValue(rows),
     getAccount: vi.fn<MailxClient['getAccount']>().mockImplementation(async (id) => rows.find((row) => row.id === id) ?? exampleAccount()),
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
-    updateAccount: vi.fn<MailxClient['updateAccount']>().mockResolvedValue(exampleAccount({ revision: 4 })),
+    updateConnection: vi.fn<MailxClient['updateConnection']>().mockImplementation(async ({ accountId, expectedRevision }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), revision: expectedRevision + 1 })),
+    updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile })),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
     refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),

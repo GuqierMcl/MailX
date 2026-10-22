@@ -22,6 +22,7 @@ function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRe
         syncStates={sync ? { [account.id]: sync } : {}}
         mailbox={{ kind: 'unified', role: 'inbox' }}
         onSelect={vi.fn()}
+        onOpenAccounts={vi.fn()}
         onOpenSettings={vi.fn()}
         onRefresh={onRefresh}
       />

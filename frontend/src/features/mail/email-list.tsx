@@ -128,7 +128,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
     )
   }
   return (
-    <ScrollArea className="min-h-0 flex-1">
+    <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
       <div
         role="list"
         aria-label="邮件列表"

@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::accounts::messages::SyncTarget;
-use crate::accounts::sync_plan::tests::config;
+use crate::accounts::sync_plan::tests::{config, connection_update};
 use crate::accounts::types::Account;
 use crate::imap::{FolderStatus, ImapLogin};
 use crate::mail::{BodyState, EmailListQuery, FolderRole};
@@ -509,17 +509,14 @@ async fn account_revision_change_restarts_old_work_without_reusing_its_session()
         let mut value = config(json!({"kind":"direct"}));
         value["emailAddress"] = json!("first@example.test");
         value["imap"]["username"] = json!("first");
-        value["displayName"] = json!("Updated");
+        value["smtp"]["host"] = json!("updated-smtp.example.test");
         value["authentication"]["password"] = json!({"action":"keep"});
         let updated = service
-            .update(
-                serde_json::from_value(json!({
-                    "accountId": fixture.account.id,
-                    "expectedRevision": fixture.account.revision,
-                    "config": value,
-                }))
-                .unwrap(),
-            )
+            .update_connection(connection_update(
+                &fixture.account.id,
+                fixture.account.revision,
+                value,
+            ))
             .unwrap();
         fixture
             .manager
