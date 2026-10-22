@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod filename;
 pub mod render;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

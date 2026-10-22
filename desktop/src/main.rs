@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attachment_save;
 mod body_protocol;
 #[cfg(feature = "body-webview-test")]
 mod body_webview_test;
@@ -29,6 +30,7 @@ fn main() {
         window_chrome::focus_main_window(app)
     }));
     let builder = builder
+        .plugin(tauri_plugin_dialog::init())
         .append_invoke_initialization_script(include_str!("subframe_guard.js"))
         .plugin(
             tauri_plugin_opener::Builder::new()
@@ -97,6 +99,7 @@ fn main() {
             commands::links_open,
             commands::sync_states,
             commands::sync_refresh,
+            commands::attachments_save,
             commands::avatars_get,
             commands::image_cache_clear,
             commands::settings_get,

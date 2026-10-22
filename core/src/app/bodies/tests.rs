@@ -498,3 +498,125 @@ async fn downloaded_message_images_persist_across_readings_but_never_bypass_iden
     let after = core.body_document(ids[1].clone()).await.unwrap();
     assert_missing(core.body_remote_image(after.binding, 0).await);
 }
+
+fn mail_with_attachments() -> Vec<u8> {
+    let encoded = STANDARD.encode(b"%PDF-1.7 synthetic attachment bytes");
+    format!(
+        "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=outer\r\n\r\n\
+         --outer\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>hello</p>\r\n\
+         --outer\r\nContent-Type: application/pdf; name=\"..\\\\..\\\\report.pdf\"\r\n\
+         Content-Disposition: attachment; filename=\"..\\\\..\\\\report.pdf\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n\
+         --outer\r\nContent-Type: image/png\r\nContent-Disposition: inline\r\n\
+         Content-ID: <logo>\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --outer\r\nContent-Type: text/plain; charset=gbk\r\n\
+         Content-Disposition: attachment; filename=\"note.txt\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --outer--\r\n",
+        STANDARD.encode(b"not displayed here"),
+        STANDARD.encode([0xd5, 0xfd, 0xce, 0xc4]),
+    )
+    .into_bytes()
+}
+
+#[tokio::test]
+async fn attachments_are_read_from_the_local_copy_with_a_safe_name() {
+    let raw = mail_with_attachments();
+    let (_directory, core, ids, _db) = fixture(&[&raw, &raw]);
+    // The detail lists only real attachments, with ids this API accepts.
+    let detail = core.get_email(&ids[0]).unwrap();
+    let listed: Vec<_> = detail.attachments.iter().map(|a| a.id.clone()).collect();
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert!(
+        listed
+            .iter()
+            .all(|id| id.starts_with(&format!("{}:", ids[0])))
+    );
+
+    let pdf = core
+        .attachment_content(ids[0].clone(), listed[0].clone())
+        .await
+        .unwrap();
+    assert_eq!(pdf.bytes, b"%PDF-1.7 synthetic attachment bytes");
+    assert_eq!(pdf.info.file_name, "report.pdf");
+    assert_eq!(pdf.info.mime_type, "application/pdf");
+    let info = core
+        .attachment_info(ids[0].clone(), listed[0].clone())
+        .await
+        .unwrap();
+    assert_eq!(info, pdf.info);
+
+    // Text comes back as UTF-8, whatever charset the sender declared.
+    let note = core
+        .attachment_content(ids[0].clone(), listed[1].clone())
+        .await
+        .unwrap();
+    assert_eq!(String::from_utf8(note.bytes).unwrap(), "正文");
+    assert_eq!(note.info.file_name, "note.txt");
+}
+
+#[tokio::test]
+async fn only_listed_attachments_of_the_named_message_can_be_read() {
+    let raw = mail_with_attachments();
+    let (_directory, core, ids, _db) = fixture(&[&raw, &raw]);
+    let listed = core.get_email(&ids[0]).unwrap().attachments;
+    let id = listed[0].id.clone();
+    let other = listed[0].id.replace(&ids[0], &ids[1]);
+    let index: usize = id.rsplit(':').next().unwrap().parse().unwrap();
+    for bad in [
+        // Another message's id with this message's attachment.
+        (ids[1].clone(), id.clone()),
+        // The inline image and the body part are not attachments.
+        (ids[0].clone(), format!("{}:{}", ids[0], index + 1)),
+        (ids[0].clone(), format!("{}:1", ids[0])),
+        // Malformed or out-of-range ids.
+        (ids[0].clone(), format!("{}:{}", ids[0], 999)),
+        (ids[0].clone(), format!("{}:-1", ids[0])),
+        (ids[0].clone(), format!("{}:", ids[0])),
+        (ids[0].clone(), format!("{}: 1", ids[0])),
+        (ids[0].clone(), format!("{}:01x", ids[0])),
+        (ids[0].clone(), ids[0].clone()),
+        (ids[0].clone(), String::new()),
+        (ids[0].clone(), "../../x:1".into()),
+        ("not-a-uuid".into(), "not-a-uuid:1".into()),
+    ] {
+        let label = format!("{bad:?}");
+        assert_missing_or_invalid(
+            core.attachment_content(bad.0.clone(), bad.1.clone()).await,
+            &label,
+        );
+        assert_missing_or_invalid(core.attachment_info(bad.0, bad.1).await.map(|_| ()), &label);
+    }
+    // Same bytes, but each message answers only for itself.
+    assert!(core.attachment_content(ids[1].clone(), other).await.is_ok());
+}
+
+fn assert_missing_or_invalid<T>(result: Result<T, AppError>, label: &str) {
+    match result {
+        Ok(_) => panic!("unexpectedly readable: {label}"),
+        Err(error) => assert!(
+            matches!(error.code, ErrorCode::NotFound | ErrorCode::Validation),
+            "{label}: {:?}",
+            error.code
+        ),
+    }
+}
+
+#[tokio::test]
+async fn attachments_are_not_handed_out_once_the_message_is_gone() {
+    let raw = mail_with_attachments();
+    let (_directory, core, ids, db) = fixture(&[&raw]);
+    let id = core.get_email(&ids[0]).unwrap().attachments[0].id.clone();
+    assert!(
+        core.attachment_content(ids[0].clone(), id.clone())
+            .await
+            .is_ok()
+    );
+    db.execute(
+        "UPDATE messages SET remote_state='deleted' WHERE id=?1",
+        [&ids[0]],
+    )
+    .unwrap();
+    assert_missing(core.attachment_content(ids[0].clone(), id.clone()).await);
+    assert_missing(core.attachment_info(ids[0].clone(), id).await);
+}

@@ -103,6 +103,7 @@ export function createMockClient(): MailxClient {
     },
     refreshSync: async () => undefined,
     getAvatar: async () => null,
+    saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
     releaseBody: async () => undefined,

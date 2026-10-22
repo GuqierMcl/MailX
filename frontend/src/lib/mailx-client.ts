@@ -51,6 +51,11 @@ export interface MailxClient {
   refreshSync(accountId: string): Promise<void>
   /** `null` unless the user enabled sender avatars and the sender has one. */
   getAvatar(accountId: string, address: string): Promise<AvatarImage | null>
+  /**
+   * Opens the system save dialog and writes the attachment where the user picks.
+   * No path crosses this boundary: the page only names the attachment.
+   */
+  saveAttachment(emailId: string, attachmentId: string): Promise<'saved' | 'cancelled'>
   /** Deletes cached avatars, site icons and downloaded message images. */
   clearImageCache(): Promise<void>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
@@ -111,6 +116,7 @@ export function createDesktopClient(): MailxClient {
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
+    saveAttachment: (emailId, attachmentId) => call<'saved' | 'cancelled'>('attachments_save', { emailId, attachmentId }),
     clearImageCache: () => call<void>('image_cache_clear'),
     onSyncState(listener) {
       if (!available) return () => undefined

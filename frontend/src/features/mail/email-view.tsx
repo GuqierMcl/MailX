@@ -1,7 +1,6 @@
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
-  Attachment01Icon,
   Delete02Icon,
   Forward01Icon,
   MailOpen01Icon,
@@ -17,8 +16,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import type { MailxClient } from '@/lib/mailx-client'
+import { AttachmentList } from './attachment-list'
 import { BodyDocument, BodySkeleton } from './body-document'
-import { displayName, formatFullTime, formatSize } from './format'
+import { displayName, formatFullTime } from './format'
 import { SenderAvatar } from './sender-avatar'
 
 type EmailViewProps = {
@@ -131,23 +131,7 @@ function EmailContent({ email, ...props }: ContentProps) {
         <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
           <Body email={email} {...props} />
         </div>
-        {attachments.length > 0 && (
-          <>
-            <section className="flex max-h-36 shrink-0 flex-col gap-2 overflow-auto p-4" aria-label="附件">
-              <h3 className="text-xs font-medium text-muted-foreground">{attachments.length} 个附件</h3>
-              <ul className="flex flex-wrap gap-2">
-                {attachments.map((attachment) => (
-                  <li key={attachment.id} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                    <HugeiconsIcon icon={Attachment01Icon} className="size-3.5 text-muted-foreground" />
-                    <span className="max-w-60 break-all">{attachment.filename}</span>
-                    <span className="text-muted-foreground">{attachment.mimeType}</span>
-                    <span className="text-muted-foreground">{formatSize(attachment.size)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </>
-        )}
+        {attachments.length > 0 && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
     </article>
   )
 }

@@ -18,10 +18,12 @@ use crate::secrets::SecretStore;
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
 
+mod attachments;
 mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
+pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
 

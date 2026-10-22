@@ -186,7 +186,10 @@ describe('isolated body, inline links and image policy', () => {
     expect(screen.queryByText('<script>plain text</script>')).not.toBeInTheDocument()
     expect(screen.getByLabelText('远程图片提示')).toBeInTheDocument()
     expect(screen.getByText('正文过长，当前仅显示截断后的内容。')).toBeInTheDocument()
-    expect(screen.getByText('application/pdf')).toBeInTheDocument()
+    // Name and size are shown; the sender-claimed type is not, since it can lie.
+    expect(screen.getByText('document.pdf')).toBeInTheDocument()
+    expect(screen.getByText('2 KB')).toBeInTheDocument()
+    expect(screen.queryByText('application/pdf')).not.toBeInTheDocument()
     emit('token-1')
     const plainEmail: EmailDetail = { ...email, summary: { ...email.summary, id: 'two' },
       body: { text: '<script>plain text</script>', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } }

@@ -54,6 +54,7 @@ pub enum RenderError {
     TooLarge,
     Protocol,
     InvalidImage,
+    MissingPart,
 }
 
 impl fmt::Display for RenderError {
@@ -62,6 +63,7 @@ impl fmt::Display for RenderError {
             Self::TooLarge => "message exceeds the supported size",
             Self::Protocol => "message structure cannot be processed",
             Self::InvalidImage => "image cannot be provided",
+            Self::MissingPart => "attachment is not part of this message",
         })
     }
 }
@@ -145,6 +147,32 @@ pub fn inline_image(
         .filter(|entity| entity.index == part_index)
         .ok_or(RenderError::InvalidImage)?;
     images::validate(part_bytes(entity.part), &mime_type(entity.part))
+}
+
+/// The decoded bytes of one listed attachment (see `RenderedPart::is_inline`).
+pub struct AttachmentContent {
+    pub bytes: Vec<u8>,
+}
+
+/// Re-reads one attachment from its raw message. The index must name a part the
+/// message lists as an attachment: not a body, container or inline resource. A
+/// text attachment comes back as UTF-8, converted from its declared charset by
+/// the MIME parser; every other type is the exact transfer-decoded content.
+pub fn attachment_content(raw: &[u8], part_index: usize) -> Result<AttachmentContent, RenderError> {
+    let message = parse(raw)?;
+    let entities = entities(&message)?;
+    let entity = entities
+        .into_iter()
+        .find(|entity| entity.index == part_index)
+        .filter(|entity| {
+            !entity.is_body
+                && !is_inline(entity.part)
+                && !matches!(entity.part.body, PartType::Multipart(_))
+        })
+        .ok_or(RenderError::MissingPart)?;
+    Ok(AttachmentContent {
+        bytes: part_bytes(entity.part).to_vec(),
+    })
 }
 
 fn parse(raw: &[u8]) -> Result<Message<'_>, RenderError> {

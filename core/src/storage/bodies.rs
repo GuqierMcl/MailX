@@ -523,6 +523,37 @@ impl Storage {
 
     /// Duplicate CIDs resolve to the first inline entity in MIME pre-order.
     /// The selected entity is always scoped to this currently visible message.
+    /// The raw message and the stored description of one listed attachment.
+    pub(crate) fn body_attachment(
+        &self,
+        identity: &BodyIdentity,
+        part_index: usize,
+    ) -> Result<Option<(StoredBlob, RenderedPart)>, AppError> {
+        let Some(raw) = self.body_raw(identity)? else {
+            return Ok(None);
+        };
+        let part = self
+            .db
+            .query_row(
+                "SELECT part_index, content_id, filename, mime_type, size, is_inline
+                 FROM message_parts WHERE message_id = ?1 AND part_index = ?2 AND is_inline = 0",
+                params![identity.message_id, part_index as i64],
+                |row| {
+                    Ok(RenderedPart {
+                        part_index: row.get::<_, i64>(0)? as usize,
+                        content_id: row.get(1)?,
+                        filename: row.get(2)?,
+                        mime_type: row.get(3)?,
+                        size: row.get::<_, i64>(4)?.max(0) as u64,
+                        is_inline: false,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
+        Ok(part.map(|part| (raw, part)))
+    }
+
     pub(crate) fn body_part(
         &self,
         identity: &BodyIdentity,

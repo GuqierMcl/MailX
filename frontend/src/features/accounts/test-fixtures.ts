@@ -42,6 +42,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
     refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),
     getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),
+    saveAttachment: vi.fn<MailxClient['saveAttachment']>().mockResolvedValue('saved'),
     clearImageCache: vi.fn<MailxClient['clearImageCache']>().mockResolvedValue(undefined),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false } }),

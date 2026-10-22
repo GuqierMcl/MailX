@@ -19,7 +19,10 @@ mod sync;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
-pub use app::{AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, MailxCore};
+pub use app::{
+    AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks,
+    MailxCore,
+};
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use mail::*;
 pub use settings::{
