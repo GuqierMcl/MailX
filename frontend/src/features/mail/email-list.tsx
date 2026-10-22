@@ -22,7 +22,7 @@ export type ListSyncStatus = {
 type EmailListProps = {
   title: string
   emails: EmailSummary[]
-  /** When the list spans several accounts, each row names its owning mailbox after the sender. */
+  /** When the list spans several accounts, each row names its owning mailbox (by name, not address) after the sender. */
   accounts: Account[] | null
   loading: boolean
   syncStatus: ListSyncStatus
@@ -187,7 +187,7 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
               {account && (
                 <>
                   <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
-                  <span className="min-w-0 truncate text-xs text-muted-foreground">{account.emailAddress}</span>
+                  <span className="min-w-0 truncate text-xs text-muted-foreground" title={account.emailAddress}>{account.displayName}</span>
                 </>
               )}
             </span>
