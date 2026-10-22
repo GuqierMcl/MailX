@@ -11,8 +11,10 @@ use std::{
 };
 
 pub(crate) mod bodies;
+mod flag_changes;
 mod folders;
 pub(crate) mod image_cache;
+pub(crate) use flag_changes::{Flag, LocalChange, PendingChange};
 pub(crate) mod messages;
 mod migrations;
 

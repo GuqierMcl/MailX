@@ -26,6 +26,7 @@ import { MailSidebar } from './mail-sidebar'
 import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody } from './use-email-body'
+import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -178,6 +179,14 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const listedSummary = emails.find((email) => email.id === selected)
   const body = useEmailBody(client, listedSummary, accounts, currentSyncStates)
+  const { setFlag } = useMessageFlags(client)
+  // The mail is "opened" once its detail is on screen; a mail the user only
+  // moved past stays unread.
+  useMarkOpenedAsRead(
+    selected ? body.email?.summary : null,
+    Boolean(selected && body.email && !body.detail.isPending),
+    (email, flag, wanted) => void setFlag(email, flag, wanted),
+  )
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
@@ -301,6 +310,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             <EmailView
               key={`${selected}:${body.identity}`}
               client={client}
+              onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
               email={selected ? body.email : null}
               loading={selected !== null && body.detail.isPending}
               error={selected && body.detail.isError ? clientFailure(body.detail.error).message : null}

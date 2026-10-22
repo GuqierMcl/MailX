@@ -40,6 +40,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile })),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
+    setFlag: vi.fn<MailxClient['setFlag']>().mockResolvedValue('queued'),
+    onFlagWriteBack: vi.fn<MailxClient['onFlagWriteBack']>().mockReturnValue(() => undefined),
     refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),
     getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),
     saveAttachment: vi.fn<MailxClient['saveAttachment']>().mockResolvedValue('saved'),

@@ -325,7 +325,21 @@ impl Storage {
         let timestamp = now();
         let mut changed = 0;
         // Rows whose flags already match are left alone so the count reflects real changes.
-        let mut statement = tx.prepare("UPDATE messages SET is_read = ?1, is_flagged = ?2, flags = ?3, updated_at = ?4 WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present' AND (is_read <> ?1 OR is_flagged <> ?2 OR flags <> ?3)")?;
+        // A flag with a change still waiting (or kept only on this device) is the
+        // user's latest word: the server's older value must not undo it. The raw
+        // `flags` list always follows the server, so the two never get mixed up.
+        let mut statement = tx.prepare(
+            "UPDATE messages SET
+                is_read = CASE WHEN EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'seen')
+                               THEN is_read ELSE ?1 END,
+                is_flagged = CASE WHEN EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'flagged')
+                                  THEN is_flagged ELSE ?2 END,
+                flags = ?3, updated_at = ?4
+             WHERE folder_id = ?5 AND uid_validity = ?6 AND uid = ?7 AND remote_state = 'present'
+               AND (flags <> ?3
+                    OR (is_read <> ?1 AND NOT EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'seen'))
+                    OR (is_flagged <> ?2 AND NOT EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = messages.id AND c.flag = 'flagged')))",
+        )?;
         for (uid, values) in flags {
             changed += statement.execute(params![
                 values
@@ -443,10 +457,10 @@ impl Storage {
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(12)?,
                     row.get::<_, String>(13)?,
                     row.get::<_, String>(14)?,
-                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, String>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             })
             .optional()?;
@@ -504,7 +518,7 @@ impl Storage {
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state";
+const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending')";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
@@ -531,7 +545,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             "failed" => BodyState::Failed,
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
-        pending_changes: false,
+        pending_changes: row.get(12)?,
     })
 }
 

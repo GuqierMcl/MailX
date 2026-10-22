@@ -179,7 +179,7 @@ describe('isolated body, inline links and image policy', () => {
       body: { text: '<script>plain text</script>', hasHtml: true, truncated: true, remoteImagesBlocked: 3 },
       attachments: [{ id: 'part', filename: 'document.pdf', mimeType: 'application/pdf', size: 2048, isInline: false }],
     }
-    const { rerender } = render(<EmailView client={client} email={email} loading={false} error={null} downloading={false} onDownload={() => undefined} />)
+    const { rerender } = render(<EmailView client={client} email={email} loading={false} error={null} downloading={false} onDownload={() => undefined} onFlag={() => undefined} />)
     await frame()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重新加载正文' })).not.toBeInTheDocument()
@@ -193,7 +193,7 @@ describe('isolated body, inline links and image policy', () => {
     emit('token-1')
     const plainEmail: EmailDetail = { ...email, summary: { ...email.summary, id: 'two' },
       body: { text: '<script>plain text</script>', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } }
-    rerender(<EmailView client={client} email={plainEmail} loading={false} error={null} downloading={false} onDownload={() => undefined} />)
+    rerender(<EmailView client={client} email={plainEmail} loading={false} error={null} downloading={false} onDownload={() => undefined} onFlag={() => undefined} />)
     expect(await screen.findByText('<script>plain text</script>')).toBeInTheDocument()
     expect(screen.queryByTitle('邮件 HTML 正文')).not.toBeInTheDocument()
     expect(client.releaseBody).toHaveBeenCalledWith('one', 'token-1')

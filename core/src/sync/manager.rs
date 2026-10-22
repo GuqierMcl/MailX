@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ts_rs::TS;
 
-use super::{folders, messages};
+use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::{AppError, ErrorCode};
@@ -113,6 +113,23 @@ pub struct AccountSyncState {
 /// Receives every sync state change, e.g. to forward it to a UI as a hint to refetch.
 pub type SyncListener = Arc<dyn Fn(&AccountSyncState) + Send + Sync>;
 
+/// What a finished write-back round tells the host. Not part of the sync state:
+/// it is a one-off, so a late or missed delivery only means a missed notice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagWriteBack {
+    pub account_id: String,
+    /// Changes the server confirmed; the list's "waiting" markers may clear.
+    #[ts(type = "number")]
+    pub sent: u32,
+    /// Starred changes kept on this device only because the folder cannot store
+    /// the flag.
+    #[ts(type = "number")]
+    pub local_only_stars: u32,
+}
+
+pub type FlagListener = Arc<dyn Fn(&FlagWriteBack) + Send + Sync>;
+
 #[derive(Clone)]
 pub(super) struct WorkerToken {
     pub(super) account_id: String,
@@ -125,6 +142,7 @@ pub(super) struct Shared {
     service: Weak<Mutex<AccountService>>,
     states: Mutex<HashMap<String, AccountSyncState>>,
     listener: SyncListener,
+    flag_listener: FlagListener,
 }
 
 impl Shared {
@@ -167,6 +185,21 @@ impl Shared {
                 change(folder);
             }
         });
+    }
+
+    pub(super) fn writeback_done(&self, token: &WorkerToken, report: &writeback::WriteBackReport) {
+        let still_current = self.states.lock().is_ok_and(|states| {
+            states
+                .get(&token.account_id)
+                .is_some_and(|state| Self::active(state, token))
+        });
+        if still_current {
+            (self.flag_listener)(&FlagWriteBack {
+                account_id: token.account_id.clone(),
+                sent: report.sent as u32,
+                local_only_stars: report.local_only_stars as u32,
+            });
+        }
     }
 
     fn begin_round(&self, token: &WorkerToken) {
@@ -215,24 +248,101 @@ pub(crate) struct SyncManager {
     workers: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Ends the wait between rounds early when the user asks for a refresh.
     wakers: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    /// One write-back worker per account, beside its sync worker.
+    writers: Mutex<HashMap<String, Writer>>,
 }
+
+/// An account's write-back task and the signal that wakes it.
+type Writer = (JoinHandle<()>, Arc<tokio::sync::Notify>);
 
 impl SyncManager {
     pub(crate) fn new(
         service: Arc<Mutex<AccountService>>,
         runtime: Handle,
         listener: SyncListener,
+        flag_listener: FlagListener,
     ) -> Self {
         Self {
             shared: Arc::new(Shared {
                 service: Arc::downgrade(&service),
                 states: Mutex::new(HashMap::new()),
                 listener,
+                flag_listener,
             }),
             runtime,
             workers: Mutex::new(HashMap::new()),
             wakers: Mutex::new(HashMap::new()),
+            writers: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Tells the account's write-back worker that a local change is waiting.
+    pub(crate) fn changes_waiting(&self, account_id: &str) {
+        if let Ok(writers) = self.writers.lock()
+            && let Some((_, wake)) = writers.get(account_id)
+        {
+            wake.notify_one();
+        }
+    }
+
+    fn start_writer(&self, account_id: &str, token: WorkerToken) {
+        let Ok(mut writers) = self.writers.lock() else {
+            return;
+        };
+        if let Some((worker, _)) = writers.remove(account_id) {
+            worker.abort();
+        }
+        let wake = Arc::new(tokio::sync::Notify::new());
+        // A change made before the worker existed (or before a restart) is
+        // picked up by the first round.
+        wake.notify_one();
+        let service = self.shared.service.clone();
+        let shared = self.shared.clone();
+        let account = account_id.to_owned();
+        let signal = wake.clone();
+        let handle = self.runtime.spawn(async move {
+            let mut failures = 0u32;
+            loop {
+                signal.notified().await;
+                loop {
+                    let Some(service) = service.upgrade() else {
+                        return;
+                    };
+                    // A stale worker (account edited, generation replaced) stops.
+                    let live = shared.states.lock().is_ok_and(|states| {
+                        states
+                            .get(&token.account_id)
+                            .is_some_and(|state| Shared::active(state, &token))
+                    });
+                    if !live {
+                        return;
+                    }
+                    match writeback::run_round(&service, &account).await {
+                        writeback::RoundEnd::Done(report) => {
+                            failures = 0;
+                            if report.sent > 0 || report.local_only_stars > 0 {
+                                shared.writeback_done(&token, &report);
+                            }
+                            break;
+                        }
+                        writeback::RoundEnd::Retry(report) => {
+                            if report.sent > 0 || report.local_only_stars > 0 {
+                                shared.writeback_done(&token, &report);
+                            }
+                            let wait = writeback::retry_delay(failures);
+                            failures = failures.saturating_add(1);
+                            // A new change ends the wait early.
+                            tokio::select! {
+                                () = tokio::time::sleep(wait) => {}
+                                () = signal.notified() => {}
+                            }
+                        }
+                        writeback::RoundEnd::Blocked => break,
+                    }
+                }
+            }
+        });
+        writers.insert(account_id.to_owned(), (handle, wake));
     }
 
     /// Starts the next round of an account's worker now instead of after its
@@ -311,10 +421,13 @@ impl SyncManager {
         if let Ok(mut wakers) = self.wakers.lock() {
             wakers.insert(account_id.to_owned(), wake.clone());
         }
+        let writer_token = token.clone();
         workers.insert(
             account_id.to_owned(),
             self.runtime.spawn(run(shared, token, wake)),
         );
+        drop(workers);
+        self.start_writer(account_id, writer_token);
     }
 
     pub(crate) fn states(&self) -> Vec<AccountSyncState> {
@@ -330,6 +443,9 @@ impl Drop for SyncManager {
     fn drop(&mut self) {
         if let Ok(workers) = self.workers.get_mut() {
             workers.drain().for_each(|(_, worker)| worker.abort());
+        }
+        if let Ok(writers) = self.writers.get_mut() {
+            writers.drain().for_each(|(_, (worker, _))| worker.abort());
         }
     }
 }
@@ -770,7 +886,12 @@ mod tests {
             )
             .unwrap();
         let service = Arc::new(Mutex::new(service));
-        let manager = SyncManager::new(service.clone(), Handle::current(), Arc::new(|_| {}));
+        let manager = SyncManager::new(
+            service.clone(),
+            Handle::current(),
+            Arc::new(|_| {}),
+            Arc::new(|_| {}),
+        );
         secrets.reads.store(0, Ordering::SeqCst);
         secrets.locked.store(true, Ordering::SeqCst);
 

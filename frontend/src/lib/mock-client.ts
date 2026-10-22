@@ -101,6 +101,17 @@ export function createMockClient(): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async setFlag(emailId, flag, wanted) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      const key = flag === 'read' ? 'isRead' : 'isStarred'
+      if (email.summary[key] === wanted) return 'unchanged' as const
+      email.summary[key] = wanted
+      // The second account stands in for a server that cannot keep stars.
+      if (flag === 'starred' && email.summary.accountId === accounts[1]?.id) return 'localOnly' as const
+      return 'queued' as const
+    },
+    onFlagWriteBack: () => () => undefined,
     refreshSync: async () => undefined,
     getAvatar: async () => null,
     saveAttachment: async () => 'saved' as const,

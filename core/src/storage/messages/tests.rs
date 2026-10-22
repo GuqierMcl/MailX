@@ -1538,3 +1538,242 @@ fn a_revived_message_keeps_the_attachment_flag_its_downloaded_body_established()
     put(&mut fixture, &[third]);
     assert!(flag(&fixture));
 }
+
+// ---- local flag changes -------------------------------------------------
+
+use crate::storage::{Flag, LocalChange};
+
+fn message_id(f: &Fixture, uid: u32) -> String {
+    f.db.query_row("SELECT id FROM messages WHERE uid = ?1", [uid], |row| {
+        row.get::<_, String>(0)
+    })
+    .unwrap()
+}
+
+fn flags_of(f: &Fixture, id: &str) -> (bool, bool) {
+    f.db.query_row(
+        "SELECT is_read, is_flagged FROM messages WHERE id = ?1",
+        [id],
+        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+    )
+    .unwrap()
+}
+
+fn server_flags(f: &mut Fixture, uid: u32, flags: &[&str]) {
+    let flags: Vec<String> = flags.iter().map(|flag| (*flag).to_owned()).collect();
+    f.service
+        .apply_flags(&f.target.clone(), &[(uid, flags)])
+        .unwrap();
+}
+
+#[test]
+fn a_local_change_is_visible_at_once_and_marked_as_waiting() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    assert_eq!(flags_of(&f, &id), (false, false));
+    assert_eq!(
+        f.service.set_message_flag(&id, Flag::Seen, true).unwrap(),
+        LocalChange::Queued
+    );
+    assert_eq!(flags_of(&f, &id), (true, false));
+    let listed = f.service.list_emails(&inbox_query()).unwrap().items;
+    assert!(listed[0].is_read && listed[0].pending_changes);
+    assert!(f.service.get_email(&id).unwrap().summary.pending_changes);
+    // Setting what it already is records nothing.
+    assert_eq!(
+        f.service.set_message_flag(&id, Flag::Seen, true).unwrap(),
+        LocalChange::Unchanged
+    );
+    assert_eq!(count(&f.db, "flag_changes"), 1);
+}
+
+#[test]
+fn toggling_twice_keeps_one_row_with_the_latest_wish() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    f.service
+        .set_message_flag(&id, Flag::Flagged, false)
+        .unwrap();
+    assert_eq!(count(&f.db, "flag_changes"), 1);
+    let wanted: bool =
+        f.db.query_row("SELECT wanted FROM flag_changes", [], |row| row.get(0))
+            .unwrap();
+    assert!(!wanted);
+    assert_eq!(flags_of(&f, &id), (false, false));
+}
+
+#[test]
+fn a_sync_round_never_undoes_a_flag_that_is_still_waiting() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    f.service
+        .set_message_flag(&id, Flag::Flagged, true)
+        .unwrap();
+    // The server still reports the old values: neither toggle snaps back.
+    server_flags(&mut f, 1, &[]);
+    assert_eq!(flags_of(&f, &id), (true, true));
+    // The raw flag list does follow the server.
+    let raw: String =
+        f.db.query_row("SELECT flags FROM messages WHERE id = ?1", [&id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(raw, "[]");
+    // A flag with no waiting change is still taken from the server.
+    f.db.execute("DELETE FROM flag_changes WHERE flag = 'seen'", [])
+        .unwrap();
+    server_flags(&mut f, 1, &["\\Flagged"]);
+    assert_eq!(flags_of(&f, &id), (false, true));
+}
+
+#[test]
+fn confirming_a_change_removes_it_unless_the_user_changed_their_mind_meanwhile() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    // The write of "seen = true" is in flight; the user marks it unread again.
+    f.service.set_message_flag(&id, Flag::Seen, false).unwrap();
+    assert!(!f.service.finish_flag_change(&id, Flag::Seen, true).unwrap());
+    assert_eq!(
+        count(&f.db, "flag_changes"),
+        1,
+        "the newer wish must stay queued"
+    );
+    assert!(
+        f.service
+            .finish_flag_change(&id, Flag::Seen, false)
+            .unwrap()
+    );
+    assert_eq!(count(&f.db, "flag_changes"), 0);
+    assert!(!f.service.get_email(&id).unwrap().summary.pending_changes);
+}
+
+#[test]
+fn an_unflaggable_folder_keeps_stars_on_this_device_only() {
+    let mut f = setup();
+    put(&mut f, &[record(1), record(2)]);
+    let (one, two) = (message_id(&f, 1), message_id(&f, 2));
+    f.service
+        .set_message_flag(&one, Flag::Flagged, true)
+        .unwrap();
+    f.service.set_message_flag(&two, Flag::Seen, true).unwrap();
+    assert_eq!(
+        f.service
+            .mark_folder_unflaggable(&f.target.folder_id)
+            .unwrap(),
+        1,
+        "only the star moves to local-only"
+    );
+    let states: Vec<(String, String)> = {
+        let mut statement =
+            f.db.prepare("SELECT flag, state FROM flag_changes ORDER BY flag")
+                .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(
+        states,
+        [
+            ("flagged".into(), "local".into()),
+            ("seen".into(), "pending".into())
+        ]
+    );
+    // New stars in that folder are local-only right away; read still goes out.
+    assert_eq!(
+        f.service
+            .set_message_flag(&two, Flag::Flagged, true)
+            .unwrap(),
+        LocalChange::LocalOnly
+    );
+    assert_eq!(
+        f.service.set_message_flag(&two, Flag::Seen, false).unwrap(),
+        LocalChange::Queued
+    );
+    // Local-only stars survive a sync that reports no star, and are not "pending".
+    server_flags(&mut f, 1, &[]);
+    assert_eq!(flags_of(&f, &one), (false, true));
+    assert!(!f.service.get_email(&one).unwrap().summary.pending_changes);
+    let waiting = f.service.pending_flag_changes(&f.account.id, 10).unwrap();
+    assert!(waiting.iter().all(|change| change.flag == Flag::Seen));
+}
+
+#[test]
+fn only_visible_messages_can_be_changed_and_deleted_ones_drop_their_changes() {
+    let mut f = setup();
+    put(&mut f, &[record(1)]);
+    let id = message_id(&f, 1);
+    assert_eq!(
+        f.service
+            .set_message_flag("00000000-0000-4000-8000-000000000000", Flag::Seen, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    f.db.execute(
+        "UPDATE messages SET remote_state = 'deleted' WHERE id = ?1",
+        [&id],
+    )
+    .unwrap();
+    // A deleted message is neither editable nor sent to the server.
+    assert_eq!(
+        f.service
+            .set_message_flag(&id, Flag::Flagged, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert!(
+        f.service
+            .pending_flag_changes(&f.account.id, 10)
+            .unwrap()
+            .is_empty()
+    );
+    // Removing the row removes its changes with it.
+    f.db.execute("DELETE FROM messages WHERE id = ?1", [&id])
+        .unwrap();
+    assert_eq!(count(&f.db, "flag_changes"), 0);
+}
+
+#[test]
+fn pending_changes_carry_everything_needed_to_address_the_message() {
+    let mut f = setup();
+    put(&mut f, &[record(7)]);
+    let id = message_id(&f, 7);
+    f.service.set_message_flag(&id, Flag::Seen, true).unwrap();
+    let waiting = f.service.pending_flag_changes(&f.account.id, 10).unwrap();
+    assert_eq!(waiting.len(), 1);
+    let change = &waiting[0];
+    assert_eq!(
+        (
+            change.message_id.as_str(),
+            change.uid,
+            change.uid_validity,
+            change.remote_name.as_str()
+        ),
+        (id.as_str(), 7, 10, "INBOX")
+    );
+    assert!(change.wanted && change.flag == Flag::Seen && change.attempts == 0);
+    f.service.retry_flag_change(&id, Flag::Seen).unwrap();
+    assert_eq!(
+        f.service.pending_flag_changes(&f.account.id, 10).unwrap()[0].attempts,
+        1
+    );
+    assert!(
+        f.service
+            .pending_flag_changes("another-account", 10)
+            .unwrap()
+            .is_empty()
+    );
+}

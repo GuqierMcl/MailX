@@ -7,6 +7,7 @@ import type {
   AppSettings,
   ApiResult,
   AvatarImage,
+  FlagWriteBack,
   CreateAccountRequest,
   EmailDetail,
   EmailListQuery,
@@ -47,6 +48,14 @@ export interface MailxClient {
   updateProfile(request: UpdateProfileRequest): Promise<Account>
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
+  /**
+   * Changes read / starred in the local copy at once; writing it to the server
+   * happens in the background. `localOnly` means the server cannot keep a starred
+   * flag in that folder, so the star stays on this device.
+   */
+  setFlag(emailId: string, flag: 'read' | 'starred', wanted: boolean): Promise<'unchanged' | 'queued' | 'localOnly'>
+  /** Hears each finished write-back round: what was confirmed, and stars kept local. */
+  onFlagWriteBack(listener: (written: FlagWriteBack) => void): () => void
   /** Asks the account's sync worker to run its next round now. */
   refreshSync(accountId: string): Promise<void>
   /** `null` unless the user enabled sender avatars and the sender has one. */
@@ -114,6 +123,16 @@ export function createDesktopClient(): MailxClient {
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
+    setFlag: (emailId, flag, wanted) => call('emails_set_flag', { emailId, flag, wanted }),
+    onFlagWriteBack(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<FlagWriteBack>('mailx://flags', (event) => { if (!disposed) listener(event.payload) })
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => { disposed = true; unlisten?.() }
+    },
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
     saveAttachment: (emailId, attachmentId) => call<'saved' | 'cancelled'>('attachments_save', { emailId, attachmentId }),

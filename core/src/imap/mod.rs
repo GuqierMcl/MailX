@@ -152,6 +152,16 @@ async fn step<T, E: Into<ImapError>>(
 pub(crate) struct Session {
     inner: async_imap::Session<BoxedStream>,
     body_guard: Option<body::ReceiveGuard>,
+    /// The `[CODE]` of the tagged OK that ended the last checked command, e.g.
+    /// `READ-ONLY` or `READ-WRITE`. Only SELECT reads it.
+    completion: Option<ResponseCodeKind>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResponseCodeKind {
+    ReadOnly,
+    ReadWrite,
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +169,32 @@ pub(crate) struct MailboxInfo {
     pub uid_validity: u32,
     pub uid_next: Option<u32>,
     pub exists: u32,
+}
+
+/// A folder opened for writing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WritableMailbox {
+    pub uid_validity: u32,
+    /// Flags the server will keep (`PERMANENTFLAGS`). `\\*` lets clients make up
+    /// keywords but says nothing about `\\Flagged`, so it is kept as written.
+    pub permanent_flags: Vec<String>,
+    pub read_only: bool,
+}
+
+impl WritableMailbox {
+    /// Whether `flag` (e.g. `\\Flagged`) can be stored here. A server that
+    /// sends no `PERMANENTFLAGS` at all makes no promise, which reads as
+    /// "unknown" rather than "no".
+    pub(crate) fn keeps(&self, flag: &str) -> Option<bool> {
+        if self.permanent_flags.is_empty() {
+            return None;
+        }
+        Some(
+            self.permanent_flags
+                .iter()
+                .any(|kept| kept.eq_ignore_ascii_case(flag)),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -201,6 +237,15 @@ pub(crate) async fn test_session(
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
     authenticate(greet(stream).await?, login).await
+}
+
+/// A session over an in-memory peer that may SELECT and STORE, for the write-back
+/// tests in other modules. The read-only `test_session` peers forbid both.
+#[cfg(test)]
+pub(crate) async fn test_writable_session(
+    commands: Vec<(String, String)>,
+) -> (Session, tokio::task::JoinHandle<()>) {
+    tests::writable_session(commands).await
 }
 
 /// Compatibility wrapper for callers that only need a folder snapshot.
@@ -257,6 +302,7 @@ async fn authenticate(
     let mut session = Session {
         inner,
         body_guard: None,
+        completion: None,
     };
     if capabilities.has_str("ID") {
         // Identification is optional, but timeout/EOF cannot leave a partially
@@ -384,6 +430,85 @@ impl Session {
             ));
         }
         Ok(result)
+    }
+
+    /// Opens a folder for writing. Only the flag write-back uses this, on its own
+    /// connection: the header sync stays on read-only `EXAMINE`.
+    pub(crate) async fn select(&mut self, name: &str) -> Result<WritableMailbox, ImapError> {
+        let command = format!("SELECT {}", quoted_mailbox(name)?);
+        let mut mailbox = WritableMailbox {
+            uid_validity: 0,
+            permanent_flags: Vec::new(),
+            read_only: false,
+        };
+        self.checked_command::<()>(&command, |response, _| {
+            if let Response::Data {
+                status: Status::Ok,
+                outcome,
+            } = response
+            {
+                match outcome.code {
+                    Some(ResponseCode::UidValidity(value)) => mailbox.uid_validity = value,
+                    Some(ResponseCode::PermanentFlags(ref flags)) => {
+                        mailbox.permanent_flags =
+                            flags.iter().map(|flag| flag.to_string()).collect();
+                    }
+                    Some(ResponseCode::ReadOnly) => mailbox.read_only = true,
+                    _ => {}
+                }
+            }
+            Ok(None)
+        })
+        .await?;
+        // The server states the mode in the tagged OK, not in an untagged line.
+        mailbox.read_only |= self.completion == Some(ResponseCodeKind::ReadOnly);
+        if mailbox.uid_validity == 0 {
+            return Err(ImapError::Mailbox(
+                "SELECT did not return a valid UIDVALIDITY".into(),
+            ));
+        }
+        Ok(mailbox)
+    }
+
+    /// Sets or clears one flag on one message of the selected folder and returns
+    /// the flags the server reports for it afterwards. `Rejected` (a tagged NO or
+    /// BAD) is an answer, not a transport failure: the connection stays usable.
+    pub(crate) async fn store_flag(
+        &mut self,
+        uid: u32,
+        flag: &str,
+        set: bool,
+    ) -> Result<Vec<String>, ImapError> {
+        validate_uids(&[uid])?;
+        // Only the two flags this client manages are ever sent, and never built
+        // from anything the server said.
+        if !matches!(flag, "\\Seen" | "\\Flagged") {
+            return Err(ImapError::Protocol("unsupported flag".into()));
+        }
+        let command = format!(
+            "UID STORE {uid} {}FLAGS ({flag})",
+            if set { "+" } else { "-" }
+        );
+        let results = self
+            .checked_command(&command, |response, _| match response {
+                Response::Fetch(_, attributes) => fetch_identity(attributes, &[uid]),
+                _ => Ok(None),
+            })
+            .await?;
+        // A server may stay silent when `.SILENT` semantics apply or the message
+        // is gone; without the flags back the write cannot be confirmed.
+        let flags = results
+            .into_iter()
+            .find(|(fetched, _)| *fetched == uid)
+            .map(|(_, flags)| flags)
+            .ok_or_else(|| ImapError::Mailbox("STORE was not confirmed".into()))?;
+        let present = flags.iter().any(|kept| kept.eq_ignore_ascii_case(flag));
+        if present != set {
+            return Err(ImapError::Mailbox(
+                "the server did not apply the flag".into(),
+            ));
+        }
+        Ok(flags)
     }
 
     pub(crate) async fn search_since(&mut self, date: NaiveDate) -> Result<Vec<u32>, ImapError> {
@@ -522,8 +647,13 @@ impl Session {
                     Response::Done {
                         tag: response_tag,
                         status,
-                        ..
+                        outcome,
                     } if response_tag == &tag => {
+                        self.completion = Some(match outcome.code {
+                            Some(ResponseCode::ReadOnly) => ResponseCodeKind::ReadOnly,
+                            Some(ResponseCode::ReadWrite) => ResponseCodeKind::ReadWrite,
+                            _ => ResponseCodeKind::Other,
+                        });
                         return match status {
                             Status::Ok if collection_failed => Err(ImapError::Mailbox(
                                 "command returned invalid mailbox data".into(),
@@ -815,6 +945,51 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+
+    /// Like `serve`, for the write-back connection only. It allows SELECT and
+    /// STORE, which `serve` forbids for every read-only sync test: the guarantee
+    /// that header sync never writes stays enforced by all of those tests.
+    async fn serve_writable(server: DuplexStream, script: Vec<(String, String)>) {
+        let mut server = BufReader::new(server);
+        server
+            .get_mut()
+            .write_all(b"* OK IMAP4rev1 ready\r\n")
+            .await
+            .unwrap();
+        for (expected, reply) in script {
+            let mut line = String::new();
+            server.read_line(&mut line).await.unwrap();
+            let (tag, command) = line.trim_end().split_once(' ').unwrap();
+            assert!(
+                command.starts_with(&expected),
+                "expected {expected:?}, got {command:?}"
+            );
+            assert!(!command.starts_with("EXPUNGE") && !command.starts_with("UID EXPUNGE"));
+            assert!(!command.contains("BODY["));
+            server
+                .get_mut()
+                .write_all(reply.replace("{tag}", tag).as_bytes())
+                .await
+                .unwrap();
+        }
+    }
+
+    pub(super) async fn writable_session(
+        commands: Vec<(String, String)>,
+    ) -> (Session, tokio::task::JoinHandle<()>) {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let mut script = vec![
+            ("LOGIN".into(), "{tag} OK\r\n".into()),
+            (
+                "CAPABILITY".into(),
+                "* CAPABILITY IMAP4rev1\r\n{tag} OK\r\n".into(),
+            ),
+        ];
+        script.extend(commands);
+        let server = tokio::spawn(serve_writable(server, script));
+        let session = test_session(Box::new(client), &login()).await.unwrap();
+        (session, server)
     }
 
     async fn run(
@@ -1290,5 +1465,153 @@ mod tests {
             assert!(!error.session_usable());
             server.await.unwrap();
         }
+    }
+
+    // ---- write-back ----------------------------------------------------
+
+    fn select_reply(permanent: &str) -> String {
+        format!(
+            "* 3 EXISTS\r\n* FLAGS (\\Deleted \\Seen)\r\n* OK [PERMANENTFLAGS ({permanent})] limited\r\n\
+             * OK [UIDVALIDITY 9] valid\r\n{{tag}} OK [READ-WRITE] SELECT completed\r\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn select_reads_which_flags_the_server_will_keep() {
+        // 2925: only \\Deleted and \\Seen, no \\Flagged.
+        let (mut session, server) = writable_session(vec![
+            ("SELECT \"INBOX\"".into(), select_reply("\\Deleted \\Seen")),
+            (
+                "SELECT \"All\"".into(),
+                select_reply("\\Deleted \\Seen \\Flagged \\*"),
+            ),
+            (
+                "SELECT \"Quiet\"".into(),
+                "* OK [UIDVALIDITY 4] x\r\n{tag} OK [READ-WRITE] done\r\n".into(),
+            ),
+            (
+                "SELECT \"Ro\"".into(),
+                "* OK [UIDVALIDITY 4] x\r\n{tag} OK [READ-ONLY] done\r\n".into(),
+            ),
+        ])
+        .await;
+        let inbox = session.select("INBOX").await.unwrap();
+        assert_eq!(inbox.uid_validity, 9);
+        assert_eq!(inbox.keeps("\\Seen"), Some(true));
+        assert_eq!(inbox.keeps("\\Flagged"), Some(false));
+        let all = session.select("All").await.unwrap();
+        assert_eq!(all.keeps("\\flagged"), Some(true));
+        // No PERMANENTFLAGS at all: unknown, not "no".
+        let quiet = session.select("Quiet").await.unwrap();
+        assert_eq!(quiet.keeps("\\Flagged"), None);
+        assert!(!quiet.read_only);
+        assert!(session.select("Ro").await.unwrap().read_only);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn select_without_a_uidvalidity_is_refused() {
+        let (mut session, server) = writable_session(vec![(
+            "SELECT".into(),
+            "* 1 EXISTS\r\n{tag} OK [READ-WRITE] done\r\n".into(),
+        )])
+        .await;
+        assert!(matches!(
+            session.select("INBOX").await,
+            Err(ImapError::Mailbox(_))
+        ));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn store_sets_and_clears_one_flag_and_returns_what_the_server_now_has() {
+        let (mut session, server) = writable_session(vec![
+            (
+                "UID STORE 42 +FLAGS (\\Seen)".into(),
+                "* 5 FETCH (UID 42 FLAGS (\\Seen))\r\n{tag} OK stored\r\n".into(),
+            ),
+            (
+                "UID STORE 42 -FLAGS (\\Seen)".into(),
+                "* 5 FETCH (UID 42 FLAGS ())\r\n{tag} OK stored\r\n".into(),
+            ),
+            (
+                "UID STORE 7 +FLAGS (\\Flagged)".into(),
+                "* 2 FETCH (UID 7 FLAGS (\\Seen \\Flagged))\r\n{tag} OK stored\r\n".into(),
+            ),
+        ])
+        .await;
+        assert_eq!(
+            session.store_flag(42, "\\Seen", true).await.unwrap(),
+            ["\\Seen"]
+        );
+        assert!(
+            session
+                .store_flag(42, "\\Seen", false)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            session
+                .store_flag(7, "\\Flagged", true)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rejection_is_an_answer_and_an_unconfirmed_store_is_not_success() {
+        let (mut session, server) = writable_session(vec![
+            (
+                "UID STORE 1".into(),
+                "{tag} NO [READONLY] cannot write\r\n".into(),
+            ),
+            // OK but no FETCH data: the message may be gone, nothing is confirmed.
+            ("UID STORE 2".into(), "{tag} OK done\r\n".into()),
+            // Confirmed, but for a different UID than the one asked about.
+            (
+                "UID STORE 3".into(),
+                "* 1 FETCH (UID 99 FLAGS (\\Seen))\r\n{tag} OK done\r\n".into(),
+            ),
+            // Acknowledged yet the flag is not there: the server ignored it.
+            (
+                "UID STORE 4".into(),
+                "* 1 FETCH (UID 4 FLAGS ())\r\n{tag} OK done\r\n".into(),
+            ),
+        ])
+        .await;
+        let rejected = session.store_flag(1, "\\Seen", true).await.unwrap_err();
+        assert_eq!(rejected, ImapError::Rejected);
+        assert!(rejected.session_usable());
+        for uid in [2, 3, 4] {
+            let error = session.store_flag(uid, "\\Seen", true).await.unwrap_err();
+            assert!(
+                matches!(error, ImapError::Mailbox(_)),
+                "uid {uid}: {error:?}"
+            );
+            assert!(error.session_usable());
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_the_two_managed_flags_and_valid_uids_ever_reach_the_wire() {
+        // No scripted commands: anything sent would fail the script check.
+        let (mut session, server) = writable_session(vec![]).await;
+        for bad in [
+            "\\Deleted",
+            "\\Seen \\Deleted",
+            "\\Seen)\r\nA1 LOGOUT",
+            "$Junk",
+            "",
+        ] {
+            assert!(session.store_flag(1, bad, true).await.is_err(), "{bad:?}");
+        }
+        assert!(session.store_flag(0, "\\Seen", true).await.is_err());
+        drop(session);
+        let _ = server.await;
     }
 }

@@ -16,16 +16,18 @@ use crate::error::{AppError, ErrorCode};
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::sync::bodies::BodyManager;
-use crate::sync::manager::{AccountSyncState, SyncListener, SyncManager};
+use crate::sync::manager::{AccountSyncState, FlagListener, SyncListener, SyncManager};
 
 mod attachments;
 mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
+mod flags;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
+pub use flags::{FlagChange, MessageFlag};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
@@ -47,6 +49,7 @@ impl MailxCore {
         secrets: Arc<dyn SecretStore>,
         runtime: Handle,
         listener: SyncListener,
+        flag_listener: FlagListener,
     ) -> Result<Self, AppError> {
         // The image cache is an optimization; a directory that cannot be used
         // must not stop mail from working.
@@ -55,7 +58,12 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
-        let sync = Arc::new(SyncManager::new(service.clone(), runtime, listener));
+        let sync = Arc::new(SyncManager::new(
+            service.clone(),
+            runtime,
+            listener,
+            flag_listener,
+        ));
         for account in &accounts {
             sync.restart(&account.id);
         }
@@ -134,6 +142,32 @@ impl MailxCore {
         self.bodies.fetch(email_id).await
     }
 
+    /// Marks a message read or unread, or starred or not. The change shows at
+    /// once and is written back to the server in the background; where the
+    /// server cannot keep a starred flag it stays on this device, and the host
+    /// is told through the flag listener when that is found out.
+    pub fn set_message_flag(
+        &self,
+        email_id: &str,
+        flag: MessageFlag,
+        wanted: bool,
+    ) -> Result<FlagChange, AppError> {
+        let (change, account_id) = {
+            let mut service = self.accounts()?;
+            let change = service.set_message_flag(email_id, flag.into(), wanted)?;
+            let account_id = service.get_email(email_id)?.summary.account_id;
+            (change, account_id)
+        };
+        if change == crate::storage::LocalChange::Queued {
+            self.sync.changes_waiting(&account_id);
+        }
+        Ok(match change {
+            crate::storage::LocalChange::Unchanged => FlagChange::Unchanged,
+            crate::storage::LocalChange::Queued => FlagChange::Queued,
+            crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
+        })
+    }
+
     /// Asks an account's sync worker to run its next round now.
     pub fn refresh_sync(&self, account_id: &str) -> Result<(), AppError> {
         self.accounts()?.get(account_id)?;
@@ -181,6 +215,7 @@ mod tests {
             Arc::new(MemorySecrets::default()),
             runtime.handle().clone(),
             listener,
+            Arc::new(|_| {}),
         )
         .unwrap();
         (core, receiver)

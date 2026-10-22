@@ -226,6 +226,17 @@ recovered: boolean, };
 
 export type AvatarKind = "photo" | "icon";
 
+export type FlagWriteBack = { accountId: string,
+/**
+ * Changes the server confirmed; the list's "waiting" markers may clear.
+ */
+sent: number,
+/**
+ * Starred changes kept on this device only because the folder cannot store
+ * the flag.
+ */
+localOnlyStars: number, };
+
 export type AvatarImage = { mimeType: string,
 /**
  * Base64 of the re-encoded, validated image.

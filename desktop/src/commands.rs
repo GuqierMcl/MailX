@@ -464,6 +464,62 @@ pub(crate) async fn attachments_save(
     Ok(respond(result))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetFlagArgs {
+    email_id: String,
+    flag: FlagName,
+    wanted: bool,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+enum FlagName {
+    Read,
+    Starred,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum FlagOutcome {
+    Unchanged,
+    /// Saved; the server is updated in the background.
+    Queued,
+    /// Saved on this device only: the server cannot keep a starred flag here.
+    LocalOnly,
+}
+
+/// Changes read / starred locally at once; the write to the server is queued.
+#[tauri::command]
+pub(crate) async fn emails_set_flag(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<FlagOutcome>, ()> {
+    use mailx_core::{FlagChange, MessageFlag};
+    let args = authorize(&window).and_then(|()| parse::<SetFlagArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| {
+                    let flag = match args.flag {
+                        FlagName::Read => MessageFlag::Read,
+                        FlagName::Starred => MessageFlag::Starred,
+                    };
+                    Ok(
+                        match core.set_message_flag(&args.email_id, flag, args.wanted)? {
+                            FlagChange::Unchanged => FlagOutcome::Unchanged,
+                            FlagChange::Queued => FlagOutcome::Queued,
+                            FlagChange::LocalOnly => FlagOutcome::LocalOnly,
+                        },
+                    )
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[tauri::command]
 pub(crate) async fn sync_refresh(
     window: WebviewWindow,

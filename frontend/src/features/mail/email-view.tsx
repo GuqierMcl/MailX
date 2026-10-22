@@ -3,12 +3,13 @@ import {
   Archive02Icon,
   Delete02Icon,
   Forward01Icon,
+  Mail01Icon,
   MailOpen01Icon,
   MailReply01Icon,
   MailReplyAll01Icon,
   StarIcon,
 } from '@hugeicons/core-free-icons'
-import type { BodyFailureCode, EmailDetail, MailAddress } from '@/generated/accounts'
+import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -23,6 +24,8 @@ import { SenderAvatar } from './sender-avatar'
 
 type EmailViewProps = {
   client: MailxClient
+  /** Marks the open message read or starred; the list shows it at once. */
+  onFlag: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   downloading: boolean
   onDownload: () => void
   email: EmailDetail | null
@@ -30,11 +33,11 @@ type EmailViewProps = {
   error: string | null
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag }: EmailViewProps) {
   const showSkeleton = useDelayedFlag(loading)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar disabled={!email} />
+      <Toolbar summary={email?.summary ?? null} onFlag={onFlag} />
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
@@ -67,9 +70,9 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
   )
 }
 
-// Mail actions need the outbox and flag sync in core; until then the buttons
-// only show where the actions will live.
-const ACTIONS: [string, IconSvgElement][][] = [
+// Reply, forward, archive and delete need the outbox and mailbox moves; until
+// then those buttons only show where the actions will live.
+const PLACEHOLDER_ACTIONS: [string, IconSvgElement][][] = [
   [
     ['归档', Archive02Icon],
     ['删除', Delete02Icon],
@@ -79,13 +82,12 @@ const ACTIONS: [string, IconSvgElement][][] = [
     ['回复全部', MailReplyAll01Icon],
     ['转发', Forward01Icon],
   ],
-  [['加星标', StarIcon]],
 ]
 
-function Toolbar({ disabled }: { disabled: boolean }) {
+function Toolbar({ summary, onFlag }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag'] }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
-      {ACTIONS.map((group, index) => (
+      {PLACEHOLDER_ACTIONS.map((group, index) => (
         <div key={index} className="flex items-center gap-1 not-first:ml-3">
           {group.map(([label, icon]) => (
             <Button key={label} variant="ghost" size="icon" aria-label={label} title={`${label}（尚未实现）`} disabled>
@@ -94,7 +96,30 @@ function Toolbar({ disabled }: { disabled: boolean }) {
           ))}
         </div>
       ))}
-      <span className="sr-only">{disabled ? '未选择邮件' : '邮件操作尚未实现'}</span>
+      <div className="flex items-center gap-1 not-first:ml-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!summary}
+          aria-label={summary?.isRead === false ? '标为已读' : '标为未读'}
+          title={summary?.isRead === false ? '标为已读' : '标为未读'}
+          onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
+        >
+          <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!summary}
+          aria-label={summary?.isStarred ? '取消星标' : '加星标'}
+          aria-pressed={summary?.isStarred ?? false}
+          title={summary?.isStarred ? '取消星标' : '加星标'}
+          onClick={() => summary && onFlag(summary, 'starred', !summary.isStarred)}
+          className={summary?.isStarred ? 'text-amber-500 hover:text-amber-500' : undefined}
+        >
+          <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
+        </Button>
+      </div>
     </div>
   )
 }
