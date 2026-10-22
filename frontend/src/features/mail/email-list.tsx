@@ -1,7 +1,6 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary } from '@/generated/accounts'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -23,7 +22,7 @@ export type ListSyncStatus = {
 type EmailListProps = {
   title: string
   emails: EmailSummary[]
-  /** Shown as a badge on each row when the list spans several accounts. */
+  /** When the list spans several accounts, each row names its owning mailbox after the sender. */
   accounts: Account[] | null
   loading: boolean
   syncStatus: ListSyncStatus
@@ -181,22 +180,33 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
         <div className="flex w-full flex-col gap-1">
           <div className="flex items-center gap-2">
-            <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
+            {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
+                muted, and gives way to the sender before the time ever does. */}
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
+              {account && (
+                <>
+                  <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">{account.emailAddress}</span>
+                </>
+              )}
+            </span>
             {!email.isRead && <span aria-label="未读" className="size-2 shrink-0 rounded-full bg-primary" />}
             <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
               {formatListTime(email.receivedAt)}
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs font-medium">
+            {email.isStarred && (
+              <HugeiconsIcon icon={StarIcon} aria-label="已加星标" fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
+            )}
             <span className="truncate">{email.subject || '（无主题）'}</span>
             {email.hasAttachment && (
               <HugeiconsIcon icon={Attachment01Icon} aria-label="有附件" className="size-3.5 shrink-0 text-muted-foreground" />
             )}
-            {email.isStarred && <HugeiconsIcon icon={StarIcon} aria-label="已加星标" className="size-3.5 shrink-0 text-muted-foreground" />}
           </div>
         </div>
         {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
-        {account && <Badge variant="secondary">{account.displayName}</Badge>}
       </div>
     </button>
   )

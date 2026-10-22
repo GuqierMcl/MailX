@@ -18,8 +18,10 @@ describe('workbench', () => {
     const { list } = await renderWorkbench()
     expect(screen.getByRole('heading', { name: '全部收件箱' })).toBeInTheDocument()
     const rows = within(list).getAllByRole('listitem')
-    expect(within(list).getAllByText('工作邮箱').length).toBeGreaterThan(0)
-    expect(within(list).getAllByText('个人邮箱').length).toBeGreaterThan(0)
+    // A view that spans accounts names each message's mailbox by its address, after the sender.
+    expect(within(list).getAllByText('lin.wei@example.com').length).toBeGreaterThan(0)
+    expect(within(list).getAllByText('linwei.home@example.org').length).toBeGreaterThan(0)
+    expect(within(list).queryByText('工作邮箱')).not.toBeInTheDocument()
 
     await userEvent.click(rows[0])
     expect(rows[0]).toHaveAttribute('aria-current', 'true')
