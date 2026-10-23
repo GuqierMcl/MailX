@@ -56,23 +56,19 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   return <SettingsPage>
     {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
     <SettingsGroup title="新邮件通知">
-      <SettingsRow label="显示通知" htmlFor="notifications.enabled"
-        description="收件箱收到未读新邮件时，通过系统通知提醒。首次同步、补齐的旧邮件、已在其他设备读过的邮件不会提醒。">
+      <SettingsRow label="收到新邮件时提醒我" htmlFor="notifications.enabled">
         <Switch id="notifications.enabled" checked={notifications.enabled}
           onCheckedChange={(enabled) => update.mutate({ enabled })} />
       </SettingsRow>
-      <SettingsRow label="显示发件人和主题" htmlFor="notifications.showPreview"
-        description="关闭后通知只显示账号名称和新邮件数量，锁屏或共享屏幕时不会露出邮件内容。">
+      <SettingsRow label="通知里显示发件人和主题" htmlFor="notifications.showPreview">
         <Switch id="notifications.showPreview" checked={notifications.showPreview} disabled={off}
           onCheckedChange={(showPreview) => update.mutate({ showPreview })} />
       </SettingsRow>
-      <SettingsRow label="MailX 在前台时也通知" htmlFor="notifications.whenFocused"
-        description="关闭时，正在使用 MailX 期间只更新未读数，不弹出通知。">
+      <SettingsRow label="正在使用时也通知" htmlFor="notifications.whenFocused">
         <Switch id="notifications.whenFocused" checked={notifications.whenFocused} disabled={off}
           onCheckedChange={(whenFocused) => update.mutate({ whenFocused })} />
       </SettingsRow>
-      <SettingsRow label="提示音" htmlFor="notifications.sound"
-        description="“系统默认”使用系统的通知提示音；其他音效由 MailX 播放，系统通知本身保持静音。">
+      <SettingsRow label="提示音" htmlFor="notifications.sound">
         {OWN_SOUNDS.includes(notifications.sound) && (
           <Button variant="ghost" size="icon-sm" aria-label="试听" disabled={off}
             onClick={() => void client.previewSound(notifications.sound).catch(() => undefined)}>
@@ -90,12 +86,12 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
           <SelectContent>{Object.entries(SOUNDS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsRow>
-      <SettingsRow label="测试通知" description="按当前设置发送一条示例通知。若没有出现，请在系统设置中允许 MailX 发送通知。">
+      <SettingsRow label="测试通知" description="没有出现通知时，请在系统设置里允许 MailX 发送通知。">
         <TestNotification client={client} disabled={off} />
       </SettingsRow>
     </SettingsGroup>
     {accounts.data && accounts.data.length > 0 && (
-      <SettingsGroup title="按账号" description="关闭的账号收到新邮件时不会通知，未读数照常更新。">
+      <SettingsGroup title="按账号">
         {accounts.data.map((account) => (
           <SettingsRow key={account.id} htmlFor={`notifications.account.${account.id}`}
             label={<span className="flex min-w-0 items-center gap-2">

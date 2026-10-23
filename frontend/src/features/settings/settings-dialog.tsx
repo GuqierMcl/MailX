@@ -102,9 +102,13 @@ function AboutSection() {
           <span className="text-sm text-muted-foreground tabular-nums">{__APP_VERSION__}</span>
         </SettingsRow>
       </SettingsGroup>
-      <SettingsGroup title="数据与凭证">
-        <SettingsRow label="本机数据" description="账号配置、邮件缓存与偏好设置（settings.json）都保存在本机的数据目录中。" />
-        <SettingsRow label="密码" description="密码由系统凭据库管理，不会显示在应用中。" />
+      <SettingsGroup title="数据与隐私" description="MailX 是在你电脑上运行的邮件应用，没有自己的服务器，也不需要注册 MailX 账号。">
+        <SettingsRow label="邮件和设置保存在哪里" description="账号信息、邮件内容、已保存的图片和各项设置，都只保存在这台电脑上，不会上传到任何地方。" />
+        <SettingsRow label="密码" description="你的邮箱密码交给系统保管（Mac 的钥匙串、Windows 的凭据管理器或 Linux 的密钥服务），不会写进 MailX 自己的文件，界面上也不会再显示。" />
+        <SettingsRow label="MailX 会联网做什么" description="连接你自己的邮箱服务器，收取邮件；在你允许后加载邮件里的网络图片；在你开启后查找发件人头像。除此之外 MailX 不会主动连接其他地址。点开邮件里的链接时，是由你的系统浏览器打开的。" />
+        <SettingsRow label="不收集你的使用情况" description="MailX 不包含统计、数据分析或崩溃上报，也不会在后台自动检查或下载更新。" />
+        <SettingsRow label="对你邮箱里的邮件" description="MailX 只会把“已读”和“星标”的变化同步回邮箱服务器，不会删除、移动或改写你的邮件。" />
+        <SettingsRow label="邮件里的内容" description="邮件在一个与应用隔离的区域里显示，邮件里的脚本不会运行，也无法接触你的账号、密码和设置。网络图片默认每次询问。" />
       </SettingsGroup>
     </SettingsPage>
   )

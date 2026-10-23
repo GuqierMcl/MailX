@@ -20,9 +20,9 @@ const lastNotifications = (client: ReturnType<typeof testClient>) =>
 describe('notification settings', () => {
   it('starts on, with previews, quiet while in front and the system sound', async () => {
     const { dialog } = renderPane()
-    expect(await within(dialog).findByRole('switch', { name: '显示通知' })).toBeChecked()
-    expect(within(dialog).getByRole('switch', { name: '显示发件人和主题' })).toBeChecked()
-    expect(within(dialog).getByRole('switch', { name: 'MailX 在前台时也通知' })).not.toBeChecked()
+    expect(await within(dialog).findByRole('switch', { name: '收到新邮件时提醒我' })).toBeChecked()
+    expect(within(dialog).getByRole('switch', { name: '通知里显示发件人和主题' })).toBeChecked()
+    expect(within(dialog).getByRole('switch', { name: '正在使用时也通知' })).not.toBeChecked()
     expect(within(dialog).getByRole('combobox', { name: '提示音' })).toHaveTextContent('系统默认')
     // The system sound is the system's to play: nothing to preview here.
     expect(within(dialog).queryByRole('button', { name: '试听' })).not.toBeInTheDocument()
@@ -30,13 +30,13 @@ describe('notification settings', () => {
 
   it('saves the whole section with each change and disables the rest when turned off', async () => {
     const { client, dialog } = renderPane()
-    await userEvent.click(await within(dialog).findByRole('switch', { name: 'MailX 在前台时也通知' }))
+    await userEvent.click(await within(dialog).findByRole('switch', { name: '正在使用时也通知' }))
     expect(lastNotifications(client)).toEqual({ ...DEFAULT_NOTIFICATIONS, whenFocused: true })
 
-    await userEvent.click(within(dialog).getByRole('switch', { name: '显示通知' }))
+    await userEvent.click(within(dialog).getByRole('switch', { name: '收到新邮件时提醒我' }))
     expect(lastNotifications(client)).toEqual({ ...DEFAULT_NOTIFICATIONS, whenFocused: true, enabled: false })
     // Base UI switches are spans: disabled shows as aria-disabled.
-    await waitFor(() => expect(within(dialog).getByRole('switch', { name: '显示发件人和主题' })).toHaveAttribute('aria-disabled', 'true'))
+    await waitFor(() => expect(within(dialog).getByRole('switch', { name: '通知里显示发件人和主题' })).toHaveAttribute('aria-disabled', 'true'))
     expect(within(dialog).getByRole('button', { name: '发送测试通知' })).toBeDisabled()
   })
 
@@ -84,7 +84,7 @@ describe('notification settings', () => {
     const client = testClient([work, home])
     client.updateSettings.mockRejectedValueOnce(new Error('disk full'))
     const { dialog } = renderPane(client)
-    const preview = await within(dialog).findByRole('switch', { name: '显示发件人和主题' })
+    const preview = await within(dialog).findByRole('switch', { name: '通知里显示发件人和主题' })
     await userEvent.click(preview)
     await waitFor(() => expect(preview).toBeChecked())
     expect(within(dialog).getByText('设置保存失败')).toBeInTheDocument()
