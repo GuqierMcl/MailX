@@ -7,6 +7,8 @@
 
 pub(crate) mod images;
 mod proxy;
+#[cfg(test)]
+mod smtp_probe;
 
 use std::fmt;
 use std::sync::{Arc, OnceLock};
