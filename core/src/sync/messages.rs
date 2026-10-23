@@ -8,6 +8,7 @@ use tokio::time::Instant;
 
 use crate::accounts::messages::{FolderSyncCursor, SyncTarget};
 use crate::error::{AppError, ErrorCode};
+use crate::events::NewMailMessage;
 use crate::imap::{FolderStatus, ImapError, Session};
 
 use super::headers::parse_header;
@@ -17,6 +18,9 @@ const WINDOW_DAYS: i64 = 30;
 const WINDOW_LIMIT: usize = 1_000;
 const HEADER_BATCH_SIZE: usize = 200;
 const FLAGS_BATCH_SIZE: usize = 500;
+/// Mail received longer ago than this (e.g. found after days offline) is old
+/// news and never notified.
+const NEW_MAIL_MAX_AGE_HOURS: i64 = 24;
 /// How long a folder whose STATUS is unchanged may skip the full round. The
 /// periodic full round also catches changes STATUS cannot show, such as
 /// `\Flagged` being set or a message being replaced by another.
@@ -97,8 +101,16 @@ fn written(result: Option<usize>, changed: &mut bool) -> Result<(), SyncError> {
     }
 }
 
-/// Syncs one folder. `changed` is set whenever visible data changed, even if a
-/// later step fails, so the UI refreshes for what was already committed.
+/// What a folder round produced, kept even when the round fails part way.
+#[derive(Debug, Default)]
+pub(super) struct FolderRound {
+    /// Visible data changed, so the UI refreshes for what was already committed.
+    pub changed: bool,
+    /// New unread inbox mail stored in this round.
+    pub arrivals: Vec<NewMailMessage>,
+}
+
+/// Syncs one folder.
 pub(super) async fn sync_folder(
     shared: &std::sync::Arc<Shared>,
     token: &WorkerToken,
@@ -106,8 +118,9 @@ pub(super) async fn sync_folder(
     remote_name: &str,
     session: &mut Session,
     memory: &mut FolderMemory,
-    changed: &mut bool,
+    round: &mut FolderRound,
 ) -> Result<(), SyncError> {
+    let changed = &mut round.changed;
     // Forgotten until this round completes, so any failure forces a full round next time.
     let previous = memory.remove(folder_id);
     let account_id = &token.account_id;
@@ -166,6 +179,12 @@ pub(super) async fn sync_folder(
         &mut transient,
     )?;
 
+    // Mail above the highest UID seen so far arrived since then: UIDs only grow
+    // within a generation. A new generation (first sync, rebuilt folder) has
+    // nothing to compare with, and neither has one whose first round stored
+    // nothing, so all their mail counts as already there.
+    let arrived_after = (!cursor.created && (cursor.backfill_done || cursor.highest_uid > 0))
+        .then_some(cursor.highest_uid);
     let mut highest_uid = cursor.highest_uid;
     for batch in plan.fetch.chunks(HEADER_BATCH_SIZE) {
         let headers = session.fetch_headers(batch).await?;
@@ -191,6 +210,25 @@ pub(super) async fn sync_folder(
         }
     }
 
+    if let Some(after) = arrived_after {
+        let uids: Vec<u32> = plan
+            .fetch
+            .iter()
+            .copied()
+            .filter(|uid| *uid > after)
+            .collect();
+        if !uids.is_empty() {
+            let guard = target.clone();
+            let since = (now - Duration::hours(NEW_MAIL_MAX_AGE_HOURS))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            round.arrivals.extend(
+                with_store(shared, token, move |service| {
+                    service.new_arrivals(&guard, &uids, &since)
+                })
+                .await?,
+            );
+        }
+    }
     let guard = target.clone();
     written(
         with_store(shared, token, move |service| {

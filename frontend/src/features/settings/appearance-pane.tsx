@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
@@ -26,6 +26,8 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: IconSvgElement }[]
 const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: '跟随颜色模式', light: '始终白底' }
 
 const FONT_SIZE_LABELS: Record<FontSize, string> = { small: '较小', default: '标准', large: '较大' }
+
+const PREVIEW_LINE_LABELS: Record<PreviewLines, string> = { none: '不显示', one: '1 行', two: '2 行', three: '3 行' }
 
 const FONT_PREVIEW = '敏捷的棕色狐狸跳过了懒狗 · The quick brown fox jumps over the lazy dog 0123456789'
 
@@ -58,8 +60,8 @@ export function AppearancePane({ client }: { client: MailxClient }) {
     <SettingsPage>
       {settings.data.recovered && (
         <Alert>
-          <AlertTitle>设置文件无法读取</AlertTitle>
-          <AlertDescription>原文件已保留为数据目录中的 settings.json.bak，当前使用默认设置；修改任意一项后会写入新文件。</AlertDescription>
+          <AlertTitle>设置无法读取</AlertTitle>
+          <AlertDescription>已改用默认设置，原来的设置文件保留为 settings.json.bak。</AlertDescription>
         </Alert>
       )}
       {failure && !fontRejected && !mailFontRejected && (
@@ -69,11 +71,11 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         </Alert>
       )}
 
-      <SettingsGroup title="颜色" description="设置会保存到本机的数据目录，并在下次启动时沿用。">
-        <SettingsRow label="颜色模式" description="跟随系统时会随操作系统的浅色或深色设置切换。">
+      <SettingsGroup title="颜色">
+        <SettingsRow label="颜色模式">
           <ThemeChoice value={appearance.theme} onChange={(theme) => change({ theme })} />
         </SettingsRow>
-        <SettingsRow label="邮件内容深色适配" description="深色模式下将邮件正文反色显示，图片保持原色；邮件自带的配色可能不完全适配，可改为始终白底。已打开的邮件会自动刷新。" htmlFor="appearance.mailTheme">
+        <SettingsRow label="深色模式下的邮件" description="有些邮件在深色下显示不佳，可改为白底。" htmlFor="appearance.mailTheme">
           <Select value={appearance.mailTheme} items={MAIL_THEME_LABELS}
             onValueChange={(mailTheme: MailTheme | null) => { if (mailTheme) change({ mailTheme }) }}>
             <SelectTrigger id="appearance.mailTheme" className="w-36"><SelectValue /></SelectTrigger>
@@ -82,7 +84,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
-        <SettingsRow label="强调色" description="用于主要按钮、选中项与焦点。">
+        <SettingsRow label="强调色">
           <AccentChoice value={appearance.accentColor} onChange={(accentColor) => change({ accentColor })} />
         </SettingsRow>
       </SettingsGroup>
@@ -98,20 +100,31 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         />
         <FontField
           id="appearance.mailFont"
-          label="邮件内容字体"
-          description="仅作用于邮件正文中未自行指定字体的文字；邮件自带的字体设置优先。已打开的邮件在重新打开后生效。"
+          label="邮件字体"
           value={appearance.mailFont}
           defaults={DEFAULT_MAIL_FONTS}
           rejected={mailFontRejected}
           resetLabel="恢复默认邮件字体"
           onCommit={(mailFont) => change({ mailFont })}
         />
-        <SettingsRow label="字号" description="同时缩放界面间距。" htmlFor="appearance.fontSize">
+        <SettingsRow label="字号" htmlFor="appearance.fontSize">
           <Select value={appearance.fontSize} items={FONT_SIZE_LABELS}
             onValueChange={(fontSize: FontSize | null) => { if (fontSize) change({ fontSize }) }}>
             <SelectTrigger id="appearance.fontSize" className="w-28"><SelectValue /></SelectTrigger>
             <SelectContent>
               {Object.entries(FONT_SIZE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="邮件列表">
+        <SettingsRow label="邮件预览行数" htmlFor="appearance.previewLines">
+          <Select value={appearance.previewLines} items={PREVIEW_LINE_LABELS}
+            onValueChange={(previewLines: PreviewLines | null) => { if (previewLines) change({ previewLines }) }}>
+            <SelectTrigger id="appearance.previewLines" className="w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(PREVIEW_LINE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
         </SettingsRow>
@@ -179,10 +192,9 @@ function AccentChoice({ value: saved, onChange }: { value: string; onChange: (ac
   )
 }
 
-function FontField({ id, label, description, value, defaults, rejected, resetLabel, onCommit }: {
+function FontField({ id, label, value, defaults, rejected, resetLabel, onCommit }: {
   id: string
   label: string
-  description?: string
   value: string
   defaults: string[]
   rejected: boolean
@@ -209,13 +221,13 @@ function FontField({ id, label, description, value, defaults, rejected, resetLab
     <Field data-invalid={rejected || undefined}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <div className="flex gap-2">
-        <Input id={id} value={draft} placeholder={`留空使用默认：${defaults.slice(0, 3).join(', ')} …`}
+        <Input id={id} value={draft} placeholder={`默认：${defaults.slice(0, 2).join(', ')} …`}
           spellCheck={false} autoComplete="off" aria-invalid={rejected || undefined}
           onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={onKeyDown} />
         <Button variant="outline" aria-label={resetLabel} disabled={!value && !draft} onClick={() => { setDraft(''); if (value) onCommit('') }}>恢复默认</Button>
       </div>
-      <FieldDescription>多个字体用英文逗号分隔，按顺序尝试，前一个未安装时使用下一个。留空时使用内置默认字体。{description}</FieldDescription>
-      {rejected && <FieldError>字体名不能包含引号、反斜杠、分号、括号或尖括号；最多 16 个，每个不超过 64 个字符。</FieldError>}
+      <FieldDescription>可填多个，用英文逗号隔开。</FieldDescription>
+      {rejected && <FieldError>字体名里有不能使用的字符，或写得太多、太长。</FieldError>}
       <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-sm text-foreground" style={{ fontFamily: fontFamilyCss(draft, defaults) }}>
         {FONT_PREVIEW}
       </p>

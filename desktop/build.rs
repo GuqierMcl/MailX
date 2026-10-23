@@ -25,6 +25,8 @@ fn main() {
             "image_cache_clear",
             "settings_get",
             "settings_update",
+            "notifications_test",
+            "notifications_preview_sound",
             "window_get_chrome",
             "window_perform",
         ]),

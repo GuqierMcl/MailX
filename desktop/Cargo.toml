@@ -23,6 +23,8 @@ uuid = { version = "1", features = ["v4"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+rodio = { version = "0.23.0", default-features = false, features = ["playback"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }

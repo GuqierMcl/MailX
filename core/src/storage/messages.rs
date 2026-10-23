@@ -7,6 +7,7 @@ use uuid::Uuid;
 use super::{Storage, decode, encode};
 use crate::{
     AppError, ErrorCode,
+    events::NewMailMessage,
     mail::{
         AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail, EmailListQuery, EmailPage,
         EmailSummary, MailAddress,
@@ -265,6 +266,47 @@ impl Storage {
         // Sync only fetches UIDs that are not cached as present, so each record
         // is a new or revived message.
         Ok(Some(records.len()))
+    }
+
+    /// Of the given just-stored UIDs, the ones worth a new-mail notice: still
+    /// unread, in an inbox, received at or after `since`. Newest first.
+    pub(crate) fn new_arrivals(
+        &self,
+        target: &SyncTarget,
+        uids: &[u32],
+        since: &str,
+    ) -> Result<Vec<NewMailMessage>, AppError> {
+        if uids.is_empty() || !current_target(&self.db, target)? {
+            return Ok(vec![]);
+        }
+        let placeholders = vec!["?"; uids.len()].join(", ");
+        let mut statement = self.db.prepare(&format!(
+            "SELECT m.id, m.from_name, m.from_address, m.subject, m.received_at
+             FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.folder_id = ? AND m.uid_validity = ? AND m.remote_state = 'present'
+               AND f.role = 'inbox' AND m.is_read = 0 AND m.received_at >= ?
+               AND m.uid IN ({placeholders})
+             ORDER BY m.received_at DESC, m.uid DESC"
+        ))?;
+        let mut values: Vec<Value> = vec![
+            Value::Text(target.folder_id.clone()),
+            Value::Integer(target.uid_validity.into()),
+            Value::Text(since.to_owned()),
+        ];
+        values.extend(uids.iter().map(|uid| Value::Integer((*uid).into())));
+        Ok(statement
+            .query_map(params_from_iter(values), |row| {
+                Ok(NewMailMessage {
+                    email_id: row.get(0)?,
+                    from: MailAddress {
+                        name: row.get(1)?,
+                        address: row.get(2)?,
+                    },
+                    subject: row.get(3)?,
+                    received_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
     }
 
     pub(crate) fn begin_backfill(

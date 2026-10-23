@@ -1,13 +1,17 @@
-import { act, render, screen, waitFor, within } from '@/test/render'
+import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, FlagWriteBack, Folder } from '@/generated/accounts'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
+import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
+import { DEFAULT_APPEARANCE } from '@/lib/appearance'
+import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { MailxClientError } from '@/lib/mailx-client'
 import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
+const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',
@@ -548,5 +552,157 @@ describe('synced inbox headers', () => {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('combobox')).not.toBeInTheDocument())
     expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
+  })
+})
+
+describe('clicked notifications', () => {
+  function withNotifications(items: EmailSummary[]) {
+    const context = setup(items)
+    let open: (request: { accountId: string; emailId: string | null }) => void = () => undefined
+    context.client.onNotificationOpen.mockImplementation((listener) => { open = listener; return () => undefined })
+    return { ...context, click: (request: { accountId: string; emailId: string | null }) => act(() => open(request)) }
+  }
+
+  it('opens the one message a notification was about, even when the list shows another mailbox', async () => {
+    const arrived = email('arrived', { subject: '新到的周报' })
+    const { client, click } = withNotifications([arrived])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
+    await screen.findByRole('heading', { name: '已发送' })
+
+    click({ accountId: account.id, emailId: arrived.id })
+    expect(await screen.findByRole('heading', { name: '新到的周报' })).toBeInTheDocument()
+    // The list is left where the user put it.
+    expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
+  })
+
+  it("shows the account's inbox for a notification about several messages", async () => {
+    const { client, click } = withNotifications([email('one'), email('two')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
+    await screen.findByRole('heading', { name: '已发送' })
+
+    click({ accountId: account.id, emailId: null })
+    await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: inbox.id })))
+  })
+
+  it('ignores a notification of an account that no longer exists', async () => {
+    const { client, click } = withNotifications([email('one')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    const calls = client.getEmail.mock.calls.length
+    click({ accountId: 'gone', emailId: 'one' })
+    expect(client.getEmail.mock.calls.length).toBe(calls)
+  })
+})
+
+describe('folding the reader away', () => {
+  const toggle = () => screen.getByRole('button', { name: /^(收起|展开)邮件内容$/ })
+
+  it('has a fold button whose label and state follow the reader', async () => {
+    const { client } = setup([email('one')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
+  })
+
+  it('opens the reader again when a message is clicked, and keeps it folded otherwise', async () => {
+    const one = email('one')
+    const { client } = setup([one])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
+    // Sync and list refreshes do not unfold it.
+    await userEvent.click(screen.getByRole('tab', { name: '未读' }))
+    expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容')
+    await userEvent.click(screen.getByRole('tab', { name: '全部' }))
+
+    await userEvent.click(rows()[0])
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
+    expect(await screen.findByRole('heading', { name: one.subject })).toBeInTheDocument()
+  })
+
+  it('does not close a message with Esc while the reader is out of sight', async () => {
+    const one = email('one')
+    const { client } = setup([one])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    await screen.findByRole('heading', { name: one.subject })
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(toggle())
+    // Still the same message when it is shown again.
+    expect(await screen.findByRole('heading', { name: one.subject })).toBeInTheDocument()
+  })
+
+  it('unfolds the reader for a clicked notification about one message', async () => {
+    const arrived = email('arrived', { subject: '新到的周报' })
+    const { client } = setup([arrived])
+    let open: (request: { accountId: string; emailId: string | null }) => void = () => undefined
+    client.onNotificationOpen.mockImplementation((listener) => { open = listener; return () => undefined })
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
+    act(() => open({ accountId: account.id, emailId: arrived.id }))
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
+    expect(await screen.findByRole('heading', { name: '新到的周报' })).toBeInTheDocument()
+  })
+})
+
+
+describe('the folded reader survives a restart', () => {
+  const toggle = () => screen.getByRole('button', { name: /^(收起|展开)邮件内容$/ })
+  const savedLayout = (client: ReturnType<typeof setup>['client'], readerCollapsed: boolean) =>
+    client.getSettings.mockResolvedValue({
+      settings: { ...DEFAULT_SETTINGS, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, stored: true, recovered: false,
+    })
+
+  it('starts folded when it was left folded, and shown by default', async () => {
+    const folded = setup([email('one')])
+    savedLayout(folded.client, true)
+    render(withTitleBar(<Workbench client={folded.client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容')
+    cleanup()
+
+    const shown = setup([email('one')])
+    render(withTitleBar(<Workbench client={shown.client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容')
+  })
+
+  it('saves the choice once things settle, not on every toggle, and carries the other widths along', async () => {
+    const { client } = setup([email('one')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    for (let index = 0; index < 4; index += 1) await userEvent.click(toggle())
+    await userEvent.click(toggle())
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
+    expect(client.updateSettings).not.toHaveBeenCalled()
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalledOnce(), { timeout: 2000 })
+    expect(client.updateSettings).toHaveBeenCalledWith({ layout: { ...DEFAULT_LAYOUT, readerCollapsed: true } })
+  })
+
+  it('opening a message unfolds the reader and saves that too', async () => {
+    const one = email('one')
+    const { client } = setup([one])
+    savedLayout(client, true)
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { ...DEFAULT_LAYOUT, readerCollapsed: false } }), { timeout: 2000 })
   })
 })

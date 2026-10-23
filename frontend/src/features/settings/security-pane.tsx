@@ -22,24 +22,20 @@ export function SecurityPane({ client }: { client: MailxClient }) {
   </SettingsPage>
   return <SettingsPage>
     {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
-    <SettingsGroup title="邮件图片">
-      <SettingsRow label="加载远程图片" htmlFor="security.remoteImages" description="远程图片可能让发件人获知你已阅读邮件。邮件自带的内嵌图片始终显示。">
+    <SettingsGroup title="图片">
+      <SettingsRow label="邮件里的网络图片" htmlFor="security.remoteImages" description="加载后，发件人可能知道你读过这封邮件。">
         <Select value={settings.data.settings.security.remoteImages} items={POLICIES} disabled={update.isPending}
           onValueChange={(remoteImages: RemoteImagePolicy | null) => { if (remoteImages) update.mutate({ remoteImages }) }}>
           <SelectTrigger id="security.remoteImages" className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>{Object.entries(POLICIES).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsRow>
-    </SettingsGroup>
-    <SettingsGroup title="发件人头像">
-      <SettingsRow label="获取发件人头像与企业图标" htmlFor="security.senderAvatars"
-        description="开启后会联网查找头像：先把发件人邮箱地址的 SHA-256 摘要发给 Gravatar；发件人不是常见个人邮箱（如 Gmail、QQ、163）时，再把发件人域名以明文发给 DuckDuckGo，查不到才发给 Google，以取得该域名的网站图标。这些服务因此可能得知你收到了哪些来源的邮件。请求都走该账号的网络路由；使用自定义代理的账号不会获取。关闭时只显示首字母头像，不发送任何请求。">
+      <SettingsRow label="显示发件人头像" htmlFor="security.senderAvatars"
+        description="需要联网查找，查找服务会得知你收到了谁的邮件。">
         <Switch id="security.senderAvatars" checked={settings.data.settings.security.senderAvatars} disabled={update.isPending}
           onCheckedChange={(senderAvatars) => update.mutate({ senderAvatars })} />
       </SettingsRow>
-    </SettingsGroup>
-    <SettingsGroup title="图片缓存">
-      <SettingsRow label="已缓存的图片" description="头像、网站图标和已下载的邮件图片会保存在本机的数据目录（最多约 200 MB，较久未用的先清理），再次打开时无需重新下载。清除后会在需要时重新获取。">
+      <SettingsRow label="已保存的图片">
         <ClearImageCache client={client} />
       </SettingsRow>
     </SettingsGroup>

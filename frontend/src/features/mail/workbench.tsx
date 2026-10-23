@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AccountSyncState } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { usePanelRef } from 'react-resizable-panels'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
@@ -15,18 +16,21 @@ import { MailSearch } from './mail-search'
 import { EmailView } from './email-view'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
+import { clampListWidth, LIST_DEFAULT, LIST_MIN, READER_MIN } from '@/features/shell/layout-defaults'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { ShellLayout } from '@/features/shell/shell-layout'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
 import { AccountsDialog, type AccountsTarget } from '@/features/accounts/accounts-dialog'
 import { AddAccountDialog } from '@/features/accounts/add-account-dialog'
-import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
+import { useDebouncedLayoutSave, useSettings } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
+import { ReaderToggle } from './reader-toggle'
 import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
+import { loadMailTree } from './mail-tree'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -38,6 +42,14 @@ type OpenedState = OpenedEmail & { source: string | null }
 export function Workbench({ client }: { client: MailxClient }) {
   const queryClient = useQueryClient()
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
+  const listPanel = usePanelRef()
+  const readerPanel = usePanelRef()
+  // Whether the reader is folded away: what was saved, until the user changes it.
+  // The state is the truth and the panel follows it; dragging the handle past the
+  // reader's minimum width collapses the panel by itself, and `onResize` below
+  // reports that back here. Every change is saved (debounced) further down.
+  const [readerChoice, setReaderChoice] = useState<boolean | null>(null)
+  const saveLayout = useDebouncedLayoutSave(client)
   const [accountsTarget, setAccountsTarget] = useState<AccountsTarget | null>(null)
   const [addingAccount, setAddingAccount] = useState(false)
   const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
@@ -54,16 +66,28 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const tree = useQuery({
     queryKey: mailKeys.tree(),
-    queryFn: async () => {
-      const accounts = await client.listAccounts()
-      const folders = (await Promise.all(accounts.map((account) => client.listFolders(account.id)))).flat()
-      return { accounts, folders }
-    },
+    queryFn: () => loadMailTree(client),
   })
   const settingsQuery = useSettings(client)
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
-  const { mutate: saveLayout } = useUpdateLayout(client)
+  const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
+  const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
+  const layoutReady = !settingsQuery.isPending
+  const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
+  const readerCollapsed = readerChoice ?? savedCollapsed
+  const setReaderCollapsed = setReaderChoice // stable, so effects may use it
+  useLayoutEffect(() => {
+    const reader = readerPanel.current
+    if (!layoutReady || !reader) return
+    if (readerCollapsed && !reader.isCollapsed()) reader.collapse()
+    else if (!readerCollapsed && reader.isCollapsed()) reader.expand()
+  }, [layoutReady, readerCollapsed, readerPanel])
+  // Each change is handed over as it happens; the debounce keeps only the last. Comparing
+  // with the saved value here would let an earlier queued value win after a quick toggle back.
+  useEffect(() => {
+    if (readerChoice !== null) saveLayout({ readerCollapsed: readerChoice })
+  }, [readerChoice, saveLayout])
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
   const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
@@ -203,6 +227,28 @@ export function Workbench({ client }: { client: MailxClient }) {
     (email, flag, wanted) => void setFlag(email, flag, wanted),
   )
 
+  // A clicked notification: one message opens in the reader (wherever the list
+  // is), several show that account's inbox. Reads the latest tree through a ref
+  // so the subscription does not restart on every tree change.
+  const latestTree = useRef({ accounts, folders })
+  useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
+  useEffect(() => client.onNotificationOpen(({ accountId, emailId }) => {
+    const { accounts, folders } = latestTree.current
+    const account = accounts.find((row) => row.id === accountId)
+    if (!account) return
+    if (emailId) {
+      setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
+      setReaderChoice(false)
+      return
+    }
+    const inbox = folders.find((folder) => folder.accountId === accountId && folder.role === 'inbox' && folder.selectable)
+    if (inbox) {
+      setSearch('')
+      setFilter('all')
+      setMailbox({ kind: 'folder', folder: inbox })
+    }
+  }), [client])
+
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
@@ -250,6 +296,22 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const selectMailbox = (next: Mailbox) => setMailbox(next)
 
+  // Every way of opening a message (list click, search result, notification) shows the reader.
+  const openEmail = (email: { id: string; accountId: string }) => {
+    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
+    setReaderCollapsed(false)
+  }
+  const toggleReader = () => setReaderCollapsed(!readerCollapsed)
+  // Only the user's own drags are saved, and not while the reader is folded away
+  // (the list then fills the window, which is not the width to come back to).
+  const saveListWidth = (_layout: unknown, meta: { isUserInteraction?: boolean } | undefined) => {
+    if (!meta?.isUserInteraction || readerPanel.current?.isCollapsed()) return
+    const width = listPanel.current?.getSize().inPixels
+    if (width === undefined) return
+    const next = clampListWidth(width)
+    if (next !== listWidth) saveLayout({ listWidth: next })
+  }
+
   return (
     <TooltipProvider>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
@@ -288,15 +350,17 @@ export function Workbench({ client }: { client: MailxClient }) {
           onApplySearch={setSearch}
           onOpenEmail={(email, text) => {
             setSearch(text)
-            setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
+            openEmail(email)
           }}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
           onOpenSettings={setSettings}
         />
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0">
-          <ResizablePanel defaultSize="40" minSize={300} className="bg-muted/40">
+        {/* The saved list width is only read when the group mounts, so it waits for the settings. */}
+        {!layoutReady ? <div className="min-h-0 flex-1 bg-muted/40" /> : (
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0" onLayoutChanged={saveListWidth}>
+          <ResizablePanel panelRef={listPanel} defaultSize={listWidth} minSize={LIST_MIN} className="bg-muted/40">
             <EmailList
               title={mailboxTitle(activeMailbox)}
               emails={emails}
@@ -312,14 +376,27 @@ export function Workbench({ client }: { client: MailxClient }) {
               filter={filter}
               search={search}
               selectedId={highlighted}
+              previewLines={previewLines}
               onFilterChange={setFilter}
-              onSelect={(email) => setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })}
+              onSelect={openEmail}
               onLoadMore={loadMore}
             />
           </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel defaultSize="60" minSize={360}>
+          <ResizableHandle disabled={readerCollapsed} className={readerCollapsed ? 'pointer-events-none opacity-0' : undefined} />
+          <ResizablePanel
+            panelRef={readerPanel}
+            minSize={READER_MIN}
+            collapsible
+            collapsedSize={0}
+            onResize={() => {
+              const collapsed = readerPanel.current?.isCollapsed() ?? false
+              if (collapsed !== readerCollapsed) setReaderCollapsed(collapsed)
+            }}
+            // Folded away, the reader is out of reach for Tab and screen readers too.
+            inert={readerCollapsed}
+          >
             <EmailView
+              hidden={readerCollapsed}
               key={`${opened?.id ?? ''}:${body.identity}`}
               client={client}
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
@@ -332,6 +409,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             />
           </ResizablePanel>
         </ResizablePanelGroup>
+        )}
+        {accounts.length > 0 && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}

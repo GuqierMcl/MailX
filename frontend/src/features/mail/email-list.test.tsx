@@ -1,7 +1,7 @@
-import { render, screen, within } from '@/test/render'
+import { cleanup, render, screen, within } from '@/test/render'
 import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount } from '@/features/accounts/test-fixtures'
-import type { Account, EmailSummary } from '@/generated/accounts'
+import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
 import { EmailList } from './email-list'
 import { formatListTime } from './format'
 
@@ -16,13 +16,13 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
   }
 }
 
-function renderList(emails: EmailSummary[], accounts: Account[] | null) {
+function renderList(emails: EmailSummary[], accounts: Account[] | null, previewLines: PreviewLines = 'one') {
   render(
     <EmailList
       title="全部收件箱" emails={emails} accounts={accounts} loading={false}
       syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
       hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
-      filter="all" search="" selectedId={null}
+      filter="all" search="" selectedId={null} previewLines={previewLines}
       onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
     />,
   )
@@ -80,5 +80,23 @@ describe('starred messages', () => {
   it('leave unstarred messages without any star', () => {
     const [row] = renderList([email('a')], null)
     expect(within(row).queryByLabelText('已加星标')).not.toBeInTheDocument()
+  })
+})
+
+describe('body preview lines', () => {
+  const long = email('a', { preview: '第一行内容。'.repeat(40) })
+
+  it('shows one line by default and follows the setting', () => {
+    for (const [lines, clamp] of [['one', 'line-clamp-1'], ['two', 'line-clamp-2'], ['three', 'line-clamp-3']] as const) {
+      const [row] = renderList([long], null, lines)
+      expect(within(row).getByText(long.preview)).toHaveClass(clamp)
+      cleanup()
+    }
+  })
+
+  it('hides the preview entirely when set to none', () => {
+    const [row] = renderList([long], null, 'none')
+    expect(within(row).queryByText(long.preview)).not.toBeInTheDocument()
+    expect(within(row).getByText(long.subject)).toBeInTheDocument()
   })
 })

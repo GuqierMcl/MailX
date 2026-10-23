@@ -23,6 +23,10 @@ pub const NAV_WIDTH_MIN: u32 = 220;
 pub const NAV_WIDTH_MAX: u32 = 420;
 const NAV_WIDTH_DEFAULT: u32 = 256;
 
+pub const LIST_WIDTH_MIN: u32 = 300;
+pub const LIST_WIDTH_MAX: u32 = 2000;
+const LIST_WIDTH_DEFAULT: u32 = 420;
+
 const MAX_FONT_FAMILIES: usize = 16;
 const MAX_FONT_FAMILY_CHARS: usize = 64;
 
@@ -42,6 +46,17 @@ pub enum FontSize {
     #[default]
     Default,
     Large,
+}
+
+/// How many lines of body preview each message list row shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewLines {
+    None,
+    #[default]
+    One,
+    Two,
+    Three,
 }
 
 /// How message bodies follow the app's color mode.
@@ -68,6 +83,7 @@ pub struct AppearanceSettings {
     pub mail_font: String,
     pub mail_theme: MailTheme,
     pub font_size: FontSize,
+    pub preview_lines: PreviewLines,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -88,18 +104,105 @@ pub struct SecuritySettings {
     pub sender_avatars: bool,
 }
 
+/// The sound of a new-mail notification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationSound {
+    /// Whatever the system plays for notifications.
+    #[default]
+    System,
+    /// Two short rising notes.
+    Chime,
+    /// A single soft bell tone.
+    Ding,
+    /// A quick rising drop.
+    Droplet,
+    /// Two rising pops.
+    Bubble,
+    /// Two warm wooden notes.
+    Marimba,
+    /// A fast rising arpeggio.
+    Sparkle,
+    /// Two soft low taps.
+    Knock,
+    /// A major chord ringing out.
+    Chord,
+    None,
+}
+
+const MAX_MUTED_ACCOUNTS: usize = 256;
+const MAX_ACCOUNT_ID_CHARS: usize = 128;
+
+/// New-mail notifications. Every host applies `enabled`, `muted_accounts` and
+/// `show_preview` the same way (see `NewMail::for_delivery`); the sound and
+/// focus rules only mean something where there is a screen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotificationSettings {
+    pub enabled: bool,
+    /// Include sender and subject. Off, a notification only says how many.
+    pub show_preview: bool,
+    /// Also notify while the MailX window is in front.
+    pub when_focused: bool,
+    pub sound: NotificationSound,
+    /// Accounts whose new mail never notifies.
+    pub muted_accounts: Vec<String>,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_preview: true,
+            when_focused: false,
+            sound: NotificationSound::default(),
+            muted_accounts: Vec::new(),
+        }
+    }
+}
+
+impl NotificationSettings {
+    /// Sorted, unique, bounded account ids; `None` for input that is not.
+    fn normalized_muted(&self) -> Option<Vec<String>> {
+        let mut ids: Vec<String> = self
+            .muted_accounts
+            .iter()
+            .map(|id| id.trim().to_owned())
+            .collect();
+        if ids.iter().any(|id| {
+            id.is_empty()
+                || id.chars().count() > MAX_ACCOUNT_ID_CHARS
+                || id.chars().any(char::is_control)
+        }) {
+            return None;
+        }
+        ids.sort();
+        ids.dedup();
+        (ids.len() <= MAX_MUTED_ACCOUNTS).then_some(ids)
+    }
+}
+
 /// Window layout preferences, in CSS pixels.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LayoutSettings {
     /// Width of the navigation sidebar, `220..=420`.
     pub nav_width: u32,
+    /// Width of the message list beside the reader, `300..=2000`, applied when
+    /// the window opens. In a window that is too narrow for it, list and reader
+    /// shrink together, each down to its own minimum.
+    pub list_width: u32,
+    /// The reader beside the message list is folded away. Unlike the sidebar,
+    /// this survives a restart: the window comes back as it was left.
+    pub reader_collapsed: bool,
 }
 
 impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
             nav_width: NAV_WIDTH_DEFAULT,
+            list_width: LIST_WIDTH_DEFAULT,
+            reader_collapsed: false,
         }
     }
 }
@@ -112,6 +215,7 @@ pub struct SettingsPatch {
     pub appearance: Option<AppearanceSettings>,
     pub security: Option<SecuritySettings>,
     pub layout: Option<LayoutSettings>,
+    pub notifications: Option<NotificationSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -120,6 +224,7 @@ pub struct AppSettings {
     pub appearance: AppearanceSettings,
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
+    pub notifications: NotificationSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -152,9 +257,20 @@ impl AppSettings {
         if !(NAV_WIDTH_MIN..=NAV_WIDTH_MAX).contains(&self.layout.nav_width) {
             return Err(AppError::validation("layout.navWidth"));
         }
+        if !(LIST_WIDTH_MIN..=LIST_WIDTH_MAX).contains(&self.layout.list_width) {
+            return Err(AppError::validation("layout.listWidth"));
+        }
+        let notifications = NotificationSettings {
+            muted_accounts: self
+                .notifications
+                .normalized_muted()
+                .ok_or_else(|| AppError::validation("notifications.mutedAccounts"))?,
+            ..self.notifications
+        };
         Ok(Self {
             security: self.security,
             layout: self.layout,
+            notifications,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -171,10 +287,17 @@ impl AppSettings {
     fn sanitized(self) -> Self {
         let defaults = AppearanceSettings::default();
         let appearance = self.appearance;
+        let notifications = NotificationSettings {
+            muted_accounts: self.notifications.normalized_muted().unwrap_or_default(),
+            ..self.notifications
+        };
         Self {
             security: self.security,
+            notifications,
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
+                list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
+                reader_collapsed: self.layout.reader_collapsed,
             },
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
@@ -360,6 +483,9 @@ impl SettingsStore {
             layout: patch
                 .layout
                 .unwrap_or_else(|| state.settings.layout.clone()),
+            notifications: patch
+                .notifications
+                .unwrap_or_else(|| state.settings.notifications.clone()),
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;

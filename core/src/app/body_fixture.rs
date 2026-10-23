@@ -52,8 +52,7 @@ impl MailxCore {
             path,
             Arc::new(NoSecrets),
             runtime,
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &crate::events::CoreEvent| {}),
         )?;
         let identities = core
             .accounts()?

@@ -1,7 +1,7 @@
 use mailx_core::{
     Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
-    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsPatch, SettingsSnapshot,
-    UpdateConnectionRequest, UpdateProfileRequest,
+    EmailListQuery, EmailPage, ErrorCode, Folder, NotificationSound, SettingsPatch,
+    SettingsSnapshot, UpdateConnectionRequest, UpdateProfileRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -780,4 +780,42 @@ mod tests {
             assert!(parse::<LinkOpenArgs>(&InvokeBody::Json(body)).is_err());
         }
     }
+}
+
+/// Shows a sample notification with the saved settings, so the user can see
+/// (and the system can ask for permission to show) what new mail will look like.
+#[tauri::command]
+pub(crate) async fn notifications_test(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state
+            .settings(|store| store.get())
+            .await
+            .map(|snapshot| crate::notifications::test(&app, &snapshot.settings.notifications)),
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SoundArgs {
+    sound: NotificationSound,
+}
+
+/// Plays one of MailX's own notification sounds; the system sound and "none"
+/// play nothing here.
+#[tauri::command]
+pub(crate) async fn notifications_preview_sound(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window).and_then(|()| parse::<SoundArgs>(request.body()));
+    Ok(respond(
+        args.map(|args| crate::notifications::preview(args.sound)),
+    ))
 }

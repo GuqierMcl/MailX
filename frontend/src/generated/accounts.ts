@@ -195,7 +195,7 @@ interfaceFont: string,
 /**
  * `""` or comma-separated font families for message bodies, tried in order.
  */
-mailFont: string, mailTheme: MailTheme, fontSize: FontSize, };
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
@@ -210,9 +210,38 @@ export type LayoutSettings = {
 /**
  * Width of the navigation sidebar, `220..=420`.
  */
-navWidth: number, };
+navWidth: number,
+/**
+ * Width of the message list beside the reader, `300..=2000`, applied when
+ * the window opens. In a window that is too narrow for it, list and reader
+ * shrink together, each down to its own minimum.
+ */
+listWidth: number,
+/**
+ * The reader beside the message list is folded away. Unlike the sidebar,
+ * this survives a restart: the window comes back as it was left.
+ */
+readerCollapsed: boolean, };
 
-export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, };
+export type PreviewLines = "none" | "one" | "two" | "three";
+
+export type NotificationSound = "system" | "chime" | "ding" | "droplet" | "bubble" | "marimba" | "sparkle" | "knock" | "chord" | "none";
+
+export type NotificationSettings = { enabled: boolean,
+/**
+ * Include sender and subject. Off, a notification only says how many.
+ */
+showPreview: boolean,
+/**
+ * Also notify while the MailX window is in front.
+ */
+whenFocused: boolean, sound: NotificationSound,
+/**
+ * Accounts whose new mail never notifies.
+ */
+mutedAccounts: Array<string>, };
+
+export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -236,6 +265,22 @@ sent: number,
  * the flag.
  */
 localOnlyStars: number, };
+
+export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
+/**
+ * RFC 3339 timestamp.
+ */
+receivedAt: string, };
+
+export type NewMail = { accountId: string, accountName: string,
+/**
+ * Every new message, including those not described below.
+ */
+count: number,
+/**
+ * The newest few, newest first. Empty when previews are turned off.
+ */
+messages: Array<NewMailMessage>, };
 
 export type AvatarImage = { mimeType: string,
 /**

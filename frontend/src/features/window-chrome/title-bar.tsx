@@ -41,9 +41,19 @@ export function TitleBarSlotsProvider({ children }: { children: ReactNode }) {
  * traffic lights (or the left edge), `center` fills the space between the two
  * sides, `trailing` just before the window controls.
  */
-export function TitleBarActions({ side, children }: { side: TitleBarSide; children: ReactNode }) {
+/**
+ * Puts `children` into a title-bar slot. Several features share a slot and mount
+ * in whatever order their data arrives, so a feature that must sit before or
+ * after the others passes an `order`: actions line up by it (default 0), not by
+ * who rendered first.
+ */
+export function TitleBarActions({ side, order, children }: { side: TitleBarSide; order?: number; children: ReactNode }) {
   const target = useContext(TitleBarSlotsContext)?.slots[side]
-  return target ? createPortal(children, target) : null
+  if (!target) return null
+  return createPortal(
+    order === undefined ? children : <div className="flex items-center gap-1" style={{ order }}>{children}</div>,
+    target,
+  )
 }
 
 type TitleBarProps = {

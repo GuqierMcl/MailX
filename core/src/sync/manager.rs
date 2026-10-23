@@ -19,6 +19,7 @@ use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::{AppError, ErrorCode};
+use crate::events::{CoreEvent, Events, NEW_MAIL_DETAILS, NewMail, NewMailMessage};
 use crate::imap::{self, ImapError, Session};
 use crate::net::NetError;
 
@@ -110,9 +111,6 @@ pub struct AccountSyncState {
     pub failure: Option<SyncFailure>,
 }
 
-/// Receives every sync state change, e.g. to forward it to a UI as a hint to refetch.
-pub type SyncListener = Arc<dyn Fn(&AccountSyncState) + Send + Sync>;
-
 /// What a finished write-back round tells the host. Not part of the sync state:
 /// it is a one-off, so a late or missed delivery only means a missed notice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -128,8 +126,6 @@ pub struct FlagWriteBack {
     pub local_only_stars: u32,
 }
 
-pub type FlagListener = Arc<dyn Fn(&FlagWriteBack) + Send + Sync>;
-
 #[derive(Clone)]
 pub(super) struct WorkerToken {
     pub(super) account_id: String,
@@ -141,8 +137,7 @@ pub(super) struct WorkerToken {
 pub(super) struct Shared {
     service: Weak<Mutex<AccountService>>,
     states: Mutex<HashMap<String, AccountSyncState>>,
-    listener: SyncListener,
-    flag_listener: FlagListener,
+    pub(super) events: Events,
 }
 
 impl Shared {
@@ -167,7 +162,7 @@ impl Shared {
             state.clone()
         };
         // The monotonic token lets consumers reject any reordered delivery.
-        (self.listener)(&state);
+        self.events.emit(&CoreEvent::Sync(state));
     }
 
     pub(super) fn folder_update(
@@ -194,12 +189,35 @@ impl Shared {
                 .is_some_and(|state| Self::active(state, token))
         });
         if still_current {
-            (self.flag_listener)(&FlagWriteBack {
+            self.events.emit(&CoreEvent::FlagWriteBack(FlagWriteBack {
                 account_id: token.account_id.clone(),
                 sent: report.sent as u32,
                 local_only_stars: report.local_only_stars as u32,
-            });
+            }));
         }
+    }
+
+    /// Tells the host about new mail found in one folder of a current worker.
+    pub(super) async fn announce(
+        self: &Arc<Self>,
+        token: &WorkerToken,
+        mut arrivals: Vec<NewMailMessage>,
+    ) {
+        if arrivals.is_empty() {
+            return;
+        }
+        let id = token.account_id.clone();
+        let Ok(account) = with_store(self, token, move |service| service.get(&id)).await else {
+            return;
+        };
+        let count = arrivals.len() as u32;
+        arrivals.truncate(NEW_MAIL_DETAILS);
+        self.events.emit(&CoreEvent::NewMail(NewMail {
+            account_id: token.account_id.clone(),
+            account_name: account.display_name,
+            count,
+            messages: arrivals,
+        }));
     }
 
     fn begin_round(&self, token: &WorkerToken) {
@@ -259,15 +277,13 @@ impl SyncManager {
     pub(crate) fn new(
         service: Arc<Mutex<AccountService>>,
         runtime: Handle,
-        listener: SyncListener,
-        flag_listener: FlagListener,
+        events: Events,
     ) -> Self {
         Self {
             shared: Arc::new(Shared {
                 service: Arc::downgrade(&service),
                 states: Mutex::new(HashMap::new()),
-                listener,
-                flag_listener,
+                events,
             }),
             runtime,
             workers: Mutex::new(HashMap::new()),
@@ -704,7 +720,7 @@ where
             folder.phase = FolderSyncPhase::Syncing;
             folder.failure = None;
         });
-        let mut changed = false;
+        let mut round = messages::FolderRound::default();
         let result = messages::sync_folder(
             shared,
             token,
@@ -712,9 +728,13 @@ where
             &remote_name,
             session.as_mut().expect("connected session"),
             memory,
-            &mut changed,
+            &mut round,
         )
         .await;
+        let changed = round.changed;
+        // Stored arrivals are announced even if the round failed afterwards:
+        // the cursor already moved past them, so they never come up again.
+        shared.announce(token, round.arrivals).await;
         match result {
             Ok(()) => {
                 reconnect_failures = 0;
@@ -889,8 +909,7 @@ mod tests {
         let manager = SyncManager::new(
             service.clone(),
             Handle::current(),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &CoreEvent| {}),
         );
         secrets.reads.store(0, Ordering::SeqCst);
         secrets.locked.store(true, Ordering::SeqCst);

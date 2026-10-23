@@ -5,6 +5,8 @@ import { testClient } from '@/features/accounts/test-fixtures'
 import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import { MailxClientError } from '@/lib/mailx-client'
 import { SettingsDialog, type SettingsTarget } from './settings-dialog'
+import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
 function renderDialog(client = testClient(), target: SettingsTarget = { section: 'appearance' }) {
   const onClose = vi.fn()
@@ -20,7 +22,7 @@ afterEach(() => {
 describe('settings dialog', () => {
   it('offers all remote image policies on the security page and saves only that section', async () => {
     const { client, dialog } = renderDialog(testClient(), { section: 'security' })
-    const select = await within(dialog).findByRole('combobox', { name: '加载远程图片' })
+    const select = await within(dialog).findByRole('combobox', { name: '邮件里的网络图片' })
     expect(select).toHaveTextContent('每次询问')
     await userEvent.click(select)
     expect(await screen.findByRole('option', { name: '自动加载' })).toBeInTheDocument()
@@ -31,7 +33,7 @@ describe('settings dialog', () => {
 
   it('keeps sender avatar lookups off until the avatar switch is turned on', async () => {
     const { client } = renderDialog(testClient(), { section: 'security' })
-    const toggle = await screen.findByRole('switch', { name: '获取发件人头像与企业图标' })
+    const toggle = await screen.findByRole('switch', { name: '显示发件人头像' })
     expect(toggle).not.toBeChecked()
     await userEvent.click(toggle)
     expect(client.updateSettings).toHaveBeenLastCalledWith({ security: { remoteImages: 'ask', senderAvatars: true } })
@@ -86,7 +88,7 @@ describe('settings dialog', () => {
   it('saves the mail body font separately from the interface font', async () => {
     const client = testClient()
     renderDialog(client, { section: 'appearance' })
-    await userEvent.type(await screen.findByLabelText('邮件内容字体'), 'Georgia{Enter}')
+    await userEvent.type(await screen.findByLabelText('邮件字体'), 'Georgia{Enter}')
     expect(client.updateSettings).toHaveBeenLastCalledWith({
       appearance: { ...DEFAULT_APPEARANCE, mailFont: 'Georgia' },
     })
@@ -95,10 +97,23 @@ describe('settings dialog', () => {
   it('saves the mail body dark mode choice', async () => {
     const client = testClient()
     renderDialog(client, { section: 'appearance' })
-    await userEvent.click(await screen.findByRole('combobox', { name: '邮件内容深色适配' }))
+    await userEvent.click(await screen.findByRole('combobox', { name: '深色模式下的邮件' }))
     await userEvent.click(await screen.findByRole('option', { name: '始终白底' }))
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
       appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' },
+    }))
+  })
+
+  it('offers list preview lines, one by default', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    const select = await screen.findByRole('combobox', { name: '邮件预览行数' })
+    expect(select).toHaveTextContent('1 行')
+    await userEvent.click(select)
+    for (const name of ['不显示', '2 行', '3 行']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: '3 行' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, previewLines: 'three' },
     }))
   })
 
@@ -109,14 +124,14 @@ describe('settings dialog', () => {
     )
     renderDialog(client, { section: 'appearance' })
     await userEvent.type(await screen.findByLabelText('界面字体'), 'Bad;Font{Enter}')
-    expect(await screen.findByText(/字体名不能包含引号/)).toBeInTheDocument()
+    expect(await screen.findByText(/字体名里有不能使用的字符/)).toBeInTheDocument()
     expect(screen.getByLabelText('界面字体')).toHaveValue('Bad;Font')
     expect(screen.getByLabelText('界面字体')).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

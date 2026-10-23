@@ -5,6 +5,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
+        notifications: NotificationSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -183,6 +184,8 @@ fn hand_edited_files_keep_valid_fields_and_reset_invalid_strings() {
     assert_eq!(appearance.accent_color, "");
     assert_eq!(appearance.interface_font, "Noto Sans SC, serif");
     assert_eq!(appearance.font_size, FontSize::Default);
+    // Settings saved before the option existed get the one-line default.
+    assert_eq!(appearance.preview_lines, PreviewLines::One);
 }
 
 #[test]
@@ -200,10 +203,18 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "interfaceFont": "",
                     "mailFont": "",
                     "mailTheme": "follow",
-                    "fontSize": "default"
+                    "fontSize": "default",
+                    "previewLines": "one"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256 }
+                "layout": { "navWidth": 256, "listWidth": 420, "readerCollapsed": false },
+                "notifications": {
+                    "enabled": true,
+                    "showPreview": true,
+                    "whenFocused": false,
+                    "sound": "system",
+                    "mutedAccounts": []
+                }
             },
             "stored": false,
             "recovered": false
@@ -301,7 +312,10 @@ fn nav_width_defaults_persists_and_is_validated() {
 
     let saved = store
         .patch(SettingsPatch {
-            layout: Some(LayoutSettings { nav_width: 300 }),
+            layout: Some(LayoutSettings {
+                nav_width: 300,
+                ..LayoutSettings::default()
+            }),
             ..SettingsPatch::default()
         })
         .unwrap();
@@ -321,7 +335,10 @@ fn nav_width_defaults_persists_and_is_validated() {
     for width in [0, 219, 421] {
         let error = store
             .patch(SettingsPatch {
-                layout: Some(LayoutSettings { nav_width: width }),
+                layout: Some(LayoutSettings {
+                    nav_width: width,
+                    ..LayoutSettings::default()
+                }),
                 ..SettingsPatch::default()
             })
             .unwrap_err();
@@ -340,4 +357,118 @@ fn hand_edited_nav_width_is_clamped_on_load() {
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.nav_width, 420);
+}
+
+#[test]
+fn notifications_default_on_and_muted_accounts_are_cleaned_or_rejected() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"notifications":{"sound":"chime","mutedAccounts":["b"," a ","b",""]}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let loaded = store.get().unwrap().settings.notifications;
+    assert!(loaded.enabled && loaded.show_preview && !loaded.when_focused);
+    assert_eq!(loaded.sound, NotificationSound::Chime);
+    // A hand-edited list with a blank entry is unusable as a whole: nothing muted.
+    assert!(loaded.muted_accounts.is_empty());
+
+    let saved = store
+        .patch(SettingsPatch {
+            notifications: Some(NotificationSettings {
+                muted_accounts: vec!["b".into(), " a ".into(), "b".into()],
+                when_focused: true,
+                ..NotificationSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.notifications.muted_accounts, ["a", "b"]);
+    assert!(saved.settings.notifications.when_focused);
+
+    let error = store
+        .patch(SettingsPatch {
+            notifications: Some(NotificationSettings {
+                muted_accounts: vec!["bad\nid".into()],
+                ..NotificationSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("notifications.mutedAccounts"));
+    assert_eq!(
+        store.get().unwrap().settings.notifications.muted_accounts,
+        ["a", "b"]
+    );
+}
+
+#[test]
+fn list_width_defaults_persists_alongside_nav_width_and_is_validated() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.list_width, 420);
+
+    store
+        .patch(SettingsPatch {
+            layout: Some(LayoutSettings {
+                nav_width: 280,
+                list_width: 520,
+                reader_collapsed: true,
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    let reloaded = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .layout;
+    assert_eq!((reloaded.nav_width, reloaded.list_width), (280, 520));
+    // The folded reader is restored too.
+    assert!(reloaded.reader_collapsed);
+    assert!(file_text(&directory, SETTINGS_FILE_NAME).contains("\"listWidth\": 520"));
+
+    for width in [0, 299, 2001] {
+        let error = store
+            .patch(SettingsPatch {
+                layout: Some(LayoutSettings {
+                    nav_width: 280,
+                    list_width: width,
+                    reader_collapsed: true,
+                }),
+                ..SettingsPatch::default()
+            })
+            .unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("layout.listWidth"));
+    }
+    assert_eq!(store.get().unwrap().settings.layout.list_width, 520);
+}
+
+#[test]
+fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_are_clamped() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"layout":{"navWidth":300}}}"#,
+    )
+    .unwrap();
+    let layout = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .layout;
+    assert_eq!((layout.nav_width, layout.list_width), (300, 420));
+    // Settings from before the option existed start with the reader shown.
+    assert!(!layout.reader_collapsed);
+
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"layout":{"listWidth":99999}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.list_width, 2000);
 }

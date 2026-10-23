@@ -9,6 +9,7 @@ import type {
   AvatarImage,
   FlagWriteBack,
   CreateAccountRequest,
+  NotificationSound,
   EmailDetail,
   EmailListQuery,
   EmailPage,
@@ -82,7 +83,15 @@ export interface MailxClient {
   getSettings(): Promise<SettingsSnapshot>
   /** Updates the supplied preference sections; the core validates them and returns the canonical form. */
   updateSettings(settings: Partial<AppSettings>): Promise<SettingsSnapshot>
+  /** Shows a sample notification with the saved notification settings. */
+  testNotification(): Promise<void>
+  /** Plays one of MailX's own notification sounds; the system sound and none play nothing. */
+  previewSound(sound: NotificationSound): Promise<void>
+  /** Hears clicks on new-mail notifications: one message, or a whole account's arrivals. */
+  onNotificationOpen(listener: (request: NotificationOpen) => void): () => void
 }
+
+export type NotificationOpen = { accountId: string; emailId: string | null }
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
 export type BodyLinkRequest = BodyLinkIdentity & { url: string; requestId: string }
@@ -173,5 +182,16 @@ export function createDesktopClient(): MailxClient {
     },
     getSettings: () => call<SettingsSnapshot>('settings_get'),
     updateSettings: (request) => call<SettingsSnapshot>('settings_update', { request }),
+    testNotification: () => call<void>('notifications_test'),
+    previewSound: (sound) => call<void>('notifications_preview_sound', { sound }),
+    onNotificationOpen(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<NotificationOpen>('mailx://notification-open', (event) => { if (!disposed) listener(event.payload) })
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => { disposed = true; unlisten?.() }
+    },
   }
 }

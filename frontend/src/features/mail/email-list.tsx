@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary } from '@/generated/accounts'
+import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -36,6 +36,8 @@ type EmailListProps = {
   filter: ListFilter
   search: string
   selectedId: string | null
+  /** Lines of body preview per row, from the appearance settings. */
+  previewLines: PreviewLines
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
@@ -61,7 +63,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
   if (pending || showSkeleton) {
@@ -143,6 +145,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
             email={email}
             account={accounts?.find((account) => account.id === email.accountId) ?? null}
             selected={email.id === selectedId}
+            previewLines={previewLines}
             onSelect={() => onSelect(email)}
           />
         ))}
@@ -162,9 +165,15 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
   )
 }
 
-type EmailRowProps = { email: EmailSummary; account: Account | null; selected: boolean; onSelect: () => void }
+const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
+  one: 'line-clamp-1',
+  two: 'line-clamp-2',
+  three: 'line-clamp-3',
+}
 
-function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
+type EmailRowProps = { email: EmailSummary; account: Account | null; selected: boolean; previewLines: PreviewLines; onSelect: () => void }
+
+function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRowProps) {
   return (
     <button
       type="button"
@@ -172,18 +181,25 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
       aria-current={selected ? 'true' : undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm transition-colors hover:bg-foreground/5',
+        'flex w-full items-center gap-3 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5',
         selected && 'bg-background shadow-xs hover:bg-background',
       )}
     >
-      <SenderAvatar sender={email.from} accountId={email.accountId} className="mt-0.5" />
+      {/* Avatar and unread marker are centered on the row; the marker has a
+          column of its own at the far left, so every dot sits on the same line
+          however long the sender is. A fixed blue, not the accent color: a red
+          or amber accent would read as an error or clash with the star. */}
+      <span className="-mr-1.5 flex w-2 shrink-0 justify-center">
+        {!email.isRead && <span aria-label="未读" className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
+      </span>
+      <SenderAvatar sender={email.from} accountId={email.accountId} />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
         <div className="flex w-full flex-col gap-1">
           <div className="flex items-center gap-2">
             {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
                 muted, and gives way to the sender before the time ever does. */}
             <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
+              <span className={cn('truncate', email.isRead ? 'font-normal' : 'font-semibold')}>{displayName(email.from)}</span>
               {account && (
                 <>
                   <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
@@ -191,12 +207,12 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
                 </>
               )}
             </span>
-            {!email.isRead && <span aria-label="未读" className="size-2 shrink-0 rounded-full bg-primary" />}
             <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
               {formatListTime(email.receivedAt)}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-medium">
+          {/* Unread is told by weight too, never by the dot's color alone. */}
+          <div className={cn('flex items-center gap-1.5 text-xs', email.isRead ? 'font-normal text-foreground/75' : 'font-semibold')}>
             {email.isStarred && (
               <HugeiconsIcon icon={StarIcon} aria-label="已加星标" fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
             )}
@@ -206,7 +222,9 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
             )}
           </div>
         </div>
-        {email.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{email.preview}</p>}
+        {email.preview && previewLines !== 'none' && (
+          <p className={cn(PREVIEW_CLAMP[previewLines], 'text-xs text-muted-foreground')}>{email.preview}</p>
+        )}
       </div>
     </button>
   )
