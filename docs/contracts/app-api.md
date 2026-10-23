@@ -172,7 +172,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `outbox_queue_send { draftId, expectedRevision, clientMutationId }` | 否（`validation`） | 仅自己的草稿 | 宿主读取 `compose.undoSendSeconds`；主体固定为 `Composer` |
 | `outbox_list { accountId?, includeAll? }`、`outbox_get { id }`、`outbox_cancel { id }`、`outbox_retry_now { id }` | 是 | 否 | |
 | `outbox_resolve_unknown { id, choice, clientMutationId }` | 是 | 否 | `choice` 为 `markSent` / `resend`；核心接受 `Composer` 与 `MainWindow`，MCP / 模型仍为 `forbidden` |
-| `composer_open { draftId }` | 是 | 否 | 草稿必须存在；创建或聚焦 `composer-{draftId}` |
+| `composer_open { draftId, fresh? }` | 是 | 否 | 草稿必须存在；创建或聚焦 `composer-{draftId}`。`fresh: true`（草稿刚为这个窗口创建）使页面 URL 带 `&fresh=1`，关闭时选择“不保存”会删除草稿；省略即 false |
 | `composer_close { force }` | 否 | 是 | 销毁调用窗口；草稿由前端先写出，宿主只负责关闭 |
 | 其余全部命令（账号修改、邮件 / 正文 / 链接 / 图片 / 附件、同步、设置修改、通知） | 是 | 否 | 与此前一致 |
 
@@ -258,7 +258,7 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 - `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`resolution`、`supersededBy`。
 - `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：接受 `Caller::Composer` 与 `Caller::MainWindow`（两者都是交互 UI；`Mcp` / `Model` 为 `forbidden`），只对未处理的 `unknown` 生效，`resend` 返回新项。
 - 新错误码：`draftLocked`、`forbidden`、`alreadySending`（均已生成到 `ErrorCode`）。`unknown` 永不自动重发。
-- 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: locked | unlocked | deleted }` 在队列锁定、释放、接受后删除草稿时发出。载荷不含地址、主题和正文。桌面宿主已转发为 `mailx://outbox` / `mailx://drafts`（见“写信窗口与发送命令”）。
+- 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: created | updated | deleted | locked | unlocked }` 在草稿创建、保存、删除以及队列锁定、释放、接受后删除时发出。载荷不含地址、主题和正文。桌面宿主已转发为 `mailx://outbox` / `mailx://drafts`（见“写信窗口与发送命令”）。
 
 ## 5. 事件
 
@@ -272,7 +272,7 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 | `FlagWriteBack(FlagWriteBack)` | 一轮已读 / 星标写回结束 | `mailx://flags` |
 | `NewMail(NewMail)` | 收件箱有新的未读邮件 | 系统通知（见文末“新邮件通知”） |
 | `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
-| `DraftChanged(DraftChanged)` | 草稿被队列锁定 / 释放 / 删除 | `mailx://drafts` |
+| `DraftChanged(DraftChanged)` | 草稿创建 / 保存 / 删除，或被队列锁定 / 释放 | `mailx://drafts` |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 

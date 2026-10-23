@@ -246,6 +246,11 @@ impl AccountService {
         )
     }
 
+    /// Deletes blank drafts that no live queue item holds; run at startup.
+    pub fn purge_blank_drafts(&mut self) -> Result<(), AppError> {
+        self.storage.purge_blank_drafts()
+    }
+
     pub fn delete_draft(&mut self, id: &str) -> Result<(), AppError> {
         validate_uuid(id, "draftId")?;
         if self.storage.draft_locked(id)? {

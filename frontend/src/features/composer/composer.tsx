@@ -30,6 +30,10 @@ export type ComposerController = {
   flush: () => Promise<{ ok: boolean }>
   /** True when recipients, subject and body are all empty. */
   isEmpty: () => boolean
+  /** Whether the content differs from what the window opened with. */
+  hasChanges: () => boolean
+  /** Writes the content the window opened with back to the draft. */
+  restoreBaseline: () => Promise<void>
   /** Deletes the draft (not while the send queue holds it). */
   discard: () => Promise<void>
   /** Whether the send queue holds the draft, so it cannot be changed or deleted. */
@@ -72,6 +76,8 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   useImperativeHandle(controllerRef, () => ({
     flush: () => editor.flush(),
     isEmpty: () => editor.isEmpty(),
+    hasChanges: () => editor.changed(),
+    restoreBaseline: () => editor.restoreBaseline(),
     discard: () => editor.remove(),
     isReadOnly: () => editor.readOnly,
   }), [editor])
@@ -254,24 +260,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         className="mx-3 mt-1 min-h-0 flex-1 resize-none rounded-lg bg-transparent px-2 py-2 text-sm leading-relaxed outline-none disabled:cursor-not-allowed"
       />
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
-        <SendButton
-          subjectEmpty={!fields.subject.trim()}
-          disabled={readOnly || busy}
-          resetToken={fields}
-          onPrepare={prepare}
-          onConfirm={send}
-        />
-        <Button type="button" variant="ghost" className="h-8 px-3 text-sm" disabled={readOnly || busy}
-          onClick={() => (empty ? void discard() : setConfirmDiscard(true))}>
-          丢弃
-        </Button>
-        <div className="ml-auto flex min-w-0 items-center gap-2 text-xs">
-          {(error || hasInvalid) && (
-            <span role="alert" className="flex min-w-0 items-center gap-1 text-destructive">
-              <HugeiconsIcon icon={AlertCircleIcon} className="size-3.5 shrink-0" />
-              <span className="truncate" title={error ?? undefined}>{error ?? '有收件人地址无效'}</span>
-            </span>
-          )}
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           <span
             role="status"
             data-status={editor.status}
@@ -280,7 +269,24 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
             {readOnly ? '' : STATUS_TEXT[editor.status]}
           </span>
           {failedSave && !readOnly && <Button type="button" variant="ghost" size="xs" onClick={editor.retry}>重试</Button>}
+          {(error || hasInvalid) && (
+            <span role="alert" className="flex min-w-0 items-center gap-1 text-destructive">
+              <HugeiconsIcon icon={AlertCircleIcon} className="size-3.5 shrink-0" />
+              <span className="truncate" title={error ?? undefined}>{error ?? '有收件人地址无效'}</span>
+            </span>
+          )}
         </div>
+        <Button type="button" variant="ghost" className="h-8 px-3 text-sm" disabled={readOnly || busy}
+          onClick={() => (empty ? void discard() : setConfirmDiscard(true))}>
+          丢弃
+        </Button>
+        <SendButton
+          subjectEmpty={!fields.subject.trim()}
+          disabled={readOnly || busy}
+          resetToken={fields}
+          onPrepare={prepare}
+          onConfirm={send}
+        />
       </div>
       <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
         <AlertDialogContent>

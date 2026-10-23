@@ -425,6 +425,6 @@ export type OutboxChanged = { accountId: string, outboxId: string, draftId: stri
  */
 errorReason: string | null, };
 
-export type DraftChange = "locked" | "unlocked" | "deleted";
+export type DraftChange = "created" | "updated" | "locked" | "unlocked" | "deleted";
 
 export type DraftChanged = { draftId: string, accountId: string, change: DraftChange, };

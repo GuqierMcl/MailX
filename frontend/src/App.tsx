@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
 import { Toaster } from '@/components/ui/toast'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { StartupGate } from '@/features/startup/startup-gate'
 import { ComposerApp } from '@/features/composer/composer-app'
 import { TitleBar, TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
@@ -22,9 +23,11 @@ import { createQueryClient } from '@/lib/query-client'
 const client = import.meta.env.DEV && !isTauri()
   ? createMockClient({
     resolveDraft: () => null,
-    onOpenComposer: (draft) => {
+    onOpenComposer: (draft, fresh) => {
       const params = new URLSearchParams(window.location.search)
       params.set('composer', draft.id)
+      if (fresh) params.set('fresh', '1')
+      else params.delete('fresh')
       window.open(`${window.location.pathname}?${params}`, `composer-${draft.id}`, 'popup,width=760,height=680')
     },
   })
@@ -49,7 +52,9 @@ function App() {
         <AppearanceSync client={client} importLegacy={false} />
         <Toaster />
         <TitleBarSlotsProvider>
-          <ComposerApp client={client} draftId={role.draftId} host={windowHost} />
+          <TooltipProvider>
+            <ComposerApp client={client} draftId={role.draftId} fresh={role.fresh} host={windowHost} />
+          </TooltipProvider>
         </TitleBarSlotsProvider>
       </QueryClientProvider>
     )

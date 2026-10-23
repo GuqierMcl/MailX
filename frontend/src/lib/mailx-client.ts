@@ -120,13 +120,13 @@ export interface MailxClient {
   retryOutboxNow(id: string): Promise<OutboxItem>
   /** Settles an `unknown` item; `resend` is an explicit new attempt and returns the new item. */
   resolveUnknown(request: ResolveUnknownRequest): Promise<OutboxItem>
-  /** Main window. Opens or focuses the draft's composer window. */
-  openComposer(draftId: string): Promise<void>
+  /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
+  openComposer(draftId: string, fresh?: boolean): Promise<void>
   /** Composer window. Closes its own window; flush the draft first. */
   closeComposer(force?: boolean): Promise<void>
   /** Every queue state change, for the main window and the draft's composer. No addresses or subject. */
   onOutbox(listener: (change: OutboxChanged) => void): () => void
-  /** The queue locked, released or deleted a draft. */
+  /** A draft was created, edited, deleted, or locked / released by the queue. */
   onDrafts(listener: (change: DraftChanged) => void): () => void
   /** Composer window. The main window is closing: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
   onAppClosing(listener: () => void): () => void
@@ -268,7 +268,7 @@ export function createDesktopClient(): MailxClient {
     retryOutboxNow: (id) => call<OutboxItem>('outbox_retry_now', { id }),
     resolveUnknown: ({ id, resolution, clientMutationId }) =>
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
-    openComposer: (draftId) => call<void>('composer_open', { draftId }),
+    openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
     closeComposer: (force = false) => call<void>('composer_close', { force }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
     onDrafts: (listener) => subscribe<DraftChanged>(HOST_EVENTS.drafts, listener),

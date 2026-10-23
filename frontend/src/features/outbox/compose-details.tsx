@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { File01Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
+import { Delete02Icon, File01Icon, MailUpload01Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 import type { Account, MailAddress, OutboxItem } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -14,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -77,6 +78,11 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
     },
   })
 
+  // Deleted from the composer window or by the queue: drop the selection instead of showing "不存在".
+  useEffect(() => client.onDrafts((change) => {
+    if (change.draftId === draftId && change.change === 'deleted') onGone()
+  }), [client, draftId, onGone])
+
   if (draft.isError) {
     return clientFailureCode(draft.error) === 'notFound'
       ? <Placeholder icon={File01Icon} title="这份草稿已不存在" description="它可能已被发送或删除。" />
@@ -87,8 +93,12 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
   return (
     <Frame actions={(
       <>
-        <Button disabled={!data} onClick={() => onEdit(draftId)}>继续编辑</Button>
-        <Button variant="ghost" disabled={!data} onClick={() => setConfirming(true)}>删除</Button>
+        <IconButton label="继续编辑" disabled={!data} onClick={() => onEdit(draftId)}>
+          <HugeiconsIcon icon={PencilEdit02Icon} />
+        </IconButton>
+        <IconButton label="删除" disabled={!data} onClick={() => setConfirming(true)}>
+          <HugeiconsIcon icon={Delete02Icon} />
+        </IconButton>
       </>
     )}>
       {data && (

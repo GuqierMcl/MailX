@@ -28,7 +28,7 @@ export type MockClientOptions = {
   /** Time from the end of the undo window to `sending`, and from `sending` to `accepted`. Default 600 ms each. */
   sendStepMs?: number
   /** Browser preview only: called when the main window "opens" a composer, e.g. to open a tab for it. */
-  onOpenComposer?: (draft: Draft) => void
+  onOpenComposer?: (draft: Draft, fresh: boolean) => void
   /**
    * Browser preview only: a composer tab starts with an empty mock, so it asks here for the draft
    * its URL names. Return `null` and the mock makes a blank draft with that id.
@@ -74,6 +74,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const now = new Date().toISOString()
     const created: Draft = { ...draft, id: crypto.randomUUID(), createdAt: now, updatedAt: now, revision: 1 }
     drafts.set(created.id, created)
+    announceDraft({ draftId: created.id, accountId: created.accountId, change: 'created' })
     return created
   }
   const summary = (draft: Draft): DraftSummary => ({
@@ -232,6 +233,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     async listDrafts(accountId = null) {
       return [...drafts.values()].filter((d) => !accountId || d.accountId === accountId)
+        .filter((d) => d.to.length + d.cc.length + d.bcc.length > 0 || d.subject.trim() !== '' || d.bodyText.trim() !== '')
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)).map(summary)
     },
     async getDraft(id) { return clone(requireDraft(id)) },
@@ -242,12 +244,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const { id: _id, expectedRevision: _revision, accountId, ...content } = request
       void _id; void _revision
       Object.assign(draft, content, { accountId: accountId ?? draft.accountId, revision: draft.revision + 1, updatedAt: new Date().toISOString() })
+      announceDraft({ draftId: draft.id, accountId: draft.accountId, change: 'updated' })
       return clone(draft)
     },
     async deleteDraft(id) {
       const draft = requireDraft(id)
       if (lockedDrafts.has(id)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
       drafts.delete(draft.id)
+      announceDraft({ draftId: draft.id, accountId: draft.accountId, change: 'deleted' })
     },
     async queueSend({ draftId, expectedRevision, clientMutationId }) {
       const draft = requireDraft(draftId)
@@ -271,9 +275,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async cancelOutbox(id) { return clone(outbox.cancel(id)) },
     async retryOutboxNow(id) { return clone(outbox.retryNow(id)) },
     async resolveUnknown(request) { return clone(outbox.resolve(request.id, request.resolution)) },
-    async openComposer(draftId) {
+    async openComposer(draftId, fresh = false) {
       const draft = clone(requireDraft(draftId))
-      options.onOpenComposer?.(draft)
+      options.onOpenComposer?.(draft, fresh)
     },
     closeComposer: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),

@@ -383,7 +383,14 @@ async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
             _ => None,
         })
         .collect();
-    assert_eq!(drafts, [DraftChange::Locked, DraftChange::Deleted]);
+    assert_eq!(
+        drafts,
+        [
+            DraftChange::Created,
+            DraftChange::Locked,
+            DraftChange::Deleted
+        ]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -827,4 +834,90 @@ async fn startup_recovers_interrupted_and_waiting_items() {
         core.get_outbox(&started.id).unwrap().state,
         OutboxState::Unknown
     );
+}
+
+fn blank_request(account: &Account) -> crate::CreateDraftRequest {
+    serde_json::from_value(json!({
+        "accountId": account.id, "to": [], "cc": [], "bcc": [],
+        "subject": " ", "bodyText": "\n ", "clientMutationId": id(),
+    }))
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn draft_operations_emit_events_and_blank_drafts_are_hidden() {
+    let fx = fixture();
+    let account = fx.account("lin@example.com", 1);
+    let blank = fx.core.create_draft(blank_request(&account), "").unwrap();
+    assert!(fx.core.list_drafts(None).unwrap().is_empty());
+    assert!(blank.is_blank());
+
+    let update = |draft: &Draft, subject: &str| crate::UpdateDraftRequest {
+        id: draft.id.clone(),
+        expected_revision: draft.revision,
+        account_id: None,
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject: subject.into(),
+        body_text: String::new(),
+    };
+    let edited = fx.core.update_draft(update(&blank, "hi")).unwrap();
+    assert_eq!(fx.core.list_drafts(None).unwrap().len(), 1);
+    let cleared = fx.core.update_draft(update(&edited, "")).unwrap();
+    assert!(fx.core.list_drafts(None).unwrap().is_empty());
+    fx.core.delete_draft(&cleared.id).unwrap();
+
+    let changes: Vec<DraftChange> = fx
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            CoreEvent::DraftChanged(changed) if changed.draft_id == blank.id => {
+                assert_eq!(changed.account_id, account.id);
+                Some(changed.change)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            DraftChange::Created,
+            DraftChange::Updated,
+            DraftChange::Updated,
+            DraftChange::Deleted
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn opening_the_core_purges_blank_drafts_only() {
+    let fx = fixture();
+    let account = fx.account("lin@example.com", 1);
+    let blank = fx.core.create_draft(blank_request(&account), "").unwrap();
+    let kept = fx.draft(&account);
+    let Fx {
+        dir,
+        core,
+        clock,
+        tls,
+        secrets,
+        ..
+    } = fx;
+    drop(core);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (core, _) = open_core(
+        dir.path(),
+        secrets,
+        clock,
+        &tls,
+        Timeouts::for_tests(Duration::from_millis(500)),
+    );
+    assert_eq!(
+        core.get_draft(&blank.id).unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert!(core.get_draft(&kept.id).is_ok());
 }

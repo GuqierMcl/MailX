@@ -192,6 +192,10 @@ pub struct OutboxChanged {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum DraftChange {
+    /// A draft was created (new, reply, forward).
+    Created,
+    /// The draft's content was saved.
+    Updated,
     /// A queue item took the draft; it cannot be edited.
     Locked,
     /// The queue let go (canceled, failed); it is editable again.
@@ -200,7 +204,8 @@ pub enum DraftChange {
     Deleted,
 }
 
-/// A draft changed because of the send queue (not because of an edit).
+/// A draft changed: created, edited, deleted, or locked / unlocked by the
+/// send queue.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftChanged {

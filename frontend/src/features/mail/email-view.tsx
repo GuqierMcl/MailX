@@ -12,6 +12,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -100,52 +101,39 @@ function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummar
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
       <div className="flex items-center gap-1 not-first:ml-3">
         {PLACEHOLDER_ACTIONS.map(([label, icon]) => (
-          <Button key={label} variant="ghost" size="icon" aria-label={label} title={`${label}（尚未实现）`} disabled>
+          <IconButton key={label} label={label} tip={`${label}（尚未实现）`} disabled>
             <HugeiconsIcon icon={icon} />
-          </Button>
+          </IconButton>
         ))}
       </div>
       <div className="flex items-center gap-1 not-first:ml-3">
         {RESPOND_ACTIONS.map(([kind, label, icon]) => (
-          <Button key={kind} variant="ghost" size="icon" aria-label={label} title={label} disabled={!summary} onClick={() => onRespond(kind)}>
+          <IconButton key={kind} label={label} disabled={!summary} onClick={() => onRespond(kind)}>
             <HugeiconsIcon icon={icon} />
-          </Button>
+          </IconButton>
         ))}
       </div>
       <div className="flex items-center gap-1 not-first:ml-3">
-        <Button
-          variant="ghost"
-          size="icon"
+        <IconButton
           disabled={!summary}
-          aria-label={summary?.isRead === false ? '标为已读' : '标为未读'}
-          title={summary?.isRead === false ? '标为已读' : '标为未读'}
+          label={summary?.isRead === false ? '标为已读' : '标为未读'}
           onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
         >
           <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
+        </IconButton>
+        <IconButton
           disabled={!summary}
-          aria-label={summary?.isStarred ? '取消星标' : '加星标'}
+          label={summary?.isStarred ? '取消星标' : '加星标'}
           aria-pressed={summary?.isStarred ?? false}
-          title={summary?.isStarred ? '取消星标' : '加星标'}
           onClick={() => summary && onFlag(summary, 'starred', !summary.isStarred)}
           className={summary?.isStarred ? 'text-amber-500 hover:text-amber-500' : undefined}
         >
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
-        </Button>
+        </IconButton>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="ml-auto"
-        aria-label="关闭邮件"
-        title="关闭邮件（Esc）"
-        onClick={onClose}
-      >
+      <IconButton className="ml-auto" label="关闭邮件" tip="关闭邮件（Esc）" onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
-      </Button>
+      </IconButton>
     </div>
   )
 }

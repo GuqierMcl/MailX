@@ -28,13 +28,14 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
 
-  const run = useCallback(async (create: () => Promise<string>) => {
+  // `fresh`: the draft is created for this window, so closing it unsaved deletes it.
+  const run = useCallback(async (create: () => Promise<string>, fresh = false) => {
     if (busyRef.current) return
     busyRef.current = true
     setBusy(true)
     try {
       const draftId = await create()
-      await client.openComposer(draftId)
+      await client.openComposer(draftId, fresh)
       void queryClient.invalidateQueries({ queryKey: composeKeys.drafts() })
     } catch (cause) {
       toast.error('无法打开写信窗口', { description: clientFailure(cause).message })
@@ -50,7 +51,7 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
       accountId: known, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: crypto.randomUUID(),
     })
     return draft.id
-  }), [accounts, client, contextAccountId, run])
+  }, true), [accounts, client, contextAccountId, run])
 
   const respond = useCallback((emailId: string, kind: Exclude<DraftKind, 'new'>) => run(async () => {
     const request = { emailId, kind, clientMutationId: crypto.randomUUID() }
@@ -62,7 +63,7 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
       if (fetched.summary.bodyState !== 'ready') throw cause
       return (await client.createDraftFrom(request)).id
     }
-  }), [client, run])
+  }, true), [client, run])
 
   const openDraft = useCallback((draftId: string) => run(async () => draftId), [run])
 

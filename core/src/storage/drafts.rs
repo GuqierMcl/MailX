@@ -164,6 +164,7 @@ impl Storage {
             .query_map([account_id], parse)?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
+            .filter(|draft| !matches!(draft, Ok(draft) if draft.is_blank()))
             .map(|draft| {
                 let draft = draft?;
                 Ok(DraftSummary {
@@ -179,6 +180,22 @@ impl Storage {
                 })
             })
             .collect()
+    }
+
+    /// Removes blank drafts that no live outbox item holds.
+    pub(crate) fn purge_blank_drafts(&self) -> Result<(), AppError> {
+        let mut statement = self.db.prepare(&format!("SELECT {COLUMNS} FROM drafts"))?;
+        let drafts = statement
+            .query_map([], parse)?
+            .collect::<Result<Vec<_>, _>>()?;
+        for draft in drafts {
+            let draft = draft?;
+            if draft.is_blank() && !self.draft_locked(&draft.id)? {
+                self.db
+                    .execute("DELETE FROM drafts WHERE id = ?1", [&draft.id])?;
+            }
+        }
+        Ok(())
     }
 
     /// Compare-and-swap on `revision`, in one transaction.

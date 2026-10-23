@@ -159,8 +159,12 @@ struct ResolveArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DraftArgs {
+struct OpenArgs {
     draft_id: String,
+    /// The draft was just created for this window (写邮件 / 回复 / 转发), so
+    /// closing without saving deletes it. Absent when reopened from a list.
+    #[serde(default)]
+    fresh: bool,
 }
 
 #[derive(Deserialize)]
@@ -409,17 +413,19 @@ pub(crate) async fn composer_open(
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
     let args = authorize(&window, "composer_open").and_then(|_| {
-        let args = parse::<DraftArgs>(request.body())?;
-        parse_draft_id(&args.draft_id).ok_or_else(|| AppError::validation("draftId"))
+        let args = parse::<OpenArgs>(request.body())?;
+        parse_draft_id(&args.draft_id)
+            .map(|id| (id, args.fresh))
+            .ok_or_else(|| AppError::validation("draftId"))
     });
     let result = async {
-        let id = args?;
+        let (id, fresh) = args?;
         let text = id.hyphenated().to_string();
         // The draft must exist; a window for nothing is never created.
         state
             .run(move |core| core.get_draft(&text).map(|_| ()))
             .await?;
-        open_composer(&app, &id).map_err(|_| AppError::new(ErrorCode::Internal))
+        open_composer(&app, &id, fresh).map_err(|_| AppError::new(ErrorCode::Internal))
     }
     .await;
     Ok(respond(result))
@@ -478,7 +484,13 @@ pub(crate) fn cascade_position(
     (x, y)
 }
 
-fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid) -> tauri::Result<()> {
+/// Page of a composer window; `fresh` marks a draft created for it.
+fn composer_url(draft_id: &uuid::Uuid, fresh: bool) -> String {
+    let url = format!("index.html?composer={}", draft_id.hyphenated());
+    if fresh { format!("{url}&fresh=1") } else { url }
+}
+
+fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid, fresh: bool) -> tauri::Result<()> {
     let label = composer_label(draft_id);
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.unminimize();
@@ -487,7 +499,7 @@ fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid) -> tauri::Result<()> {
     }
     let slot = composer_windows(app).len();
     let navigation_app = app.clone();
-    let url = format!("index.html?composer={}", draft_id.hyphenated());
+    let url = composer_url(draft_id, fresh);
     let builder = window_chrome::style_builder(
         WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
             .title(NEW_MAIL_TITLE)
@@ -665,6 +677,20 @@ mod tests {
     }
 
     #[test]
+    fn the_fresh_flag_is_carried_in_the_page_url_only_when_set() {
+        let id = uuid::Uuid::new_v4();
+        let text = id.hyphenated().to_string();
+        assert_eq!(
+            composer_url(&id, false),
+            format!("index.html?composer={text}")
+        );
+        assert_eq!(
+            composer_url(&id, true),
+            format!("index.html?composer={text}&fresh=1")
+        );
+    }
+
+    #[test]
     fn cascade_offsets_each_slot_and_wraps() {
         let size = (1520, 1360);
         let screen = Some(((0, 0), (5120, 2880)));
@@ -725,8 +751,9 @@ mod tests {
     fn command_arguments_are_strict() {
         let id = uuid::Uuid::new_v4().to_string();
         let json = |value| InvokeBody::Json(value);
-        assert!(parse::<DraftArgs>(&json(json!({"draftId": id}))).is_ok());
-        assert!(parse::<DraftArgs>(&json(json!({"draftId": id, "x": 1}))).is_err());
+        assert!(parse::<OpenArgs>(&json(json!({"draftId": id}))).is_ok());
+        assert!(parse::<OpenArgs>(&json(json!({"draftId": id, "fresh": true}))).is_ok());
+        assert!(parse::<OpenArgs>(&json(json!({"draftId": id, "x": 1}))).is_err());
         assert!(parse::<IdArgs>(&json(json!({"id": id}))).is_ok());
         assert!(parse::<IdArgs>(&json(json!({}))).is_err());
         assert!(parse::<CloseArgs>(&json(json!({"force": true}))).is_ok());

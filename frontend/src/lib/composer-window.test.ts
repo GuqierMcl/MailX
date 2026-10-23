@@ -7,7 +7,8 @@ describe('composer window detection', () => {
   it('reads the draft id from a canonical query', () => {
     expect(composerDraftId(`?composer=${ID}`)).toBe(ID)
     expect(composerDraftId(`?x=1&composer=${ID}`)).toBe(ID)
-    expect(windowRole(`?composer=${ID}`)).toEqual({ kind: 'composer', draftId: ID })
+    expect(windowRole(`?composer=${ID}`)).toEqual({ kind: 'composer', draftId: ID, fresh: false })
+    expect(windowRole(composerSearch(ID, true))).toEqual({ kind: 'composer', draftId: ID, fresh: true })
     expect(composerDraftId(composerSearch(ID))).toBe(ID)
   })
 

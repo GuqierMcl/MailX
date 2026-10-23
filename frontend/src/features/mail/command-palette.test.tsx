@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
@@ -77,12 +77,13 @@ describe('command palette', () => {
 
   it('offers 写邮件 as a command and opens a composer for a new draft', async () => {
     const { client, input } = await openPalette()
+    const opened = vi.spyOn(client, 'openComposer')
     expect(within(screen.getByRole('dialog')).getByRole('option', { name: '写邮件' })).toBeInTheDocument()
     await userEvent.type(input, '写邮')
     await userEvent.click(await screen.findByRole('option', { name: '写邮件' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    // The mock keeps the new draft in its list, so a draft now exists.
-    await waitFor(async () => expect(await client.listDrafts()).toHaveLength(1))
+    // The new draft is blank, so it is not listed, but its composer opens as fresh.
+    await waitFor(() => expect(opened).toHaveBeenCalledWith(expect.any(String), true))
   })
 
   it('says so when nothing matches', async () => {

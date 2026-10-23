@@ -59,6 +59,18 @@ pub struct Draft {
     pub revision: u32,
 }
 
+impl Draft {
+    /// No recipients and a subject and body of only whitespace: nothing worth
+    /// keeping or listing.
+    pub fn is_blank(&self) -> bool {
+        self.to.is_empty()
+            && self.cc.is_empty()
+            && self.bcc.is_empty()
+            && self.subject.trim().is_empty()
+            && self.body_text.trim().is_empty()
+    }
+}
+
 /// One row of the draft list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

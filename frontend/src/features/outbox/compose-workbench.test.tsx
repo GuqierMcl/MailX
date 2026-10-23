@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/toast'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Workbench } from '@/features/mail/workbench'
-import type { Draft, DraftSummary, EmailDetail, EmailSummary, Folder, OutboxChanged, OutboxItem } from '@/generated/accounts'
+import type { Draft, DraftChanged, DraftSummary, EmailDetail, EmailSummary, Folder, OutboxChanged, OutboxItem } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { withTitleBar } from '@/test/title-bar'
 
@@ -42,6 +42,8 @@ function setup(options: { drafts?: Draft[]; outbox?: OutboxItem[] } = {}) {
   client.listOutbox.mockImplementation(async () => structuredClone(outbox.current))
   client.createDraft.mockResolvedValue(draft('11111111-1111-4111-8111-111111111111'))
   client.createDraftFrom.mockResolvedValue(draft('22222222-2222-4222-8222-222222222222'))
+  const draftListeners = new Set<(change: DraftChanged) => void>()
+  client.onDrafts.mockImplementation((listener) => { draftListeners.add(listener); return () => { draftListeners.delete(listener) } })
   const listeners: {
     outbox: (change: OutboxChanged) => void
     open: (request: { accountId: string; emailId: string | null; outboxId?: string | null }) => void
@@ -49,7 +51,7 @@ function setup(options: { drafts?: Draft[]; outbox?: OutboxItem[] } = {}) {
   client.onOutbox.mockImplementation((listener) => { listeners.outbox = listener; return () => undefined })
   client.onNotificationOpen.mockImplementation((listener) => { listeners.open = listener; return () => undefined })
   render(withTitleBar(<><Toaster /><Workbench client={client} /></>))
-  return { client, listeners, outbox }
+  return { client, listeners, outbox, drafts, emitDraft: (change: DraftChanged) => draftListeners.forEach((listener) => listener(change)) }
 }
 
 /** The island's rows; navigation items are list items too. */
@@ -62,7 +64,7 @@ describe('compose entry points', () => {
     const { client } = setup()
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(screen.getByRole('button', { name: '写邮件' }))
-    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111'))
+    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', true))
     // The unified inbox is not one account, so the host's default applies.
     expect(client.createDraft).toHaveBeenCalledWith(expect.objectContaining({ accountId: null, to: [], subject: '', bodyText: '' }))
   })
@@ -98,7 +100,7 @@ describe('compose entry points', () => {
     await screen.findByRole('heading', { level: 2, name: '季度计划' })
     await userEvent.click(screen.getByRole('button', { name: label }))
     await waitFor(() => expect(client.createDraftFrom).toHaveBeenCalledWith({ emailId: 'mail-1', kind, clientMutationId: expect.any(String) }))
-    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222'))
+    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222', true))
   })
 
   it('fetches the body and retries once when the core says bodyNotCached', async () => {
@@ -108,7 +110,7 @@ describe('compose entry points', () => {
     await userEvent.click(await row('邮件列表'))
     await screen.findByRole('heading', { level: 2, name: '季度计划' })
     await userEvent.click(screen.getByRole('button', { name: '回复' }))
-    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222'))
+    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222', true))
     expect(client.fetchBody).toHaveBeenCalledWith('mail-1')
     expect(client.createDraftFrom).toHaveBeenCalledTimes(2)
     // The retry reuses the mutation id, so a landed first attempt cannot make two drafts.
@@ -152,12 +154,27 @@ describe('drafts and outbox navigation', () => {
     await userEvent.click(draftRow)
     expect(await screen.findByRole('heading', { level: 2, name: '草稿主题' })).toBeInTheDocument()
     expect(screen.getByRole('article')).toHaveTextContent('草稿正文')
+    const edit = screen.getByRole('button', { name: '继续编辑' })
+    for (let i = 0; i < 40 && document.activeElement !== edit; i++) await userEvent.tab()
+    expect(await screen.findByText('继续编辑')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '继续编辑' }))
-    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith(d.id))
+    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith(d.id, false))
 
     await userEvent.click(screen.getByRole('button', { name: '删除' }))
     await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '删除' }))
     await waitFor(() => expect(client.deleteDraft).toHaveBeenCalledWith(d.id))
+  })
+
+  it('clears the selection instead of showing 已不存在 when the selected draft is deleted', async () => {
+    const d = draft()
+    const { drafts, emitDraft } = setup({ drafts: [d] })
+    await userEvent.click((await screen.findAllByRole('button', { name: '草稿' }))[0])
+    await userEvent.click(await row('草稿列表'))
+    await screen.findByRole('heading', { level: 2, name: '草稿主题' })
+    drafts.splice(0)
+    act(() => emitDraft({ draftId: d.id, accountId: account.id, change: 'deleted' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 2, name: '草稿主题' })).not.toBeInTheDocument())
+    expect(screen.queryByText('这份草稿已不存在')).not.toBeInTheDocument()
   })
 })
 
@@ -197,7 +214,7 @@ describe('outbox items', () => {
     expect(list).toHaveTextContent('bad@example.org')
     expect(list).toHaveTextContent('no such user')
     await userEvent.click(screen.getByRole('button', { name: '编辑并重新发送' }))
-    expect(client.openComposer).toHaveBeenCalledWith('draft-1')
+    expect(client.openComposer).toHaveBeenCalledWith('draft-1', false)
   })
 
   it('unknown: explains, marks as sent directly, and confirms before a resend', async () => {

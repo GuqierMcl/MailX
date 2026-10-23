@@ -37,6 +37,14 @@ export function fieldsAreEmpty(fields: EditorFields) {
   return fields.to.length + fields.cc.length + fields.bcc.length === 0 && !fields.subject.trim() && !fields.bodyText.trim()
 }
 
+/** Content identity for "changed since the window opened" (recipient chips compare by address). */
+function contentKey(fields: EditorFields) {
+  return JSON.stringify([
+    fields.accountId, toMailAddresses(fields.to), toMailAddresses(fields.cc), toMailAddresses(fields.bcc),
+    fields.subject, fields.bodyText,
+  ])
+}
+
 type Notice = { kind: 'conflict' } | { kind: 'locked' }
 
 /**
@@ -59,6 +67,9 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const [gone, setGone] = useState(false)
 
   const latest = useRef<EditorFields | null>(null)
+  // The content as it was when the window opened; "不保存" on an existing draft restores it.
+  const baseline = useRef<EditorFields | null>(null)
+  const removed = useRef(false)
   const revision = useRef(0)
   const dirty = useRef(false)
   const saving = useRef<Promise<void> | null>(null)
@@ -103,7 +114,12 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     alive.current = true
     // The first load, written as a promise chain rather than `reload()` so no state is set inside the effect body.
     client.getDraft(draftId).then(
-      (draft) => { if (alive.current) { apply(draft); setProblem(null) } },
+      (draft) => {
+        if (!alive.current) return
+        baseline.current ??= fieldsOf(draft)
+        apply(draft)
+        setProblem(null)
+      },
       (cause) => {
         if (!alive.current) return
         if (clientFailureCode(cause) === 'notFound') setGone(true)
@@ -123,7 +139,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     else if (change.change === 'unlocked') {
       setLocked(false)
       void reload()
-    } else setGone(true)
+    } else if (change.change === 'deleted' && !removed.current) setGone(true)
   }), [client, draftId, reload, setLocked])
 
   const runSave = useCallback((): Promise<void> => {
@@ -226,9 +242,42 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const remove = useCallback(async () => {
     clearTimeout(timer.current)
     dirty.current = false
+    removed.current = true
     if (saving.current) await saving.current
-    await client.deleteDraft(draftId)
+    try {
+      await client.deleteDraft(draftId)
+    } catch (cause) {
+      removed.current = false
+      throw cause
+    }
   }, [client, draftId])
+
+  /** Whether the content differs from what the window opened with. */
+  const changed = useCallback(() => {
+    const now = latest.current
+    const before = baseline.current
+    return !!now && !!before && contentKey(now) !== contentKey(before)
+  }, [])
+
+  /** Writes the opening content back (after any save in flight), at the latest revision. */
+  const restoreBaseline = useCallback(async () => {
+    clearTimeout(timer.current)
+    dirty.current = false
+    if (saving.current) await saving.current
+    const before = baseline.current
+    if (!before || lockedRef.current || !changed()) return
+    const saved = await client.updateDraft({
+      id: draftId,
+      expectedRevision: revision.current,
+      accountId: before.accountId,
+      to: toMailAddresses(before.to),
+      cc: toMailAddresses(before.cc),
+      bcc: toMailAddresses(before.bcc),
+      subject: before.subject,
+      bodyText: before.bodyText,
+    })
+    revision.current = saved.revision
+  }, [changed, client, draftId])
 
   return {
     fields,
@@ -242,6 +291,8 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     retry,
     reload,
     remove,
+    changed,
+    restoreBaseline,
     markLocked: () => setLocked(true),
     revision: () => revision.current,
     isEmpty: () => (latest.current ? fieldsAreEmpty(latest.current) : false),

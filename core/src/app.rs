@@ -16,11 +16,12 @@ use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
 };
 use crate::error::{AppError, ErrorCode};
-use crate::events::Events;
+use crate::events::{CoreEvent, Events};
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::send::types::{
-    Caller, OutboxItem, QueueSendRequest, ResolveUnknownRequest, UnknownResolution,
+    Caller, DraftChange, DraftChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
+    UnknownResolution,
 };
 use crate::send::{OutboxManager, SendConfig};
 use crate::storage::outbox::Changed;
@@ -49,6 +50,7 @@ pub struct MailxCore {
     bodies: Arc<BodyManager>,
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
+    events: Events,
 }
 
 impl MailxCore {
@@ -88,7 +90,7 @@ impl MailxCore {
         for account in &accounts {
             sync.restart(&account.id);
         }
-        let outbox = Arc::new(OutboxManager::new(&service, runtime, events, send));
+        let outbox = Arc::new(OutboxManager::new(&service, runtime, events.clone(), send));
         // Items interrupted by the last shutdown are settled before any worker
         // looks at the queue: no body start mark means nothing reached the
         // server, so the item is queued again; with the mark it is `unknown`.
@@ -97,6 +99,11 @@ impl MailxCore {
             .map_err(|_| AppError::new(ErrorCode::Internal))?
             .recover_outbox(outbox.now())?;
         outbox.shared.announce(recovered);
+        // Blank drafts nobody can be editing any more are crash leftovers.
+        service
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .purge_blank_drafts()?;
         for account in &accounts {
             outbox.start(&account.id);
         }
@@ -107,6 +114,7 @@ impl MailxCore {
             bodies,
             avatars: Arc::default(),
             images,
+            events,
         })
     }
 
@@ -224,7 +232,17 @@ impl MailxCore {
         request: CreateDraftRequest,
         default_account_id: &str,
     ) -> Result<Draft, AppError> {
-        self.accounts()?.create_draft(request, default_account_id)
+        let draft = self.accounts()?.create_draft(request, default_account_id)?;
+        self.announce_draft(&draft, DraftChange::Created);
+        Ok(draft)
+    }
+
+    fn announce_draft(&self, draft: &Draft, change: DraftChange) {
+        self.events.emit(&CoreEvent::DraftChanged(DraftChanged {
+            draft_id: draft.id.clone(),
+            account_id: draft.account_id.clone(),
+            change,
+        }));
     }
 
     /// Creates a reply, reply-all or forward draft from a message whose body
@@ -247,13 +265,15 @@ impl MailxCore {
             None => Vec::new(),
         };
         let headers = crate::drafts::compose::parse_headers(&raw, message_id);
-        self.accounts()?.create_draft_from_source(
+        let draft = self.accounts()?.create_draft_from_source(
             &request,
             &detail,
             &account_address,
             &headers,
             crate::accounts::local_offset(),
-        )
+        )?;
+        self.announce_draft(&draft, DraftChange::Created);
+        Ok(draft)
     }
 
     pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
@@ -266,11 +286,16 @@ impl MailxCore {
     }
 
     pub fn update_draft(&self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
-        self.accounts()?.update_draft(request)
+        let draft = self.accounts()?.update_draft(request)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok(draft)
     }
 
     pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
-        self.accounts()?.delete_draft(id)
+        let draft = self.accounts()?.get_draft(id)?;
+        self.accounts()?.delete_draft(id)?;
+        self.announce_draft(&draft, DraftChange::Deleted);
+        Ok(())
     }
 
     /// Queues a draft for sending: the MIME is built now from the draft and the
