@@ -37,7 +37,7 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文经自定义协议与空 sandbox iframe 隔离；`tauri-plugin-single-instance` 使第二次启动只唤起已运行的窗口，`tauri-plugin-window-state` 记住主窗口的大小、位置与最大化 / 全屏（刻意不恢复窗口装饰与可见性，主窗口先隐藏创建、恢复后再显示）；打包版本去掉浏览器默认行为（右键菜单、刷新 / 打印 / 查找 / 检查器快捷键等），主界面靠前端拦截，Windows 另用 WebView2 设置关闭浏览器快捷键与表单记忆；邮件正文所在的沙箱 iframe 有意不处理 |
 | 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
-| 接收 / 发送 | `async-imap` 0.12 用于文件夹与各目录头部同步；`lettre` 候选 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
+| 接收 / 发送 | `async-imap` 0.12 用于文件夹与各目录头部同步；`lettre` 0.11 已通过 SMTP 路由探针，目前只是测试依赖 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 与 `ammonia` 4 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号、文件夹、邮件头与游标使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；头部使用参数化 LIKE 查询，FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
@@ -109,7 +109,7 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 
 1. **同步（当前）**：账号配置 → 路由与认证 → `STATUS` / `EXAMINE` / `UID SEARCH` → 每批最多 200 封头部 → 短事务写入与游标推进 → 逐目录数据版本事件 → UI 重新查询。账号之间并发且暂不设全局上限，账号内顺序对账所有可选文件夹；逐目录完成后提示 UI 查询，整轮后等待 60 秒，目录每 10 分钟到期刷新；不下载正文。
 2. **阅读（当前）**：缓存查询 → 缺失时按账号路由经独立连接 BODY.PEEK 下载 → 有界 MIME 解码与 HTML 净化 → 本地缓存 → 空 sandbox 隔离渲染。远程图片按安全性设置询问 / 自动加载 / 永不加载，经 Rust 验证，仅在本次阅读期间缓存于内存；点击正文外链由 Rust 交给系统打开；附件仅显示元数据。
-3. **发送**：本地草稿 → 用户检查完整收件人与附件 → 固化版本与 MIME → 单个队列项 → SMTP → 记录 accepted / failed / unknown。网络不确定时不自动重发。
+3. **发送**：本地草稿（独立写信窗口）→ 用户检查完整收件人与附件并两次点击发送 → 固化版本与 MIME → 单个队列项 → SMTP → 记录 accepted / failed / unknown。网络不确定时不自动重发。细节见[写信与发送设计](sending.md)。
 4. **AI**：用户选定内容与模型 → 披露策略检查 → 后端请求模型 → 流式展示 → 保存建议或新草稿。建议不直接变成已发送邮件。
 5. **外部 Agent**：显式配对 → 限定账号 / 工具 → MCP → 应用权限 → 与 UI 相同服务 → 返回限量纯文本，不返回密钥和宿主路径。
 

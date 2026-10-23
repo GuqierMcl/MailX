@@ -209,9 +209,13 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `attachments.fetch` | attachmentId → jobId | POST `/api/v1/attachments/{id}/fetch` |
 | `attachments.download` | attachmentId → 受控流 / 本地保存结果 | GET `/api/v1/attachments/{id}/content` |
 | `drafts.create` | accountId / 内容 / clientMutationId → draftId / revision | POST `/api/v1/drafts` |
+| `drafts.createFrom` | emailId / reply · replyAll · forward / clientMutationId → draftId / revision（核心生成收件人、主题、引用与串联头） | POST `/api/v1/emails/{id}/drafts` |
+| `drafts.list` / `drafts.get` / `drafts.delete` | 账号过滤 / draftId → 草稿摘要 / 草稿 / 结果 | GET / DELETE `/api/v1/drafts` / `…/{id}` |
 | `drafts.update` | draftId / expectedRevision / 内容 → revision | PATCH `/api/v1/drafts/{id}` |
 | `drafts.queueSend` | draftId / expectedRevision / clientMutationId → outboxId / state | POST `/api/v1/drafts/{id}/send` |
-| `outbox.get` / `outbox.cancel` | outboxId → 当前状态 | GET / POST `/api/v1/outbox/{id}` / `…/cancel` |
+| `outbox.list` / `outbox.get` / `outbox.cancel` | 过滤 / outboxId → 状态；`cancel` 仅对 `queued` 生效，已开始发送返回 `alreadySending` | GET / POST `/api/v1/outbox` / `…/{id}` / `…/cancel` |
+| `outbox.retryNow` | outboxId → 状态（只对 `queued` 立即尝试） | POST `/api/v1/outbox/{id}/retry` |
+| `outbox.resolveUnknown` | outboxId / markSent · resend / clientMutationId → 状态（`resend` 是用户明确确认的新尝试） | POST `/api/v1/outbox/{id}/resolve` |
 | `sync.request` | accountId / folderId? → jobId | POST `/api/v1/sync` |
 | `jobs.get` / `jobs.cancel` | jobId → job 状态 | GET / POST `/api/v1/jobs/{id}` / `…/cancel` |
 | `ai.start` / `ai.get` / `ai.cancel` | Run 请求 / runId → Run 快照 | POST / GET `/api/v1/ai/runs` / `…/{id}` / `…/{id}/cancel` |
@@ -222,7 +226,7 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 
 `expectedRevision` 不匹配报 `REVISION_CONFLICT`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
 
-`drafts.queueSend` 只允许交互 UI 主体，后端核对账号权限、草稿版本和确认过的快照；MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
+`drafts.queueSend` 只允许交互 UI 主体（桌面 v0.1 为 `composer-*` 写信窗口），后端核对账号权限、草稿版本和确认过的快照；入队时按设置 `compose.undoSendSeconds` 写入 `notBefore`。MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md#5-本地草稿与可靠发送)与[写信与发送设计](../architecture/sending.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
 
 ## 5. 事件
 

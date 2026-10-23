@@ -32,7 +32,7 @@
 | 双击发送、重复请求、草稿 revision 变化 | 唯一入队或明确冲突 | M2 |
 | SMTP RCPT 部分拒绝 | DATA 前中止，不悄悄只发部分收件人 | M2 |
 | DATA 后断线、提交后应用崩溃 | unknown，不自动重发 | M2 |
-| SMTP 成功但 Sent 归档失败 | 不重发 SMTP；单独显示归档状态 | M2 |
+| SMTP 成功后服务器没有已发送副本 | 本地副本仍在；以后加入 APPEND 时，归档失败也不重发 SMTP | M2 |
 | 断网编辑、进程退出、磁盘满 | 草稿可恢复或明确未保存，不伪报成功 | M2 |
 | FTS 删除 / 重建、中文查询、未缓存正文 | 结果不越权，短词与覆盖限制可见 | M1–M2 |
 | AI 邮件提示词注入、模型恶意 HTML | 不增加工具权限，不执行输出 | M3 |
@@ -285,6 +285,12 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 移除 HTML / 纯文本格式切换与“重新加载正文”按钮；存在 HTML 时自动显示隔离正文，否则显示纯文本。下载失败的“重试”入口保留。现有测试改为通过切换邮件和文档意外重载验证令牌失效与阅读缓存释放，并覆盖自动格式选择、提示与附件元数据保留；不再依赖已移除的控件。
 
 `bun run typecheck`、`bun run lint`、`bun run frontend:test`（18 个文件、113 项测试）、`bun run build` 与差异检查通过。Vite 仍有既有的大 chunk 提示。本次仅调整前端展示，未重跑 Rust 或原生 WebView 验证，未重新打包桌面应用。
+
+### 2026-10-23 SMTP 路由探针
+
+本次未开启 Comet。`core/src/net/smtp_probe.rs` 只在测试中编译，`lettre` 与 `rcgen` 只是 core 的开发依赖，`cargo tree -e normal` 中不出现。用本地假 SMTP 服务和假 SOCKS5 / HTTP CONNECT 代理验证：三种路由都能经 `lettre` 完成 MAIL / RCPT / DATA，代理收到未解析的域名；代理不可达时返回 `NetError::Proxy` 且直连端口 300ms 内没有收到连接；STARTTLS（587）和隐式 TLS（465）在 SOCKS5 路由上完成，证书为测试时生成的自签名证书。
+
+`cargo test -p mailx-core --lib smtp_probe` 6 项通过，`cargo clippy -p mailx-core --all-targets -- -D warnings` 无警告。没有运行完整的 `bun run check` 与 `cargo test --workspace`；没有连接真实服务商，也没有经真实代理发信；生产路径的平台证书验证、AUTH、RCPT 部分拒绝与正文后断线尚未覆盖，留给[写信与发送设计](../architecture/sending.md#12-实施步骤)第 2 步。
 
 ## 6. 窗口行为的手动验证
 
