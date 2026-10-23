@@ -22,17 +22,27 @@ const TIMEOUT_MS = { info: 5000, success: 3000, error: 8000 } as const
 const MAX_VISIBLE = 4
 
 type Kind = keyof typeof TIMEOUT_MS
-type Options = { description?: string; timeout?: number }
+type Options = {
+  description?: string
+  timeout?: number
+  /** One button on the toast; clicking runs it and dismisses the toast. */
+  action?: { label: string; onClick: () => void }
+}
 
 function show(kind: Kind, title: string, options: Options = {}) {
-  return toastManager.add({
+  const action = options.action
+  const id: string = toastManager.add({
     title,
     description: options.description,
     type: kind,
     timeout: options.timeout ?? TIMEOUT_MS[kind],
     // An error interrupts a screen reader; the others wait their turn.
     priority: kind === "error" ? "high" : "low",
+    actionProps: action
+      ? { children: action.label, onClick: () => { toastManager.close(id); action.onClick() } }
+      : undefined,
   })
+  return id
 }
 
 const toast = {
@@ -64,6 +74,9 @@ function ToastList() {
           <ToastPrimitive.Title className="text-sm font-medium" />
           <ToastPrimitive.Description className="text-xs text-muted-foreground" />
         </ToastPrimitive.Content>
+        <ToastPrimitive.Action
+          className="-my-0.5 shrink-0 rounded-md px-2 py-1 text-xs font-medium text-primary outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+        />
         <ToastPrimitive.Close
           aria-label="关闭提示"
           className="-mt-1 -mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"

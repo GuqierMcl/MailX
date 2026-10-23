@@ -76,7 +76,9 @@ export function createPreviewWindowHost(platform: WindowPlatform): WindowHost {
   }
 }
 
+/** `?platform=windows` (or the older `?titlebar=windows`) previews that platform's window controls. */
 export function previewPlatformFromUrl(search: string): WindowPlatform | null {
-  const platform = new URLSearchParams(search).get('titlebar')
+  const params = new URLSearchParams(search)
+  const platform = params.get('platform') ?? params.get('titlebar')
   return platform === 'macos' || platform === 'windows' || platform === 'linux' ? platform : null
 }

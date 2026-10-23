@@ -127,4 +127,29 @@ describe('mock drafts and sending', () => {
     await expect(client.openComposer(reply.id)).resolves.toBeUndefined()
     await expect(client.openComposer('missing')).rejects.toMatchObject({ failure: { code: 'notFound' } })
   })
+
+  it('simulates failed, unknown and retried sends from the recipient address (browser preview only)', async () => {
+    const client = createMockClient({ sendStepMs: 10 })
+    const send = async (address: string) => {
+      const draft = await client.createDraft({ accountId: null, ...content, to: [{ name: null, address }], clientMutationId: crypto.randomUUID() })
+      return client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: crypto.randomUUID() })
+    }
+    const failed = await send('fail@example.com')
+    const unknown = await send('unknown@example.com')
+    const retry = await send('retry@example.com')
+    const fine = await send('ok@example.com')
+    await wait(60)
+    expect(await client.getOutbox(failed.id)).toMatchObject({ state: 'failed', error: { reason: 'recipientsRejected', rejected: [{ address: 'fail@example.com', code: 550 }] } })
+    expect(await client.getOutbox(unknown.id)).toMatchObject({ state: 'unknown', error: { reason: 'unknown' } })
+    expect(await client.getOutbox(retry.id)).toMatchObject({ state: 'queued', attempts: 1, error: { reason: 'connect' } })
+    expect(await client.getOutbox(fine.id)).toMatchObject({ state: 'accepted' })
+    // A failed send leaves its draft editable; an unknown one keeps it locked.
+    await expect(client.updateDraft({ id: failed.draftId!, expectedRevision: 1, accountId: null, ...content })).resolves.toMatchObject({ revision: 2 })
+    await expect(client.updateDraft({ id: unknown.draftId!, expectedRevision: 1, accountId: null, ...content })).rejects.toMatchObject({ failure: { code: 'draftLocked' } })
+    // "立即重试" is only for a queued item with a retry scheduled.
+    await client.retryOutboxNow(retry.id)
+    await wait(60)
+    expect((await client.getOutbox(retry.id)).state).toBe('accepted')
+    await expect(client.retryOutboxNow(failed.id)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
 })

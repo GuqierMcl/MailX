@@ -27,6 +27,13 @@ import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 export type MockClientOptions = {
   /** Time from the end of the undo window to `sending`, and from `sending` to `accepted`. Default 600 ms each. */
   sendStepMs?: number
+  /** Browser preview only: called when the main window "opens" a composer, e.g. to open a tab for it. */
+  onOpenComposer?: (draft: Draft) => void
+  /**
+   * Browser preview only: a composer tab starts with an empty mock, so it asks here for the draft
+   * its URL names. Return `null` and the mock makes a blank draft with that id.
+   */
+  resolveDraft?: (id: string) => Draft | null
 }
 
 export function createMockClient(options: MockClientOptions = {}): MailxClient {
@@ -46,8 +53,21 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const clone = <T,>(value: T) => structuredClone(value)
 
   function requireDraft(id: string) {
-    const draft = drafts.get(id)
+    const draft = drafts.get(id) ?? adoptDraft(id)
     if (!draft) throw notFound()
+    return draft
+  }
+  // Browser preview of `?composer=<id>`: the page's own mock has no such draft yet.
+  function adoptDraft(id: string) {
+    if (!options.resolveDraft) return null
+    const now = new Date().toISOString()
+    const found = options.resolveDraft(id)
+    const draft: Draft = found ?? {
+      id, accountId: accounts[0]?.id ?? '', kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '',
+      inReplyTo: null, references: null, createdAt: now, updatedAt: now, revision: 1,
+    }
+    if (!accounts.some((row) => row.id === draft.accountId)) draft.accountId = accounts[0]?.id ?? ''
+    drafts.set(id, draft)
     return draft
   }
   function newDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt' | 'revision'>) {
@@ -68,12 +88,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       announceDraft({ draftId: item.draftId, accountId: item.accountId, change: 'deleted' })
     }
   }
-  outbox.onCanceled = (item) => {
-    if (item.draftId) {
-      lockedDrafts.delete(item.draftId)
+  const unlock = (item: OutboxItem) => {
+    if (item.draftId && lockedDrafts.delete(item.draftId)) {
       announceDraft({ draftId: item.draftId, accountId: item.accountId, change: 'unlocked' })
     }
   }
+  outbox.onCanceled = unlock
+  // A failed send leaves the draft editable again; `unknown` keeps it locked.
+  outbox.onFailed = unlock
 
   return {
     available: true,
@@ -241,6 +263,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         clientMutationId, draftId, accountId: draft.accountId, subject: draft.subject,
         recipients: recipients.slice(0, 3).map((r) => r.address), recipientCount: recipients.length,
         undoMs: settings.settings.compose.undoSendSeconds * 1000,
+        simulate: simulatedOutcome(recipients.map((r) => r.address)),
       }))
     },
     listOutbox: async ({ accountId = null, includeAll = false } = {}) => clone(outbox.list(accountId, includeAll)),
@@ -248,7 +271,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async cancelOutbox(id) { return clone(outbox.cancel(id)) },
     async retryOutboxNow(id) { return clone(outbox.retryNow(id)) },
     async resolveUnknown(request) { return clone(outbox.resolve(request.id, request.resolution)) },
-    async openComposer(draftId) { requireDraft(draftId) },
+    async openComposer(draftId) {
+      const draft = clone(requireDraft(draftId))
+      options.onOpenComposer?.(draft)
+    },
     closeComposer: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),
     onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
@@ -567,6 +593,40 @@ function buildEmails(): EmailDetail[] {
   })
 }
 
+/** Browser preview only (`?seed=outbox`): one plain draft plus sends that end failed, unknown and retrying. */
+export async function seedPreviewOutbox(client: MailxClient) {
+  const make = async (to: string, subject: string, bodyText: string) => {
+    const draft = await client.createDraft({
+      accountId: null, to: [{ name: null, address: to }], cc: [], bcc: [], subject, bodyText, clientMutationId: crypto.randomUUID(),
+    })
+    return draft
+  }
+  await make('team@example.com', '周会纪要（草稿）', '各位好，\n\n本周的进展如下……')
+  for (const [to, subject] of [['fail@example.com', '报价单'], ['unknown@example.com', '合同终稿'], ['retry@example.com', '会议邀请']] as const) {
+    const draft = await make(to, subject, '正文')
+    await client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() })
+  }
+}
+
+/**
+ * Browser-mode only, never a product feature: the recipients decide how the simulated
+ * send ends so the failure UI can be exercised without a server.
+ *   fail@...     the server rejects that recipient (state `failed`)
+ *   unknown@...  no final reply arrives (state `unknown`)
+ *   retry@...    the first attempt fails before any data and is retried after 30 s
+ *                (state stays `queued` with a next attempt; "立即重试" then succeeds)
+ * Anything else is accepted.
+ */
+type Simulated = { kind: 'accept' } | { kind: 'fail'; address: string } | { kind: 'unknown' } | { kind: 'retry' }
+function simulatedOutcome(addresses: string[]): Simulated {
+  const find = (prefix: string) => addresses.find((address) => address.toLowerCase().startsWith(prefix))
+  const failing = find('fail@')
+  if (failing) return { kind: 'fail', address: failing }
+  if (find('unknown@')) return { kind: 'unknown' }
+  if (find('retry@')) return { kind: 'retry' }
+  return { kind: 'accept' }
+}
+
 type QueueInput = {
   clientMutationId: string
   draftId: string
@@ -575,6 +635,7 @@ type QueueInput = {
   recipients: string[]
   recipientCount: number
   undoMs: number
+  simulate?: Simulated
 }
 
 /**
@@ -587,9 +648,11 @@ function createMockOutbox(stepMs: number) {
   const byMutation = new Map<string, string>()
   const listeners = new Set<(change: OutboxChanged) => void>()
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
+  const plans = new Map<string, Simulated>()
   const api = {
     onAccepted: undefined as ((item: OutboxItem) => void) | undefined,
     onCanceled: undefined as ((item: OutboxItem) => void) | undefined,
+    onFailed: undefined as ((item: OutboxItem) => void) | undefined,
     byMutation: (id: string) => (byMutation.has(id) ? items.get(byMutation.get(id)!) : undefined),
     require(id: string) {
       const item = items.get(id)
@@ -607,6 +670,7 @@ function createMockOutbox(stepMs: number) {
         resolution: null, supersededBy: null, createdAt: now.toISOString(), updatedAt: now.toISOString(),
       }
       items.set(id, item)
+      plans.set(id, input.simulate ?? { kind: 'accept' })
       byMutation.set(input.clientMutationId, id)
       announce(item)
       timers.set(id, setTimeout(() => begin(id), input.undoMs + stepMs))
@@ -629,7 +693,9 @@ function createMockOutbox(stepMs: number) {
     },
     retryNow(id: string) {
       const item = api.require(id)
-      if (item.state !== 'queued') throw new MailxClientError({ code: 'conflict', message: '当前状态不能重试。', field: null })
+      if (item.state !== 'queued' || !item.nextAttemptAt) throw new MailxClientError({ code: 'conflict', message: '当前状态不能重试。', field: null })
+      clearTimeout(timers.get(id))
+      begin(id)
       return item
     },
     resolve(id: string, resolution: 'markSent' | 'resend') {
@@ -637,13 +703,15 @@ function createMockOutbox(stepMs: number) {
       if (item.state !== 'unknown' || item.resolution) throw new MailxClientError({ code: 'conflict', message: '当前状态不需要确认。', field: null })
       if (resolution === 'markSent') {
         item.resolution = 'markedSent'
+        item.acceptedAt = new Date().toISOString()
         set(item, 'accepted')
+        api.onAccepted?.(item)
         return item
       }
       item.resolution = 'resent'
       const next = api.queue({
         clientMutationId: crypto.randomUUID(), draftId: item.draftId ?? '', accountId: item.accountId, subject: item.subject,
-        recipients: item.recipients, recipientCount: item.recipientCount, undoMs: 0,
+        recipients: item.recipients, recipientCount: item.recipientCount, undoMs: 0, simulate: { kind: 'accept' },
       })
       next.messageId = item.messageId
       item.supersededBy = next.id
@@ -671,9 +739,32 @@ function createMockOutbox(stepMs: number) {
     const item = items.get(id)
     if (!item || item.state !== 'queued') return
     item.attempts += 1
+    item.nextAttemptAt = null
+    const plan = plans.get(id) ?? { kind: 'accept' }
+    if (plan.kind === 'retry' && item.attempts === 1) {
+      // Before any data: back to the queue with a retry scheduled, like a refused connection.
+      item.error = { reason: 'connect', smtpCode: null, text: 'mock: connection refused (simulated)', rejected: [] }
+      item.nextAttemptAt = new Date(Date.now() + 30_000).toISOString()
+      set(item, 'queued')
+      timers.set(id, setTimeout(() => begin(id), 30_000))
+      return
+    }
     item.dataStartedAt = new Date().toISOString()
     set(item, 'sending')
     timers.set(id, setTimeout(() => {
+      if (plan.kind === 'fail') {
+        item.error = { reason: 'recipientsRejected', smtpCode: 550, text: null, rejected: [{ address: plan.address, code: 550, text: 'mock: mailbox unavailable (simulated)' }] }
+        item.dataStartedAt = null
+        set(item, 'failed')
+        api.onFailed?.(item)
+        return
+      }
+      if (plan.kind === 'unknown') {
+        item.error = { reason: 'unknown', smtpCode: null, text: 'connectionLost', rejected: [] }
+        set(item, 'unknown')
+        return
+      }
+      item.error = null
       item.acceptedAt = new Date().toISOString()
       item.serverReply = { code: 250, text: 'mock: accepted (simulated, nothing was sent)' }
       set(item, 'accepted')

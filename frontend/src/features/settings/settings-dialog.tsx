@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { InformationCircleIcon, Notification03Icon, PaintBoardIcon, Shield01Icon } from '@hugeicons/core-free-icons'
+import { InformationCircleIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
   Sidebar,
@@ -17,15 +17,17 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { SecurityPane } from './security-pane'
 import { AppearancePane } from './appearance-pane'
 import { NotificationsPane } from './notifications-pane'
+import { ComposePane } from './compose-pane'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 
-export type SettingsSection = 'appearance' | 'notifications' | 'security' | 'about'
+export type SettingsSection = 'appearance' | 'notifications' | 'compose' | 'security' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
 const SECTIONS: { id: SettingsSection; name: string; icon: IconSvgElement }[] = [
   { id: 'appearance', name: '外观', icon: PaintBoardIcon },
   { id: 'notifications', name: '通知', icon: Notification03Icon },
+  { id: 'compose', name: '发信', icon: PencilEdit02Icon },
   { id: 'security', name: '安全性', icon: Shield01Icon },
   { id: 'about', name: '关于', icon: InformationCircleIcon },
 ]
@@ -52,7 +54,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
-        <DialogDescription className="sr-only">管理 MailX 的外观、通知与安全性。</DialogDescription>
+        <DialogDescription className="sr-only">管理 MailX 的外观、通知、发信与安全性。</DialogDescription>
         {/* Narrow windows turn the side navigation into a top strip instead of hiding it. */}
         <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
           <Sidebar collapsible="none"
@@ -84,6 +86,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {section === 'appearance' && <AppearancePane client={client} />}
               {section === 'notifications' && <NotificationsPane client={client} />}
+              {section === 'compose' && <ComposePane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
               {section === 'about' && <AboutSection />}
             </div>

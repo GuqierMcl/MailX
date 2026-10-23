@@ -178,6 +178,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 返回值与错误沿用 `ApiResult`；错误码 `bodyNotCached`、`draftLocked`、`forbidden`、`alreadySending`、`conflict`、`idempotencyConflict` 原样透传。核心调用都在阻塞线程上执行。
 
+前端用法（4b）：主窗口创建草稿时，`drafts_create` 的 `accountId` 在浏览单个账号的文件夹时传该账号，在统一收件箱 / 草稿 / 发件箱视图传 `null`（由宿主按 `compose.defaultAccountId` 解析）；`drafts_create_from` 遇 `bodyNotCached` 时先调用 `emails_fetch_body`，成功后用**同一个** `clientMutationId` 重试一次；写信窗口的每次保存都带上次保存的 `expectedRevision`，`conflict` 后重新 `drafts_get`，不静默合并。`mailx://notification-open` 的载荷可带 `outboxId`，主窗口据此选中发件箱项。
+
 事件：`mailx://outbox`（载荷 `OutboxChanged`）与 `mailx://drafts`（载荷 `DraftChanged`）发给 main，并发给受影响草稿的 `composer-{draftId}`（若该窗口存在）。`mailx://app-closing`（无载荷）在 main 关闭时发给每个写信窗口；`mailx://composer-close-requested`（无载荷）在系统要求关闭某写信窗口时发给它。收到后前端写出草稿并调用 `composer_close`；宿主 3 秒内未收到则直接关闭。
 
 ### 文件夹与同步状态

@@ -76,6 +76,37 @@ describe('add account wizard', () => {
     })
   })
 
+  it('sends the sender name with the new account, empty by default', async () => {
+    const { client, dialog, onCreated } = renderDialog()
+    await toProfile(dialog)
+    const field = within(dialog).getByLabelText('发件人名称')
+    expect(field).toHaveValue('')
+    expect(field).toHaveAttribute('placeholder', '收件人看到的名字，可留空')
+    fireEvent.change(field, { target: { value: ' 林薇 ' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config.senderName).toBe('林薇')
+  })
+
+  it('sends no sender name when the field is left empty', async () => {
+    const { client, dialog, onCreated } = renderDialog()
+    await toProfile(dialog)
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config.senderName).toBeNull()
+  })
+
+  it('shows a rejected sender name on the profile step', async () => {
+    const client = testClient()
+    client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'senderName', message: '发件人名称过长。' }))
+    const { dialog } = renderDialog(client)
+    await toProfile(dialog)
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    expect(await within(dialog).findByText('发件人名称过长。')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('发件人名称')).toHaveAttribute('aria-invalid', 'true')
+    expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
+  })
+
   it('keeps the connection, password included, when going back from the last step', async () => {
     const { dialog } = renderDialog()
     await toProfile(dialog)

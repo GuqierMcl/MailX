@@ -31,6 +31,10 @@ import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 import { loadMailTree } from './mail-tree'
+import { isMailView } from './mailbox'
+import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
+import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
+import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -63,6 +67,9 @@ export function Workbench({ client }: { client: MailxClient }) {
   // matches": changing mailbox, filter or search, or the list refreshing, never
   // closes it. Only opening another message, closing it, or it ceasing to exist does.
   const [openedState, setOpened] = useState<OpenedState | null>(null)
+  // The draft or outbox item shown in the reader while those views are open.
+  const [draftChoice, setDraftChoice] = useState<string | null>(null)
+  const [outboxChoice, setOutboxChoice] = useState<string | null>(null)
 
   const tree = useQuery({
     queryKey: mailKeys.tree(),
@@ -91,6 +98,19 @@ export function Workbench({ client }: { client: MailxClient }) {
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
   const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
+
+  const drafts = useDrafts(client)
+  const outbox = useOutbox(client)
+  const draftCount = drafts.data?.length ?? 0
+  const outboxCount = outbox.data?.length ?? 0
+  // The outbox entry exists only while something is unfinished; if the view is open
+  // when the last item completes, fall back to the inbox.
+  const outboxGone = mailbox.kind === 'outbox' && outbox.isSuccess && outboxCount === 0
+  const selectOutboxItem = useCallback((outboxId: string) => {
+    setOutboxChoice(outboxId)
+    setMailbox({ kind: 'outbox' })
+  }, [])
+  useComposeEvents(client, selectOutboxItem)
 
   // One sync round can change many folders; reload the tree once for the burst.
   // The timer outlives the subscription effect below: snapshots are already
@@ -146,12 +166,16 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [search])
 
   const currentFolder = mailbox.kind === 'folder' ? folders.find((folder) => folder.id === mailbox.folder.id && folder.selectable) : null
-  const activeMailbox: Mailbox = mailbox.kind === 'folder' && !treeLoading
-    ? currentFolder ? { kind: 'folder', folder: currentFolder } : { kind: 'unified', role: 'inbox' }
-    : mailbox
+  const activeMailbox: Mailbox = outboxGone
+    ? { kind: 'unified', role: 'inbox' }
+    : mailbox.kind === 'folder' && !treeLoading
+      ? currentFolder ? { kind: 'folder', folder: currentFolder } : { kind: 'unified', role: 'inbox' }
+      : mailbox
+  const mailView = isMailView(activeMailbox)
   const folderId = activeMailbox.kind === 'folder' ? activeMailbox.folder.id : null
   const folderRole = activeMailbox.kind === 'unified' ? activeMailbox.role : null
   const selectedAccountId = activeMailbox.kind === 'folder' ? activeMailbox.folder.accountId : null
+  const compose = useComposeActions(client, accounts, selectedAccountId)
   const sourceIdentity = JSON.stringify(accounts.filter((account) => !selectedAccountId || account.id === selectedAccountId)
     .map((account) => [account.id, account.mailboxSourceId]).sort())
   const currentSyncStates = Object.fromEntries(accounts.flatMap((account) => {
@@ -179,7 +203,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     queryFn: ({ pageParam }) => client.listEmails({ ...listQuery, cursor: pageParam }),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
-    enabled: !treeLoading,
+    enabled: !treeLoading && mailView,
     // Keep the previous rows (dimmed) while the next folder or filter loads, so
     // switching never blanks the list. Rows from another mailbox source (a
     // changed server) are never carried over.
@@ -232,7 +256,12 @@ export function Workbench({ client }: { client: MailxClient }) {
   // so the subscription does not restart on every tree change.
   const latestTree = useRef({ accounts, folders })
   useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
-  useEffect(() => client.onNotificationOpen(({ accountId, emailId }) => {
+  useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
+    if (outboxId) {
+      setOutboxChoice(outboxId)
+      setMailbox({ kind: 'outbox' })
+      return
+    }
     const { accounts, folders } = latestTree.current
     const account = accounts.find((row) => row.id === accountId)
     if (!account) return
@@ -248,6 +277,19 @@ export function Workbench({ client }: { client: MailxClient }) {
       setMailbox({ kind: 'folder', folder: inbox })
     }
   }), [client])
+
+  // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
+  const composeNew = compose.compose
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'n' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        void composeNew()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [composeNew])
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
@@ -289,12 +331,17 @@ export function Workbench({ client }: { client: MailxClient }) {
     )
   }
   const showAccountBadges = activeMailbox.kind === 'unified' && accounts.length > 1
-  const searchScope = activeMailbox.kind === 'folder'
+  // Drafts and outbox are not searched; the title-bar search then speaks for the inbox.
+  const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : activeMailbox.kind === 'folder'
     ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
     : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
 
   const selectMailbox = (next: Mailbox) => setMailbox(next)
+  // A search or a found message belongs to a mail list: leave the local views for it.
+  const leaveLocalView = () => { if (!mailView) setMailbox({ kind: 'unified', role: 'inbox' }) }
+  const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
+  const selectedOutbox = outbox.data?.find((item) => item.id === outboxChoice) ?? null
 
   // Every way of opening a message (list click, search result, notification) shows the reader.
   const openEmail = (email: { id: string; accountId: string }) => {
@@ -329,29 +376,37 @@ export function Workbench({ client }: { client: MailxClient }) {
             onSelect={selectMailbox}
             onOpenAccounts={() => setAccountsTarget({})}
             onOpenSettings={() => setSettings({ section: 'appearance' })}
+            onCompose={() => void compose.compose()}
+            draftCount={draftCount}
+            outboxCount={outboxCount}
             onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
           />
         )}
       >
         <TitleBarActions side="center">
-          <MailSearch value={search} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
+          <MailSearch value={mailView ? search : ''} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
         </TitleBarActions>
         <CommandPalette
           client={client}
           open={paletteOpen}
           onOpenChange={setPaletteOpen}
           scope={searchScope}
-          search={search}
+          search={mailView ? search : ''}
           folderId={folderId}
-          folderRole={folderRole}
+          folderRole={mailView ? folderRole : 'inbox'}
           sourceIdentity={sourceIdentity}
           accounts={accounts}
           folders={folders}
-          onApplySearch={setSearch}
+          onApplySearch={(text) => {
+            leaveLocalView()
+            setSearch(text)
+          }}
           onOpenEmail={(email, text) => {
+            leaveLocalView()
             setSearch(text)
             openEmail(email)
           }}
+          onCompose={() => void compose.compose()}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
@@ -361,6 +416,25 @@ export function Workbench({ client }: { client: MailxClient }) {
         {!layoutReady ? <div className="min-h-0 flex-1 bg-muted/40" /> : (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0" onLayoutChanged={saveListWidth}>
           <ResizablePanel panelRef={listPanel} defaultSize={listWidth} minSize={LIST_MIN} className="bg-muted/40">
+            {activeMailbox.kind === 'drafts' ? (
+              <DraftList
+                drafts={drafts.data}
+                loading={drafts.isPending}
+                error={drafts.isError ? clientFailure(drafts.error).message : null}
+                accounts={accounts.length > 1 ? accounts : null}
+                selectedId={selectedDraft}
+                onSelect={(id) => { setDraftChoice(id); setReaderCollapsed(false) }}
+              />
+            ) : activeMailbox.kind === 'outbox' ? (
+              <OutboxList
+                items={outbox.data}
+                loading={outbox.isPending}
+                error={outbox.isError ? clientFailure(outbox.error).message : null}
+                accounts={accounts.length > 1 ? accounts : null}
+                selectedId={selectedOutbox?.id ?? null}
+                onSelect={(id) => { setOutboxChoice(id); setReaderCollapsed(false) }}
+              />
+            ) : (
             <EmailList
               title={mailboxTitle(activeMailbox)}
               emails={emails}
@@ -381,6 +455,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onSelect={openEmail}
               onLoadMore={loadMore}
             />
+            )}
           </ResizablePanel>
           <ResizableHandle disabled={readerCollapsed} className={readerCollapsed ? 'pointer-events-none opacity-0' : undefined} />
           <ResizablePanel
@@ -395,6 +470,26 @@ export function Workbench({ client }: { client: MailxClient }) {
             // Folded away, the reader is out of reach for Tab and screen readers too.
             inert={readerCollapsed}
           >
+            {activeMailbox.kind === 'drafts' ? (
+              selectedDraft ? (
+                <DraftDetail
+                  key={selectedDraft}
+                  client={client}
+                  draftId={selectedDraft}
+                  accounts={accounts}
+                  onEdit={(id) => void compose.openDraft(id)}
+                  onGone={() => setDraftChoice(null)}
+                />
+              ) : <DraftPlaceholder />
+            ) : activeMailbox.kind === 'outbox' ? (
+              <OutboxDetail
+                key={selectedOutbox?.id ?? ''}
+                client={client}
+                item={selectedOutbox}
+                accounts={accounts}
+                onEdit={(id) => void compose.openDraft(id)}
+              />
+            ) : (
             <EmailView
               hidden={readerCollapsed}
               key={`${opened?.id ?? ''}:${body.identity}`}
@@ -406,7 +501,9 @@ export function Workbench({ client }: { client: MailxClient }) {
               error={opened && body.detail.isError ? clientFailure(body.detail.error).message : null}
               downloading={body.pending}
               onDownload={body.download}
+              onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
             />
+            )}
           </ResizablePanel>
         </ResizablePanelGroup>
         )}

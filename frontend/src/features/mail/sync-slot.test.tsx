@@ -23,7 +23,7 @@ function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRe
         mailbox={{ kind: 'unified', role: 'inbox' }}
         onSelect={vi.fn()}
         onOpenAccounts={vi.fn()}
-        onOpenSettings={vi.fn()}
+        onOpenSettings={vi.fn()} onCompose={vi.fn()} draftCount={0} outboxCount={0}
         onRefresh={onRefresh}
       />
     </TooltipProvider>
@@ -95,7 +95,7 @@ describe('junk folder badge', () => {
     render(
       <TooltipProvider>
         <MailSidebar accounts={[account]} folders={folders} loading={false} syncStates={{}} mailbox={mailbox}
-          onSelect={vi.fn()} onOpenAccounts={vi.fn()} onOpenSettings={vi.fn()} onRefresh={vi.fn()} />
+          onSelect={vi.fn()} onOpenAccounts={vi.fn()} onOpenSettings={vi.fn()} onCompose={vi.fn()} draftCount={0} outboxCount={0} onRefresh={vi.fn()} />
       </TooltipProvider>,
     )
   }

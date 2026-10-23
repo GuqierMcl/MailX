@@ -9,6 +9,7 @@ import {
   File01Icon,
   Folder01Icon,
   InboxIcon,
+  MailUpload01Icon,
   PencilEdit02Icon,
   RefreshIcon,
   SentIcon,
@@ -16,7 +17,6 @@ import {
   SpamIcon,
 } from '@hugeicons/core-free-icons'
 import type { Account, AccountSyncState, Folder, FolderRole, SyncFailure } from '@/generated/accounts'
-import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   SidebarContent,
@@ -40,6 +40,9 @@ import { buildFolderTree, countedUnread, loadCollapsed, saveCollapsed, type Fold
 import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 
+/** Shown in the tooltip; the shortcut itself is handled by the workbench. */
+const COMPOSE_SHORTCUT = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘N' : 'Ctrl N'
+
 const ROLE_ICONS: Record<FolderRole, IconSvgElement> = {
   inbox: InboxIcon,
   drafts: File01Icon,
@@ -60,11 +63,16 @@ type MailSidebarProps = {
   onSelect: (mailbox: Mailbox) => void
   onOpenAccounts: () => void
   onOpenSettings: () => void
+  onCompose: () => void
+  /** Unfinished drafts; the entry is always there. */
+  draftCount: number
+  /** Unfinished sends (queued, sending, failed, unknown); the entry only appears when there are some. */
+  outboxCount: number
   /** Starts the account's next sync round now. */
   onRefresh: (accountId: string) => void
 }
 
-export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onRefresh }: MailSidebarProps) {
+export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onCompose, draftCount, outboxCount, onRefresh }: MailSidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const toggle = (id: string, open: boolean) => {
     const next = new Set(collapsed)
@@ -83,11 +91,14 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
   return (
     <div data-slot="mail-sidebar" className="flex h-full min-h-0 flex-col">
       <SidebarHeader>
-        {/* Composing is not implemented yet. */}
-        <Button className="w-full" disabled>
-          <HugeiconsIcon icon={PencilEdit02Icon} />
-          写邮件
-        </Button>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={onCompose} className="font-medium" title={`写邮件（${COMPOSE_SHORTCUT}）`}>
+              <HugeiconsIcon icon={PencilEdit02Icon} />
+              <span>写邮件</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -103,6 +114,22 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                 </SidebarMenuButton>
                 {!unifiedCountsKnown ? <SidebarMenuBadge aria-label="未读数待刷新">—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}>
+                  <HugeiconsIcon icon={File01Icon} />
+                  <span>草稿</span>
+                </SidebarMenuButton>
+                {draftCount > 0 && <SidebarMenuBadge aria-label={`${draftCount} 份草稿`}>{draftCount}</SidebarMenuBadge>}
+              </SidebarMenuItem>
+              {outboxCount > 0 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton isActive={mailbox.kind === 'outbox'} onClick={() => onSelect({ kind: 'outbox' })}>
+                    <HugeiconsIcon icon={MailUpload01Icon} />
+                    <span>发件箱</span>
+                  </SidebarMenuButton>
+                  <SidebarMenuBadge aria-label={`${outboxCount} 封未完成的邮件`}>{outboxCount}</SidebarMenuBadge>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

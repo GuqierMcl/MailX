@@ -248,7 +248,9 @@ type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { 
 function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
   const [displayName, setDisplayName] = useState(account.displayName)
   const [color, setColor] = useState(account.color)
+  const [senderName, setSenderName] = useState(account.senderName ?? '')
   const [nameError, setNameError] = useState<string | null>(null)
+  const [senderNameError, setSenderNameError] = useState<string | null>(null)
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' })
   const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName })
   const queue = useRef<Promise<void>>(Promise.resolve())
@@ -257,7 +259,8 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
 
   const save = (patch: Partial<typeof committed.current>) => {
     const profile = { ...committed.current, ...patch }
-    if (profile.displayName === committed.current.displayName && profile.color === committed.current.color) return
+    if (profile.displayName === committed.current.displayName && profile.color === committed.current.color &&
+      profile.senderName === committed.current.senderName) return
     committed.current = profile
     if (alive.current) setStatus({ kind: 'saving' })
     queue.current = queue.current.then(async () => {
@@ -268,7 +271,17 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
         onSaved(saved)
         if (alive.current) setStatus({ kind: 'saved' })
       } catch (cause) {
-        if (alive.current && committed.current === profile) setStatus({ kind: 'failed', failure: clientFailure(cause) })
+        const failure = clientFailure(cause)
+        // A rejected sender name is shown on its field, not as a general failure.
+        if (failure.field === 'senderName') {
+          if (alive.current) {
+            setSenderNameError(failure.message)
+            setStatus({ kind: 'idle' })
+          }
+          committed.current = { ...committed.current, senderName: account.senderName }
+          return
+        }
+        if (alive.current && committed.current === profile) setStatus({ kind: 'failed', failure })
       }
     })
   }
@@ -289,6 +302,13 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
     save({ displayName: name })
   }
 
+  const commitSenderName = () => {
+    const name = senderName.trim()
+    if (name !== senderName) setSenderName(name)
+    setSenderNameError(null)
+    save({ senderName: name || null })
+  }
+
   useEffect(() => {
     alive.current = true
     return () => {
@@ -303,7 +323,7 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
     <SettingsGroup
       title="资料"
       badge={<SaveBadge status={status} />}
-      description="名称和标识颜色只影响显示，修改后自动保存，不会重新连接。">
+      description="名称、发件人名称和标识颜色修改后自动保存，不会重新连接。">
       {status.kind === 'failed' && (
         <Alert variant="destructive">
           <AlertTitle>资料未保存</AlertTitle>
@@ -314,6 +334,13 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
         displayName={displayName}
         color={color}
         nameError={nameError}
+        senderName={senderName}
+        senderNameError={senderNameError}
+        onSenderNameChange={(value) => {
+          setSenderName(value)
+          setSenderNameError(null)
+        }}
+        onSenderNameCommit={commitSenderName}
         onDisplayNameChange={(value) => {
           typed.current = value
           setDisplayName(value)

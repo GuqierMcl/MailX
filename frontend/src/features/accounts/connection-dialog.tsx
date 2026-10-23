@@ -61,7 +61,7 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
                 account={account}
                 intro={{
                   title: '保存后立即重新连接',
-                  description: 'MailX 会断开当前连接，用新的设置重新登录收信服务器并同步；暂不发送邮件。',
+                  description: 'MailX 会断开当前连接，用新的设置重新登录收信服务器并同步；已排队的邮件下次发送时使用新设置。',
                 }}
                 submitLabel="保存并重新连接"
                 submittingLabel="保存中…"

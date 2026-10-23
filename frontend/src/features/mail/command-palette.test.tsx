@@ -75,6 +75,16 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('在 全部收件箱 中搜索'))
   })
 
+  it('offers 写邮件 as a command and opens a composer for a new draft', async () => {
+    const { client, input } = await openPalette()
+    expect(within(screen.getByRole('dialog')).getByRole('option', { name: '写邮件' })).toBeInTheDocument()
+    await userEvent.type(input, '写邮')
+    await userEvent.click(await screen.findByRole('option', { name: '写邮件' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The mock keeps the new draft in its list, so a draft now exists.
+    await waitFor(async () => expect(await client.listDrafts()).toHaveLength(1))
+  })
+
   it('says so when nothing matches', async () => {
     const { input } = await openPalette()
     await userEvent.type(input, 'zzzzqqqq')

@@ -10,6 +10,12 @@ type ProfileFieldsProps = {
   displayName: string
   color: string | null
   nameError?: string | null
+  /** The name recipients see in `From`; empty sends with the bare address. */
+  senderName: string
+  senderNameError?: string | null
+  onSenderNameChange(value: string): void
+  /** Called when editing the sender name settles (blur or Enter). */
+  onSenderNameCommit?(): void
   onDisplayNameChange(value: string): void
   /** Called when editing the name settles (blur or Enter). */
   onDisplayNameCommit?(): void
@@ -18,7 +24,7 @@ type ProfileFieldsProps = {
 }
 
 /** Name and identification color: how the account looks in MailX, nothing more. */
-export function ProfileFields({ displayName, color, nameError, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
+export function ProfileFields({ displayName, color, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
   const choices: { value: string | null; name: string }[] = [{ value: null, name: '无颜色' }, ...ACCOUNT_COLORS]
   return (
     <div className="flex flex-col gap-6">
@@ -38,6 +44,21 @@ export function ProfileFields({ displayName, color, nameError, onDisplayNameChan
             }} />
         </div>
         {nameError ? <FieldError id="displayName-error">{nameError}</FieldError> : <FieldDescription>只用于 MailX 中的显示。</FieldDescription>}
+      </Field>
+      <Field data-invalid={!!senderNameError}>
+        <FieldLabel htmlFor="senderName">发件人名称</FieldLabel>
+        <Input id="senderName" value={senderName} disabled={disabled} placeholder="收件人看到的名字，可留空" maxLength={128}
+          autoComplete="off"
+          aria-invalid={!!senderNameError} aria-describedby={senderNameError ? 'senderName-error' : undefined}
+          onChange={(event) => onSenderNameChange(event.target.value)}
+          onBlur={() => onSenderNameCommit?.()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              onSenderNameCommit?.()
+            }
+          }} />
+        {senderNameError ? <FieldError id="senderName-error">{senderNameError}</FieldError> : <FieldDescription>写在发出邮件的“发件人”里，留空则只显示邮箱地址。</FieldDescription>}
       </Field>
       <Field>
         <FieldTitle id="account-color-label">标识颜色</FieldTitle>
