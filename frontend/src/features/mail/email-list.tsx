@@ -172,18 +172,25 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
       aria-current={selected ? 'true' : undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm transition-colors hover:bg-foreground/5',
+        'flex w-full items-center gap-3 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5',
         selected && 'bg-background shadow-xs hover:bg-background',
       )}
     >
-      <SenderAvatar sender={email.from} accountId={email.accountId} className="mt-0.5" />
+      {/* Avatar and unread marker are centered on the row; the marker has a
+          column of its own at the far left, so every dot sits on the same line
+          however long the sender is. A fixed blue, not the accent color: a red
+          or amber accent would read as an error or clash with the star. */}
+      <span className="-mr-1.5 flex w-2 shrink-0 justify-center">
+        {!email.isRead && <span aria-label="未读" className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
+      </span>
+      <SenderAvatar sender={email.from} accountId={email.accountId} />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
         <div className="flex w-full flex-col gap-1">
           <div className="flex items-center gap-2">
             {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
                 muted, and gives way to the sender before the time ever does. */}
             <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className={cn('truncate', email.isRead ? 'font-medium' : 'font-semibold')}>{displayName(email.from)}</span>
+              <span className={cn('truncate', email.isRead ? 'font-normal' : 'font-semibold')}>{displayName(email.from)}</span>
               {account && (
                 <>
                   <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
@@ -191,12 +198,12 @@ function EmailRow({ email, account, selected, onSelect }: EmailRowProps) {
                 </>
               )}
             </span>
-            {!email.isRead && <span aria-label="未读" className="size-2 shrink-0 rounded-full bg-primary" />}
             <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
               {formatListTime(email.receivedAt)}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-medium">
+          {/* Unread is told by weight too, never by the dot's color alone. */}
+          <div className={cn('flex items-center gap-1.5 text-xs', email.isRead ? 'font-normal text-foreground/75' : 'font-semibold')}>
             {email.isStarred && (
               <HugeiconsIcon icon={StarIcon} aria-label="已加星标" fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
             )}
