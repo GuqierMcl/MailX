@@ -4,11 +4,16 @@ use ts_rs::TS;
 
 /// Who is asking. Only the interactive composer may queue mail for sending
 /// (sending.md section 3): a model or MCP principal never can, however it
-/// calls. The host decides the principal; the core never infers it.
+/// calls. Settling an `unknown` item is also allowed from the main window,
+/// the other interactive UI. The host decides the principal; the core never
+/// infers it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Caller {
     /// The user's own composer window.
     Composer,
+    /// The user's main window (outbox view); may settle `unknown` items but
+    /// not queue mail.
+    MainWindow,
     /// An MCP client.
     Mcp,
     /// A model acting on its own.

@@ -224,7 +224,7 @@ async fn queueing_is_idempotent_checks_the_revision_and_the_caller() {
             .code,
         ErrorCode::Conflict
     );
-    for caller in [Caller::Mcp, Caller::Model] {
+    for caller in [Caller::Mcp, Caller::Model, Caller::MainWindow] {
         assert_eq!(
             fx.core
                 .queue_send(caller, Fx::request(&draft), 0)
@@ -612,16 +612,19 @@ async fn an_unknown_item_can_be_marked_sent() {
         resolution: UnknownResolution::MarkSent,
         client_mutation_id: id(),
     };
-    assert_eq!(
-        fx.core
-            .resolve_unknown(Caller::Model, request.clone())
-            .unwrap_err()
-            .code,
-        ErrorCode::Forbidden
-    );
+    for caller in [Caller::Model, Caller::Mcp] {
+        assert_eq!(
+            fx.core
+                .resolve_unknown(caller, request.clone())
+                .unwrap_err()
+                .code,
+            ErrorCode::Forbidden
+        );
+    }
+    // The main window is interactive UI too.
     let done = fx
         .core
-        .resolve_unknown(Caller::Composer, request.clone())
+        .resolve_unknown(Caller::MainWindow, request.clone())
         .unwrap();
     assert_eq!(done.state, OutboxState::Accepted);
     assert_eq!(done.resolution, Some(OutboxResolution::MarkedSent));

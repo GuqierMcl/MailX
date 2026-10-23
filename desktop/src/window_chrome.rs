@@ -36,6 +36,9 @@ pub(crate) const WINDOW_STATE_FLAGS: StateFlags = StateFlags::SIZE
 pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
     tauri_plugin_window_state::Builder::default()
         .with_state_flags(WINDOW_STATE_FLAGS)
+        // Composer windows are placed by the host each time (v0.1 does not
+        // remember their size or position).
+        .with_filter(|label| label == MAIN_WINDOW)
         .build()
 }
 
@@ -150,9 +153,25 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
     // Created hidden: the window-state plugin restores size and position while
     // the window is built, and showing it afterwards avoids a jump from the
     // default geometry.
-    let builder = WebviewWindowBuilder::from_config(app, &config)?
-        .visible(false)
-        .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url));
+    let builder = style_builder(
+        WebviewWindowBuilder::from_config(app, &config)?
+            .visible(false)
+            .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url)),
+    );
+    let window = builder.build()?;
+    watch_state(&window);
+    crate::compose::watch_close(&window);
+    window.show()?;
+    window.set_focus()?;
+    Ok(window)
+}
+
+/// The platform title bar treatment shared by every window: macOS keeps the
+/// traffic lights over a transparent title bar, other platforms drop system
+/// decorations and the frontend draws the controls.
+pub(crate) fn style_builder<'a, R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -162,11 +181,7 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
         .allow_link_preview(false);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
-    let window = builder.build()?;
-    watch_state(&window);
-    window.show()?;
-    window.set_focus()?;
-    Ok(window)
+    builder
 }
 
 pub(crate) fn chrome(window: &WebviewWindow) -> WindowChrome {
@@ -211,8 +226,9 @@ fn read_state(window: &WebviewWindow, focused: Option<bool>) -> WindowState {
 
 /// Pushes maximize, fullscreen and focus changes so controls can switch glyphs
 /// and dim like native ones. Only changes are emitted, not every resize step.
-fn watch_state(window: &WebviewWindow) {
+pub(crate) fn watch_state(window: &WebviewWindow) {
     let app = window.app_handle().clone();
+    let label = window.label().to_owned();
     let last = Mutex::new(None);
     window.on_window_event(move |event| {
         let focused = match event {
@@ -220,7 +236,7 @@ fn watch_state(window: &WebviewWindow) {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => None,
             _ => return,
         };
-        let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        let Some(window) = app.get_webview_window(&label) else {
             return;
         };
         let state = read_state(&window, focused);
@@ -229,7 +245,7 @@ fn watch_state(window: &WebviewWindow) {
         };
         if *last != Some(state) {
             *last = Some(state);
-            let _ = app.emit_to(EventTarget::webview_window(MAIN_WINDOW), STATE_EVENT, state);
+            let _ = app.emit_to(EventTarget::webview_window(&label), STATE_EVENT, state);
         }
     });
 }

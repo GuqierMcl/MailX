@@ -1,6 +1,12 @@
 import type {
   Account,
   AccountConfigInput,
+  Draft,
+  DraftChanged,
+  DraftSummary,
+  OutboxChanged,
+  OutboxItem,
+  OutboxState,
   EmailDetail,
   EmailSummary,
   Folder,
@@ -18,13 +24,56 @@ import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
  * Data is synthetic and lost on reload; nothing touches the network or disk.
  * Settings start from the first-paint appearance cache so a reload keeps them.
  */
-export function createMockClient(): MailxClient {
+export type MockClientOptions = {
+  /** Time from the end of the undo window to `sending`, and from `sending` to `accepted`. Default 600 ms each. */
+  sendStepMs?: number
+}
+
+export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
   let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
+  const sendStepMs = options.sendStepMs ?? 600
+  const outbox = createMockOutbox(sendStepMs)
+  const drafts = new Map<string, Draft>()
+  const draftsByMutation = new Map<string, string>()
+  const draftListeners = new Set<(change: DraftChanged) => void>()
+  const lockedDrafts = new Set<string>()
+  const announceDraft = (change: DraftChanged) => draftListeners.forEach((listener) => listener(structuredClone(change)))
+  const clone = <T,>(value: T) => structuredClone(value)
+
+  function requireDraft(id: string) {
+    const draft = drafts.get(id)
+    if (!draft) throw notFound()
+    return draft
+  }
+  function newDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt' | 'revision'>) {
+    const now = new Date().toISOString()
+    const created: Draft = { ...draft, id: crypto.randomUUID(), createdAt: now, updatedAt: now, revision: 1 }
+    drafts.set(created.id, created)
+    return created
+  }
+  const summary = (draft: Draft): DraftSummary => ({
+    id: draft.id, accountId: draft.accountId, kind: draft.kind, sourceEmailId: draft.sourceEmailId, to: draft.to,
+    subject: draft.subject, preview: draft.bodyText.replace(/\s+/g, ' ').slice(0, 120), updatedAt: draft.updatedAt, revision: draft.revision,
+  })
+
+  // A simulated send: never contacts anything. The item moves queued -> sending -> accepted on timers.
+  outbox.onAccepted = (item) => {
+    if (item.draftId && drafts.delete(item.draftId)) {
+      lockedDrafts.delete(item.draftId)
+      announceDraft({ draftId: item.draftId, accountId: item.accountId, change: 'deleted' })
+    }
+  }
+  outbox.onCanceled = (item) => {
+    if (item.draftId) {
+      lockedDrafts.delete(item.draftId)
+      announceDraft({ draftId: item.draftId, accountId: item.accountId, change: 'unlocked' })
+    }
+  }
 
   return {
     available: true,
@@ -134,6 +183,77 @@ export function createMockClient(): MailxClient {
     testNotification: async () => undefined,
     previewSound: async () => undefined,
     onNotificationOpen: () => () => undefined,
+    async createDraft(request) {
+      const accountId = request.accountId ?? (accounts.some((a) => a.id === settings.settings.compose.defaultAccountId) ? settings.settings.compose.defaultAccountId : accounts[0]?.id)
+      if (!accountId || !accounts.some((a) => a.id === accountId)) throw notFound()
+      const known = draftsByMutation.get(request.clientMutationId)
+      if (known && drafts.has(known)) return clone(drafts.get(known)!)
+      const draft = newDraft({ accountId, kind: 'new', sourceEmailId: null, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyText: request.bodyText, inReplyTo: null, references: null })
+      draftsByMutation.set(request.clientMutationId, draft.id)
+      return clone(draft)
+    },
+    async createDraftFrom(request) {
+      const known = draftsByMutation.get(request.clientMutationId)
+      if (known && drafts.has(known)) return clone(drafts.get(known)!)
+      const email = emails.find((row) => row.summary.id === request.emailId)
+      if (!email) throw notFound()
+      const base = email.summary.subject.replace(/^(回复|转发)：/, '')
+      const quoted = `\n\n${email.summary.from.name ?? email.summary.from.address} 写道：\n${(email.body?.text ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`
+      const reply = request.kind !== 'forward'
+      const draft = newDraft({
+        accountId: email.summary.accountId, kind: request.kind, sourceEmailId: email.summary.id,
+        to: reply ? [email.summary.from] : [], cc: request.kind === 'replyAll' ? email.cc : [], bcc: [],
+        subject: `${reply ? '回复' : '转发'}：${base}`, bodyText: quoted, inReplyTo: null, references: null,
+      })
+      draftsByMutation.set(request.clientMutationId, draft.id)
+      return clone(draft)
+    },
+    async listDrafts(accountId = null) {
+      return [...drafts.values()].filter((d) => !accountId || d.accountId === accountId)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)).map(summary)
+    },
+    async getDraft(id) { return clone(requireDraft(id)) },
+    async updateDraft(request) {
+      const draft = requireDraft(request.id)
+      if (lockedDrafts.has(draft.id)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
+      if (draft.revision !== request.expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
+      const { id: _id, expectedRevision: _revision, accountId, ...content } = request
+      void _id; void _revision
+      Object.assign(draft, content, { accountId: accountId ?? draft.accountId, revision: draft.revision + 1, updatedAt: new Date().toISOString() })
+      return clone(draft)
+    },
+    async deleteDraft(id) {
+      const draft = requireDraft(id)
+      if (lockedDrafts.has(id)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
+      drafts.delete(draft.id)
+    },
+    async queueSend({ draftId, expectedRevision, clientMutationId }) {
+      const draft = requireDraft(draftId)
+      const again = outbox.byMutation(clientMutationId)
+      if (again) return clone(again)
+      if (lockedDrafts.has(draftId)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
+      if (draft.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
+      const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
+      if (recipients.length === 0) throw new MailxClientError({ code: 'validation', message: '请至少填写一个收件人。', field: 'draft.recipients' })
+      lockedDrafts.add(draftId)
+      announceDraft({ draftId, accountId: draft.accountId, change: 'locked' })
+      return clone(outbox.queue({
+        clientMutationId, draftId, accountId: draft.accountId, subject: draft.subject,
+        recipients: recipients.slice(0, 3).map((r) => r.address), recipientCount: recipients.length,
+        undoMs: settings.settings.compose.undoSendSeconds * 1000,
+      }))
+    },
+    listOutbox: async ({ accountId = null, includeAll = false } = {}) => clone(outbox.list(accountId, includeAll)),
+    async getOutbox(id) { return clone(outbox.require(id)) },
+    async cancelOutbox(id) { return clone(outbox.cancel(id)) },
+    async retryOutboxNow(id) { return clone(outbox.retryNow(id)) },
+    async resolveUnknown(request) { return clone(outbox.resolve(request.id, request.resolution)) },
+    async openComposer(draftId) { requireDraft(draftId) },
+    closeComposer: async () => undefined,
+    onOutbox: (listener) => outbox.subscribe(listener),
+    onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
+    onAppClosing: () => () => undefined,
+    onComposerCloseRequested: () => () => undefined,
     getSettings: async () => structuredClone(settings),
     async updateSettings(next) {
       const appearance = next.appearance ?? settings.settings.appearance
@@ -445,4 +565,120 @@ function buildEmails(): EmailDetail[] {
       })),
     }
   })
+}
+
+type QueueInput = {
+  clientMutationId: string
+  draftId: string
+  accountId: string
+  subject: string
+  recipients: string[]
+  recipientCount: number
+  undoMs: number
+}
+
+/**
+ * The browser-mode send queue: queued -> sending -> accepted on timers. It only
+ * imitates the core's state machine for designing the UI. Nothing is sent, and
+ * the replies and message ids are visibly synthetic.
+ */
+function createMockOutbox(stepMs: number) {
+  const items = new Map<string, OutboxItem>()
+  const byMutation = new Map<string, string>()
+  const listeners = new Set<(change: OutboxChanged) => void>()
+  const timers = new Map<string, ReturnType<typeof setTimeout>>()
+  const api = {
+    onAccepted: undefined as ((item: OutboxItem) => void) | undefined,
+    onCanceled: undefined as ((item: OutboxItem) => void) | undefined,
+    byMutation: (id: string) => (byMutation.has(id) ? items.get(byMutation.get(id)!) : undefined),
+    require(id: string) {
+      const item = items.get(id)
+      if (!item) throw new MailxClientError(missing)
+      return item
+    },
+    queue(input: QueueInput) {
+      const now = new Date()
+      const id = crypto.randomUUID()
+      const item: OutboxItem = {
+        id, draftId: input.draftId, accountId: input.accountId, messageId: `<mock-${id}@mock.invalid>`, subject: input.subject,
+        recipients: input.recipients, recipientCount: input.recipientCount, state: 'queued',
+        notBefore: new Date(now.getTime() + input.undoMs).toISOString(), dataStartedAt: null, attempts: 0, nextAttemptAt: null,
+        firstQueuedAt: now.toISOString(), error: null, acceptedAt: null, serverReply: null, serverCopyMessageId: null,
+        resolution: null, supersededBy: null, createdAt: now.toISOString(), updatedAt: now.toISOString(),
+      }
+      items.set(id, item)
+      byMutation.set(input.clientMutationId, id)
+      announce(item)
+      timers.set(id, setTimeout(() => begin(id), input.undoMs + stepMs))
+      return item
+    },
+    list(accountId: string | null, includeAll: boolean) {
+      return [...items.values()]
+        .filter((item) => (!accountId || item.accountId === accountId) &&
+          (includeAll || item.state === 'queued' || item.state === 'sending' || item.state === 'failed' || (item.state === 'unknown' && !item.resolution)))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    },
+    cancel(id: string) {
+      const item = api.require(id)
+      if (item.state === 'sending') throw new MailxClientError({ code: 'alreadySending', message: '已经开始发送，无法撤销。', field: null })
+      if (item.state !== 'queued') throw new MailxClientError({ code: 'conflict', message: '当前状态不能撤销。', field: null })
+      clearTimeout(timers.get(id))
+      set(item, 'canceled')
+      api.onCanceled?.(item)
+      return item
+    },
+    retryNow(id: string) {
+      const item = api.require(id)
+      if (item.state !== 'queued') throw new MailxClientError({ code: 'conflict', message: '当前状态不能重试。', field: null })
+      return item
+    },
+    resolve(id: string, resolution: 'markSent' | 'resend') {
+      const item = api.require(id)
+      if (item.state !== 'unknown' || item.resolution) throw new MailxClientError({ code: 'conflict', message: '当前状态不需要确认。', field: null })
+      if (resolution === 'markSent') {
+        item.resolution = 'markedSent'
+        set(item, 'accepted')
+        return item
+      }
+      item.resolution = 'resent'
+      const next = api.queue({
+        clientMutationId: crypto.randomUUID(), draftId: item.draftId ?? '', accountId: item.accountId, subject: item.subject,
+        recipients: item.recipients, recipientCount: item.recipientCount, undoMs: 0,
+      })
+      next.messageId = item.messageId
+      item.supersededBy = next.id
+      return next
+    },
+    subscribe(listener: (change: OutboxChanged) => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+  }
+
+  function announce(item: OutboxItem) {
+    const change: OutboxChanged = {
+      accountId: item.accountId, outboxId: item.id, draftId: item.draftId, state: item.state, attempts: item.attempts,
+      nextAttemptAt: item.nextAttemptAt, errorReason: item.error?.reason ?? null,
+    }
+    listeners.forEach((listener) => listener(change))
+  }
+  function set(item: OutboxItem, state: OutboxState) {
+    item.state = state
+    item.updatedAt = new Date().toISOString()
+    announce(item)
+  }
+  function begin(id: string) {
+    const item = items.get(id)
+    if (!item || item.state !== 'queued') return
+    item.attempts += 1
+    item.dataStartedAt = new Date().toISOString()
+    set(item, 'sending')
+    timers.set(id, setTimeout(() => {
+      item.acceptedAt = new Date().toISOString()
+      item.serverReply = { code: 250, text: 'mock: accepted (simulated, nothing was sent)' }
+      set(item, 'accepted')
+      api.onAccepted?.(item)
+    }, stepMs))
+  }
+  return api
 }

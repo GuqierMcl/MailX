@@ -331,14 +331,15 @@ impl MailxCore {
         Ok(item)
     }
 
-    /// Settles an `unknown` item: `MarkSent` accepts it; `Resend` queues a new
+    /// Settles an `unknown` item (interactive callers only: the composer or the
+    /// main window): `MarkSent` accepts it; `Resend` queues a new
     /// attempt with the same Message-ID and bytes and returns that new item.
     pub fn resolve_unknown(
         &self,
         caller: Caller,
         request: ResolveUnknownRequest,
     ) -> Result<OutboxItem, AppError> {
-        if caller != Caller::Composer {
+        if !matches!(caller, Caller::Composer | Caller::MainWindow) {
             return Err(AppError::new(ErrorCode::Forbidden));
         }
         let (changed, old) = {

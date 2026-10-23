@@ -312,6 +312,14 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 未验证：真实服务商与真实代理上的发送、进程在 `DATA` 中途被强杀的真实恢复（用写行模拟 `sending` 状态代替）、系统时钟跳变、桌面事件转发（第 4 步）。
 
+### 2026-10-23 发信第 4a 步：写信窗口宿主与客户端层
+
+未开启 Comet。新增 `desktop/src/window_access.rs`（窗口类别解析、按命令白名单、草稿归属）、`desktop/src/compose.rs`（草稿与发件箱命令、`composer_open` / `composer_close`、事件转发、关闭与退出生命周期）、`desktop/capabilities/composer.json`；`notifications` 增加发送结果通知；核心新增 `Caller::MainWindow`，`resolve_unknown` 对其放行；前端新增 `lib/composer-window.ts`，`MailxClient` 与桌面 / 模拟客户端补全草稿、发件箱、窗口命令与四个事件订阅。未连接任何邮件服务器、代理，未发送任何邮件；模拟客户端的发送只是计时器状态机。
+
+自动测试覆盖：窗口标签解析（拒绝 `composer-x`、大写 UUID、无连字符、花括号、多余后缀）；全部命令的 main / composer 白名单表；两类窗口的页面来源检查一致；composer 只能碰自己的草稿（大小写、空串、缺失均拒绝）；main 的 `outbox_queue_send` 被拒、`outbox_resolve_unknown` 放行；核心 `queue_send` 对 `MainWindow` / `Mcp` / `Model` 为 `forbidden`，`resolve_unknown` 对 `MainWindow` 放行、对 `Mcp` / `Model` 拒绝；事件目标标签；层叠位置的夹取与循环；关闭请求的代次记录；发送结果通知的计划（只通知终态、遵循启用 / 前台 / 预览设置、预览关闭时不含主题、`accepted` 静音）；前端命令参数转发、主体不可由页面指定、composer URL 检测、模拟客户端的草稿修订、排队 → 发送中 → 已接受、撤销与 `alreadySending`。
+
+未验证：真实窗口的创建、聚焦、层叠位置、关闭拦截与 3 秒回退、Cmd+Q / 主窗口关闭等待写信窗口、三平台标题栏、系统通知点击，见下节新增清单（尚未执行）。Tauri capability 对 `composer-*` 的实际匹配也未在运行中的应用里确认。
+
 ## 6. 窗口行为的手动验证
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：
@@ -322,6 +330,19 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - macOS 用 Cmd+H 隐藏应用后直接 Cmd+Q：再次启动窗口正常显示（这是不保存可见性的原因）。
 - Windows / Linux：自绘标题栏的最小化、最大化、关闭仍然可用，重启后标题栏样式不变。
 - 删除配置目录里的 `.window-state.json` 后启动：回到 `tauri.conf.json` 的默认大小。
+
+### 写信窗口（发信第 4a 步，尚未执行）
+
+需要先有写信界面（单独任务）才能完整操作；此前可从 `tauri dev` 的开发者工具里用 `invoke` 调 `drafts_create` 与 `composer_open` 辅助检查。macOS、Windows、Linux 各做一遍并记录平台与版本：
+
+- `composer_open` 打开新窗口：标题栏与 main 同样式（macOS 红绿灯位置正确，Windows / Linux 自绘按钮与 `gtk-decoration-layout` 一致）；尺寸约 760×680，不能缩到 520×420 以下；位置在主窗口右下错开，连开多个依次错开、靠近屏幕边缘时仍在显示器内；多显示器与高缩放下位置合理。
+- 对同一草稿再次 `composer_open`：聚焦已有窗口，不出现第二个；窗口最小化时被还原。
+- 写信窗口里 `window_perform` 的最小化 / 最大化 / 双击标题栏遵循系统偏好；`mailx://window-state` 只更新自己的窗口按钮，不影响 main。
+- 点红绿灯 / Alt+F4 / 自绘关闭按钮：收到 `mailx://composer-close-requested`，页面调用 `composer_close` 后窗口关闭；页面不响应时约 3 秒后仍关闭。
+- 关闭 main（红绿灯、Cmd+Q、Alt+F4）且有写信窗口：先收到 `mailx://app-closing`，写信窗口关闭后应用退出，最长约 3 秒；没有写信窗口时立即退出。重复点击关闭不重复触发。
+- 写信窗口从开发者工具调用 main 专用命令（如 `emails_list`、`outbox_list`）、他人草稿的 `drafts_get`、`outbox_queue_send`（他人草稿）均被拒；main 调 `outbox_queue_send` 被拒。
+- 写信窗口里的页面导航（修改 `location`）被阻止；窗口不记忆大小位置（退出再开不恢复）。
+- 发送结果通知：把一条用本地假服务器队列的邮件转为 `accepted` / `failed` / `unknown`（真实发信需用户另行授权），主窗口不在前台时出现“已发送” / “发送失败” / “可能已发送，需要确认”，预览关闭时不含主题；点击通知聚焦主窗口。
 
 ### 浏览器默认行为（仅打包版本）
 

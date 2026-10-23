@@ -158,7 +158,27 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `window_get_chrome`，无参数 | `{ platform, leading, trailing, state }`：平台、标题内容前后要绘制的按钮、`{ maximized, fullscreen, focused }` |
 | `window_perform`，`{ action }` | `action` 为 `minimize` / `toggleMaximize` / `close` / `startDragging` / `titleBarDoubleClick` |
 
-状态变化通过定向到 main 窗口的 `mailx://window-state` 事件推送。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。命令同样只授权本地可信 main 窗口。
+状态变化通过 `mailx://window-state` 事件推送，定向到变化所属的窗口（main 或各写信窗口）。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。这两个命令对 main 和写信窗口都开放，且只作用于调用它的窗口；写信窗口的双击偏好与 Linux 按钮布局与 main 完全相同。
+
+### 写信窗口与发送命令（发信步骤 4a）
+
+窗口分两类：`main` 与 `composer-<uuid>`（后缀必须是小写连字符格式的 UUID，`composer-x`、大写、无连字符、带花括号都被拒绝）。每个命令先过 Tauri capability（`capabilities/main.json`、`capabilities/composer.json`），再过宿主侧的 `window_access` 白名单；两者页面来源检查一样严格（打包内页面或调试构建的 `localhost:5173`，URL 不得带用户名或密码，路径与查询不限）。任何拒绝都是同一个脱敏的 `validation`（字段 `caller`）。传给核心的主体由窗口类别决定，请求里没有任何主体字段：main 为 `Caller::MainWindow`，composer 为 `Caller::Composer`。
+
+| 命令 | main | composer | 说明 |
+| --- | --- | --- | --- |
+| `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform` | 是 | 是 | 窗口命令只作用于调用窗口 |
+| `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
+| `drafts_create { request }`、`drafts_create_from { request }`、`drafts_list { accountId? }` | 是 | 否 | 创建在 main 完成；`drafts_create` 由宿主读取 `compose.defaultAccountId` 传给核心 |
+| `outbox_queue_send { draftId, expectedRevision, clientMutationId }` | 否（`validation`） | 仅自己的草稿 | 宿主读取 `compose.undoSendSeconds`；主体固定为 `Composer` |
+| `outbox_list { accountId?, includeAll? }`、`outbox_get { id }`、`outbox_cancel { id }`、`outbox_retry_now { id }` | 是 | 否 | |
+| `outbox_resolve_unknown { id, choice, clientMutationId }` | 是 | 否 | `choice` 为 `markSent` / `resend`；核心接受 `Composer` 与 `MainWindow`，MCP / 模型仍为 `forbidden` |
+| `composer_open { draftId }` | 是 | 否 | 草稿必须存在；创建或聚焦 `composer-{draftId}` |
+| `composer_close { force }` | 否 | 是 | 销毁调用窗口；草稿由前端先写出，宿主只负责关闭 |
+| 其余全部命令（账号修改、邮件 / 正文 / 链接 / 图片 / 附件、同步、设置修改、通知） | 是 | 否 | 与此前一致 |
+
+返回值与错误沿用 `ApiResult`；错误码 `bodyNotCached`、`draftLocked`、`forbidden`、`alreadySending`、`conflict`、`idempotencyConflict` 原样透传。核心调用都在阻塞线程上执行。
+
+事件：`mailx://outbox`（载荷 `OutboxChanged`）与 `mailx://drafts`（载荷 `DraftChanged`）发给 main，并发给受影响草稿的 `composer-{draftId}`（若该窗口存在）。`mailx://app-closing`（无载荷）在 main 关闭时发给每个写信窗口；`mailx://composer-close-requested`（无载荷）在系统要求关闭某写信窗口时发给它。收到后前端写出草稿并调用 `composer_close`；宿主 3 秒内未收到则直接关闭。
 
 ### 文件夹与同步状态
 
@@ -224,7 +244,7 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 
 ## 4. 邮件写操作一致性（后续）
 
-**草稿的核心层已实现，尚无 IPC / HTTP / MCP 与界面**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，正文不超过 1 MiB。发件箱的 core 层见下。
+**草稿的核心层已实现；桌面 IPC 命令已接通（发信步骤 4a，尚无界面），HTTP / MCP 未开放**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，正文不超过 1 MiB。发件箱的 core 层见下。
 
 `expectedRevision` 不匹配报 `REVISION_CONFLICT`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
 
@@ -232,11 +252,11 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 
 **发件箱的核心层已实现（发信步骤 3），仍无 IPC / HTTP / MCP 与界面**（`core/src/send/`）。`MailxCore` 方法：
 
-- `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 必须是 `Caller::Composer`（宿主提供的枚举，`Mcp` / `Model` 一律 `forbidden`，不依赖 UI）；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
+- `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 必须是 `Caller::Composer`（宿主提供的枚举，`MainWindow` / `Mcp` / `Model` 一律 `forbidden`，不依赖 UI）；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
 - `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`resolution`、`supersededBy`。
-- `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：同样要求 `Caller::Composer`，只对未处理的 `unknown` 生效，`resend` 返回新项。
+- `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：接受 `Caller::Composer` 与 `Caller::MainWindow`（两者都是交互 UI；`Mcp` / `Model` 为 `forbidden`），只对未处理的 `unknown` 生效，`resend` 返回新项。
 - 新错误码：`draftLocked`、`forbidden`、`alreadySending`（均已生成到 `ErrorCode`）。`unknown` 永不自动重发。
-- 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: locked | unlocked | deleted }` 在队列锁定、释放、接受后删除草稿时发出。载荷不含地址、主题和正文。桌面宿主暂未转发（`desktop/src/main.rs` 中忽略，待第 4 步加 `mailx://outbox` / `mailx://drafts`）。
+- 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: locked | unlocked | deleted }` 在队列锁定、释放、接受后删除草稿时发出。载荷不含地址、主题和正文。桌面宿主已转发为 `mailx://outbox` / `mailx://drafts`（见“写信窗口与发送命令”）。
 
 ## 5. 事件
 
@@ -249,8 +269,8 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 | `Sync(AccountSyncState)` | 账号同步状态变化 | `mailx://sync-state`，前端据修订号重新读取 |
 | `FlagWriteBack(FlagWriteBack)` | 一轮已读 / 星标写回结束 | `mailx://flags` |
 | `NewMail(NewMail)` | 收件箱有新的未读邮件 | 系统通知（见文末“新邮件通知”） |
-| `Outbox(OutboxChanged)` | 发送队列项状态变化 | 暂忽略（第 4 步转发） |
-| `DraftChanged(DraftChanged)` | 草稿被队列锁定 / 释放 / 删除 | 暂忽略（第 4 步转发） |
+| `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
+| `DraftChanged(DraftChanged)` | 草稿被队列锁定 / 释放 / 删除 | `mailx://drafts` |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 
@@ -372,3 +392,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 | `onNotificationOpen(listener)` | 事件 `mailx://notification-open` | 通知被点击 |
 
 **平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。
+
+### 发送结果通知（桌面）
+
+`Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别为“已发送”“发送失败”“可能已发送，需要确认”。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题显示“（无主题）”）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新增 `outboxId`，新邮件通知该字段为 `null`）；前端界面尚未处理它。
