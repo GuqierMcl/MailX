@@ -6,6 +6,8 @@ mod body_protocol;
 mod body_webview_test;
 mod commands;
 #[cfg(not(feature = "body-webview-test"))]
+mod notifications;
+#[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
 mod state;
 mod window_chrome;
@@ -33,6 +35,8 @@ fn main() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         window_chrome::focus_main_window(app)
     }));
+    #[cfg(not(feature = "body-webview-test"))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .append_invoke_initialization_script(include_str!("subframe_guard.js"))
@@ -66,29 +70,40 @@ fn main() {
                 let secrets = Arc::new(secret_store::SystemSecretStore::new(
                     app.config().identifier.clone(),
                 ));
-                // Sync state changes only hint the UI to refetch; a lost event is harmless.
-                let events = app.handle().clone();
-                let sync_listener: mailx_core::SyncListener = Arc::new(move |sync_state| {
-                    let _ = events.emit_to(
-                        EventTarget::webview_window(window_chrome::MAIN_WINDOW),
-                        SYNC_STATE_EVENT,
-                        sync_state,
-                    );
-                });
-                let flag_events = app.handle().clone();
-                let flag_listener: mailx_core::FlagListener = Arc::new(move |written| {
-                    let _ = flag_events.emit_to(
-                        EventTarget::webview_window(window_chrome::MAIN_WINDOW),
-                        FLAG_EVENT,
-                        written,
-                    );
-                });
-                let state =
-                    state::DesktopState::new(data_dir, secrets, sync_listener, flag_listener);
+                // Sync and write-back events only hint the UI to refetch or
+                // tell the user something; a lost one is harmless.
+                let handle = app.handle().clone();
+                let settings_handle = app.handle().clone();
+                let events: mailx_core::Events =
+                    Arc::new(move |event: &mailx_core::CoreEvent| match event {
+                        mailx_core::CoreEvent::Sync(sync_state) => {
+                            let _ = handle.emit_to(
+                                EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                                SYNC_STATE_EVENT,
+                                sync_state,
+                            );
+                        }
+                        mailx_core::CoreEvent::FlagWriteBack(written) => {
+                            let _ = handle.emit_to(
+                                EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                                FLAG_EVENT,
+                                written,
+                            );
+                        }
+                        mailx_core::CoreEvent::NewMail(mail) => {
+                            let app = settings_handle.clone();
+                            notifications::new_mail(&handle, mail.clone(), move || {
+                                app.try_state::<state::DesktopState>()?
+                                    .notification_settings()
+                            });
+                        }
+                    });
+                let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
                 state.start_initialization();
+                notifications::on_click(app.handle());
                 window_chrome::create_main_window(app.handle())?;
                 Ok(())
             }
@@ -118,6 +133,8 @@ fn main() {
             commands::image_cache_clear,
             commands::settings_get,
             commands::settings_update,
+            commands::notifications_test,
+            commands::notifications_preview_sound,
             commands::window_get_chrome,
             commands::window_perform,
         ])

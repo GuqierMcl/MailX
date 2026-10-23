@@ -10,6 +10,7 @@ import type {
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
+import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
@@ -20,7 +21,7 @@ export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: { navWidth: 256 } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: { navWidth: 256 }, notifications: DEFAULT_NOTIFICATIONS }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -128,6 +129,10 @@ export function createMockClient(): MailxClient {
     requestLink: async () => { throw notFound() },
     openLink: async () => { throw notFound() },
     onLinkRequest: () => () => undefined,
+    // A browser has no notification center or sound device to drive.
+    testNotification: async () => undefined,
+    previewSound: async () => undefined,
+    onNotificationOpen: () => () => undefined,
     getSettings: async () => structuredClone(settings),
     async updateSettings(next) {
       const appearance = next.appearance ?? settings.settings.appearance

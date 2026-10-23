@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppearanceSettings, LayoutSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
+import type { AppearanceSettings, LayoutSettings, NotificationSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
+import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
@@ -38,6 +39,7 @@ export function useUpdateAppearance(client: MailxClient) {
         ...snapshot.settings,
         security: current?.settings.security ?? snapshot.settings.security,
         layout: current?.settings.layout ?? snapshot.settings.layout,
+        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
       },
     })),
   })
@@ -57,6 +59,7 @@ export function useUpdateSecurity(client: MailxClient) {
         ...snapshot.settings,
         appearance: current?.settings.appearance ?? snapshot.settings.appearance,
         layout: current?.settings.layout ?? snapshot.settings.layout,
+        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
       },
     })),
   })
@@ -73,6 +76,7 @@ export function useUpdateLayout(client: MailxClient) {
         ...snapshot.settings,
         appearance: current?.settings.appearance ?? snapshot.settings.appearance,
         security: current?.settings.security ?? snapshot.settings.security,
+        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
       },
     })),
   })
@@ -100,4 +104,43 @@ export function AppearanceSync({ client }: { client: MailxClient }) {
   }, [appearance])
 
   return null
+}
+
+/**
+ * Saves notification preferences. Applied optimistically so switches respond
+ * at once; a rejected save puts the previous values back.
+ */
+export function useUpdateNotifications(client: MailxClient) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    scope: { id: 'notification-settings' },
+    mutationFn: (change: Partial<NotificationSettings>) => {
+      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.notifications
+      return client.updateSettings({ notifications: { ...DEFAULT_NOTIFICATIONS, ...current, ...change } })
+    },
+    onMutate: async (change) => {
+      await queryClient.cancelQueries({ queryKey: settingsKeys.all })
+      const previous = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
+      if (previous) {
+        queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, {
+          ...previous,
+          settings: { ...previous.settings, notifications: { ...previous.settings.notifications, ...change } },
+        })
+      }
+      return { previous }
+    },
+    onError: (_error, _change, context) => {
+      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
+        ...current, settings: { ...current.settings, notifications: context.previous!.settings.notifications },
+      }))
+    },
+    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
+      ...snapshot, settings: {
+        ...snapshot.settings,
+        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
+        security: current?.settings.security ?? snapshot.settings.security,
+        layout: current?.settings.layout ?? snapshot.settings.layout,
+      },
+    })),
+  })
 }

@@ -5,6 +5,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
+        notifications: NotificationSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -203,7 +204,14 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "fontSize": "default"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256 }
+                "layout": { "navWidth": 256 },
+                "notifications": {
+                    "enabled": true,
+                    "showPreview": true,
+                    "whenFocused": false,
+                    "sound": "system",
+                    "mutedAccounts": []
+                }
             },
             "stored": false,
             "recovered": false
@@ -340,4 +348,48 @@ fn hand_edited_nav_width_is_clamped_on_load() {
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.nav_width, 420);
+}
+
+#[test]
+fn notifications_default_on_and_muted_accounts_are_cleaned_or_rejected() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"notifications":{"sound":"chime","mutedAccounts":["b"," a ","b",""]}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let loaded = store.get().unwrap().settings.notifications;
+    assert!(loaded.enabled && loaded.show_preview && !loaded.when_focused);
+    assert_eq!(loaded.sound, NotificationSound::Chime);
+    // A hand-edited list with a blank entry is unusable as a whole: nothing muted.
+    assert!(loaded.muted_accounts.is_empty());
+
+    let saved = store
+        .patch(SettingsPatch {
+            notifications: Some(NotificationSettings {
+                muted_accounts: vec!["b".into(), " a ".into(), "b".into()],
+                when_focused: true,
+                ..NotificationSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.notifications.muted_accounts, ["a", "b"]);
+    assert!(saved.settings.notifications.when_focused);
+
+    let error = store
+        .patch(SettingsPatch {
+            notifications: Some(NotificationSettings {
+                muted_accounts: vec!["bad\nid".into()],
+                ..NotificationSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("notifications.mutedAccounts"));
+    assert_eq!(
+        store.get().unwrap().settings.notifications.muted_accounts,
+        ["a", "b"]
+    );
 }

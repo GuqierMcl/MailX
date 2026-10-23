@@ -8,6 +8,7 @@
 pub mod accounts;
 mod app;
 pub mod error;
+pub mod events;
 mod imap;
 pub mod mail;
 mod net;
@@ -24,15 +25,17 @@ pub use app::{
     FlagChange, MailxCore, MessageFlag,
 };
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
+pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
 pub use mail::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, FontSize, LayoutSettings, MailTheme, RemoteImagePolicy,
-    SecuritySettings, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    AppSettings, AppearanceSettings, FontSize, LayoutSettings, MailTheme, NotificationSettings,
+    NotificationSound, RemoteImagePolicy, SecuritySettings, SettingsPatch, SettingsSnapshot,
+    SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
-    AccountSyncState, FlagListener, FlagWriteBack, FolderSyncPhase, FolderSyncState, SyncFailure,
-    SyncFailureCode, SyncListener, SyncPhase,
+    AccountSyncState, FlagWriteBack, FolderSyncPhase, FolderSyncState, SyncFailure,
+    SyncFailureCode, SyncPhase,
 };
 
 /// The core crate version, available without initializing storage or networking.

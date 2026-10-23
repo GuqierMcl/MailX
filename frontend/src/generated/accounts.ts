@@ -212,7 +212,23 @@ export type LayoutSettings = {
  */
 navWidth: number, };
 
-export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, };
+export type NotificationSound = "system" | "chime" | "ding" | "droplet" | "bubble" | "marimba" | "sparkle" | "knock" | "chord" | "none";
+
+export type NotificationSettings = { enabled: boolean,
+/**
+ * Include sender and subject. Off, a notification only says how many.
+ */
+showPreview: boolean,
+/**
+ * Also notify while the MailX window is in front.
+ */
+whenFocused: boolean, sound: NotificationSound,
+/**
+ * Accounts whose new mail never notifies.
+ */
+mutedAccounts: Array<string>, };
+
+export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -236,6 +252,22 @@ sent: number,
  * the flag.
  */
 localOnlyStars: number, };
+
+export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
+/**
+ * RFC 3339 timestamp.
+ */
+receivedAt: string, };
+
+export type NewMail = { accountId: string, accountName: string,
+/**
+ * Every new message, including those not described below.
+ */
+count: number,
+/**
+ * The newest few, newest first. Empty when previews are turned off.
+ */
+messages: Array<NewMailMessage>, };
 
 export type AvatarImage = { mimeType: string,
 /**

@@ -27,6 +27,7 @@ import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
+import { loadMailTree } from './mail-tree'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -54,11 +55,7 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const tree = useQuery({
     queryKey: mailKeys.tree(),
-    queryFn: async () => {
-      const accounts = await client.listAccounts()
-      const folders = (await Promise.all(accounts.map((account) => client.listFolders(account.id)))).flat()
-      return { accounts, folders }
-    },
+    queryFn: () => loadMailTree(client),
   })
   const settingsQuery = useSettings(client)
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
@@ -202,6 +199,27 @@ export function Workbench({ client }: { client: MailxClient }) {
     Boolean(opened && body.email && !body.detail.isPending),
     (email, flag, wanted) => void setFlag(email, flag, wanted),
   )
+
+  // A clicked notification: one message opens in the reader (wherever the list
+  // is), several show that account's inbox. Reads the latest tree through a ref
+  // so the subscription does not restart on every tree change.
+  const latestTree = useRef({ accounts, folders })
+  useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
+  useEffect(() => client.onNotificationOpen(({ accountId, emailId }) => {
+    const { accounts, folders } = latestTree.current
+    const account = accounts.find((row) => row.id === accountId)
+    if (!account) return
+    if (emailId) {
+      setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
+      return
+    }
+    const inbox = folders.find((folder) => folder.accountId === accountId && folder.role === 'inbox' && folder.selectable)
+    if (inbox) {
+      setSearch('')
+      setFilter('all')
+      setMailbox({ kind: 'folder', folder: inbox })
+    }
+  }), [client])
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()

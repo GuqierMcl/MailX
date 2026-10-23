@@ -63,10 +63,14 @@ fn main() {
         RemoteImagePolicy,
         SecuritySettings,
         LayoutSettings,
+        NotificationSound,
+        NotificationSettings,
         AppSettings,
         SettingsSnapshot,
         AvatarKind,
         FlagWriteBack,
+        NewMailMessage,
+        NewMail,
         AvatarImage,
     );
 }

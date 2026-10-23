@@ -550,3 +550,46 @@ describe('synced inbox headers', () => {
     expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
   })
 })
+
+describe('clicked notifications', () => {
+  function withNotifications(items: EmailSummary[]) {
+    const context = setup(items)
+    let open: (request: { accountId: string; emailId: string | null }) => void = () => undefined
+    context.client.onNotificationOpen.mockImplementation((listener) => { open = listener; return () => undefined })
+    return { ...context, click: (request: { accountId: string; emailId: string | null }) => act(() => open(request)) }
+  }
+
+  it('opens the one message a notification was about, even when the list shows another mailbox', async () => {
+    const arrived = email('arrived', { subject: '新到的周报' })
+    const { client, click } = withNotifications([arrived])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
+    await screen.findByRole('heading', { name: '已发送' })
+
+    click({ accountId: account.id, emailId: arrived.id })
+    expect(await screen.findByRole('heading', { name: '新到的周报' })).toBeInTheDocument()
+    // The list is left where the user put it.
+    expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
+  })
+
+  it("shows the account's inbox for a notification about several messages", async () => {
+    const { client, click } = withNotifications([email('one'), email('two')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
+    await screen.findByRole('heading', { name: '已发送' })
+
+    click({ accountId: account.id, emailId: null })
+    await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: inbox.id })))
+  })
+
+  it('ignores a notification of an account that no longer exists', async () => {
+    const { client, click } = withNotifications([email('one')])
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    const calls = client.getEmail.mock.calls.length
+    click({ accountId: 'gone', emailId: 'one' })
+    expect(client.getEmail.mock.calls.length).toBe(calls)
+  })
+})

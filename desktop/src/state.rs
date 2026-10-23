@@ -7,15 +7,12 @@ use std::{
 };
 
 pub(crate) use mailx_core::StartupStatus;
-use mailx_core::{
-    AppError, ErrorCode, FlagListener, MailxCore, SettingsStore, SyncListener, secrets::SecretStore,
-};
+use mailx_core::{AppError, ErrorCode, Events, MailxCore, SettingsStore, secrets::SecretStore};
 
 struct Inner {
     data_dir: Result<PathBuf, AppError>,
     secrets: Arc<dyn SecretStore>,
-    sync_listener: SyncListener,
-    flag_listener: FlagListener,
+    events: Events,
     core: Mutex<Option<MailxCore>>,
     settings: Mutex<Option<Arc<SettingsStore>>>,
     startup: Mutex<StartupStatus>,
@@ -29,14 +26,12 @@ impl DesktopState {
     pub(crate) fn new(
         data_dir: Result<PathBuf, AppError>,
         secrets: Arc<dyn SecretStore>,
-        sync_listener: SyncListener,
-        flag_listener: FlagListener,
+        events: Events,
     ) -> Self {
         Self(Arc::new(Inner {
             data_dir,
             secrets,
-            sync_listener,
-            flag_listener,
+            events,
             core: Mutex::new(None),
             settings: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
@@ -141,6 +136,19 @@ impl DesktopState {
             .map_err(|_| AppError::new(ErrorCode::Internal))?
     }
 
+    /// The current notification preferences, for code already off the async
+    /// runtime. `None` when settings cannot be read: then nothing is shown.
+    pub(crate) fn notification_settings(&self) -> Option<mailx_core::NotificationSettings> {
+        Some(
+            self.settings_store()
+                .ok()?
+                .get()
+                .ok()?
+                .settings
+                .notifications,
+        )
+    }
+
     fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {
         let mut slot = self
             .0
@@ -197,9 +205,7 @@ impl DesktopState {
         let state = Self::new(
             Ok(directory),
             Arc::new(NoSecrets),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         state.finish_initialization(Ok(core));
         state
@@ -215,13 +221,7 @@ impl DesktopState {
     fn open_service(&self) -> Result<MailxCore, AppError> {
         let path = self.0.data_dir.as_ref().map_err(Clone::clone)?;
         let tauri::async_runtime::RuntimeHandle::Tokio(runtime) = tauri::async_runtime::handle();
-        MailxCore::open(
-            path,
-            self.0.secrets.clone(),
-            runtime,
-            self.0.sync_listener.clone(),
-            self.0.flag_listener.clone(),
-        )
+        MailxCore::open(path, self.0.secrets.clone(), runtime, self.0.events.clone())
     }
 
     fn finish_initialization(&self, result: Result<MailxCore, AppError>) {
@@ -321,8 +321,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         assert!(matches!(
             state.startup_status(),
@@ -343,8 +342,7 @@ mod tests {
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         state.start_initialization();
         // This checks readiness ordering, not startup performance. Migrations
@@ -375,8 +373,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         let error =
             tauri::async_runtime::block_on(state.run(|_| Ok::<_, AppError>(()))).unwrap_err();
@@ -389,8 +386,7 @@ mod tests {
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         let mut settings = mailx_core::AppSettings::default();
         settings.appearance.interface_font = "Inter, PingFang SC".into();
@@ -408,8 +404,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageUnavailable)),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         let error =
             tauri::async_runtime::block_on(state.settings(|store| store.get())).unwrap_err();
@@ -421,8 +416,7 @@ mod tests {
         let state = DesktopState::new(
             Err(AppError::new(ErrorCode::StorageIncompatible)),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
         *state.0.startup.lock().unwrap() = StartupStatus::Failed {
             revision: 4,

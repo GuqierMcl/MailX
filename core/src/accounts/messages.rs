@@ -63,6 +63,15 @@ impl AccountService {
             .store_message_batch(target, records, highest_uid)
     }
 
+    pub(crate) fn new_arrivals(
+        &self,
+        target: &SyncTarget,
+        uids: &[u32],
+        since: &str,
+    ) -> Result<Vec<crate::events::NewMailMessage>, AppError> {
+        self.storage.new_arrivals(target, uids, since)
+    }
+
     pub(crate) fn begin_backfill(
         &mut self,
         target: &SyncTarget,

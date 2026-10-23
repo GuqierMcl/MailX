@@ -187,7 +187,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
 
-`AppSettings` 包含 `appearance`、`security` 与 `layout`。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 包含 `appearance`、`security`、`layout` 与 `notifications`（见文末“新邮件通知”）。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 
@@ -224,7 +224,21 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 
 `drafts.queueSend` 只允许交互 UI 主体，后端核对账号权限、草稿版本和确认过的快照；MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
 
-## 5. 事件草案（后续）
+## 5. 事件
+
+### 当前：核心事件出口
+
+核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有三种：
+
+| 事件 | 含义 | 桌面宿主的去向 |
+| --- | --- | --- |
+| `Sync(AccountSyncState)` | 账号同步状态变化 | `mailx://sync-state`，前端据修订号重新读取 |
+| `FlagWriteBack(FlagWriteBack)` | 一轮已读 / 星标写回结束 | `mailx://flags` |
+| `NewMail(NewMail)` | 收件箱有新的未读邮件 | 系统通知（见文末“新邮件通知”） |
+
+事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
+
+### 后续：事件流草案
 
 ```ts
 type DomainEvent = {
@@ -326,3 +340,19 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 ### 全局提示（Toast）
 
 所有短提示都经由 `@/components/ui/toast` 的 `toast.info / success / error`，可在 React 之外调用，唯一的出口 `Toaster` 挂在应用根部、启动闸门之外，核心启动失败时也能提示。位置只有一处常量（`VIEWPORT_POSITION`），默认右下角。普通提示自动消失（信息 5 秒、成功 3 秒、错误 8 秒），最多同时显示 4 条；错误以 `role="alert"` 立即播报，其余走礼貌的 live region。关闭按钮在鼠标悬停或键盘聚焦进入提示后才对辅助技术可见，这是 Base UI 的设计。
+
+### 新邮件通知
+
+**判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 只带最新的 3 封（发件人、主题、时间、邮件 id），其余只计数。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
+
+**设置也在核心，所有宿主一致。** `notifications` 设置节：`enabled`（默认开）、`showPreview`（默认开）、`whenFocused`（默认关）、`sound`（`system | chime | ding | droplet | bubble | marimba | sparkle | knock | chord | none`，默认 `system`）、`mutedAccounts`（账号 id 列表）。核心的 `NewMail::for_delivery(&settings)` 统一套用前三项中与内容相关的规则：总开关关闭或账号被静音时什么都不发；关闭预览时把 `messages` 清空，发出的内容里就不含发件人和主题，任何宿主（包括以后的 webhook）都不会泄露。`NewMail::summary()` 给出标题和正文：一封时为“发件人 / 主题”，多封时为“账号名 / N 封新邮件，来自 A、B 等”。`mutedAccounts` 保存时去空白、排序、去重，含空项或控制字符返回 `validation`（`field` 为 `notifications.mutedAccounts`）；手工编辑出的非法列表加载时整体清空。
+
+**桌面宿主。** 使用 `tauri-plugin-notification`。窗口可见、未最小化且处于焦点时，除非开启 `whenFocused`，否则不弹通知（未读数照常更新）。提示音：`system` 由系统通知自带的默认提示音播放；`chime / ding / droplet / bubble / marimba / sparkle / knock / chord` 是 MailX 自带的短音效，在本机合成（几个正弦音加包络，没有音频文件），通知本身静音，由应用经默认输出设备播放，两者不会同时响；`none` 静音。点击通知时窗口被带到前台，并向页面发 `mailx://notification-open`（`{ accountId, emailId | null }`）：只有一封邮件时在阅读区打开它（不改动列表所在的邮箱），多封时切到该账号的收件箱。关闭预览时通知不指向具体邮件。
+
+| MailxClient 方法 | Tauri 命令与参数 | 结果 |
+| --- | --- | --- |
+| `testNotification()` | `notifications_test`，无参数 | 按已保存的设置发送一条示例通知（忽略“前台时不通知”） |
+| `previewSound(sound)` | `notifications_preview_sound`，`{ sound }` | 播放 MailX 自带音效；`system` 与 `none` 不播放 |
+| `onNotificationOpen(listener)` | 事件 `mailx://notification-open` | 通知被点击 |
+
+**平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。

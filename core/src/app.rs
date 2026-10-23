@@ -13,10 +13,11 @@ use crate::accounts::types::{
     Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
 };
 use crate::error::{AppError, ErrorCode};
+use crate::events::Events;
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::sync::bodies::BodyManager;
-use crate::sync::manager::{AccountSyncState, FlagListener, SyncListener, SyncManager};
+use crate::sync::manager::{AccountSyncState, SyncManager};
 
 mod attachments;
 mod avatars;
@@ -43,13 +44,13 @@ pub struct MailxCore {
 
 impl MailxCore {
     /// Opens the store in `path` and starts syncing every account on `runtime`.
-    /// `listener` hears each sync state change.
+    /// `events` hears everything the core reports on its own: sync state
+    /// changes, write-back results and new mail.
     pub fn open(
         path: &Path,
         secrets: Arc<dyn SecretStore>,
         runtime: Handle,
-        listener: SyncListener,
-        flag_listener: FlagListener,
+        events: Events,
     ) -> Result<Self, AppError> {
         // The image cache is an optimization; a directory that cannot be used
         // must not stop mail from working.
@@ -58,12 +59,7 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
-        let sync = Arc::new(SyncManager::new(
-            service.clone(),
-            runtime,
-            listener,
-            flag_listener,
-        ));
+        let sync = Arc::new(SyncManager::new(service.clone(), runtime, events));
         for account in &accounts {
             sync.restart(&account.id);
         }
@@ -145,7 +141,7 @@ impl MailxCore {
     /// Marks a message read or unread, or starred or not. The change shows at
     /// once and is written back to the server in the background; where the
     /// server cannot keep a starred flag it stays on this device, and the host
-    /// is told through the flag listener when that is found out.
+    /// is told through a `FlagWriteBack` event when that is found out.
     pub fn set_message_flag(
         &self,
         email_id: &str,
@@ -207,15 +203,16 @@ mod tests {
     ) -> (MailxCore, mpsc::Receiver<AccountSyncState>) {
         let (sender, receiver) = mpsc::channel();
         let sender = Mutex::new(sender);
-        let listener: SyncListener = Arc::new(move |state| {
-            let _ = sender.lock().unwrap().send(state.clone());
+        let events: Events = Arc::new(move |event: &crate::events::CoreEvent| {
+            if let crate::events::CoreEvent::Sync(state) = event {
+                let _ = sender.lock().unwrap().send(state.clone());
+            }
         });
         let core = MailxCore::open(
             directory.path(),
             Arc::new(MemorySecrets::default()),
             runtime.handle().clone(),
-            listener,
-            Arc::new(|_| {}),
+            events,
         )
         .unwrap();
         (core, receiver)

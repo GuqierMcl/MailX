@@ -3,6 +3,7 @@ import type { Account, AccountSyncState, FolderSyncState } from '@/generated/acc
 import type { StartupStatus } from '@/generated/startup'
 import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
+import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -28,7 +29,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 } }
+  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 }, notifications: DEFAULT_NOTIFICATIONS }
   return {
     available: true,
     getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
@@ -58,5 +59,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     onLinkRequest: vi.fn<MailxClient['onLinkRequest']>().mockReturnValue(() => undefined),
     getSettings: vi.fn<MailxClient['getSettings']>().mockResolvedValue({ settings: preferences, stored: true, recovered: false }),
     updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch }; return { settings: preferences, stored: true, recovered: false } }),
+    testNotification: vi.fn<MailxClient['testNotification']>().mockResolvedValue(undefined),
+    previewSound: vi.fn<MailxClient['previewSound']>().mockResolvedValue(undefined),
+    onNotificationOpen: vi.fn<MailxClient['onNotificationOpen']>().mockReturnValue(() => undefined),
   }
 }

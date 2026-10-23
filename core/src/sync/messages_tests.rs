@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::accounts::sync_plan::tests::{config, connection_update};
+use crate::events::{CoreEvent, NewMail};
 use crate::imap::{FolderStatus, ImapLogin};
 use crate::mail::{EmailListQuery, FolderRole};
 use crate::secrets::{SecretValue, test_support::MemorySecrets};
@@ -19,6 +20,7 @@ struct Fixture {
     source: String,
     token: WorkerToken,
     events: Arc<Mutex<Vec<AccountSyncState>>>,
+    new_mail: Arc<Mutex<Vec<NewMail>>>,
 }
 
 fn fixture() -> Fixture {
@@ -26,6 +28,10 @@ fn fixture() -> Fixture {
 }
 
 fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
+    fixture_with(account_config, FolderRole::Inbox)
+}
+
+fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture {
     let directory = TempDir::new().unwrap();
     let mut service =
         AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
@@ -47,7 +53,7 @@ fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
                 parent_remote_name: None,
                 name: "INBOX".into(),
                 delimiter: Some("/".into()),
-                role: FolderRole::Inbox,
+                role,
                 selectable: true,
                 attributes: vec![],
                 status: Some(FolderStatus {
@@ -61,12 +67,17 @@ fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
         .unwrap();
     let service = Arc::new(Mutex::new(service));
     let events = Arc::new(Mutex::new(Vec::new()));
+    let new_mail = Arc::new(Mutex::new(Vec::new()));
     let observed = events.clone();
+    let arrived = new_mail.clone();
     let shared = Arc::new(Shared {
         service: Arc::downgrade(&service),
         states: Mutex::new(HashMap::new()),
-        listener: Arc::new(move |state| observed.lock().unwrap().push(state.clone())),
-        flag_listener: Arc::new(|_| {}),
+        events: Arc::new(move |event: &CoreEvent| match event {
+            CoreEvent::Sync(state) => observed.lock().unwrap().push(state.clone()),
+            CoreEvent::NewMail(mail) => arrived.lock().unwrap().push(mail.clone()),
+            CoreEvent::FlagWriteBack(_) => {}
+        }),
     });
     let token = WorkerToken {
         account_id: account.id.clone(),
@@ -90,6 +101,7 @@ fn fixture_with_config(account_config: serde_json::Value) -> Fixture {
     );
     Fixture {
         events,
+        new_mail,
         token,
         _directory: directory,
         service,
@@ -135,12 +147,21 @@ fn commands(validity: u32, uids: &[u32]) -> Script {
 }
 
 fn header(uid: u32, subject: &str) -> String {
-    let date = chrono::Utc::now().format("%d-%b-%Y");
+    header_with(uid, subject, "", chrono::Utc::now())
+}
+
+fn header_with(
+    uid: u32,
+    subject: &str,
+    flags: &str,
+    received: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let date = received.format("%d-%b-%Y %H:%M:%S +0000");
     let bytes = format!(
         "From: Sender <sender@example.com>\r\nSubject: {subject}\r\nTo: lin@example.com\r\n\r\n"
     );
     format!(
-        "* 1 FETCH (UID {uid} FLAGS () INTERNALDATE \"{date} 12:00:00 +0000\" RFC822.SIZE 200 BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)] {{{}}}\r\n{bytes})\r\n",
+        "* 1 FETCH (UID {uid} FLAGS ({flags}) INTERNALDATE \"{date}\" RFC822.SIZE 200 BODY[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)] {{{}}}\r\n{bytes})\r\n",
         bytes.len()
     )
 }
@@ -217,7 +238,7 @@ async fn run_with(
     fixture
         .shared
         .reconcile_targets(&fixture.token, &targets, false);
-    let mut changed = false;
+    let mut round = super::super::messages::FolderRound::default();
     let result = super::super::messages::sync_folder(
         &fixture.shared,
         &fixture.token,
@@ -225,9 +246,14 @@ async fn run_with(
         &targets[0].1,
         &mut session,
         memory,
-        &mut changed,
+        &mut round,
     )
     .await;
+    let changed = round.changed;
+    fixture
+        .shared
+        .announce(&fixture.token, round.arrivals)
+        .await;
     if success {
         session.logout().await.unwrap();
     } else {
@@ -287,6 +313,125 @@ async fn initial_incremental_flags_deletion_and_generation_replacement() {
     assert_eq!(page.items[0].subject, "New generation");
     assert_ne!(page.items[0].id, kept_id);
     assert!(service.get_email(&kept_id).is_err());
+}
+
+fn fetched(headers: &[String]) -> (String, String) {
+    (
+        "UID FETCH ".into(),
+        headers.concat() + "{tag} OK fetched\r\n",
+    )
+}
+
+fn flags_of(uids: &[u32]) -> (String, String) {
+    let lines: String = uids
+        .iter()
+        .map(|uid| format!("* 1 FETCH (UID {uid} FLAGS ())\r\n"))
+        .collect();
+    ("UID FETCH ".into(), lines + "{tag} OK flags\r\n")
+}
+
+fn arrivals(fixture: &Fixture) -> Vec<NewMail> {
+    std::mem::take(&mut *fixture.new_mail.lock().unwrap())
+}
+
+#[tokio::test]
+async fn only_unread_recent_inbox_mail_that_arrived_after_the_first_round_is_new() {
+    let fixture = fixture();
+    let now = chrono::Utc::now();
+    // The first round finds what was already there: never new.
+    let mut first = commands(21, &[2, 3]);
+    add_headers(&mut first, &[(2, "Old"), (3, "Older")]);
+    run(&fixture, first, true).await.unwrap();
+    assert!(arrivals(&fixture).is_empty());
+
+    // Then 4 (unread, just now), 5 (already read elsewhere) and 6 (sent days
+    // ago, e.g. delivered late or found after being offline) arrive.
+    let mut second = commands(21, &[2, 3, 4, 5, 6]);
+    second.push(fetched(&[
+        header_with(4, "Fresh", "", now),
+        header_with(5, "Read on phone", "\\Seen", now),
+        header_with(6, "Stale", "", now - chrono::Duration::days(3)),
+    ]));
+    second.push(flags_of(&[2, 3]));
+    run(&fixture, second, true).await.unwrap();
+    let found = arrivals(&fixture);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].account_id, fixture.account_id);
+    assert_eq!(found[0].count, 1);
+    assert_eq!(found[0].messages[0].subject, "Fresh");
+    assert_eq!(found[0].messages[0].from.address, "sender@example.com");
+
+    // Nothing new: nothing announced, even on a full round.
+    let mut third = commands(21, &[2, 3, 4, 5, 6]);
+    third.push(flags_of(&[2, 3, 4, 5, 6]));
+    run(&fixture, third, true).await.unwrap();
+    assert!(arrivals(&fixture).is_empty());
+}
+
+#[tokio::test]
+async fn many_arrivals_are_one_event_with_the_newest_few_described() {
+    let fixture = fixture();
+    let now = chrono::Utc::now();
+    let mut first = commands(21, &[2]);
+    add_headers(&mut first, &[(2, "Old")]);
+    run(&fixture, first, true).await.unwrap();
+
+    let mut second = commands(21, &[2, 3, 4, 5, 6, 7]);
+    second.push(fetched(
+        &(3..=7)
+            .map(|uid| {
+                header_with(
+                    uid,
+                    &format!("M{uid}"),
+                    "",
+                    now - chrono::Duration::minutes(10 - i64::from(uid)),
+                )
+            })
+            .collect::<Vec<_>>(),
+    ));
+    second.push(flags_of(&[2]));
+    run(&fixture, second, true).await.unwrap();
+    let found = arrivals(&fixture);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].count, 5);
+    let subjects: Vec<_> = found[0]
+        .messages
+        .iter()
+        .map(|m| m.subject.as_str())
+        .collect();
+    assert_eq!(subjects, ["M7", "M6", "M5"]);
+}
+
+#[tokio::test]
+async fn a_rebuilt_folder_is_not_new_mail_but_an_empty_first_inbox_can_receive_some() {
+    let fixture = fixture();
+    // An empty inbox completes its first round with nothing stored...
+    run(&fixture, commands(21, &[]), true).await.unwrap();
+    // ...so the first message after that is new.
+    let mut second = commands(21, &[1]);
+    add_headers(&mut second, &[(1, "Welcome")]);
+    run(&fixture, second, true).await.unwrap();
+    assert_eq!(arrivals(&fixture)[0].messages[0].subject, "Welcome");
+
+    // The server rebuilt the folder (new UIDVALIDITY): everything in it is
+    // re-downloaded, none of it is new mail.
+    let mut rebuilt = commands(22, &[1, 2]);
+    add_headers(&mut rebuilt, &[(1, "Welcome"), (2, "Other")]);
+    run(&fixture, rebuilt, true).await.unwrap();
+    assert!(arrivals(&fixture).is_empty());
+}
+
+#[tokio::test]
+async fn new_mail_outside_the_inbox_is_not_announced() {
+    let fixture = fixture_with(config(json!({"kind":"direct"})), FolderRole::Junk);
+    let mut first = commands(21, &[2]);
+    add_headers(&mut first, &[(2, "Old")]);
+    run(&fixture, first, true).await.unwrap();
+    let mut second = commands(21, &[2, 3]);
+    add_headers(&mut second, &[(3, "Spam")]);
+    second.push(flags_of(&[2]));
+    run(&fixture, second, true).await.unwrap();
+    assert!(arrivals(&fixture).is_empty());
 }
 
 #[tokio::test]
