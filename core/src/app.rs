@@ -12,6 +12,9 @@ use crate::accounts::AccountService;
 use crate::accounts::types::{
     Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
 };
+use crate::drafts::types::{
+    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
+};
 use crate::error::{AppError, ErrorCode};
 use crate::events::Events;
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
@@ -162,6 +165,63 @@ impl MailxCore {
             crate::storage::LocalChange::Queued => FlagChange::Queued,
             crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
         })
+    }
+
+    /// Creates a blank or pre-filled draft. `default_account_id` is the
+    /// `compose.defaultAccountId` setting, which the host reads from its
+    /// settings store; it only applies when the request names no account.
+    pub fn create_draft(
+        &self,
+        request: CreateDraftRequest,
+        default_account_id: &str,
+    ) -> Result<Draft, AppError> {
+        self.accounts()?.create_draft(request, default_account_id)
+    }
+
+    /// Creates a reply, reply-all or forward draft from a message whose body
+    /// is cached. Never downloads: an uncached body is `BodyNotCached`, and the
+    /// caller fetches it with `fetch_body` first.
+    pub fn create_draft_from(&self, request: CreateDraftFromRequest) -> Result<Draft, AppError> {
+        let source = self.accounts()?.draft_source(&request)?;
+        let (detail, account_address, message_id, raw) = match source {
+            crate::accounts::DraftSource::Existing(draft) => return Ok(draft),
+            crate::accounts::DraftSource::Fresh {
+                detail,
+                account_address,
+                message_id,
+                raw,
+            } => (detail, account_address, message_id, raw),
+        };
+        // The raw message is read and parsed without holding the store lock.
+        let raw = match raw {
+            Some((blobs, blob)) => blobs.read(&blob)?,
+            None => Vec::new(),
+        };
+        let headers = crate::drafts::compose::parse_headers(&raw, message_id);
+        self.accounts()?.create_draft_from_source(
+            &request,
+            &detail,
+            &account_address,
+            &headers,
+            crate::accounts::local_offset(),
+        )
+    }
+
+    pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
+        self.accounts()?.get_draft(id)
+    }
+
+    /// Newest first; optionally only one account's drafts.
+    pub fn list_drafts(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
+        self.accounts()?.list_drafts(account_id)
+    }
+
+    pub fn update_draft(&self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
+        self.accounts()?.update_draft(request)
+    }
+
+    pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
+        self.accounts()?.delete_draft(id)
     }
 
     /// Asks an account's sync worker to run its next round now.

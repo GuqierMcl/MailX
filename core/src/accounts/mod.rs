@@ -1,4 +1,6 @@
 pub(crate) mod bodies;
+mod drafts;
+pub(crate) use drafts::{DraftSource, local_offset};
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 pub(crate) mod messages;
@@ -119,6 +121,7 @@ impl AccountService {
         let profile = AccountProfileInput {
             display_name: old.account.display_name.clone(),
             color: old.account.color.clone(),
+            sender_name: old.account.sender_name.clone(),
         };
         let (snapshot, writes) = self.build(request.connection, profile, Some(&old))?;
         let current_refs = snapshot.refs();
@@ -306,6 +309,7 @@ impl AccountService {
                 .unwrap_or(1),
             display_name: profile.display_name,
             color: profile.color,
+            sender_name: profile.sender_name,
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
@@ -529,7 +533,7 @@ fn secret_key(account_id: &str) -> String {
 fn same_source(a: &ConnectionConfig, b: &ConnectionConfig) -> bool {
     a.host == b.host && a.port == b.port && a.username == b.username
 }
-fn validate_uuid(value: &str, field: &str) -> Result<(), AppError> {
+pub(crate) fn validate_uuid(value: &str, field: &str) -> Result<(), AppError> {
     Uuid::parse_str(value)
         .map(|_| ())
         .map_err(|_| AppError::validation(field))
@@ -578,7 +582,23 @@ fn validate_profile(profile: &mut AccountProfileInput) -> Result<(), AppError> {
         None => None,
         Some(value) => normalize_color(&value).ok_or_else(|| AppError::validation("color"))?,
     };
+    profile.sender_name = match profile.sender_name.take() {
+        None => None,
+        Some(value) => {
+            normalize_sender_name(&value).ok_or_else(|| AppError::validation("senderName"))?
+        }
+    };
     Ok(())
+}
+/// Trimmed; an empty value clears the name. Control characters (CR and LF
+/// included) are rejected because the name is written into the `From` header.
+fn normalize_sender_name(value: &str) -> Option<Option<String>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Some(None);
+    }
+    (value.chars().count() <= 128 && !value.chars().any(char::is_control))
+        .then(|| Some(value.to_owned()))
 }
 /// `#rrggbb` in lowercase; an empty value clears the color.
 fn normalize_color(value: &str) -> Option<Option<String>> {
@@ -724,6 +744,9 @@ fn canonical_config(
     // Added only when set, so requests recorded before colors existed still match.
     if let Some(color) = &profile.color {
         canonical["color"] = serde_json::json!(color);
+    }
+    if let Some(sender_name) = &profile.sender_name {
+        canonical["senderName"] = serde_json::json!(sender_name);
     }
     encode(&canonical)
 }

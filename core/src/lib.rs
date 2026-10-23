@@ -7,6 +7,7 @@
 
 pub mod accounts;
 mod app;
+pub mod drafts;
 pub mod error;
 pub mod events;
 mod imap;
@@ -24,13 +25,14 @@ pub use app::{
     AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks,
     FlagChange, MailxCore, MessageFlag,
 };
+pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
 pub use mail::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, FontSize, LayoutSettings, MailTheme, NotificationSettings,
-    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsPatch,
-    SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    AppSettings, AppearanceSettings, ComposeSettings, FontSize, LayoutSettings, MailTheme,
+    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
+    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

@@ -955,3 +955,107 @@ fn profile_updates_validate_before_writing() {
         "a connection update must not carry the profile"
     );
 }
+
+fn sender_request(account: &Account, sender_name: Value) -> UpdateProfileRequest {
+    serde_json::from_value(json!({
+        "accountId": account.id,
+        "profile": {"displayName": account.display_name, "color": account.color, "senderName": sender_name},
+    }))
+    .unwrap()
+}
+
+#[test]
+fn sender_name_is_trimmed_cleared_persisted_and_kept_across_other_updates() {
+    let (directory, _secrets, mut service) = setup();
+    let original = create(&mut service);
+    assert_eq!(original.sender_name, None);
+    let stored = |directory: &TempDir| -> Option<String> {
+        db(directory.path())
+            .query_row("SELECT sender_name FROM accounts", [], |row| row.get(0))
+            .unwrap()
+    };
+    assert_eq!(stored(&directory), None);
+
+    let named = service
+        .update_profile(sender_request(&original, json!("  张三 ")))
+        .unwrap();
+    assert_eq!(named.sender_name.as_deref(), Some("张三"));
+    assert_eq!(stored(&directory).as_deref(), Some("张三"));
+    // Like the other profile fields it does not advance the connection revision.
+    assert_eq!(named.revision, original.revision);
+    assert_eq!(service.get(&original.id).unwrap(), named);
+
+    // A profile request without the field (older callers) clears it.
+    let unnamed = service
+        .update_profile(profile_request(&named, "Work", json!(null)))
+        .unwrap();
+    assert_eq!(unnamed.sender_name, None);
+    service
+        .update_profile(sender_request(&original, json!("Kept")))
+        .unwrap();
+    // A connection update keeps it, like the display name.
+    let moved = service
+        .update_connection(update_request(&original, keep_config()))
+        .unwrap();
+    assert_eq!(moved.sender_name.as_deref(), Some("Kept"));
+
+    for empty in [json!(null), json!(""), json!("  \t ")] {
+        let cleared = service
+            .update_profile(sender_request(&original, empty))
+            .unwrap();
+        assert_eq!(cleared.sender_name, None);
+        assert_eq!(stored(&directory), None);
+    }
+    let longest = "n".repeat(128);
+    assert_eq!(
+        service
+            .update_profile(sender_request(&original, json!(longest)))
+            .unwrap()
+            .sender_name,
+        Some(longest)
+    );
+}
+
+#[test]
+fn sender_name_rejects_header_injection_control_characters_and_long_values() {
+    let (directory, _secrets, mut service) = setup();
+    let original = create(&mut service);
+    let named = service
+        .update_profile(sender_request(&original, json!("Alice")))
+        .unwrap();
+    for bad in [
+        "Alice\r\nBcc: evil@example.com",
+        "Alice\nBcc: x",
+        "Alice\rx",
+        "tab\there",
+        "nul\u{0}",
+        "del\u{7f}",
+        &"n".repeat(129),
+    ] {
+        assert_eq!(
+            service
+                .update_profile(sender_request(&original, json!(bad)))
+                .unwrap_err(),
+            AppError::validation("senderName"),
+            "{bad:?}"
+        );
+    }
+    // Nothing was written, and creation applies the same rules.
+    assert_eq!(service.get(&original.id).unwrap(), named);
+    let mut value = config();
+    value["senderName"] = json!("Bob\r\nX: y");
+    assert_eq!(
+        service
+            .create(create_request(&Uuid::new_v4().to_string(), value))
+            .unwrap_err(),
+        AppError::validation("senderName")
+    );
+    assert_eq!(count(&db(directory.path()), "accounts"), 1);
+
+    let mut value = config();
+    value["senderName"] = json!("  Carol ");
+    let created = service
+        .create(create_request(&Uuid::new_v4().to_string(), value))
+        .unwrap();
+    assert_eq!(created.sender_name.as_deref(), Some("Carol"));
+}

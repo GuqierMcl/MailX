@@ -66,6 +66,7 @@ fn main() {
         PreviewLines,
         NotificationSound,
         NotificationSettings,
+        ComposeSettings,
         AppSettings,
         SettingsSnapshot,
         AvatarKind,
@@ -73,5 +74,11 @@ fn main() {
         NewMailMessage,
         NewMail,
         AvatarImage,
+        DraftKind,
+        Draft,
+        DraftSummary,
+        CreateDraftRequest,
+        CreateDraftFromRequest,
+        UpdateDraftRequest,
     );
 }

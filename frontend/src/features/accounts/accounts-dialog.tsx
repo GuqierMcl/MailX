@@ -250,7 +250,7 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
   const [color, setColor] = useState(account.color)
   const [nameError, setNameError] = useState<string | null>(null)
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' })
-  const committed = useRef({ displayName: account.displayName, color: account.color })
+  const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName })
   const queue = useRef<Promise<void>>(Promise.resolve())
   const typed = useRef(displayName)
   const alive = useRef(true)

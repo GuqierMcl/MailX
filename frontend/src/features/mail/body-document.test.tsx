@@ -38,7 +38,7 @@ describe('isolated body, inline links and image policy', () => {
       render(<BodyDocument client={client} emailId="one" />)
       expect(await frame()).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=token-1&scheme=dark')
       vi.mocked(client.getSettings).mockResolvedValue({
-        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS },
+        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } },
         stored: true, recovered: false,
       })
     } finally {

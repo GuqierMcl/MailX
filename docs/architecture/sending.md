@@ -157,7 +157,7 @@
   - **收件人**：回复优先 `Reply-To`，否则 `From`；全部回复再加原 `To` 和 `Cc`，去掉自己的地址并去重。
   - **主题**：加 `Re:` / `Fwd:`，已有 `Re:`、`RE:`、`回复：` 等前缀时不重复添加。
   - **引用**：回复为"{日期}，{发件人} 写道："加逐行 `> `；转发为"转发的邮件"头部块（发件人、日期、主题、收件人）加原文。都使用已缓存的纯文本，只有 HTML 的邮件使用阅读时已生成的纯文本，不在写信窗口中渲染 HTML。
-  - **会话串联**：`In-Reply-To` 取原 `Message-ID`，`References` 取原 `References` 再接上原 `Message-ID`。头部同步不读 `References`，所以从缓存的原始 MIME 中取；尚未下载时先下载正文再生成草稿。
+  - **会话串联**：`In-Reply-To` 取原 `Message-ID`，`References` 取原 `References` 再接上原 `Message-ID`。头部同步不读 `References`，所以从缓存的原始 MIME 中取；尚未下载时，核心不在创建草稿的调用里下载，而是返回 `bodyNotCached`，由调用方先下载正文再重试（实现与本节原文的差异，原因是创建草稿保持纯本地、无网络）。
 - 已被 `accepted` 的草稿从草稿列表移除；`failed` 后回到可编辑；`unknown` 期间锁定。
 - 导航新增本地"草稿"，以及仅在有未完成队列项（`queued`、`sending`、`failed`、`unknown`）时出现的"发件箱"。草稿在岛内列出，阅读区显示预览和"继续编辑"；发件箱的项目在阅读区显示状态和可用操作。
 
@@ -192,6 +192,14 @@ v0.1 的原则：**MailX 本地一定有副本；服务器有的话再对上**�
 | `accounts` | 新增 `sender_name`（可空） |
 | `outbox` | 每次尝试一行：草稿、账号、`client_mutation_id`、Message-ID、MIME 快照、信封、状态、`not_before`、`data_started_at`、回复码与脱敏错误、重试次数、下次重试时间 |
 | `outbox`（续） | `accepted` 行即本地已发送副本：增加 `accepted_at`、`server_copy_message_id`（对上的服务器邮件，可空）、`deleted_locally_at` |
+
+步骤 1 已落地的部分（迁移 v7，`core/src/storage/migrations/0007_drafts.sql`）：
+
+- `drafts` 的收件人为 `{ name, address }` 的 JSON 数组；`source_email_id` 指向 `messages(id)` 并 `ON DELETE SET NULL`，原邮件消失时草稿保留（引用文字与串联头在创建时已复制进草稿），账号删除则级联删除草稿；`(account_id, client_mutation_id)` 唯一。
+- 额外的 `create_canonical` 列保存创建请求的规范形式，使同一 `clientMutationId` 的重试返回同一草稿（即使之后已被编辑），内容不同则报 `idempotencyConflict`。
+- 默认发件账号由宿主从设置读出后传给 `create_draft(request, default_account_id)`，核心的设置存储与数据库互不依赖。
+- 地址校验先用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址），步骤 2 引入 `lettre` 后再统一。
+- `senderName` 上限 128 个字符，拒绝所有控制字符。
 
 v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 blob 文件。
 

@@ -207,6 +207,31 @@ impl Default for LayoutSettings {
     }
 }
 
+/// Seconds a sent message waits in the queue where it can still be undone.
+pub const UNDO_SEND_SECONDS: [u32; 5] = [0, 5, 10, 20, 30];
+
+/// Writing and sending mail.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ComposeSettings {
+    /// Account used for new mail outside any account's folders; `""` for none.
+    /// It is not checked against the accounts here: a missing account falls
+    /// back to the first one when a draft is created.
+    pub default_account_id: String,
+    /// One of 0 (send at once), 5, 10, 20 or 30.
+    #[ts(type = "number")]
+    pub undo_send_seconds: u32,
+}
+
+impl ComposeSettings {
+    /// Trimmed account id; `None` for input that is not one.
+    fn normalized_account(&self) -> Option<String> {
+        let id = self.default_account_id.trim();
+        (id.chars().count() <= MAX_ACCOUNT_ID_CHARS && !id.chars().any(char::is_control))
+            .then(|| id.to_owned())
+    }
+}
+
 /// Section updates merge under the store lock so simultaneous saves cannot
 /// overwrite another settings page with a stale frontend snapshot.
 #[derive(Clone, Debug, Default, Deserialize, TS)]
@@ -216,6 +241,7 @@ pub struct SettingsPatch {
     pub security: Option<SecuritySettings>,
     pub layout: Option<LayoutSettings>,
     pub notifications: Option<NotificationSettings>,
+    pub compose: Option<ComposeSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -225,6 +251,7 @@ pub struct AppSettings {
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
     pub notifications: NotificationSettings,
+    pub compose: ComposeSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -267,10 +294,21 @@ impl AppSettings {
                 .ok_or_else(|| AppError::validation("notifications.mutedAccounts"))?,
             ..self.notifications
         };
+        if !UNDO_SEND_SECONDS.contains(&self.compose.undo_send_seconds) {
+            return Err(AppError::validation("compose.undoSendSeconds"));
+        }
+        let compose = ComposeSettings {
+            default_account_id: self
+                .compose
+                .normalized_account()
+                .ok_or_else(|| AppError::validation("compose.defaultAccountId"))?,
+            ..self.compose
+        };
         Ok(Self {
             security: self.security,
             layout: self.layout,
             notifications,
+            compose,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -291,9 +329,18 @@ impl AppSettings {
             muted_accounts: self.notifications.normalized_muted().unwrap_or_default(),
             ..self.notifications
         };
+        let compose = ComposeSettings {
+            default_account_id: self.compose.normalized_account().unwrap_or_default(),
+            undo_send_seconds: if UNDO_SEND_SECONDS.contains(&self.compose.undo_send_seconds) {
+                self.compose.undo_send_seconds
+            } else {
+                0
+            },
+        };
         Self {
             security: self.security,
             notifications,
+            compose,
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
                 list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
@@ -486,6 +533,9 @@ impl SettingsStore {
             notifications: patch
                 .notifications
                 .unwrap_or_else(|| state.settings.notifications.clone()),
+            compose: patch
+                .compose
+                .unwrap_or_else(|| state.settings.compose.clone()),
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;

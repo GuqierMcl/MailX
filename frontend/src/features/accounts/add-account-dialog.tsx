@@ -108,7 +108,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     guard.setBusy(true)
     setSaveError(null)
     try {
-      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color } })
+      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: null } })
       guard.setDirty(false)
       onCreated(saved)
     } catch (cause) {

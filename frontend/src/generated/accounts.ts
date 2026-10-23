@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "bodyNotCached" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -38,7 +38,12 @@ export type AccountProfileInput = { displayName: string,
 /**
  * `#rrggbb`, or `null` for the neutral default.
  */
-color: string | null, };
+color: string | null,
+/**
+ * The name recipients see in `From`; `null` or empty sends with the bare
+ * address. Unlike `displayName` it is never shown only to the user.
+ */
+senderName: string | null, };
 
 export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
@@ -46,7 +51,11 @@ export type AccountConfigInput = { displayName: string,
 /**
  * `#rrggbb`; omitted or `null` for the neutral default.
  */
-color: string | null, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+color: string | null,
+/**
+ * The name recipients see in `From`; omitted, `null` or empty for none.
+ */
+senderName: string | null, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
@@ -75,7 +84,11 @@ revision: number, displayName: string,
  * `#rrggbb`, or `null` for the neutral default. Defaulted so credential
  * journals written before colors existed still load.
  */
-color: string | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
+color: string | null,
+/**
+ * The name recipients see in `From`, or `null` to send the bare address.
+ */
+senderName: string | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */
@@ -241,7 +254,19 @@ whenFocused: boolean, sound: NotificationSound,
  */
 mutedAccounts: Array<string>, };
 
-export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, };
+export type ComposeSettings = {
+/**
+ * Account used for new mail outside any account's folders; `""` for none.
+ * It is not checked against the accounts here: a missing account falls
+ * back to the first one when a draft is created.
+ */
+defaultAccountId: string,
+/**
+ * One of 0 (send at once), 5, 10, 20 or 30.
+ */
+undoSendSeconds: number, };
+
+export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -287,3 +312,48 @@ export type AvatarImage = { mimeType: string,
  * Base64 of the re-encoded, validated image.
  */
 data: string, kind: AvatarKind, };
+
+export type DraftKind = "new" | "reply" | "replyAll" | "forward";
+
+export type Draft = { id: string, accountId: string, kind: DraftKind,
+/**
+ * The message this draft answers or forwards. Cleared if that message
+ * disappears; the quoted text and headers were copied at creation.
+ */
+sourceEmailId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyText: string,
+/**
+ * Original `Message-ID` in angle brackets, for replies.
+ */
+inReplyTo: string | null,
+/**
+ * Space-separated `<message-id>` list, for replies.
+ */
+references: string | null, createdAt: string, updatedAt: string,
+/**
+ * Advances on every saved change; updates must present the one they saw.
+ */
+revision: number, };
+
+export type DraftSummary = { id: string, accountId: string, kind: DraftKind, sourceEmailId: string | null, to: Array<MailAddress>, subject: string,
+/**
+ * Start of the body on one line.
+ */
+preview: string, updatedAt: string, revision: number, };
+
+export type CreateDraftRequest = {
+/**
+ * `null` picks the default sender account, else the first account.
+ */
+accountId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyText: string, clientMutationId: string, };
+
+export type CreateDraftFromRequest = { emailId: string,
+/**
+ * `reply`, `replyAll` or `forward`.
+ */
+kind: DraftKind, clientMutationId: string, };
+
+export type UpdateDraftRequest = { id: string, expectedRevision: number,
+/**
+ * `null` keeps the current sender account.
+ */
+accountId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyText: string, };

@@ -6,6 +6,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
+        compose: ComposeSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -214,7 +215,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "whenFocused": false,
                     "sound": "system",
                     "mutedAccounts": []
-                }
+                },
+                "compose": { "defaultAccountId": "", "undoSendSeconds": 0 }
             },
             "stored": false,
             "recovered": false
@@ -471,4 +473,115 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.list_width, 2000);
+}
+
+#[test]
+fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
+    let directory = TempDir::new().unwrap();
+    assert_eq!(
+        ComposeSettings::default(),
+        ComposeSettings {
+            default_account_id: String::new(),
+            undo_send_seconds: 0
+        }
+    );
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(
+        store.get().unwrap().settings.compose,
+        ComposeSettings::default()
+    );
+
+    let compose = ComposeSettings {
+        default_account_id: "  account-1 ".into(),
+        undo_send_seconds: 20,
+    };
+    let saved = store
+        .patch(SettingsPatch {
+            compose: Some(compose),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.compose.default_account_id, "account-1");
+    assert_eq!(saved.settings.compose.undo_send_seconds, 20);
+    assert_eq!(saved.settings.appearance.theme, ThemeMode::Dark);
+
+    store
+        .patch(SettingsPatch {
+            layout: Some(LayoutSettings::default()),
+            ..Default::default()
+        })
+        .unwrap();
+    let reloaded = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(reloaded.settings.compose.undo_send_seconds, 20);
+    assert_eq!(reloaded.settings.compose.default_account_id, "account-1");
+}
+
+#[test]
+fn invalid_compose_patches_are_rejected_and_change_nothing() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    for seconds in [1, 4, 6, 15, 31, 60, u32::MAX] {
+        let error = store
+            .patch(SettingsPatch {
+                compose: Some(ComposeSettings {
+                    undo_send_seconds: seconds,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::Validation);
+        assert_eq!(error.field.as_deref(), Some("compose.undoSendSeconds"));
+    }
+    for seconds in UNDO_SEND_SECONDS {
+        store
+            .patch(SettingsPatch {
+                compose: Some(ComposeSettings {
+                    undo_send_seconds: seconds,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    let error = store
+        .patch(SettingsPatch {
+            compose: Some(ComposeSettings {
+                default_account_id: "a\nb".into(),
+                undo_send_seconds: 5,
+            }),
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("compose.defaultAccountId"));
+    assert_eq!(
+        store.get().unwrap().settings.compose.undo_send_seconds,
+        UNDO_SEND_SECONDS[4]
+    );
+}
+
+#[test]
+fn hand_edited_invalid_compose_values_fall_back_to_defaults() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"compose":{"defaultAccountId":"keep-me","undoSendSeconds":7}}}"#,
+    )
+    .unwrap();
+    let compose = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .compose;
+    assert_eq!(compose.undo_send_seconds, 0);
+    assert_eq!(compose.default_account_id, "keep-me");
 }

@@ -35,7 +35,7 @@ describe('accounts dialog', () => {
     fireEvent.change(name, { target: { value: '  新名称 ' } })
     fireEvent.blur(name)
     await waitFor(() => expect(onAccountsChanged).toHaveBeenCalledOnce())
-    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null } })
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null } })
     expect(client.updateConnection).not.toHaveBeenCalled()
     expect(await within(dialog).findByText('已保存')).toBeInTheDocument()
   })
@@ -44,7 +44,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog()
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed' } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null } }))
     expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -71,7 +71,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog([exampleAccount(), second])
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '没按回车' } })
     await userEvent.click(within(dialog).getByRole('button', { name: /个人邮箱/ }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null } }))
     await waitFor(() => expect(client.getAccount).toHaveBeenCalledWith(second.id))
   })
 

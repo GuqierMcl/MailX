@@ -22,7 +22,7 @@ export function createMockClient(): MailxClient {
   const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
   const emails = buildEmails()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
 
@@ -49,7 +49,7 @@ export function createMockClient(): MailxClient {
       if (current.revision !== expectedRevision) {
         throw new MailxClientError({ code: 'conflict', message: '配置已被修改，请重新加载后重试。', field: null })
       }
-      const config = { ...connection, displayName: current.displayName, color: current.color }
+      const config = { ...connection, displayName: current.displayName, color: current.color, senderName: current.senderName }
       accounts[index] = { ...accountFromConfig(accountId, expectedRevision + 1, config), createdAt: current.createdAt }
       return structuredClone(accounts[index])
     },
@@ -58,7 +58,7 @@ export function createMockClient(): MailxClient {
       if (index < 0) throw notFound()
       const displayName = profile.displayName.trim()
       if (!displayName) throw new MailxClientError({ code: 'validation', message: '请填写账号名称。', field: 'displayName' })
-      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, updatedAt: new Date().toISOString() }
+      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, updatedAt: new Date().toISOString() }
       return structuredClone(accounts[index])
     },
     listFolders: async (accountId) => structuredClone(folders.filter((folder) => folder.accountId === accountId)),
@@ -170,6 +170,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     revision,
     displayName: config.displayName,
     color: config.color ?? null,
+    senderName: config.senderName?.trim() || null,
     emailAddress: config.emailAddress,
     providerId: config.providerId,
     mailboxSourceId: `mock-${id}`,
@@ -191,6 +192,7 @@ const MOCK_ACCOUNTS: Account[] = [
   accountFromConfig(WORK, 1, {
     displayName: '工作邮箱',
     color: '#2563eb',
+    senderName: null,
     emailAddress: 'lin.wei@example.com',
     providerId: null,
     imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'lin.wei@example.com' },
@@ -201,6 +203,7 @@ const MOCK_ACCOUNTS: Account[] = [
   accountFromConfig(PERSONAL, 1, {
     displayName: '个人邮箱',
     color: '#16a34a',
+    senderName: null,
     emailAddress: 'linwei.home@example.org',
     providerId: null,
     imap: { host: 'imap.example.org', port: 993, tls: 'implicit', username: 'linwei.home@example.org' },
