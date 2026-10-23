@@ -8,7 +8,7 @@
 pub(crate) mod images;
 mod proxy;
 #[cfg(test)]
-mod smtp_probe;
+pub(crate) mod test_support;
 
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -92,7 +92,25 @@ pub(crate) async fn connect(
 
 /// Runs a TLS handshake for `host` over an established stream.
 pub(crate) async fn upgrade_tls(stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
-    let config = tls_config()?;
+    handshake(stream, host, tls_config()?).await
+}
+
+/// Test-only injection point: the same handshake with a test trust store.
+/// There is deliberately no production counterpart.
+#[cfg(test)]
+pub(crate) async fn upgrade_tls_with(
+    stream: BoxedStream,
+    host: &str,
+    config: Arc<ClientConfig>,
+) -> Result<BoxedStream, NetError> {
+    handshake(stream, host, config).await
+}
+
+async fn handshake(
+    stream: BoxedStream,
+    host: &str,
+    config: Arc<ClientConfig>,
+) -> Result<BoxedStream, NetError> {
     let name = ServerName::try_from(host.to_owned())
         .map_err(|_| NetError::Tls("invalid TLS server name".into()))?;
     let handshake = TlsConnector::from(config).connect(name, stream);

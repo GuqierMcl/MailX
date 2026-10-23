@@ -292,6 +292,16 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 `cargo test -p mailx-core --lib smtp_probe` 6 项通过，`cargo clippy -p mailx-core --all-targets -- -D warnings` 无警告。没有运行完整的 `bun run check` 与 `cargo test --workspace`；没有连接真实服务商，也没有经真实代理发信；生产路径的平台证书验证、AUTH、RCPT 部分拒绝与正文后断线尚未覆盖，留给[写信与发送设计](../architecture/sending.md#12-实施步骤)第 2 步。
 
+### 2026-10-23 发信第 2 步：MIME 与 SMTP 会话
+
+本次未开启 Comet。新增 `core/src/smtp/`（MIME 构造、手写 SMTP 会话、登录计划）并删除 `smtp_probe.rs`，代理与 TLS 假件移到 `core/src/net/test_support.rs`；`lettre` 成为普通依赖（仅 `builder`）。全部使用 127.0.0.1 上的进程内假 SMTP 服务器、假 SOCKS5 / HTTP CONNECT 代理和 rcgen 生成的测试 CA；未连接任何真实服务商或代理。
+
+覆盖：三种路由与未解析主机名、死代理不回退直连、STARTTLS 换流（EHLO 重发、AUTH 在 TLS 之后）、隐式 TLS、错误主机证书（永久失败且服务器没见到 AUTH / MAIL）、缺 STARTTLS、STARTTLS 之后的明文注入、AUTH PLAIN / LOGIN、535 与密码不出现在 Debug / Display、无 AUTH、SIZE 超限与声明、三个 RCPT 一个或两个被拒（RSET、无 DATA、全部列出）、各阶段 4xx / 5xx、各阶段停顿超时、`DataStarted` 钩子先于首个正文字节且恰好调用一次、钩子失败不发正文、最终 250 / 550 / 452、正文后断线与超时与无法解析的回复为 `Unknown`、点填充与换行规范化、MIME 头集合与中文往返解析（`mail-parser`）、Bcc 只入信封、信封去重、回复串联头、头部注入拒绝、登录计划的受信端点检查。
+
+命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 348 项（含新增 43 项 smtp）、账号集成 31 项、desktop 43 项（1 项忽略）全部通过，连续 3 次单独运行 `smtp` 测试均 43 项通过；`cargo tree -p mailx-core -e normal | rg -i 'lettre|native-tls|openssl|aws-lc|rcgen'` 只出现 `lettre`；`git diff --check` 通过。未改 DTO，未运行 `types:check`、`bun run check`。
+
+未验证：生产路径的平台证书验证（测试用注入的测试 CA）、真实服务商兼容性、经真实代理发信、代理认证失败的永久失败区分（`net` 暂无结构化原因）。
+
 ## 6. 窗口行为的手动验证
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：

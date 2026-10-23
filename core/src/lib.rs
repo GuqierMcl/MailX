@@ -15,6 +15,8 @@ pub mod mail;
 mod net;
 pub mod secrets;
 pub mod settings;
+#[allow(dead_code, reason = "wired to the outbox and queue in sending step 3")]
+mod smtp;
 mod startup;
 mod storage;
 mod sync;

@@ -1,6 +1,6 @@
 # 写信与发送设计
 
-状态：**设计已确认，尚未实现** · 2026-10-23。SMTP 路由探针已有测试证据（见第 4 节），草稿、发送队列、写信窗口和已发送副本均未实现。本文是 v0.1 发信的实施依据；实现中发现更好的做法时，先改本文再改代码。可靠性语义的总纲仍在[同步与发信](mail-sync.md#5-本地草稿与可靠发送)，本文给出细节，两者冲突时以本文为准并同步修订。
+状态：**设计已确认，实施中** · 2026-10-23。草稿（第 1 步）以及 MIME 构造与 SMTP 会话（第 2 步，仅在 core 内，未接入队列、命令或界面）已有本地假服务器的测试证据；发送队列、写信窗口和已发送副本未实现。本文是 v0.1 发信的实施依据；实现中发现更好的做法时，先改本文再改代码。可靠性语义的总纲仍在[同步与发信](mail-sync.md#5-本地草稿与可靠发送)，本文给出细节，两者冲突时以本文为准并同步修订。
 
 ## 1. v0.1 范围
 
@@ -85,30 +85,53 @@
 
 ## 4. SMTP 会话
 
-### 库与探针结论
+### 实现：手写会话，lettre 只做 MIME
 
-使用 `lettre` 0.11 的 `AsyncSmtpConnection`，不用一键 `send()`，也不用 `AsyncSmtpTransport` 的连接池。`connect_with_transport` 接收由 `net::connect` 打开的字节流，路由仍完全由 `net` 负责。
+第 2 步实现在 `core/src/smtp/`（`mod.rs` 会话、`reply.rs` 回复解析与脱敏、`message.rs` MIME、`plan.rs` 失败映射；登录计划在 `accounts/sync_plan.rs` 的 `AccountService::smtp_plan`，紧挨 IMAP 的 `sync_plan`）。
 
-探针（`core/src/net/smtp_probe.rs`，仅测试代码）已证明：
+**没有使用 lettre 的 `AsyncSmtpConnection`，改为手写最小客户端**（EHLO / STARTTLS / AUTH PLAIN、LOGIN / MAIL / RCPT / DATA / RSET / QUIT，含多行回复解析和点填充）。原因：
 
-- 直连、SOCKS5、HTTP CONNECT 三种路由都能完成 MAIL / RCPT / DATA，两种代理都收到未解析的域名。
-- 代理不可达时返回 `NetError::Proxy`，同时可达的直连端口没有收到任何连接，即不回退直连。
-- STARTTLS（587）和隐式 TLS（465）都能在 SOCKS5 路由上完成。
+- lettre 的连接把流放进内部 `BufReader<AsyncNetworkStream>`，`starttls` 只接受它自己的 `TlsParameters`，TLS 由 lettre 的 rustls / native-tls 特性完成，等于绕开 `net::upgrade_tls`，IMAP 与 SMTP 就有两套证书验证；启用 lettre 的 TLS 特性还会引入第二套 TLS 依赖。
+- 探针阶段的换流方案要求在 `220` 之后从内部缓冲读取器里取回底层流，并确认缓冲区为空；lettre 不暴露这一点，无法做 STARTTLS 注入防御。
+- `connect_with_transport` 的 EHLO 与 `send` 把 MAIL / RCPT / DATA 合并为一次调用，拿不到 354 与"正文开始"标记之间的钩子，也不能逐个收集 RCPT 拒绝。
 
-适配点：`lettre` 要求流为 `Send + Sync`，`BoxedStream` 只有 `Send`，用一个加锁的包装解决。探针使用自签名证书和自建信任库，生产环境的证书验证仍需按下文实现并验证。
+`lettre` 现在是 `mailx-core` 的普通依赖，仅启用 `builder`（`default-features = false`）：用于 MIME 构造、RFC 2047 编码和 `Address` 解析；不启用 `smtp-transport`、`tokio1` 或任何 TLS 特性，`cargo tree -e normal` 中没有 `native-tls`、`openssl`、`aws-lc`。`rcgen` 仍只是开发依赖。
+
+### 会话与探针结论（保留的探针证据）
+
+原探针（直连 / SOCKS5 / HTTP CONNECT、不回退直连、STARTTLS 与隐式 TLS 经 SOCKS5）已由正式测试取代并删除 `smtp_probe.rs`；代理与 TLS 假件移入 `core/src/net/test_support.rs`，假 SMTP 服务器在 `core/src/smtp/fake_server.rs`（仅测试编译，只监听 127.0.0.1）。
 
 ### 会话步骤
 
 1. 按账号路由 `net::connect`。465 端口立即走 `net::upgrade_tls`。
-2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls` 升级后放回，再发一次 `EHLO`。这样 IMAP 和 SMTP 只有一套证书验证；这个换流做法**实现时先用测试证明**。
-3. 认证前核对凭证的受信端点（协议、主机、端口、TLS、用户名），不符时不发送密码。按服务器声明选用 `AUTH PLAIN` 或 `LOGIN`。
+2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls` 升级后放回，再发一次 `EHLO`。这样 IMAP 和 SMTP 只有一套证书验证；换流的实现：会话持有 `BufReader<BoxedStream>`；收到 `220` 后检查读缓冲为空（非空说明有人在明文里抢跑，按 `protocol` 永久失败，不丢弃也不重放），再 `into_inner()` 取出底层流交给 `net::upgrade_tls`，用结果建立新的读取器并重新 `EHLO`；握手前学到的能力一律丢弃。测试用 `TlsSource::Test`（仅 `#[cfg(test)]`，对应 `net::upgrade_tls_with`）注入测试 CA；生产只有 `TlsSource::Platform`，没有任何跳过验证的开关。
+3. 认证前核对凭证的受信端点（协议、主机、端口、TLS、用户名）：在建立登录计划时完成（`smtp_plan`，`TrustEndpoint::mail("smtp", ...)`），不符时返回永久失败，**不打开任何连接**。会话按服务器声明选用 `AUTH PLAIN`（优先）或 `LOGIN`；没有声明可用机制为 `authUnavailable`。
 4. 服务器声明了 `SIZE` 且快照超出时，在 `MAIL FROM` 之前失败。
 5. `MAIL FROM`，然后逐个发 `RCPT TO` 并记录每个地址的结果。只要有一个被拒，就 `RSET` 并整体失败，返回全部被拒地址，**不只发给部分收件人**。
-6. `DATA` 收到 354 后，先在数据库里提交"正文已开始"标记（`data_started_at`），然后再写出正文和结束符。
+6. `DATA` 收到 354 后，先调用并等待调用方传入的 `DataStarted` 钩子（第 3 步在这里提交 `data_started_at`），成功后才写出正文和结束符；钩子失败则不发任何正文字节并断开，按"正文开始前"的临时失败返回（`dataMarkFailed`）。正文做 CRLF 规范化（裸 LF / CR 都转为 CRLF）和点填充，由会话自己完成并有测试。
 7. 收到最终回复：250 记为 `accepted` 并保存回复码；明确的 4xx / 5xx 记为 `failed`；超时、断线或无法解析的回复记为 `unknown`。
 8. `QUIT` 尽力而为，失败不影响已记录的结果。
 
-超时按 RFC 5321 的建议上限设置，其中等待正文结束符回复最长约 10 分钟，以减少 `unknown`。日志只记录阶段、回复码和脱敏错误，从不输出 AUTH 或 DATA 内容。
+超时按 RFC 5321 的建议上限设置（`Timeouts`，可注入）：问候与各命令 5 分钟、`DATA` 到 354 为 2 分钟、正文结束符之后的回复 10 分钟，以减少 `unknown`；连接沿用 `CONNECT_TIMEOUT`。日志只记录阶段、回复码和脱敏错误，从不输出 AUTH 或 DATA 内容。会话本身不写日志；服务器回复文本只保留回复码和脱敏文本（控制字符含 CR / LF 变空格、折叠空白、回显的密码替换为 `[redacted]`、最多 200 字符）。
+
+### 会话结果（`SmtpOutcome`）
+
+| 结果 | 含义 | 第 5 节处理 |
+| --- | --- | --- |
+| `Transient(原因)` | 正文开始前：连接失败、代理失败、超时、网络中断、任意 4xx、握手前的协议错误、`dataMarkFailed`、凭证库暂不可用 | 回到 `queued`，退避重试 |
+| `Permanent(原因)` | 正文开始前：5xx、`authRejected`、`tlsVerification`、`tlsUnavailable`、`authUnavailable`、`messageTooLarge`、`protocol`（含 STARTTLS 后的明文注入）、`credentialUntrusted`、`credentialMissing`、`invalidMessage` | `failed` |
+| `RecipientsRejected(列表)` | RCPT 有拒绝：已 `RSET`，未进入 DATA，列表含每个被拒地址与回复码 | `failed`，附全部被拒地址 |
+| `Accepted(码, 文本)` | 正文后 2xx | `accepted` |
+| `RejectedAfterData(码, 文本)` | 正文后 4xx / 5xx | `failed`，不自动重试 |
+| `Unknown(超时 / 断线 / 回复无法解析)` | 正文后没有可用的最终回复，包括写正文时出错 | `unknown`，永不自动重发 |
+
+与设计的差异与限制：
+
+- **代理认证失败与其他代理错误不区分**：`net` 目前把 SOCKS5 / HTTP CONNECT 的失败都报为 `NetError::Proxy(字符串)`，没有结构化原因，所以会话一律按临时失败（`proxy`）处理；第 3 步若要对代理认证失败给出永久失败，需先让 `net` 报告结构化原因。
+- `AUTH` 回复 4xx 视为临时服务器错误，5xx 为 `authRejected`。
+- `EHLO` 使用地址字面量 `[127.0.0.1]` 作为客户端标识，避免泄露本机主机名；未支持 `SMTPUTF8`，非 ASCII 的信封地址在第 1 步校验时已被拒绝，MIME 必须是纯 ASCII（由 lettre 对非 ASCII 内容做 QP / base64），否则 `invalidMessage`。
+- 没有实现 PIPELINING；命令逐条等待回复，以便逐个记录 RCPT 结果。
+- 服务器声明 `SIZE` 时，MAIL FROM 附带 `SIZE=` 并在发送前比较；比较的是 MIME 字节数，未计点填充后的开销。
 
 ## 5. 状态与重试
 
@@ -163,11 +186,13 @@
 
 ## 8. 邮件构造
 
-- 使用 `lettre` 的 `builder` 生成 MIME：处理中文主题和地址的编码，拒绝头部注入。
-- 头部：`Date`（本地时区）、`Message-ID`、`From`、`To`、`Cc`、`Subject`、`In-Reply-To`、`References`、`MIME-Version`。正文为 `text/plain; charset=utf-8`，传输编码由库按内容选择。
+- 使用 `lettre` 的 `builder` 生成 MIME（`core/src/smtp/message.rs`，纯函数 `build`）：处理中文主题和地址的编码，拒绝头部注入；构造器自己也拒绝任何头部值里的控制字符（含 CR / LF），不依赖第 1 步的校验已通过。至少需要一个收件人（`draft.recipients`）。
+- 头部：`Date`（本地时区；lettre 只能输出 UTC，所以在构造后用 `Date` 头的预编码值替换为本地偏移，格式为 RFC 2822）、`Message-ID`、`From`、`To`、`Cc`、`Subject`、`In-Reply-To`、`References`、`MIME-Version`。正文为 `text/plain; charset=utf-8`，传输编码由库按内容选择。
 - `Message-ID` 由我们生成，形如 `<uuid@发件地址的域名>`，入队时保存，供 Sent 对账、串联和 `unknown` 处理使用。
+- `Message-ID` 的域名取自发件地址，保留原大小写；`In-Reply-To` / `References` 必须是空格分隔的 `<local@domain>` 令牌，否则拒绝。
 - 不添加 `User-Agent` / `X-Mailer`，避免暴露客户端与版本。
 - 信封：`MAIL FROM` 为账号地址，`RCPT` 为 To + Cc + Bcc 去重。**Bcc 只进信封，不写入发出的头部。**
+- 地址规则：第 1 步的本地校验器（`valid_address`）保留为准，因为它比 lettre 的解析更严格（lettre 接受带引号的本地部分和国际化域名）；构造器另外要求 lettre 也接受该地址，两者都通过才生成。因此没有用 lettre 的 `Address` 替换本地校验器。
 - 入队时固定快照：MIME 字节、信封和 Message-ID 与队列项一起持久化，之后每次尝试都发送同一份字节，不重新生成。
 
 ## 9. 已发送副本
@@ -198,7 +223,7 @@ v0.1 的原则：**MailX 本地一定有副本；服务器有的话再对上**�
 - `drafts` 的收件人为 `{ name, address }` 的 JSON 数组；`source_email_id` 指向 `messages(id)` 并 `ON DELETE SET NULL`，原邮件消失时草稿保留（引用文字与串联头在创建时已复制进草稿），账号删除则级联删除草稿；`(account_id, client_mutation_id)` 唯一。
 - 额外的 `create_canonical` 列保存创建请求的规范形式，使同一 `clientMutationId` 的重试返回同一草稿（即使之后已被编辑），内容不同则报 `idempotencyConflict`。
 - 默认发件账号由宿主从设置读出后传给 `create_draft(request, default_account_id)`，核心的设置存储与数据库互不依赖。
-- 地址校验先用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址），步骤 2 引入 `lettre` 后再统一。
+- 地址校验使用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址）；步骤 2 决定保留它并额外要求 lettre 接受（见第 8 节）。
 - `senderName` 上限 128 个字符，拒绝所有控制字符。
 
 v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 blob 文件。
@@ -215,7 +240,7 @@ v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 bl
 | 步骤 | 内容 | 主要验证 |
 | --- | --- | --- |
 | 1 | 迁移；草稿增删改、revision、幂等；回复 / 转发草稿生成 | 核心单元测试 |
-| 2 | MIME 构造；分阶段 SMTP 会话、STARTTLS 换流、认证前信任检查 | 假 SMTP 服务器注入故障：RCPT 部分拒绝、正文后断线、各阶段 4xx / 5xx、缺 STARTTLS、超时 |
+| 2（已实现于 core，未接入队列与界面） | MIME 构造；分阶段 SMTP 会话、STARTTLS 换流、认证前信任检查 | 假 SMTP 服务器注入故障：RCPT 部分拒绝、正文后断线、各阶段 4xx / 5xx、缺 STARTTLS、超时 |
 | 3 | 发送队列：撤销等待、退避、重启恢复、撤销与开始发送的竞争、账号变更、事件 | 假时钟 + 假服务器 |
 | 4 | 写信窗口、capability、宿主命令、标题栏；`Composer`、两步发送按钮、草稿与发件箱视图、提示、设置项 | 前端组件与交互测试；macOS 实机，Windows / Linux 待验 |
 | 5 | 本地已发送副本的列表合并、阅读与服务器副本对上 | 存储与查询测试 |

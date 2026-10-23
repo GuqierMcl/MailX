@@ -14,7 +14,7 @@
 
 账号配置采用 SQLite + `rusqlite`，以单连接同步服务提供简单的事务边界；宿主在阻塞工作线程串行调用，避免阻塞 UI。数据直接存 user-data-dir，独占锁限制一个写入核心，启用 WAL、外键、FULL 同步和迁移校验。凭证由宿主 SecretStore 提供，更新 journal 协调两种存储的恢复。选择该组合便于用临时数据库和故障替身验证一致性；当前不为尚不存在的同步负载引入读连接池。FTS5、中文查询和后台协议执行模型仍待验证。草稿与队列是需保护的本地源数据，可重建缓存与索引区别处理；附件与大对象使用 blob 文件仍为候选设计。
 
-初版拟覆盖 IMAP / SMTP；POP3、JMAP 与服务商 API 保留扩展空间。候选库 `async-imap` / `lettre` 需通过统一路由验证，尤其 SMTP 自定义连接、TLS 和 OAuth。`async-imap` 已用于同步；`lettre` 已通过 SMTP 自定义连接与 TLS 的路由探针（2026-10-23，见[写信与发送设计](../architecture/sending.md#4-smtp-会话)），OAuth 仍待验证。验证失败时可以换库，不用绕过代理来保住选型名称。
+初版拟覆盖 IMAP / SMTP；POP3、JMAP 与服务商 API 保留扩展空间。候选库 `async-imap` / `lettre` 需通过统一路由验证，尤其 SMTP 自定义连接、TLS 和 OAuth。`async-imap` 已用于同步；`lettre` 已通过 SMTP 自定义连接与 TLS 的路由探针（2026-10-23，见[写信与发送设计](../architecture/sending.md#4-smtp-会话)），2026-10-23 起 `lettre` 是 `mailx-core` 的普通依赖，但 `default-features = false` 且只启用 `builder`（MIME 构造与地址解析）；SMTP 会话改为手写，经 `net::connect` / `net::upgrade_tls`，不启用 lettre 的传输与 TLS 特性，依赖树中没有 `native-tls` / `openssl` / `aws-lc`，原因见[写信与发送设计](../architecture/sending.md#4-smtp-会话)。OAuth 仍待验证。验证失败时可以换库，不用绕过代理来保住选型名称。
 
 ## 代价与重评条件
 
