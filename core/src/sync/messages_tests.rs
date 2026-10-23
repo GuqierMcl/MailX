@@ -6,6 +6,7 @@ use crate::events::{CoreEvent, NewMail};
 use crate::imap::{FolderStatus, ImapLogin};
 use crate::mail::{EmailListQuery, FolderRole};
 use crate::secrets::{SecretValue, test_support::MemorySecrets};
+use crate::sync::cadence::{Activity, Cadence};
 use crate::sync::folders::FolderRecord;
 use crate::sync::messages::FolderMemory;
 use serde_json::json;
@@ -1098,10 +1099,13 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
             fixture.token.revision = account.revision;
         }
         fixture.events.lock().unwrap().clear();
+        // The sender stays alive for the whole test: without it the worker stops.
+        let (_activity, activity) = tokio::sync::watch::channel(Activity::Active);
         let worker = tokio::spawn(super::run(
             fixture.shared.clone(),
             fixture.token.clone(),
             Default::default(),
+            activity,
         ));
         let failed = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -1166,6 +1170,79 @@ async fn an_unchanged_folder_skips_the_full_round_and_reports_no_change() {
     assert!(!changed, "nothing changed, so readers need not refetch");
 }
 
+/// One full `sync_targets` round for the fixture's INBOX against `script`; the
+/// cadence is told what the worker would tell it.
+async fn inbox_round(
+    fixture: &Fixture,
+    mut script: Script,
+    memory: &mut FolderMemory,
+    cadence: &mut Cadence,
+) {
+    use super::super::manager::{record_round, revision_total};
+    script.splice(0..0, authenticate_commands());
+    script.push(("LOGOUT".into(), "{tag} OK goodbye\r\n".into()));
+    let targets = fixture
+        .service
+        .lock()
+        .unwrap()
+        .sync_folders(&fixture.account_id, &fixture.source)
+        .unwrap();
+    fixture
+        .shared
+        .reconcile_targets(&fixture.token, &targets, false);
+    let (session, server) = scripted_session(script).await;
+    let before = revision_total(&fixture.shared, &fixture.token);
+    let outcome = sync_targets(
+        &fixture.shared,
+        &fixture.token,
+        targets,
+        session,
+        memory,
+        || async { Err(ImapError::Timeout) },
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Synced));
+    server.await.unwrap();
+    record_round(cadence, &fixture.shared, &fixture.token, before);
+}
+
+#[tokio::test]
+async fn rounds_that_store_mail_keep_the_background_wait_short_and_quiet_ones_stretch_it() {
+    use super::super::cadence::{BACKGROUND_BASE, BACKGROUND_CAP};
+    let fixture = fixture();
+    let mut memory = FolderMemory::new();
+    let mut cadence = Cadence::default();
+    let background = |cadence: &Cadence| cadence.wait(Activity::Background);
+
+    // The first round stores mail: something was found.
+    let mut first: Script = commands(21, &[2, 3]).into_iter().skip(2).collect();
+    add_headers(&mut first, &[(2, "Old"), (3, "Kept")]);
+    inbox_round(&fixture, first, &mut memory, &mut cadence).await;
+    assert_eq!(background(&cadence), BACKGROUND_BASE);
+
+    // Same STATUS afterwards: only STATUS runs and nothing is stored. Enough of
+    // those in a row and the background wait grows, up to its cap.
+    let mut waits = Vec::new();
+    for _ in 0..6 {
+        let quiet: Script = commands(21, &[2, 3]).into_iter().skip(2).take(1).collect();
+        inbox_round(&fixture, quiet, &mut memory, &mut cadence).await;
+        waits.push(background(&cadence));
+    }
+    assert_eq!(waits[0], BACKGROUND_BASE);
+    assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(*waits.last().unwrap(), BACKGROUND_CAP);
+
+    // A new message arrives: found something, so the wait starts over.
+    let mut arrival: Script = commands(21, &[2, 3, 4]).into_iter().skip(2).collect();
+    add_headers(&mut arrival, &[(4, "New")]);
+    arrival.push((
+        "UID FETCH ".into(),
+        "* 1 FETCH (UID 2 FLAGS ())\r\n* 2 FETCH (UID 3 FLAGS ())\r\n{tag} OK flags\r\n".into(),
+    ));
+    inbox_round(&fixture, arrival, &mut memory, &mut cadence).await;
+    assert_eq!(background(&cadence), BACKGROUND_BASE);
+}
+
 #[tokio::test]
 async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1176,10 +1253,12 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     account_config["imap"]["port"] = json!(port);
     let fixture = fixture_with_config(account_config);
     let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    let (_activity, activity) = tokio::sync::watch::channel(Activity::Active);
     let worker = tokio::spawn(super::run(
         fixture.shared.clone(),
         fixture.token.clone(),
         wake.clone(),
+        activity,
     ));
     let sequence =
         |fixture: &Fixture| fixture.shared.states.lock().unwrap()[&fixture.account_id].clone();
