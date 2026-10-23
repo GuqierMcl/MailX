@@ -29,8 +29,8 @@ pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
 pub use mail::*;
 pub use settings::{
     AppSettings, AppearanceSettings, FontSize, LayoutSettings, MailTheme, NotificationSettings,
-    NotificationSound, RemoteImagePolicy, SecuritySettings, SettingsPatch, SettingsSnapshot,
-    SettingsStore, ThemeMode, mail_body_css,
+    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsPatch,
+    SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

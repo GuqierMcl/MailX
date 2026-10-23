@@ -44,6 +44,17 @@ pub enum FontSize {
     Large,
 }
 
+/// How many lines of body preview each message list row shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewLines {
+    None,
+    #[default]
+    One,
+    Two,
+    Three,
+}
+
 /// How message bodies follow the app's color mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +79,7 @@ pub struct AppearanceSettings {
     pub mail_font: String,
     pub mail_theme: MailTheme,
     pub font_size: FontSize,
+    pub preview_lines: PreviewLines,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]

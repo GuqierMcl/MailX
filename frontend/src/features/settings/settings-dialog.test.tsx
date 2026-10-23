@@ -103,6 +103,19 @@ describe('settings dialog', () => {
     }))
   })
 
+  it('offers list preview lines, one by default', async () => {
+    const client = testClient()
+    renderDialog(client, { section: 'appearance' })
+    const select = await screen.findByRole('combobox', { name: '行数预览' })
+    expect(select).toHaveTextContent('1 行')
+    await userEvent.click(select)
+    for (const name of ['不显示', '2 行', '3 行']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: '3 行' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, previewLines: 'three' },
+    }))
+  })
+
   it('keeps a rejected font list in the field with an error', async () => {
     const client = testClient()
     vi.mocked(client.updateSettings).mockRejectedValue(

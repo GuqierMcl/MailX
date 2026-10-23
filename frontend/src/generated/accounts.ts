@@ -195,7 +195,7 @@ interfaceFont: string,
 /**
  * `""` or comma-separated font families for message bodies, tried in order.
  */
-mailFont: string, mailTheme: MailTheme, fontSize: FontSize, };
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
@@ -211,6 +211,8 @@ export type LayoutSettings = {
  * Width of the navigation sidebar, `220..=420`.
  */
 navWidth: number, };
+
+export type PreviewLines = "none" | "one" | "two" | "three";
 
 export type NotificationSound = "system" | "chime" | "ding" | "droplet" | "bubble" | "marimba" | "sparkle" | "knock" | "chord" | "none";
 

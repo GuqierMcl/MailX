@@ -60,6 +60,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const settingsQuery = useSettings(client)
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
+  const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
   const { mutate: saveLayout } = useUpdateLayout(client)
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
@@ -330,6 +331,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               filter={filter}
               search={search}
               selectedId={highlighted}
+              previewLines={previewLines}
               onFilterChange={setFilter}
               onSelect={(email) => setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })}
               onLoadMore={loadMore}

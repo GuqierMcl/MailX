@@ -63,6 +63,7 @@ fn main() {
         RemoteImagePolicy,
         SecuritySettings,
         LayoutSettings,
+        PreviewLines,
         NotificationSound,
         NotificationSettings,
         AppSettings,

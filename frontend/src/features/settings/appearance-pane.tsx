@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
@@ -26,6 +26,8 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: IconSvgElement }[]
 const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: '跟随颜色模式', light: '始终白底' }
 
 const FONT_SIZE_LABELS: Record<FontSize, string> = { small: '较小', default: '标准', large: '较大' }
+
+const PREVIEW_LINE_LABELS: Record<PreviewLines, string> = { none: '不显示', one: '1 行', two: '2 行', three: '3 行' }
 
 const FONT_PREVIEW = '敏捷的棕色狐狸跳过了懒狗 · The quick brown fox jumps over the lazy dog 0123456789'
 
@@ -112,6 +114,18 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             <SelectTrigger id="appearance.fontSize" className="w-28"><SelectValue /></SelectTrigger>
             <SelectContent>
               {Object.entries(FONT_SIZE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="邮件列表">
+        <SettingsRow label="行数预览" description="在邮件列表中显示邮件正文的前几行。" htmlFor="appearance.previewLines">
+          <Select value={appearance.previewLines} items={PREVIEW_LINE_LABELS}
+            onValueChange={(previewLines: PreviewLines | null) => { if (previewLines) change({ previewLines }) }}>
+            <SelectTrigger id="appearance.previewLines" className="w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(PREVIEW_LINE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
         </SettingsRow>

@@ -184,6 +184,8 @@ fn hand_edited_files_keep_valid_fields_and_reset_invalid_strings() {
     assert_eq!(appearance.accent_color, "");
     assert_eq!(appearance.interface_font, "Noto Sans SC, serif");
     assert_eq!(appearance.font_size, FontSize::Default);
+    // Settings saved before the option existed get the one-line default.
+    assert_eq!(appearance.preview_lines, PreviewLines::One);
 }
 
 #[test]
@@ -201,7 +203,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "interfaceFont": "",
                     "mailFont": "",
                     "mailTheme": "follow",
-                    "fontSize": "default"
+                    "fontSize": "default",
+                    "previewLines": "one"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
                 "layout": { "navWidth": 256 },

@@ -1,4 +1,4 @@
-import type { AppearanceSettings, FontSize, MailTheme, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   theme: 'system',
@@ -7,6 +7,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   mailFont: '',
   mailTheme: 'follow',
   fontSize: 'default',
+  previewLines: 'one',
 }
 
 /** Used only when the user leaves the interface font empty. Keep in sync with `index.css`. */
@@ -137,6 +138,7 @@ const LEGACY_THEME_KEY = 'mailx.theme'
 const THEMES: readonly string[] = ['system', 'light', 'dark'] satisfies ThemeMode[]
 const MAIL_THEMES: readonly string[] = ['follow', 'light'] satisfies MailTheme[]
 const FONT_SIZES: readonly string[] = ['small', 'default', 'large'] satisfies FontSize[]
+const PREVIEW_LINES: readonly string[] = ['none', 'one', 'two', 'three'] satisfies PreviewLines[]
 
 /**
  * The core's `settings.json` is the source of truth; this copy only lets the
@@ -154,6 +156,7 @@ export function cachedAppearance(): AppearanceSettings {
         mailFont: typeof cached.mailFont === 'string' ? cached.mailFont : '',
         mailTheme: MAIL_THEMES.includes(cached.mailTheme as string) ? (cached.mailTheme as MailTheme) : 'follow',
         fontSize: FONT_SIZES.includes(cached.fontSize as string) ? (cached.fontSize as FontSize) : 'default',
+        previewLines: PREVIEW_LINES.includes(cached.previewLines as string) ? (cached.previewLines as PreviewLines) : 'one',
       }
     }
   } catch {
