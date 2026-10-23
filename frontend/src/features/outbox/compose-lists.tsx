@@ -26,12 +26,28 @@ function Row({ selected, onSelect, children }: RowProps) {
   )
 }
 
+function ListHeader({ title }: { title: string }) {
+  return (
+    <div className="flex h-12 shrink-0 items-center gap-2 px-3">
+      <h1 className="truncate text-base font-semibold">{title}</h1>
+    </div>
+  )
+}
+
+/** The pane stays a full-height column so `Empty` (flex-1) can centre in what is left under the title. */
+function EmptyShell({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div data-slot="list-empty" className="flex h-full min-h-0 flex-col">
+      <ListHeader title={title} />
+      {children}
+    </div>
+  )
+}
+
 function ListShell({ title, label, children }: { title: string; label: string; children: React.ReactNode }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <h1 className="truncate text-base font-semibold">{title}</h1>
-      </div>
+      <ListHeader title={title} />
       <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div role="list" aria-label={label} className="flex animate-in flex-col gap-2 px-3 py-3 duration-150 fade-in-0">{children}</div>
       </ScrollArea>
@@ -51,17 +67,19 @@ type DraftListProps = {
 }
 
 export function DraftList({ drafts, loading, error, accounts, selectedId, onSelect }: DraftListProps) {
-  if (error) return <Empty><EmptyHeader><EmptyTitle>无法加载草稿</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty>
+  if (error) return <EmptyShell title="草稿"><Empty><EmptyHeader><EmptyTitle>无法加载草稿</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
   if (loading && !drafts) return <div className="min-h-0 flex-1" />
   if (!drafts || drafts.length === 0) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon"><HugeiconsIcon icon={File01Icon} /></EmptyMedia>
-          <EmptyTitle>没有草稿</EmptyTitle>
-          <EmptyDescription>写到一半的邮件会自动保存在这里，只存在这台电脑上。</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyShell title="草稿">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><HugeiconsIcon icon={File01Icon} /></EmptyMedia>
+            <EmptyTitle>没有草稿</EmptyTitle>
+            <EmptyDescription>写到一半的邮件会自动保存在这里，只存在这台电脑上。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </EmptyShell>
     )
   }
   return (
@@ -100,17 +118,19 @@ const STATE_TONE: Record<string, string> = {
 }
 
 export function OutboxList({ items, loading, error, accounts, selectedId, onSelect }: OutboxListProps) {
-  if (error) return <Empty><EmptyHeader><EmptyTitle>无法加载发件箱</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty>
+  if (error) return <EmptyShell title="发件箱"><Empty><EmptyHeader><EmptyTitle>无法加载发件箱</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
   if (loading && !items) return <div className="min-h-0 flex-1" />
   if (!items || items.length === 0) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon"><HugeiconsIcon icon={MailUpload01Icon} /></EmptyMedia>
-          <EmptyTitle>发件箱是空的</EmptyTitle>
-          <EmptyDescription>正在发送、发送失败或需要确认的邮件会出现在这里。</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <EmptyShell title="发件箱">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><HugeiconsIcon icon={MailUpload01Icon} /></EmptyMedia>
+            <EmptyTitle>发件箱是空的</EmptyTitle>
+            <EmptyDescription>正在发送、发送失败或需要确认的邮件会出现在这里。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </EmptyShell>
     )
   }
   return (

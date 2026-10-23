@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/toast'
@@ -6,7 +6,7 @@ import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import type { Draft } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { Composer } from './composer'
-import { AUTOSAVE_DELAY_MS } from './use-draft-editor'
+import { AUTOSAVE_DELAY_MS, SAVING_INDICATOR_DELAY_MS } from './use-draft-editor'
 
 const DRAFT_ID = '3f2b8c1e-9a4d-4e6f-8b1a-2c3d4e5f6a7b'
 const account = exampleAccount({ senderName: '林薇' })
@@ -39,7 +39,7 @@ function setup(initial: Draft = draft()) {
 }
 
 const body = () => screen.findByRole('textbox', { name: '正文' })
-const status = () => screen.getByText(/已保存|保存中…|保存失败/)
+const status = () => document.querySelector('[data-status]') as HTMLElement
 
 afterEach(() => vi.useRealTimers())
 
@@ -54,7 +54,7 @@ describe('composer layout', () => {
     expect(screen.queryByRole('textbox', { name: '密送' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '主题' })).toBeInTheDocument()
     for (const name of ['发送', '丢弃']) expect(screen.getByRole('button', { name })).toBeInTheDocument()
-    expect(status()).toHaveTextContent('已保存')
+    expect(status()).toHaveTextContent(/^$/)
     await userEvent.click(screen.getByRole('button', { name: '抄送' }))
     expect(screen.getByRole('textbox', { name: '抄送' })).toBeInTheDocument()
   })
@@ -73,7 +73,7 @@ describe('autosave', () => {
     vi.useFakeTimers()
     fireEvent.change(text, { target: { value: 'a' } })
     fireEvent.change(text, { target: { value: 'ab' } })
-    expect(status()).toHaveTextContent('保存中…')
+    expect(status()).toHaveTextContent(/^$/)
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS - 10) })
     expect(client.updateDraft).not.toHaveBeenCalled()
     await act(async () => { vi.advanceTimersByTime(20) })
@@ -110,7 +110,7 @@ describe('autosave', () => {
     await waitFor(() => expect(client.updateDraft).toHaveBeenCalled(), { timeout: 3000 })
     await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' })).toHaveValue('from elsewhere'))
     expect(await screen.findByText('草稿已在别处修改，已加载最新版本')).toBeInTheDocument()
-    expect(status()).toHaveTextContent('已保存')
+    expect(status()).toHaveTextContent(/^$/)
   })
 
   it('turns read-only when the draft is locked by the send queue', async () => {
@@ -223,5 +223,91 @@ describe('discard', () => {
     await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '丢弃' }))
     await waitFor(() => expect(onDiscarded).toHaveBeenCalled())
     expect(client.deleteDraft).toHaveBeenCalledWith(DRAFT_ID)
+  })
+})
+
+describe('save status', () => {
+  it('shows nothing when a fresh or a reopened draft opens', async () => {
+    setup()
+    await body()
+    expect(status()).toHaveTextContent(/^$/)
+    expect(status()).toHaveAttribute('data-status', 'idle')
+    expect(screen.queryByText('已保存')).not.toBeInTheDocument()
+    cleanup()
+    setup(draft({ subject: 'Hi', bodyText: 'text', revision: 4 }))
+    await body()
+    expect(status()).toHaveAttribute('data-status', 'idle')
+    expect(screen.queryByText('已保存')).not.toBeInTheDocument()
+  })
+
+  it('keeps the live region polite', async () => {
+    setup()
+    await body()
+    expect(status()).toHaveAttribute('role', 'status')
+    expect(status()).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('goes straight to 已保存 when the save is fast, never showing 正在保存…', async () => {
+    setup()
+    const text = await body()
+    vi.useFakeTimers()
+    fireEvent.change(text, { target: { value: 'hello' } })
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
+    expect(status()).toHaveTextContent('已保存')
+    expect(screen.queryByText('正在保存…')).not.toBeInTheDocument()
+  })
+
+  it('shows 正在保存… only once a save has taken longer than the delay', async () => {
+    const { client } = setup()
+    const text = await body()
+    let finish: (value: Draft) => void = () => undefined
+    client.updateDraft.mockReset()
+    client.updateDraft.mockReturnValueOnce(new Promise<Draft>((resolve) => { finish = resolve }))
+    vi.useFakeTimers()
+    fireEvent.change(text, { target: { value: 'slow' } })
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
+    expect(client.updateDraft).toHaveBeenCalledTimes(1)
+    await act(async () => { vi.advanceTimersByTime(SAVING_INDICATOR_DELAY_MS - 50) })
+    expect(status()).toHaveTextContent(/^$/)
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(status()).toHaveTextContent('正在保存…')
+    await act(async () => { finish(draft({ bodyText: 'slow', revision: 2 })) })
+    expect(status()).toHaveTextContent('已保存')
+  })
+
+  it('goes back to showing nothing when the content is cleared to blank', async () => {
+    setup()
+    const text = await body()
+    vi.useFakeTimers()
+    fireEvent.change(text, { target: { value: 'x' } })
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
+    expect(status()).toHaveTextContent('已保存')
+    fireEvent.change(text, { target: { value: '' } })
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
+    expect(status()).toHaveAttribute('data-status', 'idle')
+    expect(status()).toHaveTextContent(/^$/)
+  })
+
+  it('says the draft is in the send queue instead of a save status when read-only', async () => {
+    const client = testClient([account])
+    client.getDraft.mockResolvedValue(draft({ bodyText: 'x' }))
+    let emit: (change: { draftId: string; accountId: string; change: 'locked' | 'unlocked' | 'deleted' }) => void = () => undefined
+    client.onDrafts.mockImplementation((listener) => { emit = listener; return () => undefined })
+    render(<Composer client={client} draftId={DRAFT_ID} accounts={[account]} onSent={vi.fn()} onDiscarded={vi.fn()} />)
+    await body()
+    act(() => emit({ draftId: DRAFT_ID, accountId: account.id, change: 'locked' }))
+    expect(status()).toHaveTextContent('已在发送队列中')
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+  })
+
+  it('shows 保存失败 with a 重试 button that saves again', async () => {
+    const { client } = setup()
+    const text = await body()
+    client.updateDraft.mockRejectedValueOnce(new MailxClientError({ code: 'storageUnavailable', message: 'x', field: null }))
+    fireEvent.change(text, { target: { value: 'x' } })
+    await waitFor(() => expect(status()).toHaveTextContent('保存失败'), { timeout: 3000 })
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(status()).toHaveTextContent('已保存'))
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
   })
 })

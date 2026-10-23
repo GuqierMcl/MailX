@@ -17,7 +17,13 @@ export type EditorFields = {
   bodyText: string
 }
 
-export type SaveStatus = 'saved' | 'saving' | 'failed'
+/**
+ * What the footer says. `idle` shows nothing: a draft that was just opened, or one that is blank again
+ * (a blank draft is not kept). `saving` only appears for saves slower than `SAVING_INDICATOR_DELAY_MS`.
+ */
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
+
+export const SAVING_INDICATOR_DELAY_MS = 400
 
 /** Why the editor cannot be used: the draft is not there, or something else broke. */
 export type EditorProblem = { message: string }
@@ -62,7 +68,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const [fields, setFields] = useState<EditorFields | null>(null)
   const [kind, setKind] = useState<DraftKind>('new')
   const [problem, setProblem] = useState<EditorProblem | null>(null)
-  const [status, setStatus] = useState<SaveStatus>('saved')
+  const [status, setStatus] = useState<SaveStatus>('idle')
   const [readOnly, setReadOnly] = useState(false)
   const [gone, setGone] = useState(false)
 
@@ -88,7 +94,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     failed.current = false
     setFields(next)
     setKind(draft.kind)
-    setStatus('saved')
+    setStatus('idle')
   }, [])
 
   const setLocked = useCallback((locked: boolean) => {
@@ -150,7 +156,8 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
           const snapshot = latest.current
           if (!snapshot) return
           dirty.current = false
-          setStatus('saving')
+          // Local saves are usually instant: only a slow one earns a "saving" label.
+          const slow = setTimeout(() => { if (alive.current) setStatus('saving') }, SAVING_INDICATOR_DELAY_MS)
           try {
             const saved = await client.updateDraft({
               id: draftId,
@@ -162,10 +169,12 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
               subject: snapshot.subject,
               bodyText: snapshot.bodyText,
             })
+            clearTimeout(slow)
             revision.current = saved.revision
             failed.current = false
-            if (alive.current && !dirty.current) setStatus('saved')
+            if (alive.current && !dirty.current) setStatus(fieldsAreEmpty(snapshot) ? 'idle' : 'saved')
           } catch (cause) {
+            clearTimeout(slow)
             const code = clientFailureCode(cause)
             if (code === 'conflict') {
               // Someone else saved a newer version: show it rather than overwrite it.
@@ -177,7 +186,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
             if (code === 'draftLocked') {
               dirty.current = false
               setLocked(true)
-              setStatus('saved')
+              setStatus('idle')
               notice.current?.({ kind: 'locked' })
               return
             }
@@ -203,7 +212,8 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     dirty.current = true
     failed.current = false
     setFields(next)
-    setStatus('saving')
+    // A blank draft is not kept, so don't leave "已保存" up while it waits to save.
+    if (fieldsAreEmpty(next)) setStatus('idle')
     clearTimeout(timer.current)
     timer.current = setTimeout(() => { void runSave() }, AUTOSAVE_DELAY_MS)
   }, [runSave])

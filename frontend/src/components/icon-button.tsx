@@ -20,13 +20,19 @@ export function IconButton({ label, tip, children, disabled, variant = 'ghost', 
       {children}
     </Button>
   )
+  // Base UI keeps the trigger element it first registered, so switching
+  // between the disabled wrapper and the button needs a fresh tooltip.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={disabled ? <span tabIndex={0} className="inline-flex rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none" /> : button}
-      >
-        {disabled ? button : undefined}
-      </TooltipTrigger>
+    <Tooltip key={disabled ? 'disabled' : 'enabled'}>
+      {disabled ? (
+        <TooltipTrigger
+          render={<span tabIndex={0} className="inline-flex rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none" />}
+        >
+          {button}
+        </TooltipTrigger>
+      ) : (
+        <TooltipTrigger render={button} />
+      )}
       <TooltipContent>{tip ?? label}</TooltipContent>
     </Tooltip>
   )

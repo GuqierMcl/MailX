@@ -53,7 +53,7 @@ type ComposerProps = {
   controllerRef?: Ref<ComposerController>
 }
 
-const STATUS_TEXT: Record<SaveStatus, string> = { saved: '已保存', saving: '保存中…', failed: '保存失败' }
+const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', saved: '已保存', saving: '正在保存…', failed: '保存失败' }
 
 /**
  * The writing surface: sender, recipients, subject, plain-text body and the bottom
@@ -261,12 +261,16 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       />
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+          {/* The width and height are reserved so the status coming and going never moves the buttons. */}
           <span
             role="status"
-            data-status={editor.status}
-            className={cn('shrink-0', failedSave ? 'text-destructive' : 'text-muted-foreground')}
+            aria-live="polite"
+            data-status={readOnly ? 'locked' : editor.status}
+            className={cn('inline-flex h-6 min-w-20 shrink-0 items-center', failedSave && !readOnly ? 'text-destructive' : 'text-muted-foreground')}
           >
-            {readOnly ? '' : STATUS_TEXT[editor.status]}
+            <span key={readOnly ? 'locked' : editor.status} className="animate-in duration-150 fade-in-0 motion-reduce:animate-none">
+              {readOnly ? '已在发送队列中' : STATUS_TEXT[editor.status]}
+            </span>
           </span>
           {failedSave && !readOnly && <Button type="button" variant="ghost" size="xs" onClick={editor.retry}>重试</Button>}
           {(error || hasInvalid) && (

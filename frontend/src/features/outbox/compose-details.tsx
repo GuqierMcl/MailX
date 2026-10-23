@@ -35,15 +35,22 @@ function Frame({ children, actions }: { children: React.ReactNode; actions: Reac
   )
 }
 
+/** The reader pane is not a flex column by itself; this gives `Empty` (flex-1) the height to centre in. */
+function CenteredPane({ children }: { children: React.ReactNode }) {
+  return <div data-slot="detail-empty" className="flex h-full min-h-0 flex-col">{children}</div>
+}
+
 function Placeholder({ icon, title, description }: { icon: typeof File01Icon; title: string; description: string }) {
   return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon"><HugeiconsIcon icon={icon} /></EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <CenteredPane>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><HugeiconsIcon icon={icon} /></EmptyMedia>
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription>{description}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </CenteredPane>
   )
 }
 
@@ -86,7 +93,7 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
   if (draft.isError) {
     return clientFailureCode(draft.error) === 'notFound'
       ? <Placeholder icon={File01Icon} title="这份草稿已不存在" description="它可能已被发送或删除。" />
-      : <Empty><EmptyHeader><EmptyTitle>无法打开草稿</EmptyTitle><EmptyDescription>{clientFailure(draft.error).message}</EmptyDescription></EmptyHeader></Empty>
+      : <CenteredPane><Empty><EmptyHeader><EmptyTitle>无法打开草稿</EmptyTitle><EmptyDescription>{clientFailure(draft.error).message}</EmptyDescription></EmptyHeader></Empty></CenteredPane>
   }
   const data = draft.data
   const account = accounts.find((row) => row.id === data?.accountId)
