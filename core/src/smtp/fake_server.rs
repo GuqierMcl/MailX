@@ -101,7 +101,13 @@ pub(crate) fn commands(seen: &Seen) -> Vec<String> {
 }
 
 pub(crate) async fn start(script: Script) -> (u16, Seen) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    start_at(0, script).await
+}
+
+/// Like `start`, on a given port (0 picks one), so a test can bring a server
+/// up where connections were refused a moment ago.
+pub(crate) async fn start_at(port: u16, script: Script) -> (u16, Seen) {
+    let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Seen::default();
     let record = seen.clone();

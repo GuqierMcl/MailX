@@ -12,6 +12,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::mail::MailAddress;
+use crate::send::types::{DraftChanged, OutboxChanged};
 use crate::settings::NotificationSettings;
 use crate::sync::manager::{AccountSyncState, FlagWriteBack};
 
@@ -27,6 +28,10 @@ pub enum CoreEvent {
     FlagWriteBack(FlagWriteBack),
     /// Unread mail arrived in an inbox since the last completed sync round.
     NewMail(NewMail),
+    /// A send queue item changed state (queued, sending, accepted, ...).
+    Outbox(OutboxChanged),
+    /// A draft was locked, unlocked or deleted by the send queue.
+    DraftChanged(DraftChanged),
 }
 
 /// Receives every event. Called on the core's worker threads.

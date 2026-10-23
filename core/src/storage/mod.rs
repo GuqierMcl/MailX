@@ -18,6 +18,7 @@ pub(crate) mod image_cache;
 pub(crate) use flag_changes::{Flag, LocalChange, PendingChange};
 pub(crate) mod messages;
 mod migrations;
+pub(crate) mod outbox;
 
 pub(crate) struct Storage {
     pub db: Connection,

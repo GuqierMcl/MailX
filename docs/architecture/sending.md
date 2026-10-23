@@ -1,6 +1,6 @@
 # 写信与发送设计
 
-状态：**设计已确认，实施中** · 2026-10-23。草稿（第 1 步）以及 MIME 构造与 SMTP 会话（第 2 步，仅在 core 内，未接入队列、命令或界面）已有本地假服务器的测试证据；发送队列、写信窗口和已发送副本未实现。本文是 v0.1 发信的实施依据；实现中发现更好的做法时，先改本文再改代码。可靠性语义的总纲仍在[同步与发信](mail-sync.md#5-本地草稿与可靠发送)，本文给出细节，两者冲突时以本文为准并同步修订。
+状态：**设计已确认，实施中** · 2026-10-23。草稿（第 1 步）以及 MIME 构造与 SMTP 会话（第 2 步，仅在 core 内，未接入队列、命令或界面）已有本地假服务器的测试证据；发送队列（第 3 步，仅在 core 内，未接入命令与界面）已有本地假服务器测试证据；写信窗口和已发送副本的列表合并未实现。本文是 v0.1 发信的实施依据；实现中发现更好的做法时，先改本文再改代码。可靠性语义的总纲仍在[同步与发信](mail-sync.md#5-本地草稿与可靠发送)，本文给出细节，两者冲突时以本文为准并同步修订。
 
 ## 1. v0.1 范围
 
@@ -164,6 +164,16 @@
 - "标记为已发出"。
 - "确认未发出，重新发送"：创建一次新的尝试，沿用同一 Message-ID，方便收件方去重。
 
+### 第 3 步的实现（`core/src/send/`、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`）
+
+- **每账号一个串行 worker**（`send::worker::OutboxManager`）：循环为“取下一项并解析登录计划（持锁、短事务）→ 不持锁发送 → 短事务记录结果”。启动时、新入队、撤销、立即重试、账号连接更新时唤醒；没有到期项时睡到最早的 `max(not_before, next_attempt_at)`，最长睡 60 秒（系统时钟被调整时不会长期滞留）。账号被删除时 worker 退出。
+- **竞争点是一条带条件的 `UPDATE`**：worker 的 `queued → sending` 与 `cancel` 的 `queued → canceled` 都带 `WHERE state = 'queued'`，同一行只能有一个成功；输家得到 `alreadySending`（撤销时已在发送）或 `conflict`（已处于其他状态）。取走时 `attempts` 加一。
+- **`DataStarted` 钩子**在 `spawn_blocking` 里写 `data_started_at`，提交后才返回 `Ok`；写失败或该行已不是 `sending` 时返回 `Err`，会话按 `dataMarkFailed` 在正文前停止。
+- **结果映射**（`send::schedule`）：`Transient` → `queued`，`next_attempt_at = now + 30s / 1m / 2m / 5m / 10m，之后每 30m`（以第 n 次尝试失败计）；`now - first_queued_at > 24h` 时转 `failed`，原因码 `retryExhausted`（保留最后一次的服务器回复文本）。`Permanent`、`RecipientsRejected`（全部被拒地址写入 `last_error.rejected`）、`RejectedAfterData` → `failed`；`Accepted` → `accepted`；`Unknown` → `unknown`（原因码 `unknown`，文本为 `timeout` / `connectionLost` / `malformedReply`）。凭证未受信或缺失、认证被拒都是 `Permanent`，不会空转重试。
+- **账号变更**：每次取项之前，把信封发件人与当前账号地址（大小写不敏感）不同的 `queued` 项转为 `failed`（`accountChanged`）；取项后若登录计划里的地址又变了，同样失败。只改服务器、用户名、路由或凭证的更新不使项失败，下一次尝试直接用新的计划。账号被删除时队列随外键级联删除（草稿同理）。
+- **与第 2 节原文的差异**：`DraftLocked` 用单独的错误码，而不是复用 `conflict`；`drafts` 删除也被锁拒绝。重启恢复在 `MailxCore::open` 里于任何 worker 启动前完成，并为每个变化发出 `Outbox` 事件。
+- **`unknown` 的处理**：`resolve_unknown(MarkSent)` 把该行变为 `accepted`（`accepted_at` 为标记时间，无服务器回复，草稿删除）；`Resend` 在同一事务里插入一行新 `queued`（相同 Message-ID、MIME、信封，`attempts` 0，`first_queued_at` 为现在，立即可发），并把旧行标记 `resolution = 'resent'`、`superseded_by` 指向新行。已标记的 `unknown` 不再算“存活”，不锁草稿、不出现在默认的发件箱列表。同一 `clientMutationId` 重放返回同一结果，换一种处理方式返回 `conflict`。`failed` 项的“重新发送”就是对可编辑的草稿再次 `queue_send`，生成新的 Message-ID。
+
 ## 6. 撤销发送
 
 - 设置项 `compose.undoSendSeconds`，可选 0 / 5 / 10 / 20 / 30 秒，**默认 0（立即发送）**，与默认发件账号一起放在设置弹窗新增的"发信"页。
@@ -226,6 +236,14 @@ v0.1 的原则：**MailX 本地一定有副本；服务器有的话再对上**�
 - 地址校验使用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址）；步骤 2 决定保留它并额外要求 lettre 接受（见第 8 节）。
 - `senderName` 上限 128 个字符，拒绝所有控制字符。
 
+步骤 3 落地的部分（迁移 v8，`core/src/storage/migrations/0008_outbox.sql`）：
+
+- `outbox` 为 STRICT 表，带 CHECK：`state` 六种取值、`accepted` 必有 `accepted_at`、`queued` / `canceled` 不能有 `data_started_at`、`resolution` 只能是 `unknown` 行的 `resent` 或 `accepted` 行的 `markedSent`；`(account_id, client_mutation_id)` 唯一。`draft_id` 为 `ON DELETE SET NULL`，账号删除时级联删除。
+- 列在设计表之外另有：`queue_canonical`（入队请求的规范形式，用于 `clientMutationId` 重放与 `idempotencyConflict`）、`recipients_preview`（最多 3 个信封收件人）与 `recipient_count`（列表不解析 MIME）、`resolution` / `resolution_mutation_id` / `superseded_by`（`unknown` 的处理，取代 `resolved` 布尔值）。`envelope` 为 `{ from, recipients }`，`last_error` 为 `{ reason, smtpCode, text, rejected[] }`，`server_reply` 为 `{ code, text }`，均只含脱敏文本。
+- 索引：`outbox_due`（`queued` 项的下一个到期项，部分索引）、`outbox_by_account`（列表）、`outbox_by_draft`、`outbox_by_message_id`、`outbox_sent`（本地已发送副本，按接受时间倒序，部分索引）。
+- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`update_draft` 与 `delete_draft` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
+- `accepted` 行保留 `mime`、`envelope`、`accepted_at`、`server_reply`，即本地已发送副本；`server_copy_message_id` 与 `deleted_locally_at` 已建列，由第 5 步使用，本步不读写。
+
 v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 blob 文件。
 
 ## 11. 权限与宿主
@@ -241,7 +259,7 @@ v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 bl
 | --- | --- | --- |
 | 1 | 迁移；草稿增删改、revision、幂等；回复 / 转发草稿生成 | 核心单元测试 |
 | 2（已实现于 core，未接入队列与界面） | MIME 构造；分阶段 SMTP 会话、STARTTLS 换流、认证前信任检查 | 假 SMTP 服务器注入故障：RCPT 部分拒绝、正文后断线、各阶段 4xx / 5xx、缺 STARTTLS、超时 |
-| 3 | 发送队列：撤销等待、退避、重启恢复、撤销与开始发送的竞争、账号变更、事件 | 假时钟 + 假服务器 |
+| 3（已实现于 core，未接入命令与界面） | 发送队列：撤销等待、退避、重启恢复、撤销与开始发送的竞争、账号变更、事件 | 假时钟 + 假服务器 |
 | 4 | 写信窗口、capability、宿主命令、标题栏；`Composer`、两步发送按钮、草稿与发件箱视图、提示、设置项 | 前端组件与交互测试；macOS 实机，Windows / Linux 待验 |
 | 5 | 本地已发送副本的列表合并、阅读与服务器副本对上 | 存储与查询测试 |
 | 6 | 真实服务商自发自收 | 每次需用户单独授权，只发往测试账号白名单 |

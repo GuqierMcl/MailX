@@ -76,7 +76,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
         events: Arc::new(move |event: &CoreEvent| match event {
             CoreEvent::Sync(state) => observed.lock().unwrap().push(state.clone()),
             CoreEvent::NewMail(mail) => arrived.lock().unwrap().push(mail.clone()),
-            CoreEvent::FlagWriteBack(_) => {}
+            CoreEvent::FlagWriteBack(_) | CoreEvent::Outbox(_) | CoreEvent::DraftChanged(_) => {}
         }),
     });
     let token = WorkerToken {

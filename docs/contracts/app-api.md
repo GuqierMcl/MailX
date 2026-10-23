@@ -224,23 +224,33 @@ OAuth、附件上传、设置和删除账号的细分接口在对应实现任务
 
 ## 4. 邮件写操作一致性（后续）
 
-**草稿的核心层已实现，尚无 IPC / HTTP / MCP 与界面**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，正文不超过 1 MiB。发送、发件箱和 SMTP 尚未实现。
+**草稿的核心层已实现，尚无 IPC / HTTP / MCP 与界面**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，正文不超过 1 MiB。发件箱的 core 层见下。
 
 `expectedRevision` 不匹配报 `REVISION_CONFLICT`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
 
 `drafts.queueSend` 只允许交互 UI 主体（桌面 v0.1 为 `composer-*` 写信窗口），后端核对账号权限、草稿版本和确认过的快照；入队时按设置 `compose.undoSendSeconds` 写入 `notBefore`。MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md#5-本地草稿与可靠发送)与[写信与发送设计](../architecture/sending.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
 
+**发件箱的核心层已实现（发信步骤 3），仍无 IPC / HTTP / MCP 与界面**（`core/src/send/`）。`MailxCore` 方法：
+
+- `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 必须是 `Caller::Composer`（宿主提供的枚举，`Mcp` / `Model` 一律 `forbidden`，不依赖 UI）；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
+- `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`resolution`、`supersededBy`。
+- `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：同样要求 `Caller::Composer`，只对未处理的 `unknown` 生效，`resend` 返回新项。
+- 新错误码：`draftLocked`、`forbidden`、`alreadySending`（均已生成到 `ErrorCode`）。`unknown` 永不自动重发。
+- 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: locked | unlocked | deleted }` 在队列锁定、释放、接受后删除草稿时发出。载荷不含地址、主题和正文。桌面宿主暂未转发（`desktop/src/main.rs` 中忽略，待第 4 步加 `mailx://outbox` / `mailx://drafts`）。
+
 ## 5. 事件
 
 ### 当前：核心事件出口
 
-核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有三种：
+核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有五种（后两种见上文发件箱）：
 
 | 事件 | 含义 | 桌面宿主的去向 |
 | --- | --- | --- |
 | `Sync(AccountSyncState)` | 账号同步状态变化 | `mailx://sync-state`，前端据修订号重新读取 |
 | `FlagWriteBack(FlagWriteBack)` | 一轮已读 / 星标写回结束 | `mailx://flags` |
 | `NewMail(NewMail)` | 收件箱有新的未读邮件 | 系统通知（见文末“新邮件通知”） |
+| `Outbox(OutboxChanged)` | 发送队列项状态变化 | 暂忽略（第 4 步转发） |
+| `DraftChanged(DraftChanged)` | 草稿被队列锁定 / 释放 / 删除 | 暂忽略（第 4 步转发） |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 

@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "bodyNotCached" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -357,3 +357,74 @@ export type UpdateDraftRequest = { id: string, expectedRevision: number,
  * `null` keeps the current sender account.
  */
 accountId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyText: string, };
+
+export type OutboxState = "queued" | "sending" | "accepted" | "failed" | "unknown" | "canceled";
+
+export type OutboxResolution = "markedSent" | "resent";
+
+export type UnknownResolution = "markSent" | "resend";
+
+export type RejectedRecipientInfo = { address: string, code: number,
+/**
+ * Sanitized server text.
+ */
+text: string, };
+
+export type OutboxError = {
+/**
+ * A fixed code such as `connect`, `authRejected`, `recipientsRejected`,
+ * `rejectedAfterData`, `retryExhausted`, `accountChanged`, `unknown`.
+ */
+reason: string, smtpCode: number | null, text: string | null, rejected: Array<RejectedRecipientInfo>, };
+
+export type ServerReplyInfo = { code: number, text: string, };
+
+export type OutboxItem = { id: string,
+/**
+ * Cleared when the draft is deleted (after `accepted`, the item is the
+ * local Sent copy and outlives its draft).
+ */
+draftId: string | null, accountId: string,
+/**
+ * With angle brackets.
+ */
+messageId: string, subject: string,
+/**
+ * The first few envelope recipients.
+ */
+recipients: Array<string>, recipientCount: number, state: OutboxState,
+/**
+ * Earliest time of the first attempt (end of the undo window).
+ */
+notBefore: string, dataStartedAt: string | null,
+/**
+ * Attempts started so far.
+ */
+attempts: number, nextAttemptAt: string | null, firstQueuedAt: string, error: OutboxError | null, acceptedAt: string | null, serverReply: ServerReplyInfo | null,
+/**
+ * The server's copy in a synced folder, once matched by Message-ID.
+ */
+serverCopyMessageId: string | null,
+/**
+ * Set on an `unknown` item the user has settled; it is then not live.
+ */
+resolution: OutboxResolution | null,
+/**
+ * The item queued by `resend` for a settled `unknown` one.
+ */
+supersededBy: string | null, createdAt: string, updatedAt: string, };
+
+export type QueueSendRequest = { draftId: string, expectedRevision: number, clientMutationId: string, };
+
+export type ResolveUnknownRequest = { id: string, resolution: UnknownResolution, clientMutationId: string, };
+
+export type OutboxChanged = { accountId: string, outboxId: string, draftId: string | null, state: OutboxState, attempts: number, nextAttemptAt: string | null,
+/**
+ * The failure code when the item failed, was requeued after a failure or
+ * is `unknown`.
+ */
+errorReason: string | null, };
+
+export type DraftChange = "locked" | "unlocked" | "deleted";
+
+export type DraftChanged = { draftId: string, accountId: string, change: DraftChange, };

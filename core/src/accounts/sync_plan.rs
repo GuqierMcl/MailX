@@ -97,7 +97,6 @@ impl AccountService {
     /// Resolves credentials for SMTP. Like the IMAP plan, a credential is only
     /// used for the exact endpoint it was confirmed for; the check happens
     /// here, before any socket exists.
-    #[allow(dead_code, reason = "used by the send queue in sending step 3")]
     pub(crate) fn smtp_plan(&self, account_id: &str) -> Result<SmtpPlan, PlanError> {
         let snapshot = self.storage.load(account_id)?;
         let account = &snapshot.account;
@@ -127,7 +126,6 @@ impl AccountService {
             },
             route,
             sender_address: account.email_address.clone(),
-            sender_name: account.sender_name.clone(),
         })
     }
 

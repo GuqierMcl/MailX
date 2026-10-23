@@ -1,6 +1,8 @@
 pub(crate) mod bodies;
 mod drafts;
+mod outbox;
 pub(crate) use drafts::{DraftSource, local_offset};
+pub(crate) use outbox::Next;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 pub(crate) mod messages;

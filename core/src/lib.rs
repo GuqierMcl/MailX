@@ -14,8 +14,8 @@ mod imap;
 pub mod mail;
 mod net;
 pub mod secrets;
+mod send;
 pub mod settings;
-#[allow(dead_code, reason = "wired to the outbox and queue in sending step 3")]
 mod smtp;
 mod startup;
 mod storage;
@@ -31,6 +31,7 @@ pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
 pub use mail::*;
+pub use send::types::*;
 pub use settings::{
     AppSettings, AppearanceSettings, ComposeSettings, FontSize, LayoutSettings, MailTheme,
     NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,

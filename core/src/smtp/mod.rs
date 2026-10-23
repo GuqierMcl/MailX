@@ -13,7 +13,7 @@
 //! length-limited text.
 
 #[cfg(test)]
-mod fake_server;
+pub(crate) mod fake_server;
 pub(crate) mod message;
 mod plan;
 mod reply;
@@ -34,7 +34,6 @@ use crate::accounts::types::TlsMode;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
 use crate::secrets::SecretValue;
 use message::SmtpEnvelope;
-#[allow(unused_imports, reason = "used by the send queue in sending step 3")]
 pub(crate) use plan::{SmtpPlan, plan_failure};
 use reply::{IoFail, Reply, read_reply, sanitize};
 
@@ -282,27 +281,8 @@ impl TlsSource {
     }
 }
 
-/// Sends one message. Opens its own connection and always closes it.
-pub(crate) async fn send(
-    route: &NetRoute,
-    login: &SmtpLogin,
-    envelope: &SmtpEnvelope,
-    mime: &[u8],
-    timeouts: &Timeouts,
-    on_data_started: DataStarted,
-) -> SmtpOutcome {
-    send_with_tls(
-        route,
-        login,
-        envelope,
-        mime,
-        timeouts,
-        &TlsSource::Platform,
-        on_data_started,
-    )
-    .await
-}
-
+/// Sends one message. Opens its own connection and always closes it. Production
+/// passes `TlsSource::Platform`.
 pub(crate) async fn send_with_tls(
     route: &NetRoute,
     login: &SmtpLogin,

@@ -26,7 +26,7 @@ use crate::drafts::validate::valid_address;
 use crate::mail::MailAddress;
 
 /// SMTP envelope: `MAIL FROM` and the deduplicated `RCPT TO` list.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SmtpEnvelope {
     pub from: String,
     pub recipients: Vec<String>,

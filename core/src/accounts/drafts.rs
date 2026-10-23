@@ -232,6 +232,11 @@ impl AccountService {
         if let Some(account_id) = &request.account_id {
             self.check_account(account_id)?;
         }
+        // A draft held by the send queue is the snapshot's source; editing it
+        // now would suggest the queued mail changes.
+        if self.storage.draft_locked(&request.id)? {
+            return Err(AppError::new(ErrorCode::DraftLocked));
+        }
         self.storage.update_draft(
             &request.id,
             request.expected_revision,
@@ -243,6 +248,9 @@ impl AccountService {
 
     pub fn delete_draft(&mut self, id: &str) -> Result<(), AppError> {
         validate_uuid(id, "draftId")?;
+        if self.storage.draft_locked(id)? {
+            return Err(AppError::new(ErrorCode::DraftLocked));
+        }
         self.storage.delete_draft(id)
     }
 }

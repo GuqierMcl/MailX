@@ -19,6 +19,11 @@ use crate::error::{AppError, ErrorCode};
 use crate::events::Events;
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
+use crate::send::types::{
+    Caller, OutboxItem, QueueSendRequest, ResolveUnknownRequest, UnknownResolution,
+};
+use crate::send::{OutboxManager, SendConfig};
+use crate::storage::outbox::Changed;
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
 
@@ -40,6 +45,7 @@ pub use flags::{FlagChange, MessageFlag};
 pub struct MailxCore {
     service: Arc<Mutex<AccountService>>,
     sync: Arc<SyncManager>,
+    outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
@@ -55,6 +61,18 @@ impl MailxCore {
         runtime: Handle,
         events: Events,
     ) -> Result<Self, AppError> {
+        Self::open_with(path, secrets, runtime, events, SendConfig::default())
+    }
+
+    /// `open` with the send queue's clock, SMTP budgets and trust store
+    /// replaced; tests use it with local fakes.
+    pub(crate) fn open_with(
+        path: &Path,
+        secrets: Arc<dyn SecretStore>,
+        runtime: Handle,
+        events: Events,
+        send: SendConfig,
+    ) -> Result<Self, AppError> {
         // The image cache is an optimization; a directory that cannot be used
         // must not stop mail from working.
         let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
@@ -62,17 +80,44 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
-        let sync = Arc::new(SyncManager::new(service.clone(), runtime, events));
+        let sync = Arc::new(SyncManager::new(
+            service.clone(),
+            runtime.clone(),
+            events.clone(),
+        ));
         for account in &accounts {
             sync.restart(&account.id);
+        }
+        let outbox = Arc::new(OutboxManager::new(&service, runtime, events, send));
+        // Items interrupted by the last shutdown are settled before any worker
+        // looks at the queue: no body start mark means nothing reached the
+        // server, so the item is queued again; with the mark it is `unknown`.
+        let recovered = service
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .recover_outbox(outbox.now())?;
+        outbox.shared.announce(recovered);
+        for account in &accounts {
+            outbox.start(&account.id);
         }
         Ok(Self {
             service,
             sync,
+            outbox,
             bodies,
             avatars: Arc::default(),
             images,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn service_for_tests(&self) -> Arc<Mutex<AccountService>> {
+        self.service.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn outbox_mime_for_tests(&self, id: &str) -> Vec<u8> {
+        self.accounts().unwrap().outbox_mime(id).unwrap()
     }
 
     fn accounts(&self) -> Result<MutexGuard<'_, AccountService>, AppError> {
@@ -93,6 +138,7 @@ impl MailxCore {
     pub fn create_account(&self, request: CreateAccountRequest) -> Result<Account, AppError> {
         let account = self.accounts()?.create(request)?;
         self.sync.restart(&account.id);
+        self.outbox.start(&account.id);
         Ok(account)
     }
 
@@ -111,6 +157,9 @@ impl MailxCore {
         // The configuration is committed even if resetting a body state fails.
         // Always retire the old header connection before returning that error.
         self.sync.restart(&account.id);
+        // Queued mail follows the new route and credentials on its next
+        // attempt; a changed address fails the unsent items.
+        self.outbox.wake(&account.id);
         body_restart?;
         Ok(account)
     }
@@ -222,6 +271,98 @@ impl MailxCore {
 
     pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
         self.accounts()?.delete_draft(id)
+    }
+
+    /// Queues a draft for sending: the MIME is built now from the draft and the
+    /// account's current sender, the draft is locked, and the account's worker
+    /// sends it once `undo_send_seconds` (from `compose.undoSendSeconds`; one
+    /// of 0, 5, 10, 20, 30) have passed. Only the interactive composer may
+    /// call this; any other `caller` gets `Forbidden`.
+    pub fn queue_send(
+        &self,
+        caller: Caller,
+        request: QueueSendRequest,
+        undo_send_seconds: u32,
+    ) -> Result<OutboxItem, AppError> {
+        if caller != Caller::Composer {
+            return Err(AppError::new(ErrorCode::Forbidden));
+        }
+        let (item, locked) =
+            self.accounts()?
+                .queue_send(&request, undo_send_seconds, self.outbox.now())?;
+        if let Some(locked) = locked {
+            self.outbox.shared.announce(vec![Changed {
+                item: item.clone(),
+                draft: Some(locked),
+            }]);
+            self.outbox.wake(&item.account_id);
+        }
+        Ok(item)
+    }
+
+    /// Queue items, newest first. Without `include_all` only those that need
+    /// attention or time: queued, sending, failed and unsettled unknown.
+    pub fn list_outbox(
+        &self,
+        account_id: Option<&str>,
+        include_all: bool,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        self.accounts()?.list_outbox(account_id, include_all)
+    }
+
+    pub fn get_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+        self.accounts()?.get_outbox(id)
+    }
+
+    /// Undo send. Succeeds only while the item is still `queued`; once the
+    /// worker has started it the answer is `AlreadySending`.
+    pub fn cancel_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+        let changed = self.accounts()?.cancel_outbox(id, self.outbox.now())?;
+        let item = changed.item.clone();
+        self.outbox.shared.announce(vec![changed]);
+        self.outbox.wake(&item.account_id);
+        Ok(item)
+    }
+
+    /// Skips the backoff wait of a `queued` item.
+    pub fn retry_outbox_now(&self, id: &str) -> Result<OutboxItem, AppError> {
+        let item = self.accounts()?.retry_outbox_now(id, self.outbox.now())?;
+        self.outbox.wake(&item.account_id);
+        Ok(item)
+    }
+
+    /// Settles an `unknown` item: `MarkSent` accepts it; `Resend` queues a new
+    /// attempt with the same Message-ID and bytes and returns that new item.
+    pub fn resolve_unknown(
+        &self,
+        caller: Caller,
+        request: ResolveUnknownRequest,
+    ) -> Result<OutboxItem, AppError> {
+        if caller != Caller::Composer {
+            return Err(AppError::new(ErrorCode::Forbidden));
+        }
+        let (changed, old) = {
+            let mut service = self.accounts()?;
+            match service.resolve_unknown(&request, self.outbox.now())? {
+                None => return service.resolved_item(&request),
+                Some(changed) => {
+                    let old = service.get_outbox(&request.id)?;
+                    (changed, old)
+                }
+            }
+        };
+        let item = changed.item.clone();
+        let mut announced = Vec::new();
+        if request.resolution == UnknownResolution::Resend {
+            announced.push(Changed {
+                item: old,
+                draft: None,
+            });
+        }
+        announced.push(changed);
+        self.outbox.shared.announce(announced);
+        self.outbox.wake(&item.account_id);
+        Ok(item)
     }
 
     /// Asks an account's sync worker to run its next round now.

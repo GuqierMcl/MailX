@@ -80,5 +80,17 @@ fn main() {
         CreateDraftRequest,
         CreateDraftFromRequest,
         UpdateDraftRequest,
+        OutboxState,
+        OutboxResolution,
+        UnknownResolution,
+        RejectedRecipientInfo,
+        OutboxError,
+        ServerReplyInfo,
+        OutboxItem,
+        QueueSendRequest,
+        ResolveUnknownRequest,
+        OutboxChanged,
+        DraftChange,
+        DraftChanged,
     );
 }

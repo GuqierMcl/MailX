@@ -302,6 +302,16 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 未验证：生产路径的平台证书验证（测试用注入的测试 CA）、真实服务商兼容性、经真实代理发信、代理认证失败的永久失败区分（`net` 暂无结构化原因）。
 
+### 2026-10-23 发信第 3 步：发送队列
+
+本次未开启 Comet。新增迁移 v8（`outbox`）、`core/src/send/`（worker、调度、清单时钟）、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`，以及 `MailxCore` 的 `queue_send` / `list_outbox` / `get_outbox` / `cancel_outbox` / `retry_outbox_now` / `resolve_unknown`、`CoreEvent::Outbox` / `DraftChanged`、错误码 `draftLocked` / `forbidden` / `alreadySending`。全部用 127.0.0.1 上的进程内假 SMTP 服务器和手动推进的测试时钟（没有使用 tokio 暂停时钟，因为它会连带加速假服务器的套接字超时）；未连接任何真实服务商或代理。
+
+覆盖（`send::tests` 15 项、`accounts::outbox` 8 项、迁移 2 项）：入队幂等与 `idempotencyConflict`、版本冲突、无收件人、非 Composer 调用方被拒；撤销窗口内零连接、撤销后永不发送且草稿可编辑；开始发送后 `alreadySending`；取走与撤销在存储层互斥；瞬时失败的退避间隔 30s / 60s / 120s / 300s / 600s / 1800s / 1800s 及“刚好差 1 秒不重试”、之后服务器恢复即接受；24 小时耗尽 `retryExhausted`；永久失败、认证被拒、RCPT 全部被拒、正文后 5xx 各自记录原因与回复码且不重试；正文后断线为 `unknown`、推进很长时间也只有一次 DATA；两种重启恢复分支（计数不增 / 转 `unknown`）及恢复后 `queued` 项继续发送；账号地址变更使未发送项 `accountChanged`、只改连接则不失败；账号删除级联；接受后删除草稿并保留 MIME / `accepted_at` / 回复；`MarkSent`、`Resend`（Message-ID 与字节一致、重放不产生第三次尝试）；失败项编辑后重新入队得到新的 Message-ID；一个账号的服务器卡在问候语时另一账号照常发送；每次状态变化的事件序列。
+
+命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 372 项、账号集成 31 项、desktop 43 项（1 项忽略）全部通过；`cargo test -p mailx-core --lib outbox` 与 `... send::` 各连续运行 3 次，均为 9 项与 15 项通过；`bun run types:generate` 后 `bun run types:check` 通过；`bun run typecheck` 通过；`bun run frontend:test` 32 个文件 267 项通过（其中一次运行退出码为 1，随后重复两次均通过，未能复现，原因未查明）；`git diff --check` 通过。
+
+未验证：真实服务商与真实代理上的发送、进程在 `DATA` 中途被强杀的真实恢复（用写行模拟 `sending` 状态代替）、系统时钟跳变、桌面事件转发（第 4 步）。
+
 ## 6. 窗口行为的手动验证
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：

@@ -69,6 +69,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["drafts"],
         sql: include_str!("migrations/0007_drafts.sql"),
     },
+    Migration {
+        version: 8,
+        description: "send queue and local sent copies",
+        required_tables: &["outbox"],
+        sql: include_str!("migrations/0008_outbox.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -473,7 +479,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 7);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 8);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -545,6 +551,57 @@ mod tests {
                 .get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn outbox_migration_upgrades_a_v7_database_and_enforces_its_constraints() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(7)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.com', 's', 't', 't')",
+            [],
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let id = |n: char| n.to_string().repeat(36);
+        let insert = |row: &str, mutation: &str, state: &str| {
+            db.execute(
+                "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+                 mime, envelope, subject, recipients_preview, recipient_count, state, not_before,
+                 first_queued_at, created_at, updated_at)
+                 VALUES (?1, 'a', ?2, '{}', '<m@x>', x'00', '{}', '', '[]', 1, ?3, 't', 't', 't', 't')",
+                [row, mutation, state],
+            )
+        };
+        insert(&id('1'), &id('a'), "queued").unwrap();
+        assert!(
+            insert(&id('2'), &id('a'), "queued").is_err(),
+            "unique per account"
+        );
+        assert!(
+            insert(&id('3'), &id('b'), "sent").is_err(),
+            "state is checked"
+        );
+        assert!(
+            insert(&id('4'), &id('c'), "accepted").is_err(),
+            "accepted needs accepted_at"
+        );
+        assert!(
+            db.execute("UPDATE outbox SET data_started_at = 't'", [])
+                .is_err(),
+            "a queued item has not started its body"
+        );
+        db.execute("DELETE FROM accounts WHERE id = 'a'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM outbox", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "the queue goes with its account"
         );
     }
 

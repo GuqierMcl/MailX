@@ -13,7 +13,6 @@ pub(crate) struct SmtpPlan {
     pub route: NetRoute,
     /// The account address, used for `MAIL FROM` and `From`.
     pub sender_address: String,
-    pub sender_name: Option<String>,
 }
 
 /// A plan that could not be built is a failure before any connection:

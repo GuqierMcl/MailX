@@ -90,6 +90,10 @@ fn main() {
                                 written,
                             );
                         }
+                        // TODO(sending step 4): forward as `mailx://outbox` and
+                        // `mailx://drafts` once the composer and outbox views exist.
+                        mailx_core::CoreEvent::Outbox(_)
+                        | mailx_core::CoreEvent::DraftChanged(_) => {}
                         mailx_core::CoreEvent::NewMail(mail) => {
                             let app = settings_handle.clone();
                             notifications::new_mail(&handle, mail.clone(), move || {
