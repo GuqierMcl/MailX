@@ -6,6 +6,7 @@ import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import { MailxClientError } from '@/lib/mailx-client'
 import { SettingsDialog, type SettingsTarget } from './settings-dialog'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
 function renderDialog(client = testClient(), target: SettingsTarget = { section: 'appearance' }) {
   const onClose = vi.fn()
@@ -130,7 +131,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 }, notifications: DEFAULT_NOTIFICATIONS }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

@@ -23,6 +23,10 @@ pub const NAV_WIDTH_MIN: u32 = 220;
 pub const NAV_WIDTH_MAX: u32 = 420;
 const NAV_WIDTH_DEFAULT: u32 = 256;
 
+pub const LIST_WIDTH_MIN: u32 = 300;
+pub const LIST_WIDTH_MAX: u32 = 2000;
+const LIST_WIDTH_DEFAULT: u32 = 420;
+
 const MAX_FONT_FAMILIES: usize = 16;
 const MAX_FONT_FAMILY_CHARS: usize = 64;
 
@@ -184,12 +188,21 @@ impl NotificationSettings {
 pub struct LayoutSettings {
     /// Width of the navigation sidebar, `220..=420`.
     pub nav_width: u32,
+    /// Width of the message list beside the reader, `300..=2000`, applied when
+    /// the window opens. In a window that is too narrow for it, list and reader
+    /// shrink together, each down to its own minimum.
+    pub list_width: u32,
+    /// The reader beside the message list is folded away. Unlike the sidebar,
+    /// this survives a restart: the window comes back as it was left.
+    pub reader_collapsed: bool,
 }
 
 impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
             nav_width: NAV_WIDTH_DEFAULT,
+            list_width: LIST_WIDTH_DEFAULT,
+            reader_collapsed: false,
         }
     }
 }
@@ -244,6 +257,9 @@ impl AppSettings {
         if !(NAV_WIDTH_MIN..=NAV_WIDTH_MAX).contains(&self.layout.nav_width) {
             return Err(AppError::validation("layout.navWidth"));
         }
+        if !(LIST_WIDTH_MIN..=LIST_WIDTH_MAX).contains(&self.layout.list_width) {
+            return Err(AppError::validation("layout.listWidth"));
+        }
         let notifications = NotificationSettings {
             muted_accounts: self
                 .notifications
@@ -280,6 +296,8 @@ impl AppSettings {
             notifications,
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
+                list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
+                reader_collapsed: self.layout.reader_collapsed,
             },
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)

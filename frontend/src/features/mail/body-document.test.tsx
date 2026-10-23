@@ -8,6 +8,7 @@ import { BodyDocument } from './body-document'
 import { EmailView } from './email-view'
 import type { EmailDetail } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, convertFileSrc: () => 'mailx-body://localhost/' }))
 const url = 'https://example.com/a/long/path?destination=complete&x=1#fragment'
@@ -37,7 +38,7 @@ describe('isolated body, inline links and image policy', () => {
       render(<BodyDocument client={client} emailId="one" />)
       expect(await frame()).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=token-1&scheme=dark')
       vi.mocked(client.getSettings).mockResolvedValue({
-        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask', senderAvatars: false }, layout: { navWidth: 256 }, notifications: DEFAULT_NOTIFICATIONS },
+        settings: { appearance: { ...DEFAULT_APPEARANCE, mailTheme: 'light' }, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS },
         stored: true, recovered: false,
       })
     } finally {

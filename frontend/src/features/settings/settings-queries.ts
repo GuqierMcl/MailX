@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AppearanceSettings, LayoutSettings, NotificationSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
@@ -65,12 +67,20 @@ export function useUpdateSecurity(client: MailxClient) {
   })
 }
 
-/** Saves window layout such as the sidebar width; the caller shows its own value meanwhile. */
+/**
+ * Saves window layout such as the sidebar and list widths; the caller shows its
+ * own value meanwhile. A change names only what moved: the rest of the layout
+ * is taken from the saved copy when the save starts, so two writers (sidebar,
+ * list) never overwrite each other's width.
+ */
 export function useUpdateLayout(client: MailxClient) {
   const queryClient = useQueryClient()
   return useMutation({
     scope: { id: 'layout-settings' },
-    mutationFn: (layout: LayoutSettings) => client.updateSettings({ layout }),
+    mutationFn: (change: Partial<LayoutSettings>) => {
+      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.layout
+      return client.updateSettings({ layout: { ...DEFAULT_LAYOUT, ...current, ...change } })
+    },
     onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
       ...snapshot, settings: {
         ...snapshot.settings,
@@ -80,6 +90,37 @@ export function useUpdateLayout(client: MailxClient) {
       },
     })),
   })
+}
+
+/** How long layout changes wait for a quieter moment before being written. */
+export const LAYOUT_SAVE_DELAY_MS = 500
+
+/**
+ * Layout changes (a dragged width, a folded reader) written to disk once the
+ * user pauses, not on every event: a burst of key presses or a few drags in a
+ * row becomes one write. Changes made in the meantime are merged, so two
+ * writers (sidebar, list) cannot lose each other's value. What is still waiting
+ * is written when the page goes away or the caller unmounts.
+ */
+export function useDebouncedLayoutSave(client: MailxClient) {
+  const { mutate } = useUpdateLayout(client)
+  const pending = useRef<Partial<LayoutSettings>>({})
+  const write = useCallback(() => {
+    const change = pending.current
+    if (Object.keys(change).length === 0) return
+    pending.current = {}
+    mutate(change)
+  }, [mutate])
+  const debounced = useDebouncedCallback(write, { wait: LAYOUT_SAVE_DELAY_MS, onUnmount: (debouncer) => debouncer.flush() })
+  useEffect(() => {
+    // The window can close inside the delay; `pagehide` is the last chance to send it.
+    window.addEventListener('pagehide', write)
+    return () => window.removeEventListener('pagehide', write)
+  }, [write])
+  return useCallback((change: Partial<LayoutSettings>) => {
+    pending.current = { ...pending.current, ...change }
+    debounced()
+  }, [debounced])
 }
 
 /**

@@ -35,14 +35,16 @@ type EmailViewProps = {
   email: EmailDetail | null
   loading: boolean
   error: string | null
+  /** The reader is folded away: keys must not close a message nobody can see. */
+  hidden?: boolean
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose, hidden = false }: EmailViewProps) {
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
   // nothing open does the reader have no actions to offer.
   const open = Boolean(email) || loading || Boolean(error)
-  useCloseOnEscape(open, onClose)
+  useCloseOnEscape(open && !hidden, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
       {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} />}

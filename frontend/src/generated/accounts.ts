@@ -210,7 +210,18 @@ export type LayoutSettings = {
 /**
  * Width of the navigation sidebar, `220..=420`.
  */
-navWidth: number, };
+navWidth: number,
+/**
+ * Width of the message list beside the reader, `300..=2000`, applied when
+ * the window opens. In a window that is too narrow for it, list and reader
+ * shrink together, each down to its own minimum.
+ */
+listWidth: number,
+/**
+ * The reader beside the message list is folded away. Unlike the sidebar,
+ * this survives a restart: the window comes back as it was left.
+ */
+readerCollapsed: boolean, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 
