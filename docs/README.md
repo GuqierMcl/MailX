@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**账号配置、文件夹与所有可选目录的邮件头同步已有实现，邮件能力继续演进** · 2026-10-20。此目录记录产品愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。Rust 核心经账号路由登录 IMAP，将所有可选文件夹的邮件头存入 SQLite，Tauri IPC 与 shadcn 工作台提供统一列表、分页和头部搜索；按需正文缓存和安全阅读已有实现，标记写回与发信尚未实现。实现代码与真实服务商兼容性分别记录，已有部分真实账号冒烟证据，完整矩阵仍待验证。
+状态：**桌面端收信、阅读与纯文本发信已有实现，邮件能力继续演进** · 2026-10-24。此目录记录产品愿景、当前架构和实施建议，不是已完成邮件客户端的使用手册，也不是长期冻结规范。Rust 核心经账号路由登录 IMAP，将所有可选文件夹的邮件头存入 SQLite，Tauri IPC 与 shadcn 工作台提供统一列表、分页和头部搜索；按需正文缓存和安全阅读、已读 / 星标写回、附件保存与新邮件通知已有实现；纯文本写信与经发送队列的 SMTP 发信已有实现，富文本、写信附件和已发送副本展示尚未实现。实现代码与真实服务商兼容性分别记录，已有部分真实账号冒烟证据，完整矩阵仍待验证。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 
@@ -13,7 +13,7 @@
 - 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)和[应用 API](contracts/app-api.md)。
 - 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，当前编号迁移覆盖 v1 账号、v2 文件夹、v3 邮件头与 v4 正文缓存；启动准入和失败重试已实现。
 - 修改界面：先看[界面设计语言](architecture/ui-design.md)，了解画布与岛屿结构、无分割线约定和外壳组件。
-- 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
+- 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
 

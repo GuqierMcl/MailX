@@ -7,11 +7,12 @@ use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
 
 use crate::state::{DesktopState, StartupStatus};
+use crate::window_access::{self, WindowKind};
 use crate::window_chrome::{self, WindowAction, WindowChrome};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EmptyArgs {}
+pub(crate) struct EmptyArgs {}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -61,7 +62,7 @@ struct LinkRequestArgs {
     document_token: String,
 }
 
-fn parse<T: DeserializeOwned>(body: &InvokeBody) -> Result<T, AppError> {
+pub(crate) fn parse<T: DeserializeOwned>(body: &InvokeBody) -> Result<T, AppError> {
     match body {
         InvokeBody::Json(value) => {
             serde_json::from_value(value.clone()).map_err(|_| AppError::validation("request"))
@@ -70,35 +71,15 @@ fn parse<T: DeserializeOwned>(body: &InvokeBody) -> Result<T, AppError> {
     }
 }
 
-fn caller_allowed(label: &str, url: &tauri::Url) -> bool {
-    if label != "main" || !url.username().is_empty() || url.password().is_some() {
-        return false;
-    }
-    let bundled = matches!(
-        (url.scheme(), url.host_str(), url.port()),
-        ("tauri", Some("localhost"), None) | ("http" | "https", Some("tauri.localhost"), None)
-    );
-    let development = cfg!(debug_assertions)
-        && url.scheme() == "http"
-        && url.host_str() == Some("localhost")
-        && url.port() == Some(5173);
-    bundled || development
+/// Checks the calling window against the per-command whitelist in
+/// `window_access`. The caller cannot supply its own principal, data
+/// directory, SQL or credential reference.
+pub(crate) fn authorize(window: &WebviewWindow, command: &str) -> Result<WindowKind, AppError> {
+    let url = window.url().map_err(|_| AppError::validation("caller"))?;
+    window_access::check_kind(window.label(), &url, command)
 }
 
-fn authorize(window: &WebviewWindow) -> Result<(), AppError> {
-    // Supplements Tauri's local-main-only capability. The caller cannot supply
-    // its own principal, data directory, SQL or credential reference.
-    if window
-        .url()
-        .is_ok_and(|url| caller_allowed(window.label(), &url))
-    {
-        Ok(())
-    } else {
-        Err(AppError::validation("caller"))
-    }
-}
-
-fn respond<T>(result: Result<T, AppError>) -> ApiResult<T> {
+pub(crate) fn respond<T>(result: Result<T, AppError>) -> ApiResult<T> {
     ApiResult::from_result(result, uuid::Uuid::new_v4().to_string())
 }
 
@@ -108,7 +89,8 @@ pub(crate) async fn app_get_startup_status(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<StartupStatus>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args = authorize(&window, "app_get_startup_status")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => Ok(state.startup_status()),
         Err(error) => Err(error),
@@ -121,7 +103,8 @@ pub(crate) async fn app_retry_startup(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<StartupStatus>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args =
+        authorize(&window, "app_retry_startup").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => Ok(state.retry_startup()),
         Err(error) => Err(error),
@@ -134,7 +117,7 @@ pub(crate) async fn accounts_list(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Vec<Account>>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args = authorize(&window, "accounts_list").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => state.run(|core| core.list_accounts()).await,
         Err(error) => Err(error),
@@ -147,7 +130,7 @@ pub(crate) async fn accounts_get(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<GetArgs>(request.body()));
+    let args = authorize(&window, "accounts_get").and_then(|_| parse::<GetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -164,8 +147,8 @@ pub(crate) async fn accounts_create(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
-    let args =
-        authorize(&window).and_then(|()| parse::<WriteArgs<CreateAccountRequest>>(request.body()));
+    let args = authorize(&window, "accounts_create")
+        .and_then(|_| parse::<WriteArgs<CreateAccountRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -183,8 +166,8 @@ pub(crate) async fn accounts_update_connection(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
-    let args = authorize(&window)
-        .and_then(|()| parse::<WriteArgs<UpdateConnectionRequest>>(request.body()));
+    let args = authorize(&window, "accounts_update_connection")
+        .and_then(|_| parse::<WriteArgs<UpdateConnectionRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -202,8 +185,8 @@ pub(crate) async fn accounts_update_profile(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
-    let args =
-        authorize(&window).and_then(|()| parse::<WriteArgs<UpdateProfileRequest>>(request.body()));
+    let args = authorize(&window, "accounts_update_profile")
+        .and_then(|_| parse::<WriteArgs<UpdateProfileRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -220,7 +203,7 @@ pub(crate) async fn folders_list(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Vec<Folder>>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<GetArgs>(request.body()));
+    let args = authorize(&window, "folders_list").and_then(|_| parse::<GetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -237,7 +220,8 @@ pub(crate) async fn emails_list(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<EmailPage>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmailListArgs>(request.body()));
+    let args =
+        authorize(&window, "emails_list").and_then(|_| parse::<EmailListArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => state.run(move |core| core.list_emails(&args.query)).await,
         Err(error) => Err(error),
@@ -250,7 +234,7 @@ pub(crate) async fn emails_get(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<EmailDetail>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    let args = authorize(&window, "emails_get").and_then(|_| parse::<EmailGetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => state.run(move |core| core.get_email(&args.email_id)).await,
         Err(error) => Err(error),
@@ -263,7 +247,8 @@ pub(crate) async fn emails_fetch_body(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<EmailDetail>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmailGetArgs>(request.body()));
+    let args =
+        authorize(&window, "emails_fetch_body").and_then(|_| parse::<EmailGetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => match state.core() {
             Ok(core) => core.fetch_body(args.email_id).await,
@@ -288,7 +273,8 @@ pub(crate) async fn emails_prepare_body(
     protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<crate::body_protocol::PreparedBody>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<PrepareBodyArgs>(request.body()));
+    let args = authorize(&window, "emails_prepare_body")
+        .and_then(|_| parse::<PrepareBodyArgs>(request.body()));
     let result = async {
         let args = args?;
         let policy = state
@@ -322,8 +308,8 @@ pub(crate) async fn emails_release_body(
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
     Ok(respond(
-        authorize(&window)
-            .and_then(|()| parse::<BodyLinksArgs>(request.body()))
+        authorize(&window, "emails_release_body")
+            .and_then(|_| parse::<BodyLinksArgs>(request.body()))
             .and_then(|args| protocol.release(&args.email_id, &args.document_token)),
     ))
 }
@@ -335,7 +321,8 @@ pub(crate) async fn emails_body_links(
     protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<crate::body_protocol::BodyLinks>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<BodyLinksArgs>(request.body()));
+    let args = authorize(&window, "emails_body_links")
+        .and_then(|_| parse::<BodyLinksArgs>(request.body()));
     let result = async {
         let args = args?;
         protocol
@@ -354,7 +341,8 @@ pub(crate) async fn links_request(
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
     use tauri::Emitter;
-    let args = authorize(&window).and_then(|()| parse::<LinkRequestArgs>(request.body()));
+    let args =
+        authorize(&window, "links_request").and_then(|_| parse::<LinkRequestArgs>(request.body()));
     let result = async {
         let args = args?;
         let event = protocol
@@ -385,7 +373,7 @@ pub(crate) async fn links_open(
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
     use tauri_plugin_opener::OpenerExt;
-    let args = authorize(&window).and_then(|()| parse::<LinkOpenArgs>(request.body()));
+    let args = authorize(&window, "links_open").and_then(|_| parse::<LinkOpenArgs>(request.body()));
     let result = async {
         let args = args?;
         let core = state.core()?;
@@ -425,7 +413,8 @@ pub(crate) async fn attachments_save(
 ) -> Result<ApiResult<crate::attachment_save::SaveOutcome>, ()> {
     use crate::attachment_save::{SaveOutcome, write_atomically};
     use tauri_plugin_dialog::DialogExt;
-    let args = authorize(&window).and_then(|()| parse::<AttachmentArgs>(request.body()));
+    let args = authorize(&window, "attachments_save")
+        .and_then(|_| parse::<AttachmentArgs>(request.body()));
     let result = async {
         let args = args?;
         let core = state.core()?;
@@ -497,7 +486,8 @@ pub(crate) async fn emails_set_flag(
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<FlagOutcome>, ()> {
     use mailx_core::{FlagChange, MessageFlag};
-    let args = authorize(&window).and_then(|()| parse::<SetFlagArgs>(request.body()));
+    let args =
+        authorize(&window, "emails_set_flag").and_then(|_| parse::<SetFlagArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -526,7 +516,7 @@ pub(crate) async fn sync_refresh(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<GetArgs>(request.body()));
+    let args = authorize(&window, "sync_refresh").and_then(|_| parse::<GetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
@@ -543,7 +533,8 @@ pub(crate) async fn image_cache_clear(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args =
+        authorize(&window, "image_cache_clear").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => {
             state
@@ -571,7 +562,7 @@ pub(crate) async fn avatars_get(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Option<mailx_core::AvatarImage>>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<AvatarArgs>(request.body()));
+    let args = authorize(&window, "avatars_get").and_then(|_| parse::<AvatarArgs>(request.body()));
     let result = async {
         let args = args?;
         if !state
@@ -598,7 +589,7 @@ pub(crate) async fn sync_states(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Vec<AccountSyncState>>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args = authorize(&window, "sync_states").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => state.run(|core| Ok(core.sync_states())).await,
         Err(error) => Err(error),
@@ -617,7 +608,7 @@ pub(crate) async fn settings_get(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<SettingsSnapshot>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args = authorize(&window, "settings_get").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => state.settings(|store| store.get()).await,
         Err(error) => Err(error),
@@ -631,7 +622,8 @@ pub(crate) async fn settings_update(
     protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<SettingsSnapshot>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<WriteArgs<SettingsPatch>>(request.body()));
+    let args = authorize(&window, "settings_update")
+        .and_then(|_| parse::<WriteArgs<SettingsPatch>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             let changes_security = args.request.security.is_some();
@@ -656,7 +648,8 @@ pub(crate) fn window_get_chrome(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> ApiResult<WindowChrome> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args =
+        authorize(&window, "window_get_chrome").and_then(|_| parse::<EmptyArgs>(request.body()));
     respond(args.map(|_| window_chrome::chrome(&window)))
 }
 
@@ -665,7 +658,8 @@ pub(crate) fn window_perform(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> ApiResult<()> {
-    let args = authorize(&window).and_then(|()| parse::<WindowPerformArgs>(request.body()));
+    let args = authorize(&window, "window_perform")
+        .and_then(|_| parse::<WindowPerformArgs>(request.body()));
     respond(args.and_then(|args| {
         window_chrome::perform(&window, args.action).map_err(|_| AppError::new(ErrorCode::Internal))
     }))
@@ -675,33 +669,6 @@ pub(crate) fn window_perform(
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn only_local_main_window_is_authorized() {
-        for url in [
-            "tauri://localhost",
-            "http://tauri.localhost",
-            "https://tauri.localhost",
-        ] {
-            let url = tauri::Url::parse(url).unwrap();
-            assert!(caller_allowed("main", &url));
-            assert!(!caller_allowed("mail-body", &url));
-        }
-        for url in [
-            "https://example.com",
-            "http://localhost:5174",
-            "https://localhost:5173",
-            "http://tauri.localhost:9000",
-            "mailx-body://localhost/document/example",
-            "http://mailx-body.localhost/document/example",
-        ] {
-            assert!(!caller_allowed("main", &tauri::Url::parse(url).unwrap()));
-        }
-        assert_eq!(
-            caller_allowed("main", &tauri::Url::parse("http://localhost:5173").unwrap()),
-            cfg!(debug_assertions)
-        );
-    }
 
     #[test]
     fn malformed_and_forged_arguments_are_redacted() {
@@ -791,7 +758,8 @@ pub(crate) async fn notifications_test(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<EmptyArgs>(request.body()));
+    let args =
+        authorize(&window, "notifications_test").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
         Ok(_) => state
             .settings(|store| store.get())
@@ -814,7 +782,8 @@ pub(crate) async fn notifications_preview_sound(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args = authorize(&window).and_then(|()| parse::<SoundArgs>(request.body()));
+    let args = authorize(&window, "notifications_preview_sound")
+        .and_then(|_| parse::<SoundArgs>(request.body()));
     Ok(respond(
         args.map(|args| crate::notifications::preview(args.sound)),
     ))

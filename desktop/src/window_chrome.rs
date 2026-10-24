@@ -37,6 +37,9 @@ pub(crate) const WINDOW_STATE_FLAGS: StateFlags = StateFlags::SIZE
 pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
     tauri_plugin_window_state::Builder::default()
         .with_state_flags(WINDOW_STATE_FLAGS)
+        // Composer windows are placed by the host each time (v0.1 does not
+        // remember their size or position).
+        .with_filter(|label| label == MAIN_WINDOW)
         .build()
 }
 
@@ -151,9 +154,25 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
     // Created hidden: the window-state plugin restores size and position while
     // the window is built, and showing it afterwards avoids a jump from the
     // default geometry.
-    let builder = WebviewWindowBuilder::from_config(app, &config)?
-        .visible(false)
-        .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url));
+    let builder = style_builder(
+        WebviewWindowBuilder::from_config(app, &config)?
+            .visible(false)
+            .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url)),
+    );
+    let window = builder.build()?;
+    watch_state(&window);
+    crate::compose::watch_close(&window);
+    window.show()?;
+    window.set_focus()?;
+    Ok(window)
+}
+
+/// The platform title bar treatment shared by every window: macOS keeps the
+/// traffic lights over a transparent title bar, other platforms drop system
+/// decorations and the frontend draws the controls.
+pub(crate) fn style_builder<'a, R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -163,11 +182,7 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
         .allow_link_preview(false);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
-    let window = builder.build()?;
-    watch_state(&window);
-    window.show()?;
-    window.set_focus()?;
-    Ok(window)
+    builder
 }
 
 pub(crate) fn chrome(window: &WebviewWindow) -> WindowChrome {
@@ -223,6 +238,25 @@ pub(crate) fn activity_of(focused: bool, visible: bool, minimized: bool) -> Acti
     }
 }
 
+/// The app is in front when any of its windows is. `focused` is the focus the
+/// event just reported for `current`, which its window may not show yet.
+fn app_activity(app: &AppHandle, current: &str, focused: Option<bool>) -> Activity {
+    any_active(app.webview_windows().iter().map(|(label, window)| {
+        read_activity(window, if label == current { focused } else { None })
+    }))
+}
+
+pub(crate) fn any_active(activities: impl IntoIterator<Item = Activity>) -> Activity {
+    if activities
+        .into_iter()
+        .any(|activity| activity == Activity::Active)
+    {
+        Activity::Active
+    } else {
+        Activity::Background
+    }
+}
+
 fn read_activity(window: &WebviewWindow, focused: Option<bool>) -> Activity {
     activity_of(
         focused.unwrap_or_else(|| window.is_focused().unwrap_or(false)),
@@ -233,9 +267,11 @@ fn read_activity(window: &WebviewWindow, focused: Option<bool>) -> Activity {
 
 /// Pushes maximize, fullscreen and focus changes so controls can switch glyphs
 /// and dim like native ones. Only changes are emitted, not every resize step.
-/// The same events tell the sync whether the window is in front.
-fn watch_state(window: &WebviewWindow) {
+/// The same events tell the sync whether the app is in front: any of its
+/// windows (the main window or a composer) being in front counts.
+pub(crate) fn watch_state(window: &WebviewWindow) {
     let app = window.app_handle().clone();
+    let label = window.label().to_owned();
     let last = Mutex::new(None);
     window.on_window_event(move |event| {
         let focused = match event {
@@ -243,13 +279,13 @@ fn watch_state(window: &WebviewWindow) {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => None,
             _ => return,
         };
-        let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        let Some(window) = app.get_webview_window(&label) else {
             return;
         };
         // Minimizing and hiding arrive as resizes or focus changes; the core
         // ignores repeats, so reporting on every one of them is cheap.
         if let Some(state) = app.try_state::<crate::state::DesktopState>() {
-            state.set_activity(read_activity(&window, focused));
+            state.set_activity(app_activity(&app, &label, focused));
         }
         let state = read_state(&window, focused);
         let Ok(mut last) = last.lock() else {
@@ -257,7 +293,7 @@ fn watch_state(window: &WebviewWindow) {
         };
         if *last != Some(state) {
             *last = Some(state);
-            let _ = app.emit_to(EventTarget::webview_window(MAIN_WINDOW), STATE_EVENT, state);
+            let _ = app.emit_to(EventTarget::webview_window(&label), STATE_EVENT, state);
         }
     });
 }
@@ -376,6 +412,16 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_app_is_in_front_when_any_window_is() {
+        use mailx_core::Activity::{Active, Background};
+        assert_eq!(any_active([]), Background);
+        assert_eq!(any_active([Background, Background]), Background);
+        // A composer in front while the main window is minimized or behind.
+        assert_eq!(any_active([Background, Active]), Active);
+        assert_eq!(any_active([Active, Background]), Active);
+    }
+
     #[test]
     fn only_a_focused_visible_unminimized_window_counts_as_in_front() {
         use mailx_core::Activity::{Active, Background};

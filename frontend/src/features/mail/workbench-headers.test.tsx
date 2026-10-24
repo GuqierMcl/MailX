@@ -11,7 +11,7 @@ import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
-const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }
+const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',

@@ -2,7 +2,9 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
 import { Toaster } from '@/components/ui/toast'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { StartupGate } from '@/features/startup/startup-gate'
+import { ComposerApp } from '@/features/composer/composer-app'
 import { TitleBar, TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
 import {
   createDesktopWindowHost,
@@ -11,18 +13,53 @@ import {
 } from '@/features/window-chrome/window-host'
 import { isTauri } from '@tauri-apps/api/core'
 import { createDesktopClient } from '@/lib/mailx-client'
-import { createMockClient } from '@/lib/mock-client'
+import { windowRole } from '@/lib/composer-window'
+import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
-const client = import.meta.env.DEV && !isTauri() ? createMockClient({ seed: new URLSearchParams(window.location.search).get('seed') }) : createDesktopClient()
+// `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
+// starts one (blank, first account). "Opening" a composer from the main preview opens such a tab.
+const client = import.meta.env.DEV && !isTauri()
+  ? createMockClient({
+    seed: new URLSearchParams(window.location.search).get('seed'),
+    resolveDraft: () => null,
+    onOpenComposer: (draft, fresh) => {
+      const params = new URLSearchParams(window.location.search)
+      params.set('composer', draft.id)
+      if (fresh) params.set('fresh', '1')
+      else params.delete('fresh')
+      window.open(`${window.location.pathname}?${params}`, `composer-${draft.id}`, 'popup,width=760,height=680')
+    },
+  })
+  : createDesktopClient()
+
+// Browser preview only: `?seed=outbox` fills the mock with a draft and with sends that end failed,
+// unknown and waiting for a retry, so the drafts and outbox views can be looked at.
+if (import.meta.env.DEV && !isTauri() && new URLSearchParams(window.location.search).get('seed') === 'outbox') {
+  void seedPreviewOutbox(client)
+}
 
 const queryClient = createQueryClient()
 
 const previewPlatform = import.meta.env.DEV ? previewPlatformFromUrl(window.location.search) : null
 const windowHost = previewPlatform ? createPreviewWindowHost(previewPlatform) : createDesktopWindowHost()
+const role = windowRole()
 
 function App() {
+  if (role.kind === 'composer') {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AppearanceSync client={client} importLegacy={false} />
+        <Toaster />
+        <TitleBarSlotsProvider>
+          <TooltipProvider>
+            <ComposerApp client={client} draftId={role.draftId} fresh={role.fresh} host={windowHost} />
+          </TooltipProvider>
+        </TitleBarSlotsProvider>
+      </QueryClientProvider>
+    )
+  }
   return (
     <QueryClientProvider client={queryClient}>
       {/* Outside the startup gate: appearance applies even when the core failed to start. */}

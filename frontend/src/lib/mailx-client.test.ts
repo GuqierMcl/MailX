@@ -83,3 +83,65 @@ describe('desktop client boundary', () => {
     ])
   })
 })
+
+describe('drafts and sending commands', () => {
+  const ok = (data: unknown) => ({ ok: true, data, requestId: 'r' })
+
+  it('forwards each command with only its named arguments', async () => {
+    vi.mocked(invoke).mockResolvedValue(ok(null))
+    const client = createDesktopClient()
+    await client.createDraft({ accountId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: 'm' })
+    await client.createDraftFrom({ emailId: 'e', kind: 'reply', clientMutationId: 'm' })
+    await client.listDrafts()
+    await client.listDrafts('a')
+    await client.getDraft('d')
+    await client.deleteDraft('d')
+    await client.queueSend({ draftId: 'd', expectedRevision: 2, clientMutationId: 'q' })
+    await client.listOutbox()
+    await client.listOutbox({ accountId: 'a', includeAll: true })
+    await client.getOutbox('o')
+    await client.cancelOutbox('o')
+    await client.retryOutboxNow('o')
+    await client.resolveUnknown({ id: 'o', resolution: 'markSent', clientMutationId: 'c' })
+    await client.openComposer('d')
+    await client.closeComposer()
+    const calls = vi.mocked(invoke).mock.calls
+    expect(calls.map(([command, args]) => [command, args])).toEqual([
+      ['drafts_create', { request: { accountId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: 'm' } }],
+      ['drafts_create_from', { request: { emailId: 'e', kind: 'reply', clientMutationId: 'm' } }],
+      ['drafts_list', { accountId: null }],
+      ['drafts_list', { accountId: 'a' }],
+      ['drafts_get', { id: 'd' }],
+      ['drafts_delete', { id: 'd' }],
+      ['outbox_queue_send', { draftId: 'd', expectedRevision: 2, clientMutationId: 'q' }],
+      ['outbox_list', { accountId: null, includeAll: false }],
+      ['outbox_list', { accountId: 'a', includeAll: true }],
+      ['outbox_get', { id: 'o' }],
+      ['outbox_cancel', { id: 'o' }],
+      ['outbox_retry_now', { id: 'o' }],
+      ['outbox_resolve_unknown', { id: 'o', choice: 'markSent', clientMutationId: 'c' }],
+      ['composer_open', { draftId: 'd' }],
+      ['composer_close', { force: false }],
+    ])
+  })
+
+  it('never lets the page pick the principal when queueing', async () => {
+    vi.mocked(invoke).mockResolvedValue(ok(null))
+    const forged = { draftId: 'd', expectedRevision: 1, clientMutationId: 'q', caller: 'composer' }
+    await createDesktopClient().queueSend(forged)
+    expect(invoke).toHaveBeenCalledWith('outbox_queue_send', { draftId: 'd', expectedRevision: 1, clientMutationId: 'q' })
+  })
+
+  it('reports host-refused calls without raw details', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ ok: false, error: { code: 'validation', message: '请求无效。', field: 'caller' }, requestId: 'r' })
+    await expect(createDesktopClient().queueSend({ draftId: 'd', expectedRevision: 1, clientMutationId: 'q' })).rejects.toMatchObject({ failure: { field: 'caller' } })
+  })
+
+  it('does nothing without the desktop host', async () => {
+    vi.mocked(isTauri).mockReturnValue(false)
+    const client = createDesktopClient()
+    expect(client.onOutbox(() => undefined)).toBeTypeOf('function')
+    expect(client.onAppClosing(() => undefined)).toBeTypeOf('function')
+    await expect(client.openComposer('d')).rejects.toMatchObject({ failure: { code: 'hostUnavailable' } })
+  })
+})

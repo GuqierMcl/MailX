@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { testClient } from '@/features/accounts/test-fixtures'
+import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import { MailxClientError } from '@/lib/mailx-client'
 import { SettingsDialog, type SettingsTarget } from './settings-dialog'
@@ -57,7 +57,44 @@ describe('settings dialog', () => {
   it('shows a visible title and keeps navigation on narrow windows', () => {
     const { dialog } = renderDialog()
     expect(within(dialog).getByRole('heading', { name: '设置' })).toBeVisible()
-    for (const name of ['外观', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+    for (const name of ['外观', '发信', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+  })
+
+  it('has a 发信 section with the default sender account and the undo window', async () => {
+    const rows = [exampleAccount(), exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人邮箱', emailAddress: 'me@example.com' })]
+    const client = testClient(rows)
+    client.listFolders.mockResolvedValue([])
+    const { dialog } = renderDialog(client, { section: 'compose' })
+    expect(within(dialog).getByRole('button', { name: '发信' })).toBeInTheDocument()
+
+    const sender = await within(dialog).findByRole('combobox', { name: '默认发件账号' })
+    expect(sender).toHaveTextContent('跟随当前邮箱')
+    await userEvent.click(sender)
+    await userEvent.click(await screen.findByRole('option', { name: /个人邮箱/ }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', undoSendSeconds: 0 } }))
+
+    await userEvent.click(sender)
+    await userEvent.click(await screen.findByRole('option', { name: '跟随当前邮箱' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 0 } }))
+
+    const undo = within(dialog).getByRole('combobox', { name: '撤销发送' })
+    expect(undo).toHaveTextContent('关闭（立即发送）')
+    await userEvent.click(undo)
+    for (const name of ['5 秒', '10 秒', '20 秒', '30 秒']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: '20 秒' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 20 } }))
+    await waitFor(() => expect(undo).toHaveTextContent('20 秒'))
+  })
+
+  it('rolls the undo choice back when the core refuses it', async () => {
+    const client = testClient()
+    client.updateSettings.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'compose.undoSendSeconds', message: '不支持的撤销时间。' }))
+    renderDialog(client, { section: 'compose' })
+    const undo = await screen.findByRole('combobox', { name: '撤销发送' })
+    await userEvent.click(undo)
+    await userEvent.click(await screen.findByRole('option', { name: '10 秒' }))
+    expect(await screen.findByText('设置保存失败')).toBeInTheDocument()
+    await waitFor(() => expect(undo).toHaveTextContent('关闭（立即发送）'))
   })
 
   it('saves appearance choices through the client', async () => {
@@ -131,7 +168,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ settings: { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

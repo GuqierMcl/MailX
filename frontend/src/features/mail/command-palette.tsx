@@ -7,6 +7,7 @@ import {
   InboxIcon,
   Mail01Icon,
   PaintBoardIcon,
+  PencilEdit02Icon,
   RefreshIcon,
   Search01Icon,
   Settings01Icon,
@@ -55,6 +56,7 @@ export type CommandPaletteProps = {
   onOpenAccounts: () => void
   onAddAccount: () => void
   onOpenSettings: (target: SettingsTarget) => void
+  onCompose: () => void
 }
 
 type Entry = { id: string; title: string; keywords?: string; icon: Parameters<typeof HugeiconsIcon>[0]['icon']; run: () => void }
@@ -75,7 +77,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 
 function PaletteBody({
   client, onOpenChange, scope, search, folderId, folderRole, sourceIdentity, accounts, folders,
-  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings,
+  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose,
 }: CommandPaletteProps) {
   const [text, setText] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -119,6 +121,7 @@ function PaletteBody({
   ], [accounts, folders, onSelectMailbox])
 
   const commands: Entry[] = [
+    ...(accounts.length > 0 ? [{ id: 'cmd:compose', title: '写邮件', keywords: 'compose new mail 新邮件 撰写 发信', icon: PencilEdit02Icon, run: onCompose }] : []),
     { id: 'cmd:settings', title: '打开设置', keywords: 'settings 偏好', icon: Settings01Icon, run: () => onOpenSettings({ section: 'appearance' }) },
     { id: 'cmd:accounts', title: '管理邮箱账号', keywords: 'account 账号 邮箱', icon: AtSignIcon, run: onOpenAccounts },
     { id: 'cmd:add-account', title: '添加邮箱账号', keywords: 'account 新增', icon: UserAdd01Icon, run: onAddAccount },

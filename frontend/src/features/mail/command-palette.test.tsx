@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
@@ -73,6 +73,17 @@ describe('command palette', () => {
     await userEvent.click(screen.getByRole('button', { name: '搜索邮件' }))
     await userEvent.click(await screen.findByRole('option', { name: /清除搜索/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('在 全部收件箱 中搜索'))
+  })
+
+  it('offers 写邮件 as a command and opens a composer for a new draft', async () => {
+    const { client, input } = await openPalette()
+    const opened = vi.spyOn(client, 'openComposer')
+    expect(within(screen.getByRole('dialog')).getByRole('option', { name: '写邮件' })).toBeInTheDocument()
+    await userEvent.type(input, '写邮')
+    await userEvent.click(await screen.findByRole('option', { name: '写邮件' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The new draft is blank, so it is not listed, but its composer opens as fresh.
+    await waitFor(() => expect(opened).toHaveBeenCalledWith(expect.any(String), true))
   })
 
   it('says so when nothing matches', async () => {

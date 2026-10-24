@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppearanceSettings, LayoutSettings, NotificationSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
+import type { AppearanceSettings, ComposeSettings, LayoutSettings, NotificationSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
@@ -42,6 +42,7 @@ export function useUpdateAppearance(client: MailxClient) {
         security: current?.settings.security ?? snapshot.settings.security,
         layout: current?.settings.layout ?? snapshot.settings.layout,
         notifications: current?.settings.notifications ?? snapshot.settings.notifications,
+        compose: current?.settings.compose ?? snapshot.settings.compose,
       },
     })),
   })
@@ -62,6 +63,7 @@ export function useUpdateSecurity(client: MailxClient) {
         appearance: current?.settings.appearance ?? snapshot.settings.appearance,
         layout: current?.settings.layout ?? snapshot.settings.layout,
         notifications: current?.settings.notifications ?? snapshot.settings.notifications,
+        compose: current?.settings.compose ?? snapshot.settings.compose,
       },
     })),
   })
@@ -87,6 +89,7 @@ export function useUpdateLayout(client: MailxClient) {
         appearance: current?.settings.appearance ?? snapshot.settings.appearance,
         security: current?.settings.security ?? snapshot.settings.security,
         notifications: current?.settings.notifications ?? snapshot.settings.notifications,
+        compose: current?.settings.compose ?? snapshot.settings.compose,
       },
     })),
   })
@@ -127,16 +130,17 @@ export function useDebouncedLayoutSave(client: MailxClient) {
  * Keeps the document and the first-paint cache in step with the core's
  * settings, and imports the pre-`settings.json` theme preference once.
  */
-export function AppearanceSync({ client }: { client: MailxClient }) {
+export function AppearanceSync({ client, importLegacy = true }: { client: MailxClient; importLegacy?: boolean }) {
   const { data } = useSettings(client)
   const { mutate } = useUpdateAppearance(client)
   const appearance = data?.settings.appearance
 
   useEffect(() => {
-    if (!data || data.stored) return
+    // Only the main window may write settings; a composer window just follows them.
+    if (!importLegacy || !data || data.stored) return
     const theme = legacyTheme()
     if (theme) mutate({ ...data.settings.appearance, theme }, { onSuccess: clearLegacyTheme })
-  }, [data, mutate])
+  }, [data, mutate, importLegacy])
 
   useEffect(() => {
     if (!appearance) return
@@ -181,6 +185,48 @@ export function useUpdateNotifications(client: MailxClient) {
         appearance: current?.settings.appearance ?? snapshot.settings.appearance,
         security: current?.settings.security ?? snapshot.settings.security,
         layout: current?.settings.layout ?? snapshot.settings.layout,
+        compose: current?.settings.compose ?? snapshot.settings.compose,
+      },
+    })),
+  })
+}
+
+/**
+ * Saves the sending preferences (default sender account, undo window), applied at
+ * once and rolled back if the core refuses. Sections are replaced whole, so the
+ * change is merged into the saved values first.
+ */
+export function useUpdateCompose(client: MailxClient) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    scope: { id: 'compose-settings' },
+    mutationFn: (change: Partial<ComposeSettings>) => {
+      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.compose
+      return client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 0, ...current, ...change } })
+    },
+    onMutate: async (change) => {
+      await queryClient.cancelQueries({ queryKey: settingsKeys.all })
+      const previous = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
+      if (previous) {
+        queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, {
+          ...previous,
+          settings: { ...previous.settings, compose: { ...previous.settings.compose, ...change } },
+        })
+      }
+      return { previous }
+    },
+    onError: (_error, _change, context) => {
+      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
+        ...current, settings: { ...current.settings, compose: context.previous!.settings.compose },
+      }))
+    },
+    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
+      ...snapshot, settings: {
+        ...snapshot.settings,
+        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
+        security: current?.settings.security ?? snapshot.settings.security,
+        layout: current?.settings.layout ?? snapshot.settings.layout,
+        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
       },
     })),
   })

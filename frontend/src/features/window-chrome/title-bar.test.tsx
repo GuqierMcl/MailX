@@ -126,6 +126,8 @@ describe('TitleBarActions', () => {
 describe('previewPlatformFromUrl', () => {
   it('accepts only known platforms', () => {
     expect(previewPlatformFromUrl('?titlebar=linux')).toBe('linux')
+    expect(previewPlatformFromUrl('?composer=x&platform=windows')).toBe('windows')
+    expect(previewPlatformFromUrl('?platform=beos')).toBeNull()
     expect(previewPlatformFromUrl('?titlebar=beos')).toBeNull()
     expect(previewPlatformFromUrl('')).toBeNull()
   })

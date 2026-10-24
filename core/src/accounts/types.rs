@@ -121,6 +121,10 @@ pub struct AccountProfileInput {
     pub display_name: String,
     /// `#rrggbb`, or `null` for the neutral default.
     pub color: Option<String>,
+    /// The name recipients see in `From`; `null` or empty sends with the bare
+    /// address. Unlike `displayName` it is never shown only to the user.
+    #[serde(default)]
+    pub sender_name: Option<String>,
 }
 
 /// How MailX reaches the mailbox: identity, servers, credentials and route.
@@ -143,6 +147,9 @@ pub struct AccountConfigInput {
     /// `#rrggbb`; omitted or `null` for the neutral default.
     #[serde(default)]
     pub color: Option<String>,
+    /// The name recipients see in `From`; omitted, `null` or empty for none.
+    #[serde(default)]
+    pub sender_name: Option<String>,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub imap: ConnectionConfig,
@@ -157,6 +164,7 @@ impl AccountConfigInput {
             AccountProfileInput {
                 display_name: self.display_name,
                 color: self.color,
+                sender_name: self.sender_name,
             },
             ConnectionInput {
                 email_address: self.email_address,
@@ -265,6 +273,9 @@ pub struct Account {
     /// journals written before colors existed still load.
     #[serde(default)]
     pub color: Option<String>,
+    /// The name recipients see in `From`, or `null` to send the bare address.
+    #[serde(default)]
+    pub sender_name: Option<String>,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub mailbox_source_id: String,

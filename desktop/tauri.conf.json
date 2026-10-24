@@ -23,7 +23,8 @@
     ],
     "security": {
       "capabilities": [
-        "main"
+        "main",
+        "composer"
       ],
       "csp": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-src mailx-body: http://mailx-body.localhost"
     }

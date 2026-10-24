@@ -20,7 +20,7 @@ import { PROVIDERS, type MailProvider } from './providers'
 
 const STEP_COUNT = 3
 /** Fields a failed create can blame on the profile step; anything else is the connection's. */
-const PROFILE_FIELDS = new Set(['displayName', 'color'])
+const PROFILE_FIELDS = new Set(['displayName', 'color', 'senderName'])
 
 type Step =
   | { kind: 'method'; selected: MailProvider | null }
@@ -51,6 +51,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [displayName, setDisplayName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [color, setColor] = useState<string | null>(null)
+  const [senderName, setSenderName] = useState('')
+  const [senderNameError, setSenderNameError] = useState<string | null>(null)
   const [nameError, setNameError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<ClientFailure | null>(null)
   const [saving, setSaving] = useState(false)
@@ -68,6 +70,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
       setNameTouched(false)
       setColor(nextAccountColor(accounts))
       setNameError(null)
+      setSenderName('')
+      setSenderNameError(null)
       setSaveError(null)
       guard.setDirty(false)
       setRequestId(crypto.randomUUID())
@@ -108,12 +112,13 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     guard.setBusy(true)
     setSaveError(null)
     try {
-      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color } })
+      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: senderName.trim() || null } })
       guard.setDirty(false)
       onCreated(saved)
     } catch (cause) {
       const failure = clientFailure(cause)
       if (failure.field === 'displayName') setNameError(failure.message)
+      else if (failure.field === 'senderName') setSenderNameError(failure.message)
       else if (failure.field && !PROFILE_FIELDS.has(failure.field)) {
         // The connection was rejected: go back to it with the error. The
         // passwords were in the failed request and must be entered again.
@@ -208,7 +213,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                 </>}>
                   <Alert role="status">
                     <AlertTitle>最后，给这个邮箱起个名字</AlertTitle>
-                    <AlertDescription>名称和颜色只用于在 MailX 中区分邮箱，之后随时可以修改。完成后 MailX 会登录收信服务器同步文件夹；暂不发送邮件。</AlertDescription>
+                    <AlertDescription>名称和颜色只用于在 MailX 中区分邮箱；发件人名称是收件人看到的名字，可以留空。都可以之后修改。完成后 MailX 会登录收信服务器同步文件夹。</AlertDescription>
                   </Alert>
                   {saveError && (
                     <Alert variant="destructive">
@@ -220,6 +225,12 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                     displayName={displayName}
                     color={color}
                     nameError={nameError}
+                    senderName={senderName}
+                    senderNameError={senderNameError}
+                    onSenderNameChange={(value) => {
+                      setSenderName(value)
+                      setSenderNameError(null)
+                    }}
                     disabled={saving}
                     onDisplayNameChange={(value) => {
                       setDisplayName(value)

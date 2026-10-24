@@ -9,6 +9,16 @@ import type {
   AvatarImage,
   FlagWriteBack,
   CreateAccountRequest,
+  CreateDraftFromRequest,
+  CreateDraftRequest,
+  Draft,
+  DraftChanged,
+  DraftSummary,
+  OutboxChanged,
+  OutboxItem,
+  QueueSendRequest,
+  ResolveUnknownRequest,
+  UpdateDraftRequest,
   NotificationSound,
   EmailDetail,
   EmailListQuery,
@@ -89,9 +99,50 @@ export interface MailxClient {
   previewSound(sound: NotificationSound): Promise<void>
   /** Hears clicks on new-mail notifications: one message, or a whole account's arrivals. */
   onNotificationOpen(listener: (request: NotificationOpen) => void): () => void
+
+  // --- Drafts and sending (docs/architecture/sending.md). Which window may call
+  // what is enforced by the host: the composer window only reaches its own draft.
+  /** Main window. Creates a blank draft; the host supplies the default sender account. */
+  createDraft(request: CreateDraftRequest): Promise<Draft>
+  /** Main window. Reply, reply-all or forward from a message whose body is cached (`bodyNotCached` otherwise). */
+  createDraftFrom(request: CreateDraftFromRequest): Promise<Draft>
+  listDrafts(accountId?: string | null): Promise<DraftSummary[]>
+  getDraft(id: string): Promise<Draft>
+  /** Fails with `conflict` unless `expectedRevision` is current; `draftLocked` while a queue item holds the draft. */
+  updateDraft(request: UpdateDraftRequest): Promise<Draft>
+  deleteDraft(id: string): Promise<void>
+  /** Composer window only, own draft only. Queues the draft; the undo window comes from settings. */
+  queueSend(request: QueueSendRequest): Promise<OutboxItem>
+  listOutbox(options?: { accountId?: string | null; includeAll?: boolean }): Promise<OutboxItem[]>
+  getOutbox(id: string): Promise<OutboxItem>
+  /** Undo send; only while still `queued` (`alreadySending` otherwise). */
+  cancelOutbox(id: string): Promise<OutboxItem>
+  retryOutboxNow(id: string): Promise<OutboxItem>
+  /** Settles an `unknown` item; `resend` is an explicit new attempt and returns the new item. */
+  resolveUnknown(request: ResolveUnknownRequest): Promise<OutboxItem>
+  /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
+  openComposer(draftId: string, fresh?: boolean): Promise<void>
+  /** Composer window. Closes its own window; flush the draft first. */
+  closeComposer(force?: boolean): Promise<void>
+  /** Every queue state change, for the main window and the draft's composer. No addresses or subject. */
+  onOutbox(listener: (change: OutboxChanged) => void): () => void
+  /** A draft was created, edited, deleted, or locked / released by the queue. */
+  onDrafts(listener: (change: DraftChanged) => void): () => void
+  /** Composer window. The main window is closing: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
+  onAppClosing(listener: () => void): () => void
+  /** Composer window. The system asked to close it: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
+  onComposerCloseRequested(listener: () => void): () => void
 }
 
-export type NotificationOpen = { accountId: string; emailId: string | null }
+export type NotificationOpen = { accountId: string; emailId: string | null; outboxId?: string | null }
+
+/** Host events (`mailx://...`) that the clients subscribe to. */
+export const HOST_EVENTS = {
+  outbox: 'mailx://outbox',
+  drafts: 'mailx://drafts',
+  appClosing: 'mailx://app-closing',
+  composerCloseRequested: 'mailx://composer-close-requested',
+} as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
 export type BodyLinkRequest = BodyLinkIdentity & { url: string; requestId: string }
@@ -124,6 +175,16 @@ export function createDesktopClient(): MailxClient {
     }
     if (result.ok === false) throw new MailxClientError(result.error)
     return result.data
+  }
+
+  function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+    if (!available) return () => undefined
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    getCurrentWebviewWindow()
+      .listen<T>(event, (e) => { if (!disposed) listener(e.payload) })
+      .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+    return () => { disposed = true; unlisten?.() }
   }
 
   return {
@@ -193,5 +254,25 @@ export function createDesktopClient(): MailxClient {
         .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
       return () => { disposed = true; unlisten?.() }
     },
+    createDraft: (request) => call<Draft>('drafts_create', { request }),
+    createDraftFrom: (request) => call<Draft>('drafts_create_from', { request }),
+    listDrafts: (accountId = null) => call<DraftSummary[]>('drafts_list', { accountId }),
+    getDraft: (id) => call<Draft>('drafts_get', { id }),
+    updateDraft: (request) => call<Draft>('drafts_update', { request }),
+    deleteDraft: (id) => call<void>('drafts_delete', { id }),
+    queueSend: ({ draftId, expectedRevision, clientMutationId }) =>
+      call<OutboxItem>('outbox_queue_send', { draftId, expectedRevision, clientMutationId }),
+    listOutbox: ({ accountId = null, includeAll = false } = {}) => call<OutboxItem[]>('outbox_list', { accountId, includeAll }),
+    getOutbox: (id) => call<OutboxItem>('outbox_get', { id }),
+    cancelOutbox: (id) => call<OutboxItem>('outbox_cancel', { id }),
+    retryOutboxNow: (id) => call<OutboxItem>('outbox_retry_now', { id }),
+    resolveUnknown: ({ id, resolution, clientMutationId }) =>
+      call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
+    openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
+    closeComposer: (force = false) => call<void>('composer_close', { force }),
+    onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
+    onDrafts: (listener) => subscribe<DraftChanged>(HOST_EVENTS.drafts, listener),
+    onAppClosing: (listener) => subscribe<void>(HOST_EVENTS.appClosing, () => listener()),
+    onComposerCloseRequested: (listener) => subscribe<void>(HOST_EVENTS.composerCloseRequested, () => listener()),
   }
 }

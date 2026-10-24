@@ -10,6 +10,7 @@ use crate::imap::ImapLogin;
 use crate::mail::Folder;
 use crate::net::{NetRoute, ProxyRoute};
 use crate::secrets::SecretStoreError;
+use crate::smtp::{SmtpLogin, SmtpPlan};
 use crate::storage::proxy_endpoint;
 use crate::sync::folders::FolderRecord;
 
@@ -90,6 +91,41 @@ impl AccountService {
                 password,
             },
             route,
+        })
+    }
+
+    /// Resolves credentials for SMTP. Like the IMAP plan, a credential is only
+    /// used for the exact endpoint it was confirmed for; the check happens
+    /// here, before any socket exists.
+    pub(crate) fn smtp_plan(&self, account_id: &str) -> Result<SmtpPlan, PlanError> {
+        let snapshot = self.storage.load(account_id)?;
+        let account = &snapshot.account;
+
+        let endpoint = TrustEndpoint::mail("smtp", &account.smtp);
+        let profile = snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.id == account.authentication.smtp.id)
+            .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+        if profile.trust(&endpoint) != CredentialTrust::Trusted {
+            return Err(PlanError::CredentialUntrusted);
+        }
+        let password = self
+            .secrets
+            .get(&profile.secret_ref)?
+            .ok_or(PlanError::CredentialMissing)?;
+        let route = self.image_route(account_id)?;
+
+        Ok(SmtpPlan {
+            login: SmtpLogin {
+                host: account.smtp.host.clone(),
+                port: account.smtp.port,
+                tls: account.smtp.tls,
+                username: account.smtp.username.clone(),
+                password,
+            },
+            route,
+            sender_address: account.email_address.clone(),
         })
     }
 

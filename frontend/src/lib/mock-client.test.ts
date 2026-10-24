@@ -44,6 +44,116 @@ describe('mock flag changes', () => {
   })
 })
 
+describe('mock drafts and sending', () => {
+  const to = [{ name: null, address: 'a@example.com' }]
+  const content = { to, cc: [], bcc: [], subject: '你好', bodyText: '正文' }
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('creates, updates with revisions and lists drafts', async () => {
+    const client = createMockClient()
+    const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
+    expect((await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })).id).toBe(draft.id)
+    expect(draft.revision).toBe(1)
+    const saved = await client.updateDraft({ id: draft.id, expectedRevision: 1, accountId: null, ...content, subject: '改' })
+    expect([saved.revision, saved.subject]).toEqual([2, '改'])
+    await expect(client.updateDraft({ id: draft.id, expectedRevision: 1, accountId: null, ...content })).rejects.toMatchObject({ failure: { code: 'conflict' } })
+    expect((await client.listDrafts()).map((row) => row.id)).toEqual([draft.id])
+    await client.deleteDraft(draft.id)
+    await expect(client.getDraft(draft.id)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+  })
+
+  it('walks a queued item through sending to accepted and drops the draft', async () => {
+    const client = createMockClient({ sendStepMs: 5 })
+    const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
+    const states: string[] = []
+    const draftChanges: string[] = []
+    client.onOutbox((change) => states.push(change.state))
+    client.onDrafts((change) => draftChanges.push(change.change))
+    const item = await client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: 'q1' })
+    expect(item.state).toBe('queued')
+    expect((await client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: 'q1' })).id).toBe(item.id)
+    await expect(client.updateDraft({ id: draft.id, expectedRevision: 1, accountId: null, ...content })).rejects.toMatchObject({ failure: { code: 'draftLocked' } })
+    await wait(60)
+    expect(states).toEqual(['queued', 'sending', 'accepted'])
+    expect(draftChanges).toEqual(['locked', 'deleted'])
+    const done = await client.getOutbox(item.id)
+    expect(done.state).toBe('accepted')
+    expect(done.serverReply?.text).toContain('simulated')
+    expect(await client.listOutbox()).toEqual([])
+    expect((await client.listOutbox({ includeAll: true })).map((row) => row.id)).toEqual([item.id])
+  })
+
+  it('refuses a send without recipients or with a stale revision', async () => {
+    const client = createMockClient()
+    const empty = await client.createDraft({ accountId: null, ...content, to: [], clientMutationId: 'm1' })
+    await expect(client.queueSend({ draftId: empty.id, expectedRevision: 1, clientMutationId: 'q1' })).rejects.toMatchObject({ failure: { code: 'validation', field: 'draft.recipients' } })
+    await expect(client.queueSend({ draftId: empty.id, expectedRevision: 9, clientMutationId: 'q2' })).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
+
+  it('cancels during the undo window and unlocks the draft', async () => {
+    const client = createMockClient({ sendStepMs: 5 })
+    await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 5 } })
+    const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
+    const draftChanges: string[] = []
+    client.onDrafts((change) => draftChanges.push(change.change))
+    const item = await client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: 'q1' })
+    expect(new Date(item.notBefore).getTime()).toBeGreaterThan(Date.now() + 4000)
+    expect((await client.cancelOutbox(item.id)).state).toBe('canceled')
+    await wait(30)
+    expect((await client.getOutbox(item.id)).state).toBe('canceled')
+    expect(draftChanges).toEqual(['locked', 'unlocked'])
+    await expect(client.updateDraft({ id: draft.id, expectedRevision: 1, accountId: null, ...content })).resolves.toMatchObject({ revision: 2 })
+    await expect(client.cancelOutbox(item.id)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
+
+  it('cannot cancel once sending has begun', async () => {
+    const client = createMockClient({ sendStepMs: 20 })
+    const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
+    const item = await client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: 'q1' })
+    await wait(30)
+    expect((await client.getOutbox(item.id)).state).toBe('sending')
+    await expect(client.cancelOutbox(item.id)).rejects.toMatchObject({ failure: { code: 'alreadySending' } })
+  })
+
+  it('builds reply and forward drafts from a cached message', async () => {
+    const client = createMockClient()
+    const [account] = await client.listAccounts()
+    const page = await client.listEmails({ ...emailQuery({ folderRole: 'inbox', limit: 1 }), accountIds: [account.id] })
+    const reply = await client.createDraftFrom({ emailId: page.items[0].id, kind: 'reply', clientMutationId: 'r1' })
+    expect(reply.subject.startsWith('回复：')).toBe(true)
+    expect(reply.to).toEqual([page.items[0].from])
+    const forward = await client.createDraftFrom({ emailId: page.items[0].id, kind: 'forward', clientMutationId: 'r2' })
+    expect(forward.to).toEqual([])
+    await expect(client.openComposer(reply.id)).resolves.toBeUndefined()
+    await expect(client.openComposer('missing')).rejects.toMatchObject({ failure: { code: 'notFound' } })
+  })
+
+  it('simulates failed, unknown and retried sends from the recipient address (browser preview only)', async () => {
+    const client = createMockClient({ sendStepMs: 10 })
+    const send = async (address: string) => {
+      const draft = await client.createDraft({ accountId: null, ...content, to: [{ name: null, address }], clientMutationId: crypto.randomUUID() })
+      return client.queueSend({ draftId: draft.id, expectedRevision: 1, clientMutationId: crypto.randomUUID() })
+    }
+    const failed = await send('fail@example.com')
+    const unknown = await send('unknown@example.com')
+    const retry = await send('retry@example.com')
+    const fine = await send('ok@example.com')
+    await wait(60)
+    expect(await client.getOutbox(failed.id)).toMatchObject({ state: 'failed', error: { reason: 'recipientsRejected', rejected: [{ address: 'fail@example.com', code: 550 }] } })
+    expect(await client.getOutbox(unknown.id)).toMatchObject({ state: 'unknown', error: { reason: 'unknown' } })
+    expect(await client.getOutbox(retry.id)).toMatchObject({ state: 'queued', attempts: 1, error: { reason: 'connect' } })
+    expect(await client.getOutbox(fine.id)).toMatchObject({ state: 'accepted' })
+    // A failed send leaves its draft editable; an unknown one keeps it locked.
+    await expect(client.updateDraft({ id: failed.draftId!, expectedRevision: 1, accountId: null, ...content })).resolves.toMatchObject({ revision: 2 })
+    await expect(client.updateDraft({ id: unknown.draftId!, expectedRevision: 1, accountId: null, ...content })).rejects.toMatchObject({ failure: { code: 'draftLocked' } })
+    // "立即重试" is only for a queued item with a retry scheduled.
+    await client.retryOutboxNow(retry.id)
+    await wait(60)
+    expect((await client.getOutbox(retry.id)).state).toBe('accepted')
+    await expect(client.retryOutboxNow(failed.id)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
+})
+
 describe('showcase seed', () => {
   it('loads fictitious mail that only uses example domains', async () => {
     const client = createMockClient({ seed: 'showcase' })

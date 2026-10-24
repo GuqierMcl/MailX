@@ -1,7 +1,14 @@
 import type { Folder, FolderRole } from '@/generated/accounts'
 
-/** What the message list shows: one account folder, or a role across all accounts. */
-export type Mailbox = { kind: 'unified'; role: FolderRole } | { kind: 'folder'; folder: Folder }
+/**
+ * What the island shows: one account folder, a role across all accounts, or the two
+ * local views that hold unfinished mail (sending.md section 7).
+ */
+export type Mailbox =
+  | { kind: 'unified'; role: FolderRole }
+  | { kind: 'folder'; folder: Folder }
+  | { kind: 'drafts' }
+  | { kind: 'outbox' }
 
 export const UNIFIED_TITLES: Record<FolderRole, string> = {
   inbox: '全部收件箱',
@@ -29,5 +36,13 @@ export function folderLabel(folder: Folder) {
 }
 
 export function mailboxTitle(mailbox: Mailbox) {
-  return mailbox.kind === 'unified' ? UNIFIED_TITLES[mailbox.role] : folderLabel(mailbox.folder)
+  switch (mailbox.kind) {
+    case 'unified': return UNIFIED_TITLES[mailbox.role]
+    case 'folder': return folderLabel(mailbox.folder)
+    case 'drafts': return '草稿'
+    case 'outbox': return '发件箱'
+  }
 }
+
+/** Whether the island shows mail (list and reader) rather than a local view. */
+export const isMailView = (mailbox: Mailbox) => mailbox.kind === 'unified' || mailbox.kind === 'folder'

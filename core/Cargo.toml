@@ -21,6 +21,9 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 html5ever = "0.39"
+# MIME construction and address parsing only. The SMTP session is hand-written
+# over net::connect / net::upgrade_tls, so no lettre transport or TLS feature is enabled.
+lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "ico"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
@@ -45,6 +48,8 @@ resvg = { version = "0.48.1", default-features = false }
 body-webview-test = []
 
 [dev-dependencies]
+# Test-only certificates for the fake SMTP servers.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time", "test-util"] }
 

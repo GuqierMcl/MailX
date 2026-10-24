@@ -12,10 +12,19 @@ use crate::accounts::AccountService;
 use crate::accounts::types::{
     Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
 };
+use crate::drafts::types::{
+    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
+};
 use crate::error::{AppError, ErrorCode};
-use crate::events::Events;
+use crate::events::{CoreEvent, Events};
 use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
+use crate::send::types::{
+    Caller, DraftChange, DraftChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
+    UnknownResolution,
+};
+use crate::send::{OutboxManager, SendConfig};
+use crate::storage::outbox::Changed;
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
 
@@ -36,11 +45,46 @@ pub use flags::{FlagChange, MessageFlag};
 /// inside an async task without `spawn_blocking`.
 #[derive(Clone)]
 pub struct MailxCore {
+    // Declared first so it runs before the other fields are dropped.
+    _closing: Arc<Closing>,
     service: Arc<Mutex<AccountService>>,
     sync: Arc<SyncManager>,
+    outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
+    events: Events,
+}
+
+/// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
+/// the background tasks, waits for them to end, then waits for blocking work
+/// they handed off to let go of the store, so the data directory lock is free
+/// once the core is dropped rather than whenever a straggling task finishes.
+/// Every hand-off takes its store reference before spawning, so once the tasks
+/// have ended no new reference can appear. Both waits are bounded.
+struct Closing {
+    service: std::sync::Weak<Mutex<AccountService>>,
+    sync: Arc<SyncManager>,
+    outbox: Arc<OutboxManager>,
+    bodies: Arc<BodyManager>,
+}
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        let mut stopped = self.sync.shutdown();
+        stopped.extend(self.outbox.shutdown());
+        stopped.extend(self.bodies.shutdown());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(5));
+        while !stopped.iter().all(|task| task.is_finished()) && std::time::Instant::now() < deadline
+        {
+            pause();
+        }
+        // The last `MailxCore` still holds one reference of its own.
+        while self.service.strong_count() > 1 && std::time::Instant::now() < deadline {
+            pause();
+        }
+    }
 }
 
 impl MailxCore {
@@ -53,6 +97,18 @@ impl MailxCore {
         runtime: Handle,
         events: Events,
     ) -> Result<Self, AppError> {
+        Self::open_with(path, secrets, runtime, events, SendConfig::default())
+    }
+
+    /// `open` with the send queue's clock, SMTP budgets and trust store
+    /// replaced; tests use it with local fakes.
+    pub(crate) fn open_with(
+        path: &Path,
+        secrets: Arc<dyn SecretStore>,
+        runtime: Handle,
+        events: Events,
+        send: SendConfig,
+    ) -> Result<Self, AppError> {
         // The image cache is an optimization; a directory that cannot be used
         // must not stop mail from working.
         let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
@@ -60,17 +116,56 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
-        let sync = Arc::new(SyncManager::new(service.clone(), runtime, events));
+        let sync = Arc::new(SyncManager::new(
+            service.clone(),
+            runtime.clone(),
+            events.clone(),
+        ));
         for account in &accounts {
             sync.restart(&account.id);
         }
+        let outbox = Arc::new(OutboxManager::new(&service, runtime, events.clone(), send));
+        // Items interrupted by the last shutdown are settled before any worker
+        // looks at the queue: no body start mark means nothing reached the
+        // server, so the item is queued again; with the mark it is `unknown`.
+        let recovered = service
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .recover_outbox(outbox.now())?;
+        outbox.shared.announce(recovered);
+        // Blank drafts nobody can be editing any more are crash leftovers.
+        service
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .purge_blank_drafts()?;
+        for account in &accounts {
+            outbox.start(&account.id);
+        }
         Ok(Self {
+            _closing: Arc::new(Closing {
+                service: Arc::downgrade(&service),
+                sync: sync.clone(),
+                outbox: outbox.clone(),
+                bodies: bodies.clone(),
+            }),
             service,
             sync,
+            outbox,
             bodies,
             avatars: Arc::default(),
             images,
+            events,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn service_for_tests(&self) -> Arc<Mutex<AccountService>> {
+        self.service.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn outbox_mime_for_tests(&self, id: &str) -> Vec<u8> {
+        self.accounts().unwrap().outbox_mime(id).unwrap()
     }
 
     fn accounts(&self) -> Result<MutexGuard<'_, AccountService>, AppError> {
@@ -91,6 +186,7 @@ impl MailxCore {
     pub fn create_account(&self, request: CreateAccountRequest) -> Result<Account, AppError> {
         let account = self.accounts()?.create(request)?;
         self.sync.restart(&account.id);
+        self.outbox.start(&account.id);
         Ok(account)
     }
 
@@ -109,6 +205,9 @@ impl MailxCore {
         // The configuration is committed even if resetting a body state fails.
         // Always retire the old header connection before returning that error.
         self.sync.restart(&account.id);
+        // Queued mail follows the new route and credentials on its next
+        // attempt; a changed address fails the unsent items.
+        self.outbox.wake(&account.id);
         body_restart?;
         Ok(account)
     }
@@ -163,6 +262,173 @@ impl MailxCore {
             crate::storage::LocalChange::Queued => FlagChange::Queued,
             crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
         })
+    }
+
+    /// Creates a blank or pre-filled draft. `default_account_id` is the
+    /// `compose.defaultAccountId` setting, which the host reads from its
+    /// settings store; it only applies when the request names no account.
+    pub fn create_draft(
+        &self,
+        request: CreateDraftRequest,
+        default_account_id: &str,
+    ) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.create_draft(request, default_account_id)?;
+        self.announce_draft(&draft, DraftChange::Created);
+        Ok(draft)
+    }
+
+    fn announce_draft(&self, draft: &Draft, change: DraftChange) {
+        self.events.emit(&CoreEvent::DraftChanged(DraftChanged {
+            draft_id: draft.id.clone(),
+            account_id: draft.account_id.clone(),
+            change,
+        }));
+    }
+
+    /// Creates a reply, reply-all or forward draft from a message whose body
+    /// is cached. Never downloads: an uncached body is `BodyNotCached`, and the
+    /// caller fetches it with `fetch_body` first.
+    pub fn create_draft_from(&self, request: CreateDraftFromRequest) -> Result<Draft, AppError> {
+        let source = self.accounts()?.draft_source(&request)?;
+        let (detail, account_address, message_id, raw) = match source {
+            crate::accounts::DraftSource::Existing(draft) => return Ok(draft),
+            crate::accounts::DraftSource::Fresh {
+                detail,
+                account_address,
+                message_id,
+                raw,
+            } => (detail, account_address, message_id, raw),
+        };
+        // The raw message is read and parsed without holding the store lock.
+        let raw = match raw {
+            Some((blobs, blob)) => blobs.read(&blob)?,
+            None => Vec::new(),
+        };
+        let headers = crate::drafts::compose::parse_headers(&raw, message_id);
+        let draft = self.accounts()?.create_draft_from_source(
+            &request,
+            &detail,
+            &account_address,
+            &headers,
+            crate::accounts::local_offset(),
+        )?;
+        self.announce_draft(&draft, DraftChange::Created);
+        Ok(draft)
+    }
+
+    pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
+        self.accounts()?.get_draft(id)
+    }
+
+    /// Newest first; optionally only one account's drafts.
+    pub fn list_drafts(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
+        self.accounts()?.list_drafts(account_id)
+    }
+
+    pub fn update_draft(&self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.update_draft(request)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok(draft)
+    }
+
+    pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
+        let draft = self.accounts()?.get_draft(id)?;
+        self.accounts()?.delete_draft(id)?;
+        self.announce_draft(&draft, DraftChange::Deleted);
+        Ok(())
+    }
+
+    /// Queues a draft for sending: the MIME is built now from the draft and the
+    /// account's current sender, the draft is locked, and the account's worker
+    /// sends it once `undo_send_seconds` (from `compose.undoSendSeconds`; one
+    /// of 0, 5, 10, 20, 30) have passed. Only the interactive composer may
+    /// call this; any other `caller` gets `Forbidden`.
+    pub fn queue_send(
+        &self,
+        caller: Caller,
+        request: QueueSendRequest,
+        undo_send_seconds: u32,
+    ) -> Result<OutboxItem, AppError> {
+        if caller != Caller::Composer {
+            return Err(AppError::new(ErrorCode::Forbidden));
+        }
+        let (item, locked) =
+            self.accounts()?
+                .queue_send(&request, undo_send_seconds, self.outbox.now())?;
+        if let Some(locked) = locked {
+            self.outbox.shared.announce(vec![Changed {
+                item: item.clone(),
+                draft: Some(locked),
+            }]);
+            self.outbox.wake(&item.account_id);
+        }
+        Ok(item)
+    }
+
+    /// Queue items, newest first. Without `include_all` only those that need
+    /// attention or time: queued, sending, failed and unsettled unknown.
+    pub fn list_outbox(
+        &self,
+        account_id: Option<&str>,
+        include_all: bool,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        self.accounts()?.list_outbox(account_id, include_all)
+    }
+
+    pub fn get_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+        self.accounts()?.get_outbox(id)
+    }
+
+    /// Undo send. Succeeds only while the item is still `queued`; once the
+    /// worker has started it the answer is `AlreadySending`.
+    pub fn cancel_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+        let changed = self.accounts()?.cancel_outbox(id, self.outbox.now())?;
+        let item = changed.item.clone();
+        self.outbox.shared.announce(vec![changed]);
+        self.outbox.wake(&item.account_id);
+        Ok(item)
+    }
+
+    /// Skips the backoff wait of a `queued` item.
+    pub fn retry_outbox_now(&self, id: &str) -> Result<OutboxItem, AppError> {
+        let item = self.accounts()?.retry_outbox_now(id, self.outbox.now())?;
+        self.outbox.wake(&item.account_id);
+        Ok(item)
+    }
+
+    /// Settles an `unknown` item (interactive callers only: the composer or the
+    /// main window): `MarkSent` accepts it; `Resend` queues a new
+    /// attempt with the same Message-ID and bytes and returns that new item.
+    pub fn resolve_unknown(
+        &self,
+        caller: Caller,
+        request: ResolveUnknownRequest,
+    ) -> Result<OutboxItem, AppError> {
+        if !matches!(caller, Caller::Composer | Caller::MainWindow) {
+            return Err(AppError::new(ErrorCode::Forbidden));
+        }
+        let (changed, old) = {
+            let mut service = self.accounts()?;
+            match service.resolve_unknown(&request, self.outbox.now())? {
+                None => return service.resolved_item(&request),
+                Some(changed) => {
+                    let old = service.get_outbox(&request.id)?;
+                    (changed, old)
+                }
+            }
+        };
+        let item = changed.item.clone();
+        let mut announced = Vec::new();
+        if request.resolution == UnknownResolution::Resend {
+            announced.push(Changed {
+                item: old,
+                draft: None,
+            });
+        }
+        announced.push(changed);
+        self.outbox.shared.announce(announced);
+        self.outbox.wake(&item.account_id);
+        Ok(item)
     }
 
     /// Tells the sync workers how the app is being used. While it is in front
@@ -341,5 +607,22 @@ mod tests {
         };
         let (_core, states) = open(&directory, &runtime);
         assert_eq!(next_failure(&states).account_id, account.id);
+    }
+
+    #[test]
+    fn dropping_the_core_frees_the_directory_for_an_immediate_reopen() {
+        // Background tasks used to keep the store, and its lock, alive for a
+        // moment after the core was dropped.
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        {
+            let (core, states) = open(&directory, &runtime);
+            create(&core, closed_port());
+            next_failure(&states);
+        }
+        for _ in 0..20 {
+            let (core, _states) = open(&directory, &runtime);
+            let _clone = core.clone();
+        }
     }
 }

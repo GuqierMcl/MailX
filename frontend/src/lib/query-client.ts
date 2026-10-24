@@ -29,3 +29,13 @@ export const mailKeys = {
 export const settingsKeys = {
   all: ['settings'] as const,
 }
+
+/**
+ * Drafts and the send queue. Sync rounds never touch them; `mailx://outbox` and
+ * `mailx://drafts` events invalidate them (see `features/composer/compose-queries.ts`).
+ */
+export const composeKeys = {
+  all: ['compose'] as const,
+  drafts: () => [...composeKeys.all, 'drafts'] as const,
+  outbox: () => [...composeKeys.all, 'outbox'] as const,
+}

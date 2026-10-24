@@ -9,7 +9,7 @@ import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
-    displayName: '工作邮箱', color: null, emailAddress: 'work@example.com', providerId: null,
+    displayName: '工作邮箱', color: null, senderName: null, emailAddress: 'work@example.com', providerId: null,
     mailboxSourceId: 'source-a', imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'receive@example.com' },
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'send@example.com' },
     authentication: { mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
@@ -30,7 +30,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS }
+  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
   return {
     available: true,
     getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
@@ -63,5 +63,23 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     testNotification: vi.fn<MailxClient['testNotification']>().mockResolvedValue(undefined),
     previewSound: vi.fn<MailxClient['previewSound']>().mockResolvedValue(undefined),
     onNotificationOpen: vi.fn<MailxClient['onNotificationOpen']>().mockReturnValue(() => undefined),
+    createDraft: vi.fn<MailxClient['createDraft']>().mockRejectedValue(new Error('unused')),
+    createDraftFrom: vi.fn<MailxClient['createDraftFrom']>().mockRejectedValue(new Error('unused')),
+    listDrafts: vi.fn<MailxClient['listDrafts']>().mockResolvedValue([]),
+    getDraft: vi.fn<MailxClient['getDraft']>().mockRejectedValue(new Error('unused')),
+    updateDraft: vi.fn<MailxClient['updateDraft']>().mockRejectedValue(new Error('unused')),
+    deleteDraft: vi.fn<MailxClient['deleteDraft']>().mockResolvedValue(undefined),
+    queueSend: vi.fn<MailxClient['queueSend']>().mockRejectedValue(new Error('unused')),
+    listOutbox: vi.fn<MailxClient['listOutbox']>().mockResolvedValue([]),
+    getOutbox: vi.fn<MailxClient['getOutbox']>().mockRejectedValue(new Error('unused')),
+    cancelOutbox: vi.fn<MailxClient['cancelOutbox']>().mockRejectedValue(new Error('unused')),
+    retryOutboxNow: vi.fn<MailxClient['retryOutboxNow']>().mockRejectedValue(new Error('unused')),
+    resolveUnknown: vi.fn<MailxClient['resolveUnknown']>().mockRejectedValue(new Error('unused')),
+    openComposer: vi.fn<MailxClient['openComposer']>().mockResolvedValue(undefined),
+    closeComposer: vi.fn<MailxClient['closeComposer']>().mockResolvedValue(undefined),
+    onOutbox: vi.fn<MailxClient['onOutbox']>().mockReturnValue(() => undefined),
+    onDrafts: vi.fn<MailxClient['onDrafts']>().mockReturnValue(() => undefined),
+    onAppClosing: vi.fn<MailxClient['onAppClosing']>().mockReturnValue(() => undefined),
+    onComposerCloseRequested: vi.fn<MailxClient['onComposerCloseRequested']>().mockReturnValue(() => undefined),
   }
 }

@@ -35,7 +35,7 @@ describe('accounts dialog', () => {
     fireEvent.change(name, { target: { value: '  新名称 ' } })
     fireEvent.blur(name)
     await waitFor(() => expect(onAccountsChanged).toHaveBeenCalledOnce())
-    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null } })
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null } })
     expect(client.updateConnection).not.toHaveBeenCalled()
     expect(await within(dialog).findByText('已保存')).toBeInTheDocument()
   })
@@ -44,8 +44,38 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog()
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed' } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null } }))
     expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('saves the sender name when editing settles, trimmed, and clears it with an empty value', async () => {
+    const { client, dialog } = renderDialog([exampleAccount({ senderName: '林薇' })])
+    const field = await within(dialog).findByLabelText('发件人名称')
+    expect(field).toHaveValue('林薇')
+    expect(field).toHaveAttribute('placeholder', '收件人看到的名字，可留空')
+    fireEvent.change(field, { target: { value: '  Lin Wei ' } })
+    fireEvent.blur(field)
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: 'Lin Wei' },
+    }))
+    expect(field).toHaveValue('Lin Wei')
+
+    fireEvent.change(field, { target: { value: ' ' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    await waitFor(() => expect(client.updateProfile).toHaveBeenLastCalledWith({
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: null },
+    }))
+  })
+
+  it('shows a rejected sender name on its own field', async () => {
+    const client = testClient()
+    client.updateProfile.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'senderName', message: '发件人名称不能包含控制字符。' }))
+    const { dialog } = renderDialog([exampleAccount()], {}, client)
+    const field = await within(dialog).findByLabelText('发件人名称')
+    fireEvent.change(field, { target: { value: 'bad' } })
+    fireEvent.blur(field)
+    expect(await within(dialog).findByText('发件人名称不能包含控制字符。')).toBeInTheDocument()
+    expect(field).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('does not save an empty name', async () => {
@@ -71,7 +101,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog([exampleAccount(), second])
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '没按回车' } })
     await userEvent.click(within(dialog).getByRole('button', { name: /个人邮箱/ }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null } }))
     await waitFor(() => expect(client.getAccount).toHaveBeenCalledWith(second.id))
   })
 

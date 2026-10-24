@@ -5,11 +5,13 @@ mod body_protocol;
 #[cfg(feature = "body-webview-test")]
 mod body_webview_test;
 mod commands;
+mod compose;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
 mod state;
+mod window_access;
 mod window_chrome;
 
 #[cfg(not(feature = "body-webview-test"))]
@@ -90,6 +92,26 @@ fn main() {
                                 written,
                             );
                         }
+                        mailx_core::CoreEvent::Outbox(change) => {
+                            compose::emit_outbox(&handle, change);
+                            let app = settings_handle.clone();
+                            let outbox_id = change.outbox_id.clone();
+                            notifications::send_result(&handle, change.clone(), move || {
+                                let state = app.try_state::<state::DesktopState>()?;
+                                let settings = state.notification_settings()?;
+                                // The subject is read only to show it, and only
+                                // when previews are on.
+                                let subject = settings
+                                    .show_preview
+                                    .then(|| state.core().ok()?.get_outbox(&outbox_id).ok())
+                                    .flatten()
+                                    .map(|item| item.subject);
+                                Some((settings, subject))
+                            });
+                        }
+                        mailx_core::CoreEvent::DraftChanged(change) => {
+                            compose::emit_draft(&handle, change);
+                        }
                         mailx_core::CoreEvent::NewMail(mail) => {
                             let app = settings_handle.clone();
                             notifications::new_mail(&handle, mail.clone(), move || {
@@ -100,6 +122,7 @@ fn main() {
                     });
                 let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
+                app.manage(compose::Lifecycle::default());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
                 state.start_initialization();
@@ -137,7 +160,33 @@ fn main() {
             commands::notifications_preview_sound,
             commands::window_get_chrome,
             commands::window_perform,
+            compose::drafts_create,
+            compose::drafts_create_from,
+            compose::drafts_list,
+            compose::drafts_get,
+            compose::drafts_update,
+            compose::drafts_delete,
+            compose::outbox_queue_send,
+            compose::outbox_list,
+            compose::outbox_get,
+            compose::outbox_cancel,
+            compose::outbox_retry_now,
+            compose::outbox_resolve_unknown,
+            compose::composer_open,
+            compose::composer_close,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run the MailX desktop host");
+        .build(tauri::generate_context!())
+        .expect("failed to build the MailX desktop host")
+        .run(|_app, _event| {
+            // A quit from the menu or Cmd+Q gives open composers the same
+            // chance to save as closing the main window does.
+            #[cfg(not(feature = "body-webview-test"))]
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &_event
+                && compose::main_close_requested(_app)
+            {
+                api.prevent_exit();
+            }
+        });
 }

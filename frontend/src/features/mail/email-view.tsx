@@ -12,6 +12,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -37,9 +38,11 @@ type EmailViewProps = {
   error: string | null
   /** The reader is folded away: keys must not close a message nobody can see. */
   hidden?: boolean
+  /** Starts a reply, reply-all or forward of the open message (opens the composer window). */
+  onRespond: (kind: 'reply' | 'replyAll' | 'forward') => void
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose, hidden = false }: EmailViewProps) {
+export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, hidden = false }: EmailViewProps) {
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
   // nothing open does the reader have no actions to offer.
@@ -47,7 +50,7 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
   useCloseOnEscape(open && !hidden, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
@@ -80,66 +83,57 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
   )
 }
 
-// Reply, forward, archive and delete need the outbox and mailbox moves; until
-// then those buttons only show where the actions will live.
-const PLACEHOLDER_ACTIONS: [string, IconSvgElement][][] = [
-  [
-    ['归档', Archive02Icon],
-    ['删除', Delete02Icon],
-  ],
-  [
-    ['回复', MailReply01Icon],
-    ['回复全部', MailReplyAll01Icon],
-    ['转发', Forward01Icon],
-  ],
+// Archive and delete need mailbox moves; until then those buttons only show
+// where the actions will live.
+const PLACEHOLDER_ACTIONS: [string, IconSvgElement][] = [
+  ['归档', Archive02Icon],
+  ['删除', Delete02Icon],
 ]
 
-function Toolbar({ summary, onFlag, onClose }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void }) {
+const RESPOND_ACTIONS: ['reply' | 'replyAll' | 'forward', string, IconSvgElement][] = [
+  ['reply', '回复', MailReply01Icon],
+  ['replyAll', '全部回复', MailReplyAll01Icon],
+  ['forward', '转发', Forward01Icon],
+]
+
+function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond'] }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
-      {PLACEHOLDER_ACTIONS.map((group, index) => (
-        <div key={index} className="flex items-center gap-1 not-first:ml-3">
-          {group.map(([label, icon]) => (
-            <Button key={label} variant="ghost" size="icon" aria-label={label} title={`${label}（尚未实现）`} disabled>
-              <HugeiconsIcon icon={icon} />
-            </Button>
-          ))}
-        </div>
-      ))}
       <div className="flex items-center gap-1 not-first:ml-3">
-        <Button
-          variant="ghost"
-          size="icon"
+        {PLACEHOLDER_ACTIONS.map(([label, icon]) => (
+          <IconButton key={label} label={label} tip={`${label}（尚未实现）`} disabled>
+            <HugeiconsIcon icon={icon} />
+          </IconButton>
+        ))}
+      </div>
+      <div className="flex items-center gap-1 not-first:ml-3">
+        {RESPOND_ACTIONS.map(([kind, label, icon]) => (
+          <IconButton key={kind} label={label} disabled={!summary} onClick={() => onRespond(kind)}>
+            <HugeiconsIcon icon={icon} />
+          </IconButton>
+        ))}
+      </div>
+      <div className="flex items-center gap-1 not-first:ml-3">
+        <IconButton
           disabled={!summary}
-          aria-label={summary?.isRead === false ? '标为已读' : '标为未读'}
-          title={summary?.isRead === false ? '标为已读' : '标为未读'}
+          label={summary?.isRead === false ? '标为已读' : '标为未读'}
           onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
         >
           <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
+        </IconButton>
+        <IconButton
           disabled={!summary}
-          aria-label={summary?.isStarred ? '取消星标' : '加星标'}
+          label={summary?.isStarred ? '取消星标' : '加星标'}
           aria-pressed={summary?.isStarred ?? false}
-          title={summary?.isStarred ? '取消星标' : '加星标'}
           onClick={() => summary && onFlag(summary, 'starred', !summary.isStarred)}
           className={summary?.isStarred ? 'text-amber-500 hover:text-amber-500' : undefined}
         >
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
-        </Button>
+        </IconButton>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="ml-auto"
-        aria-label="关闭邮件"
-        title="关闭邮件（Esc）"
-        onClick={onClose}
-      >
+      <IconButton className="ml-auto" label="关闭邮件" tip="关闭邮件（Esc）" onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
-      </Button>
+      </IconButton>
     </div>
   )
 }

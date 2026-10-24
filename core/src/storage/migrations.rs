@@ -63,6 +63,18 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["flag_changes"],
         sql: include_str!("migrations/0006_flag_changes.sql"),
     },
+    Migration {
+        version: 7,
+        description: "local drafts and account sender name",
+        required_tables: &["drafts"],
+        sql: include_str!("migrations/0007_drafts.sql"),
+    },
+    Migration {
+        version: 8,
+        description: "send queue and local sent copies",
+        required_tables: &["outbox"],
+        sql: include_str!("migrations/0008_outbox.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -452,6 +464,144 @@ mod tests {
                 |row| row.get::<_, String>(0)
             )
             .is_ok()
+        );
+    }
+
+    fn manifest_up_to(version: u32) -> Vec<Migration> {
+        MIGRATIONS
+            .iter()
+            .copied()
+            .filter(|migration| migration.version <= version)
+            .collect()
+    }
+
+    #[test]
+    fn drafts_migration_applies_to_a_fresh_database() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, MIGRATIONS).unwrap();
+        assert_eq!(MIGRATIONS.last().unwrap().version, 8);
+        let columns: Vec<String> = db
+            .prepare("SELECT name FROM pragma_table_info('drafts')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for column in ["id", "account_id", "kind", "revision", "client_mutation_id"] {
+            assert!(columns.iter().any(|name| name == column), "{column}");
+        }
+        assert!(
+            db.query_row(
+                "SELECT 1 FROM pragma_table_info('accounts') WHERE name = 'sender_name'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn drafts_migration_upgrades_a_v6_database_and_keeps_its_accounts() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(6)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.com', 's', 't', 't')",
+            [],
+        )
+        .unwrap();
+
+        apply(&mut db, MIGRATIONS).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT sender_name FROM accounts WHERE id = 'a'",
+                [],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap(),
+            None
+        );
+        let insert = |id: &str, mutation: &str, kind: &str| {
+            db.execute(
+                "INSERT INTO drafts(id, account_id, kind, to_addresses, cc_addresses, bcc_addresses,
+                 subject, body_text, created_at, updated_at, client_mutation_id, create_canonical)
+                 VALUES (?1, 'a', ?3, '[]', '[]', '[]', '', '', 't', 't', ?2, '{}')",
+                [id, mutation, kind],
+            )
+        };
+        let id = |n: char| n.to_string().repeat(36);
+        insert(&id('1'), &id('a'), "new").unwrap();
+        // Mutation ids are unique per account; kinds and revisions are checked.
+        assert!(insert(&id('2'), &id('a'), "new").is_err());
+        assert!(insert(&id('3'), &id('b'), "other").is_err());
+        assert!(
+            db.execute("UPDATE drafts SET revision = 0", []).is_err(),
+            "revision starts at 1"
+        );
+        assert!(
+            db.execute("UPDATE accounts SET sender_name = ''", [])
+                .is_err(),
+            "an empty name is stored as NULL"
+        );
+        db.execute("DELETE FROM accounts WHERE id = 'a'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM drafts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn outbox_migration_upgrades_a_v7_database_and_enforces_its_constraints() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(7)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.com', 's', 't', 't')",
+            [],
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let id = |n: char| n.to_string().repeat(36);
+        let insert = |row: &str, mutation: &str, state: &str| {
+            db.execute(
+                "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+                 mime, envelope, subject, recipients_preview, recipient_count, state, not_before,
+                 first_queued_at, created_at, updated_at)
+                 VALUES (?1, 'a', ?2, '{}', '<m@x>', x'00', '{}', '', '[]', 1, ?3, 't', 't', 't', 't')",
+                [row, mutation, state],
+            )
+        };
+        insert(&id('1'), &id('a'), "queued").unwrap();
+        assert!(
+            insert(&id('2'), &id('a'), "queued").is_err(),
+            "unique per account"
+        );
+        assert!(
+            insert(&id('3'), &id('b'), "sent").is_err(),
+            "state is checked"
+        );
+        assert!(
+            insert(&id('4'), &id('c'), "accepted").is_err(),
+            "accepted needs accepted_at"
+        );
+        assert!(
+            db.execute("UPDATE outbox SET data_started_at = 't'", [])
+                .is_err(),
+            "a queued item has not started its body"
+        );
+        db.execute("DELETE FROM accounts WHERE id = 'a'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM outbox", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "the queue goes with its account"
         );
     }
 

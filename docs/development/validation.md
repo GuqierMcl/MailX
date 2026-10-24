@@ -32,7 +32,7 @@
 | 双击发送、重复请求、草稿 revision 变化 | 唯一入队或明确冲突 | M2 |
 | SMTP RCPT 部分拒绝 | DATA 前中止，不悄悄只发部分收件人 | M2 |
 | DATA 后断线、提交后应用崩溃 | unknown，不自动重发 | M2 |
-| SMTP 成功但 Sent 归档失败 | 不重发 SMTP；单独显示归档状态 | M2 |
+| SMTP 成功后服务器没有已发送副本 | 本地副本仍在；以后加入 APPEND 时，归档失败也不重发 SMTP | M2 |
 | 断网编辑、进程退出、磁盘满 | 草稿可恢复或明确未保存，不伪报成功 | M2 |
 | FTS 删除 / 重建、中文查询、未缓存正文 | 结果不越权，短词与覆盖限制可见 | M1–M2 |
 | AI 邮件提示词注入、模型恶意 HTML | 不增加工具权限，不执行输出 | M3 |
@@ -286,6 +286,48 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 `bun run typecheck`、`bun run lint`、`bun run frontend:test`（18 个文件、113 项测试）、`bun run build` 与差异检查通过。Vite 仍有既有的大 chunk 提示。本次仅调整前端展示，未重跑 Rust 或原生 WebView 验证，未重新打包桌面应用。
 
+### 2026-10-23 SMTP 路由探针
+
+本次未开启 Comet。`core/src/net/smtp_probe.rs` 只在测试中编译，`lettre` 与 `rcgen` 只是 core 的开发依赖，`cargo tree -e normal` 中不出现。用本地假 SMTP 服务和假 SOCKS5 / HTTP CONNECT 代理验证：三种路由都能经 `lettre` 完成 MAIL / RCPT / DATA，代理收到未解析的域名；代理不可达时返回 `NetError::Proxy` 且直连端口 300ms 内没有收到连接；STARTTLS（587）和隐式 TLS（465）在 SOCKS5 路由上完成，证书为测试时生成的自签名证书。
+
+`cargo test -p mailx-core --lib smtp_probe` 6 项通过，`cargo clippy -p mailx-core --all-targets -- -D warnings` 无警告。没有运行完整的 `bun run check` 与 `cargo test --workspace`；没有连接真实服务商，也没有经真实代理发信；生产路径的平台证书验证、AUTH、RCPT 部分拒绝与正文后断线尚未覆盖，留给[写信与发送设计](../architecture/sending.md#12-实施步骤)第 2 步。
+
+### 2026-10-23 发信第 2 步：MIME 与 SMTP 会话
+
+本次未开启 Comet。新增 `core/src/smtp/`（MIME 构造、手写 SMTP 会话、登录计划）并删除 `smtp_probe.rs`，代理与 TLS 假件移到 `core/src/net/test_support.rs`；`lettre` 成为普通依赖（仅 `builder`）。全部使用 127.0.0.1 上的进程内假 SMTP 服务器、假 SOCKS5 / HTTP CONNECT 代理和 rcgen 生成的测试 CA；未连接任何真实服务商或代理。
+
+覆盖：三种路由与未解析主机名、死代理不回退直连、STARTTLS 换流（EHLO 重发、AUTH 在 TLS 之后）、隐式 TLS、错误主机证书（永久失败且服务器没见到 AUTH / MAIL）、缺 STARTTLS、STARTTLS 之后的明文注入、AUTH PLAIN / LOGIN、535 与密码不出现在 Debug / Display、无 AUTH、SIZE 超限与声明、三个 RCPT 一个或两个被拒（RSET、无 DATA、全部列出）、各阶段 4xx / 5xx、各阶段停顿超时、`DataStarted` 钩子先于首个正文字节且恰好调用一次、钩子失败不发正文、最终 250 / 550 / 452、正文后断线与超时与无法解析的回复为 `Unknown`、点填充与换行规范化、MIME 头集合与中文往返解析（`mail-parser`）、Bcc 只入信封、信封去重、回复串联头、头部注入拒绝、登录计划的受信端点检查。
+
+命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 348 项（含新增 43 项 smtp）、账号集成 31 项、desktop 43 项（1 项忽略）全部通过，连续 3 次单独运行 `smtp` 测试均 43 项通过；`cargo tree -p mailx-core -e normal | rg -i 'lettre|native-tls|openssl|aws-lc|rcgen'` 只出现 `lettre`；`git diff --check` 通过。未改 DTO，未运行 `types:check`、`bun run check`。
+
+未验证：生产路径的平台证书验证（测试用注入的测试 CA）、真实服务商兼容性、经真实代理发信、代理认证失败的永久失败区分（`net` 暂无结构化原因）。
+
+### 2026-10-23 发信第 3 步：发送队列
+
+本次未开启 Comet。新增迁移 v8（`outbox`）、`core/src/send/`（worker、调度、清单时钟）、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`，以及 `MailxCore` 的 `queue_send` / `list_outbox` / `get_outbox` / `cancel_outbox` / `retry_outbox_now` / `resolve_unknown`、`CoreEvent::Outbox` / `DraftChanged`、错误码 `draftLocked` / `forbidden` / `alreadySending`。全部用 127.0.0.1 上的进程内假 SMTP 服务器和手动推进的测试时钟（没有使用 tokio 暂停时钟，因为它会连带加速假服务器的套接字超时）；未连接任何真实服务商或代理。
+
+覆盖（`send::tests` 15 项、`accounts::outbox` 8 项、迁移 2 项）：入队幂等与 `idempotencyConflict`、版本冲突、无收件人、非 Composer 调用方被拒；撤销窗口内零连接、撤销后永不发送且草稿可编辑；开始发送后 `alreadySending`；取走与撤销在存储层互斥；瞬时失败的退避间隔 30s / 60s / 120s / 300s / 600s / 1800s / 1800s 及“刚好差 1 秒不重试”、之后服务器恢复即接受；24 小时耗尽 `retryExhausted`；永久失败、认证被拒、RCPT 全部被拒、正文后 5xx 各自记录原因与回复码且不重试；正文后断线为 `unknown`、推进很长时间也只有一次 DATA；两种重启恢复分支（计数不增 / 转 `unknown`）及恢复后 `queued` 项继续发送；账号地址变更使未发送项 `accountChanged`、只改连接则不失败；账号删除级联；接受后删除草稿并保留 MIME / `accepted_at` / 回复；`MarkSent`、`Resend`（Message-ID 与字节一致、重放不产生第三次尝试）；失败项编辑后重新入队得到新的 Message-ID；一个账号的服务器卡在问候语时另一账号照常发送；每次状态变化的事件序列。
+
+命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 372 项、账号集成 31 项、desktop 43 项（1 项忽略）全部通过；`cargo test -p mailx-core --lib outbox` 与 `... send::` 各连续运行 3 次，均为 9 项与 15 项通过；`bun run types:generate` 后 `bun run types:check` 通过；`bun run typecheck` 通过；`bun run frontend:test` 32 个文件 267 项通过（其中一次运行退出码为 1，随后重复两次均通过，未能复现，原因未查明）；`git diff --check` 通过。
+
+未验证：真实服务商与真实代理上的发送、进程在 `DATA` 中途被强杀的真实恢复（用写行模拟 `sending` 状态代替）、系统时钟跳变、桌面事件转发（第 4 步）。
+
+### 2026-10-23 发信第 4a 步：写信窗口宿主与客户端层
+
+未开启 Comet。新增 `desktop/src/window_access.rs`（窗口类别解析、按命令白名单、草稿归属）、`desktop/src/compose.rs`（草稿与发件箱命令、`composer_open` / `composer_close`、事件转发、关闭与退出生命周期）、`desktop/capabilities/composer.json`；`notifications` 增加发送结果通知；核心新增 `Caller::MainWindow`，`resolve_unknown` 对其放行；前端新增 `lib/composer-window.ts`，`MailxClient` 与桌面 / 模拟客户端补全草稿、发件箱、窗口命令与四个事件订阅。未连接任何邮件服务器、代理，未发送任何邮件；模拟客户端的发送只是计时器状态机。
+
+自动测试覆盖：窗口标签解析（拒绝 `composer-x`、大写 UUID、无连字符、花括号、多余后缀）；全部命令的 main / composer 白名单表；两类窗口的页面来源检查一致；composer 只能碰自己的草稿（大小写、空串、缺失均拒绝）；main 的 `outbox_queue_send` 被拒、`outbox_resolve_unknown` 放行；核心 `queue_send` 对 `MainWindow` / `Mcp` / `Model` 为 `forbidden`，`resolve_unknown` 对 `MainWindow` 放行、对 `Mcp` / `Model` 拒绝；事件目标标签；层叠位置的夹取与循环；关闭请求的代次记录；发送结果通知的计划（只通知终态、遵循启用 / 前台 / 预览设置、预览关闭时不含主题、`accepted` 静音）；前端命令参数转发、主体不可由页面指定、composer URL 检测、模拟客户端的草稿修订、排队 → 发送中 → 已接受、撤销与 `alreadySending`。
+
+未验证：真实窗口的创建、聚焦、层叠位置、关闭拦截与 3 秒回退、Cmd+Q / 主窗口关闭等待写信窗口、三平台标题栏、系统通知点击，见下节新增清单（尚未执行）。Tauri capability 对 `composer-*` 的实际匹配也未在运行中的应用里确认。
+
+### 2026-10-24 写信窗口体验修正
+
+核心：草稿的创建、保存、删除都发出 `DraftChanged`（新增 `created` / `updated`）；空白草稿不进草稿列表，启动时清理无活动发送项的空白草稿。宿主：`composer_open` 增加可选 `fresh`，写入页面 URL。前端：关闭提示（空白删除、未改动的已有草稿直接关、否则“要保存这封草稿吗？”）、底栏保存状态在左 / 按钮在右、草稿预览与阅读工具栏改用带提示的图标按钮、所选草稿被删除时清除选择。未连接邮件服务器，未发送邮件。
+
+自动测试覆盖：核心各草稿操作的事件、空白过滤、启动清理；`composer_open` 参数与 URL 的 `fresh`；关闭提示各分支（空白、未改动、取消、保存草稿、新草稿 / 已有草稿的不保存、保存失败）、底栏顺序、草稿预览图标按钮及提示、阅读工具栏提示（含禁用项）、选择清除。
+
+未验证：真实 Tauri 窗口里的关闭提示（红绿灯 / Cmd+W / 退出应用）与三平台底栏观感。
+
 ## 6. 窗口行为的手动验证
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：
@@ -296,6 +338,35 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - macOS 用 Cmd+H 隐藏应用后直接 Cmd+Q：再次启动窗口正常显示（这是不保存可见性的原因）。
 - Windows / Linux：自绘标题栏的最小化、最大化、关闭仍然可用，重启后标题栏样式不变。
 - 删除配置目录里的 `.window-state.json` 后启动：回到 `tauri.conf.json` 的默认大小。
+
+### 2026-10-23 发信第 4b 步：写信、草稿、发件箱与设置界面
+
+未开启 Comet。新增 `frontend/src/features/composer/`（`ComposerApp`、`Composer`、两步发送按钮、收件人标签输入、草稿自动保存）与 `features/outbox/`（草稿 / 发件箱列表与详情、发送 toast 与事件订阅）；主窗口导航加“写邮件”、“草稿”、“发件箱”，`Cmd/Ctrl+N`、命令面板“写邮件”、阅读区回复 / 全部回复 / 转发；账号资料与添加账号第 3 步加“发件人名称”；设置加“发信”页；`toast` 支持动作按钮；`previewPlatformFromUrl` 接受 `?platform=`。模拟客户端用收件人决定发送结果（`fail@` 失败、`unknown@` 未知、`retry@` 首次连接失败后排队重试），仅用于浏览器预览，并有 `?seed=outbox` 预置数据。未改 Rust，没有联系任何邮件服务器，没有发送任何邮件。
+
+自动测试覆盖（Vitest + Testing Library，假计时器）：两步发送按钮（首次点击校验与确认、防双击 400ms、4 秒退回、编辑 / Esc / 失焦退回、无主题标签、Cmd/Ctrl+Enter 两次、减少动态效果、入队携带保存后的 revision 与新的 mutation id、冲突时退回并重新加载）；收件人标签（Enter / 逗号 / 分号 / 失焦提交、粘贴“Name <a@b>, c@d”拆分、空输入退格删除、无效地址为错误标签并可修改、去重）与地址解析规则；自动保存防抖、串行保存、冲突重载并提示、`draftLocked` 只读、队列事件跟随、保存失败重试；关闭流程（空草稿删除、先写出再关闭、保存失败时的确认与取消、应用退出不询问、被队列锁定的草稿不删除、发送成功立即关闭）；主窗口入口调用的命令（含 `bodyNotCached` 取正文后重试一次且复用同一 mutation id、取正文失败的提示）、草稿 / 发件箱导航的可见性与数量、发件箱各状态的操作与错误详情（被拒收件人、中文原因）、未知状态的重发确认、撤销 toast 取消并重开写信窗口、`alreadySending`、系统通知 `outboxId` 选中；命令面板“写邮件”；发件人名称字段（账号弹窗自动保存、字段级错误、添加账号提交）；设置“发信”页（默认发件账号、撤销发送、失败回滚）；模拟客户端的失败 / 未知 / 重试。
+
+浏览器预览（`bun run --cwd frontend dev`，开发模式模拟客户端）的目测：`/?composer=<uuid>&platform=macos|windows|linux`、深色与浅色、520px 宽度、主窗口草稿与发件箱视图；见本次任务的最终报告。**这不是桌面行为的证据。**
+
+未验证：真实 Tauri 窗口里的写信界面、`composer_open` 后页面是否能调用 composer capability 内的命令、三平台标题栏在写信窗口里的表现、窗口原生标题、IME 输入收件人 / 主题、真实通知点击选中发件箱项，见 §6 新增清单（尚未执行）。转发时原邮件附件数的提示未实现（草稿没有该字段）。
+
+### 写信窗口（发信第 4a 步，尚未执行）
+
+需要先有写信界面（单独任务）才能完整操作；此前可从 `tauri dev` 的开发者工具里用 `invoke` 调 `drafts_create` 与 `composer_open` 辅助检查。macOS、Windows、Linux 各做一遍并记录平台与版本：
+
+- `composer_open` 打开新窗口：标题栏与 main 同样式（macOS 红绿灯位置正确，Windows / Linux 自绘按钮与 `gtk-decoration-layout` 一致）；尺寸约 760×680，不能缩到 520×420 以下；位置在主窗口右下错开，连开多个依次错开、靠近屏幕边缘时仍在显示器内；多显示器与高缩放下位置合理。
+- 对同一草稿再次 `composer_open`：聚焦已有窗口，不出现第二个；窗口最小化时被还原。
+- 写信窗口里 `window_perform` 的最小化 / 最大化 / 双击标题栏遵循系统偏好；`mailx://window-state` 只更新自己的窗口按钮，不影响 main。
+- 点红绿灯 / Alt+F4 / 自绘关闭按钮：收到 `mailx://composer-close-requested`，页面调用 `composer_close` 后窗口关闭；页面不响应时约 3 秒后仍关闭。
+- 关闭 main（红绿灯、Cmd+Q、Alt+F4）且有写信窗口：先收到 `mailx://app-closing`，写信窗口关闭后应用退出，最长约 3 秒；没有写信窗口时立即退出。重复点击关闭不重复触发。
+- 写信窗口从开发者工具调用 main 专用命令（如 `emails_list`、`outbox_list`）、他人草稿的 `drafts_get`、`outbox_queue_send`（他人草稿）均被拒；main 调 `outbox_queue_send` 被拒。
+- 写信窗口里的页面导航（修改 `location`）被阻止；窗口不记忆大小位置（退出再开不恢复）。
+- 写信界面（4b，尚未执行；macOS、Windows、Linux 各一遍）：
+  - 从主窗口“写邮件”、`Cmd/Ctrl+N`、回复 / 全部回复 / 转发各开一次：窗口标题栏与主窗口一致，标题随主题变化；浅色、深色下岛、输入行、发送按钮颜色正常；窗口缩到 520×420 时底栏不挤压、收件人标签换行。
+  - 中文输入法在收件人、主题、正文里组字时，Enter 不会误提交标签、不会触发发送；`Cmd/Ctrl+Enter` 在输入法组字期间不发送。
+  - 停止输入约 1 秒后显示“已保存”；关闭窗口（红绿灯 / Alt+F4 / 自绘关闭）后在主窗口“草稿”里能看到内容，空白草稿则不留下；把数据目录设为只读后编辑并关闭，出现“仍要关闭（丢失未保存的修改）”。
+  - 两步发送：第一次点击后按钮变色加宽，快速双击不会直接发送，约 4 秒、切到别的窗口、按 Esc、改字都会退回；撤销发送设为 10 秒时主窗口出现“将在 10 秒后发送”和“撤销”，撤销后写信窗口重新出现并保留内容；只往测试白名单账号发（真实发信需用户另行授权）。
+  - 主窗口：草稿 / 发件箱数量与可见性、失败与未知项的操作、点系统通知选中发件箱项；设置“发信”页的两项在重启后保持。
+- 发送结果通知：把一条用本地假服务器队列的邮件转为 `accepted` / `failed` / `unknown`（真实发信需用户另行授权），主窗口不在前台时出现“已发送” / “发送失败” / “可能已发送，需要确认”，预览关闭时不含主题；点击通知聚焦主窗口。
 
 ### 浏览器默认行为（仅打包版本）
 

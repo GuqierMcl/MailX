@@ -1,0 +1,294 @@
+# 写信与发送设计
+
+状态：**设计已确认，实施中** · 2026-10-23。草稿（第 1 步）以及 MIME 构造与 SMTP 会话（第 2 步）、发送队列（第 3 步）已有本地假服务器的测试证据；宿主与客户端层（4a）和写信 / 草稿 / 发件箱 / 设置界面（4b）已实现并有前端自动测试，三平台实机未验证；已发送副本的列表合并（第 5 步）未实现。本文是 v0.1 发信的实施依据；实现中发现更好的做法时，先改本文再改代码。可靠性语义的总纲仍在[同步与发信](mail-sync.md#5-本地草稿与可靠发送)，本文给出细节，两者冲突时以本文为准并同步修订。
+
+## 1. v0.1 范围
+
+| 包含 | 暂缓 |
+| --- | --- |
+| 新建、回复、全部回复、转发 | 附件（含转发原邮件附件）、HTML / 富文本写信 |
+| 纯文本正文（UTF-8） | 签名、联系人补全、多身份 / 别名 |
+| 本地草稿，编辑时自动保存 | 草稿同步到服务器草稿箱 |
+| 发送队列、撤销发送、离线排队 | 定时发送 |
+| 本地已发送副本；服务器已保存时按 Message-ID 对上 | IMAP APPEND 追加到服务器、OAuth（XOAUTH2）发信 |
+
+转发只转正文。原邮件有附件时，写信窗口明确提示"原邮件的 N 个附件不会随转发发出"，不显示成可用功能。
+
+## 2. 写信窗口：独立窗口
+
+### 调研
+
+| 客户端 | 新邮件 | 回复 / 转发 | 能否弹出为新窗口 |
+| --- | --- | --- | --- |
+| Apple Mail | 独立窗口 | 独立窗口 | 本身即窗口 |
+| Thunderbird | 独立窗口 | 独立窗口 | 本身即窗口 |
+| 经典版 Outlook | 独立窗口 | 默认在阅读窗格内联 | 可逐封弹出；有"回复与转发在新窗口打开"设置 |
+| 新 Outlook / Outlook 网页版 | 主窗口内 | 阅读区内联 | 可逐封弹出；未查到"总是新窗口"设置 |
+| Spark Desktop | 主窗口内 | 主窗口内 | 可弹出；有"总是在新窗口打开写信"设置 |
+| Gmail 网页版 | 右下角浮动面板（非模态） | 内联 | 可弹出 |
+
+规律：传统桌面客户端以独立窗口为主；Web 出身的现代客户端默认在主窗口内编辑，但都是**非模态**的（内联区或浮动面板），并都提供"弹出到新窗口"。没有主流客户端用遮挡主窗口的模态弹窗写信。
+
+来源（2026-10-23 查阅）：[Spark Desktop 多窗口](https://sparkmailapp.com/help/sending-emails/multi-window-support-in-spark-desktop)、[Outlook 回复与转发](https://support.microsoft.com/en-us/outlook/reply-to-or-forward-an-email-message)、[Outlook 网页版回复设置](https://support.microsoft.com/en-us/office/reply-settings-in-outlook-on-the-web-3adc2c37-ee1e-46f5-98bb-1f0fb02003b3)、Thunderbird 帮助中心的写信窗口说明。Apple Mail 与 Gmail 为常见行为，未逐项查证当前版本。
+
+### 取舍
+
+| | 独立窗口 | 主窗口内（非模态） | 主窗口模态弹窗 |
+| --- | --- | --- | --- |
+| 写信时参考其他邮件 | 可以，两窗并排 | 受阅读区占用影响 | 不行，被遮挡 |
+| 同时写多封 | 自然支持 | 需要标签或切换 | 不支持 |
+| 权限隔离 | 可按窗口单独授权（见下） | 与主窗口共享全部权限 | 同左 |
+| 实现成本 | 多窗口外壳、标题栏、生命周期 | 需要在岛内设计第二种布局 | 低 |
+| 资源 | 每个窗口一个 WebView，首次打开要加载前端 | 无额外 | 无额外 |
+
+模态弹窗直接排除：挡住阅读、易被 `Esc` 误关，也与"画布 + 岛"的设计语言冲突。
+
+### 决定
+
+- **桌面端 v0.1 一律用独立窗口**：新建、回复、全部回复、转发都在新窗口里写。理由是参考原邮件、多封并行和按窗口最小授权；这也符合用户的习惯判断。
+- **写信组件与宿主无关**：同一个 `Composer` 组件既可以挂在独立窗口里，也可以挂在主窗口的岛内。以后 Web 宿主（无法开系统窗口）和"在阅读区内快速回复"选项复用它，那时再加设置"写信打开方式：新窗口 / 主窗口内"，不在 v0.1 做。
+- 打开速度和内存占用**实现后实测**，不预设数字；首次打开明显偏慢时，再评估预创建一个隐藏的写信窗口。
+
+### 窗口行为
+
+- 窗口标签为 `composer-{draftId}`，一份草稿最多一个窗口；再次打开同一草稿时聚焦已有窗口。
+- 入口：导航顶部的"写邮件"、阅读区工具栏的回复 / 全部回复 / 转发、`Cmd/Ctrl+N`、草稿列表的“继续编辑”、命令面板的“写邮件”（规则见[界面设计](ui-design.md#命令面板)）。
+- 外观沿用画布与岛：自有标题栏（窗口标题为邮件主题，空时为"新邮件"），macOS 红绿灯照常；内容是一个岛，上方为发件账号、收件人、抄送 / 密送（默认收起）、主题，下面是纯文本编辑区，底部为发送按钮、丢弃和保存状态（见下）。
+- 默认尺寸约 760×680，最小 520×420，相对主窗口错开放置；v0.1 不记忆尺寸。
+- 关闭（系统关闭按钮、自绘关闭按钮、Cmd+W）：
+  - 空白草稿（无收件人 / 抄送 / 密送，主题与正文只有空白）：删除并关闭，不询问。
+  - 内容与打开窗口时相同且草稿不是为本窗口新建的（从“草稿”列表重新打开）：直接关闭，不询问。
+  - 其他情况弹出“要保存这封草稿吗？”（“保存后可以在‘草稿’中继续编辑。”），按钮“不保存”（最左）、“取消”、“保存草稿”（默认焦点）；`Esc` 等于取消。保存草稿：写出后关闭，保存失败时询问“仍要关闭（丢失未保存的修改）/ 取消”。不保存：新建的草稿（写邮件 / 回复 / 转发，宿主 URL 带 `fresh=1`）删除；已有草稿用打开时的内容覆盖回去（取最新 revision），**绝不删除已有草稿**。取消：窗口保持打开。
+  - “丢弃”在内容非空时需要确认，行为不变。
+  - 底栏左侧是保存状态，右侧依次为“丢弃”和“发送”（最右）。
+  - 保存状态为 `idle`（不显示）/ `saving` / `saved` / `failed`：打开任何草稿（新建或重新打开）都从 `idle` 开始，用户改动之前什么都不显示；保存超过约 400 ms 才显示“正在保存…”，更快的保存直接显示“已保存”；内容重新变为空白（无收件人、主题和正文都为空）时回到不显示，因为空白草稿不保留、关闭时删除；失败显示“保存失败”和文字按钮“重试”（再次触发保存，关闭时对失败保存的处理不变）；草稿已进入发送队列只读时显示“已在发送队列中”，不显示保存状态。状态元素保持 `role="status"` / `aria-live="polite"`，并预留固定宽高，出现与消失不会推动右侧按钮；淡入在减少动态效果时关闭。自动保存节奏（约 1 s 防抖）不受影响。
+- 关闭主窗口仍退出应用：宿主先向所有写信窗口发出关闭请求，等它们各自写出草稿，再退出。
+
+**已实现（步骤 4a，宿主与客户端层，尚无界面）：**
+
+- `composer_open { draftId }`（仅 main）：草稿必须存在；已有 `composer-{draftId}` 窗口则取消最小化并聚焦，否则新建。窗口加载 `index.html?composer={draftId}`，CSP 不变、不需要 `frame-src`；macOS 为 Overlay 标题栏、隐藏标题与红绿灯位置，Windows / Linux 为 `decorations(false)`（与 main 共用 `window_chrome::style_builder`）；尺寸 760×680、最小 520×420；位置在主窗口的基础上按已开启的写信窗口数每级错开 32 逻辑像素（8 级后循环），并夹在主窗口所在显示器内；窗口状态插件只记 main（过滤其余标签）。`on_navigation` 只放行应用页面来源并沿用正文链接拦截。
+- 关闭：写信窗口的系统关闭请求（红绿灯、Alt+F4、自绘关闭按钮的 `close`）一律被拦截，宿主向该窗口发 `mailx://composer-close-requested`，前端写出草稿后调用 `composer_close`（销毁窗口）；3 秒内没有回应则宿主直接销毁。主窗口关闭请求或系统退出（Cmd+Q）在有写信窗口时被拦截，向每个写信窗口发 `mailx://app-closing`，等它们都关闭（最多 3 秒，之后强制销毁），然后退出；没有写信窗口时与以前一样立即退出。
+- 与设计的差异：尺寸与位置用逻辑像素与主窗口位置换算，多显示器与缩放下的真实效果待实机验证；`composer_close` 的 `force` 参数保留在契约里但宿主不区分。关闭时“保存失败是否仍关闭”的询问和空草稿自动删除属于前端，已在 4b 实现（见下）。
+- 写信窗口不读邮件正文：回复引用和转发内容由核心在创建草稿时生成并写入草稿，所以写信窗口不需要正文相关命令，也没有正文 iframe。
+
+**已实现（步骤 4b，前端界面，自动测试通过，三平台实机未验证）：**
+
+- 写信窗口页面 `ComposerApp` 复用主窗口同一个 `TitleBar`；`Composer` 与宿主无关。保存：停止输入约 1 秒后写出，同一时刻只有一个保存在途，期间的新修改在其后以新 revision 再发；每次都带上次保存的 `expectedRevision`；`conflict` 时重新加载核心里的草稿并提示（本地未保存的修改不合并、不覆盖）；`draftLocked`（含 `mailx://drafts` 的 `locked` 事件）时转只读；`unlocked` 时重新加载，`deleted` 时显示“草稿已不存在”。无效地址不写入草稿（核心会整份拒绝），保留为错误标签并阻止发送。
+- 关闭：收到 `composer-close-requested` 后按“窗口行为”中的规则处理；收到 `app-closing`（整个应用退出）从不询问，写出后（最多约 2 秒）空白草稿删除，再调用 `composer_close`。写出失败时，系统关闭请求弹出“仍要关闭（丢失未保存的修改）/ 取消”。第二次点击发送成功后立即关闭窗口。“丢弃”在内容非空时要确认。
+- 转发附件提示：草稿（`Draft`）里没有原邮件附件数，写信窗口也不读邮件，所以 **“原邮件的 N 个附件不会随转发发出”的提示尚未显示**（待核心在草稿里带上该信息，或由主窗口创建转发草稿时传入）。
+- 发信凭证不可信或缺失时，发送按钮第一次点击就拒绝并说明，不进入待确认。
+- 与设计的差异：窗口原生标题只设置了 `document.title`，宿主没有 `set_title` 命令；点收件人标签可把它放回输入框修改。
+
+### 发件账号
+
+默认用触发写信时的上下文账号：回复 / 转发用原邮件所属账号；在某个账号的文件夹里新建时用该账号；在统一收件箱新建时用设置中的默认发件账号（`compose.defaultAccountId`），未设置或该账号已删除时用排序第一的账号。可以在窗口里改选。
+
+每个账号有自己的**发件人名称**（`senderName`），即收件人看到的名字，如"张三"；它和账号名称（给自己看的标签，如"工作邮箱"）不同，单独保存。发件人名称属于账号资料：在账号管理弹窗的资料里直接编辑并自动保存，添加账号第 3 步（命名）也填写。留空时 `From` 只有地址。改名称不影响已入队的快照。
+
+## 3. 发送按钮：两步确认
+
+不弹确认框。发送按钮本身分两步：
+
+1. **待发送**：按钮显示"发送"。第一次点击先校验（至少一个收件人、所有地址可解析、账号可用）。校验失败只标出字段，按钮不变。
+2. **待确认**：校验通过后立刻写出未保存内容，按钮经过渡动画（宽度与颜色，约 200ms）变为"确认发送"；主题为空时显示"无主题，确认发送"。屏幕阅读器通过 `aria-live` 听到"再次按下以确认发送"。
+3. **发送**：第二次点击后立即入队，关闭写信窗口。
+
+约束：
+
+- **防双击**：进入待确认后约 400ms 内的点击无效，双击不会直接越过确认。
+- **自动退回**：约 4 秒内没有第二次点击、内容有任何修改、按 `Esc` 或窗口失焦，都退回"发送"。
+- `Cmd/Ctrl+Enter` 同样需要按两次。
+- 系统要求减少动态效果时不播放动画，防双击间隔保留。
+- 入队请求携带进入待确认时已保存的 `expectedRevision` 和一个新的 `clientMutationId`；版本冲突时退回并加载最新草稿。
+
+两步按钮只是防误触的交互，**不是安全边界**。后端独立核对调用方必须是写信窗口（交互 UI 主体）、草稿版本与快照，MCP 和模型主体无论如何调用都不能入队。
+
+## 4. SMTP 会话
+
+### 实现：手写会话，lettre 只做 MIME
+
+第 2 步实现在 `core/src/smtp/`（`mod.rs` 会话、`reply.rs` 回复解析与脱敏、`message.rs` MIME、`plan.rs` 失败映射；登录计划在 `accounts/sync_plan.rs` 的 `AccountService::smtp_plan`，紧挨 IMAP 的 `sync_plan`）。
+
+**没有使用 lettre 的 `AsyncSmtpConnection`，改为手写最小客户端**（EHLO / STARTTLS / AUTH PLAIN、LOGIN / MAIL / RCPT / DATA / RSET / QUIT，含多行回复解析和点填充）。原因：
+
+- lettre 的连接把流放进内部 `BufReader<AsyncNetworkStream>`，`starttls` 只接受它自己的 `TlsParameters`，TLS 由 lettre 的 rustls / native-tls 特性完成，等于绕开 `net::upgrade_tls`，IMAP 与 SMTP 就有两套证书验证；启用 lettre 的 TLS 特性还会引入第二套 TLS 依赖。
+- 探针阶段的换流方案要求在 `220` 之后从内部缓冲读取器里取回底层流，并确认缓冲区为空；lettre 不暴露这一点，无法做 STARTTLS 注入防御。
+- `connect_with_transport` 的 EHLO 与 `send` 把 MAIL / RCPT / DATA 合并为一次调用，拿不到 354 与"正文开始"标记之间的钩子，也不能逐个收集 RCPT 拒绝。
+
+`lettre` 现在是 `mailx-core` 的普通依赖，仅启用 `builder`（`default-features = false`）：用于 MIME 构造、RFC 2047 编码和 `Address` 解析；不启用 `smtp-transport`、`tokio1` 或任何 TLS 特性，`cargo tree -e normal` 中没有 `native-tls`、`openssl`、`aws-lc`。`rcgen` 仍只是开发依赖。
+
+### 会话与探针结论（保留的探针证据）
+
+原探针（直连 / SOCKS5 / HTTP CONNECT、不回退直连、STARTTLS 与隐式 TLS 经 SOCKS5）已由正式测试取代并删除 `smtp_probe.rs`；代理与 TLS 假件移入 `core/src/net/test_support.rs`，假 SMTP 服务器在 `core/src/smtp/fake_server.rs`（仅测试编译，只监听 127.0.0.1）。
+
+### 会话步骤
+
+1. 按账号路由 `net::connect`。465 端口立即走 `net::upgrade_tls`。
+2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls` 升级后放回，再发一次 `EHLO`。这样 IMAP 和 SMTP 只有一套证书验证；换流的实现：会话持有 `BufReader<BoxedStream>`；收到 `220` 后检查读缓冲为空（非空说明有人在明文里抢跑，按 `protocol` 永久失败，不丢弃也不重放），再 `into_inner()` 取出底层流交给 `net::upgrade_tls`，用结果建立新的读取器并重新 `EHLO`；握手前学到的能力一律丢弃。测试用 `TlsSource::Test`（仅 `#[cfg(test)]`，对应 `net::upgrade_tls_with`）注入测试 CA；生产只有 `TlsSource::Platform`，没有任何跳过验证的开关。
+3. 认证前核对凭证的受信端点（协议、主机、端口、TLS、用户名）：在建立登录计划时完成（`smtp_plan`，`TrustEndpoint::mail("smtp", ...)`），不符时返回永久失败，**不打开任何连接**。会话按服务器声明选用 `AUTH PLAIN`（优先）或 `LOGIN`；没有声明可用机制为 `authUnavailable`。
+4. 服务器声明了 `SIZE` 且快照超出时，在 `MAIL FROM` 之前失败。
+5. `MAIL FROM`，然后逐个发 `RCPT TO` 并记录每个地址的结果。只要有一个被拒，就 `RSET` 并整体失败，返回全部被拒地址，**不只发给部分收件人**。
+6. `DATA` 收到 354 后，先调用并等待调用方传入的 `DataStarted` 钩子（第 3 步在这里提交 `data_started_at`），成功后才写出正文和结束符；钩子失败则不发任何正文字节并断开，按"正文开始前"的临时失败返回（`dataMarkFailed`）。正文做 CRLF 规范化（裸 LF / CR 都转为 CRLF）和点填充，由会话自己完成并有测试。
+7. 收到最终回复：250 记为 `accepted` 并保存回复码；明确的 4xx / 5xx 记为 `failed`；超时、断线或无法解析的回复记为 `unknown`。
+8. `QUIT` 尽力而为，失败不影响已记录的结果。
+
+超时按 RFC 5321 的建议上限设置（`Timeouts`，可注入）：问候与各命令 5 分钟、`DATA` 到 354 为 2 分钟、正文结束符之后的回复 10 分钟，以减少 `unknown`；连接沿用 `CONNECT_TIMEOUT`。日志只记录阶段、回复码和脱敏错误，从不输出 AUTH 或 DATA 内容。会话本身不写日志；服务器回复文本只保留回复码和脱敏文本（控制字符含 CR / LF 变空格、折叠空白、回显的密码替换为 `[redacted]`、最多 200 字符）。
+
+### 会话结果（`SmtpOutcome`）
+
+| 结果 | 含义 | 第 5 节处理 |
+| --- | --- | --- |
+| `Transient(原因)` | 正文开始前：连接失败、代理失败、超时、网络中断、任意 4xx、握手前的协议错误、`dataMarkFailed`、凭证库暂不可用 | 回到 `queued`，退避重试 |
+| `Permanent(原因)` | 正文开始前：5xx、`authRejected`、`tlsVerification`、`tlsUnavailable`、`authUnavailable`、`messageTooLarge`、`protocol`（含 STARTTLS 后的明文注入）、`credentialUntrusted`、`credentialMissing`、`invalidMessage` | `failed` |
+| `RecipientsRejected(列表)` | RCPT 有拒绝：已 `RSET`，未进入 DATA，列表含每个被拒地址与回复码 | `failed`，附全部被拒地址 |
+| `Accepted(码, 文本)` | 正文后 2xx | `accepted` |
+| `RejectedAfterData(码, 文本)` | 正文后 4xx / 5xx | `failed`，不自动重试 |
+| `Unknown(超时 / 断线 / 回复无法解析)` | 正文后没有可用的最终回复，包括写正文时出错 | `unknown`，永不自动重发 |
+
+与设计的差异与限制：
+
+- **代理认证失败与其他代理错误不区分**：`net` 目前把 SOCKS5 / HTTP CONNECT 的失败都报为 `NetError::Proxy(字符串)`，没有结构化原因，所以会话一律按临时失败（`proxy`）处理；第 3 步若要对代理认证失败给出永久失败，需先让 `net` 报告结构化原因。
+- `AUTH` 回复 4xx 视为临时服务器错误，5xx 为 `authRejected`。
+- `EHLO` 使用地址字面量 `[127.0.0.1]` 作为客户端标识，避免泄露本机主机名；未支持 `SMTPUTF8`，非 ASCII 的信封地址在第 1 步校验时已被拒绝，MIME 必须是纯 ASCII（由 lettre 对非 ASCII 内容做 QP / base64），否则 `invalidMessage`。
+- 没有实现 PIPELINING；命令逐条等待回复，以便逐个记录 RCPT 结果。
+- 服务器声明 `SIZE` 时，MAIL FROM 附带 `SIZE=` 并在发送前比较；比较的是 MIME 字节数，未计点填充后的开销。
+
+## 5. 状态与重试
+
+状态沿用[发信状态机](mail-sync.md#5-本地草稿与可靠发送)：`queued → sending → accepted / failed / unknown`，另有 `canceled`。细化如下：
+
+| 发生在 | 情况 | 结果 |
+| --- | --- | --- |
+| 正文开始之前 | 网络错误、超时、代理暂不可达、任意 4xx | 回到 `queued`，按退避自动重试 |
+| 正文开始之前 | 5xx、认证失败、证书验证失败、代理认证失败、缺 STARTTLS、凭证需重新确认、超出 SIZE | `failed`，不自动重试 |
+| 正文开始之前 | RCPT 有被拒地址 | `failed`，附全部被拒地址 |
+| 正文开始之后 | 明确的 4xx / 5xx 最终回复 | `failed`，不自动重试，可由用户重新发送 |
+| 正文开始之后 | 没有最终回复 | `unknown`，永不自动重发 |
+
+- 正文开始之前，服务器还没收到任何内容，所以自动重试不会造成重复发送。退避为 30 秒、1、2、5、10 分钟，之后每 30 分钟一次；超过 24 小时转为 `failed`（`retryExhausted`）。应用启动、手动"立即重试"时立即尝试。
+- 每次尝试用**当时**的账号路由与凭证；快照只固定内容，不固定路由。
+- 账号被删除，或地址 / 服务器来源已被替换时，未发出的队列项转为 `failed`（`accountChanged`），需要用户确认后重新发送，因为快照里的发件人可能已不对应当前账号。
+- 同一账号的队列串行发送，每次发送开一个独立连接，和同步、标记写回互不共用。
+
+### 重启恢复
+
+- `sending` 且没有正文开始标记：证明服务器未收到内容，回到 `queued`。
+- `sending` 且有正文开始标记：转为 `unknown`。
+- `queued`（包括撤销等待期内被关闭的）：启动后继续发送，并在发件箱中可见。
+
+### `unknown` 的处理
+
+写信内容保持锁定，界面说明"服务器可能已收到这封邮件"。提供三种选择：
+
+- 在已发送中按 Message-ID 查到时显示"已在已发送中找到"，并允许标记为已发出。
+- "标记为已发出"。
+- "确认未发出，重新发送"：创建一次新的尝试，沿用同一 Message-ID，方便收件方去重。
+
+### 第 3 步的实现（`core/src/send/`、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`）
+
+- **每账号一个串行 worker**（`send::worker::OutboxManager`）：循环为“取下一项并解析登录计划（持锁、短事务）→ 不持锁发送 → 短事务记录结果”。启动时、新入队、撤销、立即重试、账号连接更新时唤醒；没有到期项时睡到最早的 `max(not_before, next_attempt_at)`，最长睡 60 秒（系统时钟被调整时不会长期滞留）。账号被删除时 worker 退出。
+- **竞争点是一条带条件的 `UPDATE`**：worker 的 `queued → sending` 与 `cancel` 的 `queued → canceled` 都带 `WHERE state = 'queued'`，同一行只能有一个成功；输家得到 `alreadySending`（撤销时已在发送）或 `conflict`（已处于其他状态）。取走时 `attempts` 加一。
+- **`DataStarted` 钩子**在 `spawn_blocking` 里写 `data_started_at`，提交后才返回 `Ok`；写失败或该行已不是 `sending` 时返回 `Err`，会话按 `dataMarkFailed` 在正文前停止。
+- **结果映射**（`send::schedule`）：`Transient` → `queued`，`next_attempt_at = now + 30s / 1m / 2m / 5m / 10m，之后每 30m`（以第 n 次尝试失败计）；`now - first_queued_at > 24h` 时转 `failed`，原因码 `retryExhausted`（保留最后一次的服务器回复文本）。`Permanent`、`RecipientsRejected`（全部被拒地址写入 `last_error.rejected`）、`RejectedAfterData` → `failed`；`Accepted` → `accepted`；`Unknown` → `unknown`（原因码 `unknown`，文本为 `timeout` / `connectionLost` / `malformedReply`）。凭证未受信或缺失、认证被拒都是 `Permanent`，不会空转重试。
+- **账号变更**：每次取项之前，把信封发件人与当前账号地址（大小写不敏感）不同的 `queued` 项转为 `failed`（`accountChanged`）；取项后若登录计划里的地址又变了，同样失败。只改服务器、用户名、路由或凭证的更新不使项失败，下一次尝试直接用新的计划。账号被删除时队列随外键级联删除（草稿同理）。
+- **与第 2 节原文的差异**：`DraftLocked` 用单独的错误码，而不是复用 `conflict`；`drafts` 删除也被锁拒绝。重启恢复在 `MailxCore::open` 里于任何 worker 启动前完成，并为每个变化发出 `Outbox` 事件。
+- **`unknown` 的处理**：`resolve_unknown(MarkSent)` 把该行变为 `accepted`（`accepted_at` 为标记时间，无服务器回复，草稿删除）；`Resend` 在同一事务里插入一行新 `queued`（相同 Message-ID、MIME、信封，`attempts` 0，`first_queued_at` 为现在，立即可发），并把旧行标记 `resolution = 'resent'`、`superseded_by` 指向新行。已标记的 `unknown` 不再算“存活”，不锁草稿、不出现在默认的发件箱列表。同一 `clientMutationId` 重放返回同一结果，换一种处理方式返回 `conflict`。`failed` 项的“重新发送”就是对可编辑的草稿再次 `queue_send`，生成新的 Message-ID。
+
+## 6. 撤销发送
+
+- 设置项 `compose.undoSendSeconds`，可选 0 / 5 / 10 / 20 / 30 秒，**默认 0（立即发送）**，与默认发件账号一起放在设置弹窗新增的"发信"页。
+- 入队时记录 `notBefore = 入队时间 + N 秒`，等待期间仍是 `queued`。
+- 写信窗口在第二次点击后总是立即关闭。主窗口显示提示："正在发送"；N > 0 时显示"将在 N 秒后发送 · 撤销"。**已实现（4b）**：toast 为“将在 N 秒后发送”加“撤销”按钮（N 为入队时 `notBefore` 与入队时间之差向上取整；N = 0 不显示这条），随后“正在发送…”“已发送”；失败显示“发送失败：<中文原因>”、`unknown` 显示“可能已发送，需要确认”，二者带“查看”并在发件箱标出；撤销成功后重新打开写信窗口，`alreadySending` 提示“已开始发送，无法撤销”。发送成功显示"已发送"，失败或 `unknown` 时提示并在发件箱中标出；主窗口不在前台时，经现有通知通道发系统通知。
+- 撤销调用 `outbox.cancel`：仍是 `queued` 时转为 `canceled`，草稿回到可编辑状态并重新打开写信窗口。已开始发送时返回 `alreadySending`，提示"已开始发送，无法撤销"。
+
+## 7. 草稿
+
+- 草稿只存在本地，不同步到服务器草稿箱。
+- 编辑时防抖保存（停止输入约 1 秒），每次保存 `revision` 加一；`expectedRevision` 不匹配报 `REVISION_CONFLICT`，加载最新版本由用户处理，不静默覆盖。
+- 草稿字段：账号、类型（新建 / 回复 / 全部回复 / 转发）、来源邮件、收件人 / 抄送 / 密送、主题、纯文本正文、`In-Reply-To`、`References`、时间戳、revision。
+- 回复与转发的草稿由核心生成：
+  - **收件人**：回复优先 `Reply-To`，否则 `From`；全部回复再加原 `To` 和 `Cc`，去掉自己的地址并去重。
+  - **主题**：加 `Re:` / `Fwd:`，已有 `Re:`、`RE:`、`回复：` 等前缀时不重复添加。
+  - **引用**：回复为"{日期}，{发件人} 写道："加逐行 `> `；转发为"转发的邮件"头部块（发件人、日期、主题、收件人）加原文。都使用已缓存的纯文本，只有 HTML 的邮件使用阅读时已生成的纯文本，不在写信窗口中渲染 HTML。
+  - **会话串联**：`In-Reply-To` 取原 `Message-ID`，`References` 取原 `References` 再接上原 `Message-ID`。头部同步不读 `References`，所以从缓存的原始 MIME 中取；尚未下载时，核心不在创建草稿的调用里下载，而是返回 `bodyNotCached`，由调用方先下载正文再重试（实现与本节原文的差异，原因是创建草稿保持纯本地、无网络）。
+- 空白草稿不出现在草稿列表（`list_drafts` 过滤），核心启动时删除没有活动发送项的空白草稿（崩溃遗留）。
+- 核心对每次草稿变更发出 `DraftChanged`：`created`、`updated`、`deleted`，以及队列的 `locked` / `unlocked`；主窗口据此刷新草稿列表，并在所选草稿被删除时清除选择。
+- 已被 `accepted` 的草稿从草稿列表移除；`failed` 后回到可编辑；`unknown` 期间锁定。
+- 导航新增本地"草稿"，以及仅在有未完成队列项（`queued`、`sending`、`failed`、`unknown`）时出现的"发件箱"。草稿在岛内列出，阅读区显示预览和"继续编辑"；发件箱的项目在阅读区显示状态和可用操作。**已实现（4b）**：两个视图的行与阅读区见[界面设计](ui-design.md#主窗口的写信入口草稿与发件箱)；发件箱操作为 `queued` → 撤销（成功后重新打开写信窗口）/ 立即重试（仅在已安排下次重试时）、`failed` → 编辑并重新发送（打开草稿）、`unknown` → 标记为已发出 / 确认未发出，重新发送（确认对话框）；失败项若同一草稿已有更新的非失败项（已重新发送），不再列出。`mailx://outbox` / `mailx://drafts` 事件使对应查询失效；系统通知点击携带的 `outboxId` 会选中发件箱项。
+
+## 8. 邮件构造
+
+- 使用 `lettre` 的 `builder` 生成 MIME（`core/src/smtp/message.rs`，纯函数 `build`）：处理中文主题和地址的编码，拒绝头部注入；构造器自己也拒绝任何头部值里的控制字符（含 CR / LF），不依赖第 1 步的校验已通过。至少需要一个收件人（`draft.recipients`）。
+- 头部：`Date`（本地时区；lettre 只能输出 UTC，所以在构造后用 `Date` 头的预编码值替换为本地偏移，格式为 RFC 2822）、`Message-ID`、`From`、`To`、`Cc`、`Subject`、`In-Reply-To`、`References`、`MIME-Version`。正文为 `text/plain; charset=utf-8`，传输编码由库按内容选择。
+- `Message-ID` 由我们生成，形如 `<uuid@发件地址的域名>`，入队时保存，供 Sent 对账、串联和 `unknown` 处理使用。
+- `Message-ID` 的域名取自发件地址，保留原大小写；`In-Reply-To` / `References` 必须是空格分隔的 `<local@domain>` 令牌，否则拒绝。
+- 不添加 `User-Agent` / `X-Mailer`，避免暴露客户端与版本。
+- 信封：`MAIL FROM` 为账号地址，`RCPT` 为 To + Cc + Bcc 去重。**Bcc 只进信封，不写入发出的头部。**
+- 地址规则：第 1 步的本地校验器（`valid_address`）保留为准，因为它比 lettre 的解析更严格（lettre 接受带引号的本地部分和国际化域名）；构造器另外要求 lettre 也接受该地址，两者都通过才生成。因此没有用 lettre 的 `Address` 替换本地校验器。
+- 入队时固定快照：MIME 字节、信封和 Message-ID 与队列项一起持久化，之后每次尝试都发送同一份字节，不重新生成。
+
+## 9. 已发送副本
+
+v0.1 的原则：**MailX 本地一定有副本；服务器有的话再对上**，不向服务器追加。
+
+- 发送被接受（`accepted`）后，入队时固定的 MIME 快照、信封、Message-ID 和接受时间永久留在本地，作为这封信的本地已发送副本。它不依赖服务商是否保存已发送，也不需要额外网络操作。
+- 本地副本显示在该账号的"已发送"文件夹里，与服务器同步来的邮件按时间合并排序；账号没有已发送文件夹时，导航中显示一个本地"已发送"。本地副本带"仅本机"标识，打开时从快照解析并走现有的正文净化与隔离阅读流程。
+- 头部同步在已发送文件夹里取到 `Message-ID` 相同的邮件时，本地副本记为"服务器已有"，列表只显示服务器那封，不重复。对上只按我们生成的 Message-ID，不按主题或时间猜测。
+- 本地副本可以由用户删除，只删本机，不影响服务器。删除账号时一并删除。
+- 撤销、失败和 `unknown` 的队列项不是已发送副本，留在发件箱里。
+
+以后再做（不在 v0.1）：服务商不自动保存时，用 IMAP `APPEND` 追加到服务器的已发送，并提供账号级开关；`APPEND` 结果不确定时先按 Message-ID 查找再决定是否追加，永远不会触发再次发送。各服务商是否自动保存，在第 6 步逐家记录。
+
+## 10. 存储
+
+新增迁移，字段为方向性设计，实现时按[数据库迁移](database-migrations.md)落地：
+
+| 表 | 内容 |
+| --- | --- |
+| `drafts` | 第 7 节的字段、`client_mutation_id` |
+| `accounts` | 新增 `sender_name`（可空） |
+| `outbox` | 每次尝试一行：草稿、账号、`client_mutation_id`、Message-ID、MIME 快照、信封、状态、`not_before`、`data_started_at`、回复码与脱敏错误、重试次数、下次重试时间 |
+| `outbox`（续） | `accepted` 行即本地已发送副本：增加 `accepted_at`、`server_copy_message_id`（对上的服务器邮件，可空）、`deleted_locally_at` |
+
+步骤 1 已落地的部分（迁移 v7，`core/src/storage/migrations/0007_drafts.sql`）：
+
+- `drafts` 的收件人为 `{ name, address }` 的 JSON 数组；`source_email_id` 指向 `messages(id)` 并 `ON DELETE SET NULL`，原邮件消失时草稿保留（引用文字与串联头在创建时已复制进草稿），账号删除则级联删除草稿；`(account_id, client_mutation_id)` 唯一。
+- 额外的 `create_canonical` 列保存创建请求的规范形式，使同一 `clientMutationId` 的重试返回同一草稿（即使之后已被编辑），内容不同则报 `idempotencyConflict`。
+- 默认发件账号由宿主从设置读出后传给 `create_draft(request, default_account_id)`，核心的设置存储与数据库互不依赖。
+- 地址校验使用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址）；步骤 2 决定保留它并额外要求 lettre 接受（见第 8 节）。
+- `senderName` 上限 128 个字符，拒绝所有控制字符。
+
+步骤 3 落地的部分（迁移 v8，`core/src/storage/migrations/0008_outbox.sql`）：
+
+- `outbox` 为 STRICT 表，带 CHECK：`state` 六种取值、`accepted` 必有 `accepted_at`、`queued` / `canceled` 不能有 `data_started_at`、`resolution` 只能是 `unknown` 行的 `resent` 或 `accepted` 行的 `markedSent`；`(account_id, client_mutation_id)` 唯一。`draft_id` 为 `ON DELETE SET NULL`，账号删除时级联删除。
+- 列在设计表之外另有：`queue_canonical`（入队请求的规范形式，用于 `clientMutationId` 重放与 `idempotencyConflict`）、`recipients_preview`（最多 3 个信封收件人）与 `recipient_count`（列表不解析 MIME）、`resolution` / `resolution_mutation_id` / `superseded_by`（`unknown` 的处理，取代 `resolved` 布尔值）。`envelope` 为 `{ from, recipients }`，`last_error` 为 `{ reason, smtpCode, text, rejected[] }`，`server_reply` 为 `{ code, text }`，均只含脱敏文本。
+- 索引：`outbox_due`（`queued` 项的下一个到期项，部分索引）、`outbox_by_account`（列表）、`outbox_by_draft`、`outbox_by_message_id`、`outbox_sent`（本地已发送副本，按接受时间倒序，部分索引）。
+- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`update_draft` 与 `delete_draft` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
+- `accepted` 行保留 `mime`、`envelope`、`accepted_at`、`server_reply`，即本地已发送副本；`server_copy_message_id` 与 `deleted_locally_at` 已建列，由第 5 步使用，本步不读写。
+
+v0.1 没有附件，快照直接入库；加入附件后按存储设计改为 blob 文件。
+
+## 11. 权限与宿主
+
+- **已实现（步骤 4a）。** 新增写信窗口专用的 capability（`desktop/capabilities/composer.json`），匹配 `composer-*` 窗口：只包含窗口控制、草稿 / 发送队列命令、读取设置、列出账号（不含凭证），不含账号修改和邮件正文命令。
+- 宿主的调用方检查从"只允许主窗口"改为按命令的窗口白名单。`outbox_queue_send` v0.1 只接受 `composer-*` 窗口且只能用于窗口自己的草稿；以后在主窗口内写信时再加入主窗口。偏离原设计的一点：`resolve_unknown` 按用户决定也对主窗口开放，核心新增主体 `Caller::MainWindow`（只能处理 `unknown`，不能入队）。具体白名单表见[应用 API](../contracts/app-api.md#写信窗口与发送命令发信步骤-4a)。
+- 自定义标题栏的宿主逻辑已改为服务所有应用窗口（`mailx://window-state` 定向到各自窗口）；三个平台的多窗口标题栏需分别验证。
+- 草稿与发送队列的变更事件只发给 main 与受影响草稿的写信窗口（`mailx://outbox`、`mailx://drafts`）；窗口之间不直接共享前端状态，以核心为唯一事实来源。
+
+## 12. 实施步骤
+
+| 步骤 | 内容 | 主要验证 |
+| --- | --- | --- |
+| 1 | 迁移；草稿增删改、revision、幂等；回复 / 转发草稿生成 | 核心单元测试 |
+| 2（已实现于 core，未接入队列与界面） | MIME 构造；分阶段 SMTP 会话、STARTTLS 换流、认证前信任检查 | 假 SMTP 服务器注入故障：RCPT 部分拒绝、正文后断线、各阶段 4xx / 5xx、缺 STARTTLS、超时 |
+| 3（已实现于 core，未接入命令与界面） | 发送队列：撤销等待、退避、重启恢复、撤销与开始发送的竞争、账号变更、事件 | 假时钟 + 假服务器 |
+| 4（4a 已实现宿主与客户端层：窗口、capability、命令、事件、通知、生命周期；4b 已实现界面） | 写信窗口、capability、宿主命令、标题栏；`Composer`、两步发送按钮、草稿与发件箱视图、提示、设置项 | 前端组件与交互测试；macOS 实机，Windows / Linux 待验 |
+| 5 | 本地已发送副本的列表合并、阅读与服务器副本对上 | 存储与查询测试 |
+| 6 | 真实服务商自发自收 | 每次需用户单独授权，只发往测试账号白名单 |
+
+每一步都同步更新[应用 API](../contracts/app-api.md)与[验证策略](../development/validation.md)，用测试结果说话，不以测试文件存在宣称通过。
+
+## 13. 已知待定
+
+- 写信窗口首次打开的实测耗时，以及是否需要预创建隐藏窗口。
+- 各服务商对 SMTP 发信是否自动保存已发送，需在第 6 步逐家记录；据此决定 IMAP APPEND 的优先级。
