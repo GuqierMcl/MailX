@@ -43,3 +43,28 @@ describe('mock flag changes', () => {
     expect(await unreadOf(target.folderId)).toBe(before)
   })
 })
+
+describe('showcase seed', () => {
+  it('loads fictitious mail that only uses example domains', async () => {
+    const client = createMockClient({ seed: 'showcase' })
+    const accounts = await client.listAccounts()
+    expect(accounts.map((account) => account.displayName)).toEqual(['Work', 'Personal', 'Studio'])
+    const page = await client.listEmails({ ...emailQuery({ folderRole: 'inbox' }), limit: 200 })
+    expect(page.items.length).toBeGreaterThanOrEqual(14)
+    expect(page.items.some((item) => item.isStarred)).toBe(true)
+    expect(page.items.some((item) => !item.isRead)).toBe(true)
+    const addresses = [
+      ...accounts.flatMap((account) => [account.emailAddress, account.imap.username, account.smtp.username]),
+      ...page.items.map((item) => item.from.address),
+    ]
+    for (const detail of await Promise.all(page.items.map((item) => client.getEmail(item.id)))) {
+      addresses.push(...detail.to.map((to) => to.address))
+    }
+    for (const address of addresses) expect(address).toMatch(/@example\.(com|org|net)$/)
+  })
+
+  it('leaves the default dataset alone', async () => {
+    const accounts = await createMockClient().listAccounts()
+    expect(accounts).toHaveLength(2)
+  })
+})

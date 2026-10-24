@@ -1,58 +1,95 @@
+<div align="center">
+
+<img src="branding/logo.svg" alt="MailX logo" width="112" />
+
 # MailX
 
-> **⚠️ 早期开发阶段，尚未达到 MVP，不建议日常使用。** 请不要在有重要邮件的账号上使用 MailX；当前没有发布版本、安装包或 Docker 镜像。
+A fast, lightweight, local-first email client — built for every inbox, with AI at its core.
 
-<img src="branding/logo.svg" alt="MailX Logo" width="128" height="128" />
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml)
+![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-一款极速启动、兼容市面所有邮箱、本地数据优先、AI 原生（内置全功能智能引擎 + 双向 MCP 互通）的跨平台开源邮件工作台。
+English | [简体中文](README.zh-CN.md)
 
-MailX 围绕快速启动、广泛的邮箱兼容性和流畅的日常收发体验设计，让个人邮箱、工作邮箱与企业邮箱在同一个轻量工作台中统一管理。桌面端基于 Rust + Tauri，面向 Windows、macOS 和 Linux，后续提供单用户 Docker Web 版本。
+</div>
 
-> **项目状态：开发中。** 桌面端已能经账号路由登录 IMAP，同步文件夹与邮件头，提供统一收件箱、本地头部搜索、按需正文下载与隔离阅读，以及已读 / 星标写回和附件保存；发信、OAuth、完整的服务商兼容性验证等尚未完成，真实服务商仅有部分冒烟证据。上述定位与下述亮点描述产品愿景，目前没有可用的发布版本、安装包或 Docker 镜像，设计可随项目演化调整。
+> [!NOTE]
+> MailX is in early development. Things may change quickly — issues and pull requests are welcome.
 
-项目仓库：[GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)，按开源项目的文档、贡献和版本管理方式维护。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+<p align="center">
+  <img src="docs/assets/screenshots/mailx-light.webp" alt="MailX main window in light mode" width="900">
+</p>
+<p align="center">
+  <img src="docs/assets/screenshots/mailx-dark.webp" alt="MailX main window in dark mode" width="900">
+</p>
 
-## 核心亮点
+## Features
 
-- **极速轻快**：以快速启动、低资源占用和流畅交互为目标，打开即可进入邮件工作。
-- **广泛兼容**：面向国内外主流邮箱与企业邮箱，通过通用邮件协议、服务商适配和配置预设持续扩展兼容范围。
-- **统一收发**：多账号收件箱、离线阅读、快速检索、草稿与可靠发信，覆盖日常邮件工作。
-- **分账号路由**：每个邮箱独立选择直连或代理，适应不同账号的网络环境。
-- **本地优先**：邮件在本地存储与检索，不依赖 MailX 云端中继，远程图片默认关闭。
-- **AI 原生与互通**：内置全功能智能引擎与双向 MCP 互通，将智能辅助融入阅读、整理和撰写流程。
+- **Fast** — A Rust core reads from the local cache first, so MailX opens straight into your mail.
+- **Lightweight** — Built on Tauri with the system WebView instead of bundling a browser engine.
+- **Cross-platform** — Windows, macOS and Linux from a single codebase.
+- **All in One** — Multiple accounts share one unified inbox. MailX is designed for standard IMAP/SMTP mailboxes, and each account can connect directly or through a SOCKS5 or HTTP CONNECT proxy, with no silent fallback to a direct connection.
+- **Local-first & private** — Mail is stored and searched on your machine, with no MailX cloud relay. Remote images are off by default, and message bodies render in an isolated sandbox.
+- **AI-native** *(planned)* — A built-in assistant for reading, organizing and writing, using your own cloud model key or a local model, plus two-way MCP integration. AI never sends mail on its own.
+- **Self-hostable** *(planned)* — A single-user web version you can deploy with Docker.
 
-首版以桌面端为交付重点，具体功能、邮箱兼容范围与 Web 版顺序见[产品范围](docs/product/README.md)。AI 可使用自带 Key 的云端模型或本地模型；使用云端模型时，所选内容会发送至对应提供商，详见 [AI 设计](docs/ai-runtime/README.md)。
+## Roadmap
 
-项目与传统 Unix `mailx` 命令无关，可执行程序、命令行别名与安装包名称尚未确定。
+| Module | Status |
+| --- | --- |
+| Desktop app: receiving, reading, search, multiple accounts | 🚧 In progress |
+| Desktop app: composing and sending | 🚧 In progress |
+| Rich-text composing and attachments | 🗓️ Planned |
+| Full-text search | 🗓️ Planned |
+| OAuth sign-in (Gmail, Outlook) | 🗓️ Planned |
+| AI assistant | 🗓️ Planned |
+| MCP server (lets external AI tools access your mailbox safely, with your approval) | 🗓️ Planned |
+| Server: self-hosted web version | 🗓️ Planned |
 
-## 参与开发
+The detailed roadmap is in [docs/roadmap/README.md](docs/roadmap/README.md) (written in Chinese).
 
-从[文档入口](docs/README.md)开始，或直接阅读：
+## Getting Started
 
-- [架构总览](docs/architecture/overview.md)：模块划分、技术选型与目标代码结构。
-- [账号配置](docs/architecture/account-configuration.md)：当前能力、凭证恢复与未来 OAuth 扩展边界。
-- [实施路线图](docs/roadmap/README.md)：里程碑、依赖关系和完成标准。
-- [开发指南](docs/development/README.md)：环境、构建检查与下一条收信链路。
-- [贡献说明](CONTRIBUTING.md)：提交和验证约定。
-- [品牌资源](branding/README.md)：正式 Logo、平台图标、分享素材与生成方式。
+### Build from source
 
-根目录 `core/` 管理共享核心与通用实现，`frontend/` 是 React + TypeScript + Vite + shadcn 前端工程，`desktop/` 是 Tauri 宿主；`server/` 留待第二阶段服务器 MVP。数据库与协议库尚未引入。
+Prebuilt packages are not available yet.
 
-准备 Bun、Rust 和 [Tauri 平台依赖](https://v2.tauri.app/start/prerequisites/)后，在仓库根目录执行：
+Prerequisites:
+
+- [Bun](https://bun.sh/) 1.3.12 (the version pinned in `package.json`)
+- Rust 1.94.0 (pinned in `rust-toolchain.toml`; rustup installs it on first use)
+- [Tauri platform dependencies](https://v2.tauri.app/start/prerequisites/)
 
 ```sh
 bun install
-bun run dev                 # 仅启动前端 Vite 开发服务器
-bun tauri dev               # 启动前端 + Tauri 桌面开发环境（等价于 bun run tauri dev）
-bun run build               # 构建前端静态资源
-bun tauri build             # 构建桌面 release 二进制；当前不生成安装包
-bun run check               # 版本、TypeScript、ESLint 与 Rust check
+bun tauri dev       # run the desktop app in development mode
+bun tauri build     # build a release binary (no installer is produced yet)
+bun run check       # run the version, type, lint, test, build and Rust checks
 ```
 
-根目录 `package.json` 是命令入口和工作区版本入口，`bun run version:check` 会校验根目录、`frontend/package.json` 与 Cargo workspace 的版本一致。工具链固定为 Rust 1.94.0，Bun 版本记录在 `package.json`，依赖解析记录在 `bun.lock` 与 `Cargo.lock`。完整验证命令见[开发指南](docs/development/README.md)。
+See [docs/development/README.md](docs/development/README.md) for the full list of commands.
 
-## 许可证
+## Documentation
 
-本项目采用 [Apache License 2.0](LICENSE)（SPDX：`Apache-2.0`）。
+Documentation is currently written in Chinese.
+
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/architecture/overview.md)
+- [Product scope](docs/product/README.md)
+- [AI design](docs/ai-runtime/README.md)
+- [Development guide](docs/development/README.md)
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. To report a security issue, follow [SECURITY.md](SECURITY.md) and report it privately.
+
+## License
+
+MailX is licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 GuqierMcl and MailX contributors.
+
+---
+
+MailX is not related to the Unix `mailx` command.
