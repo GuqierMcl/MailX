@@ -7,6 +7,7 @@
 
 use std::sync::Mutex;
 
+use mailx_core::Activity;
 use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
@@ -209,8 +210,30 @@ fn read_state(window: &WebviewWindow, focused: Option<bool>) -> WindowState {
     }
 }
 
+/// How the sync should treat the app: someone is looking at the window, or not.
+/// A locked screen is "not": the window loses focus, and that is exactly when a
+/// new-mail notification is wanted, so the sync keeps going on the slow rhythm.
+/// Sleep is not reported to windows on desktop and needs no handling: a
+/// sleeping computer runs no timers, and the first round after waking is due.
+pub(crate) fn activity_of(focused: bool, visible: bool, minimized: bool) -> Activity {
+    if focused && visible && !minimized {
+        Activity::Active
+    } else {
+        Activity::Background
+    }
+}
+
+fn read_activity(window: &WebviewWindow, focused: Option<bool>) -> Activity {
+    activity_of(
+        focused.unwrap_or_else(|| window.is_focused().unwrap_or(false)),
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(false),
+    )
+}
+
 /// Pushes maximize, fullscreen and focus changes so controls can switch glyphs
 /// and dim like native ones. Only changes are emitted, not every resize step.
+/// The same events tell the sync whether the window is in front.
 fn watch_state(window: &WebviewWindow) {
     let app = window.app_handle().clone();
     let last = Mutex::new(None);
@@ -223,6 +246,11 @@ fn watch_state(window: &WebviewWindow) {
         let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
             return;
         };
+        // Minimizing and hiding arrive as resizes or focus changes; the core
+        // ignores repeats, so reporting on every one of them is cheap.
+        if let Some(state) = app.try_state::<crate::state::DesktopState>() {
+            state.set_activity(read_activity(&window, focused));
+        }
         let state = read_state(&window, focused);
         let Ok(mut last) = last.lock() else {
             return;
@@ -348,6 +376,27 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_focused_visible_unminimized_window_counts_as_in_front() {
+        use mailx_core::Activity::{Active, Background};
+        for focused in [false, true] {
+            for visible in [false, true] {
+                for minimized in [false, true] {
+                    let expected = if focused && visible && !minimized {
+                        Active
+                    } else {
+                        Background
+                    };
+                    assert_eq!(
+                        activity_of(focused, visible, minimized),
+                        expected,
+                        "focused={focused} visible={visible} minimized={minimized}"
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
     use WindowButton::{Close, Maximize, Minimize};
 

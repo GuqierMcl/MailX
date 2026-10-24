@@ -25,6 +25,7 @@ mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 mod flags;
+pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
@@ -162,6 +163,20 @@ impl MailxCore {
             crate::storage::LocalChange::Queued => FlagChange::Queued,
             crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
         })
+    }
+
+    /// Tells the sync workers how the app is being used. While it is in front
+    /// they check often; in the background they check less and less often when
+    /// nothing arrives; while the computer sleeps they pause. Coming to the
+    /// front starts a round at once. Hosts without such a notion never call this
+    /// and stay on the in-front rhythm.
+    pub fn set_activity(&self, activity: Activity) {
+        self.sync.set_activity(activity);
+    }
+
+    /// What the sync workers were last told about how the app is used.
+    pub fn activity(&self) -> Activity {
+        self.sync.activity()
     }
 
     /// Asks an account's sync worker to run its next round now.
