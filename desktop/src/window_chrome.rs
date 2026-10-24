@@ -7,6 +7,7 @@
 
 use std::sync::Mutex;
 
+use mailx_core::Activity;
 use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
@@ -224,8 +225,50 @@ fn read_state(window: &WebviewWindow, focused: Option<bool>) -> WindowState {
     }
 }
 
+/// How the sync should treat the app: someone is looking at the window, or not.
+/// A locked screen is "not": the window loses focus, and that is exactly when a
+/// new-mail notification is wanted, so the sync keeps going on the slow rhythm.
+/// Sleep is not reported to windows on desktop and needs no handling: a
+/// sleeping computer runs no timers, and the first round after waking is due.
+pub(crate) fn activity_of(focused: bool, visible: bool, minimized: bool) -> Activity {
+    if focused && visible && !minimized {
+        Activity::Active
+    } else {
+        Activity::Background
+    }
+}
+
+/// The app is in front when any of its windows is. `focused` is the focus the
+/// event just reported for `current`, which its window may not show yet.
+fn app_activity(app: &AppHandle, current: &str, focused: Option<bool>) -> Activity {
+    any_active(app.webview_windows().iter().map(|(label, window)| {
+        read_activity(window, if label == current { focused } else { None })
+    }))
+}
+
+pub(crate) fn any_active(activities: impl IntoIterator<Item = Activity>) -> Activity {
+    if activities
+        .into_iter()
+        .any(|activity| activity == Activity::Active)
+    {
+        Activity::Active
+    } else {
+        Activity::Background
+    }
+}
+
+fn read_activity(window: &WebviewWindow, focused: Option<bool>) -> Activity {
+    activity_of(
+        focused.unwrap_or_else(|| window.is_focused().unwrap_or(false)),
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(false),
+    )
+}
+
 /// Pushes maximize, fullscreen and focus changes so controls can switch glyphs
 /// and dim like native ones. Only changes are emitted, not every resize step.
+/// The same events tell the sync whether the app is in front: any of its
+/// windows (the main window or a composer) being in front counts.
 pub(crate) fn watch_state(window: &WebviewWindow) {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
@@ -239,6 +282,11 @@ pub(crate) fn watch_state(window: &WebviewWindow) {
         let Some(window) = app.get_webview_window(&label) else {
             return;
         };
+        // Minimizing and hiding arrive as resizes or focus changes; the core
+        // ignores repeats, so reporting on every one of them is cheap.
+        if let Some(state) = app.try_state::<crate::state::DesktopState>() {
+            state.set_activity(app_activity(&app, &label, focused));
+        }
         let state = read_state(&window, focused);
         let Ok(mut last) = last.lock() else {
             return;
@@ -364,6 +412,37 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_app_is_in_front_when_any_window_is() {
+        use mailx_core::Activity::{Active, Background};
+        assert_eq!(any_active([]), Background);
+        assert_eq!(any_active([Background, Background]), Background);
+        // A composer in front while the main window is minimized or behind.
+        assert_eq!(any_active([Background, Active]), Active);
+        assert_eq!(any_active([Active, Background]), Active);
+    }
+
+    #[test]
+    fn only_a_focused_visible_unminimized_window_counts_as_in_front() {
+        use mailx_core::Activity::{Active, Background};
+        for focused in [false, true] {
+            for visible in [false, true] {
+                for minimized in [false, true] {
+                    let expected = if focused && visible && !minimized {
+                        Active
+                    } else {
+                        Background
+                    };
+                    assert_eq!(
+                        activity_of(focused, visible, minimized),
+                        expected,
+                        "focused={focused} visible={visible} minimized={minimized}"
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
     use WindowButton::{Close, Maximize, Minimize};
 

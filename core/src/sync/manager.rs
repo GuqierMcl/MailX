@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use ts_rs::TS;
 
+use super::cadence::{Activity, Cadence, FRONT_WAKE_MIN_GAP};
 use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
@@ -23,7 +24,6 @@ use crate::events::{CoreEvent, Events, NEW_MAIL_DETAILS, NewMail, NewMailMessage
 use crate::imap::{self, ImapError, Session};
 use crate::net::NetError;
 
-const MESSAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const FOLDER_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// Retry delay after consecutive transient failures: exponential from 1s,
 /// capped at 5 minutes, with jitter so accounts do not retry in lockstep
@@ -268,6 +268,9 @@ pub(crate) struct SyncManager {
     wakers: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     /// One write-back worker per account, beside its sync worker.
     writers: Mutex<HashMap<String, Writer>>,
+    /// How the app is being used, as the host last said. Every worker watches
+    /// it: coming to the front starts a round at once.
+    activity: tokio::sync::watch::Sender<Activity>,
 }
 
 /// An account's write-back task and the signal that wakes it.
@@ -289,7 +292,23 @@ impl SyncManager {
             workers: Mutex::new(HashMap::new()),
             wakers: Mutex::new(HashMap::new()),
             writers: Mutex::new(HashMap::new()),
+            activity: tokio::sync::watch::channel(Activity::default()).0,
         }
+    }
+
+    /// What the workers were last told; in front until a host says otherwise.
+    pub(crate) fn activity(&self) -> Activity {
+        *self.activity.borrow()
+    }
+
+    /// Tells every worker how the app is being used. Only a real change wakes
+    /// them, so a host may repeat itself freely.
+    pub(crate) fn set_activity(&self, activity: Activity) {
+        self.activity.send_if_modified(|current| {
+            let changed = *current != activity;
+            *current = activity;
+            changed
+        });
     }
 
     /// Tells the account's write-back worker that a local change is waiting.
@@ -440,7 +459,8 @@ impl SyncManager {
         let writer_token = token.clone();
         workers.insert(
             account_id.to_owned(),
-            self.runtime.spawn(run(shared, token, wake)),
+            self.runtime
+                .spawn(run(shared, token, wake, self.activity.subscribe())),
         );
         drop(workers);
         self.start_writer(account_id, writer_token);
@@ -494,13 +514,56 @@ enum Outcome {
     Gone,
 }
 
-async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Notify>) {
+/// What the worker does after a round: wait the schedule's time, or retry a
+/// failure after its own backoff.
+enum Pause {
+    Cadence,
+    Backoff(Duration),
+}
+
+/// Folder and listing revisions summed: moves whenever a round changed anything
+/// a reader could see, so a round that did not move it was a quiet one.
+pub(super) fn revision_total(shared: &Shared, token: &WorkerToken) -> u64 {
+    shared.states.lock().map_or(0, |states| {
+        states
+            .get(&token.account_id)
+            .filter(|state| Shared::active(state, token))
+            .map_or(0, |state| {
+                u64::from(state.folder_revision)
+                    + state
+                        .folders
+                        .iter()
+                        .map(|folder| u64::from(folder.data_revision))
+                        .sum::<u64>()
+            })
+    })
+}
+
+/// Tells the cadence whether a round that just succeeded found anything: it did
+/// when the revision total the readers refetch on has moved since `before`.
+pub(super) fn record_round(
+    cadence: &mut Cadence,
+    shared: &Shared,
+    token: &WorkerToken,
+    before: u64,
+) {
+    cadence.record(revision_total(shared, token) != before);
+}
+
+async fn run(
+    shared: Arc<Shared>,
+    token: WorkerToken,
+    wake: Arc<tokio::sync::Notify>,
+    mut activity: tokio::sync::watch::Receiver<Activity>,
+) {
     let mut failures = 0u32;
     let mut last_folder_refresh = None;
     let mut memory = messages::FolderMemory::new();
+    let mut cadence = Cadence::default();
     loop {
         shared.begin_round(&token);
-        let wait = match sync_once(&shared, &token, &mut last_folder_refresh, &mut memory).await {
+        let before = revision_total(&shared, &token);
+        let pause = match sync_once(&shared, &token, &mut last_folder_refresh, &mut memory).await {
             Outcome::Synced => {
                 failures = 0;
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -509,7 +572,8 @@ async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Not
                     state.last_synced_at = Some(now);
                     state.failure = None;
                 });
-                MESSAGE_REFRESH_INTERVAL
+                record_round(&mut cadence, &shared, &token, before);
+                Pause::Cadence
             }
             Outcome::Partial(failure) => {
                 failures = 0;
@@ -517,7 +581,9 @@ async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Not
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
                 });
-                MESSAGE_REFRESH_INTERVAL
+                // Something is wrong in one folder: not a quiet mailbox, so no backing off.
+                cadence.record(true);
+                Pause::Cadence
             }
             Outcome::Transient(failure) => {
                 let wait = backoff(failures);
@@ -526,7 +592,7 @@ async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Not
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
                 });
-                wait
+                Pause::Backoff(wait)
             }
             Outcome::Blocked(failure) => {
                 shared.update(&token, |state| {
@@ -547,9 +613,52 @@ async fn run(shared: Arc<Shared>, token: WorkerToken, wake: Arc<tokio::sync::Not
                 return;
             }
         };
+        if !wait_for_next_round(&pause, &mut cadence, &wake, &mut activity).await {
+            return;
+        }
+    }
+}
+
+/// Sleeps until the next round is due. The deadline is measured from when the
+/// round ended and re-derived whenever the app's activity changes, so going to
+/// the background lengthens the wait that is already running. Ends early for a manual refresh, and for the app coming to the
+/// front (which also wipes the background's quiet streak). Returns false when
+/// the manager is gone and the worker should stop.
+async fn wait_for_next_round(
+    pause: &Pause,
+    cadence: &mut Cadence,
+    wake: &tokio::sync::Notify,
+    activity: &mut tokio::sync::watch::Receiver<Activity>,
+) -> bool {
+    let ended = Instant::now();
+    loop {
+        let current = *activity.borrow_and_update();
+        // A failed round retries on its own backoff whatever the app is doing.
+        let wait = match pause {
+            Pause::Backoff(wait) => *wait,
+            Pause::Cadence => cadence.wait(current),
+        };
         tokio::select! {
-            () = tokio::time::sleep(wait) => {}
-            () = wake.notified() => {}
+            () = tokio::time::sleep_until(ended + wait) => return true,
+            () = wake.notified() => {
+                cadence.reset();
+                return true;
+            }
+            changed = activity.changed() => {
+                if changed.is_err() {
+                    return false;
+                }
+                if current != Activity::Active && *activity.borrow() == Activity::Active {
+                    cadence.reset();
+                    // Right away, but not within seconds of the last round; a manual
+                    // refresh during that short hold still goes through at once.
+                    tokio::select! {
+                        () = tokio::time::sleep_until(ended + FRONT_WAKE_MIN_GAP) => {}
+                        () = wake.notified() => {}
+                    }
+                    return true;
+                }
+            }
         }
     }
 }
@@ -980,12 +1089,209 @@ mod tests {
     async fn inbox_ticks_do_not_repeat_folder_listing_until_ten_minutes() {
         assert!(folders_due(None));
         let refreshed = Instant::now();
+        let step = Duration::from_secs(60);
         for _ in 0..9 {
-            tokio::time::advance(MESSAGE_REFRESH_INTERVAL).await;
+            tokio::time::advance(step).await;
             assert!(!folders_due(Some(refreshed)));
         }
-        tokio::time::advance(MESSAGE_REFRESH_INTERVAL).await;
+        tokio::time::advance(step).await;
         assert!(folders_due(Some(refreshed)));
+    }
+
+    /// Runs `wait_for_next_round` on a paused clock. `Instant` jumps forward as the
+    /// runtime idles, so a ten-minute wait costs no real time.
+    struct Waiting {
+        done: tokio::task::JoinHandle<bool>,
+        started: Instant,
+        activity: tokio::sync::watch::Sender<Activity>,
+        wake: Arc<tokio::sync::Notify>,
+    }
+
+    impl Waiting {
+        fn start(pause: Pause, mut cadence: Cadence, activity: Activity) -> Self {
+            let (sender, mut receiver) = tokio::sync::watch::channel(activity);
+            let wake = Arc::new(tokio::sync::Notify::new());
+            let task_wake = wake.clone();
+            let started = Instant::now();
+            let done = tokio::spawn(async move {
+                wait_for_next_round(&pause, &mut cadence, &task_wake, &mut receiver).await
+            });
+            Self {
+                done,
+                started,
+                activity: sender,
+                wake,
+            }
+        }
+
+        /// How long the wait lasted, or `None` if it is still going after `limit`.
+        async fn finished_within(&mut self, limit: Duration) -> Option<Duration> {
+            tokio::time::timeout(limit, &mut self.done)
+                .await
+                .ok()
+                .map(|result| {
+                    assert!(result.unwrap());
+                    self.started.elapsed()
+                })
+        }
+    }
+
+    fn quiet_cadence(rounds: u32) -> Cadence {
+        let mut cadence = Cadence::default();
+        for _ in 0..rounds {
+            cadence.record(false);
+        }
+        cadence
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn in_front_the_next_round_comes_after_twenty_seconds() {
+        let mut waiting = Waiting::start(Pause::Cadence, Cadence::default(), Activity::Active);
+        let waited = waiting.finished_within(Duration::from_secs(60)).await;
+        assert_eq!(waited, Some(Duration::from_secs(20)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn going_to_the_background_lengthens_the_wait_that_is_already_running() {
+        let mut waiting = Waiting::start(Pause::Cadence, Cadence::default(), Activity::Active);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        waiting.activity.send(Activity::Background).unwrap();
+        // The deadline counts from the end of the round: 3 minutes, not 10 s + 3 min and not 20 s.
+        assert!(
+            waiting
+                .finished_within(Duration::from_secs(150))
+                .await
+                .is_none()
+        );
+        let waited = waiting.finished_within(Duration::from_secs(60)).await;
+        assert_eq!(waited, Some(Duration::from_secs(180)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_quiet_background_waits_longer_each_time_up_to_ten_minutes() {
+        for (quiet_rounds, expected) in [(0, 180), (3, 360), (4, 600), (30, 600)] {
+            let mut waiting = Waiting::start(
+                Pause::Cadence,
+                quiet_cadence(quiet_rounds),
+                Activity::Background,
+            );
+            let waited = waiting.finished_within(Duration::from_secs(900)).await;
+            assert_eq!(
+                waited,
+                Some(Duration::from_secs(expected)),
+                "{quiet_rounds} quiet rounds"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn out_of_sight_it_keeps_checking_so_mail_behind_a_locked_screen_is_found() {
+        // A locked screen is background, not a pause: the round still comes, on the
+        // slow rhythm, which is what lets a new-mail notification reach the user.
+        let mut waiting = Waiting::start(Pause::Cadence, Cadence::default(), Activity::Active);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        waiting.activity.send(Activity::Background).unwrap();
+        let waited = waiting.finished_within(Duration::from_secs(600)).await;
+        assert_eq!(waited, Some(Duration::from_secs(180)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coming_to_the_front_starts_a_round_at_once_instead_of_waiting_out_the_background() {
+        // Back after 12 seconds of a ten-minute background wait: no further delay.
+        let mut waiting = Waiting::start(Pause::Cadence, quiet_cadence(30), Activity::Background);
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        waiting.activity.send(Activity::Active).unwrap();
+        let waited = waiting.finished_within(Duration::from_secs(1)).await;
+        assert_eq!(waited, Some(Duration::from_secs(12)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flicking_back_to_the_front_right_after_a_round_waits_for_the_minimum_gap() {
+        let mut waiting = Waiting::start(Pause::Cadence, quiet_cadence(30), Activity::Background);
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        waiting.activity.send(Activity::Active).unwrap();
+        assert!(
+            waiting
+                .finished_within(Duration::from_secs(5))
+                .await
+                .is_none()
+        );
+        let waited = waiting.finished_within(Duration::from_secs(10)).await;
+        assert_eq!(waited, Some(FRONT_WAKE_MIN_GAP));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_manual_refresh_during_that_short_hold_is_not_delayed() {
+        let mut waiting = Waiting::start(Pause::Cadence, quiet_cadence(30), Activity::Background);
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        waiting.activity.send(Activity::Active).unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        waiting.wake.notify_one();
+        let waited = waiting.finished_within(Duration::from_secs(1)).await;
+        assert_eq!(waited, Some(Duration::from_secs(4)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coming_to_the_front_clears_the_quiet_streak_for_the_next_time_in_the_background() {
+        let mut cadence = quiet_cadence(30);
+        assert_eq!(
+            cadence.wait(Activity::Background),
+            super::super::cadence::BACKGROUND_CAP
+        );
+        let (sender, mut receiver) = tokio::sync::watch::channel(Activity::Background);
+        let wake = tokio::sync::Notify::new();
+        // The pinned future borrows the cadence; the block ends that borrow before it is read again.
+        {
+            let round = wait_for_next_round(&Pause::Cadence, &mut cadence, &wake, &mut receiver);
+            tokio::pin!(round);
+            tokio::select! {
+                _ = &mut round => panic!("the background wait is minutes long"),
+                () = tokio::time::sleep(Duration::from_secs(5)) => {}
+            }
+            sender.send(Activity::Active).unwrap();
+            assert!(round.await);
+        }
+        // Going back out of sight starts from the short background wait again.
+        assert_eq!(
+            cadence.wait(Activity::Background),
+            super::super::cadence::BACKGROUND_BASE
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_manual_refresh_ends_the_wait_in_any_state() {
+        for activity in [Activity::Active, Activity::Background] {
+            let mut waiting = Waiting::start(Pause::Cadence, quiet_cadence(30), activity);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            waiting.wake.notify_one();
+            let waited = waiting.finished_within(Duration::from_secs(1)).await;
+            assert_eq!(waited, Some(Duration::from_secs(1)), "{activity:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_round_keeps_its_own_backoff_whatever_the_app_is_doing() {
+        for activity in [Activity::Active, Activity::Background] {
+            let mut waiting = Waiting::start(
+                Pause::Backoff(Duration::from_secs(40)),
+                quiet_cadence(30),
+                activity,
+            );
+            let waited = waiting.finished_within(Duration::from_secs(900)).await;
+            assert_eq!(waited, Some(Duration::from_secs(40)), "{activity:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_worker_stops_when_the_manager_is_gone() {
+        let waiting = Waiting::start(Pause::Cadence, Cadence::default(), Activity::Background);
+        let Waiting { done, activity, .. } = {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            waiting.activity.send(Activity::Background).ok();
+            waiting
+        };
+        drop(activity);
+        assert!(!done.await.unwrap(), "no sender left: the worker must stop");
     }
 
     #[test]

@@ -7,13 +7,18 @@ use std::{
 };
 
 pub(crate) use mailx_core::StartupStatus;
-use mailx_core::{AppError, ErrorCode, Events, MailxCore, SettingsStore, secrets::SecretStore};
+use mailx_core::{
+    Activity, AppError, ErrorCode, Events, MailxCore, SettingsStore, secrets::SecretStore,
+};
 
 struct Inner {
     data_dir: Result<PathBuf, AppError>,
     secrets: Arc<dyn SecretStore>,
     events: Events,
     core: Mutex<Option<MailxCore>>,
+    /// The latest word on how the window is being used. Window events can come
+    /// before the core has opened, so it is kept here and handed over when it does.
+    activity: Mutex<Activity>,
     settings: Mutex<Option<Arc<SettingsStore>>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
@@ -33,12 +38,32 @@ impl DesktopState {
             secrets,
             events,
             core: Mutex::new(None),
+            activity: Mutex::new(Activity::default()),
             settings: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
             initialization_in_flight: AtomicBool::new(false),
         }))
+    }
+
+    /// Remembers how the window is being used and tells the core if it is open.
+    /// Repeats cost nothing: the core only reacts to a real change.
+    ///
+    /// Lock order is core, then activity, here and in `finish_initialization`.
+    /// Both are held together so a core that opens right now gets this value
+    /// and a value set right now reaches that core; neither can be lost.
+    pub(crate) fn set_activity(&self, activity: Activity) {
+        let Ok(core) = self.0.core.lock() else {
+            return;
+        };
+        let Ok(mut current) = self.0.activity.lock() else {
+            return;
+        };
+        *current = activity;
+        if let Some(core) = core.as_ref() {
+            core.set_activity(activity);
+        }
     }
 
     pub(crate) fn startup_status(&self) -> StartupStatus {
@@ -228,6 +253,10 @@ impl DesktopState {
         let status = match result {
             Ok(core) => match self.0.core.lock() {
                 Ok(mut current) => {
+                    // Apply what the window said while the core was still opening.
+                    if let Ok(activity) = self.0.activity.lock() {
+                        core.set_activity(*activity);
+                    }
                     *current = Some(core);
                     StartupStatus::Ready {
                         revision: self.next_revision(),
@@ -366,6 +395,49 @@ mod tests {
         let accounts = tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
             .expect("ready service should accept business calls");
         assert!(accounts.is_empty());
+    }
+
+    fn open_and_wait_until_ready(state: &DesktopState) {
+        state.start_initialization();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !matches!(state.startup_status(), StartupStatus::Ready { .. }) {
+            assert!(
+                !matches!(state.startup_status(), StartupStatus::Failed { .. }),
+                "startup failed"
+            );
+            assert!(std::time::Instant::now() < deadline, "never became ready");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn the_windows_activity_reaches_the_core_whether_it_is_told_before_or_after_startup() {
+        // Told while the core is still closed: it is applied the moment the core opens.
+        let early_directory = tempfile::tempdir().unwrap();
+        let early = DesktopState::new(
+            Ok(early_directory.path().to_owned()),
+            Arc::new(MemorySecrets::default()),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
+        );
+        early.set_activity(Activity::Background);
+        open_and_wait_until_ready(&early);
+        assert_eq!(early.core().unwrap().activity(), Activity::Background);
+
+        // Told after startup: it goes straight through, and repeats change nothing.
+        let late_directory = tempfile::tempdir().unwrap();
+        let late = DesktopState::new(
+            Ok(late_directory.path().to_owned()),
+            Arc::new(MemorySecrets::default()),
+            Arc::new(|_: &mailx_core::CoreEvent| {}),
+        );
+        open_and_wait_until_ready(&late);
+        assert_eq!(late.core().unwrap().activity(), Activity::Active);
+        for _ in 0..3 {
+            late.set_activity(Activity::Background);
+        }
+        assert_eq!(late.core().unwrap().activity(), Activity::Background);
+        late.set_activity(Activity::Active);
+        assert_eq!(late.core().unwrap().activity(), Activity::Active);
     }
 
     #[test]

@@ -24,8 +24,8 @@ mod sync;
 pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use app::{
-    AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks,
-    FlagChange, MailxCore, MessageFlag,
+    Activity, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument,
+    BodyLinks, FlagChange, MailxCore, MessageFlag,
 };
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
