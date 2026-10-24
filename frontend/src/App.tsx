@@ -22,6 +22,7 @@ import { createQueryClient } from '@/lib/query-client'
 // starts one (blank, first account). "Opening" a composer from the main preview opens such a tab.
 const client = import.meta.env.DEV && !isTauri()
   ? createMockClient({
+    seed: new URLSearchParams(window.location.search).get('seed'),
     resolveDraft: () => null,
     onOpenComposer: (draft, fresh) => {
       const params = new URLSearchParams(window.location.search)

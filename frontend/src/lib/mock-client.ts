@@ -18,6 +18,7 @@ import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
+import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
 
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
@@ -34,12 +35,15 @@ export type MockClientOptions = {
    * its URL names. Return `null` and the mock makes a blank draft with that id.
    */
   resolveDraft?: (id: string) => Draft | null
+  /** Browser preview only: `showcase` loads the fictitious screenshot dataset. */
+  seed?: string | null
 }
 
 export function createMockClient(options: MockClientOptions = {}): MailxClient {
-  const accounts = MOCK_ACCOUNTS.map((account) => structuredClone(account))
-  const emails = buildEmails()
-  const folders = accounts.flatMap((account) => buildFolders(account.id, emails))
+  const dataset = options.seed === 'showcase' ? showcaseDataset() : DEFAULT_DATASET
+  const accounts = dataset.accounts.map((account) => structuredClone(account))
+  const emails = buildEmails(dataset)
+  const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
 
   const notFound = () => new MailxClientError(missing)
@@ -111,7 +115,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async createAccount({ config }) {
       const account = accountFromConfig(crypto.randomUUID(), 1, config)
       accounts.push(account)
-      folders.push(...buildFolders(account.id, emails))
+      folders.push(...buildFolders(account.id, emails, dataset.customFolders))
       return structuredClone(account)
     },
     async updateConnection({ accountId, expectedRevision, connection }) {
@@ -338,7 +342,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
   }
 }
 
-const MOCK_ACCOUNTS: Account[] = [
+const DEFAULT_ACCOUNTS: Account[] = [
   accountFromConfig(WORK, 1, {
     displayName: '工作邮箱',
     color: '#2563eb',
@@ -375,7 +379,7 @@ const FOLDER_NAMES: [FolderRole, string][] = [
 const folderId = (accountId: string, role: FolderRole) => `${accountId}:${role}`
 
 /** User folders by account: `[path, name, parent path, selectable]`; `selectable: false` mimics IMAP `\\Noselect`. */
-const CUSTOM_FOLDERS: Record<string, [string, string, string | null, boolean][]> = {
+const DEFAULT_CUSTOM_FOLDERS: CustomFolders = {
   [WORK]: [
     ['projects', '项目', null, true],
     ['projects/mailx', 'MailX', 'projects', true],
@@ -386,8 +390,8 @@ const CUSTOM_FOLDERS: Record<string, [string, string, string | null, boolean][]>
   [PERSONAL]: [['travel', '旅行', null, true]],
 }
 
-function buildFolders(accountId: string, emails: EmailDetail[]): Folder[] {
-  const custom = (CUSTOM_FOLDERS[accountId] ?? []).map(
+function buildFolders(accountId: string, emails: EmailDetail[], customFolders: CustomFolders): Folder[] {
+  const custom = (customFolders[accountId] ?? []).map(
     ([path, name, parent, selectable]) => [`${accountId}:${path}`, name, 'other', parent && `${accountId}:${parent}`, selectable] as const,
   )
   const system = FOLDER_NAMES.map(([role, name]) => [folderId(accountId, role), name, role, null, true] as const)
@@ -407,7 +411,9 @@ function buildFolders(accountId: string, emails: EmailDetail[]): Folder[] {
   })
 }
 
-type Seed = {
+export type CustomFolders = Record<string, [string, string, string | null, boolean][]>
+
+export type Seed = {
   account: string
   role?: FolderRole
   /** Path of a user folder from `CUSTOM_FOLDERS`; overrides `role`. */
@@ -424,7 +430,7 @@ type Seed = {
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }
 const ME_HOME = { name: '林伟', address: 'linwei.home@example.org' }
 
-const SEEDS: Seed[] = [
+const DEFAULT_SEEDS: Seed[] = [
   {
     account: WORK,
     from: { name: '陈晓', address: 'chen.xiao@example.com' },
@@ -557,13 +563,42 @@ const SEEDS: Seed[] = [
   },
 ]
 
+type MockDataset = {
+  accounts: Account[]
+  seeds: Seed[]
+  customFolders: CustomFolders
+  /** The address each account's mail is delivered to. */
+  me: Record<string, MailAddress>
+  /** Whether the first seed has an HTML body (the browser preview shows a fixed document for it). */
+  htmlFirst: boolean
+}
+
+const DEFAULT_DATASET: MockDataset = {
+  accounts: DEFAULT_ACCOUNTS,
+  seeds: DEFAULT_SEEDS,
+  customFolders: DEFAULT_CUSTOM_FOLDERS,
+  me: { [WORK]: ME_WORK, [PERSONAL]: ME_HOME },
+  htmlFirst: true,
+}
+
+/** Fictitious data for README screenshots, selected with `?seed=showcase`; see `mock-showcase.ts`. */
+function showcaseDataset(): MockDataset {
+  return {
+    accounts: SHOWCASE_DATASET.accounts.map(({ id, config }) => accountFromConfig(id, 1, config)),
+    seeds: SHOWCASE_DATASET.seeds,
+    customFolders: SHOWCASE_DATASET.customFolders,
+    me: SHOWCASE_DATASET.me,
+    htmlFirst: false,
+  }
+}
+
 // Relative to load time so the list always looks recent.
 const BASE_TIME = Date.now()
 
-function buildEmails(): EmailDetail[] {
-  return SEEDS.map((seed, index) => {
+function buildEmails({ seeds, me: addresses, htmlFirst }: MockDataset): EmailDetail[] {
+  return seeds.map((seed, index) => {
     const id = `mock-email-${index + 1}`
-    const me = seed.account === WORK ? ME_WORK : ME_HOME
+    const me = addresses[seed.account]
     const sent = seed.role === 'sent' || seed.role === 'drafts'
     const summary: EmailSummary = {
       id,
@@ -584,7 +619,7 @@ function buildEmails(): EmailDetail[] {
       to: sent ? [{ name: '团队', address: 'team@example.com' }] : [me],
       cc: [],
       replyTo: [],
-      body: { text: seed.text, hasHtml: index === 0, truncated: false, remoteImagesBlocked: index === 0 ? 1 : 0 },
+      body: { text: seed.text, hasHtml: htmlFirst && index === 0, truncated: false, remoteImagesBlocked: htmlFirst && index === 0 ? 1 : 0 },
       bodyFailure: null,
       attachments: (seed.attachments ?? []).map(([filename, mimeType, size], position) => ({
         id: `${id}-attachment-${position + 1}`,
