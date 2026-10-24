@@ -15,7 +15,7 @@ import { createMockClient } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
-const client = import.meta.env.DEV && !isTauri() ? createMockClient() : createDesktopClient()
+const client = import.meta.env.DEV && !isTauri() ? createMockClient({ seed: new URLSearchParams(window.location.search).get('seed') }) : createDesktopClient()
 
 const queryClient = createQueryClient()
 
