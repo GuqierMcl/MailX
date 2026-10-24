@@ -7,7 +7,7 @@
 快速、轻量、本地优先的跨平台邮件客户端，兼容各类邮箱，AI 原生。
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
 ![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 [English](README.md) | 简体中文

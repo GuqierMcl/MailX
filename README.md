@@ -7,7 +7,7 @@
 A fast, lightweight, local-first email client — built for every inbox, with AI at its core.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GuqierMcl/MailX/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
 ![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 English | [简体中文](README.zh-CN.md)
