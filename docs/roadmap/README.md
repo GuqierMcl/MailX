@@ -10,7 +10,7 @@
 
 优先顺序为**第一阶段桌面 MVP，第二阶段服务器 MVP**。下文 M0–M4 是桌面阶段的细分候选里程碑，M5 是后续服务器阶段；AI / MCP 的具体交付范围可根据邮件收发闭环进展再调整。
 
-仓库为 [GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)，目前私有，按开源项目形式维护。首个 MVP 版本发布后再公开并开源；公开时机跟随实际 MVP 交付，不固定绑定本文的阶段编号。
+仓库为 [GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)，按开源项目形式维护，项目处于早期开发阶段，尚未达到 MVP。
 
 ## M0：工程骨架与关键可行性
 

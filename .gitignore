@@ -123,3 +123,7 @@ Desktop.ini
 
 # Keep personal Comet files private even when its managed block is refreshed.
 /.comet/
+
+# Local secret-scan reports
+gitleaks-*.json
+trufflehog-*.json

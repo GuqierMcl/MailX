@@ -20,8 +20,9 @@
 
 PR 描述说明行为变化、验证结果和未解决限制。初始方案调整时更新对应文档即可；重大选型可通过 [ADR](docs/adr/README.md)保留取舍理由，不需要为了改变启动草案建立额外审批流程。
 
-## 开源发布前
+## 开源与安全
 
-项目仓库为 [GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)。当前保持私有，按开源项目方式维护文档、贡献流程与版本记录；计划在首个 MVP 版本发布后公开并开源。
+项目仓库为 [GuqierMcl/MailX](https://github.com/GuqierMcl/MailX)，采用 [Apache License 2.0](LICENSE)。项目仍处于早期开发阶段，下载地址、徽章和发布命令以实际产物为准。
 
-项目采用 [Apache License 2.0](LICENSE)。维护者联系渠道和安全问题报告渠道在公开前确定，并检查提交历史中是否包含敏感信息。下载地址、徽章和发布命令以实际产物为准。
+- 安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要开公开 Issue。
+- 任何 Issue、PR、日志和截图中都不要粘贴真实凭证、真实邮件内容或带真实地址的完整日志；复现请使用合成数据。

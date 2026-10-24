@@ -8,10 +8,10 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch or PR supersedes the running checks.
+# A newer push to the same PR supersedes the running checks; runs on main always finish.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
