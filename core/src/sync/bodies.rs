@@ -84,10 +84,10 @@ impl BodyManager {
 
     pub(crate) async fn fetch(&self, id: String) -> Result<EmailDetail, AppError> {
         self.ensure(id.clone(), false).await?;
-        let shared = self.shared.clone();
+        // Upgrade before handing off, so a closing core counts this reference.
+        let service = self.shared.service.upgrade().ok_or_else(internal)?;
         self.runtime
             .spawn_blocking(move || {
-                let service = shared.service.upgrade().ok_or_else(internal)?;
                 let service = service.lock().map_err(|_| internal())?;
                 service.get_email(&id)
             })
@@ -161,14 +161,25 @@ impl BodyManager {
     }
 }
 
-impl Drop for BodyManager {
-    fn drop(&mut self) {
+impl BodyManager {
+    /// Stops every body download; the core is closing. Returns the stopped
+    /// tasks so the caller can wait for them to finish.
+    pub(crate) fn shutdown(&self) -> Vec<AbortHandle> {
+        let mut stopped = Vec::new();
         if let Ok(mut flights) = self.shared.flights.lock() {
             for (_, flight) in flights.messages.drain() {
                 flight.abort.abort();
                 flight.result.send_replace(Some(Err(internal())));
+                stopped.push(flight.abort);
             }
         }
+        stopped
+    }
+}
+
+impl Drop for BodyManager {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
     }
 }
 
@@ -277,10 +288,11 @@ async fn store<T: Send + 'static>(
     token: &Token,
     action: impl FnOnce(&mut AccountService, &BodyIdentity) -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, AppError> {
+    // Upgrade before handing off, so a closing core counts this reference.
+    let service = shared.service.upgrade().ok_or_else(internal)?;
     let shared = shared.clone();
     let token = token.clone();
     tokio::task::spawn_blocking(move || {
-        let service = shared.service.upgrade().ok_or_else(internal)?;
         let mut service = service.lock().map_err(|_| internal())?;
         let flights = shared.flights.lock().map_err(|_| internal())?;
         if flights

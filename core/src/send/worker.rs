@@ -116,11 +116,24 @@ impl OutboxManager {
     }
 }
 
+impl OutboxManager {
+    /// Stops every account's send task; the core is closing. Returns the
+    /// stopped tasks so the caller can wait for them to finish.
+    pub(crate) fn shutdown(&self) -> Vec<tokio::task::AbortHandle> {
+        let mut stopped = Vec::new();
+        if let Ok(mut workers) = self.workers.lock() {
+            for (_, (handle, _)) in workers.drain() {
+                handle.abort();
+                stopped.push(handle.abort_handle());
+            }
+        }
+        stopped
+    }
+}
+
 impl Drop for OutboxManager {
     fn drop(&mut self) {
-        if let Ok(workers) = self.workers.get_mut() {
-            workers.drain().for_each(|(_, (handle, _))| handle.abort());
-        }
+        let _ = self.shutdown();
     }
 }
 

@@ -455,14 +455,30 @@ impl SyncManager {
     }
 }
 
+impl SyncManager {
+    /// Stops every sync and write-back task; the core is closing. Returns the
+    /// stopped tasks so the caller can wait for them to finish.
+    pub(crate) fn shutdown(&self) -> Vec<tokio::task::AbortHandle> {
+        let mut stopped = Vec::new();
+        if let Ok(mut workers) = self.workers.lock() {
+            for (_, worker) in workers.drain() {
+                worker.abort();
+                stopped.push(worker.abort_handle());
+            }
+        }
+        if let Ok(mut writers) = self.writers.lock() {
+            for (_, (worker, _)) in writers.drain() {
+                worker.abort();
+                stopped.push(worker.abort_handle());
+            }
+        }
+        stopped
+    }
+}
+
 impl Drop for SyncManager {
     fn drop(&mut self) {
-        if let Ok(workers) = self.workers.get_mut() {
-            workers.drain().for_each(|(_, worker)| worker.abort());
-        }
-        if let Ok(writers) = self.writers.get_mut() {
-            writers.drain().for_each(|(_, (worker, _))| worker.abort());
-        }
+        let _ = self.shutdown();
     }
 }
 

@@ -44,6 +44,8 @@ pub use flags::{FlagChange, MessageFlag};
 /// inside an async task without `spawn_blocking`.
 #[derive(Clone)]
 pub struct MailxCore {
+    // Declared first so it runs before the other fields are dropped.
+    _closing: Arc<Closing>,
     service: Arc<Mutex<AccountService>>,
     sync: Arc<SyncManager>,
     outbox: Arc<OutboxManager>,
@@ -51,6 +53,37 @@ pub struct MailxCore {
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
     events: Events,
+}
+
+/// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
+/// the background tasks, waits for them to end, then waits for blocking work
+/// they handed off to let go of the store, so the data directory lock is free
+/// once the core is dropped rather than whenever a straggling task finishes.
+/// Every hand-off takes its store reference before spawning, so once the tasks
+/// have ended no new reference can appear. Both waits are bounded.
+struct Closing {
+    service: std::sync::Weak<Mutex<AccountService>>,
+    sync: Arc<SyncManager>,
+    outbox: Arc<OutboxManager>,
+    bodies: Arc<BodyManager>,
+}
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        let mut stopped = self.sync.shutdown();
+        stopped.extend(self.outbox.shutdown());
+        stopped.extend(self.bodies.shutdown());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(5));
+        while !stopped.iter().all(|task| task.is_finished()) && std::time::Instant::now() < deadline
+        {
+            pause();
+        }
+        // The last `MailxCore` still holds one reference of its own.
+        while self.service.strong_count() > 1 && std::time::Instant::now() < deadline {
+            pause();
+        }
+    }
 }
 
 impl MailxCore {
@@ -108,6 +141,12 @@ impl MailxCore {
             outbox.start(&account.id);
         }
         Ok(Self {
+            _closing: Arc::new(Closing {
+                service: Arc::downgrade(&service),
+                sync: sync.clone(),
+                outbox: outbox.clone(),
+                bodies: bodies.clone(),
+            }),
             service,
             sync,
             outbox,
@@ -553,5 +592,22 @@ mod tests {
         };
         let (_core, states) = open(&directory, &runtime);
         assert_eq!(next_failure(&states).account_id, account.id);
+    }
+
+    #[test]
+    fn dropping_the_core_frees_the_directory_for_an_immediate_reopen() {
+        // Background tasks used to keep the store, and its lock, alive for a
+        // moment after the core was dropped.
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        {
+            let (core, states) = open(&directory, &runtime);
+            create(&core, closed_port());
+            next_failure(&states);
+        }
+        for _ in 0..20 {
+            let (core, _states) = open(&directory, &runtime);
+            let _clone = core.clone();
+        }
     }
 }
