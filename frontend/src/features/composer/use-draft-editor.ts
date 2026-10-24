@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft, DraftKind } from '@/generated/accounts'
 import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { recipientsFromAddresses, toMailAddresses, type Recipient } from './address-parse'
+import { draftHtmlIsEmpty } from './draft-html'
 
 /** Typing pauses this long before the draft is written. */
 export const AUTOSAVE_DELAY_MS = 1000
@@ -14,7 +15,7 @@ export type EditorFields = {
   cc: Recipient[]
   bcc: Recipient[]
   subject: string
-  bodyText: string
+  bodyHtml: string
 }
 
 /**
@@ -35,19 +36,19 @@ function fieldsOf(draft: Draft): EditorFields {
     cc: recipientsFromAddresses(draft.cc),
     bcc: recipientsFromAddresses(draft.bcc),
     subject: draft.subject,
-    bodyText: draft.bodyText,
+    bodyHtml: draft.bodyHtml,
   }
 }
 
 export function fieldsAreEmpty(fields: EditorFields) {
-  return fields.to.length + fields.cc.length + fields.bcc.length === 0 && !fields.subject.trim() && !fields.bodyText.trim()
+  return fields.to.length + fields.cc.length + fields.bcc.length === 0 && !fields.subject.trim() && draftHtmlIsEmpty(fields.bodyHtml)
 }
 
 /** Content identity for "changed since the window opened" (recipient chips compare by address). */
 function contentKey(fields: EditorFields) {
   return JSON.stringify([
     fields.accountId, toMailAddresses(fields.to), toMailAddresses(fields.cc), toMailAddresses(fields.bcc),
-    fields.subject, fields.bodyText,
+    fields.subject, fields.bodyHtml,
   ])
 }
 
@@ -71,6 +72,9 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const [status, setStatus] = useState<SaveStatus>('idle')
   const [readOnly, setReadOnly] = useState(false)
   const [gone, setGone] = useState(false)
+  // User edits and reloads withdraw send confirmation; an acknowledgement that
+  // merely canonicalizes HTML must not invalidate the save it just confirmed.
+  const [changeToken, setChangeToken] = useState(0)
 
   const latest = useRef<EditorFields | null>(null)
   // The content as it was when the window opened; "不保存" on an existing draft restores it.
@@ -93,6 +97,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     dirty.current = false
     failed.current = false
     setFields(next)
+    setChangeToken((value) => value + 1)
     setKind(draft.kind)
     setStatus('idle')
   }, [])
@@ -167,12 +172,21 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
               cc: toMailAddresses(snapshot.cc),
               bcc: toMailAddresses(snapshot.bcc),
               subject: snapshot.subject,
-              bodyText: snapshot.bodyText,
+              bodyHtml: snapshot.bodyHtml,
             })
             clearTimeout(slow)
             revision.current = saved.revision
             failed.current = false
-            if (alive.current && !dirty.current) setStatus(fieldsAreEmpty(snapshot) ? 'idle' : 'saved')
+            if (alive.current && !dirty.current) {
+              // Only accept canonical content when no newer typing would be replaced.
+              if (saved.bodyHtml !== snapshot.bodyHtml) {
+                const canonical = { ...snapshot, bodyHtml: saved.bodyHtml }
+                latest.current = canonical
+                setFields(canonical)
+              }
+              const empty = saved.to.length + saved.cc.length + saved.bcc.length === 0 && !saved.subject.trim() && !saved.bodyText.trim()
+              setStatus(empty ? 'idle' : 'saved')
+            }
           } catch (cause) {
             clearTimeout(slow)
             const code = clientFailureCode(cause)
@@ -212,6 +226,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     dirty.current = true
     failed.current = false
     setFields(next)
+    setChangeToken((value) => value + 1)
     // A blank draft is not kept, so don't leave "已保存" up while it waits to save.
     if (fieldsAreEmpty(next)) setStatus('idle')
     clearTimeout(timer.current)
@@ -284,7 +299,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
       cc: toMailAddresses(before.cc),
       bcc: toMailAddresses(before.bcc),
       subject: before.subject,
-      bodyText: before.bodyText,
+      bodyHtml: before.bodyHtml,
     })
     revision.current = saved.revision
   }, [changed, client, draftId])
@@ -296,6 +311,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     status,
     readOnly,
     gone,
+    changeToken,
     update,
     flush,
     retry,

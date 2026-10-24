@@ -244,15 +244,21 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 OAuth、附件上传、设置和删除账号的细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
 
-## 4. 邮件写操作一致性（后续）
+## 4. 邮件写操作一致性
 
-**草稿的核心层已实现；桌面 IPC 命令已接通（发信步骤 4a，尚无界面），HTTP / MCP 未开放**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，正文不超过 1 MiB。发件箱的 core 层见下。
+**草稿核心、桌面 IPC 与写信界面已实现；HTTP / MCP 未开放**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyHtml` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，输入 HTML 不超过 2 MiB，核心派生纯文本不超过 1 MiB。发件箱的 core 层见下。
 
-`expectedRevision` 不匹配报 `REVISION_CONFLICT`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
+`CreateDraftRequest` 与 `UpdateDraftRequest` 的正文只有 `bodyHtml: string`，不接受 `bodyText`（未知字段被拒绝）。`Draft` 返回核心净化后的 `bodyHtml` 与只读派生的 `bodyText`。核心使用独立于阅读端的 HTML 白名单，删除样式、事件属性、图片与非 http/https/mailto 链接；纯文本保留段落、嵌套列表、引用和链接地址，详见[富文本设计](../architecture/sending.md#14-富文本写信已实现)。HTML 不超过 2 MiB，派生纯文本不超过 1 MiB，超限分别返回 `draft.bodyHtml` / `draft.bodyText` 校验错误。
+
+v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文本按行转义为段落，下次保存落盘。回复 / 转发使用缓存原文并降级复杂格式，不加载外部资源。新入队邮件固定为 `multipart/alternative`（纯文本在前、HTML 在后）；迁移不重建已入队的 MIME 快照。
+
+兼容旧草稿：旧纯文本经 HTML 转义可能超过 2 MiB；更新请求正文与核心当前返回值完全一致时，复用已保存的正文，只更新其他字段，不重新套用新正文限额，也不截断内容。新建或实际修改正文仍执行完整净化与限额校验。
+
+`expectedRevision` 不匹配报 `conflict`，客户端加载最新草稿供用户处理，不静默覆盖。`clientMutationId` 用于本地创建 / 入队幂等，作用域为账号及操作类型；重复键带不同请求内容报冲突。MCP 创建草稿也使用该机制。
 
 `drafts.queueSend` 只允许交互 UI 主体（桌面 v0.1 为 `composer-*` 写信窗口），后端核对账号权限、草稿版本和确认过的快照；入队时按设置 `compose.undoSendSeconds` 写入 `notBefore`。MCP 或模型主体即使直接调用该方法也不能通过。发送结果按[发信状态机](../architecture/mail-sync.md#5-本地草稿与可靠发送)与[写信与发送设计](../architecture/sending.md)解释；未来错误的重试提示从不授权对 `unknown` SMTP 结果自动重发。
 
-**发件箱的核心层已实现（发信步骤 3），仍无 IPC / HTTP / MCP 与界面**（`core/src/send/`）。`MailxCore` 方法：
+**发件箱核心、桌面 IPC 与界面已实现；HTTP / MCP 未开放**（`core/src/send/`）。`MailxCore` 方法：
 
 - `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 必须是 `Caller::Composer`（宿主提供的枚举，`MainWindow` / `Mcp` / `Model` 一律 `forbidden`，不依赖 UI）；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
 - `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`resolution`、`supersededBy`。

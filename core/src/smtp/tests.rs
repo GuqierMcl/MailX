@@ -619,6 +619,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
             address: "hidden@example.org".into(),
         }],
         subject: "你好".into(),
+        body_html: "<p>.点开头</p><p>正文</p><p></p>".into(),
         body_text: ".点开头\n正文\n".into(),
         in_reply_to: None,
         references: None,

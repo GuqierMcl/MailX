@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
+import { lazy, Suspense, useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AlertCircleIcon, MailOpen01Icon } from '@hugeicons/core-free-icons'
 import type { Account } from '@/generated/accounts'
@@ -22,7 +22,10 @@ import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-
 import { cn } from '@/lib/utils'
 import { RecipientField } from './recipient-field'
 import { SendButton } from './send-button'
-import { useDraftEditor, type SaveStatus } from './use-draft-editor'
+import { fieldsAreEmpty, useDraftEditor, type SaveStatus } from './use-draft-editor'
+
+// Keep the editor engine and its styles out of the main window's initial bundle.
+const MailBodyEditor = lazy(() => import('./mail-body-editor'))
 
 /** What the window around the composer needs from it when closing. */
 export type ComposerController = {
@@ -56,7 +59,7 @@ type ComposerProps = {
 const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', saved: '已保存', saving: '正在保存…', failed: '保存失败' }
 
 /**
- * The writing surface: sender, recipients, subject, plain-text body and the bottom
+ * The writing surface: sender, recipients, subject, rich-text body and the bottom
  * bar. It knows nothing about windows, so the same component can later sit in the
  * main window's island (sending.md section 2). Closing and window titles belong to
  * the host, which reaches in through `controllerRef`.
@@ -120,9 +123,8 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   }
 
   const readOnly = editor.readOnly
-  const recipientCount = fields.to.length + fields.cc.length + fields.bcc.length
   const hasInvalid = [...fields.to, ...fields.cc, ...fields.bcc].some((item) => !item.valid)
-  const empty = recipientCount === 0 && !fields.subject.trim() && !fields.bodyText.trim()
+  const empty = fieldsAreEmpty(fields)
 
   // First press of the send button: check, save, and hand back the saved revision.
   const prepare = async (): Promise<number | null> => {
@@ -251,14 +253,9 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           />
         </div>
       </div>
-      <textarea
-        aria-label="正文"
-        value={fields.bodyText}
-        disabled={readOnly}
-        spellCheck
-        onChange={(event) => editor.update({ bodyText: event.target.value })}
-        className="mx-3 mt-1 min-h-0 flex-1 resize-none rounded-lg bg-transparent px-2 py-2 text-sm leading-relaxed outline-none disabled:cursor-not-allowed"
-      />
+      <Suspense fallback={<div role="status" className="flex min-h-0 flex-1 items-center justify-center">正在打开编辑器…</div>}>
+        <MailBodyEditor value={fields.bodyHtml} readOnly={readOnly} onChange={(bodyHtml) => editor.update({ bodyHtml })} />
+      </Suspense>
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           {/* The width and height are reserved so the status coming and going never moves the buttons. */}
@@ -287,7 +284,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         <SendButton
           subjectEmpty={!fields.subject.trim()}
           disabled={readOnly || busy}
-          resetToken={fields}
+          resetToken={editor.changeToken}
           onPrepare={prepare}
           onConfirm={send}
         />

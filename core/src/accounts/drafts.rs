@@ -36,7 +36,7 @@ fn canonical(value: serde_json::Value) -> Result<String, AppError> {
 fn content_json(content: &DraftContent) -> serde_json::Value {
     serde_json::json!({
         "to": content.to, "cc": content.cc, "bcc": content.bcc,
-        "subject": content.subject, "bodyText": content.body_text,
+        "subject": content.subject, "bodyHtml": content.body_html,
     })
 }
 
@@ -98,7 +98,8 @@ impl AccountService {
             cc: request.cc,
             bcc: request.bcc,
             subject: request.subject,
-            body_text: request.body_text,
+            body_html: request.body_html,
+            body_text: String::new(),
         })?;
         let canonical = canonical(serde_json::json!({
             "op": "create", "accountId": request.account_id, "content": content_json(&content),
@@ -178,11 +179,31 @@ impl AccountService {
             .as_ref()
             .and_then(|body| body.text.as_deref())
             .unwrap_or_default();
+        let identity = self.storage.body_identity(&request.email_id)?;
+        let cached = self.storage.body_cache(&identity)?;
+        let original = crate::drafts::body::quote_cached_source(
+            cached
+                .as_ref()
+                .filter(|_| headers.has_html)
+                .and_then(|body| body.rendered.sanitized_html.as_deref()),
+            cached
+                .as_ref()
+                .map(|body| body.rendered.links.as_slice())
+                .unwrap_or_default(),
+            text,
+        );
         let Composed {
             content,
             in_reply_to,
             references,
-        } = compose::compose(detail, text, request.kind, account_address, headers, offset);
+        } = compose::compose(
+            detail,
+            &original,
+            request.kind,
+            account_address,
+            headers,
+            offset,
+        );
         let content = validate::normalize(content)?;
         let canonical = Self::from_canonical(request)?;
         // The lock was released while the raw MIME was read: an identical
@@ -222,13 +243,21 @@ impl AccountService {
 
     pub fn update_draft(&mut self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
         validate_uuid(&request.id, "draftId")?;
-        let content = validate::normalize(DraftContent {
+        let current = self.storage.get_draft(&request.id)?;
+        let unchanged_body = request.body_html == current.body_html;
+        let content = DraftContent {
             to: request.to,
             cc: request.cc,
             bcc: request.bcc,
             subject: request.subject,
-            body_text: request.body_text,
-        })?;
+            body_html: request.body_html,
+            body_text: current.body_text,
+        };
+        let content = if unchanged_body {
+            validate::normalize_headers(content)?
+        } else {
+            validate::normalize(content)?
+        };
         if let Some(account_id) = &request.account_id {
             self.check_account(account_id)?;
         }

@@ -1,0 +1,72 @@
+.mail-body-editor {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 0 20px;
+}
+
+.mail-format-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 10px;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.mail-format-group { display: flex; gap: 2px; }
+.mail-format-button[aria-pressed="true"] { background: var(--accent); color: var(--accent-foreground); }
+.mail-format-more { display: none; }
+.mail-body-surface { display: flex; min-height: 0; flex: 1; overflow-y: auto; }
+
+/* ProseMirror's base rules live here; injectCSS is disabled for the desktop CSP. */
+.mail-body-content {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-ligatures: none;
+}
+.mail-body-content p { margin: 0; }
+.mail-body-content li { position: relative; }
+.mail-body-content ul, .mail-body-content ol { margin: 0; padding-left: 1.5em; }
+.mail-body-content ul { list-style-type: disc; }
+.mail-body-content ul ul { list-style-type: circle; }
+.mail-body-content ol { list-style-type: decimal; }
+.mail-body-content blockquote { margin: 0 0 0 0.8ex; padding-left: 1ex; border-left: 1px solid var(--muted-foreground); }
+.mail-body-content a { color: var(--primary); text-decoration: underline; cursor: pointer; }
+.mail-body-content strong { font-weight: bold; }
+.mail-body-content em { font-style: italic; }
+.mail-body-content s { text-decoration: line-through; }
+.mail-body-content u { text-decoration: underline; }
+.mail-body-content .ProseMirror-hideselection *::selection { background: transparent; }
+.mail-body-content.ProseMirror-hideselection { caret-color: transparent; }
+.mail-body-content[aria-readonly="true"] { color: var(--muted-foreground); }
+
+.mail-editor-popup {
+  position: absolute;
+  z-index: 30;
+  top: 42px;
+  max-width: 100%;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 24px #0002;
+}
+.mail-link-popup { left: 20px; width: 320px; max-width: calc(100% - 40px); }
+.mail-link-popup form { display: flex; flex-direction: column; gap: 10px; }
+.mail-format-menu { right: 20px; display: flex; gap: 4px; }
+
+@container (max-width: 470px) {
+  .mail-format-secondary { display: none; }
+  .mail-format-more { display: flex; margin-left: auto; }
+}

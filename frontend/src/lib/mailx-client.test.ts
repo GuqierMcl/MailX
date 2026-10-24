@@ -90,7 +90,7 @@ describe('drafts and sending commands', () => {
   it('forwards each command with only its named arguments', async () => {
     vi.mocked(invoke).mockResolvedValue(ok(null))
     const client = createDesktopClient()
-    await client.createDraft({ accountId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: 'm' })
+    await client.createDraft({ accountId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '', clientMutationId: 'm' })
     await client.createDraftFrom({ emailId: 'e', kind: 'reply', clientMutationId: 'm' })
     await client.listDrafts()
     await client.listDrafts('a')
@@ -107,7 +107,7 @@ describe('drafts and sending commands', () => {
     await client.closeComposer()
     const calls = vi.mocked(invoke).mock.calls
     expect(calls.map(([command, args]) => [command, args])).toEqual([
-      ['drafts_create', { request: { accountId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: 'm' } }],
+      ['drafts_create', { request: { accountId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '', clientMutationId: 'm' } }],
       ['drafts_create_from', { request: { emailId: 'e', kind: 'reply', clientMutationId: 'm' } }],
       ['drafts_list', { accountId: null }],
       ['drafts_list', { accountId: 'a' }],
