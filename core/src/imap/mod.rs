@@ -168,7 +168,8 @@ enum ResponseCodeKind {
 pub(crate) struct MailboxInfo {
     pub uid_validity: u32,
     pub uid_next: Option<u32>,
-    pub exists: u32,
+    /// Missing EXISTS must not be mistaken for an empty mailbox.
+    pub exists: Option<u32>,
 }
 
 /// A folder opened for writing.
@@ -401,16 +402,50 @@ impl Session {
             .ok_or_else(|| ImapError::Mailbox("STATUS did not return mailbox data".into()))
     }
 
+    /// Some servers return lossy names such as `???` in STATUS while LIST and
+    /// EXAMINE still accept the original modified UTF-7 name. Never guess which
+    /// folder that row belongs to: read counts from the explicitly opened folder.
+    /// Return its selection so a full sync can reuse EXAMINE.
+    pub(crate) async fn status_or_examine(
+        &mut self,
+        name: &str,
+    ) -> Result<(FolderStatus, Option<MailboxInfo>), ImapError> {
+        match self.status(name).await {
+            Ok(status) => return Ok((status, None)),
+            // Only completed OK with unusable data is eligible. Rejections and
+            // broken/incomplete connections retain their normal failure paths.
+            Err(ImapError::Mailbox(_)) => {}
+            Err(error) => return Err(error),
+        }
+        let mailbox = self.examine(name).await?;
+        let messages = mailbox
+            .exists
+            .ok_or_else(|| ImapError::Mailbox("EXAMINE did not return a message count".into()))?;
+        // This is the whole folder, not the fixed header window. EXAMINE's
+        // [UNSEEN n] is a sequence number, not an unread count.
+        let unseen = u32::try_from(self.search("UID SEARCH UNSEEN").await?.len())
+            .map_err(|_| ImapError::Mailbox("unread count exceeds the supported range".into()))?;
+        Ok((
+            FolderStatus {
+                messages,
+                unseen,
+                uid_next: mailbox.uid_next,
+                uid_validity: Some(mailbox.uid_validity),
+            },
+            Some(mailbox),
+        ))
+    }
+
     pub(crate) async fn examine(&mut self, name: &str) -> Result<MailboxInfo, ImapError> {
         let command = format!("EXAMINE {}", quoted_mailbox(name)?);
         let mut result = MailboxInfo {
             uid_validity: 0,
             uid_next: None,
-            exists: 0,
+            exists: None,
         };
         self.checked_command::<()>(&command, |response, _| {
             match response {
-                Response::MailboxData(MailboxDatum::Exists(value)) => result.exists = *value,
+                Response::MailboxData(MailboxDatum::Exists(value)) => result.exists = Some(*value),
                 Response::Data {
                     status: Status::Ok,
                     outcome,
@@ -515,8 +550,12 @@ impl Session {
         // Chrono's default %b is locale-independent English. No external input
         // may be interpolated into async-imap's unescaped SEARCH expression.
         let query = format!("UID SEARCH SINCE {}", date.format("%d-%b-%Y"));
+        self.search(&query).await
+    }
+
+    async fn search(&mut self, query: &str) -> Result<Vec<u32>, ImapError> {
         let batches = self
-            .checked_command(&query, |response, _| {
+            .checked_command(query, |response, _| {
                 Ok(match response {
                     Response::MailboxData(MailboxDatum::Search(uids)) => Some(uids.clone()),
                     _ => None,
@@ -1158,7 +1197,7 @@ mod tests {
             MailboxInfo {
                 uid_validity: 9,
                 uid_next: Some(43),
-                exists: 3
+                exists: Some(3)
             }
         );
         assert_eq!(
@@ -1328,6 +1367,125 @@ mod tests {
         ])
         .await;
         assert!(matches!(result, Err(ImapError::Rejected)));
+    }
+
+    #[tokio::test]
+    async fn lossy_status_names_use_counts_from_each_original_mailbox() {
+        let (mut session, server) = header_session(vec![
+            (
+                "STATUS \"&XfJT0ZAB-\" ".into(),
+                "* STATUS \"???\" (MESSAGES 999 UNSEEN 888 UIDNEXT 999 UIDVALIDITY 999)\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "EXAMINE \"&XfJT0ZAB-\"".into(),
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n* OK [UIDNEXT 43] next\r\n* OK [UNSEEN 42] first unread sequence\r\n{tag} OK [READ-ONLY]\r\n".into(),
+            ),
+            (
+                "UID SEARCH UNSEEN".into(),
+                "* SEARCH 7 19 7\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "STATUS \"&g0l6P3ux-\" ".into(),
+                "* STATUS \"???\" (MESSAGES 999 UNSEEN 888)\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "EXAMINE \"&g0l6P3ux-\"".into(),
+                "* 0 EXISTS\r\n* OK [UIDVALIDITY 10] valid\r\n{tag} OK [READ-ONLY]\r\n".into(),
+            ),
+            ("UID SEARCH UNSEEN".into(), "* SEARCH\r\n{tag} OK\r\n".into()),
+        ])
+        .await;
+        let (sent, examined) = session.status_or_examine("&XfJT0ZAB-").await.unwrap();
+        assert_eq!(
+            sent,
+            FolderStatus {
+                messages: 3,
+                unseen: 2,
+                uid_next: Some(43),
+                uid_validity: Some(9),
+            }
+        );
+        assert_eq!(examined.unwrap().uid_validity, 9);
+        let (drafts, examined) = session.status_or_examine("&g0l6P3ux-").await.unwrap();
+        assert_eq!(
+            drafts,
+            FolderStatus {
+                messages: 0,
+                unseen: 0,
+                uid_next: None,
+                uid_validity: Some(10),
+            }
+        );
+        assert_eq!(examined.unwrap().uid_validity, 10);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn completed_status_with_missing_data_can_use_examine() {
+        for reply in [
+            "{tag} OK\r\n",
+            "* STATUS INBOX (MESSAGES 99)\r\n{tag} OK\r\n",
+        ] {
+            let (mut session, server) = header_session(vec![
+                ("STATUS".into(), reply.into()),
+                (
+                    "EXAMINE".into(),
+                    "* 1 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n".into(),
+                ),
+                (
+                    "UID SEARCH UNSEEN".into(),
+                    "* SEARCH 7\r\n{tag} OK\r\n".into(),
+                ),
+            ])
+            .await;
+            let (status, _) = session.status_or_examine("INBOX").await.unwrap();
+            assert_eq!((status.messages, status.unseen), (1, 1));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_or_interrupted_status_never_attempts_the_fallback() {
+        for reply in [
+            "{tag} NO private\r\n",
+            "{tag} BAD private\r\n",
+            "* STATUS INBOX (MESSAGES 3 UNSEEN 2)\r\n{tag} NO private\r\n",
+            "* STATUS INBOX (MESSAGES 3 UNSEEN 2)\r\n",
+            "* BYE private\r\n",
+        ] {
+            let (mut session, server) = header_session(vec![("STATUS".into(), reply.into())]).await;
+            assert!(session.status_or_examine("INBOX").await.is_err());
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_requires_complete_examine_and_unread_enumeration() {
+        let valid_examine = "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n";
+        for (examine, search) in [
+            ("* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n", None),
+            ("* 3 EXISTS\r\n{tag} OK\r\n", None),
+            (
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} NO private\r\n",
+                None,
+            ),
+            ("* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n", None),
+            (valid_examine, Some("{tag} OK\r\n")),
+            (valid_examine, Some("* SEARCH 7\r\n{tag} NO private\r\n")),
+            (valid_examine, Some("* SEARCH 7\r\n")),
+            (valid_examine, Some("* SEARCH 0\r\n{tag} OK\r\n")),
+        ] {
+            let mut script = vec![
+                ("STATUS".into(), "{tag} OK\r\n".into()),
+                ("EXAMINE".into(), examine.into()),
+            ];
+            if let Some(search) = search {
+                script.push(("UID SEARCH UNSEEN".into(), search.into()));
+            }
+            let (mut session, server) = header_session(script).await;
+            assert!(session.status_or_examine("INBOX").await.is_err());
+            server.await.unwrap();
+        }
     }
 
     #[tokio::test]
