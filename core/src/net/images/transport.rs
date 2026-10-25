@@ -199,6 +199,9 @@ mod tests {
         net::TcpListener,
     };
 
+    // macOS only configures 127.0.0.1 on lo0, so connecting to 127.0.0.2 hangs
+    // instead of being refused and the fallback never gets a chance to run.
+    #[cfg_attr(target_os = "macos", ignore = "lo0 has no 127.0.0.2 alias")]
     #[tokio::test]
     async fn pinned_connector_uses_the_snapshot_and_falls_back_within_address_family() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

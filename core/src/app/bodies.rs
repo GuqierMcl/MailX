@@ -311,6 +311,29 @@ impl MailxCore {
         binding: BodyBinding,
         index: usize,
     ) -> Result<InlineImage, ImageFetchError> {
+        // A caller that drops this future mid-flight would otherwise leave the
+        // image `loading` forever and block every later retry.
+        struct DropGuard<'a> {
+            binding: &'a BodyBinding,
+            index: usize,
+            finished: bool,
+        }
+        impl Drop for DropGuard<'_> {
+            fn drop(&mut self) {
+                if !self.finished {
+                    let _ = self.binding.image_status(RemoteImageStatus {
+                        index: self.index,
+                        loading: false,
+                        error: Some(ImageFetchError::Cancelled),
+                    });
+                }
+            }
+        }
+        let mut guard = DropGuard {
+            binding: &binding,
+            index,
+            finished: false,
+        };
         let mut cancelled = binding.remote_cancelled.subscribe();
         let result = if *cancelled.borrow() {
             Err(ImageFetchError::Cancelled)
@@ -327,6 +350,7 @@ impl MailxCore {
             loading: false,
             error: result.as_ref().err().copied(),
         });
+        guard.finished = true;
         result
     }
 
