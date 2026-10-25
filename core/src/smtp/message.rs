@@ -356,7 +356,20 @@ mod tests {
         draft.bcc = vec![who(Some("秘密"), "secret@example.net")];
         let built = make(&draft, None).unwrap();
         let text = String::from_utf8(built.mime.clone()).unwrap();
-        assert!(!text.to_ascii_lowercase().contains("bcc"));
+        // Match the header, not the substring: the random Message-ID is hex and
+        // now and then contains "bcc" by chance.
+        assert!(
+            !text
+                .lines()
+                .any(|line| line.to_ascii_lowercase().starts_with("bcc:"))
+        );
+        assert!(
+            MessageParser::default()
+                .parse(&built.mime)
+                .unwrap()
+                .bcc()
+                .is_none()
+        );
         assert!(!text.contains("secret@example.net"));
         assert_eq!(
             built.envelope.recipients,
