@@ -10,6 +10,8 @@ mod compose;
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
+#[cfg(not(feature = "body-webview-test"))]
+mod secret_vault;
 mod state;
 #[cfg(not(feature = "body-webview-test"))]
 mod storage_location;
@@ -85,7 +87,7 @@ fn main() {
                     .map(|storage| storage.secret_service.clone())
                     .unwrap_or_else(|_| storage_location::SECRET_SERVICE.to_owned());
                 let data_dir = storage.map(|storage| storage.data_dir);
-                let secrets = Arc::new(secret_store::SystemSecretStore::new(secret_service));
+                let secrets = secret_store::system_store(secret_service);
                 // Sync and write-back events only hint the UI to refetch or
                 // tell the user something; a lost one is harmless.
                 let handle = app.handle().clone();

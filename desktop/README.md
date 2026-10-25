@@ -18,7 +18,7 @@ bun run tauri dev
 - `src/commands.rs`：`app_get_startup_status` / `app_retry_startup` 提供启动状态与显式重试；四个 `accounts_*` 命令在 Ready 前立即拒绝，之后适配 AccountService，均返回生成的 `ApiResult<T>`。命令自行解析原始负载，仅返回固定脱敏错误，避免解析异常回显秘密。原骨架的 `core_info` 已移除。
 - `src/state.rs`：宿主启动时在阻塞线程主动打开核心并恢复凭证 journal，使用 `Initializing` / `Ready` / `Failed` 状态和单飞重试；业务服务只在 Ready 后串行运行。数据目录内为 `mailx.sqlite3` 和 `mailx.lock`，不使用仓库目录。
 - `capabilities/main.json`：仅为本地 `main` 窗口开放启动状态/重试和四个账号管理命令，没有文件系统、Shell、网络插件或远程来源授权。`build.rs` 为这些命令生成权限定义；宿主同时校验调用窗口标签及来源 URL。
-- `src/secret_store.rs`：使用 keyring 3.6 的原生后端，凭据 service 固定为 `MailX`（与 identifier 无关）；macOS 使用 apple-native，Windows 使用 windows-native，Linux 使用 sync-secret-service + crypto-rust。其他平台明确不支持，不使用 mock 或明文 fallback。适配代码存在不代表该平台已完成运行验证。
+- `src/secret_store.rs`：使用 keyring 3.6 的原生后端，凭据 service 固定为 `MailX`（与 identifier 无关）；macOS 上经 `src/secret_vault.rs` 把所有密码合并为一个钥匙串条目，使启动时最多一次授权，旧的逐账号条目在首次读取时迁入、下次启动清理（设计见[凭据保险库](../docs/architecture/secret-vault.md)）；macOS 使用 apple-native，Windows 使用 windows-native，Linux 使用 sync-secret-service + crypto-rust。其他平台明确不支持，不使用 mock 或明文 fallback。适配代码存在不代表该平台已完成运行验证。
 - `frontend/`：React + TypeScript + Vite + shadcn 账号配置界面；可以保存与重载配置，尚未登录邮箱或收发邮件。
 - `icons/`：从 `branding/logo.svg` 生成的正式应用图标，包含 Windows ICO、macOS ICNS、Linux PNG 和 Windows 商店尺寸；`tray/` 为后续托盘功能预备黑白与 macOS template 资源。
 
