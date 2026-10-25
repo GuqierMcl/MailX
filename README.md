@@ -30,6 +30,7 @@ English | [简体中文](README.zh-CN.md)
 - **Lightweight** — Built on Tauri with the system WebView instead of bundling a browser engine.
 - **Cross-platform** — Windows, macOS and Linux from a single codebase.
 - **All in One** — Multiple accounts share one unified inbox. MailX is designed for standard IMAP/SMTP mailboxes, and each account can connect directly or through a SOCKS5 or HTTP CONNECT proxy, with no silent fallback to a direct connection.
+- **Rich-text composing** — A lightweight Tiptap editor in its own compose window: headings, bold/italic/underline/strikethrough, links, lists, quotes, alignment, a fixed color palette and Markdown shortcuts. Mail goes out as plain text plus HTML, and the core sanitizes everything you write. Drafts are saved locally, sends can be undone, and a message that may already have been accepted is never resent on its own.
 - **Local-first & private** — Mail is stored and searched on your machine, with no MailX cloud relay. Remote images are off by default, and message bodies render in an isolated sandbox.
 - **AI-native** *(planned)* — A built-in assistant for reading, organizing and writing, using your own cloud model key or a local model, plus two-way MCP integration. AI never sends mail on its own.
 - **Self-hostable** *(planned)* — A single-user web version you can deploy with Docker.
@@ -39,8 +40,8 @@ English | [简体中文](README.zh-CN.md)
 | Module | Status |
 | --- | --- |
 | Desktop app: receiving, reading, search, multiple accounts | 🚧 In progress |
-| Desktop app: composing and sending | 🚧 In progress |
-| Rich-text composing and attachments | 🗓️ Planned |
+| Desktop app: composing and sending (rich-text editor, replies and forwards, reliable send queue) | 🚧 In progress |
+| Compose attachments and inline images | 🗓️ Planned |
 | Full-text search | 🗓️ Planned |
 | OAuth sign-in (Gmail, Outlook) | 🗓️ Planned |
 | AI assistant | 🗓️ Planned |
