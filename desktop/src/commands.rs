@@ -1,7 +1,7 @@
 use mailx_core::{
     Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
-    EmailListQuery, EmailPage, ErrorCode, Folder, NotificationSound, SettingsPatch,
-    SettingsSnapshot, UpdateConnectionRequest, UpdateProfileRequest,
+    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsPatch, SettingsSnapshot,
+    UpdateConnectionRequest, UpdateProfileRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{State, WebviewWindow, ipc::InvokeBody};
@@ -164,15 +164,20 @@ pub(crate) async fn accounts_create(
 pub(crate) async fn accounts_update_connection(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<Account>, ()> {
     let args = authorize(&window, "accounts_update_connection")
         .and_then(|_| parse::<WriteArgs<UpdateConnectionRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
-            state
+            let result = state
                 .run(move |core| core.update_account_connection(args.request))
-                .await
+                .await;
+            if let Ok(account) = &result {
+                protocol.revoke_account(&account.id);
+            }
+            result
         }
         Err(error) => Err(error),
     }))
@@ -311,6 +316,58 @@ pub(crate) async fn emails_release_body(
         authorize(&window, "emails_release_body")
             .and_then(|_| parse::<BodyLinksArgs>(request.body()))
             .and_then(|args| protocol.release(&args.email_id, &args.document_token)),
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_image_status(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::RemoteImageStatus>>, ()> {
+    let args = authorize(&window, "emails_image_status")
+        .and_then(|_| parse::<BodyLinksArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let policy = state
+                .settings(|store| store.get())
+                .await?
+                .settings
+                .security
+                .remote_images;
+            protocol
+                .image_status(&state.core()?, &args.email_id, &args.document_token, policy)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_retry_images(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<crate::body_protocol::PreparedBody>, ()> {
+    let args = authorize(&window, "emails_retry_images")
+        .and_then(|_| parse::<BodyLinksArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let policy = state
+                .settings(|store| store.get())
+                .await?
+                .settings
+                .security
+                .remote_images;
+            protocol
+                .retry_images(&state.core()?, &args.email_id, &args.document_token, policy)
+                .await
+        }
+        .await,
     ))
 }
 
@@ -758,21 +815,30 @@ pub(crate) async fn notifications_test(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args =
-        authorize(&window, "notifications_test").and_then(|_| parse::<EmptyArgs>(request.body()));
-    Ok(respond(match args {
-        Ok(_) => state
-            .settings(|store| store.get())
-            .await
-            .map(|snapshot| crate::notifications::test(&app, &snapshot.settings.notifications)),
-        Err(error) => Err(error),
-    }))
+    #[cfg(feature = "body-webview-test")]
+    {
+        let _ = (app, window, state, request);
+        Ok(respond(Err(AppError::new(ErrorCode::Unsupported))))
+    }
+    #[cfg(not(feature = "body-webview-test"))]
+    {
+        let args = authorize(&window, "notifications_test")
+            .and_then(|_| parse::<EmptyArgs>(request.body()));
+        Ok(respond(match args {
+            Ok(_) => state
+                .settings(|store| store.get())
+                .await
+                .map(|snapshot| crate::notifications::test(&app, &snapshot.settings.notifications)),
+            Err(error) => Err(error),
+        }))
+    }
 }
 
+#[cfg(not(feature = "body-webview-test"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SoundArgs {
-    sound: NotificationSound,
+    sound: mailx_core::NotificationSound,
 }
 
 /// Plays one of MailX's own notification sounds; the system sound and "none"
@@ -782,9 +848,17 @@ pub(crate) async fn notifications_preview_sound(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    let args = authorize(&window, "notifications_preview_sound")
-        .and_then(|_| parse::<SoundArgs>(request.body()));
-    Ok(respond(
-        args.map(|args| crate::notifications::preview(args.sound)),
-    ))
+    #[cfg(feature = "body-webview-test")]
+    {
+        let _ = (window, request);
+        Ok(respond(Err(AppError::new(ErrorCode::Unsupported))))
+    }
+    #[cfg(not(feature = "body-webview-test"))]
+    {
+        let args = authorize(&window, "notifications_preview_sound")
+            .and_then(|_| parse::<SoundArgs>(request.body()));
+        Ok(respond(
+            args.map(|args| crate::notifications::preview(args.sound)),
+        ))
+    }
 }

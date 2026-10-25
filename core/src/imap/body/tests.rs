@@ -495,6 +495,7 @@ async fn body_connection_honors_proxy_route_without_direct_fallback() {
     let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let route = NetRoute {
+        image_proxy_dns: false,
         proxy: Some(ProxyRoute {
             kind: ProxyKind::HttpConnect,
             host: "127.0.0.1".into(),

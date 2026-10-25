@@ -7,6 +7,7 @@ import type {
   AppSettings,
   ApiResult,
   AvatarImage,
+  RemoteImageStatus,
   FlagWriteBack,
   CreateAccountRequest,
   CreateDraftFromRequest,
@@ -85,6 +86,8 @@ export interface MailxClient {
   fetchBody(emailId: string): Promise<EmailDetail>
   prepareBody(emailId: string, loadRemoteImages?: boolean): Promise<{ documentToken: string }>
   releaseBody(emailId: string, documentToken: string): Promise<void>
+  imageStatus(emailId: string, documentToken: string): Promise<RemoteImageStatus[]>
+  retryImages(emailId: string, documentToken: string): Promise<{ documentToken: string }>
   bodyLinks(emailId: string, documentToken: string): Promise<BodyLinks>
   requestLink(request: BodyLinkIdentity): Promise<void>
   openLink(request: BodyLinkIdentity & { requestId: string }): Promise<void>
@@ -229,6 +232,8 @@ export function createDesktopClient(): MailxClient {
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),
     prepareBody: (emailId, loadRemoteImages = false) => call('emails_prepare_body', { emailId, loadRemoteImages }),
     releaseBody: (emailId, documentToken) => call('emails_release_body', { emailId, documentToken }),
+    imageStatus: (emailId, documentToken) => call('emails_image_status', { emailId, documentToken }),
+    retryImages: (emailId, documentToken) => call('emails_retry_images', { emailId, documentToken }),
     bodyLinks: (emailId, documentToken) => call('emails_body_links', { emailId, documentToken }),
     requestLink: ({ emailId, index, documentToken }) => call('links_request', { emailId, index, documentToken }),
     openLink: ({ emailId, index, documentToken, requestId }) => call('links_open', { emailId, index, documentToken, requestId }),

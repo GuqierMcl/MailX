@@ -16,7 +16,10 @@ mod plain;
 pub use html::{
     ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
 };
-pub use images::{InlineImage, validate as validate_image};
+pub(crate) use images::remote_raster_format;
+pub use images::{
+    InlineImage, MAX_REMOTE_IMAGE_OUTPUT_BYTES, decode_remote_raster, validate as validate_image,
+};
 
 pub const SANITIZER_VERSION: u32 = 5;
 pub const MAX_MESSAGE_BYTES: usize = 100 * 1024 * 1024;

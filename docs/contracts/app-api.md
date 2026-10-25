@@ -105,6 +105,8 @@ type EmailPage = {
 | `fetchBody(emailId)` | `emails_fetch_body`，`{ emailId }` | 最新 `EmailDetail` |
 | `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
 | `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
+| `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, loading, error }`，无原始 URL |
+| `retryImages(emailId, documentToken)` | `emails_retry_images`，`{ emailId, documentToken }` | `{ documentToken }`，复用成功图片、清理失败状态、撤销旧令牌 |
 | `bodyLinks(emailId, documentToken)` | `emails_body_links`，`{ emailId, documentToken }` | `{ documentToken, links: [{ emailId, index, url }] }` |
 | `requestLink(identity)` | `links_request`，`{ emailId, index, documentToken }` | null；旧编号兼容入口，生产模式拒绝 |
 | `openLink(grant)` | `links_open`，`{ emailId, index, documentToken, requestId }` | null |
@@ -118,13 +120,15 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 下载使用独立的账号路由连接、EXAMINE 和 UID BODY.PEEK[]，不改变服务端已读状态。同一邮件共享 flight，每账号正文串行，账号之间无全局限额。已缓存正文只读本地数据；失败通常以 bodyState=failed 的成功详情返回，前端不能仅靠 Promise rejection 判断失败。邮件不可见时返回 notFound，存储不可写时返回受控错误，不假称已保存失败状态。
 
-每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。离开本次阅读时调用 release，删除令牌、待处理链接授权并释放远程图片内存；迟到的 prepare 结果同样释放，重复 release 无副作用。令牌有效期 30 分钟、最多 128 个，作为清理后备，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。
+每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。离开本次阅读时调用 release，删除令牌、待处理链接授权并释放远程图片内存；迟到的 prepare 结果同样释放，重复 release 无副作用。令牌有效期 30 分钟、最多 128 个，作为清理后备，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。桌面保存账号连接成功后还会主动撤销该账号的文档和待处理链接授权，并取消旧阅读的排队/网络图片请求。
 
 `mailx://link-request` 载荷为 `{ emailId, index, url, documentToken, requestId }`。点击正文原位置的链接时，原生导航回调先取消 WebView 跳转，再产生受控事件；WebView2 保留协议 204 后备路径。UI 只接受当前已加载、可见文档的事件，立即提交身份与一次性 requestId 给 links_open，不提交 URL，不再显示编号列表或逐次确认弹窗。宿主重新读取链接并限制 http / https / mailto，由系统浏览器或邮件应用打开；悬停通过链接 title 显示真实地址。重复事件、切换邮件、隐藏或文档意外重载后的旧事件均被丢弃。旧编号接口保留内部兼容，生产模式返回空列表且拒绝 links_request。
 
 远程图片策略来自 `settings.security.remoteImages`：`ask`（默认）、`automatic`、`never`。ask 在 HTML 正文上方显示单行提示；“加载图片”只授权当前打开，“不再提示”单独勾选不生效，勾选后加载须先成功保存 automatic；关闭仅隐藏本次提示。重新打开重新询问，never 不显示提示。CID 和已验证 data 图片不受策略影响。prepare 的 loadRemoteImages 默认 false，只有可信主窗口可提交；never 即使收到 true 仍不放行。图片协议每次检查当前策略和文档授权，收紧设置还会撤销已有授权。
 
-正文只包含 `/remote/<emailId>/<index>?token=…`，原始图片 URL 不交给 WebView。Rust 按净化结果解析索引、沿账号路由加载、验证，并仅在本次阅读的内存中复用（保留字节最多 64 MiB，超出部分不额外缓存），不写入数据库或磁盘；列表、搜索和头部同步不会下载图片。当前支持 `<img src>` 的 http/https（含 // 地址），每封最多 32 个资源、响应最多 8 MiB、30 秒、至多 3 次重定向；远程 SVG 可由 Rust 转为静态 PNG 后显示，仅支持有界矢量图形，不加载关联资源；CSS URL、srcset、正文内联 SVG 等继续移除。系统 TUN 的 Fake-IP DNS 映射仅对通过原始域名 TLS 验证的 HTTPS 图片兼容，地址字面量和明文 HTTP 不适用。账号自定义代理代解析无法校验实际 IP 的域名请求仍拒绝加载，不使用本地 DNS 或直连绕行。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束刷新详情和已加载列表页并保留有效选中。
+正文只包含 `/remote/<emailId>/<index>?token=…`，原始图片 URL 不交给 WebView。Rust 根据净化结果解析索引，按账号路由加载，成功图片在当前阅读内存（总量最多 64 MiB）及账号 / 来源 / 连接版本隔离的磁盘缓存中复用。读取始终校验当前身份与显示授权，关闭阅读或收紧策略取消等待/网络任务。支持 `<img src>` 的 http/https（含 // 地址），每封最多 32 个资源、输入最多 8 MiB、总等待 30 秒、至多 3 次重定向；远程格式和账号代理策略见[网络与安全](../architecture/network-security.md)。CSS URL、srcset、正文内联 SVG 等继续移除。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束刷新详情和已加载列表页并保留有效选中。
+
+图片状态与重试仅向可信主窗口开放，要求当前文档 token、邮件身份和当前图片许可同时有效。错误枚举为 `targetBlocked | proxyPolicyRequired | dns | connect | proxy | tls | httpStatus | unsupportedType | invalidImage | tooLarge | timeout | cancelled`，不携带源地址、响应文字或认证信息。重试继承当前阅读授权和成功图片内存，返回独立新绑定与令牌；旧令牌随后释放，失败资源可重新获取，成功资源不重新联网；尚在加载或冷却期内不能重试。未授权/失效文档不提供诊断。
 
 ## 3. 当前账号操作
 
@@ -344,11 +348,11 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 1. Gravatar：规范化（去空白、转小写）地址的 SHA-256，`https://www.gravatar.com/avatar/<hash>?s=96&d=404`，`kind` 为 `photo`。
 2. 发件域名不属于常见个人邮箱（核心内置名单，含子域名匹配，另加用户已配置账号的域名）时，取域名的网站图标，`kind` 为 `icon`：依次尝试发件域名与其可注册父域名（用常见二级后缀的启发式判断，非公共后缀表），每个域名先 DuckDuckGo（`icons.duckduckgo.com/ip3/<domain>.ico`）、失败再 Google（`www.google.com/s2/favicons?domain=<domain>&sz=128`）。只接受由小写字母、数字、连字符组成的 ASCII 域名。个人邮箱域名跳过这一步，避免所有 Gmail 发件人都显示 Google 标志。
 
-披露范围：Gravatar 得知地址的哈希；图标服务得知发件域名的明文。所有请求都经**该账号的网络路由**下载，复用远程图片的下载约束（公网地址、重定向复检、大小与解码校验，结果重新编码）；自定义代理路由无法验证目的地，因此不取、也不回退直连。图标常为 ICO，核心用受限解码取最大尺寸并重新编码为 PNG，ICO 因此也成为远程图片可接受的类型之一。同一时刻最多 3 个头像查找在途，其余排队，避免长列表尾部因超时被误记为无头像。前端始终先显示按地址稳定着色的首字母头像，取到后覆盖；`icon` 在白底上完整显示而不裁切。
+披露范围：Gravatar 得知地址的哈希，图标服务得知发件域名明文。所有请求经该账号路由，复用远程图片的地址策略、重定向与解码约束；显式开启 `imageProxyDns` 的自定义代理可代解析 HTTPS 域名，未开启时拒绝，不回退直连。头像的 `senderAvatars` 开关独立于正文图片许可。最大 3 个头像查找在途，其余排队；缓存读取前后、排队结束和网络前后核对账号来源及连接版本，旧结果不能覆盖当前账号。前端先显示首字母头像，获得照片或图标后覆盖。
 
-远程图片下载：地址是明文 `http://`、使用默认端口且主机是域名时，先尝试同一地址的 `https://`（单独 10 秒上限），失败才回退到原地址；带显式端口或 IP 字面量的地址不升级。这样既避免明文传输，也让邮件里常见的 `http://` 图片在 TUN / Fake-IP 代理下可用——该环境下域名解析为 198.18.0.0/15 的映射地址，明文 HTTP 无法验证目的地而被拒绝，只有 HTTPS 通过证书校验才放行。HTTPS 到 HTTP 的重定向降级仍然拒绝。
+远程图片下载：默认端口的 HTTP 域名先尝试 HTTPS（10 秒子预算），普通直连失败才尝试原 URL；代理域名只走 HTTPS，不回退明文。每跳复检，HTTPS 重定向不降级。类型以真实内容为准，允许缺失或任意误标的 Content-Type 后进入受支持格式的有界解码；有效 JPEG 返回已验证原字节，其余栅格/受限 SVG 转静态 PNG，输出最多 16 MiB。HTML 错误页和未知格式不会因图片响应头而放行。详细格式与限额见[网络与安全](../architecture/network-security.md)。CID / data 的声明类型规则保持独立。
 
-图片缓存：核心在数据目录下维护 `image-cache/`，保存已校验并重新编码的 PNG / JPEG，文件名是键的 SHA-256，磁盘上不出现 URL、地址或域名。内容包括头像（按地址）、域名图标（按域名）和已下载的邮件远程图片（按 URL）。命中后无需联网；邮件图片是否可显示仍由宿主按图片策略和文档授权先判断，命中不放宽策略，也仍要求当前有效的文档绑定。总量上限约 200 MB，超限按最近使用时间清理到约 160 MB；头像与图标保留 7 天，邮件图片保留 30 天，超过 60 天未使用的条目在启动时删除。查不到头像或图标的结果只在内存记 1 小时，不落盘。缓存读写失败一律当作未命中，不影响显示。
+图片缓存：数据目录 `image-cache/` 保存已校验的 PNG/JPEG，文件名为键的 SHA-256，不以 URL、发件地址或域名命名。正文、头像与域名图标的键均包含账号、邮箱来源、连接版本和解码缓存版本；不读取旧的全局 URL/地址缓存。命中仍校验当前授权与身份，代理/图片策略更改后不能跨版本复用。单条最多 16 MiB，总量上限约 200 MiB，超限按最近使用时间清理到约 160 MiB；头像和图标保留 7 天，正文图片保留 30 天，超过 60 天未使用的条目启动时清理。头像失败不做负缓存，避免短暂断网被当作一小时无头像；正文失败只在当前阅读中合并，可显式重试。磁盘缓存失败不影响已经成功解码的图片显示。
 
 `clearImageCache()` 对应 `image_cache_clear`，无参数、无数据：删除磁盘与内存中的全部缓存条目。应用自身 CSP 的 `img-src` 为显示头像增加了 `data:`；邮件正文所在的隔离文档不受影响。
 

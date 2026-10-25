@@ -2,9 +2,11 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use super::MailxCore;
+use crate::net::images::ImageFetchError;
 use crate::{
     AppError, ErrorCode,
     accounts::AccountService,
@@ -20,27 +22,67 @@ pub struct BodyBinding {
     raw: StoredBlob,
     sanitizer_version: u32,
     remote_images: Arc<Mutex<RemoteImages>>,
+    remote_cancelled: tokio::sync::watch::Sender<bool>,
 }
 
 const MAX_REMOTE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const IMAGE_RETRY_COOLDOWN: Duration = Duration::from_secs(2);
 /// How long a downloaded message image is reused without asking the sender again.
 const REMOTE_IMAGE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Default)]
 struct RemoteImages {
     images: HashMap<String, InlineImage>,
+    failures: HashMap<String, ImageFetchError>,
+    requests: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    statuses: HashMap<usize, RemoteImageStatus>,
+    last_retry: Option<Instant>,
     released: bool,
 }
 
+/// Safe diagnostics for the trusted reader. No source URL or response text.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteImageStatus {
+    pub index: usize,
+    pub loading: bool,
+    pub error: Option<ImageFetchError>,
+}
+
+fn remote_cache_key(binding: &BodyBinding, url: &str) -> String {
+    // Account revision includes route and proxy policy changes. Never reuse the
+    // previous global URL cache after introducing delegated proxy DNS.
+    format!(
+        "remote-v2:{}:{}:{}:{url}",
+        binding.identity.account_id,
+        binding.identity.mailbox_source_id,
+        binding.identity.account_revision,
+    )
+}
+
+fn unavailable<T>(_: T) -> ImageFetchError {
+    ImageFetchError::Cancelled
+}
+
 impl BodyBinding {
+    pub fn account_id(&self) -> &str {
+        &self.identity.account_id
+    }
+
     pub fn email_id(&self) -> &str {
         &self.identity.message_id
     }
 
     /// Ends image reuse for this reading, including all clones and pending loads.
     pub fn release_remote_images(&self) {
+        // Store cancellation even if nobody has subscribed yet. Pending
+        // request/dial slots must not turn into new network work after release.
+        self.remote_cancelled.send_replace(true);
         if let Ok(mut cache) = self.remote_images.lock() {
             cache.images.clear();
+            cache.failures.clear();
+            cache.requests.clear();
+            cache.statuses.clear();
             cache.released = true;
         }
     }
@@ -53,16 +95,32 @@ impl BodyBinding {
         Ok(cache.images.get(url).cloned())
     }
 
-    fn cache_remote_image(&self, url: String, image: &InlineImage) -> Result<(), AppError> {
+    fn cache_remote_image(&self, url: String, image: &InlineImage) -> Result<(), ImageFetchError> {
+        let mut cache = self.remote_images.lock().map_err(unavailable)?;
+        if cache.released {
+            return Err(ImageFetchError::Cancelled);
+        }
+        let retained: usize = cache.images.values().map(|image| image.bytes.len()).sum();
+        if !cache.images.contains_key(&url) {
+            // Every successful response remains available for a retry even if
+            // the optional disk cache cannot retain it. Budget exhaustion is a
+            // visible failure, never a silently uncached successful response.
+            if image.bytes.len() > MAX_REMOTE_CACHE_BYTES.saturating_sub(retained) {
+                cache.failures.insert(url, ImageFetchError::TooLarge);
+                return Err(ImageFetchError::TooLarge);
+            }
+            cache.images.insert(url, image.clone());
+        }
+        Ok(())
+    }
+
+    fn image_status(&self, status: RemoteImageStatus) -> Result<(), AppError> {
         let mut cache = self.remote_images.lock().map_err(|_| internal())?;
         if cache.released {
             return Err(missing());
         }
-        let retained: usize = cache.images.values().map(|image| image.bytes.len()).sum();
-        if !cache.images.contains_key(&url)
-            && retained + image.bytes.len() <= MAX_REMOTE_CACHE_BYTES
-        {
-            cache.images.insert(url, image.clone());
+        if status.loading || cache.statuses.contains_key(&status.index) {
+            cache.statuses.insert(status.index, status);
         }
         Ok(())
     }
@@ -129,6 +187,7 @@ fn read_links(
             raw,
             sanitizer_version,
             remote_images: Arc::default(),
+            remote_cancelled: tokio::sync::watch::channel(false).0,
         },
     }))
 }
@@ -176,6 +235,7 @@ impl MailxCore {
                     raw: body.raw,
                     sanitizer_version: body.sanitizer_version,
                     remote_images: Arc::default(),
+                    remote_cancelled: tokio::sync::watch::channel(false).0,
                 },
             })
         })
@@ -234,12 +294,110 @@ impl MailxCore {
 
     /// Loads only a renderer-created image index from a current document. The
     /// trusted host must check its image policy/document grant before calling.
-    /// Validated bytes live only in this reading binding; nothing is persisted.
+    /// Validated bytes are cached in this binding and in an account/revision
+    /// scoped disk cache. Cache hits never authorize an otherwise invalid read.
     pub async fn body_remote_image(
         &self,
         binding: BodyBinding,
         index: usize,
     ) -> Result<InlineImage, AppError> {
+        self.body_remote_image_detailed(binding, index)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn body_remote_image_detailed(
+        &self,
+        binding: BodyBinding,
+        index: usize,
+    ) -> Result<InlineImage, ImageFetchError> {
+        let mut cancelled = binding.remote_cancelled.subscribe();
+        let result = if *cancelled.borrow() {
+            Err(ImageFetchError::Cancelled)
+        } else {
+            tokio::select! {
+                biased;
+                _ = cancelled.changed() => Err(ImageFetchError::Cancelled),
+                result = self.load_remote_image(&binding, index) => result,
+            }
+        };
+        // Released bindings cannot regain status through a late completion.
+        let _ = binding.image_status(RemoteImageStatus {
+            index,
+            loading: false,
+            error: result.as_ref().err().copied(),
+        });
+        result
+    }
+
+    /// A read-only snapshot for a trusted host, not for the mail iframe.
+    pub async fn body_image_status(
+        &self,
+        binding: BodyBinding,
+    ) -> Result<Vec<RemoteImageStatus>, AppError> {
+        let core = self.clone();
+        tokio::task::spawn_blocking(move || {
+            check(&*core.accounts()?, &binding)?;
+            let cache = binding.remote_images.lock().map_err(|_| internal())?;
+            if cache.released {
+                return Err(missing());
+            }
+            let mut statuses: Vec<_> = cache.statuses.values().cloned().collect();
+            statuses.sort_by_key(|status| status.index);
+            Ok(statuses)
+        })
+        .await
+        .map_err(|_| internal())?
+    }
+
+    /// A trusted host can issue a fresh document token for this independent
+    /// reading. Only failed resources become eligible for a new fetch; already
+    /// successful images survive without relying on the optional disk cache.
+    pub async fn body_retry_images(&self, binding: BodyBinding) -> Result<BodyBinding, AppError> {
+        let core = self.clone();
+        tokio::task::spawn_blocking(move || {
+            check(&*core.accounts()?, &binding)?;
+            let mut cache = binding.remote_images.lock().map_err(|_| internal())?;
+            if cache.released || *binding.remote_cancelled.borrow() {
+                return Err(missing());
+            }
+            if cache.statuses.values().any(|status| status.loading)
+                || cache
+                    .last_retry
+                    .is_some_and(|last| last.elapsed() < IMAGE_RETRY_COOLDOWN)
+            {
+                return Err(AppError::validation("imageRetry"));
+            }
+            let now = Instant::now();
+            cache.last_retry = Some(now);
+            let images = RemoteImages {
+                images: cache.images.clone(),
+                statuses: cache
+                    .statuses
+                    .iter()
+                    .filter(|(_, status)| status.error.is_none())
+                    .map(|(&index, status)| (index, status.clone()))
+                    .collect(),
+                last_retry: Some(now),
+                ..Default::default()
+            };
+            Ok(BodyBinding {
+                identity: binding.identity.clone(),
+                raw: binding.raw.clone(),
+                sanitizer_version: binding.sanitizer_version,
+                remote_images: Arc::new(Mutex::new(images)),
+                remote_cancelled: tokio::sync::watch::channel(false).0,
+            })
+        })
+        .await
+        .map_err(|_| internal())?
+    }
+
+    async fn load_remote_image(
+        &self,
+        binding: &BodyBinding,
+        index: usize,
+    ) -> Result<InlineImage, ImageFetchError> {
         let core = self.clone();
         let saved = binding.clone();
         let url = tokio::task::spawn_blocking(move || {
@@ -257,33 +415,72 @@ impl MailxCore {
             .ok_or_else(missing)
         })
         .await
-        .map_err(|_| internal())??;
-        if let Some(image) = binding.cached_remote_image(&url)? {
-            check(&*self.accounts()?, &binding)?;
+        .map_err(unavailable)?
+        .map_err(unavailable)?;
+        binding
+            .image_status(RemoteImageStatus {
+                index,
+                loading: true,
+                error: None,
+            })
+            .map_err(unavailable)?;
+        let request = {
+            let mut cache = binding.remote_images.lock().map_err(unavailable)?;
+            if cache.released {
+                return Err(ImageFetchError::Cancelled);
+            }
+            cache.requests.entry(url.clone()).or_default().clone()
+        };
+        let _request = request.lock().await;
+        if let Some(image) = binding.cached_remote_image(&url).map_err(unavailable)? {
+            check(&*self.accounts().map_err(unavailable)?, binding).map_err(unavailable)?;
             return Ok(image);
-        } // The host has already checked the user's image policy for this document,
-        // so a hit here shows nothing a fresh download would not have shown.
-        let cache_key = format!("remote:{url}");
+        }
+        if let Some(error) = binding
+            .remote_images
+            .lock()
+            .map_err(unavailable)?
+            .failures
+            .get(&url)
+        {
+            return Err(*error);
+        }
+        let cache_key = remote_cache_key(binding, &url);
         if let Some(image) = self.images.get(&cache_key, REMOTE_IMAGE_TTL) {
-            check(&*self.accounts()?, &binding)?;
+            check(&*self.accounts().map_err(unavailable)?, binding).map_err(unavailable)?;
             binding.cache_remote_image(url, &image)?;
             return Ok(image);
         }
         let core = self.clone();
         let saved = binding.clone();
         let route = tokio::task::spawn_blocking(move || {
-            let service = core.accounts()?;
-            check(&service, &saved)?;
+            let service = core.accounts().map_err(unavailable)?;
+            check(&service, &saved).map_err(unavailable)?;
             service
                 .image_route(&saved.identity.account_id)
-                .map_err(|_| missing())
+                .map_err(|error| match error {
+                    crate::accounts::sync_plan::PlanError::CredentialMissing
+                    | crate::accounts::sync_plan::PlanError::CredentialUntrusted => {
+                        ImageFetchError::Proxy
+                    }
+                    crate::accounts::sync_plan::PlanError::Account(_) => ImageFetchError::Cancelled,
+                })
         })
         .await
-        .map_err(|_| internal())??;
-        let image = crate::net::images::fetch(&route, url.clone()).await?;
-        check(&*self.accounts()?, &binding)?;
-        self.images.put(&cache_key, &image);
+        .map_err(unavailable)??;
+        let image = match crate::net::images::fetch(&route, url.clone()).await {
+            Ok(image) => image,
+            Err(error) => {
+                let mut cache = binding.remote_images.lock().map_err(unavailable)?;
+                if !cache.released {
+                    cache.failures.insert(url, error);
+                }
+                return Err(error);
+            }
+        };
+        check(&*self.accounts().map_err(unavailable)?, binding).map_err(unavailable)?;
         binding.cache_remote_image(url, &image)?;
+        self.images.put(&cache_key, &image);
         Ok(image)
     }
 

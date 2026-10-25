@@ -168,7 +168,7 @@ impl Storage {
     }
 
     fn load_route(&self, id: &str) -> Result<(u32, RouteConfig, Option<ProxySecret>), AppError> {
-        self.db.query_row("SELECT revision,kind,proxy_kind,host,port,username,secret_ref,generation,trusted_endpoint_json FROM network_routes WHERE account_id=?1", [id], |r| {
+        self.db.query_row("SELECT revision,kind,proxy_kind,host,port,username,secret_ref,generation,trusted_endpoint_json,image_proxy_dns FROM network_routes WHERE account_id=?1", [id], |r| {
             let revision = r.get(0)?;
             let kind: String = r.get(1)?;
             if kind == "direct" { return Ok(Ok((revision,RouteConfig::Direct,None))); }
@@ -186,7 +186,7 @@ impl Storage {
                     let endpoint = proxy_endpoint(proxy_kind,&host,port,&username);
                     ProxyAuthenticationSummary { username,password_configured:secret.is_some(),trust: if secret.as_ref().is_some_and(|s|s.trusted_endpoint == endpoint) {CredentialTrust::Trusted} else {CredentialTrust::NeedsConfirmation} }
                 });
-                Ok((revision,RouteConfig::Custom {proxy_kind,host,port,dns:DnsPolicy::Proxy,authentication},secret))
+                Ok((revision,RouteConfig::Custom {proxy_kind,host,port,dns:DnsPolicy::Proxy,image_proxy_dns:r.get(9)?,authentication},secret))
             };
             Ok(parse())
         })?
@@ -335,9 +335,10 @@ impl Storage {
                 host,
                 port,
                 dns: _,
+                image_proxy_dns,
                 authentication,
             } => {
-                tx.execute("INSERT INTO network_routes(account_id,revision,kind,proxy_kind,host,port,dns,username,secret_ref,generation,trusted_endpoint_json) VALUES (?1,?2,'custom',?3,?4,?5,'proxy',?6,?7,?8,?9)",params![account.id,account.route_revision,enum_name(proxy_kind)?,host,port,authentication.as_ref().map(|a|&a.username),snapshot.proxy_secret.as_ref().map(|s|&s.secret_ref),snapshot.proxy_secret.as_ref().map(|s|s.generation),snapshot.proxy_secret.as_ref().map(|s|encode(&s.trusted_endpoint)).transpose()?])?;
+                tx.execute("INSERT INTO network_routes(account_id,revision,kind,proxy_kind,host,port,dns,username,secret_ref,generation,trusted_endpoint_json,image_proxy_dns) VALUES (?1,?2,'custom',?3,?4,?5,'proxy',?6,?7,?8,?9,?10)",params![account.id,account.route_revision,enum_name(proxy_kind)?,host,port,authentication.as_ref().map(|a|&a.username),snapshot.proxy_secret.as_ref().map(|s|&s.secret_ref),snapshot.proxy_secret.as_ref().map(|s|s.generation),snapshot.proxy_secret.as_ref().map(|s|encode(&s.trusted_endpoint)).transpose()?,image_proxy_dns])?;
             }
         }
         if let Some((request_id, canonical)) = &journal.create_request {

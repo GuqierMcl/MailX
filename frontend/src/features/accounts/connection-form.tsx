@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { clientFailure, type ClientFailure } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
-import { clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
+import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 
 type FormProps = {
   /** The saved account whose connection is edited; `null` for a new one. */
@@ -147,7 +147,7 @@ export function ConnectionForm({
     || oldProxyAuth?.trust === 'needsConfirmation')
 
   function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
-    setDraft((current) => ({ ...current, [key]: value }))
+    setDraft((current) => changeDraft(current, key, value))
     onDirtyChange(true)
     setError(null)
   }
@@ -268,6 +268,13 @@ export function ConnectionForm({
                   <TextField id="proxyUsername" label="代理用户名" value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
                   <PasswordField id="proxyPassword" label="代理密码" value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} />
                 </>}
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel htmlFor="imageProxyDns">通过此代理加载 HTTPS 图片</FieldLabel>
+                    <FieldDescription>由此代理解析并连接图片服务器，应用无法独立验证最终 IP。更改代理地址或身份后需重新开启。</FieldDescription>
+                  </FieldContent>
+                  <Switch id="imageProxyDns" checked={draft.imageProxyDns} onCheckedChange={(value) => change('imageProxyDns', value)} />
+                </Field>
               </>}
           </SettingsGroup>
         </FieldSet>

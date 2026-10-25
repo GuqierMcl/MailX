@@ -388,6 +388,28 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 已执行并通过：`cargo test -p mailx-core --locked`（421 项单元测试 + 31 项集成测试）、`cargo clippy -p mailx-core --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`。
 
+### 2026-10-25 Windows 远程图片：双栈 Fake-IP 与 CDN 类型标错
+
+以下为第一轮定位与修复记录；随后对 DNS 候选筛选和实际图片格式识别的扩展见下一节。
+
+- 用户已点击加载图片并保存自动加载。只读检查确认本机设置为 `automatic`、目标账号使用直连路由；已缓存样本是远程图片，无 CID 部分。真实 WebView2 控制台显示 `/remote/…` 返回 404。
+- 本机 DNS 同时返回 IPv4 `198.18.0.0/15` 与 IPv6 `2001:2::/48` Fake-IP 映射，旧校验只兼容 IPv4，因 IPv6 不被接受而拒绝整个答案。修复将 IPv6 基准测试网段纳入现有的 HTTPS 域名映射例外，仍要求原始域名 TLS 校验，IP 字面量、明文 HTTP、其他私网和混合不安全答案继续拒绝。IPv6 网段的用途见 [IANA 注册表](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)，Fake-IP 配置实例见 [sing-box 文档](https://sing-box.sagernet.org/configuration/dns/fakeip/)。
+- 地址修复后，GitHub 图片通过；网易 CDN 的另一张图片返回 HTTP 200、`image/jpeg;charset=UTF-8`，但实际 10,101 字节为 PNG，原解码器因声明不匹配拒绝。远程栅格图片现在要求受支持的图片响应类型，再按真实文件格式完整解码校验，向协议返回正确 MIME；未知响应类型、HTML / SVG 伪装、截断文件与原有预算限制仍拒绝。CID / data 图片的声明类型要求不变。
+- 用生产下载路径重新请求两种图片均成功，返回 PNG（网易 10,101 字节、GitHub 1,707 字节）。在自动重编译后的 Windows 原生开发窗口中分别打开邮件，现场确认网易顶部品牌图片和 GitHub Logo 恢复显示。该证据覆盖本机网络与这两个来源，不代表其他平台或全部邮件格式已验证。
+- 回归覆盖 IPv4 / IPv6 单独和双栈两种顺序、IPv6 前缀边界、不安全混合 DNS 与字面量 / HTTP 拒绝，以及 JPEG / PNG 响应头互相标错、带 charset 的类型、损坏和非栅格内容拒绝。`cargo test --workspace --locked` 通过：core 422、账号集成 31、desktop 59，共 512 项；1 项真实凭据库测试按默认忽略。工作区 Clippy（`-D warnings`）、Rust 格式和差异检查通过。临时本机诊断测试与日志已移除，未将账号、正文或图片地址写入测试夹具。
+
+### 2026-10-25 远程图片 A/B：兼容、代理路径与失败重试
+
+实现与契约见[远程图片调研与优化](../architecture/remote-image-loading.md)、[网络与安全](../architecture/network-security.md)和[应用 API](../contracts/app-api.md)。正文保留单一“不再提示”，没有增加发件人或域名许可列表。
+
+- 图片按实际字节识别，响应类型缺失、通用类型或误标不再单独阻止有效图片。支持 PNG/APNG、JPEG、GIF、WebP、ICO、BMP、TIFF、PNM、QOI、DDS/DXT、Radiance HDR、Farbfeld、TGA v2 与受限 SVG；除验证后的 JPEG 外统一输出静态 PNG。测试覆盖各格式、错误 MIME、截断与损坏、输出和解码预算，SVG 不加载外部资源。CID/data 保留独立规则，AVIF/HEIF/JXL/OpenEXR 尚未支持。
+- 直连 DNS 只解析一次，筛选允许的候选后固定实际连接地址，通过成熟连接器处理同族回退与双栈竞争。自定义 SOCKS5/HTTP CONNECT 代理可在账号设置显式开启 HTTPS 图片域名解析；v10 迁移默认关闭，代理端点或认证身份变化须重新开启。受控本地代理测试覆盖目标域名不在本地解析、原域名 TLS 校验、代理失败不直连、重定向检查和取消后的解码配额。
+- 可信阅读区显示固定失败原因并提供手动重试。状态接口绑定当前邮件、文档令牌及显示许可；失败资源可重取，成功图片即使磁盘缓存已清理也复用内存。关闭正文、收紧策略和保存账号连接后撤销旧授权并取消旧阅读请求。正文与头像缓存按账号、来源及连接版本隔离，不复用旧全局键；头像网络失败不再长期缓存为空。
+- `cargo test --workspace --locked --quiet` 通过：core 448、账号集成 31、desktop 61，共 **540 项通过**，1 项真实系统凭据库测试按默认忽略。`bun run frontend:test --maxWorkers=4` 通过：48 个文件、**446 项测试**；初次高并发运行中的编辑器懒加载测试曾超时，降低 worker 数后全量复跑通过。生成 DTO 一致性、TypeScript、ESLint、生产构建、工作区 Clippy（禁止警告）、Rust 格式和差异检查通过。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
+- Windows 原生合成测试已使用本轮重新构建的 `body-webview-test` 二进制执行，WebView2 / EdgeDriver 均为 155.0.4283.62，**48/48 断言通过、canary 外部请求为 0**。覆盖中文正文、CID 图片、原生链接点击、恶意 HTML 与策略探针；使用临时合成 profile 和独立 WebView 数据目录，不访问真实账号或系统凭证。报告位于 `target/body-webview-evidence/remote-image-ab-windows-final/report.json`（本地生成证据，不提交）。验证中修复了新 profile 尚未创建便初始化图片缓存导致首次启动失败的问题，并补回归；测试 feature 的通知命令返回 unsupported，以配合其不装配通知模块的隔离方式。
+
+本轮原生 harness 不覆盖远程代理软件矩阵。Mihomo / sing-box 的 SOCKS、CONNECT、TUN、任意自定义 Fake-IP 网段及 macOS/Linux 本轮行为仍待实机验证；此前 Windows 网易/GitHub 两个来源的现场结果不扩展为全部服务商和代理兼容承诺。未发送真实邮件。
+
 ## 6. 窗口行为的手动验证
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：

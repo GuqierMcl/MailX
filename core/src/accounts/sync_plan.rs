@@ -79,7 +79,8 @@ impl AccountService {
             .get(&profile.secret_ref)?
             .ok_or(PlanError::CredentialMissing)?;
 
-        let route = self.image_route(account_id)?;
+        let mut route = self.image_route(account_id)?;
+        route.image_proxy_dns = false;
 
         Ok(SyncPlan {
             mailbox_source_id: account.mailbox_source_id.clone(),
@@ -114,7 +115,8 @@ impl AccountService {
             .secrets
             .get(&profile.secret_ref)?
             .ok_or(PlanError::CredentialMissing)?;
-        let route = self.image_route(account_id)?;
+        let mut route = self.image_route(account_id)?;
+        route.image_proxy_dns = false;
 
         Ok(SmtpPlan {
             login: SmtpLogin {
@@ -141,6 +143,7 @@ impl AccountService {
                 host,
                 port,
                 authentication,
+                image_proxy_dns,
                 ..
             } => {
                 let auth = match authentication {
@@ -163,6 +166,7 @@ impl AccountService {
                     }
                 };
                 NetRoute {
+                    image_proxy_dns: *image_proxy_dns,
                     proxy: Some(ProxyRoute {
                         kind: *proxy_kind,
                         host: host.clone(),
@@ -312,6 +316,89 @@ pub(crate) mod tests {
             (username.as_str(), password.expose_secret()),
             ("proxy-user", "proxy-secret")
         );
+    }
+
+    #[test]
+    fn image_proxy_dns_requires_explicit_consent_and_survives_reload() {
+        let route = json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1",
+            "port":1080,"dns":"proxy","authentication":null});
+        let (directory, mut service, account) = setup(route.clone());
+        assert!(!service.image_route(&account.id).unwrap().image_proxy_dns);
+        let unconfirmed = update(&mut service, &account, |value| {
+            value["route"] = route.clone();
+            value["route"]["imageProxyDns"] = json!(true);
+        });
+        assert!(!service.image_route(&account.id).unwrap().image_proxy_dns);
+        let granted = update(&mut service, &unconfirmed, |value| {
+            value["route"] = route.clone();
+            value["route"]["imageProxyDns"] = json!(true);
+            value["route"]["confirmImageProxyDns"] = json!(true);
+        });
+        assert!(granted.route_revision > unconfirmed.route_revision);
+        assert!(service.image_route(&account.id).unwrap().image_proxy_dns);
+        assert!(
+            !service
+                .sync_plan(&account.id)
+                .unwrap()
+                .route
+                .image_proxy_dns
+        );
+        assert!(
+            !service
+                .smtp_plan(&account.id)
+                .unwrap()
+                .route
+                .image_proxy_dns
+        );
+        let preserved = update(&mut service, &granted, |value| {
+            value["route"] = route.clone();
+            value["route"]["imageProxyDns"] = json!(true);
+        });
+        assert_eq!(preserved.route_revision, granted.route_revision);
+        drop(service);
+        let service =
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
+        assert!(service.image_route(&account.id).unwrap().image_proxy_dns);
+        // Output never contains the transient confirmation flag.
+        let encoded = serde_json::to_value(service.get(&account.id).unwrap()).unwrap();
+        assert_eq!(encoded["route"]["imageProxyDns"], true);
+        assert!(encoded["route"].get("confirmImageProxyDns").is_none());
+    }
+
+    #[test]
+    fn proxy_changes_revoke_old_image_consent_and_explicit_regrant_is_possible() {
+        for (field, changed) in [
+            ("host", json!("proxy.other.example")),
+            ("port", json!(1081)),
+            ("proxyKind", json!("httpConnect")),
+            (
+                "authentication",
+                json!({"username":"new-user","password":{"action":"replace","value":"proxy-secret"}}),
+            ),
+        ] {
+            let mut route = json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1",
+                "port":1080,"dns":"proxy","authentication":null,"imageProxyDns":true,"confirmImageProxyDns":true});
+            let (_directory, mut service, account) = setup(route.clone());
+            route[field] = changed;
+            route["confirmImageProxyDns"] = json!(false);
+            let revoked = update(&mut service, &account, |value| {
+                value["route"] = route.clone()
+            });
+            assert!(
+                !service.image_route(&account.id).unwrap().image_proxy_dns,
+                "{field}"
+            );
+            assert!(revoked.route_revision > account.route_revision);
+            route["confirmImageProxyDns"] = json!(true);
+            let granted = update(&mut service, &revoked, |value| {
+                value["route"] = route.clone()
+            });
+            assert!(
+                service.image_route(&account.id).unwrap().image_proxy_dns,
+                "{field}"
+            );
+            assert!(granted.route_revision > revoked.route_revision);
+        }
     }
 
     #[test]

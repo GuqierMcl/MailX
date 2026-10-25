@@ -81,6 +81,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["drafts"],
         sql: include_str!("migrations/0009_draft_body_html.sql"),
     },
+    Migration {
+        version: 10,
+        description: "explicit image proxy DNS policy",
+        required_tables: &["network_routes"],
+        sql: include_str!("migrations/0010_image_proxy_dns.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -485,7 +491,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 9);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 10);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -656,7 +662,35 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            9
+            10
+        );
+    }
+
+    #[test]
+    fn image_proxy_dns_migration_keeps_existing_routes_restricted() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(9)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id,revision,display_name,email_address,mailbox_source_id,created_at,updated_at) VALUES ('a',1,'Work','work@example.com','s','t','t')",
+            [],
+        ).unwrap();
+        db.execute(
+            "INSERT INTO network_routes(account_id,revision,kind,proxy_kind,host,port,dns) VALUES ('a',1,'custom','socks5','127.0.0.1',1080,'proxy')",
+            [],
+        ).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let (host, allowed): (String, bool) = db
+            .query_row(
+                "SELECT host,image_proxy_dns FROM network_routes WHERE account_id='a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert!(!allowed);
+        assert!(
+            db.execute("UPDATE network_routes SET image_proxy_dns=2", [])
+                .is_err()
         );
     }
 

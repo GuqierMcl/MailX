@@ -61,6 +61,8 @@ fn main() {
         MailTheme,
         AppearanceSettings,
         RemoteImagePolicy,
+        ImageFetchError,
+        RemoteImageStatus,
         SecuritySettings,
         LayoutSettings,
         PreviewLines,

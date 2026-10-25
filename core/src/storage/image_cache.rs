@@ -19,7 +19,7 @@ use crate::{AppError, ErrorCode, mail::render::InlineImage};
 const MAX_TOTAL_BYTES: u64 = 200 * 1024 * 1024;
 /// Trimming stops below this, so one trim buys room for many writes.
 const TRIM_TARGET_BYTES: u64 = 160 * 1024 * 1024;
-const MAX_ENTRY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_ENTRY_BYTES: usize = crate::mail::render::MAX_REMOTE_IMAGE_OUTPUT_BYTES;
 /// Entries untouched for this long are removed whatever their size.
 const MAX_IDLE: Duration = Duration::from_secs(60 * 24 * 60 * 60);
 const MAGIC: &[u8] = b"MXIC1\n";

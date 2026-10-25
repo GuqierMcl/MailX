@@ -1385,6 +1385,7 @@ mod tests {
                 socket.write_all(response.as_bytes()).await.unwrap();
             });
             let route = NetRoute {
+                image_proxy_dns: false,
                 proxy: Some(ProxyRoute {
                     kind: ProxyKind::HttpConnect,
                     host: "127.0.0.1".into(),

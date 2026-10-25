@@ -54,6 +54,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     fetchBody: vi.fn<MailxClient['fetchBody']>().mockRejectedValue(new Error('unavailable')),
     prepareBody: vi.fn<MailxClient['prepareBody']>().mockResolvedValue({ documentToken: 'test-document' }),
     releaseBody: vi.fn<MailxClient['releaseBody']>().mockResolvedValue(undefined),
+    imageStatus: vi.fn<MailxClient['imageStatus']>().mockResolvedValue([]),
+    retryImages: vi.fn<MailxClient['retryImages']>().mockResolvedValue({ documentToken: 'retry-document' }),
     bodyLinks: vi.fn<MailxClient['bodyLinks']>().mockImplementation(async (_id, documentToken) => ({ documentToken, links: [] })),
     requestLink: vi.fn<MailxClient['requestLink']>().mockResolvedValue(undefined),
     openLink: vi.fn<MailxClient['openLink']>().mockResolvedValue(undefined),

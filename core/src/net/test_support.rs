@@ -80,6 +80,7 @@ pub(crate) async fn fake_http_connect(upstream: u16) -> (u16, Arc<Mutex<Vec<Stri
 /// A route through a local proxy on `port`.
 pub(crate) fn proxy_route(kind: ProxyKind, port: u16) -> NetRoute {
     NetRoute {
+        image_proxy_dns: false,
         proxy: Some(ProxyRoute {
             kind,
             host: "127.0.0.1".into(),

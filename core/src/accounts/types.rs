@@ -110,6 +110,12 @@ pub enum RouteInput {
         host: String,
         port: u16,
         dns: DnsPolicy,
+        /// HTTPS images may delegate target DNS to this configured proxy.
+        #[serde(default)]
+        image_proxy_dns: bool,
+        /// Explicit grant for the endpoint supplied in this request. Never persisted.
+        #[serde(default)]
+        confirm_image_proxy_dns: bool,
         authentication: Option<ProxyAuthenticationInput>,
     },
 }
@@ -251,6 +257,9 @@ pub enum RouteConfig {
         host: String,
         port: u16,
         dns: DnsPolicy,
+        /// Defaults closed when reading snapshots written before this policy existed.
+        #[serde(default)]
+        image_proxy_dns: bool,
         authentication: Option<ProxyAuthenticationSummary>,
     },
 }
