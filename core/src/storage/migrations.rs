@@ -75,6 +75,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["outbox"],
         sql: include_str!("migrations/0008_outbox.sql"),
     },
+    Migration {
+        version: 9,
+        description: "authoritative rich-text draft body",
+        required_tables: &["drafts"],
+        sql: include_str!("migrations/0009_draft_body_html.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -479,7 +485,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 8);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 9);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -602,6 +608,55 @@ mod tests {
                 .unwrap(),
             0,
             "the queue goes with its account"
+        );
+    }
+
+    #[test]
+    fn rich_drafts_migration_preserves_legacy_text_and_queued_mime() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(8)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.com', 's', 't', 't')", [],
+        ).unwrap();
+        let draft = "d".repeat(36);
+        db.execute(
+            "INSERT INTO drafts(id, account_id, kind, to_addresses, cc_addresses, bcc_addresses,
+             subject, body_text, created_at, updated_at, client_mutation_id, create_canonical)
+             VALUES (?1, 'a', 'new', '[]', '[]', '[]', 'old', ?2, 't', 't', ?3, '{}')",
+            [&draft, "<literal>\n\n第二行", &"m".repeat(36)],
+        )
+        .unwrap();
+        let mime = b"Content-Type: text/plain; charset=utf-8\r\n\r\nlegacy snapshot\r\n";
+        db.execute(
+            "INSERT INTO outbox(id, draft_id, account_id, client_mutation_id, queue_canonical, message_id,
+             mime, envelope, subject, recipients_preview, recipient_count, state, not_before,
+             first_queued_at, created_at, updated_at)
+             VALUES (?1, ?2, 'a', ?3, '{}', '<old@example.com>', ?4, '{}', 'old', '[]', 1, 'queued', 't', 't', 't', 't')",
+            rusqlite::params!["q".repeat(36), draft, "n".repeat(36), mime.as_slice()],
+        ).unwrap();
+
+        apply(&mut db, MIGRATIONS).unwrap();
+        let (text, html, revision): (String, Option<String>, u32) = db
+            .query_row(
+                "SELECT body_text, body_html, revision FROM drafts",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(text, "<literal>\n\n第二行");
+        assert_eq!(html, None);
+        assert_eq!(revision, 1);
+        assert_eq!(
+            db.query_row("SELECT mime FROM outbox", [], |row| row
+                .get::<_, Vec<u8>>(0))
+                .unwrap(),
+            mime
+        );
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            9
         );
     }
 

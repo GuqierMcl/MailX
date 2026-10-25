@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { fireEvent } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import type { Draft } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
@@ -9,12 +9,20 @@ import { TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
 import { ComposerApp } from './composer-app'
 import { AUTOSAVE_DELAY_MS } from './use-draft-editor'
 
+
+// The real editing engine is covered by mail-body-editor and composer-rich-text tests.
+vi.mock('./mail-body-editor', () => ({
+  default: ({ value, onChange, readOnly }: { value: string; onChange: (html: string) => void; readOnly?: boolean }) => (
+    <textarea aria-label="正文" value={value} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
+  ),
+}))
+
 const DRAFT_ID = '3f2b8c1e-9a4d-4e6f-8b1a-2c3d4e5f6a7b'
 const account = exampleAccount()
 
 function draft(overrides: Partial<Draft> = {}): Draft {
   return {
-    id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '',
+    id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
     inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, ...overrides,
   }
 }
@@ -24,7 +32,7 @@ function setup(initial: Draft = draft(), fresh = false) {
   let current = initial
   client.getDraft.mockImplementation(async () => structuredClone(current))
   client.updateDraft.mockImplementation(async (request) => {
-    current = { ...current, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyText: request.bodyText, revision: current.revision + 1 }
+    current = { ...current, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyHtml: request.bodyHtml, bodyText: request.bodyHtml.replace(/<[^>]+>/g, ''), revision: current.revision + 1 }
     return structuredClone(current)
   })
   const handlers: { close: () => void; quit: () => void } = { close: () => undefined, quit: () => undefined }
@@ -67,7 +75,7 @@ describe('composer window', () => {
   })
 
   it('closes an existing draft that was not changed without asking or writing', async () => {
-    const { client, handlers } = setup(draft({ subject: '周会', bodyText: '内容' }))
+    const { client, handlers } = setup(draft({ subject: '周会', bodyHtml: '内容' }))
     await body()
     await act(async () => { handlers.close() })
     await waitFor(() => expect(client.closeComposer).toHaveBeenCalled())
@@ -94,7 +102,7 @@ describe('composer window', () => {
     await act(async () => { handlers.close() })
     await userEvent.click(await screen.findByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(client.closeComposer).toHaveBeenCalled())
-    expect(client.updateDraft).toHaveBeenCalledWith(expect.objectContaining({ bodyText: '还没保存的正文' }))
+    expect(client.updateDraft).toHaveBeenCalledWith(expect.objectContaining({ bodyHtml: '还没保存的正文' }))
     expect(client.deleteDraft).not.toHaveBeenCalled()
     expect(AUTOSAVE_DELAY_MS).toBeGreaterThan(0)
   })
@@ -109,13 +117,13 @@ describe('composer window', () => {
   })
 
   it('不保存 on an existing draft restores the opening content and never deletes it', async () => {
-    const { client, handlers } = setup(draft({ subject: '周会', bodyText: '原文' }))
+    const { client, handlers } = setup(draft({ subject: '周会', bodyHtml: '原文' }))
     fireEvent.change(await body(), { target: { value: '改过的' } })
     await act(async () => { handlers.close() })
     await userEvent.click(await screen.findByRole('button', { name: '不保存' }))
     await waitFor(() => expect(client.closeComposer).toHaveBeenCalled())
     expect(client.deleteDraft).not.toHaveBeenCalled()
-    expect(client.updateDraft).toHaveBeenLastCalledWith(expect.objectContaining({ subject: '周会', bodyText: '原文' }))
+    expect(client.updateDraft).toHaveBeenLastCalledWith(expect.objectContaining({ subject: '周会', bodyHtml: '原文' }))
   })
 
   it('asks again with the failure dialog when 保存草稿 fails; cancel keeps the window, confirm closes', async () => {

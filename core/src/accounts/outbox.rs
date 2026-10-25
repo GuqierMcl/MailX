@@ -354,7 +354,7 @@ mod tests {
                 serde_json::from_value(json!({
                     "accountId": account_id,
                     "to": [{"name": null, "address": "li@example.org"}],
-                    "cc": [], "bcc": [], "subject": "hi", "bodyText": "hello",
+                    "cc": [], "bcc": [], "subject": "hi", "bodyHtml": "hello",
                     "clientMutationId": id(),
                 }))
                 .unwrap(),
@@ -430,7 +430,7 @@ mod tests {
             serde_json::from_value::<crate::drafts::types::UpdateDraftRequest>(json!({
                 "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
                 "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],
-                "subject": "changed", "bodyText": "x",
+                "subject": "changed", "bodyHtml": "x",
             }))
             .unwrap()
         };
@@ -622,7 +622,7 @@ mod tests {
             .create_draft(
                 serde_json::from_value(json!({
                     "accountId": account_id, "to": [], "cc": [], "bcc": [],
-                    "subject": "", "bodyText": "", "clientMutationId": id(),
+                    "subject": "", "bodyHtml": "", "clientMutationId": id(),
                 }))
                 .unwrap(),
                 "",

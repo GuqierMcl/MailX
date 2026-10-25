@@ -126,7 +126,7 @@ impl Fx {
                 serde_json::from_value(json!({
                     "accountId": account.id,
                     "to": [{"name": null, "address": "li@example.org"}],
-                    "cc": [], "bcc": [], "subject": "hi", "bodyText": "hello",
+                    "cc": [], "bcc": [], "subject": "hi", "bodyHtml": "hello",
                     "clientMutationId": id(),
                 }))
                 .unwrap(),
@@ -303,7 +303,7 @@ async fn nothing_is_sent_during_the_undo_window_and_canceling_keeps_it_unsent() 
     let update = serde_json::from_value(json!({
         "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
         "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],
-        "subject": "edited", "bodyText": "x",
+        "subject": "edited", "bodyHtml": "x",
     }))
     .unwrap();
     assert_eq!(fx.core.update_draft(update).unwrap().subject, "edited");
@@ -477,7 +477,7 @@ async fn a_failed_item_can_be_edited_and_sent_again_with_a_new_message_id() {
             serde_json::from_value(json!({
                 "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
                 "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],
-                "subject": "hi again", "bodyText": "hello",
+                "subject": "hi again", "bodyHtml": "hello",
             }))
             .unwrap(),
         )
@@ -596,7 +596,7 @@ async fn no_final_reply_is_unknown_and_is_never_retried_automatically() {
     // The draft stays locked while the outcome is unknown.
     let locked = serde_json::from_value(json!({
         "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
-        "to": [], "cc": [], "bcc": [], "subject": "", "bodyText": "",
+        "to": [], "cc": [], "bcc": [], "subject": "", "bodyHtml": "",
     }))
     .unwrap();
     assert_eq!(
@@ -839,7 +839,7 @@ async fn startup_recovers_interrupted_and_waiting_items() {
 fn blank_request(account: &Account) -> crate::CreateDraftRequest {
     serde_json::from_value(json!({
         "accountId": account.id, "to": [], "cc": [], "bcc": [],
-        "subject": " ", "bodyText": "\n ", "clientMutationId": id(),
+        "subject": " ", "bodyHtml": "\n ", "clientMutationId": id(),
     }))
     .unwrap()
 }
@@ -860,7 +860,7 @@ async fn draft_operations_emit_events_and_blank_drafts_are_hidden() {
         cc: vec![],
         bcc: vec![],
         subject: subject.into(),
-        body_text: String::new(),
+        body_html: String::new(),
     };
     let edited = fx.core.update_draft(update(&blank, "hi")).unwrap();
     assert_eq!(fx.core.list_drafts(None).unwrap().len(), 1);

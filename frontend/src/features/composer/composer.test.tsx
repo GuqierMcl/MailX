@@ -8,12 +8,20 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { Composer } from './composer'
 import { AUTOSAVE_DELAY_MS, SAVING_INDICATOR_DELAY_MS } from './use-draft-editor'
 
+
+// The real editing engine is covered by mail-body-editor and composer-rich-text tests.
+vi.mock('./mail-body-editor', () => ({
+  default: ({ value, onChange, readOnly }: { value: string; onChange: (html: string) => void; readOnly?: boolean }) => (
+    <textarea aria-label="正文" value={value} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
+  ),
+}))
+
 const DRAFT_ID = '3f2b8c1e-9a4d-4e6f-8b1a-2c3d4e5f6a7b'
 const account = exampleAccount({ senderName: '林薇' })
 
 function draft(overrides: Partial<Draft> = {}): Draft {
   return {
-    id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '',
+    id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
     inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, ...overrides,
   }
 }
@@ -23,7 +31,7 @@ function setup(initial: Draft = draft()) {
   let current = initial
   client.getDraft.mockImplementation(async () => structuredClone(current))
   client.updateDraft.mockImplementation(async (request) => {
-    current = { ...current, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyText: request.bodyText, revision: current.revision + 1 }
+    current = { ...current, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyHtml: request.bodyHtml, bodyText: request.bodyHtml.replace(/<[^>]+>/g, ''), revision: current.revision + 1 }
     return structuredClone(current)
   })
   const onSent = vi.fn()
@@ -78,7 +86,7 @@ describe('autosave', () => {
     expect(client.updateDraft).not.toHaveBeenCalled()
     await act(async () => { vi.advanceTimersByTime(20) })
     expect(client.updateDraft).toHaveBeenCalledTimes(1)
-    expect(client.updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: DRAFT_ID, expectedRevision: 1, bodyText: 'ab', accountId: account.id }))
+    expect(client.updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: DRAFT_ID, expectedRevision: 1, bodyHtml: 'ab', accountId: account.id }))
     expect(status()).toHaveTextContent('已保存')
   })
 
@@ -88,7 +96,7 @@ describe('autosave', () => {
     let finish: (value: Draft) => void = () => undefined
     const first = new Promise<Draft>((resolve) => { finish = resolve })
     client.updateDraft.mockReset()
-    client.updateDraft.mockReturnValueOnce(first).mockImplementation(async (request) => draft({ bodyText: request.bodyText, revision: 3 }))
+    client.updateDraft.mockReturnValueOnce(first).mockImplementation(async (request) => draft({ bodyHtml: request.bodyHtml, bodyText: request.bodyHtml.replace(/<[^>]+>/g, ''), revision: 3 }))
     vi.useFakeTimers()
     fireEvent.change(text, { target: { value: 'one' } })
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
@@ -96,16 +104,16 @@ describe('autosave', () => {
     fireEvent.change(text, { target: { value: 'two' } })
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1) })
     expect(client.updateDraft).toHaveBeenCalledTimes(1)
-    await act(async () => { finish(draft({ bodyText: 'one', revision: 2 })) })
+    await act(async () => { finish(draft({ bodyHtml: 'one', revision: 2 })) })
     expect(client.updateDraft).toHaveBeenCalledTimes(2)
-    expect(client.updateDraft).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 2, bodyText: 'two' }))
+    expect(client.updateDraft).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 2, bodyHtml: 'two' }))
   })
 
   it('reloads the latest draft and says so when the core reports a conflict', async () => {
     const { client, setCurrent } = setup()
     const text = await body()
     client.updateDraft.mockRejectedValueOnce(new MailxClientError({ code: 'conflict', message: 'x', field: null }))
-    setCurrent(draft({ bodyText: 'from elsewhere', revision: 5 }))
+    setCurrent(draft({ bodyHtml: 'from elsewhere', revision: 5 }))
     fireEvent.change(text, { target: { value: 'mine' } })
     await waitFor(() => expect(client.updateDraft).toHaveBeenCalled(), { timeout: 3000 })
     await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' })).toHaveValue('from elsewhere'))
@@ -149,6 +157,18 @@ describe('autosave', () => {
 })
 
 describe('sending', () => {
+  it('keeps confirmation when the core canonicalizes HTML during the preparation save', async () => {
+    const { client } = setup(draft({ to: [{ name: null, address: 'li@example.org' }] }))
+    const text = await body()
+    client.updateDraft.mockResolvedValueOnce(draft({ to: [{ name: null, address: 'li@example.org' }], bodyHtml: '<p>&quot;quoted&quot;</p>', bodyText: '"quoted"', revision: 2 }))
+    fireEvent.change(text, { target: { value: '<p>"quoted"</p>' } })
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await screen.findByRole('button', { name: '无主题，确认发送' })
+    await waitFor(() => expect(text).toHaveValue('<p>&quot;quoted&quot;</p>'))
+    expect(screen.getByRole('button', { name: '无主题，确认发送' })).toBeInTheDocument()
+    expect(client.queueSend).not.toHaveBeenCalled()
+  })
+
   async function fillAndPrepare(client: ReturnType<typeof testClient>) {
     await body()
     await userEvent.type(screen.getByRole('textbox', { name: '收件人' }), 'li@example.org{Enter}')
@@ -234,7 +254,7 @@ describe('save status', () => {
     expect(status()).toHaveAttribute('data-status', 'idle')
     expect(screen.queryByText('已保存')).not.toBeInTheDocument()
     cleanup()
-    setup(draft({ subject: 'Hi', bodyText: 'text', revision: 4 }))
+    setup(draft({ subject: 'Hi', bodyHtml: 'text', revision: 4 }))
     await body()
     expect(status()).toHaveAttribute('data-status', 'idle')
     expect(screen.queryByText('已保存')).not.toBeInTheDocument()
@@ -271,7 +291,7 @@ describe('save status', () => {
     expect(status()).toHaveTextContent(/^$/)
     await act(async () => { vi.advanceTimersByTime(100) })
     expect(status()).toHaveTextContent('正在保存…')
-    await act(async () => { finish(draft({ bodyText: 'slow', revision: 2 })) })
+    await act(async () => { finish(draft({ bodyHtml: 'slow', revision: 2 })) })
     expect(status()).toHaveTextContent('已保存')
   })
 
@@ -290,7 +310,7 @@ describe('save status', () => {
 
   it('says the draft is in the send queue instead of a save status when read-only', async () => {
     const client = testClient([account])
-    client.getDraft.mockResolvedValue(draft({ bodyText: 'x' }))
+    client.getDraft.mockResolvedValue(draft({ bodyHtml: 'x' }))
     let emit: (change: { draftId: string; accountId: string; change: 'locked' | 'unlocked' | 'deleted' }) => void = () => undefined
     client.onDrafts.mockImplementation((listener) => { emit = listener; return () => undefined })
     render(<Composer client={client} draftId={DRAFT_ID} accounts={[account]} onSent={vi.fn()} onDiscarded={vi.fn()} />)

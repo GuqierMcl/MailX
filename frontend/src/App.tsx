@@ -16,6 +16,7 @@ import { createDesktopClient } from '@/lib/mailx-client'
 import { windowRole } from '@/lib/composer-window'
 import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
+import { preloadMailBodyEditor } from '@/features/composer/mail-body-editor-loader'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
 // `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
@@ -45,6 +46,9 @@ const queryClient = createQueryClient()
 const previewPlatform = import.meta.env.DEV ? previewPlatformFromUrl(window.location.search) : null
 const windowHost = previewPlatform ? createPreviewWindowHost(previewPlatform) : createDesktopWindowHost()
 const role = windowRole()
+// Start the editor in this WebView before rendering/reading the draft. The main
+// window still never imports the engine. Composer displays any load failure.
+if (role.kind === 'composer') void preloadMailBodyEditor().catch(() => undefined)
 
 function App() {
   if (role.kind === 'composer') {

@@ -46,7 +46,7 @@ describe('mock flag changes', () => {
 
 describe('mock drafts and sending', () => {
   const to = [{ name: null, address: 'a@example.com' }]
-  const content = { to, cc: [], bcc: [], subject: '你好', bodyText: '正文' }
+  const content = { to, cc: [], bcc: [], subject: '你好', bodyHtml: '正文' }
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   it('creates, updates with revisions and lists drafts', async () => {

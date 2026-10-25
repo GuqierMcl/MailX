@@ -19,6 +19,7 @@ import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
+import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
@@ -67,7 +68,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const now = new Date().toISOString()
     const found = options.resolveDraft(id)
     const draft: Draft = found ?? {
-      id, accountId: accounts[0]?.id ?? '', kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: '',
+      id, accountId: accounts[0]?.id ?? '', kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '<p></p>', bodyText: '',
       inReplyTo: null, references: null, createdAt: now, updatedAt: now, revision: 1,
     }
     if (!accounts.some((row) => row.id === draft.accountId)) draft.accountId = accounts[0]?.id ?? ''
@@ -215,7 +216,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!accountId || !accounts.some((a) => a.id === accountId)) throw notFound()
       const known = draftsByMutation.get(request.clientMutationId)
       if (known && drafts.has(known)) return clone(drafts.get(known)!)
-      const draft = newDraft({ accountId, kind: 'new', sourceEmailId: null, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyText: request.bodyText, inReplyTo: null, references: null })
+      const draft = newDraft({ accountId, kind: 'new', sourceEmailId: null, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, ...mockDraftBody(request.bodyHtml), inReplyTo: null, references: null })
       draftsByMutation.set(request.clientMutationId, draft.id)
       return clone(draft)
     },
@@ -225,12 +226,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const email = emails.find((row) => row.summary.id === request.emailId)
       if (!email) throw notFound()
       const base = email.summary.subject.replace(/^(回复|转发)：/, '')
-      const quoted = `\n\n${email.summary.from.name ?? email.summary.from.address} 写道：\n${(email.body?.text ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`
       const reply = request.kind !== 'forward'
+      const original = mockPlainToHtml(email.body?.text ?? '')
+      const quoted = reply
+        ? `<p></p>${mockPlainToHtml(`${email.summary.from.name ?? email.summary.from.address} 写道：`)}<blockquote>${original}</blockquote>`
+        : `<p></p>${mockPlainToHtml(`---------- 转发的邮件 ----------\n发件人：${email.summary.from.address}\n日期：${email.summary.receivedAt}\n主题：${email.summary.subject}\n收件人：${email.to.map((address) => address.address).join(', ')}`)}${original}`
       const draft = newDraft({
         accountId: email.summary.accountId, kind: request.kind, sourceEmailId: email.summary.id,
         to: reply ? [email.summary.from] : [], cc: request.kind === 'replyAll' ? email.cc : [], bcc: [],
-        subject: `${reply ? '回复' : '转发'}：${base}`, bodyText: quoted, inReplyTo: null, references: null,
+        subject: `${reply ? '回复' : '转发'}：${base}`, ...mockDraftBody(quoted), inReplyTo: null, references: null,
       })
       draftsByMutation.set(request.clientMutationId, draft.id)
       return clone(draft)
@@ -247,7 +251,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (draft.revision !== request.expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
       const { id: _id, expectedRevision: _revision, accountId, ...content } = request
       void _id; void _revision
-      Object.assign(draft, content, { accountId: accountId ?? draft.accountId, revision: draft.revision + 1, updatedAt: new Date().toISOString() })
+      Object.assign(draft, content, mockDraftBody(request.bodyHtml), { accountId: accountId ?? draft.accountId, revision: draft.revision + 1, updatedAt: new Date().toISOString() })
       announceDraft({ draftId: draft.id, accountId: draft.accountId, change: 'updated' })
       return clone(draft)
     },
@@ -636,7 +640,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst }: MockDataset): EmailDet
 export async function seedPreviewOutbox(client: MailxClient) {
   const make = async (to: string, subject: string, bodyText: string) => {
     const draft = await client.createDraft({
-      accountId: null, to: [{ name: null, address: to }], cc: [], bcc: [], subject, bodyText, clientMutationId: crypto.randomUUID(),
+      accountId: null, to: [{ name: null, address: to }], cc: [], bcc: [], subject, bodyHtml: mockPlainToHtml(bodyText), clientMutationId: crypto.randomUUID(),
     })
     return draft
   }

@@ -16,11 +16,12 @@ use std::str::FromStr;
 use chrono::{DateTime, FixedOffset, Local, Offset, Utc};
 use lettre::address::Envelope;
 use lettre::message::header::{ContentType, HeaderName, HeaderValue};
-use lettre::message::{Mailbox, SinglePart};
+use lettre::message::{Mailbox, MultiPart, SinglePart};
 use lettre::{Address, Message};
 use uuid::Uuid;
 
 use crate::AppError;
+use crate::drafts::body::email_document;
 use crate::drafts::types::Draft;
 use crate::drafts::validate::valid_address;
 use crate::mail::MailAddress;
@@ -187,11 +188,19 @@ pub(crate) fn build(message: &OutgoingMessage<'_>) -> Result<BuiltMessage, AppEr
     if let Some(value) = &draft.references {
         builder = builder.references(value.clone());
     }
-    let body = SinglePart::builder()
-        .header(ContentType::TEXT_PLAIN)
-        .body(draft.body_text.clone());
+    let body = MultiPart::alternative()
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(draft.body_text.clone()),
+        )
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_HTML)
+                .body(email_document(&draft.body_html)),
+        );
     let mut built = builder
-        .singlepart(body)
+        .multipart(body)
         .map_err(|_| AppError::validation("draft"))?;
 
     // lettre can only render `Date` in UTC; the local offset is set afterwards.
@@ -236,6 +245,7 @@ mod tests {
             cc: vec![],
             bcc: vec![],
             subject: "你好，世界".into(),
+            body_html: "<p>正文</p><p>第二行</p><p></p>".into(),
             body_text: "正文\n第二行\n".into(),
             in_reply_to: None,
             references: None,
@@ -281,7 +291,6 @@ mod tests {
         assert_eq!(
             names,
             [
-                "content-transfer-encoding",
                 "content-type",
                 "date",
                 "from",

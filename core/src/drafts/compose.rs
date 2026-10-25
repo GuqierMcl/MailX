@@ -5,14 +5,12 @@ use chrono::{DateTime, FixedOffset};
 use mail_parser::{HeaderValue, MessageParser};
 
 use super::{
+    body::plain_text_to_html,
     types::DraftKind,
-    validate::{DraftContent, MAX_BODY_BYTES, MAX_SUBJECT_BYTES, clean_address},
+    validate::{DraftContent, MAX_SUBJECT_BYTES, clean_address},
 };
 use crate::mail::{EmailDetail, MailAddress};
 
-/// Longest slice of the original text that is quoted. Together with the
-/// `> ` markers it stays well inside the draft body limit.
-const MAX_QUOTED_BYTES: usize = MAX_BODY_BYTES / 2;
 /// Cap on carried-over `References` ids, newest kept, so a long thread does
 /// not grow the header without bound.
 const MAX_REFERENCES: usize = 50;
@@ -30,6 +28,9 @@ pub(crate) struct Composed {
 
 /// Facts about the source message that the cached summary does not carry.
 pub(crate) struct SourceHeaders {
+    /// The reader also renders text-only messages as HTML. Only reuse that
+    /// cached document when the original MIME actually had an HTML body.
+    pub has_html: bool,
     /// `Message-ID` without angle brackets, if the message has one.
     pub message_id: Option<String>,
     /// Ids from the original `References` / `In-Reply-To`, without brackets.
@@ -38,7 +39,7 @@ pub(crate) struct SourceHeaders {
 
 /// Reads `References` (falling back to `In-Reply-To`) from the raw message.
 pub(crate) fn parse_headers(raw: &[u8], cached_message_id: Option<String>) -> SourceHeaders {
-    let parsed = MessageParser::default().parse_headers(raw);
+    let parsed = MessageParser::default().parse(raw);
     let ids = |value: &HeaderValue<'_>| -> Vec<String> {
         match value {
             HeaderValue::Text(text) => text.split_whitespace().map(str::to_owned).collect(),
@@ -65,6 +66,14 @@ pub(crate) fn parse_headers(raw: &[u8], cached_message_id: Option<String>) -> So
         .map(|id| id.trim().trim_matches(['<', '>']).to_owned())
         .filter(|id| !id.is_empty());
     SourceHeaders {
+        has_html: parsed.as_ref().is_some_and(|message| {
+            message.html_body.iter().any(|id| {
+                message
+                    .parts
+                    .get(*id as usize)
+                    .is_some_and(|part| matches!(part.body, mail_parser::PartType::Html(_)))
+            })
+        }),
         message_id,
         references: references
             .into_iter()
@@ -156,7 +165,7 @@ fn add_recipients(into: &mut Vec<MailAddress>, taken: &mut Vec<String>, from: &[
 /// carry `In-Reply-To` / `References`: a forward starts a new conversation.
 pub(crate) fn compose(
     source: &EmailDetail,
-    text: &str,
+    original: &str,
     kind: DraftKind,
     own_address: &str,
     headers: &SourceHeaders,
@@ -165,23 +174,15 @@ pub(crate) fn compose(
     let summary = &source.summary;
     let date = format_date(&summary.received_at, offset);
     let sender = display(&summary.from);
-    let original = truncate(
-        &text.replace("\r\n", "\n").replace('\r', "\n"),
-        MAX_QUOTED_BYTES,
-    )
-    .trim_end()
-    .to_owned();
-
     let mut to = Vec::new();
     let mut cc = Vec::new();
     let body = if kind == DraftKind::Forward {
-        let mut block = format!(
-            "\n\n---------- 转发的邮件 ----------\n发件人：{sender}\n日期：{date}\n主题：{}\n收件人：{}\n\n{original}",
+        let header = format!(
+            "\n---------- 转发的邮件 ----------\n发件人：{sender}\n日期：{date}\n主题：{}\n收件人：{}",
             summary.subject.replace(['\r', '\n'], " "),
             display_list(&source.to),
         );
-        block.push('\n');
-        block
+        format!("{}{original}", plain_text_to_html(&header))
     } else {
         let mut taken = vec![own_address.to_ascii_lowercase()];
         let primary = if source.reply_to.is_empty() {
@@ -197,10 +198,11 @@ pub(crate) fn compose(
             // Answering a message the account sent itself goes to its recipients.
             add_recipients(&mut to, &mut taken, &source.to);
         }
-        let quoted: Vec<String> = original.lines().map(|line| format!("> {line}")).collect();
-        format!("\n\n{date}，{sender} 写道：\n{}\n", quoted.join("\n"))
+        format!(
+            "{}<blockquote>{original}</blockquote>",
+            plain_text_to_html(&format!("\n{date}，{sender} 写道："))
+        )
     };
-    let body = truncate(&body, MAX_BODY_BYTES).to_owned();
 
     let (in_reply_to, references) = match (&headers.message_id, kind) {
         (_, DraftKind::Forward) => (None, None),
@@ -230,7 +232,8 @@ pub(crate) fn compose(
             cc,
             bcc: Vec::new(),
             subject: prefixed_subject(&summary.subject, kind),
-            body_text: body,
+            body_html: body,
+            body_text: String::new(),
         },
         in_reply_to,
         references,

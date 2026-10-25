@@ -100,7 +100,7 @@ impl Fixture {
             cc: vec![],
             bcc: vec![],
             subject: String::new(),
-            body_text: String::new(),
+            body_html: String::new(),
             client_mutation_id: id(),
         }
     }
@@ -141,7 +141,7 @@ async fn create_is_idempotent_for_the_same_content_and_conflicts_otherwise() {
             cc: vec![],
             bcc: vec![],
             subject: "Edited".into(),
-            body_text: "text".into(),
+            body_html: "text".into(),
         })
         .unwrap();
     let again = f.core.create_draft(request.clone(), NONE).unwrap();
@@ -228,7 +228,7 @@ async fn update_checks_the_revision_and_may_move_the_draft_to_another_account() 
         cc: vec![],
         bcc: vec![],
         subject: "S".into(),
-        body_text: body.into(),
+        body_html: body.into(),
     };
     let saved = f.core.update_draft(update(1, None, "one")).unwrap();
     assert_eq!(saved.revision, 2);
@@ -267,7 +267,7 @@ async fn list_is_newest_first_filterable_and_delete_removes() {
     let make = |account: &str, subject: &str, body: &str| {
         let mut request = f.blank(Some(account));
         request.subject = subject.into();
-        request.body_text = body.into();
+        request.body_html = super::body::plain_text_to_html(body);
         f.core.create_draft(request, NONE).unwrap()
     };
     let a = make(&f.account, "a", "  first \n line  ");
@@ -356,9 +356,14 @@ async fn content_limits_and_header_injection_are_rejected() {
     }
     check(&|r| r.subject = "s".repeat(999), "draft.subject");
     check(
-        &|r| r.body_text = "b".repeat(1024 * 1024 + 1),
+        &|r| r.body_html = "b".repeat(1024 * 1024 + 1),
         "draft.bodyText",
     );
+    check(
+        &|r| r.body_html = " ".repeat(2 * 1024 * 1024 + 1),
+        "draft.bodyHtml",
+    );
+    check(&|r| r.body_html = "<p>nul\0</p>".into(), "draft.bodyHtml");
     let many = |count: usize| {
         (0..count)
             .map(|i| who(None, &format!("u{i}@example.com")))
@@ -379,7 +384,7 @@ async fn content_limits_and_header_injection_are_rejected() {
     ok.cc = many(30);
     ok.bcc = many(20);
     ok.subject = "s".repeat(998);
-    ok.body_text = format!("line\r\nline\n{}", "b".repeat(1024 * 1024 - 11));
+    ok.body_html = format!("line\r\nline\n{}", "b".repeat(1024 * 1024 - 11));
     let saved = f.core.create_draft(ok, NONE).unwrap();
     assert_eq!(saved.to.len() + saved.cc.len() + saved.bcc.len(), 100);
 
@@ -392,7 +397,7 @@ async fn content_limits_and_header_injection_are_rejected() {
         cc: vec![],
         bcc: vec![],
         subject: String::new(),
-        body_text: String::new(),
+        body_html: String::new(),
     };
     assert_eq!(
         code(f.core.update_draft(update)),
@@ -489,12 +494,18 @@ async fn reply_goes_to_reply_to_else_from_and_quotes_the_text() {
     assert!(reply.cc.is_empty() && reply.bcc.is_empty());
     assert_eq!(reply.subject, "Re: Weekly");
     assert!(
-        reply.body_text.starts_with("\n\n2026-"),
+        reply.body_text.starts_with("\n2026-"),
         "{:?}",
         reply.body_text
     );
     assert!(reply.body_text.contains("，Ann <ann@example.com> 写道：\n"));
-    assert!(reply.body_text.ends_with("> line one\n> \n> line three\n"));
+    assert!(
+        reply
+            .body_text
+            .ends_with("> line one\n> \n> line three\n> "),
+        "{:?}",
+        reply.body_text,
+    );
     // Threading comes from the cached raw MIME and the header cache.
     assert_eq!(reply.in_reply_to.as_deref(), Some("<orig@example.com>"));
     assert_eq!(
@@ -580,7 +591,7 @@ async fn forward_has_a_header_block_and_the_original_text_and_no_threading() {
     assert!(
         draft
             .body_text
-            .starts_with("\n\n---------- 转发的邮件 ----------\n")
+            .starts_with("\n---------- 转发的邮件 ----------\n")
     );
     assert!(draft.body_text.contains("发件人：Ann <ann@example.com>\n"));
     assert!(draft.body_text.contains("日期：2026-10-"));
@@ -588,7 +599,7 @@ async fn forward_has_a_header_block_and_the_original_text_and_no_threading() {
     assert!(
         draft
             .body_text
-            .contains("收件人：Bob <bob@example.com>, x@example.com\n\n你好\nsecond\n")
+            .contains("收件人：Bob <bob@example.com>, x@example.com\n你好\nsecond\n")
     );
 }
 
@@ -708,4 +719,281 @@ async fn quoted_text_is_bounded_and_references_fall_back_to_in_reply_to() {
         draft.references.as_deref(),
         Some("<parent@example.com> <child@example.com>")
     );
+}
+
+#[test]
+fn callers_cannot_submit_the_derived_plain_text_projection() {
+    let create = serde_json::json!({
+        "accountId": null, "to": [], "cc": [], "bcc": [], "subject": "",
+        "bodyHtml": "<p>real</p>", "bodyText": "forged", "clientMutationId": id(),
+    });
+    assert!(serde_json::from_value::<CreateDraftRequest>(create).is_err());
+    let update = serde_json::json!({
+        "id": id(), "expectedRevision": 1, "accountId": null,
+        "to": [], "cc": [], "bcc": [], "subject": "",
+        "bodyHtml": "<p>real</p>", "bodyText": "forged",
+    });
+    assert!(serde_json::from_value::<UpdateDraftRequest>(update).is_err());
+}
+
+#[tokio::test]
+async fn legacy_plain_text_drafts_upgrade_on_read_and_persist_on_save() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let text = "<script>alert('&')</script>\n\n第二行\n";
+    f.db.execute(
+        "UPDATE drafts SET body_html = NULL, body_text = ?2 WHERE id = ?1",
+        params![draft.id, text],
+    )
+    .unwrap();
+    let legacy = f.core.get_draft(&draft.id).unwrap();
+    assert_eq!(legacy.body_text, text);
+    assert_eq!(legacy.body_html, super::body::plain_text_to_html(text));
+    assert!(!legacy.body_html.contains("<script>"));
+    assert_eq!(legacy.revision, draft.revision);
+    assert_eq!(
+        f.db.query_row(
+            "SELECT body_html FROM drafts WHERE id = ?1",
+            [&draft.id],
+            |row| row.get::<_, Option<String>>(0)
+        )
+        .unwrap(),
+        None
+    );
+
+    let saved = f
+        .core
+        .update_draft(UpdateDraftRequest {
+            id: legacy.id.clone(),
+            expected_revision: legacy.revision,
+            account_id: None,
+            to: legacy.to,
+            cc: legacy.cc,
+            bcc: legacy.bcc,
+            subject: legacy.subject,
+            body_html: legacy.body_html,
+        })
+        .unwrap();
+    assert_eq!(saved.body_text, text);
+    assert_eq!(saved.revision, 2);
+    assert_eq!(
+        f.db.query_row(
+            "SELECT body_html FROM drafts WHERE id = ?1",
+            [&saved.id],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        saved.body_html
+    );
+}
+
+#[tokio::test]
+async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_queued() {
+    const MIB: usize = 1024 * 1024;
+    let f = fixture(&[plain("x")]);
+    // Exactly the old text limit. Entity expansion is bounded per line so the
+    // test exercises the byte limit without pathological HTML parser runtime.
+    let text = format!("{}\n", "&".repeat(255)).repeat(4096);
+    assert_eq!(text.len(), MIB);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    f.db.execute(
+        "UPDATE drafts SET body_html = NULL, body_text = ?2, to_addresses = ?3 WHERE id = ?1",
+        params![
+            draft.id,
+            text,
+            r#"[{"name":null,"address":"reader@example.com"}]"#
+        ],
+    )
+    .unwrap();
+    let legacy = f.core.get_draft(&draft.id).unwrap();
+    assert!(legacy.body_html.len() > 2 * MIB);
+    let service = f.core.service_for_tests();
+    let queue = |draft: &Draft| {
+        service
+            .lock()
+            .unwrap()
+            .queue_send(
+                &crate::QueueSendRequest {
+                    draft_id: draft.id.clone(),
+                    expected_revision: draft.revision,
+                    client_mutation_id: id(),
+                },
+                30,
+                chrono::Utc::now(),
+            )
+            .unwrap()
+            .0
+    };
+    // Direct enqueue must not reapply the new-input limit to a legacy body.
+    let queued = queue(&legacy);
+    let raw = f.core.outbox_mime_for_tests(&queued.id);
+    let mime = mail_parser::MessageParser::default().parse(&raw).unwrap();
+    assert_eq!(mime.body_text(0).unwrap().replace("\r\n", "\n"), text);
+    assert_eq!(
+        mime.body_html(0).unwrap().matches("&amp;").count(),
+        255 * 4096
+    );
+    service
+        .lock()
+        .unwrap()
+        .cancel_outbox(&queued.id, chrono::Utc::now())
+        .unwrap();
+
+    let update = |draft: &Draft, html: String| UpdateDraftRequest {
+        id: draft.id.clone(),
+        expected_revision: draft.revision,
+        account_id: None,
+        to: draft.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: "header edit".into(),
+        body_html: html,
+    };
+    let saved = f
+        .core
+        .update_draft(update(&legacy, legacy.body_html.clone()))
+        .unwrap();
+    assert_eq!(saved.body_html, legacy.body_html);
+    assert_eq!(saved.body_text, text);
+    assert_eq!(
+        f.db.query_row(
+            "SELECT body_html FROM drafts WHERE id = ?1",
+            [&saved.id],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        saved.body_html
+    );
+    // Once persisted, unchanged core-owned content still stays editable.
+    let again = f
+        .core
+        .update_draft(update(&saved, saved.body_html.clone()))
+        .unwrap();
+    assert_eq!(again.body_text, text);
+    // An actual body change uses the ordinary new-input sanitizer and limit.
+    assert_eq!(
+        code(
+            f.core
+                .update_draft(update(&again, format!("{}<p>new</p>", again.body_html)))
+        ),
+        (ErrorCode::Validation, Some("draft.bodyHtml".into()))
+    );
+    let queued = queue(&again);
+    let raw = f.core.outbox_mime_for_tests(&queued.id);
+    let mime = mail_parser::MessageParser::default().parse(&raw).unwrap();
+    assert_eq!(mime.body_text(0).unwrap().replace("\r\n", "\n"), text);
+
+    // Even a valid legacy body made entirely of line breaks may exceed the
+    // HTML limit. A header-only save must not truncate those lines either.
+    let blank_lines = "\n".repeat(MIB);
+    let other = f.core.create_draft(f.blank(None), NONE).unwrap();
+    f.db.execute(
+        "UPDATE drafts SET body_html = NULL, body_text = ?2 WHERE id = ?1",
+        params![other.id, blank_lines],
+    )
+    .unwrap();
+    let legacy = f.core.get_draft(&other.id).unwrap();
+    let saved = f
+        .core
+        .update_draft(update(&legacy, legacy.body_html.clone()))
+        .unwrap();
+    assert_eq!(saved.body_text, blank_lines);
+    assert_eq!(saved.body_html.matches("<p>").count(), MIB + 1);
+}
+
+#[tokio::test]
+async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
+    let f = fixture(&[plain("x")]);
+    let mut request = f.blank(None);
+    request.to = vec![who(None, "reader@example.com")];
+    request.body_html = "<h2 data-align='center'>标题</h2><p data-align='right' onclick='steal()'>你好<span data-color='red'><mark data-highlight='yellow'><strong>朋友</strong></mark></span></p><ol start='3'><li><p>三个</p></li><li><p><a href='https://example.com' style='color:red'>链接</a></p></li></ol><blockquote><p>引用</p></blockquote><script>secret()</script><img src='https://tracker.example'>".into();
+    let saved = f.core.create_draft(request, NONE).unwrap();
+    assert_eq!(
+        saved.body_text,
+        "标题\n你好朋友\n3. 三个\n4. 链接 <https://example.com>\n> 引用"
+    );
+    assert!(saved.body_html.contains("<strong>朋友</strong>"));
+    assert!(
+        saved
+            .body_html
+            .contains("<h2 data-align=\"center\">标题</h2>")
+    );
+    assert!(
+        saved
+            .body_html
+            .contains("<span data-color=\"red\"><mark data-highlight=\"yellow\">")
+    );
+    for forbidden in ["onclick", "style", "script", "secret", "<img", "tracker"] {
+        assert!(!saved.body_html.contains(forbidden));
+    }
+    assert_eq!(f.core.get_draft(&saved.id).unwrap(), saved);
+    assert!(
+        f.core.list_drafts(None).unwrap()[0]
+            .preview
+            .contains("3. 三个")
+    );
+    let built = crate::smtp::message::build(&crate::smtp::message::OutgoingMessage {
+        sender_address: "writer@example.com",
+        sender_name: None,
+        draft: &saved,
+        message_id: "<test@example.com>",
+        date: crate::smtp::message::local_now(),
+    })
+    .unwrap();
+    assert!(built.mime.is_ascii());
+    let wire = String::from_utf8(built.mime.clone()).unwrap();
+    assert!(wire.contains("multipart/alternative"));
+    assert!(
+        wire.find("text/plain; charset=utf-8").unwrap()
+            < wire.find("text/html; charset=utf-8").unwrap()
+    );
+    let message = mail_parser::MessageParser::default()
+        .parse(&built.mime)
+        .unwrap();
+    assert_eq!(
+        message
+            .body_text(0)
+            .unwrap()
+            .trim_end()
+            .replace("\r\n", "\n"),
+        saved.body_text
+    );
+    let html = message.body_html(0).unwrap();
+    assert!(html.contains("<strong>朋友</strong>"));
+    assert!(html.contains(
+        "<h2 style=\"margin:0;font-size:18px;font-weight:bold;text-align:center\">标题</h2>"
+    ));
+    assert!(html.contains("<p style=\"margin:0;text-align:right\">"));
+    assert!(html.contains(
+        "<span style=\"color:#dc2626\"><mark style=\"background-color:#fef08a;color:inherit\">"
+    ));
+    assert!(!html.contains("data-"));
+    assert!(html.contains("margin:0"));
+    assert!(html.contains("<meta charset=\"utf-8\">"));
+    assert!(!html.contains("<style") && !html.contains("class="));
+}
+
+#[tokio::test]
+async fn replies_and_forwards_reuse_cached_html_with_safe_links_and_simple_layout() {
+    let raw = b"Content-Type: text/html; charset=utf-8\r\n\r\n<h2 align='right' style='color:red'>Heading</h2><h6>Small</h6><p style='text-align:center'><span style='color:red'><mark style='background-color:yellow'><strong>Bold</strong></mark></span> <a href='https://example.com'>Website</a></p><table><tr><td>Cell A</td><td>Cell B</td></tr></table><p><img src='https://example.com/image.png' alt='chart'></p><script>evil()</script>".to_vec();
+    let f = fixture(&[raw]);
+    let reply = f.derive(0, DraftKind::Reply).unwrap();
+    assert!(reply.body_html.starts_with("<p></p>"));
+    assert!(reply.body_html.contains("<blockquote>"));
+    assert!(reply.body_html.contains("<h2>Heading</h2><h3>Small</h3>"));
+    assert!(reply.body_html.contains("<strong>Bold</strong>"));
+    assert!(reply.body_html.contains("href=\"https://example.com"));
+    assert!(reply.body_text.contains("Website <https://example.com"));
+    assert!(reply.body_text.contains("Cell A") && reply.body_text.contains("Cell B"));
+    assert!(reply.body_text.contains("[图片：chart]"));
+    for forbidden in [
+        "<table", "<img", "<h6", "data-", "style=", "align=", "<span", "<mark", "<script", "evil()",
+    ] {
+        assert!(!reply.body_html.contains(forbidden), "{forbidden}");
+    }
+    let forward = f.derive(0, DraftKind::Forward).unwrap();
+    assert!(forward.body_html.starts_with("<p></p>"));
+    assert!(!forward.body_html.contains("<blockquote>"));
+    assert!(forward.body_html.contains("<strong>Bold</strong>"));
+    assert!(forward.body_html.contains("<h2>Heading</h2><h3>Small</h3>"));
 }

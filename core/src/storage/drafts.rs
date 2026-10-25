@@ -5,6 +5,7 @@ use super::{Storage, decode, encode};
 use crate::{
     AppError, ErrorCode,
     drafts::{
+        body::plain_text_to_html,
         types::{Draft, DraftKind, DraftSummary},
         validate::DraftContent,
     },
@@ -12,7 +13,7 @@ use crate::{
 
 const COLUMNS: &str = "id, account_id, kind, source_email_id, to_addresses, cc_addresses,
     bcc_addresses, subject, body_text, in_reply_to, references_header, created_at,
-    updated_at, revision";
+    updated_at, revision, body_html";
 
 /// Everything a new row needs besides the content.
 pub(crate) struct NewDraft<'a> {
@@ -36,13 +37,16 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
         row.get(1)?,
         row.get(3)?,
         row.get(7)?,
-        row.get(8)?,
+        row.get::<_, String>(8)?,
         row.get(9)?,
         row.get(10)?,
         row.get(11)?,
         row.get(12)?,
         row.get(13)?,
     );
+    let body_html = row
+        .get::<_, Option<String>>(14)?
+        .unwrap_or_else(|| plain_text_to_html(&body));
     Ok((|| {
         Ok(Draft {
             id,
@@ -54,6 +58,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
             cc: decode(&cc)?,
             bcc: decode(&bcc)?,
             subject,
+            body_html,
             body_text: body,
             in_reply_to: reply,
             references: refs,
@@ -98,8 +103,8 @@ impl Storage {
             "INSERT INTO drafts (id, account_id, kind, source_email_id, to_addresses,
                 cc_addresses, bcc_addresses, subject, body_text, in_reply_to,
                 references_header, created_at, updated_at, revision, client_mutation_id,
-                create_canonical)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, 1, ?13, ?14)",
+                create_canonical, body_html)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, 1, ?13, ?14, ?15)",
             params![
                 draft.id,
                 draft.account_id,
@@ -115,6 +120,7 @@ impl Storage {
                 draft.now,
                 draft.client_mutation_id,
                 draft.canonical,
+                draft.content.body_html,
             ],
         )?;
         self.get_draft(draft.id)
@@ -133,7 +139,7 @@ impl Storage {
                      WHERE client_mutation_id = ?1 ORDER BY created_at, id LIMIT 1"
                 ),
                 [client_mutation_id],
-                |row| Ok((parse(row)?, row.get::<_, String>(14)?)),
+                |row| Ok((parse(row)?, row.get::<_, String>(15)?)),
             )
             .optional()?;
         found
@@ -223,7 +229,7 @@ impl Storage {
         tx.execute(
             "UPDATE drafts SET account_id = COALESCE(?2, account_id), to_addresses = ?3,
                 cc_addresses = ?4, bcc_addresses = ?5, subject = ?6, body_text = ?7,
-                updated_at = ?8, revision = ?9
+                updated_at = ?8, revision = ?9, body_html = ?10
              WHERE id = ?1",
             params![
                 id,
@@ -234,7 +240,8 @@ impl Storage {
                 content.subject,
                 content.body_text,
                 now,
-                next
+                next,
+                content.body_html,
             ],
         )?;
         tx.commit()?;

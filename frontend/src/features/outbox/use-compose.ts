@@ -48,7 +48,7 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
   const compose = useCallback(() => run(async () => {
     const known = contextAccountId && accounts.some((account) => account.id === contextAccountId) ? contextAccountId : null
     const draft = await client.createDraft({
-      accountId: known, to: [], cc: [], bcc: [], subject: '', bodyText: '', clientMutationId: crypto.randomUUID(),
+      accountId: known, to: [], cc: [], bcc: [], subject: '', bodyHtml: '', clientMutationId: crypto.randomUUID(),
     })
     return draft.id
   }, true), [accounts, client, contextAccountId, run])
