@@ -79,7 +79,7 @@ git diff --check
 
 当前前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航、列表与设置详情，经 `accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
 
-桌面数据目录直接来自 Tauri `app_data_dir()`，包含 `mailx.sqlite3`、`mailx.lock` 与应用偏好 `settings.json`，不写入仓库或当前工作目录。应用标识变化会影响目录归属，已有数据需要显式迁移。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
+桌面数据目录是以产品名命名的 `MailX`（Tauri `app_data_dir()` 的同级，不含 identifier；macOS 为 `~/Library/Application Support/MailX`），包含 `mailx.sqlite3`、`mailx.lock` 与应用偏好 `settings.json`，不写入仓库或当前工作目录；系统凭据 service 固定为 `MailX`。应用标识（`com.mailxapp.desktop`）仍决定 Tauri 的 WebView 存储、缓存和窗口位置文件的位置，这些可重建。`bun run tauri dev` 与已安装版共用同一数据目录和 `mailx.lock`，不要同时运行。需要隔离的临时配置（冒烟测试、试验）时设置环境变量 `MAILX_DATA_DIR` 为一个绝对路径：数据改放该目录，凭据 service 同时改为 `MailX.<目录名>`，不会读到或覆盖正式密码。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
 
 正常 Tauri 开发和构建使用 `frontend/dist`，不再在 `desktop/` 内维护另一份前端资源。Tauri 生成的 schema 与命令权限文件忽略提交，由 `build.rs` 重新生成。`git diff --check` 不覆盖未跟踪文件，新文件需额外检查。
 

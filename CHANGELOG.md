@@ -16,4 +16,8 @@
 - 按需下载并缓存邮件正文，在隔离的阅读视图中显示；支持已读 / 星标写回、附件保存与新邮件通知。
 - 富文本写信（Tiptap、本地草稿、回复与转发、独立写信窗口），经发送队列通过 SMTP 发信。
 
+### Changed
+
+- 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。
+
 [Unreleased]: https://github.com/GuqierMcl/MailX/commits/main

@@ -4,7 +4,7 @@
 
 ## 1. 所有权与目录
 
-桌面直接使用 Tauri `app_data_dir()` 对应的 user-data-dir；路径由宿主注入，不在仓库或当前工作目录存生产数据。未来 Web 使用容器 `/data`。每个目录加实例锁，桌面、server 和 MCP bridge 不得各自打开独立写入核心。SQLite 位于本地磁盘，不能把运行中的数据库放在 NFS / SMB 共享目录。
+桌面使用以产品名命名的 `MailX` user-data-dir（Tauri `app_data_dir()` 的同级目录，不含 identifier）；路径由宿主注入，不在仓库或当前工作目录存生产数据。未来 Web 使用容器 `/data`。每个目录加实例锁，桌面、server 和 MCP bridge 不得各自打开独立写入核心。SQLite 位于本地磁盘，不能把运行中的数据库放在 NFS / SMB 共享目录。
 
 ```text
 user-data-dir/

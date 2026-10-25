@@ -27,7 +27,7 @@ if (mode === 'build') {
   // its real frame-src allowance before this harness can pass.
   await writeFile(configuration, JSON.stringify({
     productName: 'MailX Body WebView Test',
-    identifier: 'dev.mailx.body-webview-test',
+    identifier: 'com.mailxapp.body-webview-test',
     // Relative to desktop/, like production's "../frontend/dist". An absolute
     // Windows path such as D:\a\... parses as a URL with scheme "d" (Tauri tries
     // FrontendDist::Url first), so the app opened the folder as a file:// page.

@@ -48,7 +48,7 @@ type SecretUpdate =
 
 ## 4. SQLite 与凭据库的一致性
 
-桌面直接使用 Tauri `app_data_dir()` 对应的 user-data-dir，核心接受宿主注入的目录。系统凭据 service 使用同一应用 identifier，后续更换应用标识时须处理数据目录和凭据归属迁移。生产数据不存仓库或当前工作目录；测试使用独立临时目录。目录内当前有 `mailx.sqlite3`、SQLite 自己管理的 WAL/SHM 文件、`mailx.lock`，以及应用偏好 `settings.json`（无法读取时保留为 `settings.json.bak`），偏好不含秘密。一个目录只由一个 `AccountService` 持有独占锁。
+桌面使用以产品名命名的 `MailX` user-data-dir（位于 Tauri `app_data_dir()` 的同级，见 `desktop/src/storage_location.rs`），核心接受宿主注入的目录。系统凭据 service 固定为 `MailX`。两者都不依赖应用 identifier，所以更换标识不需要迁移数据或凭据；`0.1.0-alpha.2` 之前的开发构建曾使用 `dev.mailx.desktop` 目录和同名凭据，没有自动迁移。生产数据不存仓库或当前工作目录；测试使用独立临时目录。目录内当前有 `mailx.sqlite3`、SQLite 自己管理的 WAL/SHM 文件、`mailx.lock`，以及应用偏好 `settings.json`（无法读取时保留为 `settings.json.bak`），偏好不含秘密。一个目录只由一个 `AccountService` 持有独占锁。
 
 当前使用 `rusqlite` 单连接、外键、WAL、`synchronous=FULL` 和带 SHA-256 校验的版本化 schema。打开较新版本、校验不符或非空无版本数据库时拒绝继续，保留原数据。核心接口是同步的，宿主在阻塞工作线程执行并串行访问服务。
 

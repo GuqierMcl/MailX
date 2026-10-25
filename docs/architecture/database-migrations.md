@@ -4,7 +4,7 @@
 
 ## 1. 目标与范围
 
-数据库是 MailX 自己的应用数据库。生产路径继续由 Tauri `app_data_dir()` 提供，核心接受宿主注入的 user-data-dir；数据库名、应用 identifier 和系统凭据归属均沿用现有配置。
+数据库是 MailX 自己的应用数据库。生产路径是以产品名命名的 `MailX` 数据目录（见 `desktop/src/storage_location.rs`），核心接受宿主注入的 user-data-dir；数据库名和系统凭据 service（`MailX`）都不依赖应用 identifier。
 
 本轮实现：
 
