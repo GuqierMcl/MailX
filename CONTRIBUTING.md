@@ -18,6 +18,7 @@
 - 涉及同步、发送、HTML、权限和迁移的改动，应包含故障路径验证；普通文档排版修改无需新增测试。
 - `README.md` 与 `README.zh-CN.md` 必须同时更新，保持章节结构一致。
 - 提交消息使用 Conventional Commits，例如 `docs(architecture): define mailbox sync lifecycle`。
+- 用户可见的改动在 PR 里往 `CHANGELOG.md` 的 `[Unreleased]` 下补一行；版本号只通过 `bun run version:bump` / `version:set` 修改，发版步骤见[发版流程](docs/development/release.md)。
 
 PR 描述说明行为变化、验证结果和未解决限制。初始方案调整时更新对应文档即可；重大选型可通过 [ADR](docs/adr/README.md)保留取舍理由，不需要为了改变启动草案建立额外审批流程。
 

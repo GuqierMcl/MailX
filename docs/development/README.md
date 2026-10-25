@@ -30,11 +30,18 @@ bun tauri dev
 # 前端静态资源构建
 bun run build
 
-# 桌面 release 构建；当前 bundle.active=false，不生成安装包
+# 桌面 release 构建；bundle 已启用（dmg / nsis / deb / rpm / appimage，各平台只构建自己支持的格式），
+# 正式的安装包由发版工作流产出，见 release.md
 bun tauri build
 
-# 版本入口校验：根 package.json、frontend/package.json、Cargo workspace
+# 版本入口校验：根 package.json、frontend/package.json、Cargo workspace、Cargo.lock
 bun run version:check
+
+# 版本进位 / 直接设置（只改文件）、发版脚本测试、预览发布说明；流程见 release.md
+bun run version:bump patch --dry-run
+bun run version:set 0.2.0-alpha.1
+bun run version:test
+bun run release:notes
 
 # 独立检查核心，不构建桌面 GUI
 cargo check -p mailx-core --locked
@@ -68,7 +75,7 @@ git diff --check
 
 普通浏览器运行 `bun run dev` 时，可在地址后加 `?seed=showcase` 载入虚构的展示数据集（仅用 `example.*` 地址），用于截图；默认数据集不受影响。
 
-`bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`；推荐使用会自动准备前端资源的 `bun run check`。当前 `bundle.active=false`，所以不宣称已经生成安装包。
+`bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`；推荐使用会自动准备前端资源的 `bun run check`。当前 `bundle.active=true`，本机 `bun tauri build` 会在 `target/release/bundle/` 生成本平台的安装包；对外发布的安装包由 `.github/workflows/release.yml` 在推送版本标签后构建，目前未签名、无自动更新，流程见[发版流程](release.md)。
 
 当前前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航、列表与设置详情，经 `accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
 
