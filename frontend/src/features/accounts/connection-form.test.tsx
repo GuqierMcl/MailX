@@ -117,11 +117,23 @@ describe('connection form', () => {
     render(
       <ConnectionForm account={null} intro={{ title: '说明', description: '说明' }} submitLabel="下一步" submittingLabel="下一步"
         initialError={{ code: 'validation', field: 'imap.host', message: '无法使用这个主机。' }}
-        initialDraft={{ ...(() => { const d = { emailAddress: 'me@example.com' }; return d })(), imap: { host: 'bad', port: '993', tls: 'implicit', username: 'me' }, smtp: { host: 'smtp.example.com', port: '465', tls: 'implicit', username: 'me' }, mode: 'shared', sharedPassword: { replace: true, value: '' }, imapPassword: { replace: true, value: '' }, smtpPassword: { replace: true, value: '' }, routeKind: 'direct', proxyKind: 'socks5', proxyHost: '', proxyPort: '1080', proxyAuth: false, proxyUsername: '', proxyPassword: { replace: true, value: '' } }}
+        initialDraft={{ ...(() => { const d = { emailAddress: 'me@example.com' }; return d })(), imap: { host: 'bad', port: '993', tls: 'implicit', username: 'me' }, smtp: { host: 'smtp.example.com', port: '465', tls: 'implicit', username: 'me' }, mode: 'shared', sharedPassword: { replace: true, value: '' }, imapPassword: { replace: true, value: '' }, smtpPassword: { replace: true, value: '' }, routeKind: 'direct', proxyKind: 'socks5', proxyHost: '', proxyPort: '1080', proxyAuth: false, proxyUsername: '', proxyPassword: { replace: true, value: '' }, imageProxyDns: false, confirmImageProxyDns: false }}
         onSubmit={vi.fn()} onBusyChange={vi.fn()} onDirtyChange={vi.fn()} />,
     )
     expect(screen.getByLabelText('邮箱地址')).toHaveValue('me@example.com')
     expect(screen.getByLabelText('IMAP 主机')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByText('无法使用这个主机。')).toBeInTheDocument()
+  })
+
+  it('revokes the image proxy switch on endpoint edits and allows an explicit new selection', async () => {
+    const account = exampleAccount({ route: { kind: 'custom', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080, dns: 'proxy', imageProxyDns: true, authentication: null } })
+    const { submit } = renderForm(account)
+    const toggle = screen.getByRole('switch', { name: '通过此代理加载 HTTPS 图片' })
+    expect(toggle).toBeChecked()
+    fireEvent.change(screen.getByLabelText('代理主机'), { target: { value: 'other.example.com' } })
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    expect(submit.mock.calls[0][0].route).toMatchObject({ host: 'other.example.com', imageProxyDns: true, confirmImageProxyDns: true })
   })
 })

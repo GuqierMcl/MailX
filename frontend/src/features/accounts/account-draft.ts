@@ -20,6 +20,8 @@ export type AccountDraft = {
   proxyAuth: boolean
   proxyUsername: string
   proxyPassword: SecretDraft
+  imageProxyDns: boolean
+  confirmImageProxyDns: boolean
 }
 
 export function initialDraft(account: Account | null): AccountDraft {
@@ -40,7 +42,21 @@ export function initialDraft(account: Account | null): AccountDraft {
     proxyAuth: proxy?.authentication != null,
     proxyUsername: proxy?.authentication?.username ?? '',
     proxyPassword: secret(proxy?.authentication?.passwordConfigured),
+    imageProxyDns: proxy?.imageProxyDns ?? false,
+    confirmImageProxyDns: false,
   }
+}
+
+/** An image permission follows only the proxy identity the user selected. */
+export function changeDraft<K extends keyof AccountDraft>(draft: AccountDraft, key: K, value: AccountDraft[K]): AccountDraft {
+  const changed = { ...draft, [key]: value }
+  if (key === 'imageProxyDns') {
+    changed.confirmImageProxyDns = value === true
+  } else if (['routeKind', 'proxyKind', 'proxyHost', 'proxyPort', 'proxyAuth', 'proxyUsername'].includes(key) && value !== draft[key]) {
+    changed.imageProxyDns = false
+    changed.confirmImageProxyDns = false
+  }
+  return changed
 }
 
 export function clearSecrets(draft: AccountDraft): AccountDraft {
@@ -97,6 +113,7 @@ export function draftToConnection(draft: AccountDraft, account: Account | null):
     route = {
       kind: 'custom', proxyKind: draft.proxyKind,
       host: host(draft.proxyHost, 'proxyHost'), port: port(draft.proxyPort, 'proxyPort'), dns: 'proxy',
+      imageProxyDns: draft.imageProxyDns, confirmImageProxyDns: draft.confirmImageProxyDns,
       authentication: draft.proxyAuth ? { username: draft.proxyUsername.trim(), password: secret(draft.proxyPassword, 'proxyPassword') } : null,
     }
   }

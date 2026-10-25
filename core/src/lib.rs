@@ -25,12 +25,13 @@ pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use app::{
     Activity, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument,
-    BodyLinks, FlagChange, MailxCore, MessageFlag,
+    BodyLinks, FlagChange, MailxCore, MessageFlag, RemoteImageStatus,
 };
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
 pub use mail::*;
+pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AppSettings, AppearanceSettings, ComposeSettings, FontSize, LayoutSettings, MailTheme,

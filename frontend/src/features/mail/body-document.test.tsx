@@ -31,6 +31,58 @@ async function frame() {
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('isolated body, inline links and image policy', () => {
+  it('shows safe image failures and retries while preserving this reading grant', async () => {
+    const { client } = setup()
+    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: 'proxyPolicyRequired' }])
+    render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
+    await frame()
+    expect(client.imageStatus).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '加载图片' }))
+    await frame()
+    expect(await screen.findByLabelText('图片加载状态')).toHaveTextContent('1 张图片未能加载')
+    expect(screen.getByLabelText('图片加载状态')).toHaveTextContent('账号代理设置')
+    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: null }])
+    await userEvent.click(screen.getByRole('button', { name: '重试图片' }))
+    await waitFor(() => expect(screen.getByTitle('邮件 HTML 正文')).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=retry-document'))
+    await frame()
+    expect(client.prepareBody).toHaveBeenLastCalledWith('one', true)
+    expect(client.retryImages).toHaveBeenCalledExactlyOnceWith('one', 'token-2')
+    expect(screen.getByTitle('邮件 HTML 正文')).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=retry-document')
+    expect(client.updateSettings).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('远程图片提示')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByLabelText('图片加载状态')).not.toBeInTheDocument())
+  })
+
+  it('ignores diagnostics completing after a different message was selected', async () => {
+    const { client } = setup()
+    const initial = await client.getSettings()
+    client.getSettings.mockResolvedValue({ ...initial, settings: { ...initial.settings, security: { remoteImages: 'automatic', senderAvatars: false } } })
+    let finish!: (value: { index: number; loading: boolean; error: 'tls' }[]) => void
+    client.imageStatus.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const { rerender } = render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
+    await waitFor(() => expect(client.imageStatus).toHaveBeenCalled())
+    rerender(<BodyDocument client={client} emailId="two" />)
+    await frame()
+    await act(async () => { finish([{ index: 0, loading: false, error: 'tls' }]) })
+    expect(screen.queryByLabelText('图片加载状态')).not.toBeInTheDocument()
+  })
+
+  it('releases a retry token that arrives after the reader closed', async () => {
+    const { client } = setup()
+    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: 'connect' }])
+    let finish!: (value: { documentToken: string }) => void
+    client.retryImages.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const { unmount } = render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
+    await frame()
+    await userEvent.click(screen.getByRole('button', { name: '加载图片' }))
+    await frame()
+    await userEvent.click(await screen.findByRole('button', { name: '重试图片' }))
+    unmount()
+    await act(async () => { finish({ documentToken: 'late-retry' }) })
+    expect(client.releaseBody).toHaveBeenCalledWith('one', 'late-retry')
+    expect(screen.queryByTitle('邮件 HTML 正文')).not.toBeInTheDocument()
+  })
+
   it('requests the dark document only when the app is dark and mail follows it', async () => {
     const { client } = setup()
     document.documentElement.classList.add('dark')

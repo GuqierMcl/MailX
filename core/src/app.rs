@@ -37,7 +37,7 @@ mod flags;
 pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
-pub use bodies::{BodyBinding, BodyDocument, BodyLinks};
+pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use flags::{FlagChange, MessageFlag};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
@@ -109,10 +109,10 @@ impl MailxCore {
         events: Events,
         send: SendConfig,
     ) -> Result<Self, AppError> {
-        // The image cache is an optimization; a directory that cannot be used
-        // must not stop mail from working.
-        let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
+        // Create and lock the profile before touching its shared image cache.
+        // On first launch the profile directory may not exist yet.
         let service = AccountService::open(path, secrets)?;
+        let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
@@ -607,6 +607,24 @@ mod tests {
         };
         let (_core, states) = open(&directory, &runtime);
         assert_eq!(next_failure(&states).account_id, account.id);
+    }
+
+    #[test]
+    fn first_launch_creates_a_new_profile_before_opening_the_image_cache() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        let profile = directory.path().join("new-profile");
+        assert!(!profile.exists());
+        let core = MailxCore::open(
+            &profile,
+            Arc::new(MemorySecrets::default()),
+            runtime.handle().clone(),
+            Arc::new(|_: &crate::events::CoreEvent| {}),
+        )
+        .unwrap();
+        assert!(core.list_accounts().unwrap().is_empty());
+        assert!(profile.join("image-cache").is_dir());
+        assert!(profile.join("mailx.sqlite3").is_file());
     }
 
     #[test]

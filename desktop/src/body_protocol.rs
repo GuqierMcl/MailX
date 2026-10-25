@@ -485,6 +485,91 @@ impl BodyProtocol {
         }
     }
 
+    /// A saved connection replaces the route and invalidates its open readers.
+    pub(crate) fn revoke_account(&self, account_id: &str) {
+        if let Ok(mut documents) = self.documents.lock() {
+            documents.retain(|_, document| {
+                if document.binding.account_id() != account_id {
+                    return true;
+                }
+                document.binding.release_remote_images();
+                false
+            });
+        }
+        if let Ok(mut confirmations) = self.confirmations.lock() {
+            confirmations
+                .retain(|_, confirmation| confirmation.document.binding.account_id() != account_id);
+        }
+    }
+
+    pub(crate) async fn image_status(
+        &self,
+        core: &MailxCore,
+        id: &str,
+        token: &str,
+        policy: mailx_core::RemoteImagePolicy,
+    ) -> Result<Vec<mailx_core::RemoteImageStatus>, AppError> {
+        let allowed = || {
+            let document = self.resolve(id, token)?;
+            if !document.remote_images
+                || matches!(policy, mailx_core::RemoteImagePolicy::Never)
+                || (matches!(policy, mailx_core::RemoteImagePolicy::Ask)
+                    && !document.explicit_images)
+            {
+                return Err(missing());
+            }
+            Ok(document)
+        };
+        let document = allowed()?;
+        let statuses = core.body_image_status(document.binding).await?;
+        allowed()?;
+        Ok(statuses)
+    }
+
+    pub(crate) async fn retry_images(
+        &self,
+        core: &MailxCore,
+        id: &str,
+        token: &str,
+        policy: mailx_core::RemoteImagePolicy,
+    ) -> Result<PreparedBody, AppError> {
+        self.image_status(core, id, token, policy).await?;
+        let previous = self.resolve(id, token)?;
+        let binding = core.body_retry_images(previous.binding).await?;
+        let next = Uuid::new_v4().to_string();
+        {
+            let mut documents = self.documents.lock().map_err(|_| missing())?;
+            let current = documents
+                .get(token)
+                .filter(|document| {
+                    document.binding.email_id() == id
+                        && document.remote_images
+                        && Instant::now() < document.expires_at
+                })
+                .cloned()
+                .ok_or_else(missing)?;
+            // Rotate under the same lock used by revocation: a stale retry
+            // cannot recreate a grant after the user tightened image policy.
+            documents.insert(
+                next.clone(),
+                Document {
+                    token: next.clone(),
+                    binding,
+                    expires_at: Instant::now() + TOKEN_LIFETIME,
+                    remote_images: true,
+                    explicit_images: current.explicit_images,
+                },
+            );
+            documents.remove(token);
+            current.binding.release_remote_images();
+        }
+        // Removes old pending link confirmations; the old binding is gone.
+        self.release(id, token)?;
+        Ok(PreparedBody {
+            document_token: next,
+        })
+    }
+
     /// End one reading without affecting a newer opening of the same email.
     pub(crate) fn release(&self, id: &str, token: &str) -> Result<(), AppError> {
         {

@@ -407,8 +407,21 @@ impl AccountService {
                 host,
                 port,
                 dns,
+                image_proxy_dns,
+                confirm_image_proxy_dns,
                 authentication,
             } => {
+                let same_image_proxy = old.is_some_and(|snapshot| {
+                    matches!(&snapshot.account.route, RouteConfig::Custom {
+                        proxy_kind: old_kind, host: old_host, port: old_port,
+                        image_proxy_dns: true, authentication: old_auth, ..
+                    } if *old_kind == proxy_kind && *old_host == host && *old_port == port
+                        && old_auth.as_ref().map(|auth| &auth.username)
+                            == authentication.as_ref().map(|auth| &auth.username))
+                });
+                // Forwarding an old boolean does not grant a changed proxy.
+                let image_proxy_dns =
+                    image_proxy_dns && (confirm_image_proxy_dns || same_image_proxy);
                 let old_secret = old.and_then(|s| s.proxy_secret.as_ref());
                 let mut proxy_secret = None;
                 let authentication = if let Some(auth) = authentication {
@@ -456,6 +469,7 @@ impl AccountService {
                         host,
                         port,
                         dns,
+                        image_proxy_dns,
                         authentication,
                     },
                     proxy_secret,
@@ -737,9 +751,17 @@ fn canonical_config(
             host,
             port,
             dns,
+            image_proxy_dns,
+            confirm_image_proxy_dns,
             authentication,
         } => {
-            serde_json::json!({"kind":"custom","proxyKind":proxy_kind,"host":host,"port":port,"dns":dns,"username":authentication.as_ref().map(|a|&a.username)})
+            let mut route = serde_json::json!({"kind":"custom","proxyKind":proxy_kind,"host":host,"port":port,"dns":dns,"username":authentication.as_ref().map(|a|&a.username)});
+            // Preserve create-request identities recorded before the policy existed.
+            if *image_proxy_dns {
+                route["imageProxyDns"] = serde_json::json!(true);
+                route["confirmImageProxyDns"] = serde_json::json!(confirm_image_proxy_dns);
+            }
+            route
         }
     };
     let mut canonical = serde_json::json!({"displayName":profile.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"imap":config.imap,"smtp":config.smtp,"authenticationMode":mode,"route":route});

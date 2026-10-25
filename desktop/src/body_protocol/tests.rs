@@ -878,6 +878,30 @@ async fn remote_routes_require_a_current_document_grant_and_policy() {
         .await
         .unwrap();
     assert!(protocol.permits_remote_request(&remote(&one_time.document_token), Ask));
+    assert!(
+        protocol
+            .image_status(&core, id, &one_time.document_token, Ask)
+            .await
+            .is_ok()
+    );
+    assert!(
+        protocol
+            .image_status(&core, id, &blocked.document_token, Ask)
+            .await
+            .is_err()
+    );
+    assert!(
+        protocol
+            .image_status(&core, id, &one_time.document_token, Never)
+            .await
+            .is_err()
+    );
+    assert!(
+        protocol
+            .image_status(&core, "another-message", &one_time.document_token, Ask)
+            .await
+            .is_err()
+    );
     assert!(!protocol.permits_remote_request(&remote(&one_time.document_token), Never));
     let automatic = protocol
         .prepare_with_images(&core, id.clone(), true, false)
@@ -885,6 +909,12 @@ async fn remote_routes_require_a_current_document_grant_and_policy() {
         .unwrap();
     assert!(protocol.permits_remote_request(&remote(&automatic.document_token), Automatic));
     assert!(!protocol.permits_remote_request(&remote(&automatic.document_token), Ask));
+    assert!(
+        protocol
+            .image_status(&core, id, &automatic.document_token, Ask)
+            .await
+            .is_err()
+    );
     let (reply, _) = protocol
         .serve(
             &core,
@@ -904,6 +934,97 @@ async fn remote_routes_require_a_current_document_grant_and_policy() {
     protocol.revoke_remote_images();
     assert!(!protocol.permits_remote_request(&remote(&one_time.document_token), Ask));
     assert!(!protocol.permits_remote_request(&remote(&automatic.document_token), Automatic));
+    assert!(
+        protocol
+            .image_status(&core, id, &one_time.document_token, Ask)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn image_retry_rotates_only_an_existing_valid_grant() {
+    use mailx_core::RemoteImagePolicy::Ask;
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://127.0.0.1/private\">";
+    let directory = TempDir::new().unwrap();
+    let (core, ids) =
+        MailxCore::body_test_fixture(directory.path(), tokio::runtime::Handle::current(), &[raw])
+            .unwrap();
+    let protocol = BodyProtocol::default();
+    let id = &ids[0];
+    let blocked = protocol.prepare(&core, id.clone()).await.unwrap();
+    assert!(
+        protocol
+            .retry_images(&core, id, &blocked.document_token, Ask)
+            .await
+            .is_err()
+    );
+    let granted = protocol
+        .prepare_with_images(&core, id.clone(), true, true)
+        .await
+        .unwrap();
+    let resource = format!(
+        "{BODY_ORIGIN}/remote/{id}/0?token={}",
+        granted.document_token
+    );
+    let (reply, _) = protocol
+        .serve(&core, request(Method::GET, &resource), APP_ORIGIN)
+        .await;
+    assert_eq!(reply.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        protocol
+            .image_status(&core, id, &granted.document_token, Ask)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let retry = protocol
+        .retry_images(&core, id, &granted.document_token, Ask)
+        .await
+        .unwrap();
+    assert_ne!(retry.document_token, granted.document_token);
+    assert!(protocol.resolve(id, &granted.document_token).is_err());
+    assert!(
+        protocol
+            .image_status(&core, id, &retry.document_token, Ask)
+            .await
+            .is_ok()
+    );
+    protocol.revoke_remote_images();
+    assert!(
+        protocol
+            .retry_images(&core, id, &retry.document_token, Ask)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn changing_an_accounts_connection_revokes_its_readers_and_confirmations() {
+    let (_directory, core, ids, _db) = fixture();
+    let protocol = BodyProtocol::default();
+    let first = protocol
+        .prepare_with_images(&core, ids[0].clone(), true, true)
+        .await
+        .unwrap();
+    let second = protocol.prepare(&core, ids[1].clone()).await.unwrap();
+    let document = protocol.resolve(&ids[0], &first.document_token).unwrap();
+    let account_id = document.binding.account_id().to_owned();
+    let retained = document.binding.clone();
+    protocol
+        .prepare_link(&core, document, ids[0].clone(), 0)
+        .await
+        .unwrap();
+
+    protocol.revoke_account("unrelated-account");
+    assert!(protocol.resolve(&ids[0], &first.document_token).is_ok());
+    assert_eq!(protocol.confirmations.lock().unwrap().len(), 1);
+    protocol.revoke_account(&account_id);
+    assert!(protocol.resolve(&ids[0], &first.document_token).is_err());
+    assert!(protocol.resolve(&ids[1], &second.document_token).is_err());
+    assert!(protocol.confirmations.lock().unwrap().is_empty());
+    assert!(core.body_image_status(retained).await.is_err());
 }
 
 #[tokio::test]

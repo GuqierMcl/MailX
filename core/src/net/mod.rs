@@ -46,6 +46,9 @@ pub(crate) struct ProxyRoute {
 #[derive(Debug, Default)]
 pub(crate) struct NetRoute {
     pub proxy: Option<ProxyRoute>,
+    /// Explicit account consent for HTTPS image target DNS at this proxy.
+    /// Mail protocol connections do not consume this image-only permission.
+    pub image_proxy_dns: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

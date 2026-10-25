@@ -4,14 +4,18 @@
 //! the address belongs to a personal mailbox provider, the sender's domain icon
 //! from DuckDuckGo and then Google. Personal providers are skipped on purpose:
 //! every Gmail sender would otherwise get Google's logo. All requests use the
-//! owning account's route like any remote image, and a route that cannot attest
-//! its destination (a custom proxy) gets no avatar rather than a direct request.
+//! owning account's route and explicit image proxy policy. A failed proxy never
+//! falls back to a direct request. Cache entries are isolated by account/source
+//! and connection revision.
 //!
 //! Disclosure: Gravatar learns a hash of the address; the icon services learn
 //! the sender's domain in clear text. Found images persist in the shared image
-//! cache; misses are only remembered in memory, for a shorter time.
+//! cache. Failed lookups are not cached, so a temporary network error does not
+//! hide avatars for an hour.
 use std::{
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -22,11 +26,14 @@ use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
 use super::MailxCore;
-use crate::{AppError, ErrorCode, mail::render::InlineImage, net::NetRoute};
+use crate::{
+    AppError, ErrorCode,
+    accounts::AccountService,
+    mail::render::InlineImage,
+    net::{NetRoute, images::ImageFetchError},
+};
 
 const FOUND_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-// Failures are not distinguished (no profile, offline, blocked route), so retry soon.
-const MISSING_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ENTRIES: usize = 1024;
 
 /// A list can ask for a hundred senders at once. The shared download limit's
@@ -65,32 +72,20 @@ impl AvatarImage {
 
 #[derive(Default)]
 pub(super) struct AvatarCache {
-    entries: Mutex<HashMap<String, (Instant, Option<AvatarImage>)>>,
+    entries: Mutex<HashMap<String, (Instant, AvatarImage)>>,
 }
 
 impl AvatarCache {
-    fn get(&self, key: &str) -> Option<Option<AvatarImage>> {
+    fn get(&self, key: &str) -> Option<AvatarImage> {
         let entries = self.entries.lock().ok()?;
         let (stored, image) = entries.get(key)?;
-        let ttl = if image.is_some() {
-            FOUND_TTL
-        } else {
-            MISSING_TTL
-        };
-        (stored.elapsed() < ttl).then(|| image.clone())
+        (stored.elapsed() < FOUND_TTL).then(|| image.clone())
     }
 
-    fn put(&self, key: String, image: Option<AvatarImage>) {
+    fn put(&self, key: String, image: AvatarImage) {
         if let Ok(mut entries) = self.entries.lock() {
             if entries.len() >= MAX_ENTRIES {
-                entries.retain(|_, (stored, image)| {
-                    stored.elapsed()
-                        < if image.is_some() {
-                            FOUND_TTL
-                        } else {
-                            MISSING_TTL
-                        }
-                });
+                entries.retain(|_, (stored, _)| stored.elapsed() < FOUND_TTL);
                 if entries.len() >= MAX_ENTRIES {
                     entries.clear();
                 }
@@ -252,33 +247,91 @@ fn icon_urls(domain: &str) -> [String; 2] {
     ]
 }
 
+#[derive(Clone)]
+struct AvatarBinding {
+    account_id: String,
+    mailbox_source_id: String,
+    revision: u32,
+}
+
+impl AvatarBinding {
+    fn read(service: &AccountService, account_id: String) -> Result<Self, AppError> {
+        let identity = service.sync_identity(&account_id)?;
+        Ok(Self {
+            account_id,
+            mailbox_source_id: identity.mailbox_source_id,
+            revision: identity.revision,
+        })
+    }
+
+    fn check(&self, service: &AccountService) -> Result<(), AppError> {
+        let current = service.sync_identity(&self.account_id)?;
+        if current.mailbox_source_id != self.mailbox_source_id || current.revision != self.revision
+        {
+            return Err(AppError::new(ErrorCode::NotFound));
+        }
+        Ok(())
+    }
+
+    fn key(&self, kind: &str, value: &str) -> String {
+        format!(
+            "avatar-v2:{}:{}:{}:{kind}:{value}",
+            self.account_id, self.mailbox_source_id, self.revision
+        )
+    }
+}
+
+type ImageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<InlineImage, ImageFetchError>> + Send + 'a>>;
+
 impl MailxCore {
-    /// `None` when the address has no avatar or none could be fetched. The
-    /// caller must already have checked the user's opt-in setting.
+    /// The caller checks the independent avatar opt-in before and after this
+    /// request. No remote-image display grant is implied by an avatar lookup.
     pub async fn sender_avatar(
         &self,
         account_id: String,
         address: String,
     ) -> Result<Option<AvatarImage>, AppError> {
+        self.sender_avatar_with(account_id, address, |route, url| {
+            Box::pin(crate::net::images::fetch(route, url))
+        })
+        .await
+    }
+
+    async fn sender_avatar_with<F>(
+        &self,
+        account_id: String,
+        address: String,
+        fetch: F,
+    ) -> Result<Option<AvatarImage>, AppError>
+    where
+        F: for<'a> Fn(&'a NetRoute, String) -> ImageFuture<'a> + Send + Sync,
+    {
         let Some(address) = normalize(&address) else {
             return Ok(None);
         };
-        let memory_key = format!("avatar:{address}");
-        if let Some(cached) = self.avatars.get(&memory_key) {
-            return Ok(cached);
-        }
-        if let Some(image) = self.images.get(&memory_key, FOUND_TTL) {
-            let image = AvatarImage::new(image, AvatarKind::Photo);
-            self.avatars.put(memory_key, Some(image.clone()));
-            return Ok(Some(image));
+        let core = self.clone();
+        let binding = tokio::task::spawn_blocking(move || {
+            AvatarBinding::read(&*core.accounts()?, account_id)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))??;
+        let memory_key = binding.key("photo", &address);
+        if let Some(cached) = self
+            .cached_avatar(&binding, &memory_key, AvatarKind::Photo)
+            .await?
+        {
+            return Ok(Some(cached));
         }
         let domain = address
             .rsplit_once('@')
             .map_or("", |(_, domain)| domain)
             .to_owned();
         let core = self.clone();
+        let saved = binding.clone();
         let (route, personal) = tokio::task::spawn_blocking(move || {
             let service = core.accounts()?;
+            saved.check(&service)?;
             let own: Vec<String> = service
                 .list()?
                 .iter()
@@ -289,11 +342,10 @@ impl MailxCore {
                         .map(|(_, domain)| domain.trim().to_lowercase())
                 })
                 .collect();
-            let personal = is_personal(&domain, &own);
             let route = service
-                .image_route(&account_id)
+                .image_route(&saved.account_id)
                 .map_err(|_| AppError::new(ErrorCode::NotFound))?;
-            Ok::<_, AppError>((route, personal))
+            Ok::<_, AppError>((route, is_personal(&domain, &own)))
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))??;
@@ -301,63 +353,132 @@ impl MailxCore {
             .acquire()
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))?;
-        // Another request for this address may have finished while this one queued.
-        if let Some(cached) = self.avatars.get(&memory_key) {
-            return Ok(cached);
-        }
-        let mut found = crate::net::images::fetch(&route, gravatar_url(&address))
-            .await
-            .ok()
-            .map(|image| AvatarImage::new(image, AvatarKind::Photo));
-        if found.is_none() && !personal {
-            let domain = address.rsplit_once('@').map_or("", |(_, domain)| domain);
-            found = self.domain_icon(&route, domain).await;
-        }
-        // Only photos are stored under the address. A site icon is stored under
-        // its domain by `domain_icon`, so a restart reads it back as an icon.
-        if let Some(image) = found
-            .as_ref()
-            .filter(|image| image.kind == AvatarKind::Photo)
-            && let Ok(bytes) = STANDARD.decode(&image.data)
+        // This also rechecks identity after queueing, before a new request.
+        if let Some(cached) = self
+            .cached_avatar(&binding, &memory_key, AvatarKind::Photo)
+            .await?
         {
-            self.images.put(
-                &memory_key,
-                &InlineImage {
-                    bytes,
-                    mime_type: image.mime_type.clone(),
-                },
-            );
+            return Ok(Some(cached));
         }
-        self.avatars.put(memory_key, found.clone());
-        Ok(found)
+        let fetched = fetch(&route, gravatar_url(&address)).await;
+        self.check_avatar(&binding).await?;
+        if let Ok(image) = fetched {
+            return self
+                .store_avatar(&binding, &memory_key, image, AvatarKind::Photo)
+                .await
+                .map(Some);
+        }
+        let found = if personal {
+            None
+        } else {
+            let domain = address.rsplit_once('@').map_or("", |(_, domain)| domain);
+            self.domain_icon(&binding, &route, domain, &fetch).await?
+        };
+        let core = self.clone();
+        let saved = binding.clone();
+        tokio::task::spawn_blocking(move || {
+            let service = core.accounts()?;
+            saved.check(&service)?;
+            if let Some(image) = &found {
+                // Domain icons stay on disk under their icon key so their kind
+                // is preserved across restarts; only memory also aliases sender.
+                core.avatars.put(memory_key, image.clone());
+            }
+            Ok(found)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))?
     }
 
-    /// Site icon for a sender's domain, shared by every sender at that domain.
-    async fn domain_icon(&self, route: &NetRoute, domain: &str) -> Option<AvatarImage> {
-        for candidate in icon_domains(domain) {
-            let key = format!("icon:{candidate}");
-            if let Some(cached) = self.avatars.get(&key) {
-                if cached.is_some() {
-                    return cached;
-                }
-                continue;
+    async fn check_avatar(&self, binding: &AvatarBinding) -> Result<(), AppError> {
+        let core = self.clone();
+        let binding = binding.clone();
+        tokio::task::spawn_blocking(move || binding.check(&*core.accounts()?))
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    async fn cached_avatar(
+        &self,
+        binding: &AvatarBinding,
+        key: &str,
+        kind: AvatarKind,
+    ) -> Result<Option<AvatarImage>, AppError> {
+        let core = self.clone();
+        let binding = binding.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            binding.check(&*core.accounts()?)?;
+            let cached = core.avatars.get(&key).or_else(|| {
+                core.images
+                    .get(&key, FOUND_TTL)
+                    .map(|image| AvatarImage::new(image, kind))
+            });
+            let service = core.accounts()?;
+            binding.check(&service)?;
+            if let Some(image) = &cached {
+                core.avatars.put(key, image.clone());
             }
-            if let Some(image) = self.images.get(&key, FOUND_TTL) {
-                let image = AvatarImage::new(image, AvatarKind::Icon);
-                self.avatars.put(key, Some(image.clone()));
-                return Some(image);
+            Ok(cached)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    async fn store_avatar(
+        &self,
+        binding: &AvatarBinding,
+        key: &str,
+        image: InlineImage,
+        kind: AvatarKind,
+    ) -> Result<AvatarImage, AppError> {
+        let core = self.clone();
+        let binding = binding.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            binding.check(&*core.accounts()?)?;
+            core.images.put(&key, &image);
+            let service = core.accounts()?;
+            binding.check(&service)?;
+            let image = AvatarImage::new(image, kind);
+            core.avatars.put(key, image.clone());
+            Ok(image)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    /// Shared only among senders in the same account/source/connection revision.
+    async fn domain_icon<F>(
+        &self,
+        binding: &AvatarBinding,
+        route: &NetRoute,
+        domain: &str,
+        fetch: &F,
+    ) -> Result<Option<AvatarImage>, AppError>
+    where
+        F: for<'a> Fn(&'a NetRoute, String) -> ImageFuture<'a> + Send + Sync,
+    {
+        for candidate in icon_domains(domain) {
+            let key = binding.key("icon", &candidate);
+            if let Some(cached) = self.cached_avatar(binding, &key, AvatarKind::Icon).await? {
+                return Ok(Some(cached));
             }
             for url in icon_urls(&candidate) {
-                if let Ok(image) = crate::net::images::fetch(route, url).await {
-                    self.images.put(&key, &image);
-                    let image = AvatarImage::new(image, AvatarKind::Icon);
-                    self.avatars.put(key, Some(image.clone()));
-                    return Some(image);
+                self.check_avatar(binding).await?;
+                let fetched = fetch(route, url).await;
+                self.check_avatar(binding).await?;
+                if let Ok(image) = fetched {
+                    return self
+                        .store_avatar(binding, &key, image, AvatarKind::Icon)
+                        .await
+                        .map(Some);
                 }
             }
-            self.avatars.put(key, None);
         }
-        None
+        // No negative cache: HTTP status alone cannot distinguish a missing
+        // picture from an upstream outage, and network errors are recoverable.
+        Ok(None)
     }
 
     /// Deletes cached avatars and mail images, on disk and in memory.
@@ -370,6 +491,200 @@ impl MailxCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::{
+        sync_plan::tests::{config, connection_update},
+        types::{Account, CreateAccountRequest},
+    };
+    use crate::secrets::test_support::MemorySecrets;
+    use serde_json::{Value, json};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use tempfile::TempDir;
+
+    fn fixture() -> (TempDir, MailxCore, Account) {
+        let directory = TempDir::new().unwrap();
+        let core = MailxCore::open(
+            directory.path(),
+            Arc::new(MemorySecrets::default()),
+            tokio::runtime::Handle::current(),
+            Arc::new(|_: &crate::events::CoreEvent| {}),
+        )
+        .unwrap();
+        let request: CreateAccountRequest = serde_json::from_value(json!({
+            "requestId":uuid::Uuid::new_v4().to_string(), "config":config(json!({"kind":"direct"}))
+        }))
+        .unwrap();
+        // Add after opening, directly through the service: no real sync starts.
+        let account = core.accounts().unwrap().create(request).unwrap();
+        (directory, core, account)
+    }
+
+    fn update_route(core: &MailxCore, account: &Account, route: Value) -> Account {
+        let mut input = config(route);
+        input["authentication"]["password"] = json!({"action":"keep"});
+        core.accounts()
+            .unwrap()
+            .update_connection(connection_update(&account.id, account.revision, input))
+            .unwrap()
+    }
+
+    fn synthetic_image(value: u8) -> InlineImage {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            2,
+            image::Rgb([value, 0, 0]),
+        ));
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        InlineImage {
+            bytes: bytes.into_inner(),
+            mime_type: "image/png".into(),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn caches_are_scoped_to_current_account_revision_and_ignore_legacy_keys() {
+        let (_directory, core, account) = fixture();
+        let address = "sender@gmail.com";
+        let old = synthetic_image(10);
+        core.images.put(&format!("avatar:{address}"), &old);
+        core.avatars.put(
+            format!("avatar:{address}"),
+            AvatarImage::new(old.clone(), AvatarKind::Photo),
+        );
+        let calls = AtomicUsize::new(0);
+        let loaded = core
+            .sender_avatar_with(account.id.clone(), address.into(), |_, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(synthetic_image(20)) })
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "unscoped legacy cache must not be read"
+        );
+        let current = update_route(&core, &account, json!({"kind":"inherit"}));
+        assert!(current.revision > account.revision);
+        let changed = core
+            .sender_avatar_with(account.id.clone(), address.into(), |_, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(synthetic_image(30)) })
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(loaded.data, changed.data);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let cached = core
+            .sender_avatar_with(account.id.clone(), address.into(), |_, _| {
+                panic!("same-revision positive cache should avoid network")
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached, changed);
+        core.avatars.clear();
+        let disk = core
+            .sender_avatar_with(account.id.clone(), address.into(), |_, _| {
+                panic!("same-revision disk cache should avoid network")
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(disk, changed);
+        let binding = AvatarBinding::read(&core.accounts().unwrap(), account.id.clone()).unwrap();
+        let other_account = AvatarBinding {
+            account_id: uuid::Uuid::new_v4().to_string(),
+            ..binding.clone()
+        };
+        assert_ne!(
+            binding.key("photo", address),
+            other_account.key("photo", address)
+        );
+        let other_source = AvatarBinding {
+            mailbox_source_id: uuid::Uuid::new_v4().to_string(),
+            ..binding
+        };
+        assert_ne!(
+            other_source.key("icon", "example.com"),
+            other_account.key("icon", "example.com")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn late_network_result_after_route_change_is_not_returned_or_cached() {
+        let (_directory, core, account) = fixture();
+        let started = Arc::new(tokio::sync::Notify::new());
+        let finish = Arc::new(tokio::sync::Notify::new());
+        let task_core = core.clone();
+        let task_account = account.id.clone();
+        let task_started = started.clone();
+        let task_finish = finish.clone();
+        let pending = tokio::spawn(async move {
+            task_core
+                .sender_avatar_with(task_account, "sender@gmail.com".into(), move |_, _| {
+                    let started = task_started.clone();
+                    let finish = task_finish.clone();
+                    Box::pin(async move {
+                        started.notify_one();
+                        finish.notified().await;
+                        Ok(synthetic_image(50))
+                    })
+                })
+                .await
+        });
+        started.notified().await;
+        update_route(&core, &account, json!({"kind":"inherit"}));
+        finish.notify_one();
+        assert!(pending.await.unwrap().is_err());
+        assert!(core.avatars.entries.lock().unwrap().is_empty());
+        let old = AvatarBinding {
+            account_id: account.id,
+            mailbox_source_id: account.mailbox_source_id,
+            revision: account.revision,
+        };
+        assert!(
+            core.images
+                .get(&old.key("photo", "sender@gmail.com"), FOUND_TTL)
+                .is_none()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn temporary_network_errors_do_not_become_cached_missing_avatars() {
+        let (_directory, core, account) = fixture();
+        for failure in [
+            ImageFetchError::Dns,
+            ImageFetchError::Connect,
+            ImageFetchError::Proxy,
+            ImageFetchError::Tls,
+            ImageFetchError::Timeout,
+            ImageFetchError::HttpStatus,
+        ] {
+            assert!(
+                core.sender_avatar_with(account.id.clone(), "sender@gmail.com".into(), |_, _| {
+                    Box::pin(async move { Err(failure) })
+                })
+                .await
+                .unwrap()
+                .is_none()
+            );
+        }
+        assert!(core.avatars.entries.lock().unwrap().is_empty());
+        assert!(
+            core.sender_avatar_with(account.id, "sender@gmail.com".into(), |_, _| {
+                Box::pin(async { Ok(synthetic_image(60)) })
+            })
+            .await
+            .unwrap()
+            .is_some()
+        );
+    }
 
     #[test]
     fn addresses_are_normalized_before_hashing_and_junk_is_rejected() {
@@ -475,20 +790,18 @@ mod tests {
     }
 
     #[test]
-    fn cache_returns_hits_including_misses_and_bounds_its_size() {
+    fn cache_returns_only_successes_and_bounds_its_size() {
         let cache = AvatarCache::default();
         assert!(cache.get("a@b.c").is_none());
-        cache.put("a@b.c".into(), None);
-        assert_eq!(cache.get("a@b.c"), Some(None));
         let image = AvatarImage {
             mime_type: "image/png".into(),
             data: "AA==".into(),
             kind: AvatarKind::Photo,
         };
-        cache.put("d@e.f".into(), Some(image.clone()));
-        assert_eq!(cache.get("d@e.f"), Some(Some(image)));
+        cache.put("d@e.f".into(), image.clone());
+        assert_eq!(cache.get("d@e.f"), Some(image.clone()));
         for index in 0..(MAX_ENTRIES + 5) {
-            cache.put(format!("u{index}@x.io"), None);
+            cache.put(format!("u{index}@x.io"), image.clone());
         }
         assert!(cache.entries.lock().unwrap().len() <= MAX_ENTRIES);
         cache.clear();

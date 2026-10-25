@@ -32,7 +32,15 @@ export type DnsPolicy = "proxy";
 
 export type ProxyAuthenticationInput = { username: string, password: SecretUpdate, };
 
-export type RouteInput = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy, authentication: ProxyAuthenticationInput | null, };
+export type RouteInput = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy,
+/**
+ * HTTPS images may delegate target DNS to this configured proxy.
+ */
+imageProxyDns: boolean,
+/**
+ * Explicit grant for the endpoint supplied in this request. Never persisted.
+ */
+confirmImageProxyDns: boolean, authentication: ProxyAuthenticationInput | null, };
 
 export type AccountProfileInput = { displayName: string,
 /**
@@ -71,7 +79,11 @@ export type PasswordAuthenticationSummary = { mode: AuthenticationMode, imap: Au
 
 export type ProxyAuthenticationSummary = { username: string, passwordConfigured: boolean, trust: CredentialTrust, };
 
-export type RouteConfig = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy, authentication: ProxyAuthenticationSummary | null, };
+export type RouteConfig = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy,
+/**
+ * Defaults closed when reading snapshots written before this policy existed.
+ */
+imageProxyDns: boolean, authentication: ProxyAuthenticationSummary | null, };
 
 export type ConnectionStatus = "unverified";
 
@@ -211,6 +223,10 @@ interfaceFont: string,
 mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
+
+export type ImageFetchError = "targetBlocked" | "proxyPolicyRequired" | "dns" | "connect" | "proxy" | "tls" | "httpStatus" | "unsupportedType" | "invalidImage" | "tooLarge" | "timeout" | "cancelled";
+
+export type RemoteImageStatus = { index: number, loading: boolean, error: ImageFetchError | null, };
 
 export type SecuritySettings = { remoteImages: RemoteImagePolicy,
 /**

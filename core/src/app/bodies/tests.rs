@@ -448,7 +448,10 @@ async fn ending_a_reading_drops_images_and_rejects_late_cache_writes() {
     binding.release_remote_images();
     binding.release_remote_images();
     assert!(pending.remote_images.lock().unwrap().images.is_empty());
-    assert_missing(pending.cache_remote_image(url.into(), &image));
+    assert!(matches!(
+        pending.cache_remote_image(url.into(), &image),
+        Err(ImageFetchError::Cancelled)
+    ));
     assert_missing(core.body_remote_image(pending, 0).await);
     let reopened = core.body_document(ids[0].clone()).await.unwrap().binding;
     assert!(reopened.cached_remote_image(url).unwrap().is_none());
@@ -462,10 +465,11 @@ async fn downloaded_message_images_persist_across_readings_but_never_bypass_iden
     let (_, bytes) = synthetic_mail([0, 0, 255], "cache", "pixel");
     let image = render::validate_image(&bytes, "image/png").unwrap();
     // The host fetched and validated this earlier; the host is unreachable now.
-    core.images
-        .put("remote:https://example.invalid/pixel", &image);
-
     let first = core.body_document(ids[0].clone()).await.unwrap();
+    core.images.put(
+        &remote_cache_key(&first.binding, "https://example.invalid/pixel"),
+        &image,
+    );
     assert_eq!(
         core.body_remote_image(first.binding.clone(), 0)
             .await
@@ -497,6 +501,266 @@ async fn downloaded_message_images_persist_across_readings_but_never_bypass_iden
     core.clear_image_cache();
     let after = core.body_document(ids[1].clone()).await.unwrap();
     assert_missing(core.body_remote_image(after.binding, 0).await);
+}
+
+#[tokio::test]
+async fn image_diagnostics_are_bound_and_never_include_remote_details() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://127.0.0.1/private?secret=private-marker\">";
+    let (_directory, core, ids, db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    assert!(
+        core.body_image_status(binding.clone())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let (first, duplicate) = tokio::join!(
+        core.body_remote_image_detailed(binding.clone(), 0),
+        core.body_remote_image_detailed(binding.clone(), 0),
+    );
+    // This cached-only fixture deliberately has no connection profile, so a
+    // cache miss fails before any network plan can be opened.
+    assert!(matches!(first, Err(ImageFetchError::Cancelled)));
+    assert!(matches!(duplicate, Err(ImageFetchError::Cancelled)));
+    let status = core.body_image_status(binding.clone()).await.unwrap();
+    assert_eq!(
+        status,
+        vec![RemoteImageStatus {
+            index: 0,
+            loading: false,
+            error: Some(ImageFetchError::Cancelled)
+        }]
+    );
+    let serialized = serde_json::to_string(&status).unwrap();
+    assert!(!serialized.contains("private-marker"));
+    assert!(!serialized.contains("127.0.0.1"));
+    assert!(
+        core.body_remote_image_detailed(binding.clone(), usize::MAX)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        core.body_image_status(binding.clone()).await.unwrap(),
+        status
+    );
+    db.execute("UPDATE accounts SET revision=revision+1", [])
+        .unwrap();
+    assert_missing(core.body_image_status(binding.clone()).await);
+    binding.release_remote_images();
+    assert!(binding.remote_images.lock().unwrap().statuses.is_empty());
+}
+
+#[tokio::test]
+async fn remote_cache_does_not_cross_account_source_or_route_revisions() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://127.0.0.1/pixel\">";
+    let (_directory, core, ids, db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    let (_, bytes) = synthetic_mail([0, 0, 255], "cache", "pixel");
+    let image = render::validate_image(&bytes, "image/png").unwrap();
+    let url = "https://127.0.0.1/pixel";
+    let key = remote_cache_key(&binding, url);
+    core.images.put(&key, &image);
+    assert!(core.body_remote_image(binding.clone(), 0).await.is_ok());
+    let mut other = binding.clone();
+    other.identity.account_id.push_str("-other");
+    assert_ne!(key, remote_cache_key(&other, url));
+    other = binding.clone();
+    other.identity.mailbox_source_id.push_str("-other");
+    assert_ne!(key, remote_cache_key(&other, url));
+    db.execute("UPDATE accounts SET revision=revision+1", [])
+        .unwrap();
+    let current = core.body_document(ids[0].clone()).await.unwrap().binding;
+    assert_ne!(key, remote_cache_key(&current, url));
+    core.images.put(&format!("remote:{url}"), &image);
+    assert!(matches!(
+        core.body_remote_image_detailed(current, 0).await,
+        Err(ImageFetchError::Cancelled)
+    ));
+}
+
+#[tokio::test]
+async fn releasing_a_reading_cancels_a_queued_image_before_its_request_slot_opens() {
+    let url = "https://images.example.invalid/queued";
+    let raw = format!("Content-Type: text/html\r\n\r\n<img src=\"{url}\">");
+    let (_directory, core, ids, _db) = fixture(&[raw.as_bytes()]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    let request = Arc::new(tokio::sync::Mutex::new(()));
+    binding
+        .remote_images
+        .lock()
+        .unwrap()
+        .requests
+        .insert(url.into(), request.clone());
+    let slot = request.lock_owned().await;
+    let pending_core = core.clone();
+    let pending_binding = binding.clone();
+    let pending = tokio::spawn(async move {
+        pending_core
+            .body_remote_image_detailed(pending_binding, 0)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if binding
+                .remote_images
+                .lock()
+                .unwrap()
+                .statuses
+                .get(&0)
+                .is_some_and(|status| status.loading)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    binding.release_remote_images();
+    // Still hold the request slot: the whole loader, not merely its eventual
+    // cache write, must stop immediately when the capability is revoked.
+    let result = tokio::time::timeout(Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(result, Err(ImageFetchError::Cancelled)));
+    drop(slot);
+    let cache = binding.remote_images.lock().unwrap();
+    assert!(cache.requests.is_empty() && cache.statuses.is_empty());
+    assert!(cache.images.is_empty() && cache.failures.is_empty());
+}
+
+#[tokio::test]
+async fn a_released_binding_cannot_start_a_later_image_request_or_restore_status() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://images.example.invalid/late\">";
+    let (_directory, core, ids, _db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    let late = binding.clone();
+    binding.release_remote_images();
+    assert!(matches!(
+        core.body_remote_image_detailed(late.clone(), 0).await,
+        Err(ImageFetchError::Cancelled)
+    ));
+    assert!(
+        late.image_status(RemoteImageStatus {
+            index: 0,
+            loading: true,
+            error: None
+        })
+        .is_err()
+    );
+    assert!(late.remote_images.lock().unwrap().statuses.is_empty());
+    let fresh = core.body_document(ids[0].clone()).await.unwrap().binding;
+    assert!(!*fresh.remote_cancelled.borrow());
+}
+
+#[tokio::test]
+async fn retry_keeps_successes_without_disk_and_reopens_only_failed_resources() {
+    let good_url = "https://images.example.invalid/good";
+    let failed_url = "https://images.example.invalid/failed";
+    let raw = format!(
+        "Content-Type: text/html\r\n\r\n<img src=\"{good_url}\"><img src=\"{failed_url}\">"
+    );
+    let (_directory, core, ids, _db) = fixture(&[raw.as_bytes()]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    let (_, bytes) = synthetic_mail([10, 20, 30], "retained", "pixel");
+    let image = render::validate_image(&bytes, "image/png").unwrap();
+    binding.cache_remote_image(good_url.into(), &image).unwrap();
+    assert!(core.body_remote_image(binding.clone(), 0).await.is_ok());
+    // Represent a previously attempted download. The next read observes the
+    // remembered error instead of opening another network request.
+    binding
+        .remote_images
+        .lock()
+        .unwrap()
+        .failures
+        .insert(failed_url.into(), ImageFetchError::Connect);
+    assert!(matches!(
+        core.body_remote_image_detailed(binding.clone(), 1).await,
+        Err(ImageFetchError::Connect)
+    ));
+    core.clear_image_cache();
+    let retry = core.body_retry_images(binding.clone()).await.unwrap();
+    assert!(core.body_retry_images(binding.clone()).await.is_err());
+    assert!(core.body_retry_images(retry.clone()).await.is_err());
+    binding.release_remote_images();
+    // A new document has independent cancellation and carries the successful
+    // bytes itself. Without that memory, this credential-free fixture fails.
+    assert_eq!(
+        core.body_remote_image(retry.clone(), 0)
+            .await
+            .unwrap()
+            .bytes,
+        bytes
+    );
+    assert!(!*retry.remote_cancelled.borrow());
+    assert!(retry.remote_images.lock().unwrap().failures.is_empty());
+    // A recovered source can now be read rather than reusing its old failure.
+    core.images
+        .put(&remote_cache_key(&retry, failed_url), &image);
+    assert_eq!(
+        core.body_remote_image(retry.clone(), 1)
+            .await
+            .unwrap()
+            .bytes,
+        bytes
+    );
+    assert!(
+        core.body_image_status(retry)
+            .await
+            .unwrap()
+            .iter()
+            .all(|status| status.error.is_none() && !status.loading)
+    );
+}
+
+#[tokio::test]
+async fn image_retry_rejects_pending_released_and_stale_readings() {
+    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://images.example.invalid/pixel\">";
+    let (_directory, core, ids, db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    binding
+        .image_status(RemoteImageStatus {
+            index: 0,
+            loading: true,
+            error: None,
+        })
+        .unwrap();
+    assert!(core.body_retry_images(binding.clone()).await.is_err());
+    binding.release_remote_images();
+    assert_missing(core.body_retry_images(binding).await);
+    let stale = core.body_document(ids[0].clone()).await.unwrap().binding;
+    db.execute("UPDATE accounts SET revision=revision+1", [])
+        .unwrap();
+    assert_missing(core.body_retry_images(stale).await);
+}
+
+#[tokio::test]
+async fn document_image_budget_rejects_successes_it_cannot_retain_for_retry() {
+    let raw = b"Content-Type: text/html\r\n\r\n<p>budget fixture</p>";
+    let (_directory, core, ids, _db) = fixture(&[raw]);
+    let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
+    // Only the retaining budget is under test; network decoding has separate
+    // per-image validation. Production cannot hand this helper unvalidated data.
+    let image = InlineImage {
+        bytes: vec![0; MAX_REMOTE_CACHE_BYTES],
+        mime_type: "image/png".into(),
+    };
+    binding.cache_remote_image("full".into(), &image).unwrap();
+    let extra = InlineImage {
+        bytes: vec![0],
+        mime_type: "image/png".into(),
+    };
+    assert!(matches!(
+        binding.cache_remote_image("overflow".into(), &extra),
+        Err(ImageFetchError::TooLarge)
+    ));
+    let cache = binding.remote_images.lock().unwrap();
+    assert_eq!(cache.images.len(), 1);
+    assert_eq!(
+        cache.failures.get("overflow"),
+        Some(&ImageFetchError::TooLarge)
+    );
 }
 
 fn mail_with_attachments() -> Vec<u8> {

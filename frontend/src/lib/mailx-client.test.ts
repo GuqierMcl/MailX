@@ -70,6 +70,8 @@ describe('desktop client boundary', () => {
     const client = createDesktopClient()
     await client.fetchBody('email')
     await client.prepareBody('email')
+    await client.imageStatus('email', 'document')
+    await client.retryImages('email', 'document')
     await client.bodyLinks('email', 'document')
     const request = { emailId: 'email', index: 3, documentToken: 'document', requestId: 'grant', url: 'https://ignored.example' }
     await client.requestLink(request)
@@ -77,6 +79,8 @@ describe('desktop client boundary', () => {
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['emails_fetch_body', { emailId: 'email' }],
       ['emails_prepare_body', { emailId: 'email', loadRemoteImages: false }],
+      ['emails_image_status', { emailId: 'email', documentToken: 'document' }],
+      ['emails_retry_images', { emailId: 'email', documentToken: 'document' }],
       ['emails_body_links', { emailId: 'email', documentToken: 'document' }],
       ['links_request', { emailId: 'email', index: 3, documentToken: 'document' }],
       ['links_open', { emailId: 'email', index: 3, documentToken: 'document', requestId: 'grant' }],

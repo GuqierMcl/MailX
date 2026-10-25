@@ -19,12 +19,12 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio"] }
 html5ever = "0.39"
 # MIME construction and address parsing only. The SMTP session is hand-written
 # over net::connect / net::upgrade_tls, so no lettre transport or TLS feature is enabled.
 lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "ico"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "ico", "bmp", "tiff", "pnm", "qoi", "dds", "hdr", "ff", "tga"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 # ring avoids the cmake/nasm toolchain aws-lc needs on Windows.
@@ -37,6 +37,7 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-socks = "0.5"
+tower-service = "0.3"
 ts-rs = { version = "11", features = ["serde-compat", "no-serde-warnings"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }

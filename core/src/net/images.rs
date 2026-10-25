@@ -1,21 +1,53 @@
 //! Bounded, credential-free HTTP for untrusted mail images. This uses the
 //! account route, pins checked public addresses and revalidates every redirect.
+mod transport;
+
 use super::NetRoute;
 use crate::{
     AppError, ErrorCode,
-    mail::render::{InlineImage, validate_image},
+    mail::render::{InlineImage, RenderError, decode_remote_raster, remote_raster_format},
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use hyper::{Request, header};
 use hyper_util::rt::TokioIo;
-use std::{net::IpAddr, time::Duration};
+use std::{
+    net::IpAddr,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+use transport::{connect_target, network_error, target};
 use url::Url;
 
 pub(crate) const MAX_BYTES: usize = 8 * 1024 * 1024;
 static DOWNLOADS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
-fn rejected() -> AppError {
-    AppError::new(ErrorCode::NotFound)
+// The permit is moved into the blocking task. Cancelling its async waiter does
+// not free a slot while a decoder is still consuming CPU and memory.
+static DECODERS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+
+/// Fixed diagnostics for the trusted host; never contains URLs or peer text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ImageFetchError {
+    TargetBlocked,
+    ProxyPolicyRequired,
+    Dns,
+    Connect,
+    Proxy,
+    Tls,
+    HttpStatus,
+    UnsupportedType,
+    InvalidImage,
+    TooLarge,
+    Timeout,
+    Cancelled,
+}
+
+impl From<ImageFetchError> for AppError {
+    fn from(_: ImageFetchError) -> Self {
+        Self::new(ErrorCode::NotFound)
+    }
 }
 
 pub(crate) fn public_ip(ip: IpAddr) -> bool {
@@ -46,57 +78,18 @@ pub(crate) fn public_ip(ip: IpAddr) -> bool {
     }
 }
 
-fn checked_url(value: &str) -> Result<Url, AppError> {
-    let mut url = Url::parse(value).map_err(|_| rejected())?;
+fn checked_url(value: &str) -> Result<Url, ImageFetchError> {
+    let mut url = Url::parse(value).map_err(|_| ImageFetchError::TargetBlocked)?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
         || value.len() > 8192
     {
-        return Err(rejected());
+        return Err(ImageFetchError::TargetBlocked);
     }
     url.set_fragment(None);
     Ok(url)
-}
-
-async fn target(route: &NetRoute, url: &Url) -> Result<IpAddr, AppError> {
-    let host = url
-        .host_str()
-        .ok_or_else(rejected)?
-        .trim_matches(['[', ']']);
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return public_ip(ip).then_some(ip).ok_or_else(rejected);
-    }
-    // Proxy DNS cannot attest the final address. Do not leak a local lookup or
-    // fall back to a direct connection to make this image work.
-    if route.proxy.is_some() {
-        return Err(rejected());
-    }
-    let addresses: Vec<_> =
-        tokio::net::lookup_host((host, url.port_or_known_default().ok_or_else(rejected)?))
-            .await
-            .map_err(|_| rejected())?
-            .map(|a| a.ip())
-            .collect();
-    resolved_target(url, &addresses)
-}
-
-fn resolved_target(url: &Url, addresses: &[IpAddr]) -> Result<IpAddr, AppError> {
-    // Local TUN proxies commonly return RFC 2544 Fake-IP addresses for domains.
-    // Treat them as a transport mapping only for HTTPS: the connection still
-    // authenticates the original domain with the platform TLS verifier before
-    // sending HTTP. Literal benchmark addresses and plaintext HTTP stay blocked.
-    let tls_domain = url.scheme() == "https" && matches!(url.host(), Some(url::Host::Domain(_)));
-    let allowed = |ip: &IpAddr| {
-        public_ip(*ip)
-            || (tls_domain
-                && matches!(ip, IpAddr::V4(ip) if ip.octets()[0] == 198 && matches!(ip.octets()[1], 18 | 19)))
-    };
-    if addresses.is_empty() || !addresses.iter().all(allowed) {
-        return Err(rejected());
-    }
-    Ok(addresses[0])
 }
 
 struct ConnectionTask(tokio::task::JoinHandle<()>);
@@ -125,44 +118,51 @@ fn https_upgrade(url: &Url) -> Option<Url> {
     Some(secure)
 }
 
-pub(crate) async fn fetch(route: &NetRoute, value: String) -> Result<InlineImage, AppError> {
+pub(crate) async fn fetch(route: &NetRoute, value: String) -> Result<InlineImage, ImageFetchError> {
     tokio::time::timeout(Duration::from_secs(30), async {
-        let _permit = DOWNLOADS.acquire().await.map_err(|_| rejected())?;
+        let _permit = DOWNLOADS
+            .acquire()
+            .await
+            .map_err(|_| ImageFetchError::Cancelled)?;
         let url = checked_url(&value)?;
         // Tried first because plain HTTP cannot be used behind a Fake-IP (TUN)
         // proxy, where the destination can only be authenticated through TLS,
         // and because it keeps the image off the network in clear text.
-        if let Some(secure) = https_upgrade(&url)
-            && let Ok(Ok(image)) =
-                tokio::time::timeout(UPGRADE_ATTEMPT, follow(route, secure)).await
-        {
-            return Ok(image);
+        if let Some(secure) = https_upgrade(&url) {
+            let upgraded = tokio::time::timeout(UPGRADE_ATTEMPT, follow(route, secure))
+                .await
+                .unwrap_or(Err(ImageFetchError::Timeout));
+            match upgraded {
+                Ok(image) => return Ok(image),
+                // A proxy-domain request may only use HTTPS. Preserve the
+                // useful HTTPS diagnostic instead of reporting a blocked HTTP
+                // fallback that we were never going to attempt.
+                Err(error) if route.proxy.is_some() => return Err(error),
+                Err(_) => {}
+            }
         }
         follow(route, url).await
     })
     .await
-    .map_err(|_| rejected())?
+    .map_err(|_| ImageFetchError::Timeout)?
 }
 
-async fn follow(route: &NetRoute, mut url: Url) -> Result<InlineImage, AppError> {
+async fn follow(route: &NetRoute, mut url: Url) -> Result<InlineImage, ImageFetchError> {
     for redirects in 0..=3 {
-        let ip = target(route, &url).await?;
-        let port = url.port_or_known_default().ok_or_else(rejected)?;
-        let mut stream = super::connect(route, &ip.to_string(), port)
-            .await
-            .map_err(|_| rejected())?;
+        let checked = target(route, &url).await?;
+        let mut stream = connect_target(route, &url, checked).await?;
         if url.scheme() == "https" {
             stream = super::upgrade_tls(stream, url.host_str().unwrap().trim_matches(['[', ']']))
                 .await
-                .map_err(|_| rejected())?;
+                .map_err(network_error)?;
         }
         match exchange(stream, &url).await? {
             ImageReply::Image(image) => return Ok(image),
             ImageReply::Redirect(next) if redirects < 3 => url = next,
-            _ => return Err(rejected()),
+            _ => return Err(ImageFetchError::TargetBlocked),
         }
     }
-    Err(rejected())
+    Err(ImageFetchError::TargetBlocked)
 }
 
 enum ImageReply {
@@ -170,13 +170,13 @@ enum ImageReply {
     Image(InlineImage),
 }
 
-async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, AppError> {
+async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, ImageFetchError> {
     let (mut sender, connection) = hyper::client::conn::http1::Builder::new()
         .max_headers(64)
         .max_buf_size(32 * 1024)
         .handshake(TokioIo::new(stream))
         .await
-        .map_err(|_| rejected())?;
+        .map_err(|_| ImageFetchError::Connect)?;
     let _connection = ConnectionTask(tokio::spawn(async move {
         let _ = connection.await;
     }));
@@ -188,41 +188,54 @@ async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, A
         .header(header::HOST, authority)
         .header(
             header::ACCEPT,
-            "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon",
+            "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/tiff,image/x-icon,image/*;q=0.9,*/*;q=0.1",
         )
         .header(header::ACCEPT_ENCODING, "identity")
         .header(header::CONNECTION, "close")
         .body(Empty::<Bytes>::new())
-        .map_err(|_| rejected())?;
-    let response = sender.send_request(request).await.map_err(|_| rejected())?;
+        .map_err(|_| ImageFetchError::TargetBlocked)?;
+    let response = sender
+        .send_request(request)
+        .await
+        .map_err(|_| ImageFetchError::Connect)?;
+
     if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
         let location = response
             .headers()
             .get(header::LOCATION)
             .and_then(|h| h.to_str().ok())
-            .ok_or_else(rejected)?;
-        let next = checked_url(url.join(location).map_err(|_| rejected())?.as_str())?;
+            .ok_or(ImageFetchError::TargetBlocked)?;
+        let next = checked_url(
+            url.join(location)
+                .map_err(|_| ImageFetchError::TargetBlocked)?
+                .as_str(),
+        )?;
         if url.scheme() == "https" && next.scheme() != "https" {
-            return Err(rejected());
+            return Err(ImageFetchError::TargetBlocked);
         }
         return Ok(ImageReply::Redirect(next));
     }
-    if response.status() != 200
-        || response
-            .headers()
-            .get(header::CONTENT_ENCODING)
-            .is_some_and(|v| v != "identity")
-        || response
-            .headers()
-            .get(header::CONTENT_LENGTH)
-            .is_some_and(|v| {
-                v.to_str()
-                    .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .is_none_or(|n| n > MAX_BYTES)
-            })
+    if response.status() != 200 {
+        return Err(ImageFetchError::HttpStatus);
+    }
+    if response
+        .headers()
+        .get(header::CONTENT_ENCODING)
+        .is_some_and(|v| v != "identity")
     {
-        return Err(rejected());
+        return Err(ImageFetchError::UnsupportedType);
+    }
+    if response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .is_some_and(|v| {
+            v.to_str()
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .is_none_or(|n| n > MAX_BYTES)
+        })
+    {
+        return Err(ImageFetchError::TooLarge);
     }
     let mime = response
         .headers()
@@ -235,44 +248,78 @@ async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, A
     let mut body = response.into_body();
     let mut bytes = Vec::new();
     while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|_| rejected())?;
+        let frame = frame.map_err(|_| ImageFetchError::Connect)?;
         if let Ok(data) = frame.into_data() {
             if bytes.len().saturating_add(data.len()) > MAX_BYTES {
-                return Err(rejected());
+                return Err(ImageFetchError::TooLarge);
             }
             bytes.extend_from_slice(&data);
         }
     }
-    let image = tokio::task::spawn_blocking(move || decode_image(&bytes, &mime))
-        .await
-        .map_err(|_| rejected())??;
+
+    let image = decode_on_worker(DECODERS.clone(), move || decode_image(&bytes, &mime)).await?;
     Ok(ImageReply::Image(image))
 }
 
-fn decode_image(bytes: &[u8], mime: &str) -> Result<InlineImage, AppError> {
-    if mime != "image/svg+xml" {
-        return validate_image(bytes, mime).map_err(|_| rejected());
+async fn decode_on_worker(
+    permits: Arc<tokio::sync::Semaphore>,
+    decode: impl FnOnce() -> Result<InlineImage, ImageFetchError> + Send + 'static,
+) -> Result<InlineImage, ImageFetchError> {
+    let permit = permits
+        .acquire_owned()
+        .await
+        .map_err(|_| ImageFetchError::Cancelled)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        decode()
+    })
+    .await
+    .map_err(|_| ImageFetchError::Cancelled)?
+}
+
+fn decode_image(bytes: &[u8], _mime: &str) -> Result<InlineImage, ImageFetchError> {
+    // Bytes, not a CDN's Content-Type, determine the decoder. Even a label such
+    // as text/html cannot turn validated raster data into active HTML: output
+    // comes exclusively from our bounded image path with its own MIME.
+    if remote_raster_format(bytes).is_some() {
+        return decode_remote_raster(bytes).map_err(|error| match error {
+            RenderError::TooLarge => ImageFetchError::TooLarge,
+            _ => ImageFetchError::InvalidImage,
+        });
     }
     // Remote SVGs never reach the WebView. Rasterize static vector shapes only,
     // with no scripts, external/local images, fonts, nested SVGs or SVGZ decoding.
     use resvg::{tiny_skia, usvg};
+    let text = std::str::from_utf8(bytes).map_err(|_| ImageFetchError::UnsupportedType)?;
+    if !text
+        .trim_start_matches(['\u{feff}', ' ', '\r', '\n', '\t'])
+        .starts_with('<')
+    {
+        return Err(ImageFetchError::UnsupportedType);
+    }
     if bytes.len() > 1024 * 1024 {
-        return Err(rejected());
+        return Err(ImageFetchError::TooLarge);
     }
     let xml = usvg::roxmltree::Document::parse_with_options(
-        std::str::from_utf8(bytes).map_err(|_| rejected())?,
+        text,
         usvg::roxmltree::ParsingOptions {
             allow_dtd: false,
             nodes_limit: 20_000,
             ..Default::default()
         },
     )
-    .map_err(|_| rejected())?;
+    .map_err(|_| ImageFetchError::InvalidImage)?;
+    let root = xml.root_element();
+    if root.tag_name().name() != "svg"
+        || root.tag_name().namespace() != Some("http://www.w3.org/2000/svg")
+    {
+        return Err(ImageFetchError::UnsupportedType);
+    }
     if xml
         .descendants()
         .any(|node| node.ancestors().count() > 32 || node.has_tag_name("filter"))
     {
-        return Err(rejected());
+        return Err(ImageFetchError::InvalidImage);
     }
     let options = usvg::Options {
         image_href_resolver: usvg::ImageHrefResolver {
@@ -281,23 +328,31 @@ fn decode_image(bytes: &[u8], mime: &str) -> Result<InlineImage, AppError> {
         },
         ..Default::default()
     };
-    let tree = usvg::Tree::from_xmltree(&xml, &options).map_err(|_| rejected())?;
+    let tree =
+        usvg::Tree::from_xmltree(&xml, &options).map_err(|_| ImageFetchError::InvalidImage)?;
     let size = tree.size().to_int_size();
     if size.width() > 4096
         || size.height() > 4096
         || u64::from(size.width()) * u64::from(size.height()) > 4 * 1024 * 1024
         || !tree.root().has_children()
     {
-        return Err(rejected());
+        return Err(ImageFetchError::TooLarge);
     }
-    let mut pixmap = tiny_skia::Pixmap::new(size.width(), size.height()).ok_or_else(rejected)?;
+    let mut pixmap =
+        tiny_skia::Pixmap::new(size.width(), size.height()).ok_or(ImageFetchError::TooLarge)?;
     resvg::render(
         &tree,
         tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
+    let bytes = pixmap
+        .encode_png()
+        .map_err(|_| ImageFetchError::InvalidImage)?;
+    if bytes.len() > crate::mail::render::MAX_REMOTE_IMAGE_OUTPUT_BYTES {
+        return Err(ImageFetchError::TooLarge);
+    }
     Ok(InlineImage {
-        bytes: pixmap.encode_png().map_err(|_| rejected())?,
+        bytes,
         mime_type: "image/png".into(),
     })
 }
@@ -305,6 +360,7 @@ fn decode_image(bytes: &[u8], mime: &str) -> Result<InlineImage, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use transport::resolved_targets;
     #[test]
     fn denies_local_metadata_reserved_and_transition_addresses() {
         for value in [
@@ -322,6 +378,7 @@ mod tests {
             "fe80::1",
             "fc00::1",
             "2002:0808:0808::",
+            "2001:2::1",
             "2001:db8::1",
         ] {
             assert!(!public_ip(value.parse().unwrap()), "{value}");
@@ -340,20 +397,62 @@ mod tests {
     async fn fake_ip_dns_is_supported_only_for_tls_authenticated_domains() {
         let https = checked_url("https://images.example.com/image.png").unwrap();
         let http = checked_url("http://images.example.com/image.png").unwrap();
-        for value in ["198.18.0.1", "198.19.255.254"] {
+        for value in [
+            "198.18.0.1",
+            "198.19.255.254",
+            "2001:2::1",
+            "2001:2:0:ffff:ffff:ffff:ffff:ffff",
+        ] {
             let ip = value.parse().unwrap();
-            assert_eq!(resolved_target(&https, &[ip]).unwrap(), ip);
-            assert!(resolved_target(&http, &[ip]).is_err());
-            let literal = checked_url(&format!("https://{value}/image.png")).unwrap();
+            assert_eq!(resolved_targets(&https, &[ip]).unwrap(), [ip]);
+            assert!(resolved_targets(&http, &[ip]).is_err());
+            let literal = checked_url(&format!(
+                "https://{}/image.png",
+                std::net::SocketAddr::new(ip, 443)
+            ))
+            .unwrap();
             assert!(target(&NetRoute::default(), &literal).await.is_err());
-            assert!(resolved_target(&literal, &[ip]).is_err());
+            assert!(resolved_targets(&literal, &[ip]).is_err());
         }
-        for value in ["127.0.0.1", "192.168.1.1", "169.254.169.254", "::1"] {
+        // A dual-stack answer must work in either order; previously the IPv6
+        // mapping rejected the whole answer, even with a usable IPv4 mapping.
+        let v4 = "198.18.0.200".parse().unwrap();
+        let v6 = "2001:2::c5".parse().unwrap();
+        for addresses in [[v4, v6], [v6, v4]] {
+            assert_eq!(resolved_targets(&https, &addresses).unwrap(), addresses);
+            assert!(resolved_targets(&http, &addresses).is_err());
+        }
+        for value in [
+            "127.0.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "::1",
+            "fc00::1",
+            "fdfe:dcba:9876::1",
+            "::ffff:198.18.0.1",
+            "2001:1:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001:2:1::1",
+            "2001:3::1",
+        ] {
             let ip = value.parse().unwrap();
-            assert!(resolved_target(&https, &[ip]).is_err());
-            assert!(resolved_target(&https, &["198.18.0.1".parse().unwrap(), ip]).is_err());
+            assert!(resolved_targets(&https, &[ip]).is_err());
+            assert_eq!(resolved_targets(&https, &[v4, ip, v4]).unwrap(), [v4]);
+            assert_eq!(resolved_targets(&https, &[v6, ip, v6]).unwrap(), [v6]);
         }
-        assert!(resolved_target(&https, &[]).is_err());
+        assert!(resolved_targets(&https, &[]).is_err());
+        let public = "8.8.8.8".parse().unwrap();
+        assert_eq!(
+            resolved_targets(
+                &https,
+                &[
+                    "127.0.0.1".parse().unwrap(),
+                    public,
+                    "192.168.1.1".parse().unwrap()
+                ]
+            )
+            .unwrap(),
+            [public]
+        );
     }
     #[tokio::test]
     async fn blocks_credentials_local_targets_and_proxy_dns_before_connecting() {
@@ -370,6 +469,7 @@ mod tests {
                 port: 9,
                 auth: None,
             }),
+            ..Default::default()
         };
         assert!(
             target(&route, &checked_url("https://example.com/a").unwrap())
@@ -380,7 +480,7 @@ mod tests {
     async fn synthetic_response(
         headers: &str,
         bytes: &[u8],
-    ) -> (Result<ImageReply, AppError>, String) {
+    ) -> (Result<ImageReply, ImageFetchError>, String) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (client, mut server) = tokio::io::duplex(65536);
         let reply = [headers.as_bytes(), bytes].concat();
@@ -408,7 +508,10 @@ mod tests {
         let ImageReply::Image(image) = result.unwrap() else {
             panic!("expected image")
         };
-        assert_eq!(image.bytes, bytes);
+        assert_eq!(
+            image::load_from_memory(&image.bytes).unwrap().to_rgba8(),
+            image::load_from_memory(&bytes).unwrap().to_rgba8()
+        );
         assert!(request.starts_with("GET /a?b=1 HTTP/1.1\r\n"));
         let headers = request.to_ascii_lowercase();
         assert!(
@@ -416,6 +519,52 @@ mod tests {
                 && !headers.contains("authorization:")
                 && !headers.contains("referer:")
         );
+    }
+
+    #[tokio::test]
+    async fn mislabeled_remote_rasters_are_fully_validated_and_served_with_their_actual_mime() {
+        let mut png = Vec::new();
+        for (format, declared, expected) in [
+            (
+                image::ImageFormat::Png,
+                "image/jpeg;charset=UTF-8",
+                "image/png",
+            ),
+            (image::ImageFormat::Jpeg, "image/png", "image/jpeg"),
+        ] {
+            let mut output = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(2, 2)
+                .write_to(&mut output, format)
+                .unwrap();
+            let bytes = output.into_inner();
+            let (reply, _) = synthetic_response(
+                &format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {declared}\r\nContent-Length: {}\r\n\r\n",
+                    bytes.len()
+                ),
+                &bytes,
+            )
+            .await;
+            let ImageReply::Image(image) = reply.unwrap() else {
+                panic!("expected raster image")
+            };
+            assert_eq!(image.mime_type, expected);
+            assert_eq!(
+                image::load_from_memory(&image.bytes).unwrap().to_rgba8(),
+                image::load_from_memory(&bytes).unwrap().to_rgba8()
+            );
+            if format == image::ImageFormat::Png {
+                png = bytes;
+            }
+        }
+        // A recognized magic number still requires complete decoding. MIME is
+        // advisory; active content never becomes an image merely by its label.
+        assert!(decode_image(&png[..png.len() - 1], "image/jpeg").is_err());
+        assert!(decode_image(b"<html>not an image</html>", "image/png").is_err());
+        assert!(decode_image(b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/jpeg").is_err());
+        for declared in ["text/html", "application/octet-stream", "", "image/svg+xml"] {
+            assert_eq!(decode_image(&png, declared).unwrap().mime_type, "image/png");
+        }
     }
 
     #[tokio::test]
@@ -462,6 +611,45 @@ mod tests {
             assert!(decode_image(svg.as_bytes(), "image/svg+xml").is_err());
         }
         assert!(decode_image(&vec![b' '; 1024 * 1024 + 1], "image/svg+xml").is_err());
+    }
+
+    #[test]
+    fn svg_is_identified_by_its_root_and_rasterized_even_with_missing_or_wrong_mime() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>"#;
+        for mime in ["", "application/octet-stream", "text/html", "image/png"] {
+            let image = decode_image(svg, mime).unwrap();
+            assert_eq!(image.mime_type, "image/png");
+            let rgba = image::load_from_memory(&image.bytes).unwrap().into_rgba8();
+            assert!(rgba.pixels().all(|p| p.0 == [255, 0, 0, 255]));
+        }
+        for bytes in [
+            b"<html><body>error</body></html>".as_slice(),
+            b"<svg xmlns='https://other.invalid'/>",
+            b"<html xmlns='http://www.w3.org/2000/svg'/>",
+        ] {
+            assert!(decode_image(bytes, "image/svg+xml").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_decode_waiter_keeps_its_worker_budget_until_work_finishes() {
+        let permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, work) = std::sync::mpsc::channel();
+        let worker = tokio::spawn(decode_on_worker(permits.clone(), move || {
+            started.send(()).unwrap();
+            work.recv().unwrap();
+            Err(ImageFetchError::InvalidImage)
+        }));
+        ready.await.unwrap();
+        worker.abort();
+        assert!(matches!(worker.await, Err(error) if error.is_cancelled()));
+        assert_eq!(permits.available_permits(), 0);
+        release.send(()).unwrap();
+        let _released = tokio::time::timeout(Duration::from_secs(1), permits.acquire())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

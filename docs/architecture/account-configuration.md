@@ -42,6 +42,8 @@ type SecretUpdate =
 
 支持保存 `direct`、`inherit` 与 `custom` 路由；自定义代理为 SOCKS5 或 HTTP CONNECT，目标 DNS 策略固定为 `proxy`。主机字段接受主机名或 IP，不接受带协议、路径或 userinfo 的 URL。邮件 TLS 只允许隐式 TLS 或强制 STARTTLS。
 
+自定义路由新增 `imageProxyDns`（默认 false），对应“通过此代理加载 HTTPS 图片”。显式开启时，写入请求同时带临时 `confirmImageProxyDns=true`；该标记不出现在读取 DTO 或持久化配置中。已有许可只在代理类型、主机、端口与认证用户名均相同时保留；变化后即使输入沿用旧 true，也需新的明确确认，否则保存为关闭。前端编辑这些字段会自动关闭选择；同一身份下替换代理密码可保留许可。策略变更推进连接及路由版本，旧正文/头像绑定失效；邮件显示许可和头像开关独立管理。HTTPS 的原始域名证书仍验证，代理最终解析地址由受信出口负责，见[网络与安全](network-security.md)。
+
 路由配置或代理凭证变化推进 `routeRevision`。`inherit` 当前解析为应用默认直连，返回 `defaultRouteRevision=1`；尚无可修改的全局代理设置。后续默认路由变化必须使继承它的连接失效，即使账号配置版本未变。实际网络连接、不回退直连和代理 DNS 行为仍须通过协议探针验证。
 
 ## 4. SQLite 与凭据库的一致性
