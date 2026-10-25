@@ -113,7 +113,7 @@ type EmailPage = {
 
 `EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number }`。
 `bodyFailure` 为 null 或 `tooLarge | stale | network | authentication | protocol | storage`。
-`AttachmentSummary` 包含 id、filename、mimeType、size、isInline；本轮不提供附件保存接口。
+`AttachmentSummary` 包含 id、filename、mimeType、size、isInline；邮件未给出附件名时 filename 为空字符串，界面按当前语言显示占位名，核心不生成面向用户的文本；本轮不提供附件保存接口。
 HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 正文界面自动选择格式：hasHtml 为 true 时显示隔离的 HTML，否则显示纯文本；不提供格式切换或“重新加载正文”按钮。缺失正文仍自动下载，下载失败时保留“重试”入口。

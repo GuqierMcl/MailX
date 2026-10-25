@@ -1,6 +1,7 @@
 {
   "attachments": "Attachments",
   "saveAttachment": "Save attachment {{filename}}",
+  "unnamedAttachment": "Unnamed attachment",
   "saveTo": "Save as…",
   "saving": "Saving",
   "saved": "Saved",

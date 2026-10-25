@@ -39,6 +39,7 @@ function AttachmentItem({ client, emailId, attachment }: {
   attachment: AttachmentSummary
 }) {
   useTranslation()
+  const filename = attachment.filename || t('mail:unnamedAttachment')
   const [state, setState] = useState<SaveState>({ kind: 'idle' })
   const busy = state.kind === 'saving'
   const save = () => {
@@ -59,13 +60,13 @@ function AttachmentItem({ client, emailId, attachment }: {
     <li className="flex flex-col gap-1">
       <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
         <HugeiconsIcon icon={Attachment01Icon} className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="max-w-60 break-all">{attachment.filename}</span>
+        <span className="max-w-60 break-all">{filename}</span>
         <span className="text-muted-foreground">{formatSize(attachment.size)}</span>
         <button
           type="button"
           onClick={save}
           disabled={busy}
-          aria-label={t('mail:saveAttachment', { filename: attachment.filename })}
+          aria-label={t('mail:saveAttachment', { filename })}
           title={t('mail:saveTo')}
           className={cn(
             'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none',

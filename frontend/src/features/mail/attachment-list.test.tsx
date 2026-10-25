@@ -46,6 +46,16 @@ describe('attachment list', () => {
     expect(screen.queryByText('application/pdf')).not.toBeInTheDocument()
   })
 
+  it('shows a localized placeholder for an attachment without a name', async () => {
+    const client = testClient()
+    render(<AttachmentList client={client} emailId="mail-1" attachments={[{ ...notes, filename: '' }]} />)
+    expect(screen.getByText('未命名附件')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存附件 未命名附件' })).toBeEnabled()
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(screen.getByText('Unnamed attachment')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save attachment Unnamed attachment' })).toBeEnabled()
+  })
+
   it('asks the host to save exactly the attachment that was clicked, with no path', async () => {
     const client = setup()
     await userEvent.click(screen.getByRole('button', { name: '保存附件 notes.txt' }))

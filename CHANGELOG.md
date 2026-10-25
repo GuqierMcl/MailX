@@ -25,6 +25,10 @@
 
 - macOS 上所有账号密码合并存放在一个钥匙串条目中，启动时最多只需授权一次，不再每个账号一次；旧条目会在首次启动时迁入、下次启动时清理。
 
+### Fixed
+
+- 没有文件名的附件在英文界面下也按所选语言显示占位名称，不再固定显示中文。([#32](https://github.com/GuqierMcl/MailX/pull/32))
+
 ### Changed
 
 - 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。

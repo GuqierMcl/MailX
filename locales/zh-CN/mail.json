@@ -1,6 +1,7 @@
 {
   "attachments": "附件",
   "saveAttachment": "保存附件 {{filename}}",
+  "unnamedAttachment": "未命名附件",
   "saveTo": "保存到…",
   "saving": "正在保存",
   "saved": "已保存",

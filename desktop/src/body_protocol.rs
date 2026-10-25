@@ -681,7 +681,7 @@ impl BodyProtocol {
                     render::bind_resources(&document.html, resolve)
                 };
                 let html = format!(
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>邮件正文</title><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
                     base_css = self.base_css.lock().map_err(|_| missing())?,
                     dark_css = if dark { DARK_CSS } else { "" }
                 );

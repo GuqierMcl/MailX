@@ -233,7 +233,8 @@ fn ready_queries_return_safe_body_metadata_preview_and_non_inline_attachments() 
     assert_eq!(detail.attachments[0].mime_type, "application/pdf");
     assert_eq!(detail.attachments[0].size, 123);
     assert_eq!(detail.attachments[0].id, format!("{id}:1"));
-    assert_eq!(detail.attachments[1].filename, "未命名附件");
+    // A missing name stays empty; the UI supplies the localized placeholder.
+    assert_eq!(detail.attachments[1].filename, "");
     assert!(detail.attachments.iter().all(|part| !part.is_inline));
     let wire = serde_json::to_value(&detail).unwrap();
     assert!(wire["body"].get("html").is_none());
