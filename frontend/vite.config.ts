@@ -13,6 +13,11 @@ const appVersion = JSON.parse(readFileSync(resolve(configDirectory, "../package.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: { __APP_VERSION__: JSON.stringify(appVersion) },
+  server: {
+    // Prepare this lazy module on dev-server startup, before the first composer
+    // asks for it. Production keeps the editor in its own dynamically loaded chunk.
+    warmup: { clientFiles: ['./src/features/composer/mail-body-editor.tsx'] },
+  },
   resolve: {
     alias: {
       "@": resolve(configDirectory, "./src"),

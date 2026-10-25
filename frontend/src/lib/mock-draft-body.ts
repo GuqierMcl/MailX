@@ -1,19 +1,45 @@
+import { isMailColor, isMailHighlight, isMailTextAlign } from '@/features/composer/mail-body-format'
+
+const BLOCKS = new Set(['P', 'H1', 'H2', 'H3'])
+const ALLOWED = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'SPAN', 'MARK'])
+const DROP_CONTENT = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'TEMPLATE', 'SVG', 'MATH', 'NOSCRIPT', 'HEAD', 'TITLE'])
+
+function safeHref(value: string): string | null {
+  const href = value.trim()
+  if (!/^(https?:\/\/|mailto:)/i.test(href) || Array.from(href).some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)) return null
+  try {
+    const url = new URL(href)
+    return (url.protocol === 'mailto:' ? url.pathname.length > 0 : url.hostname.length > 0) ? href : null
+  } catch {
+    return null
+  }
+}
+
 /** Browser-preview approximation only. Production HTML/text are owned by Rust. */
 export function mockDraftBody(html: string): { bodyHtml: string; bodyText: string } {
   const template = document.createElement('template')
   template.innerHTML = html
-  const allowed = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE'])
   for (const node of Array.from(template.content.querySelectorAll('*'))) {
-    if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'TEMPLATE', 'SVG', 'MATH'].includes(node.tagName)) {
+    if (node.namespaceURI !== 'http://www.w3.org/1999/xhtml' || DROP_CONTENT.has(node.tagName)) {
       node.remove()
       continue
     }
+    const href = node.tagName === 'A' ? safeHref(node.getAttribute('href') ?? '') : null
+    const start = node.tagName === 'OL' ? node.getAttribute('start') : null
+    const align = BLOCKS.has(node.tagName) ? node.getAttribute('data-align') : null
+    const color = node.tagName === 'SPAN' ? node.getAttribute('data-color') : null
+    const highlight = node.tagName === 'MARK' ? node.getAttribute('data-highlight') : null
     for (const attribute of Array.from(node.attributes)) {
-      const link = node.tagName === 'A' && attribute.name === 'href' && /^(https?:\/\/|mailto:)/i.test(attribute.value.trim())
-      const start = node.tagName === 'OL' && attribute.name === 'start' && /^\d+$/.test(attribute.value)
-      if (!link && !start) node.removeAttribute(attribute.name)
+      node.removeAttribute(attribute.name)
     }
-    if (!allowed.has(node.tagName)) node.replaceWith(...node.childNodes)
+    if (href) node.setAttribute('href', href)
+    if (start && /^-?\d+$/.test(start) && Number.isSafeInteger(Number(start))) node.setAttribute('start', String(Number(start)))
+    if (isMailTextAlign(align)) node.setAttribute('data-align', align)
+    if (isMailColor(color)) node.setAttribute('data-color', color)
+    if (isMailHighlight(highlight)) node.setAttribute('data-highlight', highlight)
+    if (!ALLOWED.has(node.tagName) || (node.tagName === 'SPAN' && !isMailColor(color)) || (node.tagName === 'MARK' && !isMailHighlight(highlight))) {
+      node.replaceWith(...node.childNodes)
+    }
   }
   const text = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
@@ -30,7 +56,7 @@ export function mockDraftBody(html: string): { bodyHtml: string; bodyText: strin
       const number = Number(parent?.getAttribute('start') ?? 1) + (parent ? Array.from(parent.children).indexOf(node) : 0)
       return `${parent?.tagName === 'OL' ? `${number}. ` : '- '}${inside.replace(/\n$/, '')}\n`
     }
-    return inside + (node.tagName === 'P' ? '\n' : '')
+    return inside + (BLOCKS.has(node.tagName) ? '\n' : '')
   }
   return { bodyHtml: template.innerHTML, bodyText: text(template.content).replace(/\n$/, '') }
 }

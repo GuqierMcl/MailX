@@ -906,13 +906,23 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
     let f = fixture(&[plain("x")]);
     let mut request = f.blank(None);
     request.to = vec![who(None, "reader@example.com")];
-    request.body_html = "<p onclick='steal()'>你好<strong>朋友</strong></p><ol start='3'><li><p>三个</p></li><li><p><a href='https://example.com' style='color:red'>链接</a></p></li></ol><blockquote><p>引用</p></blockquote><script>secret()</script><img src='https://tracker.example'>".into();
+    request.body_html = "<h2 data-align='center'>标题</h2><p data-align='right' onclick='steal()'>你好<span data-color='red'><mark data-highlight='yellow'><strong>朋友</strong></mark></span></p><ol start='3'><li><p>三个</p></li><li><p><a href='https://example.com' style='color:red'>链接</a></p></li></ol><blockquote><p>引用</p></blockquote><script>secret()</script><img src='https://tracker.example'>".into();
     let saved = f.core.create_draft(request, NONE).unwrap();
     assert_eq!(
         saved.body_text,
-        "你好朋友\n3. 三个\n4. 链接 <https://example.com>\n> 引用"
+        "标题\n你好朋友\n3. 三个\n4. 链接 <https://example.com>\n> 引用"
     );
     assert!(saved.body_html.contains("<strong>朋友</strong>"));
+    assert!(
+        saved
+            .body_html
+            .contains("<h2 data-align=\"center\">标题</h2>")
+    );
+    assert!(
+        saved
+            .body_html
+            .contains("<span data-color=\"red\"><mark data-highlight=\"yellow\">")
+    );
     for forbidden in ["onclick", "style", "script", "secret", "<img", "tracker"] {
         assert!(!saved.body_html.contains(forbidden));
     }
@@ -950,6 +960,14 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
     );
     let html = message.body_html(0).unwrap();
     assert!(html.contains("<strong>朋友</strong>"));
+    assert!(html.contains(
+        "<h2 style=\"margin:0;font-size:18px;font-weight:bold;text-align:center\">标题</h2>"
+    ));
+    assert!(html.contains("<p style=\"margin:0;text-align:right\">"));
+    assert!(html.contains(
+        "<span style=\"color:#dc2626\"><mark style=\"background-color:#fef08a;color:inherit\">"
+    ));
+    assert!(!html.contains("data-"));
     assert!(html.contains("margin:0"));
     assert!(html.contains("<meta charset=\"utf-8\">"));
     assert!(!html.contains("<style") && !html.contains("class="));
@@ -957,22 +975,25 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
 
 #[tokio::test]
 async fn replies_and_forwards_reuse_cached_html_with_safe_links_and_simple_layout() {
-    let raw = b"Content-Type: text/html; charset=utf-8\r\n\r\n<h2>Heading</h2><p><strong>Bold</strong> <a href='https://example.com'>Website</a></p><table><tr><td>Cell A</td><td>Cell B</td></tr></table><p><img src='https://example.com/image.png' alt='chart'></p><script>evil()</script>".to_vec();
+    let raw = b"Content-Type: text/html; charset=utf-8\r\n\r\n<h2 align='right' style='color:red'>Heading</h2><h6>Small</h6><p style='text-align:center'><span style='color:red'><mark style='background-color:yellow'><strong>Bold</strong></mark></span> <a href='https://example.com'>Website</a></p><table><tr><td>Cell A</td><td>Cell B</td></tr></table><p><img src='https://example.com/image.png' alt='chart'></p><script>evil()</script>".to_vec();
     let f = fixture(&[raw]);
     let reply = f.derive(0, DraftKind::Reply).unwrap();
     assert!(reply.body_html.starts_with("<p></p>"));
     assert!(reply.body_html.contains("<blockquote>"));
-    assert!(reply.body_html.contains("<strong>Heading</strong>"));
+    assert!(reply.body_html.contains("<h2>Heading</h2><h3>Small</h3>"));
     assert!(reply.body_html.contains("<strong>Bold</strong>"));
     assert!(reply.body_html.contains("href=\"https://example.com"));
     assert!(reply.body_text.contains("Website <https://example.com"));
     assert!(reply.body_text.contains("Cell A") && reply.body_text.contains("Cell B"));
     assert!(reply.body_text.contains("[图片：chart]"));
-    for forbidden in ["<table", "<img", "<h2", "data-mailx", "<script", "evil()"] {
+    for forbidden in [
+        "<table", "<img", "<h6", "data-", "style=", "align=", "<span", "<mark", "<script", "evil()",
+    ] {
         assert!(!reply.body_html.contains(forbidden), "{forbidden}");
     }
     let forward = f.derive(0, DraftKind::Forward).unwrap();
     assert!(forward.body_html.starts_with("<p></p>"));
     assert!(!forward.body_html.contains("<blockquote>"));
     assert!(forward.body_html.contains("<strong>Bold</strong>"));
+    assert!(forward.body_html.contains("<h2>Heading</h2><h3>Small</h3>"));
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AlertCircleIcon, MailOpen01Icon } from '@hugeicons/core-free-icons'
 import type { Account } from '@/generated/accounts'
@@ -23,9 +23,7 @@ import { cn } from '@/lib/utils'
 import { RecipientField } from './recipient-field'
 import { SendButton } from './send-button'
 import { fieldsAreEmpty, useDraftEditor, type SaveStatus } from './use-draft-editor'
-
-// Keep the editor engine and its styles out of the main window's initial bundle.
-const MailBodyEditor = lazy(() => import('./mail-body-editor'))
+import { useMailBodyEditor } from './mail-body-editor-loader'
 
 /** What the window around the composer needs from it when closing. */
 export type ComposerController = {
@@ -65,6 +63,8 @@ const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', saved: '已保存', 
  * the host, which reaches in through `controllerRef`.
  */
 export function Composer({ client, draftId, accounts, onSubjectChange, onSent, onDiscarded, controllerRef }: ComposerProps) {
+  // Also load on mount for other hosts, independently of the draft's response.
+  const { Component: MailBodyEditor, failed: editorLoadFailed, retry: retryEditor } = useMailBodyEditor()
   const editor = useDraftEditor(client, draftId, (notice) => {
     if (notice.kind === 'conflict') toast.info('草稿已在别处修改，已加载最新版本', { description: '你刚才未保存的改动没有被应用。' })
     else toast.info('这封邮件已进入发送队列，不能再编辑')
@@ -253,9 +253,16 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           />
         </div>
       </div>
-      <Suspense fallback={<div role="status" className="flex min-h-0 flex-1 items-center justify-center">正在打开编辑器…</div>}>
+      {MailBodyEditor ? (
         <MailBodyEditor value={fields.bodyHtml} readOnly={readOnly} onChange={(bodyHtml) => editor.update({ bodyHtml })} />
-      </Suspense>
+      ) : editorLoadFailed ? (
+        <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">
+          <p>编辑器加载失败</p>
+          <Button type="button" variant="outline" onClick={retryEditor}>重新加载编辑器</Button>
+        </div>
+      ) : (
+        <div role="status" className="flex min-h-0 flex-1 items-center justify-center">正在打开编辑器…</div>
+      )}
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           {/* The width and height are reserved so the status coming and going never moves the buttons. */}

@@ -29,11 +29,46 @@ const TAGS: &[&str] = &[
     "ol",
     "li",
     "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "span",
+    "mark",
 ];
 const DROP_CONTENT: &[&str] = &[
     "script", "style", "iframe", "object", "embed", "template", "svg", "math", "noscript", "head",
     "title",
 ];
+
+// Storage contains palette names only. Email colors are fixed and independent
+// of the editor's light/dark theme; arbitrary CSS never crosses this boundary.
+const TEXT_COLORS: &[(&str, &str)] = &[
+    ("gray", "#6b7280"),
+    ("red", "#dc2626"),
+    ("orange", "#ea580c"),
+    ("yellow", "#ca8a04"),
+    ("green", "#16a34a"),
+    ("blue", "#2563eb"),
+    ("purple", "#9333ea"),
+    ("pink", "#db2777"),
+];
+const HIGHLIGHT_COLORS: &[(&str, &str)] = &[
+    ("gray", "#e5e7eb"),
+    ("red", "#fecaca"),
+    ("yellow", "#fef08a"),
+    ("green", "#bbf7d0"),
+    ("blue", "#bfdbfe"),
+];
+
+fn palette_color<'a>(palette: &'a [(&str, &str)], name: &str) -> Option<&'a str> {
+    palette
+        .iter()
+        .find_map(|(key, color)| (*key == name).then_some(*color))
+}
+
+fn alignment(value: &str) -> Option<&str> {
+    matches!(value, "center" | "right").then_some(value)
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct NormalizedBody {
@@ -64,6 +99,12 @@ fn sanitize(html: &str) -> String {
             [
                 ("a", HashSet::from(["href"])),
                 ("ol", HashSet::from(["start"])),
+                ("p", HashSet::from(["data-align"])),
+                ("h1", HashSet::from(["data-align"])),
+                ("h2", HashSet::from(["data-align"])),
+                ("h3", HashSet::from(["data-align"])),
+                ("span", HashSet::from(["data-color"])),
+                ("mark", HashSet::from(["data-highlight"])),
             ]
             .into_iter()
             .collect(),
@@ -79,6 +120,13 @@ fn sanitize(html: &str) -> String {
                 .parse::<i64>()
                 .ok()
                 .map(|n| Cow::Owned(n.to_string())),
+            ("p" | "h1" | "h2" | "h3", "data-align") => alignment(value).map(Cow::Borrowed),
+            ("span", "data-color") if palette_color(TEXT_COLORS, value).is_some() => {
+                Some(Cow::Borrowed(value))
+            }
+            ("mark", "data-highlight") if palette_color(HIGHLIGHT_COLORS, value).is_some() => {
+                Some(Cow::Borrowed(value))
+            }
             _ => None,
         })
         .clean(html)
@@ -286,17 +334,34 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                 }
                 continue;
             }
-            let tag = canonical_tag(original);
-            if mode == Mode::Quote && matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-                open.push_str("<p><strong>");
-                close.push_str("</strong></p>");
-            } else if mode == Mode::Quote
+            let tag = if mode == Mode::Quote && matches!(original, "h4" | "h5" | "h6") {
+                "h3"
+            } else {
+                canonical_tag(original)
+            };
+            // Quoted mail keeps its heading structure, but never imports the
+            // sender's alignment, colors, highlights, or palette attributes.
+            let align = (mode != Mode::Quote && matches!(tag, "p" | "h1" | "h2" | "h3"))
+                .then(|| element.value().attr("data-align").and_then(alignment))
+                .flatten();
+            let color = (mode != Mode::Quote && tag == "span")
+                .then(|| element.value().attr("data-color"))
+                .flatten()
+                .filter(|name| palette_color(TEXT_COLORS, name).is_some());
+            let highlight = (mode != Mode::Quote && tag == "mark")
+                .then(|| element.value().attr("data-highlight"))
+                .flatten()
+                .filter(|name| palette_color(HIGHLIGHT_COLORS, name).is_some());
+            if mode == Mode::Quote
                 && matches!(tag, "div" | "td" | "th" | "pre")
                 && !has_block_children(element)
             {
                 open.push_str("<p>");
                 close.push_str("</p>");
-            } else if TAGS.contains(&tag) {
+            } else if TAGS.contains(&tag)
+                && (tag != "span" || color.is_some())
+                && (tag != "mark" || highlight.is_some())
+            {
                 open.push('<');
                 open.push_str(tag);
                 let href = if tag == "a" {
@@ -333,21 +398,50 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                 {
                     open.push_str(&format!(" start=\"{start}\""));
                 }
-                if mode == Mode::Email {
-                    let style = match tag {
-                        "p" => Some("margin:0"),
-                        "blockquote" => {
-                            Some("margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex")
+                if mode == Mode::Draft {
+                    for (attribute, value) in [
+                        ("data-align", align),
+                        ("data-color", color),
+                        ("data-highlight", highlight),
+                    ] {
+                        if let Some(value) = value {
+                            open.push_str(&format!(" {attribute}=\"{value}\""));
                         }
-                        "ul" | "ol" => Some("margin-top:0;margin-bottom:0"),
-                        _ => None,
-                    };
-                    if let Some(style) = style {
+                    }
+                }
+                if mode == Mode::Email {
+                    let mut style = match tag {
+                        "p" => "margin:0",
+                        "h1" => "margin:0;font-size:20px;font-weight:bold",
+                        "h2" => "margin:0;font-size:18px;font-weight:bold",
+                        "h3" => "margin:0;font-size:16px;font-weight:bold",
+                        "blockquote" => {
+                            "margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex"
+                        }
+                        "ul" | "ol" => "margin-top:0;margin-bottom:0",
+                        _ => "",
+                    }
+                    .to_owned();
+                    if let Some(align) = align {
+                        style.push_str(&format!(";text-align:{align}"));
+                    }
+                    if let Some(color) = color.and_then(|name| palette_color(TEXT_COLORS, name)) {
+                        style = format!("color:{color}");
+                    }
+                    if let Some(color) =
+                        highlight.and_then(|name| palette_color(HIGHLIGHT_COLORS, name))
+                    {
+                        style = format!("background-color:{color};color:inherit");
+                    }
+                    if !style.is_empty() {
                         open.push_str(&format!(" style=\"{style}\""));
                     }
                 }
                 open.push('>');
-                if mode == Mode::Email && tag == "p" && !element.has_children() {
+                if mode == Mode::Email
+                    && matches!(tag, "p" | "h1" | "h2" | "h3")
+                    && !element.has_children()
+                {
                     // Empty HTML paragraphs otherwise have zero height in mail
                     // clients, unlike the editor's visible empty paragraph.
                     open.push_str("<br>");
@@ -505,7 +599,7 @@ fn plain_text(document: &Html) -> Result<String, AppError> {
         let tag = element.value().name();
         if exiting {
             match tag {
-                "p" => writer.flush(true)?,
+                "p" | "h1" | "h2" | "h3" => writer.flush(true)?,
                 "blockquote" => {
                     writer.flush(false)?;
                     writer.quote_depth -= 1;
@@ -534,7 +628,7 @@ fn plain_text(document: &Html) -> Result<String, AppError> {
             continue;
         }
         match tag {
-            "p" => writer.flush(false)?,
+            "p" | "h1" | "h2" | "h3" => writer.flush(false)?,
             "br" => writer.flush(true)?,
             "blockquote" => {
                 writer.flush(false)?;
@@ -702,7 +796,7 @@ mod tests {
             "fallback",
         );
         assert!(
-            html.starts_with("<p><strong>标题</strong></p><p>甲</p><p>乙</p><p>丙</p>"),
+            html.starts_with("<h2>标题</h2><p>甲</p><p>乙</p><p>丙</p>"),
             "{html}"
         );
         assert_eq!(
@@ -808,5 +902,121 @@ mod tests {
             "<p style=\"margin:0\">first</p><p style=\"margin:0\"><br></p><p style=\"margin:0\"><br></p><p style=\"margin:0\">last</p>"
         ));
         assert_eq!(body.html, "<p>first</p><p></p><p></p><p>last</p>");
+    }
+
+    #[test]
+    fn headings_and_alignment_keep_plain_text_and_use_fixed_email_styles() {
+        let body = normalize("<h1 data-align='center'>First</h1><h2 data-align='right'>Second</h2><h3>Third</h3><p data-align='center'>Body</p><ul><li><p data-align='right'>Item</p></li></ul><blockquote><h2 data-align='center'>Quote</h2></blockquote>").unwrap();
+        assert_eq!(body.text, "First\nSecond\nThird\nBody\n- Item\n> Quote");
+        assert_eq!(normalize(&body.html).unwrap(), body);
+        let html = email_document(&body.html);
+        for expected in [
+            "<h1 style=\"margin:0;font-size:20px;font-weight:bold;text-align:center\">First</h1>",
+            "<h2 style=\"margin:0;font-size:18px;font-weight:bold;text-align:right\">Second</h2>",
+            "<h3 style=\"margin:0;font-size:16px;font-weight:bold\">Third</h3>",
+            "<p style=\"margin:0;text-align:center\">Body</p>",
+            "<li><p style=\"margin:0;text-align:right\">Item</p></li>",
+        ] {
+            assert!(html.contains(expected), "{expected}: {html}");
+        }
+        assert!(!html.contains("data-"));
+        assert_eq!(
+            normalize("<h1></h1><h2>  </h2><h3>\t</h3>").unwrap().text,
+            ""
+        );
+        assert!(email_document("<h1></h1>").contains("font-weight:bold\"><br></h1>"));
+    }
+
+    #[test]
+    fn palette_names_are_the_only_color_and_highlight_values() {
+        for (name, expected) in [
+            ("gray", "#6b7280"),
+            ("red", "#dc2626"),
+            ("orange", "#ea580c"),
+            ("yellow", "#ca8a04"),
+            ("green", "#16a34a"),
+            ("blue", "#2563eb"),
+            ("purple", "#9333ea"),
+            ("pink", "#db2777"),
+        ] {
+            let body = normalize(&format!(
+                "<p><span data-color='{name}' style='color:black' class='external'>Color</span></p>"
+            ))
+            .unwrap();
+            assert_eq!(
+                body.html,
+                format!("<p><span data-color=\"{name}\">Color</span></p>")
+            );
+            assert_eq!(body.text, "Color");
+            assert!(
+                email_document(&body.html)
+                    .contains(&format!("<span style=\"color:{expected}\">Color</span>"))
+            );
+        }
+        for (name, expected) in [
+            ("gray", "#e5e7eb"),
+            ("red", "#fecaca"),
+            ("yellow", "#fef08a"),
+            ("green", "#bbf7d0"),
+            ("blue", "#bfdbfe"),
+        ] {
+            let body = normalize(&format!("<p><span data-color='purple'><mark data-highlight='{name}'><strong>Both</strong></mark></span></p>")).unwrap();
+            assert_eq!(body.text, "Both");
+            assert_eq!(normalize(&body.html).unwrap(), body);
+            let html = email_document(&body.html);
+            assert!(html.contains(&format!("<span style=\"color:#9333ea\"><mark style=\"background-color:{expected};color:inherit\"><strong>Both</strong></mark></span>")));
+            assert!(!html.contains("data-"));
+        }
+    }
+
+    #[test]
+    fn arbitrary_attributes_and_invalid_palette_wrappers_are_removed() {
+        for value in [
+            "",
+            "RED",
+            " red",
+            "red ",
+            "#dc2626",
+            "rgb(1,2,3)",
+            "var(--red)",
+            "red;background:url(https://tracker)",
+        ] {
+            let body = normalize(&format!("<p><span data-color='{value}' style='color:red'><strong>Keep</strong></span><mark data-highlight='{value}'>Text</mark></p>")).unwrap();
+            assert_eq!(body.html, "<p><strong>Keep</strong>Text</p>", "{value}");
+            assert_eq!(body.text, "KeepText");
+        }
+        for value in [
+            "left",
+            "justify",
+            "CENTER",
+            "center ",
+            "right;position:fixed",
+        ] {
+            let body = normalize(&format!(
+                "<h2 data-align='{value}'>Title</h2><p data-align='{value}'>Body</p>"
+            ))
+            .unwrap();
+            assert_eq!(body.html, "<h2>Title</h2><p>Body</p>", "{value}");
+        }
+        assert_eq!(normalize("<p data-color='red' align='right' style='text-align:right'>Text<span data-highlight='yellow'>A</span><mark data-color='red'>B</mark><mark data-highlight='orange'>C</mark></p><ul data-align='center'><li data-align='right'>Item</li></ul>").unwrap().html, "<p>TextABC</p><ul><li>Item</li></ul>");
+    }
+
+    #[test]
+    fn quoted_mail_keeps_heading_levels_but_discards_all_source_styling() {
+        let html = quote_source(
+            Some(
+                "<h1 data-align='right' style='color:red;text-align:right'>One</h1><h2 align='center'>Two</h2><h3>Three</h3><h4>Four</h4><h5>Five</h5><h6>Six</h6><p data-align='center'><span data-color='red' style='color:#dc2626'><mark data-highlight='yellow' style='background:yellow'><strong>Formatted</strong></mark></span></p>",
+            ),
+            "",
+        );
+        assert_eq!(
+            html,
+            "<h1>One</h1><h2>Two</h2><h3>Three</h3><h3>Four</h3><h3>Five</h3><h3>Six</h3><p><strong>Formatted</strong></p>"
+        );
+        assert_eq!(
+            normalize(&html).unwrap().text,
+            "One\nTwo\nThree\nFour\nFive\nSix\nFormatted"
+        );
+        assert!(!html.contains("data-") && !html.contains("style") && !html.contains("align"));
     }
 }

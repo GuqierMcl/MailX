@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type Ref, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { EditorState, Selection } from '@tiptap/pm/state'
@@ -7,12 +7,14 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import {
   LeftToRightListBulletIcon, LeftToRightListNumberIcon, Link01Icon, MoreHorizontalIcon,
   QuoteDownIcon, RedoIcon, TextBoldIcon, TextClearIcon, TextItalicIcon,
-  TextStrikethroughIcon, TextUnderlineIcon, UndoIcon,
+  TextStrikethroughIcon, TextUnderlineIcon, UndoIcon, ArrowDown01Icon,
+  TextAlignLeftIcon, TextAlignCenterIcon, TextAlignRightIcon, TextColorIcon, PaintBoardIcon, Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { allowedMailLink, mailEditorOptions } from './mail-body-editor-schema'
+import { MAIL_COLORS, MAIL_HIGHLIGHTS, type MailColor, type MailHighlight, type MailTextAlign } from './mail-body-format'
 import './mail-body-editor.css'
 
 export type MailBodySelection = { from: number; to: number }
@@ -31,6 +33,22 @@ type MailBodyEditorProps = {
 }
 
 type LinkPopup = MailBodySelection & { href: string }
+type FormatPopup = MailBodySelection & { kind: 'paragraph' | 'color' | 'highlight' }
+
+const alignActions = [
+  { value: 'left', label: '左对齐', icon: TextAlignLeftIcon },
+  { value: 'center', label: '居中对齐', icon: TextAlignCenterIcon },
+  { value: 'right', label: '右对齐', icon: TextAlignRightIcon },
+] as const
+
+function popupButtons(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')).filter((button) => {
+    for (let element: HTMLElement | null = button; element && element !== container; element = element.parentElement) {
+      if (getComputedStyle(element).display === 'none') return false
+    }
+    return true
+  })
+}
 type FormatAction = {
   label: string
   shortcut?: string
@@ -49,7 +67,11 @@ const blockActions: FormatAction[] = [
   { label: '无序列表', shortcut: 'Shift+8', icon: LeftToRightListBulletIcon, mark: 'bulletList', execute: (editor) => editor.commands.toggleBulletList() },
   { label: '有序列表', shortcut: 'Shift+7', icon: LeftToRightListNumberIcon, mark: 'orderedList', execute: (editor) => editor.commands.toggleOrderedList() },
   { label: '引用', shortcut: 'Shift+B', icon: QuoteDownIcon, mark: 'blockquote', execute: (editor) => editor.commands.toggleBlockquote() },
-  { label: '清除格式', icon: TextClearIcon, execute: (editor) => editor.chain().unsetAllMarks().clearNodes().run() },
+  { label: '清除格式', icon: TextClearIcon, execute: (editor) => editor.chain().unsetAllMarks().command(({ tr }) => {
+    // unsetAllMarks only affects a range; an empty caret needs explicit clearing.
+    if (tr.selection.empty) tr.setStoredMarks([])
+    return true
+  }).unsetMailTextAlign().run() },
 ]
 
 /** A host-independent editor. Draft revisions, saving and sending live outside. */
@@ -57,6 +79,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
   const [linkPopup, setLinkPopup] = useState<LinkPopup | null>(null)
   const [linkError, setLinkError] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [formatPopup, setFormatPopup] = useState<FormatPopup | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const linkInput = useRef<HTMLInputElement>(null)
   const popup = useRef<HTMLDivElement>(null)
@@ -73,7 +96,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     onTransaction: ({ transaction }) => {
       // A conflict reload can replace the document while a link dialog is open.
       // Its saved range belongs to the old document and must not be applied.
-      if (transaction.docChanged) { setLinkPopup(null); setMoreOpen(false) }
+      if (transaction.docChanged) { setLinkPopup(null); setMoreOpen(false); setFormatPopup(null) }
     },
     editorProps: {
       ...options.editorProps,
@@ -113,6 +136,10 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     selector: ({ editor: current }) => current && !current.isDestroyed ? {
       active: [...markActions, ...blockActions].filter((action) => action.mark && current.isActive(action.mark)).map((action) => action.mark),
       link: current.isActive('link'),
+      heading: ([1, 2, 3] as const).find((level) => current.isActive('heading', { level })) ?? 0,
+      align: current.isActive({ textAlign: 'center' }) ? 'center' : current.isActive({ textAlign: 'right' }) ? 'right' : 'left',
+      color: String(current.getAttributes('mailColor').color ?? ''),
+      highlight: String(current.getAttributes('mailHighlight').highlight ?? ''),
       undo: current.can().undo(),
       redo: current.can().redo(),
     } : null,
@@ -165,13 +192,14 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     }
   }, [editor, value])
 
-  const hasPopup = (!readOnly && linkPopup !== null) || moreOpen
+  const hasPopup = !readOnly && (linkPopup !== null || formatPopup !== null || moreOpen)
   useEffect(() => {
     if (!hasPopup) return
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !popup.current?.contains(event.target) && !moreButton.current?.contains(event.target)) {
+      if (event.target instanceof Node && !popup.current?.contains(event.target) && !root.current?.querySelector('[role=toolbar]')?.contains(event.target)) {
         setLinkPopup(null)
         setMoreOpen(false)
+        setFormatPopup(null)
       }
     }
     document.addEventListener('pointerdown', outside)
@@ -180,8 +208,11 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
 
   useEffect(() => {
     if (linkPopup && !readOnly) linkInput.current?.focus()
-    else if (moreOpen) popup.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-  }, [linkPopup, moreOpen, readOnly])
+    else if (!readOnly && popup.current && (moreOpen || formatPopup)) {
+      const buttons = popupButtons(popup.current)
+      ;(buttons.find((button) => button.getAttribute('aria-checked') === 'true') ?? buttons[0])?.focus()
+    }
+  }, [linkPopup, moreOpen, formatPopup, readOnly])
 
   function openLink() {
     if (!editor || !editor.isEditable) return
@@ -190,6 +221,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     linkComposing.current = false
     setLinkError(false)
     setMoreOpen(false)
+    setFormatPopup(null)
     setLinkPopup({ from, to, href: String(editor.getAttributes('link').href ?? '') })
   }
 
@@ -197,7 +229,55 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     linkComposing.current = false
     setLinkPopup(null)
     setMoreOpen(false)
+    setFormatPopup(null)
     if (editor && !editor.isDestroyed) editor.view.focus()
+  }
+
+  function openFormat(kind: FormatPopup['kind']) {
+    if (!editor?.isEditable) return
+    const { from, to } = editor.state.selection
+    setLinkPopup(null)
+    setMoreOpen(false)
+    setFormatPopup(formatPopup?.kind === kind ? null : { kind, from, to })
+  }
+
+  function applyFormat(value: string) {
+    if (!editor?.isEditable || !formatPopup) return
+    // Re-selecting the same collapsed caret would clear pending bold/color marks.
+    if (editor.state.selection.from !== formatPopup.from || editor.state.selection.to !== formatPopup.to) {
+      editor.commands.setTextSelection({ from: formatPopup.from, to: formatPopup.to })
+    }
+    if (formatPopup.kind === 'paragraph') {
+      const pendingMarks = editor.state.selection.empty ? editor.state.storedMarks : null
+      if (value === '0') editor.commands.setParagraph()
+      else editor.commands.setHeading({ level: Number(value) as 1 | 2 | 3 })
+      if (pendingMarks) editor.view.dispatch(editor.state.tr.setStoredMarks(pendingMarks))
+    } else if (formatPopup.kind === 'color') {
+      if (value) editor.commands.setMailColor(value as MailColor)
+      else editor.commands.unsetMailColor()
+    } else if (value) editor.commands.setMailHighlight(value as MailHighlight)
+    else editor.commands.unsetMailHighlight()
+    closePopup()
+  }
+
+  function menuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, columns = 1) {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopup(); return }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey || event.nativeEvent.isComposing || event.keyCode === 229)) {
+      event.preventDefault(); event.stopPropagation(); return
+    }
+    const buttons = popupButtons(event.currentTarget)
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    let next: number
+    if (event.key === 'ArrowRight') next = index + 1
+    else if (event.key === 'ArrowDown') next = index + columns
+    else if (event.key === 'ArrowLeft') next = index - 1
+    else if (event.key === 'ArrowUp') next = index - columns
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = buttons.length - 1
+    else return
+    event.preventDefault()
+    event.stopPropagation()
+    buttons[(next + buttons.length) % buttons.length]?.focus()
   }
 
   function applyLink(remove = false) {
@@ -246,23 +326,60 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     </>
   )
 
+  const alignButtons = (inMenu = false) => alignActions.map((action) => (
+    <IconButton key={action.value} label={action.label} size="icon-sm" disabled={readOnly || !editor}
+      role={inMenu ? 'menuitem' : undefined} aria-pressed={state?.align === action.value} className="mail-format-button"
+      onMouseDown={(event) => event.preventDefault()} onClick={() => {
+        if (editor?.isEditable) editor.commands.setMailTextAlign(action.value as MailTextAlign)
+        closePopup()
+      }}><HugeiconsIcon icon={action.icon} strokeWidth={1.8} aria-hidden="true" /></IconButton>
+  ))
+
+  const colorButtons = (inMenu = false) => (
+    <>
+      <IconButton label="文字颜色" size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
+        aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'color'} className="mail-format-button"
+        onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('color')}>
+        <span className="mail-format-color-indicator" data-color={state?.color || undefined}><HugeiconsIcon icon={TextColorIcon} strokeWidth={1.8} aria-hidden="true" /></span>
+      </IconButton>
+      <IconButton label="高亮" size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
+        aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'highlight'} className="mail-format-button"
+        onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('highlight')}>
+        <span className="mail-format-color-indicator" data-highlight={state?.highlight || undefined}><HugeiconsIcon icon={PaintBoardIcon} strokeWidth={1.8} aria-hidden="true" /></span>
+      </IconButton>
+    </>
+  )
+  const formatChoices = formatPopup?.kind === 'paragraph'
+    ? [{ name: '0', label: '正文' }, ...[1, 2, 3].map((level) => ({ name: String(level), label: `标题 ${level}` }))]
+    : [{ name: '', label: formatPopup?.kind === 'color' ? '自动' : '无' }, ...(formatPopup?.kind === 'color' ? MAIL_COLORS : MAIL_HIGHLIGHTS)]
+  const formatValue = formatPopup?.kind === 'paragraph' ? String(state?.heading ?? 0) : formatPopup?.kind === 'color' ? state?.color : state?.highlight
+
   return (
     <div ref={root} className="mail-body-editor">
       <div role="toolbar" aria-label="正文格式" className="mail-format-toolbar">
+        <div className="mail-format-group">
+          <IconButton label={`段落样式：${state?.heading ? `标题 ${state.heading}` : '正文'}`} tip="段落样式（标题：Cmd/Ctrl+Alt+1/2/3）" size="icon-sm"
+            disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'paragraph'} className="mail-paragraph-trigger"
+            onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('paragraph')}>
+            <span>{state?.heading ? `标题 ${state.heading}` : '正文'}</span><HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} aria-hidden="true" />
+          </IconButton>
+        </div>
         <div className="mail-format-group">{markActions.map((action) => actionButton(action))}</div>
+        <div className="mail-format-group mail-format-colors">{colorButtons()}</div>
         <div className="mail-format-group">
           <IconButton label="链接" tip="链接（Cmd/Ctrl+K）" size="icon-sm" disabled={readOnly || !editor} aria-pressed={state?.link ?? false}
             className="mail-format-button" onMouseDown={(event) => event.preventDefault()} onClick={openLink}>
             <HugeiconsIcon icon={Link01Icon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
         </div>
-        <div className="mail-format-group mail-format-secondary">{blockActions.slice(0, 2).map((action) => actionButton(action))}</div>
+        <div className="mail-format-group mail-format-secondary">{alignButtons()}</div>
+        <div className="mail-format-group">{blockActions.slice(0, 2).map((action) => actionButton(action))}</div>
         <div className="mail-format-group mail-format-secondary">{actionButton(blockActions[2])}</div>
-        <div className="mail-format-group mail-format-secondary">{actionButton(blockActions[3])}</div>
+        <div className="mail-format-group">{actionButton(blockActions[3])}</div>
         <div className="mail-format-group mail-format-secondary">{historyButtons()}</div>
         <div className="mail-format-more">
           <IconButton ref={moreButton} label="更多格式" size="icon-sm" disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={moreOpen}
-            onMouseDown={(event) => event.preventDefault()} onClick={() => { setLinkPopup(null); setMoreOpen(!moreOpen) }}>
+            onMouseDown={(event) => event.preventDefault()} onClick={() => { setLinkPopup(null); setFormatPopup(null); setMoreOpen(!moreOpen) }}>
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
         </div>
@@ -291,20 +408,26 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
       )}
       {!readOnly && moreOpen && (
         <div ref={popup} role="menu" aria-label="更多正文格式" className="mail-editor-popup mail-format-menu"
-          onKeyDownCapture={(event) => {
-            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopup(); return }
-            const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
-            const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
-            let next: number
-            if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % buttons.length
-            else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + buttons.length) % buttons.length
-            else if (event.key === 'Home') next = 0
-            else if (event.key === 'End') next = buttons.length - 1
-            else return
-            event.preventDefault()
-            buttons[next]?.focus()
-          }}>
-          {blockActions.map((action) => actionButton(action, true))}{historyButtons(true)}
+          onKeyDownCapture={(event) => menuKeyDown(event)}>
+          <div className="mail-format-group mail-menu-colors">{colorButtons(true)}</div>
+          <div className="mail-format-group">{alignButtons(true)}</div>
+          <div className="mail-format-group">{actionButton(blockActions[2], true)}</div>
+          <div className="mail-format-group">{historyButtons(true)}</div>
+        </div>
+      )}
+      {!readOnly && formatPopup && (
+        <div ref={popup} role="menu" aria-label={formatPopup.kind === 'paragraph' ? '段落样式' : formatPopup.kind === 'color' ? '文字颜色' : '高亮颜色'}
+          className={`mail-editor-popup mail-choice-popup ${formatPopup.kind === 'paragraph' ? 'mail-paragraph-menu' : 'mail-palette-menu'}`}
+          onKeyDownCapture={(event) => menuKeyDown(event, formatPopup.kind === 'paragraph' ? 1 : 3)}>
+          {formatChoices.map((choice) => (
+            <IconButton key={choice.name} label={choice.label} tip={formatPopup.kind === 'paragraph' && choice.name !== '0' ? `${choice.label}（Cmd/Ctrl+Alt+${choice.name}）` : choice.label}
+              role="menuitemradio" aria-checked={formatValue === choice.name} className="mail-choice-button" size="sm"
+              onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormat(choice.name)}>
+              {formatPopup.kind !== 'paragraph' && <span aria-hidden="true" className="mail-color-swatch" data-swatch-color={formatPopup.kind === 'color' ? choice.name : undefined} data-swatch-highlight={formatPopup.kind === 'highlight' ? choice.name : undefined} />}
+              <span>{choice.label}</span>
+              {formatValue === choice.name && <HugeiconsIcon icon={Tick02Icon} strokeWidth={1.8} aria-hidden="true" />}
+            </IconButton>
+          ))}
         </div>
       )}
       <EditorContent editor={editor} className="mail-body-surface" />
