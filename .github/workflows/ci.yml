@@ -72,6 +72,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run version:check
+      - run: bun run version:test
       # icons:check is left out: it compares zlib output byte for byte, which
       # differs between zlib builds even when the pixels are identical.
       - run: bun run typecheck

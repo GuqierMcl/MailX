@@ -23,8 +23,9 @@ MailX 是开发中的本地优先、AI 原生邮件工作台。仓库已建立 `
 - 文件使用 UTF-8 / LF；Rust 使用 Cargo，前端使用 Bun 工作区。根目录 `package.json` 维护命令与版本入口，`bun.lock` 是前端依赖锁文件。
 - 品牌图形的唯一源稿为 `branding/logo.svg`；更新后运行 `bun run icons:generate` 和 `bun run icons:check`，不手工修改桌面、网页和品牌目录中的生成副本。资源位置和选用规则见 `branding/README.md`。
 - 前端界面遵循 `docs/architecture/ui-design.md`：标题栏与导航同属画布，邮件列表与阅读区合成一个岛；岛内不加分割线和卡片边框；外壳用 `frontend/src/features/shell/` 的自有组件，不直接依赖 shadcn Sidebar。
+- 版本号只通过 `bun run version:bump` / `version:set` 修改，用户可见变更写进 `CHANGELOG.md` 的 `[Unreleased]`；发版由推送 `v*` 标签触发 `.github/workflows/release.yml`，生成未签名的草稿 Release（尚无自动更新与代码签名，也未做过真实发布）。流程见 `docs/development/release.md`。
 - 结构化代码查询优先使用可用的 CodeGraph 工具；文字与文档查找使用 `rg`。
 
 ## 检查
 
-当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run check`、`bun run tauri dev`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；已有账号、存储、同步协议及前端测试，不把自动测试通过等同于真实服务商或三平台桌面行为已验证。详见 `docs/development/validation.md`。
+当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run version:test`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run check`、`bun run tauri dev`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；已有账号、存储、同步协议及前端测试，不把自动测试通过等同于真实服务商或三平台桌面行为已验证。详见 `docs/development/validation.md`。

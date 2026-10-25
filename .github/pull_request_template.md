@@ -9,3 +9,4 @@
 - [ ] `git diff --check`
 - [ ] 相关的前端 / Rust 检查（`bun run check`、`bun run rust:test` 等）
 - [ ] 涉及同步、发送、HTML、权限或迁移时，已补充故障路径验证并更新相关文档
+- [ ] 用户可见的改动，已在 `CHANGELOG.md` 的 `[Unreleased]` 下补一行（纯内部 / 文档改动可不填）

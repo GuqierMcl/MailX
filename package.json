@@ -1,6 +1,6 @@
 {
   "name": "mailx",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "private": true,
   "description": "MailX workspace entrypoint",
   "license": "Apache-2.0",
@@ -26,6 +26,10 @@
     "body-webview:build": "bun scripts/body-webview.mjs build",
     "body-webview:test": "bun scripts/body-webview.mjs run",
     "version:check": "bun scripts/check-version.mjs",
+    "version:bump": "bun scripts/bump-version.mjs",
+    "version:set": "bun scripts/bump-version.mjs set",
+    "version:test": "bun test ./scripts/",
+    "release:notes": "bun scripts/release-notes.mjs",
     "types:generate": "bun scripts/generate-types.mjs",
     "types:check": "bun scripts/generate-types.mjs --check",
     "icons:generate": "bun scripts/generate-icons.mjs",
@@ -34,7 +38,7 @@
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "rust:test": "cargo test --workspace --locked",
-    "check": "bun run version:check && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
+    "check": "bun run version:check && bun run version:test && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2"

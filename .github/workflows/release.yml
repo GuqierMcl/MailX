@@ -1,0 +1,172 @@
+name: Release
+
+# Pushing a `vX.Y.Z[-alpha|beta|rc.N]` tag builds the installers and leaves a DRAFT
+# GitHub Release; a person publishes it after trying the installers.
+# "Run workflow" (workflow_dispatch) builds the same installers from any branch and
+# keeps them as run artifacts only. It never creates a release, so the workflow can
+# be debugged without burning a version.
+# Steps for maintainers: docs/development/release.md
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release run per ref. A running release is never cancelled halfway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Verify version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Every recorded version agrees (and the tag names it)
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            bun scripts/check-version.mjs --release --tag "$GITHUB_REF_NAME"
+          else
+            bun scripts/check-version.mjs
+          fi
+      - name: The tagged commit is on main
+        if: github.ref_type == 'tag'
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point into main. Merge the release PR first, then tag the merge commit."
+            exit 1
+          fi
+      - id: meta
+        run: |
+          version=$(bun -e 'console.log(JSON.parse(require("fs").readFileSync("package.json","utf8")).version)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: Release notes from CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: bun scripts/release-notes.mjs "${{ steps.meta.outputs.version }}" > release-notes.md
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-15 }
+          # Intel runner label: confirm it still exists when the matrix changes.
+          - { name: macos-x64, os: macos-15-intel }
+          - { name: windows-x64, os: windows-2025 }
+          - { name: linux-x64, os: ubuntu-24.04 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config \
+            patchelf
+      # rustup reads rust-toolchain.toml and installs the pinned toolchain.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # bundle.targets in desktop/tauri.conf.json lists every format; each runner
+      # builds the ones it supports (dmg, nsis, deb + rpm + appimage).
+      - run: bun run tauri build
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir dist-release
+          find target/release/bundle -type f \
+            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp -v {} dist-release/ \;
+          test -n "$(ls dist-release)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.name }}
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Only on a tag, and only after every platform built: a failed platform leaves no
+  # half-filled draft behind.
+  release:
+    name: Draft release
+    needs: [verify, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create the draft release
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          # A re-run replaces its own earlier draft (the tag stays), but a published
+          # release is never overwritten.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::Release $TAG is already published; refusing to overwrite it."
+              exit 1
+            fi
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" dist/* \
+            --draft --verify-tag \
+            --title "MailX $VERSION" \
+            --notes-file release-notes.md \
+            "${flags[@]}"
