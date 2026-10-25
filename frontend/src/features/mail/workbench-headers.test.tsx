@@ -231,7 +231,7 @@ describe('synced inbox headers', () => {
     await screen.findByRole('list', { name: '邮件列表' })
     client.listEmails.mockRejectedValueOnce(new Error('private transport detail'))
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('与桌面应用的通信中断')
+    expect(await screen.findByRole('alert')).toHaveTextContent('操作未完成，请重试。')
     expect(rows()).toHaveLength(1)
     client.listEmails.mockResolvedValueOnce(page([email('second')]))
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
@@ -250,7 +250,7 @@ describe('synced inbox headers', () => {
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: 'sent', folderRole: null }))
     emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent', { phase: 'failed', failure: { code: 'protocol', message: '此文件夹暂时不可用。', detail: null, willRetry: true } })] }))
     expect(await screen.findByText('邮件同步失败')).toBeInTheDocument()
-    expect(screen.getByText('此文件夹暂时不可用。')).toBeInTheDocument()
+    expect(screen.getByText('邮箱服务器返回了无法识别的回复。')).toBeInTheDocument()
     emit(exampleSyncState({ sequence: 3, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent')] }))
     expect(await screen.findByText('这里还没有邮件')).toBeInTheDocument()
     // Incomplete coverage alone cannot label an idle folder as still syncing.
@@ -666,7 +666,7 @@ describe('the folded reader survives a restart', () => {
   const toggle = () => screen.getByRole('button', { name: /^(收起|展开)邮件内容$/ })
   const savedLayout = (client: ReturnType<typeof setup>['client'], readerCollapsed: boolean) =>
     client.getSettings.mockResolvedValue({
-      settings: { ...DEFAULT_SETTINGS, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, stored: true, recovered: false,
+      settings: { ...DEFAULT_SETTINGS, general: { language: 'zh-CN' }, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, effectiveLocale: 'zh-CN', revision: 0, stored: true, recovered: false,
     })
 
   it('starts folded when it was left folded, and shown by default', async () => {

@@ -1,0 +1,10 @@
+{
+  "noSubject": "（无主题）",
+  "newMail_other": "{{count}} 封新邮件",
+  "newMailFrom_other": "{{count}} 封新邮件，来自 {{senders}}{{more}}",
+  "moreSenders": " 等",
+  "sent": "已发送",
+  "failed": "发送失败",
+  "unknown": "可能已发送，需要确认",
+  "test": "这是一条测试通知，新邮件会这样提醒你。"
+}

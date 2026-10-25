@@ -1,15 +1,17 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
 import { useCallback, useEffect } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { toast } from '@/components/ui/toast'
 import type { EmailDetail, EmailPage, EmailSummary } from '@/generated/accounts'
-import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 
 type Flag = 'read' | 'starred'
 
 /** What the user is told when a star can only be kept on this device. */
-const LOCAL_STAR_TITLE = '星标仅保存在本机'
-const LOCAL_STAR_BODY = '该邮箱服务商不支持在服务器上保存星标，换一台设备将看不到它。已读状态不受影响，仍会同步。'
+const LOCAL_STAR_TITLE = 'mail:localStarTitle'
+const LOCAL_STAR_BODY = 'mail:localStarDescription'
 
 /** `EmailSummary` fields each flag drives. */
 const FIELD = { read: 'isRead', starred: 'isStarred' } as const
@@ -86,12 +88,12 @@ export function useMessageFlags(client: MailxClient) {
       if (outcome === 'localOnly') {
         // Not pending: it is final. Tell the user, once for this change.
         patchEverywhere(queryClient, email.id, (item) => ({ ...item, pendingChanges: false }))
-        if (wanted) toast.info(LOCAL_STAR_TITLE, { description: LOCAL_STAR_BODY, timeout: 9000 })
+        if (wanted) toast.info(t(LOCAL_STAR_TITLE), { description: t(LOCAL_STAR_BODY), timeout: 9000 })
       }
     } catch (error) {
       refreshCounts()
       patchEverywhere(queryClient, email.id, (item) => ({ ...item, [field]: before, pendingChanges: false }))
-      toast.error(flag === 'read' ? '无法更改已读状态' : '无法更改星标', { description: clientFailure(error).message })
+      toast.error(flag === 'read' ? t('mail:changeReadFailed') : t('mail:changeStarFailed'), { description: errorText(error) })
     }
   }, [client, queryClient])
 
@@ -102,7 +104,7 @@ export function useMessageFlags(client: MailxClient) {
     // The open message holds its own copy of "waiting"; re-read it as well.
     void queryClient.invalidateQueries({ queryKey: mailKeys.all, predicate: isEmailDetail })
     if (written.localOnlyStars > 0) {
-      toast.info(LOCAL_STAR_TITLE, { description: LOCAL_STAR_BODY, timeout: 9000 })
+      toast.info(t(LOCAL_STAR_TITLE), { description: t(LOCAL_STAR_BODY), timeout: 9000 })
     }
   }), [client, queryClient])
 

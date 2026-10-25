@@ -7,6 +7,7 @@ use ammonia::{Builder, UrlRelative};
 use scraper::{ElementRef, Html, Node};
 use url::Url;
 
+use crate::SupportedLocale;
 use crate::error::AppError;
 
 const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
@@ -169,16 +170,26 @@ fn bounded_plain_text_to_html(text: &str, limit: usize) -> String {
 
 /// Reading HTML stores links in a trusted, separate table. Restore only those
 /// indexed links before the independent composer sanitizer runs.
-pub(crate) fn quote_cached_source(html: Option<&str>, links: &[String], text: &str) -> String {
-    quote(html, Some(links), text)
+pub(crate) fn quote_cached_source(
+    html: Option<&str>,
+    links: &[String],
+    text: &str,
+    locale: SupportedLocale,
+) -> String {
+    quote(html, Some(links), text, locale)
 }
 
 #[cfg(test)]
 fn quote_source(html: Option<&str>, text: &str) -> String {
-    quote(html, None, text)
+    quote(html, None, text, SupportedLocale::ZhCn)
 }
 
-fn quote(html: Option<&str>, links: Option<&[String]>, text: &str) -> String {
+fn quote(
+    html: Option<&str>,
+    links: Option<&[String]>,
+    text: &str,
+    locale: SupportedLocale,
+) -> String {
     let Some(html) = html else {
         // Escaping trusted plain text directly avoids parsing a potentially
         // five-times-larger intermediate full of HTML entities.
@@ -190,7 +201,7 @@ fn quote(html: Option<&str>, links: Option<&[String]>, text: &str) -> String {
     let document = Html::parse_fragment(truncate(html, crate::mail::render::MAX_BODY_BYTES));
     let mut budget = MAX_QUOTE_BYTES;
     loop {
-        let output = sanitize(&serialize(&document, Mode::Quote, links, budget));
+        let output = sanitize(&serialize(&document, Mode::Quote(locale), links, budget));
         if output.len() <= MAX_QUOTE_BYTES {
             return output;
         }
@@ -213,7 +224,7 @@ pub(crate) fn email_document(fragment: &str) -> String {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Draft,
-    Quote,
+    Quote(SupportedLocale),
     Email,
 }
 
@@ -288,6 +299,7 @@ fn layout_whitespace(
 /// Iterative traversal also bounds attacker-controlled nesting. Reserving all
 /// open closing tags lets quoted source stop at a strict serialized byte limit.
 fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize) -> String {
+    let quoting = matches!(mode, Mode::Quote(_));
     let mut output = String::new();
     let mut reserved = 0usize;
     let mut full = false;
@@ -320,41 +332,41 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
             if DROP_CONTENT.contains(&original) {
                 continue;
             }
-            if mode == Mode::Quote && original == "img" {
+            if let Mode::Quote(locale) = mode
+                && original == "img"
+            {
                 if let Some(alt) = element
                     .value()
                     .attr("alt")
                     .filter(|alt| !alt.trim().is_empty())
                 {
                     full = !escape_into(
-                        &format!("[图片：{alt}]"),
+                        &locale.image_alt(alt),
                         &mut output,
                         limit.saturating_sub(reserved),
                     );
                 }
                 continue;
             }
-            let tag = if mode == Mode::Quote && matches!(original, "h4" | "h5" | "h6") {
+            let tag = if quoting && matches!(original, "h4" | "h5" | "h6") {
                 "h3"
             } else {
                 canonical_tag(original)
             };
             // Quoted mail keeps its heading structure, but never imports the
             // sender's alignment, colors, highlights, or palette attributes.
-            let align = (mode != Mode::Quote && matches!(tag, "p" | "h1" | "h2" | "h3"))
+            let align = (!quoting && matches!(tag, "p" | "h1" | "h2" | "h3"))
                 .then(|| element.value().attr("data-align").and_then(alignment))
                 .flatten();
-            let color = (mode != Mode::Quote && tag == "span")
+            let color = (!quoting && tag == "span")
                 .then(|| element.value().attr("data-color"))
                 .flatten()
                 .filter(|name| palette_color(TEXT_COLORS, name).is_some());
-            let highlight = (mode != Mode::Quote && tag == "mark")
+            let highlight = (!quoting && tag == "mark")
                 .then(|| element.value().attr("data-highlight"))
                 .flatten()
                 .filter(|name| palette_color(HIGHLIGHT_COLORS, name).is_some());
-            if mode == Mode::Quote
-                && matches!(tag, "div" | "td" | "th" | "pre")
-                && !has_block_children(element)
+            if quoting && matches!(tag, "div" | "td" | "th" | "pre") && !has_block_children(element)
             {
                 open.push_str("<p>");
                 close.push_str("</p>");
@@ -807,6 +819,38 @@ mod tests {
     }
 
     #[test]
+    fn localized_image_labels_escape_alt_and_do_not_reinterpret_it() {
+        for (locale, expected) in [
+            (SupportedLocale::ZhCn, "[图片：{{date}} <b>&]"),
+            (SupportedLocale::En, "[Image: {{date}} <b>&]"),
+        ] {
+            let html = quote_cached_source(
+                Some("<p><img alt='{{date}} &lt;b&gt;&amp;'></p>"),
+                &[],
+                "",
+                locale,
+            );
+            assert_eq!(normalize(&html).unwrap().text, expected);
+            assert!(html.contains("&lt;b&gt;&amp;"));
+            assert!(!html.contains("<img") && !html.contains("<b>"));
+        }
+    }
+
+    #[test]
+    fn localized_image_labels_remain_within_the_quote_budget() {
+        let source = format!(
+            "<blockquote><p><img alt='{}'></p></blockquote>",
+            "x".repeat(MAX_QUOTE_BYTES + 32),
+        );
+        for locale in [SupportedLocale::ZhCn, SupportedLocale::En] {
+            let html = quote_cached_source(Some(&source), &[], "", locale);
+            assert!(html.len() <= MAX_QUOTE_BYTES);
+            assert!(html.ends_with("</p></blockquote>"));
+            assert!(normalize(&html).is_ok());
+        }
+    }
+
+    #[test]
     fn cached_links_only_come_from_the_trusted_link_table() {
         let html = quote_cached_source(
             Some(
@@ -814,6 +858,7 @@ mod tests {
             ),
             &["https://real.example".into()],
             "",
+            SupportedLocale::ZhCn,
         );
         assert_eq!(
             normalize(&html).unwrap().text,
@@ -831,7 +876,12 @@ mod tests {
                 "x".repeat(MAX_QUOTE_BYTES + 32)
             ),
         ] {
-            let html = quote_cached_source(Some(&format!("{leading}<p>正文仍然保留</p>")), &[], "");
+            let html = quote_cached_source(
+                Some(&format!("{leading}<p>正文仍然保留</p>")),
+                &[],
+                "",
+                SupportedLocale::ZhCn,
+            );
             assert_eq!(html, "<p>正文仍然保留</p>");
         }
     }

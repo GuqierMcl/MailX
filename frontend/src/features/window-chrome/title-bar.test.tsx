@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { i18n } from '@/i18n'
 import { TitleBar, TitleBarActions, TitleBarSlotsProvider } from './title-bar'
 import { previewPlatformFromUrl, type WindowChrome, type WindowHost, type WindowState } from './window-host'
 
@@ -44,6 +45,21 @@ describe('TitleBar', () => {
     emit({ ...normal, maximized: true, focused: false })
     expect(screen.getByRole('button', { name: '还原' })).toBeInTheDocument()
     expect(header).toHaveAttribute('data-focused', 'false')
+  })
+
+  it.each(['windows', 'linux'] as const)('updates %s button labels without a host state change', async (platform) => {
+    const { host, perform } = fakeHost({ platform, trailing: ['minimize', 'maximize', 'close'] })
+    const header = await renderTitleBar(host)
+    const buttons = [...header.querySelectorAll('[data-window-button]')]
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['最小化', '最大化', '关闭'])
+
+    await act(async () => { await i18n.changeLanguage('en') })
+
+    expect([...header.querySelectorAll('[data-window-button]')]).toEqual(buttons)
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Minimize', 'Maximize', 'Close'])
+    expect(buttons.map((button) => button.getAttribute('title'))).toEqual(['Minimize', 'Maximize', 'Close'])
+    expect(perform).not.toHaveBeenCalled()
+    expect(header).toHaveAttribute('data-focused', 'true')
   })
 
   it('drags from empty areas but not from interactive content', async () => {

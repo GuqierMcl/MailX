@@ -17,6 +17,7 @@ import { windowRole } from '@/lib/composer-window'
 import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
 import { preloadMailBodyEditor } from '@/features/composer/mail-body-editor-loader'
+import { SettingsSync } from '@/i18n/settings-sync'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
 // `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
@@ -54,6 +55,7 @@ function App() {
   if (role.kind === 'composer') {
     return (
       <QueryClientProvider client={queryClient}>
+        <SettingsSync client={client} />
         <AppearanceSync client={client} importLegacy={false} />
         <Toaster />
         <TitleBarSlotsProvider>
@@ -66,6 +68,7 @@ function App() {
   }
   return (
     <QueryClientProvider client={queryClient}>
+      <SettingsSync client={client} />
       {/* Outside the startup gate: appearance applies even when the core failed to start. */}
       <AppearanceSync client={client} />
       {/* One global toast outlet; everything short that needs saying goes through `toast`. */}

@@ -1,3 +1,4 @@
+import { i18n } from '@/i18n'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CONFIRM_GUARD_MS, CONFIRM_TIMEOUT_MS, SendButton } from './send-button'
@@ -18,6 +19,7 @@ beforeEach(() => vi.useFakeTimers())
 afterEach(() => {
   vi.useRealTimers()
   window.matchMedia = matchMedia
+  void i18n.changeLanguage('zh-CN')
 })
 
 describe('two-step send button', () => {
@@ -70,6 +72,21 @@ describe('two-step send button', () => {
     await act(async () => { vi.advanceTimersByTime(20) })
     expect(button).toHaveAttribute('data-stage', 'idle')
     expect(screen.getByRole('status')).toHaveTextContent('')
+  })
+
+  it('updates the confirmation text without restarting its timer or sending when the language changes', async () => {
+    const { button, press, onPrepare, onConfirm } = setup()
+    await press()
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS / 2) })
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(button).toHaveTextContent('Confirm send')
+    expect(button).toHaveAttribute('data-stage', 'confirm')
+    expect(onPrepare).toHaveBeenCalledTimes(1)
+    expect(onConfirm).not.toHaveBeenCalled()
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS / 2 + 1) })
+    expect(button).toHaveAttribute('data-stage', 'idle')
+    expect(button).toHaveTextContent('Send')
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 
   it('reverts on any edit, on Escape and when the window loses focus', async () => {

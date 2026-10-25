@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -99,32 +102,34 @@ function StartupShell({ children }: { children: React.ReactNode }) {
 }
 
 function StartupLoadingScreen() {
+  useTranslation()
   return (
     <StartupShell>
       <CardHeader>
-        <CardTitle>正在准备 MailX</CardTitle>
-        <CardDescription>正在初始化本地数据，完成后即可进入邮箱工作台。</CardDescription>
+        <CardTitle>{t('common:preparingMailx')}</CardTitle>
+        <CardDescription>{t('common:initializingDescription')}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3" role="status" aria-label="正在初始化本地数据">
+      <CardContent className="space-y-3" role="status" aria-label={t('common:initializingData')}>
         <Skeleton className="h-3 w-4/5" />
         <Skeleton className="h-3 w-3/5" />
-        <FieldDescription>请稍候，不会联网检查邮箱。</FieldDescription>
+        <FieldDescription>{t('common:initializingHint')}</FieldDescription>
       </CardContent>
     </StartupShell>
   )
 }
 
 function UnavailableScreen() {
+  useTranslation()
   return (
     <StartupShell>
       <CardHeader>
-        <CardTitle>桌面能力不可用</CardTitle>
-        <CardDescription>账号和本地数据只能在 MailX 桌面应用中使用。</CardDescription>
+        <CardTitle>{t('common:desktopUnavailable')}</CardTitle>
+        <CardDescription>{t('common:desktopOnlyHint')}</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert>
-          <AlertTitle>请打开桌面应用</AlertTitle>
-          <AlertDescription>当前页面没有连接到 MailX 宿主，未读取浏览器存储，也不会模拟本地账号。</AlertDescription>
+          <AlertTitle>{t('common:openDesktopApp')}</AlertTitle>
+          <AlertDescription>{t('common:hostDisconnectedHint')}</AlertDescription>
         </Alert>
       </CardContent>
     </StartupShell>
@@ -132,42 +137,44 @@ function UnavailableScreen() {
 }
 
 function TransportFailureScreen({ failure, onRetry }: { failure: QueryFailure, onRetry: () => void }) {
+  useTranslation()
   return (
     <StartupShell>
       <CardHeader>
-        <CardTitle>无法读取启动状态</CardTitle>
-        <CardDescription>MailX 没有返回当前初始化状态。</CardDescription>
+        <CardTitle>{t('common:startupStatusFailed')}</CardTitle>
+        <CardDescription>{t('common:startupStatusMissing')}</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert variant="destructive">
-          <AlertTitle>{failure.message}</AlertTitle>
-          <AlertDescription>这不代表迁移失败。请重新查询状态后再继续。</AlertDescription>
+          <AlertTitle>{errorText(failure)}</AlertTitle>
+          <AlertDescription>{t('common:startupStatusRetryHint')}</AlertDescription>
         </Alert>
       </CardContent>
       <CardFooter>
-        <Button type="button" onClick={onRetry}>重新查询</Button>
+        <Button type="button" onClick={onRetry}>{t('common:queryAgain')}</Button>
       </CardFooter>
     </StartupShell>
   )
 }
 
 function StartupFailureScreen({ status, retrying, onRetry }: { status: Extract<StartupStatus, { state: 'failed' }>, retrying: boolean, onRetry: () => void }) {
+  useTranslation()
   return (
     <StartupShell>
       <CardHeader>
-        <CardTitle>MailX 尚未准备好</CardTitle>
-        <CardDescription>本地数据初始化未完成，账号页面暂时不会打开。</CardDescription>
+        <CardTitle>{t('common:notReady')}</CardTitle>
+        <CardDescription>{t('common:notReadyDescription')}</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert variant="destructive">
-          <AlertTitle>{status.error.message}</AlertTitle>
-          <AlertDescription>请处理提示的问题后重试。应用不会跳过数据库迁移。</AlertDescription>
+          <AlertTitle>{errorText(status.error)}</AlertTitle>
+          <AlertDescription>{t('common:initializationRetryHint')}</AlertDescription>
         </Alert>
       </CardContent>
       {status.canRetry && (
         <CardFooter>
           <Button type="button" onClick={onRetry} disabled={retrying}>
-            {retrying ? '正在重试…' : '重试初始化'}
+            {retrying ? t('common:retrying') : t('common:retryInitialization')}
           </Button>
         </CardFooter>
       )}

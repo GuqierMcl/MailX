@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import { generateHTML, type EditorOptions } from '@tiptap/core'
 import HardBreak from '@tiptap/extension-hard-break'
 import Link from '@tiptap/extension-link'
@@ -129,7 +130,7 @@ export function mailEditorOptions(): Partial<EditorOptions> {
     // output (for example, interpreting escaped emphasis a second time).
     enablePasteRules: false,
     editorProps: {
-      attributes: { role: 'textbox', 'aria-label': '正文', 'aria-multiline': 'true', class: 'mail-body-content' },
+      attributes: { role: 'textbox', 'aria-label': t('composer:field.body'), 'aria-multiline': 'true', class: 'mail-body-content' },
       transformPastedHTML: filterClipboardHtml,
     },
   }

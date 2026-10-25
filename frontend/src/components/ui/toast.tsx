@@ -1,5 +1,8 @@
 "use client"
 
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
+
 import { Toast as ToastPrimitive } from "@base-ui/react/toast"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Alert02Icon, CheckmarkCircle02Icon, InformationCircleIcon } from "@hugeicons/core-free-icons"
@@ -56,6 +59,7 @@ const ICONS = { info: InformationCircleIcon, success: CheckmarkCircle02Icon, err
 const ICON_COLOR = { info: "text-muted-foreground", success: "text-emerald-600 dark:text-emerald-400", error: "text-destructive" }
 
 function ToastList() {
+  useTranslation()
   const { toasts } = ToastPrimitive.useToastManager()
   return toasts.map((item) => {
     const kind = (item.type && item.type in ICONS ? item.type : "info") as Kind
@@ -78,7 +82,7 @@ function ToastList() {
           className="-my-0.5 shrink-0 rounded-md px-2 py-1 text-xs font-medium text-primary outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
         />
         <ToastPrimitive.Close
-          aria-label="关闭提示"
+          aria-label={t('common:dismissToast')}
           className="-mt-1 -mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           ×
@@ -90,11 +94,13 @@ function ToastList() {
 
 /** Mount once, near the app root. */
 function Toaster() {
+  const { t } = useTranslation('common')
   return (
     <ToastPrimitive.Provider toastManager={toastManager} limit={MAX_VISIBLE}>
       <ToastPrimitive.Portal>
         <ToastPrimitive.Viewport
           data-slot="toast-viewport"
+          aria-label={t('notifications')}
           className={cn("pointer-events-none fixed z-[100] flex flex-col gap-2", VIEWPORT_POSITION)}
         >
           <ToastList />

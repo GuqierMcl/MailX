@@ -1,5 +1,8 @@
 "use client"
 
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
+
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import { cn } from "cn"
@@ -31,8 +34,8 @@ function Command({
 }
 
 function CommandDialog({
-  title = "命令面板",
-  description = "搜索邮件、跳转邮箱或执行命令",
+  title = t('common:commandPalette'),
+  description = t('common:commandDescription'),
   children,
   className,
   ...props
@@ -42,6 +45,7 @@ function CommandDialog({
   className?: string
   children?: React.ReactNode
 }) {
+  useTranslation()
   return (
     <Dialog {...props}>
       <DialogHeader className="sr-only">

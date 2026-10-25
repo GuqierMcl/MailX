@@ -6,6 +6,7 @@ mod body_protocol;
 mod body_webview_test;
 mod commands;
 mod compose;
+mod locale;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
@@ -98,7 +99,7 @@ fn main() {
                             let outbox_id = change.outbox_id.clone();
                             notifications::send_result(&handle, change.clone(), move || {
                                 let state = app.try_state::<state::DesktopState>()?;
-                                let settings = state.notification_settings()?;
+                                let (settings, locale) = state.notification_settings()?;
                                 // The subject is read only to show it, and only
                                 // when previews are on.
                                 let subject = settings
@@ -106,7 +107,7 @@ fn main() {
                                     .then(|| state.core().ok()?.get_outbox(&outbox_id).ok())
                                     .flatten()
                                     .map(|item| item.subject);
-                                Some((settings, subject))
+                                Some((settings, subject, locale))
                             });
                         }
                         mailx_core::CoreEvent::DraftChanged(change) => {

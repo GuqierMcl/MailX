@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Cancel01Icon, Search01Icon } from '@hugeicons/core-free-icons'
@@ -17,6 +19,7 @@ const SHORTCUT = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? 
 
 /** The title-bar search entry: it opens the command palette and shows the applied search. */
 export function MailSearch({ value, scope, onOpen, onClear }: MailSearchProps) {
+  useTranslation()
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.key === 'k' || event.key === 'f') && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
@@ -32,7 +35,7 @@ export function MailSearch({ value, scope, onOpen, onClear }: MailSearchProps) {
     <div className="relative w-full max-w-md">
       <button
         type="button"
-        aria-label="搜索邮件"
+        aria-label={t('mail:searchMail')}
         aria-haspopup="dialog"
         onClick={onOpen}
         className={cn(
@@ -41,14 +44,14 @@ export function MailSearch({ value, scope, onOpen, onClear }: MailSearchProps) {
         )}
       >
         <HugeiconsIcon icon={Search01Icon} className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{value || `在 ${scope} 中搜索`}</span>
+        <span className="min-w-0 flex-1 truncate">{value || t('mail:searchIn', { scope })}</span>
         {!value && <kbd className="shrink-0 font-sans text-[0.65rem] text-muted-foreground/70">{SHORTCUT}</kbd>}
       </button>
       {value && (
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label="清除搜索"
+          aria-label={t('mail:clearSearch')}
           className="absolute top-1/2 right-1 size-5 -translate-y-1/2"
           onClick={onClear}
         >

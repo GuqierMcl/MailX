@@ -172,7 +172,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | --- | --- | --- | --- |
 | `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform` | 是 | 是 | 窗口命令只作用于调用窗口 |
 | `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
-| `drafts_create { request }`、`drafts_create_from { request }`、`drafts_list { accountId? }` | 是 | 否 | 创建在 main 完成；`drafts_create` 由宿主读取 `compose.defaultAccountId` 传给核心 |
+| `drafts_create { request }`、`drafts_create_from { request }`、`drafts_list { accountId? }` | 是 | 否 | 创建在 main 完成；`drafts_create` 由宿主读取 `compose.defaultAccountId` 传给核心；`drafts_create_from` 由宿主读取当前 `effectiveLocale` 生成引用头 |
 | `outbox_queue_send { draftId, expectedRevision, clientMutationId }` | 否（`validation`） | 仅自己的草稿 | 宿主读取 `compose.undoSendSeconds`；主体固定为 `Composer` |
 | `outbox_list { accountId?, includeAll? }`、`outbox_get { id }`、`outbox_cancel { id }`、`outbox_retry_now { id }` | 是 | 否 | |
 | `outbox_resolve_unknown { id, choice, clientMutationId }` | 是 | 否 | `choice` 为 `markSent` / `resend`；核心接受 `Composer` 与 `MainWindow`，MCP / 模型仍为 `forbidden` |
@@ -183,6 +183,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 返回值与错误沿用 `ApiResult`；错误码 `bodyNotCached`、`draftLocked`、`forbidden`、`alreadySending`、`conflict`、`idempotencyConflict` 原样透传。核心调用都在阻塞线程上执行。
 
 前端用法（4b）：主窗口创建草稿时，`drafts_create` 的 `accountId` 在浏览单个账号的文件夹时传该账号，在统一收件箱 / 草稿 / 发件箱视图传 `null`（由宿主按 `compose.defaultAccountId` 解析）；`drafts_create_from` 遇 `bodyNotCached` 时先调用 `emails_fetch_body`，成功后用**同一个** `clientMutationId` 重试一次；写信窗口的每次保存都带上次保存的 `expectedRevision`，`conflict` 后重新 `drafts_get`，不静默合并。`mailx://notification-open` 的载荷可带 `outboxId`，主窗口据此选中发件箱项。
+
+回复 / 转发的语言由宿主读取设置后传给 `create_draft_from_localized`，请求不增加客户端可指定的 locale 字段。引用头标签、句子和图片替代文字的占位标签使用创建时的有效语言，并按现有路径转义；图片 alt 保留原值、不再次解析模板参数，整个占位计入既有 512 KiB 引用上限。原邮件、主题前缀识别、线程字段和日期格式沿用现状。引用内容创建后作为草稿内容固化，语言切换不重写已有草稿，也不改变草稿 revision、dirty 状态或发送确认进度；相同 mutation 重放保留首次创建的语言。
 
 事件：`mailx://outbox`（载荷 `OutboxChanged`）与 `mailx://drafts`（载荷 `DraftChanged`）发给 main，并发给受影响草稿的 `composer-{draftId}`（若该窗口存在）。`mailx://app-closing`（无载荷）在 main 关闭时发给每个写信窗口；`mailx://composer-close-requested`（无载荷）在系统要求关闭某写信窗口时发给它。收到后前端写出草稿并调用 `composer_close`；宿主 3 秒内未收到则直接关闭。
 
@@ -209,13 +211,20 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | MailxClient 方法 | Tauri 命令与参数 | 核心组件 | 成功结果 |
 | --- | --- | --- | --- |
 | `getSettings()` | `settings_get`，无参数 | `SettingsStore::get` | `SettingsSnapshot` |
-| `updateSettings(settings)` | `settings_update`，`{ request: Partial<AppSettings> }` | `SettingsStore::patch` | `SettingsSnapshot` |
+| `updateSettings(settings)` | `settings_update`，`{ request: SettingsPatch }` | `SettingsStore::patch` | `SettingsSnapshot` |
+| `onSettingsChanged(listener)` | `mailx://settings-changed`，`{ revision }` | 桌面宿主在保存成功后广播 | `Promise<取消监听函数>`；Promise 完成表示监听已注册 |
 
-偏好只需要数据目录，由宿主单独打开 `SettingsStore`，不受 Ready 检查影响；核心启动失败时外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。命令同样只授权本地可信 main 窗口。
+偏好只需要数据目录，由宿主单独打开并复用 `SettingsStore`，不受 Ready 检查影响；核心启动失败时语言、外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。`settings_get` 和设置变更事件对本地可信 main 与合法 `composer-<uuid>` 窗口开放，`settings_update` 仍只允许 main；邮件正文 iframe 和其他窗口无权访问。
 
-`AppSettings` 包含 `appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回排序第一的账号）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段，保存时再与已保存的值合并，所以侧栏和列表两处各自保存不会互相覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。拖动类的布局变化由前端抖动写入（停止 500ms 后一次提交），核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 包含 `general`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回排序第一的账号）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段，保存时再与已保存的值合并，所以侧栏和列表两处各自保存不会互相覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。拖动类的布局变化由前端抖动写入（停止 500ms 后一次提交），核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新只替换提交的设置节，在核心锁内合并，避免不同页面相互覆盖；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
-`SettingsSnapshot` 为 `{ settings, stored, recovered }`。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
+`general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的六个设置节均为可选，提交的节在核心锁内替换，未提交的节保留；同一节局部修改由前端在发送前与最新已提交值合并。
+
+语言兼容规则区分三种情况：没有设置文件时默认 `system`；已有合法 v1 文件缺少 `general` 或 `general.language` 时补 `zh-CN`，保留升级前的显示语言；文件中的非法语言字段回到 `system`，保留其他合法设置。IPC 提交不支持的语言返回 `validation`、`field: "general.language"`，不落盘也不改变当前设置。这是设置文件扩展，无邮件数据库迁移。
+
+`SettingsSnapshot` 为 `{ settings, stored, recovered, effectiveLocale, revision }`。`effectiveLocale` 只取 `zh-CN | en`，由偏好与宿主启动时读取的系统语言派生，不持久化、不能提交；中文标签（含简繁体和地区变体）映射到 `zh-CN`，英文、其他语言或读取失败使用 `en`，显式语言优先。系统语言的运行期变化在下次重启生效。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
+
+`revision` 是当前宿主进程内的设置版本，从 0 开始，在同一把设置锁内随成功保存递增，失败不递增，不写入文件。所有读取、保存响应与事件补读通过前端统一接收入口，拒绝旧版本覆盖；语言在保存成功后应用，失败保留原语言。各可信窗口先等待监听注册，再首次读取；保存成功后宿主发送 `{ revision }` 失效通知，窗口重新读取完整快照，重新聚焦时补读并重试失败的订阅。事件不承载设置值或凭证，也不替代查询事实。
 
 ### 后续应用操作草案
 
@@ -286,6 +295,10 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 
+### 当前：宿主设置事件
+
+`mailx://settings-changed` 由桌面宿主在 `settings_update` 成功后发出，不是 `CoreEvent` 的新增分支。载荷为 `SettingsChanged { revision: number }`，只定向给通过来源与角色校验的 main 和 composer 窗口。失败不发事件；监听注册、查询和版本接收规则见上文“应用偏好设置”。
+
 ### 后续：事件流草案
 
 ```ts
@@ -322,6 +335,8 @@ Tauri 事件与 Web SSE 都是可丢失通知，不提供可靠消息队列语�
 | `internal` | 脱敏内部故障 |
 
 MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）与 `transport`（通信失败）；不展示原始 IPC 异常。以下大写代码及 HTTP 映射是未来邮件功能的原始分类草案，尚未加入当前生成的错误枚举，实施时统一命名与验证。
+
+首版中英文界面按稳定的 `code`、`field` 与操作上下文生成受控错误文本，不匹配或解析中文 `message` 来决定行为。startup、同步、正文、图片、附件、草稿和发件箱采用对应映射；未知代码显示当前语言的通用提示。兼容的固定脱敏 `message` 继续保留，不直接作为可翻译界面文案；外部邮件与已脱敏服务器诊断不是翻译资源。
 
 | code | 含义 / 处理 | HTTP |
 | --- | --- | --- |
@@ -393,7 +408,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 **判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 只带最新的 3 封（发件人、主题、时间、邮件 id），其余只计数。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
 
-**设置也在核心，所有宿主一致。** `notifications` 设置节：`enabled`（默认开）、`showPreview`（默认开）、`whenFocused`（默认关）、`sound`（`system | chime | ding | droplet | bubble | marimba | sparkle | knock | chord | none`，默认 `system`）、`mutedAccounts`（账号 id 列表）。核心的 `NewMail::for_delivery(&settings)` 统一套用前三项中与内容相关的规则：总开关关闭或账号被静音时什么都不发；关闭预览时把 `messages` 清空，发出的内容里就不含发件人和主题，任何宿主（包括以后的 webhook）都不会泄露。`NewMail::summary()` 给出标题和正文：一封时为“发件人 / 主题”，多封时为“账号名 / N 封新邮件，来自 A、B 等”。`mutedAccounts` 保存时去空白、排序、去重，含空项或控制字符返回 `validation`（`field` 为 `notifications.mutedAccounts`）；手工编辑出的非法列表加载时整体清空。
+**设置也在核心，所有宿主一致。** `notifications` 设置节：`enabled`（默认开）、`showPreview`（默认开）、`whenFocused`（默认关）、`sound`（`system | chime | ding | droplet | bubble | marimba | sparkle | knock | chord | none`，默认 `system`）、`mutedAccounts`（账号 id 列表）。核心的 `NewMail::for_delivery(&settings)` 统一套用前三项中与内容相关的规则：总开关关闭或账号被静音时什么都不发；关闭预览时把 `messages` 清空，发出的内容里就不含发件人和主题，任何宿主（包括以后的 webhook）都不会泄露。桌面以当前 `effectiveLocale` 调用 `NewMail::summary_localized(locale)` 生成标题和正文：一封时保留发件人与主题，多封时生成当前语言的账号摘要；空主题、计数和摘要模板来自共享资源。`summary()` 保留默认中文的兼容入口。`mutedAccounts` 保存时去空白、排序、去重，含空项或控制字符返回 `validation`（`field` 为 `notifications.mutedAccounts`）；手工编辑出的非法列表加载时整体清空。
 
 **桌面宿主。** 使用 `tauri-plugin-notification`。窗口可见、未最小化且处于焦点时，除非开启 `whenFocused`，否则不弹通知（未读数照常更新）。提示音：`system` 由系统通知自带的默认提示音播放；`chime / ding / droplet / bubble / marimba / sparkle / knock / chord` 是 MailX 自带的短音效，在本机合成（几个正弦音加包络，没有音频文件），通知本身静音，由应用经默认输出设备播放，两者不会同时响；`none` 静音。点击通知时窗口被带到前台，并向页面发 `mailx://notification-open`（`{ accountId, emailId | null }`）：只有一封邮件时在阅读区打开它（不改动列表所在的邮箱），多封时切到该账号的收件箱。关闭预览时通知不指向具体邮件。
 
@@ -407,4 +422,6 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 发送结果通知（桌面）
 
-`Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别为“已发送”“发送失败”“可能已发送，需要确认”。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题显示“（无主题）”）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新增 `outboxId`，新邮件通知该字段为 `null`）；前端界面尚未处理它。
+`Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别对应“已发送”“发送失败”“可能已发送，需要确认”的当前语言译文。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题使用当前语言的占位文本）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新邮件通知该字段为 `null`），主窗口据此选中发件箱项。
+
+新邮件、发送结果和测试通知都按生成时的有效语言取资源；切换语言不撤回、不重发已显示的系统通知。通知过滤、隐私和声音规则沿用现状。共享文本与预览隐藏有自动测试，三平台真实通知显示和点击仍需按[验证策略](../development/validation.md#8-新邮件通知的手动验证)分别记录。

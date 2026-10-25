@@ -1,8 +1,10 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Account, DraftKind, OutboxChanged } from '@/generated/accounts'
 import { toast } from '@/components/ui/toast'
-import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
+import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { composeKeys } from '@/lib/query-client'
 import { reasonText, visibleOutbox } from './outbox-text'
 
@@ -38,7 +40,7 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
       await client.openComposer(draftId, fresh)
       void queryClient.invalidateQueries({ queryKey: composeKeys.drafts() })
     } catch (cause) {
-      toast.error('无法打开写信窗口', { description: clientFailure(cause).message })
+      toast.error(t('composer:toast.openFailed'), { description: errorText(cause) })
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -100,20 +102,20 @@ export function useComposeEvents(client: MailxClient, onOpenOutbox: (outboxId: s
           if (new Date(item.notBefore).getTime() - new Date(item.firstQueuedAt).getTime() < 1000) return
           const seconds = Math.ceil((new Date(item.notBefore).getTime() - Date.now()) / 1000)
           if (seconds <= 0) return
-          undoToasts.current.set(item.id, toast.info(`将在 ${seconds} 秒后发送`, {
+          undoToasts.current.set(item.id, toast.info(t('composer:toast.sendAfter', { count: seconds }), {
             timeout: seconds * 1000,
-            action: { label: '撤销', onClick: () => void undo(item.id, item.draftId) },
+            action: { label: t('composer:action.undo'), onClick: () => void undo(item.id, item.draftId) },
           }))
         }, () => undefined)
         return
       }
       forget(change.outboxId)
-      if (change.state === 'sending') toast.info('正在发送…', { timeout: 2000 })
-      else if (change.state === 'accepted') toast.success('已发送')
+      if (change.state === 'sending') toast.info(t('composer:send.sending'), { timeout: 2000 })
+      else if (change.state === 'accepted') toast.success(t('composer:toast.sent'))
       else if (change.state === 'failed') {
-        toast.error(`发送失败：${reasonText(change.errorReason)}`, { action: { label: '查看', onClick: () => open.current(change.outboxId) } })
+        toast.error(t('composer:toast.sendFailed', { reason: reasonText(change.errorReason) }), { action: { label: t('composer:action.view'), onClick: () => open.current(change.outboxId) } })
       } else if (change.state === 'unknown') {
-        toast.error('可能已发送，需要确认', { action: { label: '查看', onClick: () => open.current(change.outboxId) } })
+        toast.error(t('composer:toast.unknown'), { action: { label: t('composer:action.view'), onClick: () => open.current(change.outboxId) } })
       }
     })
 
@@ -122,8 +124,8 @@ export function useComposeEvents(client: MailxClient, onOpenOutbox: (outboxId: s
         await client.cancelOutbox(outboxId)
         if (draftId) await client.openComposer(draftId)
       } catch (cause) {
-        if (clientFailureCode(cause) === 'alreadySending') toast.error('已开始发送，无法撤销')
-        else toast.error('无法撤销', { description: clientFailure(cause).message })
+        if (clientFailureCode(cause) === 'alreadySending') toast.error(t('composer:detail.alreadySending'))
+        else toast.error(t('composer:toast.undoFailed'), { description: errorText(cause) })
       }
     }
 

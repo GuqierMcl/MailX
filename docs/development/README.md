@@ -1,6 +1,6 @@
 # 开发指南
 
-状态：**账号配置基础已接通，邮件功能待实现**。当前可启动 shadcn 邮件工作台外壳与 Tauri 宿主，在独立的账号弹窗中创建（先选添加方式）、查看、修改并重载账号配置；普通浏览器运行 `bun run dev` 时工作台使用内存 mock 数据，桌面应用中尚无邮件命令；非敏感数据存 user-data-dir 的 SQLite，凭证由系统凭据库保存。协议接入、OAuth 与服务器仍未实现。
+状态：**桌面账号、收信、阅读、富文本写信发信与首版中英文文本已有实现** · 2026-10-25。普通浏览器运行 `bun run dev` 时工作台使用合成 mock 数据，仅用于界面开发；真实邮件与凭证经 Tauri 宿主访问共享核心，非敏感数据存 user-data-dir 的 SQLite，凭证由系统凭据库保存。写信附件、已发送副本展示、OAuth 与服务器宿主尚未实现；完整服务商兼容性及三平台体验仍待验证。
 
 ## 1. 环境与目录
 
@@ -11,7 +11,7 @@
 
 仓库顶层目录：`core/` 是共享 Rust 核心，`frontend/` 是 React + TypeScript + Vite + shadcn 前端工程，`desktop/` 是 Tauri 宿主，`server/` 留待服务器 MVP，仅占位。根目录 `package.json` 是命令入口和工作区版本入口，`bun run version:check` 校验根目录、`frontend/package.json` 与 Cargo workspace 的版本一致。
 
-根 Cargo workspace 包含 `core/` 和 `desktop/`；前端工作区位于 `frontend/`，公共 Rust 包元数据与依赖版本在根 `Cargo.toml` 管理，`Cargo.lock` 跟踪 Rust 解析结果，`bun.lock` 跟踪前端解析结果。Cargo 包暂不发布到 crates.io；`0.1.0` 是工程初始版本，不表示已发布 MVP。
+根 Cargo workspace 包含 `core/` 和 `desktop/`；前端工作区位于 `frontend/`，公共 Rust 包元数据与依赖版本在根 `Cargo.toml` 管理，`Cargo.lock` 跟踪 Rust 解析结果，`bun.lock` 跟踪前端解析结果。Cargo 包暂不发布到 crates.io；当前版本以根 `package.json` 为入口，并经 `version:check` 核对各包和 Cargo.lock；工程版本号不表示已发布 MVP。
 
 ## 2. 已有开发命令
 
@@ -38,7 +38,7 @@ bun tauri build
 bun run version:check
 
 # 版本进位 / 直接设置（只改文件）、发版脚本测试、预览发布说明；流程见 release.md
-bun run version:bump patch --dry-run
+bun run version:bump pre --dry-run
 bun run version:set 0.2.0-alpha.1
 bun run version:test
 bun run release:notes
@@ -56,7 +56,10 @@ bun run rust:test
 bun run typecheck
 bun run lint
 
-# 一次执行版本、生成类型漂移、前端类型 / lint / 测试 / build 和 Rust check
+# 中英文资源检查：逻辑消息、复数、插值参数及 Rust 共享子集
+bun run i18n:check
+
+# 一次执行版本、资源、生成类型漂移、前端类型 / lint / 测试 / build 和 Rust check
 bun run check
 
 # 前端账号组件与客户端测试
@@ -77,11 +80,17 @@ git diff --check
 
 `bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`；推荐使用会自动准备前端资源的 `bun run check`。当前 `bundle.active=true`，本机 `bun tauri build` 会在 `target/release/bundle/` 生成本平台的安装包；对外发布的安装包由 `.github/workflows/release.yml` 在推送版本标签后构建，目前未签名、无自动更新，流程见[发版流程](release.md)。
 
-当前前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航、列表与设置详情，经 `accounts_* IPC → AccountService` 完成读写。页面显示“尚未验证连接”，保存不访问邮箱服务器。普通浏览器的 `bun run dev` 没有系统凭据及核心能力，会显示需要桌面应用；不能把它作为已保存配置的替代后端。
+当前桌面前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航和邮件工作台；应用偏好可在核心启动失败时单独读取。账号配置经 `accounts_* IPC → AccountService` 完成读写，保存配置本身不访问邮箱服务器，连接测试与同步另行触发。普通浏览器的 `bun run dev` 使用合成 mock，语言等预览设置可保存在浏览器，但没有系统凭据及真实核心能力；生产构建在普通浏览器打开时会显示需要桌面应用。两者均不是桌面已保存配置的替代后端。
 
 桌面数据目录直接来自 Tauri `app_data_dir()`，包含 `mailx.sqlite3`、`mailx.lock` 与应用偏好 `settings.json`，不写入仓库或当前工作目录。应用标识变化会影响目录归属，已有数据需要显式迁移。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
 
 正常 Tauri 开发和构建使用 `frontend/dist`，不再在 `desktop/` 内维护另一份前端资源。Tauri 生成的 schema 与命令权限文件忽略提交，由 `build.rs` 重新生成。`git diff --check` 不覆盖未跟踪文件，新文件需额外检查。
+
+### 中英文文本维护
+
+共享译文放在根目录 `locales/{zh-CN,en}/`，前端通过 `i18next + react-i18next` 使用，Rust 编译时嵌入通知与引用模板子集。新增界面文案、Tooltip、读屏标签或错误映射时，同步补齐两种语言；模块配置保存语义 key，React 组件订阅语言变化，避免将译文冻结在模块初始化时。运行 `bun run i18n:check`、类型检查及受影响的行为测试；新增设置 DTO 还需生成并检查类型漂移。根 `check` 与前端 CI 已包含资源门禁。
+
+设置、跨窗口同步和引用模板的改动须同步[应用 API](../contracts/app-api.md)、[桌面与 Web](../architecture/desktop-web.md)及[验证记录](validation.md)；详细规则见[中英文文本适配](../architecture/internationalization.md)。本版只适配文本，不重构日期 / 时间、数字、文件大小、列表连接或排序。浏览器 mock 适合检查文案与基本交互，不能据此宣称真实 Tauri 多窗口、系统通知或三平台验收通过。
 
 ## 3. 包边界
 

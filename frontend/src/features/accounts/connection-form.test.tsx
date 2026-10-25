@@ -122,7 +122,7 @@ describe('connection form', () => {
     )
     expect(screen.getByLabelText('邮箱地址')).toHaveValue('me@example.com')
     expect(screen.getByLabelText('IMAP 主机')).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByText('无法使用这个主机。')).toBeInTheDocument()
+    expect(screen.getByText('请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')).toBeInTheDocument()
   })
 
   it('revokes the image proxy switch on endpoint edits and allows an explicit new selection', async () => {

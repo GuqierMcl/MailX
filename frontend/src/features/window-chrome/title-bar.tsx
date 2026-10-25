@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useContext, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
@@ -155,12 +157,13 @@ const BUTTON_ACTIONS: Record<WindowButton, WindowAction> = {
 }
 
 function buttonLabel(button: WindowButton, maximized?: boolean) {
-  if (button === 'minimize') return '最小化'
-  if (button === 'close') return '关闭'
-  return maximized ? '还原' : '最大化'
+  if (button === 'minimize') return t('common:minimize')
+  if (button === 'close') return t('common:close')
+  return maximized ? t('common:restore') : t('common:maximize')
 }
 
 function WindowControls({ platform, buttons, maximized, onAction }: WindowControlsProps) {
+  useTranslation('common')
   const windows = platform === 'windows'
   return (
     <div

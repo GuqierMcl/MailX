@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useId, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Cancel01Icon } from '@hugeicons/core-free-icons'
@@ -21,6 +23,7 @@ type RecipientFieldProps = {
  * chip (and blocks sending) so nothing the user typed disappears.
  */
 export function RecipientField({ label, value, onChange, disabled, autoFocus, trailing }: RecipientFieldProps) {
+  useTranslation('composer')
   const [text, setText] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const id = useId()
@@ -93,7 +96,7 @@ export function RecipientField({ label, value, onChange, disabled, autoFocus, tr
           <span
             key={`${item.address}-${index}`}
             data-invalid={!item.valid || undefined}
-            title={item.valid ? item.address : `地址无效：${item.address}`}
+            title={item.valid ? item.address : t('composer:recipient.invalid', { address: item.address })}
             className={cn(
               'inline-flex max-w-full items-center gap-0.5 rounded-md py-0.5 pr-0.5 pl-2 text-xs',
               item.valid ? 'bg-secondary text-secondary-foreground' : 'text-destructive ring-1 ring-destructive/60 ring-inset bg-destructive/10',
@@ -103,7 +106,7 @@ export function RecipientField({ label, value, onChange, disabled, autoFocus, tr
               type="button"
               disabled={disabled}
               onClick={() => edit(index)}
-              aria-label={item.valid ? undefined : `地址无效：${item.address}，点击修改`}
+              aria-label={item.valid ? undefined : t('composer:recipient.editInvalid', { address: item.address })}
               className="min-w-0 truncate rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               {item.valid ? item.name || item.address : item.address}
@@ -111,7 +114,7 @@ export function RecipientField({ label, value, onChange, disabled, autoFocus, tr
             {!disabled && (
               <button
                 type="button"
-                aria-label={`移除 ${item.address}`}
+                aria-label={t('composer:recipient.remove', { address: item.address })}
                 onClick={() => onChange(value.filter((_, position) => position !== index))}
                 className="flex size-4 shrink-0 items-center justify-center rounded-sm opacity-60 outline-hidden hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50"
               >

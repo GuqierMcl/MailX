@@ -43,13 +43,13 @@ export const DEFAULT_MAIL_FONTS = [
 
 /** `''` keeps the brand's graphite tokens from `index.css`. */
 export const ACCENT_PRESETS = [
-  { value: '', label: '石墨' },
-  { value: '#2563eb', label: '蓝' },
-  { value: '#7c3aed', label: '紫' },
-  { value: '#0d9488', label: '青' },
-  { value: '#16a34a', label: '绿' },
-  { value: '#ea580c', label: '橙' },
-  { value: '#e11d48', label: '玫红' },
+  { value: '', label: 'settings:accentGraphite' },
+  { value: '#2563eb', label: 'settings:accentBlue' },
+  { value: '#7c3aed', label: 'settings:accentPurple' },
+  { value: '#0d9488', label: 'settings:accentTeal' },
+  { value: '#16a34a', label: 'settings:accentGreen' },
+  { value: '#ea580c', label: 'settings:accentOrange' },
+  { value: '#e11d48', label: 'settings:accentRose' },
 ] as const
 
 const ROOT_FONT_SIZE: Record<FontSize, string> = { small: '15px', default: '', large: '17px' }

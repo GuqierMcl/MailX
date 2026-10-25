@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import type { Account } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -24,6 +27,7 @@ type ConnectionDialogProps = {
  * and route. Saving restarts the account's sync with the new settings.
  */
 export function ConnectionDialog({ client, accountId, onClose, onSaved }: ConnectionDialogProps) {
+  useTranslation()
   const guard = useLeaveGuard()
   const { account, error, version, reload } = useAccount(client, accountId)
 
@@ -31,9 +35,9 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
     <>
       <Dialog open={accountId !== null} onOpenChange={(open) => !open && guard.leave(onClose)}>
         <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[640px]">
-          <DialogDescription className="sr-only">修改邮箱的服务器、凭证与网络路由。</DialogDescription>
+          <DialogDescription className="sr-only">{t('accounts:editConnectionDescription')}</DialogDescription>
           <header className="flex shrink-0 items-center gap-2 px-6 py-4 pr-12">
-            <DialogTitle className="text-base font-semibold">修改连接</DialogTitle>
+            <DialogTitle className="text-base font-semibold">{t('accounts:editConnection')}</DialogTitle>
             {account && <span className="min-w-0 truncate text-sm text-muted-foreground">{account.displayName}</span>}
             {account && <ProviderBadge providerId={account.providerId} className="ml-auto shrink-0" />}
           </header>
@@ -41,15 +45,15 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
             {error ? (
               <SettingsPage>
                 <Alert variant="destructive">
-                  <AlertTitle>无法加载账号配置</AlertTitle>
-                  <AlertDescription>{error.message}</AlertDescription>
-                  <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>重试加载</Button>
+                  <AlertTitle>{t('accounts:loadAccountFailed')}</AlertTitle>
+                  <AlertDescription>{errorText(error)}</AlertDescription>
+                  <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>{t('accounts:retryLoad')}</Button>
                 </Alert>
               </SettingsPage>
             ) : !account ? (
               <SettingsPage>
                 <Delayed>
-                  <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-3">
+                  <div role="status" aria-label={t('accounts:loadingAccount')} className="flex flex-col gap-3">
                     <Skeleton className="h-16 w-full" />
                     <Skeleton className="h-48 w-full" />
                   </div>
@@ -60,11 +64,11 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
                 key={version}
                 account={account}
                 intro={{
-                  title: '保存后立即重新连接',
-                  description: 'MailX 会断开当前连接，用新的设置重新登录收信服务器并同步；已排队的邮件下次发送时使用新设置。',
+                  title: t('accounts:reconnectAfterSave'),
+                  description: t('accounts:reconnectDescription'),
                 }}
-                submitLabel="保存并重新连接"
-                submittingLabel="保存中…"
+                submitLabel={t('accounts:saveAndReconnect')}
+                submittingLabel={t('accounts:savingEllipsis')}
                 unavailable={!client.available}
                 onBusyChange={guard.setBusy}
                 onDirtyChange={guard.setDirty}

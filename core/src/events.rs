@@ -93,6 +93,10 @@ impl NewMail {
     /// The notification text, the same wherever it is shown: one message names
     /// its sender and subject, several are summed up per account.
     pub fn summary(&self) -> (String, String) {
+        self.summary_localized(crate::SupportedLocale::ZhCn)
+    }
+
+    pub fn summary_localized(&self, locale: crate::SupportedLocale) -> (String, String) {
         match self.messages.as_slice() {
             [message] if self.count == 1 => {
                 let from = message
@@ -110,16 +114,13 @@ impl NewMail {
                         from.to_owned()
                     },
                     if subject.is_empty() {
-                        "（无主题）".to_owned()
+                        locale.no_subject()
                     } else {
                         subject.to_owned()
                     },
                 )
             }
-            [] => (
-                self.account_name.clone(),
-                format!("{} 封新邮件", self.count),
-            ),
+            [] => (self.account_name.clone(), locale.new_mail(self.count)),
             messages => {
                 let mut senders: Vec<&str> = Vec::new();
                 for message in messages {
@@ -135,14 +136,13 @@ impl NewMail {
                     }
                 }
                 let body = if senders.is_empty() {
-                    format!("{} 封新邮件", self.count)
+                    locale.new_mail(self.count)
                 } else {
-                    format!("{} 封新邮件，来自 {}", self.count, senders.join("、"))
-                        + if self.count as usize > senders.len() {
-                            " 等"
-                        } else {
-                            ""
-                        }
+                    locale.new_mail_from(
+                        self.count,
+                        &senders.join("、"),
+                        self.count as usize > senders.len(),
+                    )
                 };
                 (self.account_name.clone(), body)
             }

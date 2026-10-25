@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { Folder, FolderRole } from '@/generated/accounts'
 
 /**
@@ -11,22 +12,22 @@ export type Mailbox =
   | { kind: 'outbox' }
 
 export const UNIFIED_TITLES: Record<FolderRole, string> = {
-  inbox: '全部收件箱',
-  drafts: '全部草稿',
-  sent: '全部已发送',
-  archive: '全部归档',
-  junk: '全部垃圾邮件',
-  trash: '全部已删除',
-  other: '全部邮件',
+  get inbox() { return t('mail:allInboxes') },
+  get drafts() { return t('mail:allDrafts') },
+  get sent() { return t('mail:allSent') },
+  get archive() { return t('mail:allArchive') },
+  get junk() { return t('mail:allJunk') },
+  get trash() { return t('mail:allTrash') },
+  get other() { return t('mail:allMail') },
 }
 
 const ROLE_LABELS: Record<FolderRole, string | null> = {
-  inbox: '收件箱',
-  drafts: '草稿',
-  sent: '已发送',
-  archive: '归档',
-  junk: '垃圾邮件',
-  trash: '已删除',
+  get inbox() { return t('mail:inbox') },
+  get drafts() { return t('mail:drafts') },
+  get sent() { return t('mail:sent') },
+  get archive() { return t('mail:archive') },
+  get junk() { return t('mail:junk') },
+  get trash() { return t('mail:trash') },
   other: null,
 }
 
@@ -39,8 +40,8 @@ export function mailboxTitle(mailbox: Mailbox) {
   switch (mailbox.kind) {
     case 'unified': return UNIFIED_TITLES[mailbox.role]
     case 'folder': return folderLabel(mailbox.folder)
-    case 'drafts': return '草稿'
-    case 'outbox': return '发件箱'
+    case 'drafts': return t('mail:drafts')
+    case 'outbox': return t('mail:outbox')
   }
 }
 

@@ -7,7 +7,9 @@
 //! user asked otherwise, and which sound goes with it.
 mod sounds;
 
-use mailx_core::{NewMail, NotificationSettings, NotificationSound, OutboxChanged, OutboxState};
+use mailx_core::{
+    NewMail, NotificationSettings, NotificationSound, OutboxChanged, OutboxState, SupportedLocale,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
@@ -56,16 +58,17 @@ fn sounds_for(sound: NotificationSound) -> (Option<&'static str>, Option<Notific
 
 /// Whether and how to announce `mail`, given the settings and whether the main
 /// window is in front.
-pub(crate) fn plan(
+pub(crate) fn plan_localized(
     mail: &NewMail,
     settings: &NotificationSettings,
     window_in_front: bool,
+    locale: SupportedLocale,
 ) -> Option<Shown> {
     let mail = mail.for_delivery(settings)?;
     if window_in_front && !settings.when_focused {
         return None;
     }
-    let (title, body) = mail.summary();
+    let (title, body) = mail.summary_localized(locale);
     let (system_sound, own_sound) = sounds_for(settings.sound);
     Some(Shown {
         title,
@@ -93,25 +96,21 @@ pub(crate) fn announces_send_result(state: OutboxState) -> bool {
 /// when previews are on, like new mail; `enabled` and the in-front rule apply
 /// the same way. Accepted results are silent; failures and unknown outcomes
 /// use the chosen sound.
-pub(crate) fn plan_send_result(
+pub(crate) fn plan_send_result_localized(
     change: &OutboxChanged,
     subject: Option<&str>,
     settings: &NotificationSettings,
     window_in_front: bool,
+    locale: SupportedLocale,
 ) -> Option<Shown> {
-    let title = match change.state {
-        OutboxState::Accepted => "已发送",
-        OutboxState::Failed => "发送失败",
-        OutboxState::Unknown => "可能已发送，需要确认",
-        _ => return None,
-    };
+    let title = locale.send_result(change.state)?;
     if !settings.enabled || (window_in_front && !settings.when_focused) {
         return None;
     }
     let body = if settings.show_preview {
         match subject.map(str::trim) {
             Some(subject) if !subject.is_empty() => subject.to_owned(),
-            Some(_) => "（无主题）".to_owned(),
+            Some(_) => locale.no_subject(),
             // The subject could not be read: say nothing rather than guess.
             None => String::new(),
         }
@@ -124,7 +123,7 @@ pub(crate) fn plan_send_result(
         sounds_for(settings.sound)
     };
     Some(Shown {
-        title: title.to_owned(),
+        title,
         body,
         system_sound,
         own_sound,
@@ -172,14 +171,14 @@ fn window_in_front<R: Runtime>(app: &AppHandle<R>) -> bool {
 pub(crate) fn new_mail<R: Runtime>(
     app: &AppHandle<R>,
     mail: NewMail,
-    settings: impl FnOnce() -> Option<NotificationSettings> + Send + 'static,
+    settings: impl FnOnce() -> Option<(NotificationSettings, SupportedLocale)> + Send + 'static,
 ) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(settings) = settings() else {
+        let Some((settings, locale)) = settings() else {
             return;
         };
-        if let Some(shown) = plan(&mail, &settings, window_in_front(&app)) {
+        if let Some(shown) = plan_localized(&mail, &settings, window_in_front(&app), locale) {
             show(&app, shown);
         }
     });
@@ -191,21 +190,24 @@ pub(crate) fn new_mail<R: Runtime>(
 pub(crate) fn send_result<R: Runtime>(
     app: &AppHandle<R>,
     change: OutboxChanged,
-    lookup: impl FnOnce() -> Option<(NotificationSettings, Option<String>)> + Send + 'static,
+    lookup: impl FnOnce() -> Option<(NotificationSettings, Option<String>, SupportedLocale)>
+    + Send
+    + 'static,
 ) {
     if !announces_send_result(change.state) {
         return;
     }
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some((settings, subject)) = lookup() else {
+        let Some((settings, subject, locale)) = lookup() else {
             return;
         };
-        if let Some(shown) = plan_send_result(
+        if let Some(shown) = plan_send_result_localized(
             &change,
             subject.as_deref(),
             &settings,
             window_in_front(&app),
+            locale,
         ) {
             show(&app, shown);
         }
@@ -214,15 +216,16 @@ pub(crate) fn send_result<R: Runtime>(
 
 /// A sample notification under the current settings, ignoring whether the
 /// window is in front: the user is looking at the settings when asking.
-pub(crate) fn test<R: Runtime>(app: &AppHandle<R>, settings: &NotificationSettings) {
+pub(crate) fn test<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: &NotificationSettings,
+    locale: SupportedLocale,
+) {
     let (system_sound, own_sound) = sounds_for(settings.sound);
     let (title, body) = if settings.show_preview {
-        (
-            "MailX".to_owned(),
-            "这是一条测试通知，新邮件会这样提醒你。".to_owned(),
-        )
+        ("MailX".to_owned(), locale.test_notification())
     } else {
-        ("MailX".to_owned(), "1 封新邮件".to_owned())
+        ("MailX".to_owned(), locale.new_mail(1))
     };
     let mut builder = app.notification().builder().title(title).body(body);
     if let Some(sound) = system_sound {
@@ -282,6 +285,27 @@ pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
 }
 
 #[cfg(test)]
+fn plan(mail: &NewMail, settings: &NotificationSettings, window_in_front: bool) -> Option<Shown> {
+    plan_localized(mail, settings, window_in_front, SupportedLocale::ZhCn)
+}
+
+#[cfg(test)]
+fn plan_send_result(
+    change: &OutboxChanged,
+    subject: Option<&str>,
+    settings: &NotificationSettings,
+    window_in_front: bool,
+) -> Option<Shown> {
+    plan_send_result_localized(
+        change,
+        subject,
+        settings,
+        window_in_front,
+        SupportedLocale::ZhCn,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use mailx_core::{MailAddress, NewMailMessage};
@@ -316,6 +340,37 @@ mod tests {
             ..settings
         };
         assert!(plan(&mail(1, &["e1"]), &always, true).is_some());
+    }
+
+    #[test]
+    fn english_text_preserves_preview_privacy_and_original_list_joining() {
+        let settings = NotificationSettings::default();
+        let private = NotificationSettings {
+            show_preview: false,
+            ..settings.clone()
+        };
+        let hidden =
+            plan_localized(&mail(1, &["e1"]), &private, false, SupportedLocale::En).unwrap();
+        assert_eq!(hidden.body, "1 new message");
+        assert!(!format!("{hidden:?}").contains("周报"));
+        let several = plan_localized(
+            &mail(4, &["e1", "e2"]),
+            &settings,
+            false,
+            SupportedLocale::En,
+        )
+        .unwrap();
+        assert_eq!(several.body, "4 new messages from Lin and others");
+        let failed = plan_send_result_localized(
+            &change(OutboxState::Failed),
+            Some(" "),
+            &settings,
+            false,
+            SupportedLocale::En,
+        )
+        .unwrap();
+        assert_eq!(failed.title, "Send failed");
+        assert_eq!(failed.body, "(No subject)");
     }
 
     #[test]

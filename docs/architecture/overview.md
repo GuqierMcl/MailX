@@ -1,13 +1,13 @@
 # MailX 第一版架构
 
-状态：**部分 Implemented / 其余 Initial draft** · 2026-10-20。已建立 core、Tauri 宿主、shadcn 邮件工作台与设置弹窗，接通配置持久化、系统凭据库、账号路由及 IMAP 文件夹和所有可选目录的邮件头同步。桌面端可分页查询缓存头部、搜索主题和发件人；按需正文缓存与隔离阅读已有实现，标记写回与发信尚未实现，真实服务商已有部分冒烟证据，完整兼容性仍待验证。下文区分当前能力与后续设想，所有设计仍可演化。
+状态：**部分 Implemented / 其余 Initial draft** · 2026-10-25。已建立 core、Tauri 宿主、shadcn 邮件工作台与设置弹窗，接通配置持久化、系统凭据库、账号路由及 IMAP 文件夹和所有可选目录的邮件头同步。桌面端可分页查询缓存头部、搜索主题和发件人；按需正文缓存、隔离阅读、标记写回、附件保存、富文本写信与经发送队列的 SMTP 发信已有实现，首版中英文文本已落地；写信附件与已发送副本展示尚未实现。真实服务商已有部分冒烟证据，完整兼容性及三平台体验仍待验证。下文区分当前能力与后续设想，所有设计仍可演化。
 
 ## 1. 总体结构
 
 采用模块化单体与轻量宿主。每个数据目录只有一个 Rust 核心实例拥有数据库、同步任务和发件队列。桌面与 Web 复用核心库；独立部署时不共享数据目录。
 
 ```text
-前端工作台（React + TypeScript + Vite + shadcn；当前为账号设置、邮件头与按需正文阅读）
+前端工作台（React + TypeScript + Vite + shadcn；账号设置、收信阅读、富文本写信与语言设置）
     └── MailxClient 接口
          ├── Tauri IPC adapter ── 桌面宿主
          └── HTTP + SSE adapter ─ Web 宿主（v0.2）
@@ -35,9 +35,10 @@ MCP bridge 只转发受限调用，不打开数据库或启动第二套同步器
 | --- | --- | --- |
 | UI | React + TypeScript + Vite，已初始化 | 三栏工作台与设置弹窗；桌面通过 MailxClient 读取同步文件夹、各目录头部、统一列表与分页，普通浏览器预览使用 mock；HTTP 留待后续 |
 | UI 基础 | shadcn `base-mira` preset，已初始化 | 账号业务界面使用 shadcn 组件组合，缺少组件时按现有 preset 安装 |
+| 文本语言 | `i18next + react-i18next`；Rust 使用有类型的共享资源子集，已实现 | 根 `locales/{zh-CN,en}/` 随包提供，语言由设置快照统一派生；宿主注入系统语言，core 不读取平台 API。首版只适配文本，日期等区域格式化另行规划 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文经自定义协议与空 sandbox iframe 隔离；`tauri-plugin-single-instance` 使第二次启动只唤起已运行的窗口，`tauri-plugin-window-state` 记住主窗口的大小、位置与最大化 / 全屏（刻意不恢复窗口装饰与可见性，主窗口先隐藏创建、恢复后再显示）；打包版本去掉浏览器默认行为（右键菜单、刷新 / 打印 / 查找 / 检查器快捷键等），主界面靠前端拦截，Windows 另用 WebView2 设置关闭浏览器快捷键与表单记忆；邮件正文所在的沙箱 iframe 有意不处理 |
 | 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
-| 接收 / 发送 | `async-imap` 0.12 用于文件夹与各目录头部同步；`lettre` 0.11 已通过 SMTP 路由探针，目前只是测试依赖 | 经账号路由完成只读 `EXAMINE`、`UID SEARCH` 和 `UID FETCH`；SMTP、OAuth 与真实服务商组合仍需验证 |
+| 接收 / 发送 | `async-imap` 0.12 用于同步与标记写回；`lettre` 0.11 构建发送 MIME，SMTP 会话在 core 实现 | IMAP 与 SMTP 连接统一经过账号路由；已有受控服务器测试，完整真实服务商组合及 OAuth 仍待验证，详见[写信与发送](sending.md) |
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 与 `ammonia` 4 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号、文件夹、邮件头与游标使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；头部使用参数化 LIKE 查询，FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
@@ -63,19 +64,25 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/sync/                 # 文件夹 / 邮件头解析、同步计划与每账号后台任务
   src/storage/              # SQLite、迁移、文件夹 / 邮件头缓存与游标、凭证恢复和实例锁
   src/secrets.rs            # 宿主注入的 SecretStore
+  src/settings.rs           # 应用偏好、语言兼容与设置快照版本
+  src/localization.rs       # 通知与引用模板的纯文本生成
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
+  src/locale.rs             # 系统语言读取并注入共享核心
   capabilities/             # 主窗口权限
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位
 frontend/                   # React + TypeScript + Vite + shadcn 前端
   src/features/accounts/    # 账号管理、修改连接与添加账号弹窗，资料与连接表单
   src/features/mail/        # 三栏邮件工作台
-  src/features/settings/    # 设置弹窗（外观、安全性、关于）
+  src/features/settings/    # 设置弹窗（通用语言、外观、通知、发信、安全性、关于）
+  src/i18n/                 # 资源初始化、结构化错误及跨窗口语言同步
   src/lib/mailx-client.ts    # 传输适配
   src/generated/            # Rust DTO 生成的 TypeScript
   package.json              # 前端脚本与依赖
   vite.config.ts            # Vite / Tailwind 配置
+locales/                    # zh-CN / en 公共文本资源；Rust 与前端共用
+scripts/check-i18n.mjs      # 资源、复数、参数与 Rust 子集门禁
 docs/                       # 文档
 branding/                   # 主 Logo 源稿、品牌变体、分享素材与资源清单
 .github/workflows/ci.yml     # 前端检查与 Linux / macOS / Windows Rust 检查
@@ -87,6 +94,8 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 
 账号以 Rust DTO 为跨边界类型来源，通过 `ts-rs` 生成 TypeScript；输入秘密与读取结果分开。前端仅经 `MailxClient` 调用宿主，生成产物可检查漂移。接口仍处于开发期，未冻结对外兼容承诺。
 
+首版中英文文本的语言来源、持久化兼容、快照修订号及窗口同步规则见[中英文文本适配](internationalization.md)，设置与事件契约见[应用 API](../contracts/app-api.md#应用偏好设置)。系统语言由 desktop 读取，core 只接收受支持语言并生成通知 / 引用文本；没有新增邮件数据库迁移或正文 iframe 权限。日期 / 时间、数字、文件大小、列表连接与排序保留现有行为；三平台打包体验与原生通知仍待分别验收。
+
 ## 4. 核心职责
 
 当前 `MailxCore` / `AccountService` 已提供账号、文件夹和邮件头查询，`SyncManager` 管理每账号的只读后台同步；表中服务名描述职责，尚未单独建立的服务按实际功能拆分，不要求先创建空目录或接口。
@@ -95,7 +104,7 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 | --- | --- | --- |
 | AccountService | 账号、端点、认证配置、路由、凭证引用与恢复；当前未探测连接能力 | 返回密钥明文 |
 | SyncManager | 每账号任务、文件夹目录、邮件头游标、增量与只读对账；后续再扩展写操作 | UI 排序和模型判断 |
-| 邮件读取与搜索（当前在 MailxCore / AccountService / Storage） | 缓存头部读取、参数化 LIKE、稳定分页与按需正文缓存；服务器标记写回待实现 | 让前端执行 SQL |
+| 邮件读取与搜索（当前在 MailxCore / AccountService / Storage） | 缓存头部读取、参数化 LIKE、稳定分页、按需正文缓存与标记写回 | 让前端执行 SQL |
 | DraftService / OutboxService | 草稿版本、发送快照、幂等与结果状态 | 模型自主确认发送 |
 | AiService | 选定上下文、运行、流式结果、取消 | 直接持有邮件协议连接 |
 | PolicyService | 账号范围、动作权限、内容披露与确认 | 依赖前端按钮隐藏来授权 |

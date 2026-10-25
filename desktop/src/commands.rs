@@ -4,7 +4,7 @@ use mailx_core::{
     UpdateConnectionRequest, UpdateProfileRequest,
 };
 use serde::{Deserialize, de::DeserializeOwned};
-use tauri::{State, WebviewWindow, ipc::InvokeBody};
+use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
 
 use crate::state::{DesktopState, StartupStatus};
 use crate::window_access::{self, WindowKind};
@@ -674,6 +674,7 @@ pub(crate) async fn settings_get(
 
 #[tauri::command]
 pub(crate) async fn settings_update(
+    app: tauri::AppHandle,
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
@@ -691,6 +692,22 @@ pub(crate) async fn settings_update(
                 })
             {
                 protocol.revoke_remote_images();
+            }
+            if let Ok(snapshot) = &result {
+                let change = mailx_core::SettingsChanged {
+                    revision: snapshot.revision,
+                };
+                for (label, target) in app.webview_windows() {
+                    if target.url().ok().is_some_and(|url| {
+                        window_access::check_kind(&label, &url, "settings_get").is_ok()
+                    }) {
+                        let _ = app.emit_to(
+                            EventTarget::webview_window(label),
+                            "mailx://settings-changed",
+                            change,
+                        );
+                    }
+                }
             }
             result
         }
@@ -825,10 +842,13 @@ pub(crate) async fn notifications_test(
         let args = authorize(&window, "notifications_test")
             .and_then(|_| parse::<EmptyArgs>(request.body()));
         Ok(respond(match args {
-            Ok(_) => state
-                .settings(|store| store.get())
-                .await
-                .map(|snapshot| crate::notifications::test(&app, &snapshot.settings.notifications)),
+            Ok(_) => state.settings(|store| store.get()).await.map(|snapshot| {
+                crate::notifications::test(
+                    &app,
+                    &snapshot.settings.notifications,
+                    snapshot.effective_locale,
+                )
+            }),
             Err(error) => Err(error),
         }))
     }

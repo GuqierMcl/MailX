@@ -6,10 +6,12 @@ import App from './App.tsx'
 import { isTauri } from '@tauri-apps/api/core'
 import { applyAppearance, cachedAppearance } from './lib/appearance'
 import { installBrowserDefaultGuards } from './lib/browser-defaults'
+import { initializeLanguage } from './i18n/locale'
 
 // Apply the last known appearance before the first paint to avoid a flash;
 // the core's settings replace it once IPC answers.
 applyAppearance(cachedAppearance())
+initializeLanguage()
 
 // A packaged app should not act like a browser tab. Development builds keep
 // reload and the inspector for working on the UI.

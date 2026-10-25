@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { IconSvgElement } from '@hugeicons/react'
 import { Mail01Icon } from '@hugeicons/core-free-icons'
 
@@ -20,7 +21,7 @@ export const GENERIC_PROVIDER: MailProvider = {
   id: null,
   name: 'IMAP/SMTP',
   // Works with any server, so it names no single suffix.
-  domain: '其他邮箱',
+  get domain() { return t('accounts:otherProvider') },
   icon: Mail01Icon,
 }
 

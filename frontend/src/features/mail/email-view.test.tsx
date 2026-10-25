@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { MailxClient } from '@/lib/mailx-client'
 import { EmailView } from './email-view'
+import { i18n } from '@/i18n'
 
 function setup() {
   render(
@@ -27,6 +28,16 @@ async function focus(name: string) {
 }
 
 describe('reader toolbar tooltips', () => {
+  it('updates actions that were previously module-level labels when the language changes', async () => {
+    setup()
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(screen.getByRole('toolbar', { name: 'Message actions' })).toBeInTheDocument()
+    for (const name of ['Archive', 'Reply', 'Reply all', 'Forward', 'Mark as unread', 'Add star', 'Close message']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+    expect(screen.queryByRole('button', { name: '回复' })).not.toBeInTheDocument()
+  })
+
   it('uses tooltips, not native titles, and names every icon button', () => {
     setup()
     const bar = screen.getByRole('toolbar', { name: '邮件操作' })

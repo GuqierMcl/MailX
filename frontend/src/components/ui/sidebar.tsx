@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
@@ -161,6 +163,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
+  useTranslation()
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
   if (collapsible === "none") {
@@ -195,8 +198,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>邮箱账号列表</SheetTitle>
-            <SheetDescription>查看、选择和添加邮箱账号。</SheetDescription>
+            <SheetTitle>{t('common:emailAccountList')}</SheetTitle>
+            <SheetDescription>{t('common:accountListDescription')}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -255,6 +258,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
+  useTranslation()
   const { toggleSidebar } = useSidebar()
 
   return (
@@ -271,7 +275,7 @@ function SidebarTrigger({
       {...props}
     >
       <HugeiconsIcon icon={SidebarLeftIcon} strokeWidth={2} />
-      <span className="sr-only">展开或收起账号列表</span>
+      <span className="sr-only">{t('common:toggleAccountList')}</span>
     </Button>
   )
 }

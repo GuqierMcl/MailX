@@ -173,6 +173,7 @@ impl AccountService {
         account_address: &str,
         headers: &SourceHeaders,
         offset: FixedOffset,
+        locale: crate::SupportedLocale,
     ) -> Result<Draft, AppError> {
         let text = detail
             .body
@@ -191,6 +192,7 @@ impl AccountService {
                 .map(|body| body.rendered.links.as_slice())
                 .unwrap_or_default(),
             text,
+            locale,
         );
         let Composed {
             content,
@@ -203,6 +205,7 @@ impl AccountService {
             account_address,
             headers,
             offset,
+            locale,
         );
         let content = validate::normalize(content)?;
         let canonical = Self::from_canonical(request)?;

@@ -96,6 +96,8 @@ export interface MailxClient {
   getSettings(): Promise<SettingsSnapshot>
   /** Updates the supplied preference sections; the core validates them and returns the canonical form. */
   updateSettings(settings: Partial<AppSettings>): Promise<SettingsSnapshot>
+  /** Resolves once the host event listener is registered. */
+  onSettingsChanged(listener: (change: { revision: number }) => void): Promise<() => void>
   /** Shows a sample notification with the saved notification settings. */
   testNotification(): Promise<void>
   /** Plays one of MailX's own notification sounds; the system sound and none play nothing. */
@@ -145,6 +147,7 @@ export const HOST_EVENTS = {
   drafts: 'mailx://drafts',
   appClosing: 'mailx://app-closing',
   composerCloseRequested: 'mailx://composer-close-requested',
+  settingsChanged: 'mailx://settings-changed',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -247,6 +250,10 @@ export function createDesktopClient(): MailxClient {
       return () => { disposed = true; unlisten?.() }
     },
     getSettings: () => call<SettingsSnapshot>('settings_get'),
+    async onSettingsChanged(listener) {
+      if (!available) return () => undefined
+      return getCurrentWebviewWindow().listen<{ revision: number }>(HOST_EVENTS.settingsChanged, (event) => listener(event.payload))
+    },
     updateSettings: (request) => call<SettingsSnapshot>('settings_update', { request }),
     testNotification: () => call<void>('notifications_test'),
     previewSound: (sound) => call<void>('notifications_preview_sound', { sound }),

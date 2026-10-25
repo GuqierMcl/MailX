@@ -1,0 +1,12 @@
+{
+  "noSubject": "(No subject)",
+  "newMail_one": "{{count}} new message",
+  "newMail_other": "{{count}} new messages",
+  "newMailFrom_one": "{{count}} new message from {{senders}}{{more}}",
+  "newMailFrom_other": "{{count}} new messages from {{senders}}{{more}}",
+  "moreSenders": " and others",
+  "sent": "Sent",
+  "failed": "Send failed",
+  "unknown": "May have been sent; confirmation needed",
+  "test": "This is a test notification. New mail will be announced like this."
+}

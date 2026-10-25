@@ -1,21 +1,22 @@
+import { t } from '@/i18n'
 /** Storage names shared by the editor, toolbar and browser preview client. */
 export const MAIL_COLORS = [
-  { name: 'gray', label: '灰色' },
-  { name: 'red', label: '红色' },
-  { name: 'orange', label: '橙色' },
-  { name: 'yellow', label: '黄色' },
-  { name: 'green', label: '绿色' },
-  { name: 'blue', label: '蓝色' },
-  { name: 'purple', label: '紫色' },
-  { name: 'pink', label: '粉色' },
+  { name: 'gray', get label() { return t('composer:color.gray') } },
+  { name: 'red', get label() { return t('composer:color.red') } },
+  { name: 'orange', get label() { return t('composer:color.orange') } },
+  { name: 'yellow', get label() { return t('composer:color.yellow') } },
+  { name: 'green', get label() { return t('composer:color.green') } },
+  { name: 'blue', get label() { return t('composer:color.blue') } },
+  { name: 'purple', get label() { return t('composer:color.purple') } },
+  { name: 'pink', get label() { return t('composer:color.pink') } },
 ] as const
 
 export const MAIL_HIGHLIGHTS = [
-  { name: 'gray', label: '灰色' },
-  { name: 'red', label: '红色' },
-  { name: 'yellow', label: '黄色' },
-  { name: 'green', label: '绿色' },
-  { name: 'blue', label: '蓝色' },
+  { name: 'gray', get label() { return t('composer:color.gray') } },
+  { name: 'red', get label() { return t('composer:color.red') } },
+  { name: 'yellow', get label() { return t('composer:color.yellow') } },
+  { name: 'green', get label() { return t('composer:color.green') } },
+  { name: 'blue', get label() { return t('composer:color.blue') } },
 ] as const
 
 export type MailColor = (typeof MAIL_COLORS)[number]['name']

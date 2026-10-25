@@ -48,11 +48,11 @@ describe('workbench', () => {
     expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
   })
 
-  it('opens the settings dialog from the sidebar', async () => {
+  it('opens general settings from the sidebar', async () => {
     await renderWorkbench()
     await userEvent.click(screen.getByRole('button', { name: '设置' }))
     expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument()
-    expect(await screen.findByRole('radiogroup', { name: '颜色模式' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '语言' })).toBeInTheDocument()
   })
 
   it('opens the account manager from the sidebar and lists accounts beside the form', async () => {

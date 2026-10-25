@@ -102,7 +102,7 @@ describe('add account wizard', () => {
     const { dialog } = renderDialog(client)
     await toProfile(dialog)
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
-    expect(await within(dialog).findByText('发件人名称过长。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('配置参数无效，请检查标记的字段。')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('发件人名称')).toHaveAttribute('aria-invalid', 'true')
     expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
   })
@@ -121,7 +121,7 @@ describe('add account wizard', () => {
     const { dialog } = renderDialog(client)
     await toProfile(dialog)
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
-    expect(await within(dialog).findByText('无法使用这个主机。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('IMAP 主机')).toHaveAttribute('aria-invalid', 'true')
     // The password went out with the failed request and must be entered again.
     expect(within(dialog).getByLabelText('收发密码')).toHaveValue('')

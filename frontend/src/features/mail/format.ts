@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { EmailListQuery, MailAddress } from '@/generated/accounts'
 
 export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
@@ -47,7 +48,7 @@ export function formatListTime(value: string, now = new Date()) {
   if (sameDay(date, now)) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   const yesterday = new Date(now)
   yesterday.setDate(now.getDate() - 1)
-  if (sameDay(date, yesterday)) return '昨天'
+  if (sameDay(date, yesterday)) return t('mail:yesterday')
   const days = (now.getTime() - date.getTime()) / 86_400_000
   if (days < 7) return date.toLocaleDateString('zh-CN', { weekday: 'short' })
   if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })

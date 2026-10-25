@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -31,6 +33,7 @@ type SendButtonProps = {
  * sends. It is a guard against slips, not a security boundary.
  */
 export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, resetToken }: SendButtonProps) {
+  const { i18n } = useTranslation('composer')
   const [stage, setStage] = useState<Stage>('idle')
   const reducedMotion = usePrefersReducedMotion()
   const revision = useRef(0)
@@ -117,7 +120,7 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
   }, [])
 
   const confirming = stage === 'confirm' || stage === 'sending'
-  const label = stage === 'sending' ? '正在发送…' : confirming ? (subjectEmpty ? '无主题，确认发送' : '确认发送') : '发送'
+  const label = stage === 'sending' ? t('composer:send.sending') : confirming ? (subjectEmpty ? t('composer:send.confirmEmptySubject') : t('composer:send.confirm')) : t('composer:send.send')
   return (
     <>
       <Button
@@ -130,13 +133,13 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
           'h-8 justify-center overflow-hidden px-3 text-sm whitespace-nowrap',
           !reducedMotion && 'transition-[width,background-color,color] duration-200 ease-out',
           confirming
-            ? cn(subjectEmpty ? 'w-36' : 'w-24', 'bg-emerald-700 text-white hover:bg-emerald-700/90 dark:bg-emerald-600 dark:hover:bg-emerald-600/90')
-            : 'w-16',
+            ? cn(i18n.resolvedLanguage === 'en' ? (subjectEmpty ? 'w-60' : 'w-36') : (subjectEmpty ? 'w-36' : 'w-24'), 'bg-emerald-700 text-white hover:bg-emerald-700/90 dark:bg-emerald-600 dark:hover:bg-emerald-600/90')
+            : i18n.resolvedLanguage === 'en' ? 'w-24' : 'w-16',
         )}
       >
         {label}
       </Button>
-      <span role="status" aria-live="polite" className="sr-only">{stage === 'confirm' ? '再次按下以确认发送' : ''}</span>
+      <span role="status" aria-live="polite" className="sr-only">{stage === 'confirm' ? t('composer:send.confirmAnnouncement') : ''}</span>
     </>
   )
 }

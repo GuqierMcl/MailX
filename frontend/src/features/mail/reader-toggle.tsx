@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { PanelRightCloseIcon, PanelRightOpenIcon } from '@hugeicons/core-free-icons'
 import { Button } from '@/components/ui/button'
@@ -10,7 +12,8 @@ import { TitleBarActions } from '@/features/window-chrome/title-bar'
  * the two mount), and its icon shows what a click will do.
  */
 export function ReaderToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const label = collapsed ? '展开邮件内容' : '收起邮件内容'
+  useTranslation()
+  const label = collapsed ? t('mail:expandReader') : t('mail:collapseReader')
   return (
     <TitleBarActions side="trailing" order={1}>
       <Tooltip>

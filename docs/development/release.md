@@ -23,7 +23,7 @@
 
 刻意不做的隐式行为：预发布版上执行 `patch` 会报错，而不是悄悄变成正式版。已存在同名标签的版本会被拒绝。
 
-**第一次发布**：仓库当前版本是 `0.1.0`（从未发布），而 `0.1.0-alpha.1` 在 SemVer 里低于它，所以要写 `bun run version:set 0.1.0-alpha.1 --force`。
+**首次预发布的初始化**：只有从尚未发布的正式工程版本（如 `0.1.0`）切换为更低的预发布版本（如 `0.1.0-alpha.1`）时，才需要 `bun run version:set 0.1.0-alpha.1 --force`。已经处于 alpha / beta / rc 阶段时，用 `bun run version:bump pre` 递增，不重复初始化；可先加 `--dry-run` 预览。实际当前版本以根 `package.json` 和 `version:check` 为准。
 
 ## 3. 更新日志
 

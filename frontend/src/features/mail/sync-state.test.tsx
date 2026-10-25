@@ -55,7 +55,7 @@ describe('folder sync in the workbench', () => {
   it('explains a failed sync on the account row', async () => {
     const { client } = desktopLike([], [failed])
     render(<Workbench client={client} />)
-    const action = await screen.findByRole('button', { name: /^同步失败：服务器拒绝了登录/ })
+    const action = await screen.findByRole('button', { name: /^同步失败：邮箱服务器拒绝了账号登录/ })
     expect(screen.getByText('暂无文件夹')).toBeInTheDocument()
     await userEvent.hover(action)
     expect(await screen.findByText('login rejected: Invalid credentials', {}, { timeout: 3000 })).toBeInTheDocument()

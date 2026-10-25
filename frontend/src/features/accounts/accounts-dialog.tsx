@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
@@ -50,6 +53,7 @@ type AccountsDialogProps = {
  * summary and changed in its own dialog.
  */
 export function AccountsDialog({ client, target, accounts, syncStates, onClose, onAccountsChanged, onAddAccount }: AccountsDialogProps) {
+  useTranslation()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingConnection, setEditingConnection] = useState<string | null>(null)
   const [connectionVersion, setConnectionVersion] = useState(0)
@@ -67,18 +71,18 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
     <>
       <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
-          <DialogDescription className="sr-only">查看邮箱账号，修改名称、标识颜色与连接。</DialogDescription>
+          <DialogDescription className="sr-only">{t('accounts:accountsDescription')}</DialogDescription>
           {/* Narrow windows turn the account list into a top strip instead of hiding it. */}
           <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
             <Sidebar collapsible="none"
               className="h-auto w-full shrink-0 border-b pr-12 md:h-full md:w-(--sidebar-width) md:border-b-0 md:pr-0">
               <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
-                <DialogTitle className="text-base font-semibold">邮箱账号</DialogTitle>
+                <DialogTitle className="text-base font-semibold">{t('accounts:emailAccounts')}</DialogTitle>
               </SidebarHeader>
               <SidebarContent>
                 <SidebarGroup className="py-2 md:p-2">
                   <SidebarGroupContent>
-                    <SidebarMenu className="flex-row overflow-x-auto md:flex-col md:overflow-visible" aria-label="邮箱账号列表">
+                    <SidebarMenu className="flex-row overflow-x-auto md:flex-col md:overflow-visible" aria-label={t('accounts:emailAccountList')}>
                       {accounts.map((row) => (
                         <SidebarMenuItem key={row.id} className="shrink-0">
                           <SidebarMenuButton isActive={row.id === activeId} title={`${row.emailAddress} · ${providerOf(row.providerId).name}`} onClick={() => setSelectedId(row.id)}>
@@ -94,7 +98,8 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
               <SidebarFooter className="hidden md:flex">
                 <Button variant="outline" className="w-full" onClick={onAddAccount}>
                   <HugeiconsIcon icon={Add01Icon} />
-                  添加账号
+
+                  {t('accounts:addAccountShort')}
                 </Button>
               </SidebarFooter>
             </Sidebar>
@@ -115,13 +120,14 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
                       <EmptyMedia variant="icon">
                         <HugeiconsIcon icon={Mail01Icon} />
                       </EmptyMedia>
-                      <EmptyTitle>从添加一个邮箱开始</EmptyTitle>
-                      <EmptyDescription>连接邮箱后为它命名。设置保存在本机，密码交由系统凭据库管理。</EmptyDescription>
+                      <EmptyTitle>{t('accounts:startWithAccount')}</EmptyTitle>
+                      <EmptyDescription>{t('accounts:accountStorageHint')}</EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
                       <Button onClick={onAddAccount}>
                         <HugeiconsIcon icon={Add01Icon} />
-                        添加第一个账号
+
+                        {t('accounts:addFirstAccount')}
                       </Button>
                     </EmptyContent>
                   </Empty>
@@ -132,7 +138,8 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
                 <div className="px-6 pb-4 md:hidden">
                   <Button variant="outline" onClick={onAddAccount}>
                     <HugeiconsIcon icon={Add01Icon} />
-                    添加账号
+
+                    {t('accounts:addAccountShort')}
                   </Button>
                 </div>
               )}
@@ -165,15 +172,16 @@ type AccountDetailProps = {
 
 /** Loads one account; remounted per account and after its connection changes. */
 function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: AccountDetailProps) {
+  useTranslation()
   const { account, error, reload, replace } = useAccount(client, accountId)
 
   if (error) {
     return (
       <SettingsPage>
         <Alert variant="destructive">
-          <AlertTitle>无法加载账号配置</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>重试加载</Button>
+          <AlertTitle>{t('accounts:loadAccountFailed')}</AlertTitle>
+          <AlertDescription>{errorText(error)}</AlertDescription>
+          <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>{t('accounts:retryLoad')}</Button>
         </Alert>
       </SettingsPage>
     )
@@ -182,7 +190,7 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: A
     return (
       <SettingsPage>
         <Delayed>
-          <div role="status" aria-label="正在加载账号配置" className="flex flex-col gap-3">
+          <div role="status" aria-label={t('accounts:loadingAccount')} className="flex flex-col gap-3">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-48 w-full" />
           </div>
@@ -201,15 +209,15 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: A
     <SettingsPage>
       {needsTrust ? (
         <Alert variant="destructive">
-          <AlertTitle>凭证需要重新确认</AlertTitle>
-          <AlertDescription>服务器或登录身份已改变，在重新输入密码之前 MailX 不会用旧凭证连接。</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>修改连接</Button>
+          <AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle>
+          <AlertDescription>{t('accounts:changedIdentityHint')}</AlertDescription>
+          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       ) : stopped && (
         <Alert variant="destructive">
-          <AlertTitle>同步已停止</AlertTitle>
-          <AlertDescription>{stopped.message} 修改连接后会重新尝试。</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>修改连接</Button>
+          <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
+          <AlertDescription>{errorText(stopped)}  {t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       )}
       <ProfileEditor
@@ -220,13 +228,13 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: A
           onSaved()
         }}
       />
-      <SettingsGroup title="连接" badge={<ProviderBadge providerId={account.providerId} />} description="服务器、凭证与网络路由。修改后 MailX 会立即重新连接。">
-        <SettingsRow label="邮箱地址" description={account.emailAddress} />
-        <SettingsRow label="收信服务器" description={server('IMAP', account.imap)} />
-        <SettingsRow label="发信服务器" description={server('SMTP', account.smtp)} />
-        <SettingsRow label="凭证" description={credentials(account, needsTrust)} />
-        <SettingsRow label="网络路由" description={route(account.route)} />
-        <Button variant="outline" className="w-fit" onClick={onEditConnection}>修改连接</Button>
+      <SettingsGroup title={t('accounts:connection')} badge={<ProviderBadge providerId={account.providerId} />} description={t('accounts:connectionDescription')}>
+        <SettingsRow label={t('accounts:emailAddress')} description={account.emailAddress} />
+        <SettingsRow label={t('accounts:incomingServer')} description={server('IMAP', account.imap)} />
+        <SettingsRow label={t('accounts:outgoingServer')} description={server('SMTP', account.smtp)} />
+        <SettingsRow label={t('accounts:credentials')} description={credentials(account, needsTrust)} />
+        <SettingsRow label={t('accounts:networkRoute')} description={route(account.route)} />
+        <Button variant="outline" className="w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
       </SettingsGroup>
     </SettingsPage>
   )
@@ -246,11 +254,12 @@ type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { 
  * mid-edit is saved when the editor goes away.
  */
 function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
+  useTranslation()
   const [displayName, setDisplayName] = useState(account.displayName)
   const [color, setColor] = useState(account.color)
   const [senderName, setSenderName] = useState(account.senderName ?? '')
-  const [nameError, setNameError] = useState<string | null>(null)
-  const [senderNameError, setSenderNameError] = useState<string | null>(null)
+  const [nameError, setNameError] = useState<ClientFailure | null>(null)
+  const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' })
   const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName })
   const queue = useRef<Promise<void>>(Promise.resolve())
@@ -275,7 +284,7 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
         // A rejected sender name is shown on its field, not as a general failure.
         if (failure.field === 'senderName') {
           if (alive.current) {
-            setSenderNameError(failure.message)
+            setSenderNameError(failure)
             setStatus({ kind: 'idle' })
           }
           committed.current = { ...committed.current, senderName: account.senderName }
@@ -294,7 +303,7 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
   const commitName = () => {
     const name = displayName.trim()
     if (!name) {
-      setNameError('请填写账号名称。')
+      setNameError({ code: 'validation', field: 'displayName', message: '' })
       return
     }
     setNameError(null)
@@ -321,13 +330,13 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
 
   return (
     <SettingsGroup
-      title="资料"
+      title={t('accounts:profile')}
       badge={<SaveBadge status={status} />}
-      description="名称、发件人名称和标识颜色修改后自动保存，不会重新连接。">
+      description={t('accounts:profileDescription')}>
       {status.kind === 'failed' && (
         <Alert variant="destructive">
-          <AlertTitle>资料未保存</AlertTitle>
-          <AlertDescription>{status.failure.message}</AlertDescription>
+          <AlertTitle>{t('accounts:profileNotSaved')}</AlertTitle>
+          <AlertDescription>{errorText(status.failure)}</AlertDescription>
         </Alert>
       )}
       <ProfileFields
@@ -357,7 +366,8 @@ function ProfileEditor({ client, account, onSaved }: ProfileEditorProps) {
 }
 
 function SaveBadge({ status }: { status: SaveStatus }) {
-  const text = status.kind === 'saving' ? '正在保存…' : status.kind === 'saved' ? '已保存' : null
+  useTranslation()
+  const text = status.kind === 'saving' ? t('accounts:savingStatus') : status.kind === 'saved' ? t('accounts:saved') : null
   return <span role="status" className="text-xs font-normal text-muted-foreground">{text}</span>
 }
 
@@ -367,14 +377,14 @@ function server(protocol: string, connection: Account['imap']) {
 }
 
 function credentials(account: Account, needsTrust: boolean) {
-  const mode = account.authentication.mode === 'shared' ? '收发使用相同密码' : '收发分别设置密码'
+  const mode = account.authentication.mode === 'shared' ? t('accounts:sharedPassword') : t('accounts:separatePasswords')
   const configured = account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured
-  return `${mode} · ${needsTrust ? '需要重新确认' : configured ? '已保存在系统凭据库' : '缺少密码'}`
+  return `${mode} · ${needsTrust ? t('accounts:needsConfirmation') : configured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`
 }
 
 function route(value: RouteConfig) {
-  if (value.kind === 'direct') return '直接连接'
-  if (value.kind === 'inherit') return '使用应用默认（目前为直接连接）'
+  if (value.kind === 'direct') return t('accounts:directConnection')
+  if (value.kind === 'inherit') return t('accounts:appDefaultDirect')
   const kind = value.proxyKind === 'socks5' ? 'SOCKS5' : 'HTTP CONNECT'
-  return `${kind} 代理 · ${value.host}:${value.port}${value.authentication ? ` · ${value.authentication.username}` : ''}`
+  return t('accounts:proxySummary', { kind, host: value.host, port: value.port, authentication: value.authentication ? ` · ${value.authentication.username}` : '' })
 }

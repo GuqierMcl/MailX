@@ -1,0 +1,6 @@
+{
+  "newMailTitle": "新邮件",
+  "imageAlt": "[图片：{{alt}}]",
+  "replyIntro": "\n{{date}}，{{sender}} 写道：",
+  "forwardHeader": "\n---------- 转发的邮件 ----------\n发件人：{{sender}}\n日期：{{date}}\n主题：{{subject}}\n收件人：{{recipients}}"
+}

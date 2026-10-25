@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
@@ -8,7 +11,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { usePanelRef } from 'react-resizable-panels'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
+import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
 import { CommandPalette } from './command-palette'
@@ -44,6 +47,7 @@ const PAGE_SIZE = 100
 type OpenedState = OpenedEmail & { source: string | null }
 
 export function Workbench({ client }: { client: MailxClient }) {
+  useTranslation()
   const queryClient = useQueryClient()
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
   const listPanel = usePanelRef()
@@ -335,7 +339,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : activeMailbox.kind === 'folder'
     ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
     : mailboxTitle(activeMailbox)
-  const firstPageError = list.isError && !list.isFetchNextPageError ? clientFailure(list.error).message : null
+  const firstPageError = list.isError && !list.isFetchNextPageError ? errorText(list.error) : null
 
   const selectMailbox = (next: Mailbox) => setMailbox(next)
   // A search or a found message belongs to a mail list: leave the local views for it.
@@ -363,7 +367,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     <TooltipProvider>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
       <ShellLayout
-        navLabel="邮箱导航"
+        navLabel={t('mail:mailboxNavigation')}
         navWidth={navWidth}
         onNavWidthChange={(width) => saveLayout({ navWidth: width })}
         nav={(
@@ -375,7 +379,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             mailbox={activeMailbox}
             onSelect={selectMailbox}
             onOpenAccounts={() => setAccountsTarget({})}
-            onOpenSettings={() => setSettings({ section: 'appearance' })}
+            onOpenSettings={() => setSettings({ section: 'general' })}
             onCompose={() => void compose.compose()}
             draftCount={draftCount}
             outboxCount={outboxCount}
@@ -420,7 +424,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               <DraftList
                 drafts={drafts.data}
                 loading={drafts.isPending}
-                error={drafts.isError ? clientFailure(drafts.error).message : null}
+                error={drafts.isError ? errorText(drafts.error) : null}
                 accounts={accounts.length > 1 ? accounts : null}
                 selectedId={selectedDraft}
                 onSelect={(id) => { setDraftChoice(id); setReaderCollapsed(false) }}
@@ -429,7 +433,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               <OutboxList
                 items={outbox.data}
                 loading={outbox.isPending}
-                error={outbox.isError ? clientFailure(outbox.error).message : null}
+                error={outbox.isError ? errorText(outbox.error) : null}
                 accounts={accounts.length > 1 ? accounts : null}
                 selectedId={selectedOutbox?.id ?? null}
                 onSelect={(id) => { setOutboxChoice(id); setReaderCollapsed(false) }}
@@ -445,8 +449,8 @@ export function Workbench({ client }: { client: MailxClient }) {
               loadingMore={list.isFetchingNextPage}
               refreshing={list.isFetching && !list.isFetchingNextPage}
               stale={list.isPlaceholderData}
-              loadMoreError={list.isFetchNextPageError ? clientFailure(list.error).message : null}
-              error={tree.isError ? clientFailure(tree.error).message : firstPageError}
+              loadMoreError={list.isFetchNextPageError ? errorText(list.error) : null}
+              error={tree.isError ? errorText(tree.error) : firstPageError}
               filter={filter}
               search={search}
               selectedId={highlighted}
@@ -498,7 +502,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onClose={() => setOpened(null)}
               email={opened ? body.email : null}
               loading={opened !== null && body.detail.isPending}
-              error={opened && body.detail.isError ? clientFailure(body.detail.error).message : null}
+              error={opened && body.detail.isError ? errorText(body.detail.error) : null}
               downloading={body.pending}
               onDownload={body.download}
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
@@ -516,19 +520,21 @@ export function Workbench({ client }: { client: MailxClient }) {
 }
 
 function NoAccounts({ onAddAccount }: { onAddAccount: () => void }) {
+  useTranslation()
   return (
     <Empty className="h-full">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <HugeiconsIcon icon={Mail01Icon} />
         </EmptyMedia>
-        <EmptyTitle>还没有邮箱账号</EmptyTitle>
-        <EmptyDescription>添加一个邮箱后，邮件会显示在这里。</EmptyDescription>
+        <EmptyTitle>{t('mail:noAccounts')}</EmptyTitle>
+        <EmptyDescription>{t('mail:addAccountHint')}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <Button onClick={onAddAccount}>
           <HugeiconsIcon icon={Add01Icon} />
-          添加邮箱账号
+
+          {t('mail:addAccount')}
         </Button>
       </EmptyContent>
     </Empty>

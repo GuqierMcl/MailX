@@ -1,3 +1,6 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
+import { errorText } from '@/i18n/errors'
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
@@ -73,6 +76,7 @@ type MailSidebarProps = {
 }
 
 export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onCompose, draftCount, outboxCount, onRefresh }: MailSidebarProps) {
+  useTranslation()
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const toggle = (id: string, open: boolean) => {
     const next = new Set(collapsed)
@@ -93,9 +97,9 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={onCompose} className="font-medium" title={`写邮件（${COMPOSE_SHORTCUT}）`}>
+            <SidebarMenuButton onClick={onCompose} className="font-medium" title={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })}>
               <HugeiconsIcon icon={PencilEdit02Icon} />
-              <span>写邮件</span>
+              <span>{t('mail:compose')}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -110,31 +114,31 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                   onClick={() => onSelect({ kind: 'unified', role: 'inbox' })}
                 >
                   <HugeiconsIcon icon={InboxIcon} />
-                  <span>全部收件箱</span>
+                  <span>{t('mail:allInboxes')}</span>
                 </SidebarMenuButton>
-                {!unifiedCountsKnown ? <SidebarMenuBadge aria-label="未读数待刷新">—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
+                {!unifiedCountsKnown ? <SidebarMenuBadge aria-label={t('mail:unreadCountUnknown')}>—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}>
                   <HugeiconsIcon icon={File01Icon} />
-                  <span>草稿</span>
+                  <span>{t('mail:drafts')}</span>
                 </SidebarMenuButton>
-                {draftCount > 0 && <SidebarMenuBadge aria-label={`${draftCount} 份草稿`}>{draftCount}</SidebarMenuBadge>}
+                {draftCount > 0 && <SidebarMenuBadge aria-label={t('mail:draftCount', { count: draftCount })}>{draftCount}</SidebarMenuBadge>}
               </SidebarMenuItem>
               {outboxCount > 0 && (
                 <SidebarMenuItem>
                   <SidebarMenuButton isActive={mailbox.kind === 'outbox'} onClick={() => onSelect({ kind: 'outbox' })}>
                     <HugeiconsIcon icon={MailUpload01Icon} />
-                    <span>发件箱</span>
+                    <span>{t('mail:outbox')}</span>
                   </SidebarMenuButton>
-                  <SidebarMenuBadge aria-label={`${outboxCount} 封未完成的邮件`}>{outboxCount}</SidebarMenuBadge>
+                  <SidebarMenuBadge aria-label={t('mail:outboxCount', { count: outboxCount })}>{outboxCount}</SidebarMenuBadge>
                 </SidebarMenuItem>
               )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>邮箱</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('mail:mailboxes')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {loading &&
@@ -177,10 +181,11 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                         {tree.length === 0 && (
                           <SidebarMenuItem>
                             <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
-                              {sync?.phase === 'failed' || sync?.phase === 'idle' ? '暂无文件夹' : (
+                              {sync?.phase === 'failed' || sync?.phase === 'idle' ? t('mail:noFolders') : (
                                 <>
                                   <SyncIcon className="size-3.5" spinning />
-                                  正在同步文件夹…
+
+                                  {t('mail:syncingFolders')}
                                 </>
                               )}
                             </span>
@@ -210,14 +215,14 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenAccounts}>
               <HugeiconsIcon icon={AtSignIcon} />
-              <span>账号</span>
+              <span>{t('mail:accounts')}</span>
             </SidebarMenuButton>
-            {hasSyncFailure && <SidebarMenuBadge aria-label="有账号同步失败" className="text-destructive">!</SidebarMenuBadge>}
+            {hasSyncFailure && <SidebarMenuBadge aria-label={t('mail:someAccountsSyncFailed')} className="text-destructive">!</SidebarMenuBadge>}
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenSettings}>
               <HugeiconsIcon icon={Settings01Icon} />
-              <span>设置</span>
+              <span>{t('mail:settings')}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -253,6 +258,7 @@ function AccountSyncSlot({ unread, countsKnown, syncing, label, onRefresh, class
   onRefresh: () => void
   className?: string
 }) {
+  useTranslation()
   const turning = useDelayedFlag(syncing, 400, 700)
   const showCount = !countsKnown || unread > 0
   const canRefresh = !syncing
@@ -266,16 +272,16 @@ function AccountSyncSlot({ unread, countsKnown, syncing, label, onRefresh, class
     >
       <span className={cn('pointer-events-none flex items-center transition-opacity', canRefresh && 'opacity-[calc(1-var(--show))]')}>
         {turning ? (
-          <span role="status" aria-label="正在同步"><SyncIcon className="size-3.5" spinning /></span>
+          <span role="status" aria-label={t('mail:syncing')}><SyncIcon className="size-3.5" spinning /></span>
         ) : showCount && (
-          <span aria-label={!countsKnown ? '未读数待刷新' : undefined}>{countsKnown ? unread : '—'}</span>
+          <span aria-label={!countsKnown ? t('mail:unreadCountUnknown') : undefined}>{countsKnown ? unread : '—'}</span>
         )}
       </span>
       {canRefresh && (
         <button
           type="button"
-          aria-label={`立即同步 ${label}`}
-          title={`立即同步 ${label}`}
+          aria-label={t('mail:syncAccount', { label })}
+          title={t('mail:syncAccount', { label })}
           onClick={onRefresh}
           className="absolute inset-0 flex items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
@@ -295,6 +301,7 @@ type FolderItemProps = {
 }
 
 function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderItemProps) {
+  useTranslation()
   const { folder, children } = node
   const hasChildren = children.length > 0
   const open = hasChildren && !collapsed.has(folder.id)
@@ -329,15 +336,15 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
         <CollapsibleTrigger render={<SidebarMenuButton className="text-sidebar-foreground/70" />}>{label}</CollapsibleTrigger>
       )}
       {junkDot && countsKnown && unread === 0 ? (
-        <SidebarMenuBadge aria-label="有未读邮件" className={cn(hasChildren && 'right-7')}>
+        <SidebarMenuBadge aria-label={t('mail:hasUnread')} className={cn(hasChildren && 'right-7')}>
           <span className="size-1.5 rounded-full bg-current" />
         </SidebarMenuBadge>
       ) : (!countsKnown || unread > 0) && !(isJunk && own) && (
-        <SidebarMenuBadge aria-label={!countsKnown ? '未读数待刷新' : undefined} className={cn(hasChildren && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>
+        <SidebarMenuBadge aria-label={!countsKnown ? t('mail:unreadCountUnknown') : undefined} className={cn(hasChildren && 'right-7')}>{countsKnown ? unread : '—'}</SidebarMenuBadge>
       )}
       {hasChildren && (
         <>
-          <CollapsibleTrigger render={<SidebarMenuAction aria-label={`${open ? '收起' : '展开'}${folderLabel(folder)}`} />}>
+          <CollapsibleTrigger render={<SidebarMenuAction aria-label={t('mail:toggleFolder', { action: open ? t('mail:collapse') : t('mail:expand'), folder: folderLabel(folder) })} />}>
             <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -361,15 +368,16 @@ function FolderItem({ node, selectedId, collapsed, onToggle, onSelect }: FolderI
 }
 
 function SyncFailureAction({ failure }: { failure: SyncFailure }) {
+  useTranslation()
   return (
     <Tooltip>
-      <TooltipTrigger render={<SidebarMenuAction aria-label={`同步失败：${failure.message}`} className="text-destructive" />}>
+      <TooltipTrigger render={<SidebarMenuAction aria-label={t('mail:syncFailure', { reason: errorText(failure) })} className="text-destructive" />}>
         <HugeiconsIcon icon={Alert02Icon} />
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-72">
-        <p>{failure.message}</p>
+        <p>{errorText(failure)}</p>
         {failure.detail && <p className="mt-1 opacity-70">{failure.detail}</p>}
-        <p className="mt-1 opacity-70">{failure.willRetry ? '稍后会自动重试。' : '修改账号设置后会重新尝试。'}</p>
+        <p className="mt-1 opacity-70">{failure.willRetry ? t('mail:willRetryAutomatically') : t('mail:retryAfterAccountChange')}</p>
       </TooltipContent>
     </Tooltip>
   )

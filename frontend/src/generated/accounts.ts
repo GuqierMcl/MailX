@@ -282,7 +282,13 @@ defaultAccountId: string,
  */
 undoSendSeconds: number, };
 
-export type AppSettings = { appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
+export type LanguagePreference = "system" | "zh-CN" | "en";
+
+export type SupportedLocale = "zh-CN" | "en";
+
+export type GeneralSettings = { language: LanguagePreference, };
+
+export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -292,7 +298,13 @@ stored: boolean,
 /**
  * The previous file could not be used and was moved to `settings.json.bak`.
  */
-recovered: boolean, };
+recovered: boolean, effectiveLocale: SupportedLocale,
+/**
+ * Monotonic within this settings-store lifetime; never persisted.
+ */
+revision: number, };
+
+export type SettingsChanged = { revision: number, };
 
 export type AvatarKind = "photo" | "icon";
 
