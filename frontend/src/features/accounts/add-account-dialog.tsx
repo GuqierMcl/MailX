@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
@@ -43,6 +46,7 @@ type AddAccountDialogProps = {
  * and the last step the same fields used to edit the profile.
  */
 export function AddAccountDialog({ client, open, accounts, onClose, onCreated }: AddAccountDialogProps) {
+  useTranslation()
   const guard = useLeaveGuard()
   const [step, setStep] = useState<Step>({ kind: 'method', selected: null })
   const [formVersion, setFormVersion] = useState(0)
@@ -52,8 +56,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [nameTouched, setNameTouched] = useState(false)
   const [color, setColor] = useState<string | null>(null)
   const [senderName, setSenderName] = useState('')
-  const [senderNameError, setSenderNameError] = useState<string | null>(null)
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
+  const [nameError, setNameError] = useState<ClientFailure | null>(null)
   const [saveError, setSaveError] = useState<ClientFailure | null>(null)
   const [saving, setSaving] = useState(false)
   // One request id per opening, so retrying a create that may have landed is safe.
@@ -104,7 +108,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     if (step.kind !== 'profile' || saving) return
     const name = displayName.trim()
     if (!name) {
-      setNameError('请填写账号名称。')
+      setNameError({ code: 'validation', field: 'displayName', message: '' })
       document.getElementById('displayName')?.focus()
       return
     }
@@ -117,8 +121,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
       onCreated(saved)
     } catch (cause) {
       const failure = clientFailure(cause)
-      if (failure.field === 'displayName') setNameError(failure.message)
-      else if (failure.field === 'senderName') setSenderNameError(failure.message)
+      if (failure.field === 'displayName') setNameError(failure)
+      else if (failure.field === 'senderName') setSenderNameError(failure)
       else if (failure.field && !PROFILE_FIELDS.has(failure.field)) {
         // The connection was rejected: go back to it with the error. The
         // passwords were in the failed request and must be entered again.
@@ -134,11 +138,11 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     <>
       <Dialog open={open} onOpenChange={(next) => !next && guard.leave(onClose, unsaved)}>
         <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[640px]">
-          <DialogDescription className="sr-only">选择添加邮箱账号的方式，连接邮箱，再为它命名。</DialogDescription>
+          <DialogDescription className="sr-only">{t('accounts:addAccountDescription')}</DialogDescription>
           <header className="flex shrink-0 items-baseline gap-2 px-6 py-4 pr-12">
-            <DialogTitle className="text-base font-semibold">添加邮箱账号</DialogTitle>
+            <DialogTitle className="text-base font-semibold">{t('accounts:addAccount')}</DialogTitle>
             {step.kind !== 'method' && <span className="text-sm text-muted-foreground">{step.method.name}</span>}
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums">第 {stepNumber} 步，共 {STEP_COUNT} 步</span>
+            <span className="ml-auto text-xs text-muted-foreground tabular-nums">{t('accounts:stepProgress', { step: stepNumber, total: STEP_COUNT })}</span>
           </header>
           {/* Keyed by step so each change replays the slide; skipped when reduced motion is preferred. */}
           <div key={step.kind} className={cn(
@@ -147,7 +151,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
           )}>
             {step.kind === 'method' && (
               <>
-                <p id="add-account-methods" className="shrink-0 px-6 pb-3 text-sm text-muted-foreground">选择你的邮箱服务商。</p>
+                <p id="add-account-methods" className="shrink-0 px-6 pb-3 text-sm text-muted-foreground">{t('accounts:chooseProvider')}</p>
                 {/* The list of providers will grow, so it scrolls inside a dialog of fixed height. */}
                 <ScrollArea className="min-h-0 flex-1">
                   <div role="radiogroup" aria-labelledby="add-account-methods" className="grid grid-cols-2 gap-3 px-6 pb-6 sm:grid-cols-3">
@@ -175,7 +179,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   </div>
                 </ScrollArea>
                 <footer className="flex shrink-0 items-center justify-end gap-4 border-t px-6 py-3">
-                  <Button disabled={!step.selected} onClick={() => step.selected && showConnection(step.selected)}>下一步</Button>
+                  <Button disabled={!step.selected} onClick={() => step.selected && showConnection(step.selected)}>{t('accounts:next')}</Button>
                 </footer>
               </>
             )}
@@ -186,9 +190,9 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   account={null}
                   initialDraft={step.resume}
                   initialError={step.error}
-                  intro={{ title: '手动配置 · 密码或授权码', description: '填写服务商提供的收发服务器参数。下一步为这个邮箱命名。' }}
-                  submitLabel="下一步"
-                  submittingLabel="下一步"
+                  intro={{ title: t('accounts:manualSetup'), description: t('accounts:serverParametersHint') }}
+                  submitLabel={t('accounts:next')}
+                  submittingLabel={t('accounts:next')}
                   onBack={back}
                   onBusyChange={guard.setBusy}
                   onDirtyChange={(dirty) => dirty && guard.setDirty(true)}
@@ -205,20 +209,20 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
             {step.kind === 'profile' && (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 <SettingsPage footer={<>
-                  <FieldDescription>{saving ? '正在安全保存配置…' : `邮箱：${step.connection.emailAddress}`}</FieldDescription>
+                  <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:mailboxAddress', { address: step.connection.emailAddress })}</FieldDescription>
                   <div className="flex shrink-0 gap-2">
-                    <Button variant="outline" onClick={back} disabled={saving}>上一步</Button>
-                    <Button onClick={() => void finish()} disabled={saving || !client.available}>{saving ? '保存中…' : '完成'}</Button>
+                    <Button variant="outline" onClick={back} disabled={saving}>{t('accounts:back')}</Button>
+                    <Button onClick={() => void finish()} disabled={saving || !client.available}>{saving ? t('accounts:savingEllipsis') : t('accounts:finish')}</Button>
                   </div>
                 </>}>
                   <Alert role="status">
-                    <AlertTitle>最后，给这个邮箱起个名字</AlertTitle>
-                    <AlertDescription>名称和颜色只用于在 MailX 中区分邮箱；发件人名称是收件人看到的名字，可以留空。都可以之后修改。完成后 MailX 会登录收信服务器同步文件夹。</AlertDescription>
+                    <AlertTitle>{t('accounts:nameMailbox')}</AlertTitle>
+                    <AlertDescription>{t('accounts:nameMailboxDescription')}</AlertDescription>
                   </Alert>
                   {saveError && (
                     <Alert variant="destructive">
-                      <AlertTitle>尚未保存</AlertTitle>
-                      <AlertDescription>{saveError.message}</AlertDescription>
+                      <AlertTitle>{t('accounts:notSaved')}</AlertTitle>
+                      <AlertDescription>{errorText(saveError)}</AlertDescription>
                     </Alert>
                   )}
                   <ProfileFields

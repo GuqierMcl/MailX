@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useRef, useState, type ReactNode } from 'react'
 import type { Account, AuthenticationMode, ConnectionInput, TlsMode } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -58,7 +61,7 @@ function TextField({ id, label, value, onChange, placeholder, inputMode, error, 
       <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder}
         inputMode={inputMode} autoComplete={autoComplete} autoCapitalize="none" spellCheck={false}
         aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined} />
-      {invalid && <FieldError id={`${id}-error`}>{error.message}</FieldError>}
+      {invalid && <FieldError id={`${id}-error`}>{errorText(error)}</FieldError>}
     </Field>
   )
 }
@@ -69,27 +72,28 @@ function ConnectionFields({ protocol, value, onChange, error }: {
   onChange(value: ConnectionDraft): void
   error: ClientFailure | null
 }) {
+  useTranslation()
   const isImap = protocol === 'imap'
   const name = protocol.toUpperCase()
   return (
-    <SettingsGroup title={isImap ? '收信服务器' : '发信服务器'} badge={<Badge variant="secondary">{name}</Badge>}
-      description={isImap ? '填写服务商提供的 IMAP 参数。' : '收发服务器与登录用户名可以不同。'}>
-        <TextField id={`${protocol}.host`} label={`${name} 主机`} value={value.host} error={error}
+    <SettingsGroup title={isImap ? t('accounts:incomingServer') : t('accounts:outgoingServer')} badge={<Badge variant="secondary">{name}</Badge>}
+      description={isImap ? t('accounts:incomingParametersHint') : t('accounts:separateServersHint')}>
+        <TextField id={`${protocol}.host`} label={t('accounts:serverHost', { name })} value={value.host} error={error}
           placeholder={isImap ? 'imap.example.com' : 'smtp.example.com'} onChange={(host) => onChange({ ...value, host })} />
         <div className="grid grid-cols-2 gap-4">
-          <TextField id={`${protocol}.port`} label={`${name} 端口`} value={value.port} inputMode="numeric" error={error}
+          <TextField id={`${protocol}.port`} label={t('accounts:serverPort', { name })} value={value.port} inputMode="numeric" error={error}
             onChange={(port) => onChange({ ...value, port })} />
           <Field>
-            <FieldLabel htmlFor={`${protocol}.tls`}>连接安全</FieldLabel>
+            <FieldLabel htmlFor={`${protocol}.tls`}>{t('accounts:connectionSecurity')}</FieldLabel>
             <Select value={value.tls} onValueChange={(tls: TlsMode | null) => { if (tls) onChange({ ...value, tls }) }}
               items={{ implicit: 'TLS', startTls: 'STARTTLS' }}>
-              <SelectTrigger id={`${protocol}.tls`} className="w-full" aria-label={`${name} 连接安全`}><SelectValue /></SelectTrigger>
+              <SelectTrigger id={`${protocol}.tls`} className="w-full" aria-label={t('accounts:serverSecurity', { name })}><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="implicit">TLS</SelectItem><SelectItem value="startTls">STARTTLS</SelectItem></SelectContent>
             </Select>
           </Field>
         </div>
-        <TextField id={`${protocol}.username`} label={`${name} 登录用户名`} value={value.username}
-          placeholder="通常为完整邮箱地址" error={error} onChange={(username) => onChange({ ...value, username })} />
+        <TextField id={`${protocol}.username`} label={t('accounts:serverUsername', { name })} value={value.username}
+          placeholder={t('accounts:fullEmailHint')} error={error} onChange={(username) => onChange({ ...value, username })} />
     </SettingsGroup>
   )
 }
@@ -102,14 +106,15 @@ function PasswordField({ id, label, value, onChange, canKeep, error }: {
   canKeep: boolean
   error: ClientFailure | null
 }) {
+  useTranslation()
   const invalid = error?.field === id
   return (
     <FieldGroup>
       {canKeep && (
         <Field orientation="horizontal">
           <FieldContent>
-            <FieldLabel htmlFor={`${id}-replace`}>替换{label}</FieldLabel>
-            <FieldDescription>{value.replace ? '本次保存使用新输入的凭证。' : '继续使用已保存的凭证，密码不会回填。'}</FieldDescription>
+            <FieldLabel htmlFor={`${id}-replace`}>{t('accounts:replaceCredential', { label })}</FieldLabel>
+            <FieldDescription>{value.replace ? t('accounts:useNewCredentials') : t('accounts:keepSavedCredentials')}</FieldDescription>
           </FieldContent>
           <Switch id={`${id}-replace`} checked={value.replace} onCheckedChange={(replace) => onChange({ replace, value: '' })} />
         </Field>
@@ -118,9 +123,9 @@ function PasswordField({ id, label, value, onChange, canKeep, error }: {
         <Field data-invalid={invalid}>
           <FieldLabel htmlFor={id}>{label}</FieldLabel>
           <Input id={id} type="password" value={value.value} onChange={(event) => onChange({ ...value, value: event.target.value })}
-            autoComplete="new-password" autoCapitalize="none" spellCheck={false} placeholder={id === 'proxyPassword' ? '输入代理密码' : '输入密码或邮箱授权码'}
+            autoComplete="new-password" autoCapitalize="none" spellCheck={false} placeholder={id === 'proxyPassword' ? t('accounts:enterProxyPassword') : t('accounts:enterPassword')}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined} />
-          {invalid && <FieldError id={`${id}-error`}>{error.message}</FieldError>}
+          {invalid && <FieldError id={`${id}-error`}>{errorText(error)}</FieldError>}
         </Field>
       )}
     </FieldGroup>
@@ -136,6 +141,7 @@ export function ConnectionForm({
   account, initialDraft: resume, initialError = null, intro, submitLabel, submittingLabel,
   onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack,
 }: FormProps) {
+  useTranslation()
   const [draft, setDraft] = useState(() => resume ?? initialDraft(account))
   const [error, setError] = useState<ClientFailure | null>(initialError)
   const [saving, setSaving] = useState(false)
@@ -196,9 +202,9 @@ export function ConnectionForm({
 
   return (
     <SettingsPage footer={<>
-      <FieldDescription>{saving ? '正在安全保存配置…' : '凭证不会显示在账号详情中。'}</FieldDescription>
+      <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
       <div className="flex shrink-0 gap-2">
-        {onBack && <Button variant="outline" onClick={onBack} disabled={saving}>上一步</Button>}
+        {onBack && <Button variant="outline" onClick={onBack} disabled={saving}>{t('accounts:back')}</Button>}
         <Button onClick={() => { void save() }} disabled={saving || unavailable}>{saving ? submittingLabel : submitLabel}</Button>
       </div>
     </>}>
@@ -206,72 +212,72 @@ export function ConnectionForm({
           <AlertTitle>{intro.title}</AlertTitle>
           <AlertDescription>{intro.description}</AlertDescription>
         </Alert>
-        {needsTrust && <Alert variant="destructive"><AlertTitle>凭证需要重新确认</AlertTitle><AlertDescription>服务器或登录身份已改变。请为受影响的收信、发信或代理配置重新输入密码，以确认新的使用范围。</AlertDescription></Alert>}
+        {needsTrust && <Alert variant="destructive"><AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle><AlertDescription>{t('accounts:confirmChangedCredentials')}</AlertDescription></Alert>}
         {error && (
           <Alert variant="destructive">
-            <AlertTitle>{error.code === 'conflict' ? '配置已在其他位置更新' : '尚未保存'}</AlertTitle>
-            <AlertDescription>{error.message} 已输入的密码已清空，需要时请重新输入。</AlertDescription>
+            <AlertTitle>{error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
+            <AlertDescription>{errorText(error)}  {t('accounts:passwordsCleared')}</AlertDescription>
             {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
-              <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>重新加载配置</Button>}
+              <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
           </Alert>
         )}
-        <FieldSet disabled={saving} aria-label="邮箱账号配置" aria-busy={saving} className="gap-6">
-          <SettingsGroup title="邮箱地址" description="收发邮件所用的地址。">
-            <TextField id="emailAddress" label="邮箱地址" value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
+        <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
+          <SettingsGroup title={t('accounts:emailAddress')} description={t('accounts:emailAddressDescription')}>
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
           </SettingsGroup>
           <ConnectionFields protocol="imap" value={draft.imap} onChange={(value) => change('imap', value)} error={error} />
           <ConnectionFields protocol="smtp" value={draft.smtp} onChange={(value) => change('smtp', value)} error={error} />
-          <SettingsGroup title="认证凭证" description="支持密码、授权码与应用专用密码，安全保存在系统凭据库。">
-              <RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label="收发认证方式">
-                <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">收发使用相同密码</FieldLabel></Field>
-                <Field orientation="horizontal"><RadioGroupItem id="auth-separate" value="separate" /><FieldLabel htmlFor="auth-separate">收发分别设置密码</FieldLabel></Field>
+          <SettingsGroup title={t('accounts:authentication')} description={t('accounts:authenticationDescription')}>
+              <RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label={t('accounts:authenticationMode')}>
+                <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">{t('accounts:sharedPassword')}</FieldLabel></Field>
+                <Field orientation="horizontal"><RadioGroupItem id="auth-separate" value="separate" /><FieldLabel htmlFor="auth-separate">{t('accounts:separatePasswords')}</FieldLabel></Field>
               </RadioGroup>
-              {account && !sameMode && <FieldDescription>认证方式已改变，请重新输入凭证以确认收发服务器的使用范围。</FieldDescription>}
+              {account && !sameMode && <FieldDescription>{t('accounts:authenticationChanged')}</FieldDescription>}
               {draft.mode === 'shared'
-                ? <PasswordField id="sharedPassword" label="收发密码" value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} />
+                ? <PasswordField id="sharedPassword" label={t('accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} />
                 : <>
-                    <PasswordField id="imapPassword" label="收信密码" value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} />
-                    <PasswordField id="smtpPassword" label="发信密码" value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} />
+                    <PasswordField id="imapPassword" label={t('accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} />
+                    <PasswordField id="smtpPassword" label={t('accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} />
                   </>}
           </SettingsGroup>
-          <SettingsGroup title="网络路由" description="为这个账号指定连接方式。保存配置不会测试代理。">
+          <SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
               <Field>
-                <FieldLabel htmlFor="routeKind">连接方式</FieldLabel>
+                <FieldLabel htmlFor="routeKind">{t('accounts:connectionMode')}</FieldLabel>
                 <Select value={draft.routeKind} onValueChange={(value) => {
                   if (!value) return
                   change('routeKind', value)
                   if (value !== 'custom') change('proxyPassword', { ...draft.proxyPassword, value: '' })
                 }}
-                  items={{ direct: '直接连接', inherit: '使用应用默认', custom: '自定义代理' }}>
+                  items={{ direct: t('accounts:directConnection'), inherit: t('accounts:appDefault'), custom: t('accounts:customProxy') }}>
                   <SelectTrigger id="routeKind" className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="direct">直接连接</SelectItem><SelectItem value="inherit">使用应用默认</SelectItem><SelectItem value="custom">自定义代理</SelectItem></SelectContent>
+                  <SelectContent><SelectItem value="direct">{t('accounts:directConnection')}</SelectItem><SelectItem value="inherit">{t('accounts:appDefault')}</SelectItem><SelectItem value="custom">{t('accounts:customProxy')}</SelectItem></SelectContent>
                 </Select>
-                <FieldDescription>{draft.routeKind === 'inherit' ? '应用默认目前为直接连接。' : draft.routeKind === 'direct' ? '该账号使用直接连接。' : '代理连接失败时不会回退直连；目标主机名由代理解析。'}</FieldDescription>
+                <FieldDescription>{draft.routeKind === 'inherit' ? t('accounts:appDefaultHint') : draft.routeKind === 'direct' ? t('accounts:directConnectionHint') : t('accounts:proxyNoFallbackHint')}</FieldDescription>
               </Field>
               {draft.routeKind === 'custom' && <>
                 <div className="grid grid-cols-[1fr_1.5fr_0.75fr] gap-4">
                   <Field>
-                    <FieldLabel htmlFor="proxyKind">代理类型</FieldLabel>
+                    <FieldLabel htmlFor="proxyKind">{t('accounts:proxyType')}</FieldLabel>
                     <Select value={draft.proxyKind} onValueChange={(value) => { if (value) change('proxyKind', value) }} items={{ socks5: 'SOCKS5', httpConnect: 'HTTP CONNECT' }}>
                       <SelectTrigger id="proxyKind" className="w-full"><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="socks5">SOCKS5</SelectItem><SelectItem value="httpConnect">HTTP CONNECT</SelectItem></SelectContent>
                     </Select>
                   </Field>
-                  <TextField id="proxyHost" label="代理主机" value={draft.proxyHost} onChange={(value) => change('proxyHost', value)} placeholder="127.0.0.1" error={error} />
-                  <TextField id="proxyPort" label="代理端口" value={draft.proxyPort} onChange={(value) => change('proxyPort', value)} inputMode="numeric" error={error} />
+                  <TextField id="proxyHost" label={t('accounts:proxyHost')} value={draft.proxyHost} onChange={(value) => change('proxyHost', value)} placeholder="127.0.0.1" error={error} />
+                  <TextField id="proxyPort" label={t('accounts:proxyPort')} value={draft.proxyPort} onChange={(value) => change('proxyPort', value)} inputMode="numeric" error={error} />
                 </div>
                 <Field orientation="horizontal">
-                  <FieldContent><FieldLabel htmlFor="proxyAuth">代理需要认证</FieldLabel><FieldDescription>仅在代理服务要求时填写。</FieldDescription></FieldContent>
+                  <FieldContent><FieldLabel htmlFor="proxyAuth">{t('accounts:proxyAuthentication')}</FieldLabel><FieldDescription>{t('accounts:proxyAuthenticationHint')}</FieldDescription></FieldContent>
                   <Switch id="proxyAuth" checked={draft.proxyAuth} onCheckedChange={(value) => { change('proxyAuth', value); change('proxyPassword', { replace: !oldProxyAuth, value: '' }) }} />
                 </Field>
                 {draft.proxyAuth && <>
-                  <TextField id="proxyUsername" label="代理用户名" value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
-                  <PasswordField id="proxyPassword" label="代理密码" value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} />
+                  <TextField id="proxyUsername" label={t('accounts:proxyUsername')} value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
+                  <PasswordField id="proxyPassword" label={t('accounts:proxyPassword')} value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} />
                 </>}
                 <Field orientation="horizontal">
                   <FieldContent>
-                    <FieldLabel htmlFor="imageProxyDns">通过此代理加载 HTTPS 图片</FieldLabel>
-                    <FieldDescription>由此代理解析并连接图片服务器，应用无法独立验证最终 IP。更改代理地址或身份后需重新开启。</FieldDescription>
+                    <FieldLabel htmlFor="imageProxyDns">{t('accounts:proxyHttpsImages')}</FieldLabel>
+                    <FieldDescription>{t('accounts:proxyHttpsImagesHint')}</FieldDescription>
                   </FieldContent>
                   <Switch id="imageProxyDns" checked={draft.imageProxyDns} onCheckedChange={(value) => change('imageProxyDns', value)} />
                 </Field>

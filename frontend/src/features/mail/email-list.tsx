@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
@@ -44,6 +46,7 @@ type EmailListProps = {
 }
 
 export function EmailList(props: EmailListProps) {
+  useTranslation()
   const { title, filter, onFilterChange } = props
   return (
     <Tabs
@@ -54,8 +57,8 @@ export function EmailList(props: EmailListProps) {
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
         <h1 className="truncate text-base font-semibold">{title}</h1>
         <TabsList className="ml-auto">
-          <TabsTrigger value="all">全部</TabsTrigger>
-          <TabsTrigger value="unread">未读</TabsTrigger>
+          <TabsTrigger value="all">{t('mail:all')}</TabsTrigger>
+          <TabsTrigger value="unread">{t('mail:unread')}</TabsTrigger>
         </TabsList>
       </div>
       <EmailRows {...props} />
@@ -64,13 +67,14 @@ export function EmailList(props: EmailListProps) {
 }
 
 function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+  useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
   if (pending || showSkeleton) {
     // Nothing for the first moments: local data usually arrives before a
     // placeholder would be worth showing, and a flash is worse than a blink of blank.
     return showSkeleton ? (
-      <div className="flex animate-in flex-col gap-2 px-3 pt-3 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
+      <div className="flex animate-in flex-col gap-2 px-3 pt-3 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
         {Array.from({ length: 6 }, (_, index) => (
           <Skeleton key={index} className="h-20 w-full" />
         ))}
@@ -81,23 +85,23 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>无法加载邮件</EmptyTitle>
+          <EmptyTitle>{t('mail:loadMailFailed')}</EmptyTitle>
           <EmptyDescription>{error}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
   }
   const syncTitle = {
-    waiting: '等待同步邮件…',
-    syncing: '正在同步邮件…',
-    failed: '邮件同步失败',
-    idle: '这里还没有邮件',
+    waiting: t('mail:waitingForSync'),
+    syncing: t('mail:syncingMail'),
+    failed: t('mail:mailSyncFailed'),
+    idle: t('mail:noMailYet'),
   }[syncStatus.phase]
   const syncDescription = syncStatus.phase === 'failed'
-    ? syncStatus.failure ?? '稍后会自动重试，已有邮件仍可查看。'
+    ? syncStatus.failure ?? t('mail:syncWillRetry')
     : syncStatus.phase === 'waiting'
-      ? '轮到这个文件夹时会自动同步。'
-      : '邮件头同步后会显示在这里。'
+      ? t('mail:folderSyncQueued')
+      : t('mail:headersWillAppear')
   const filtered = Boolean(search) || filter === 'unread'
   if (emails.length === 0 && !filtered) {
     return (
@@ -108,7 +112,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
           </EmptyMedia>
           <EmptyTitle>{syncTitle}</EmptyTitle>
           <EmptyDescription>{syncDescription}</EmptyDescription>
-          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
+          {syncStatus.windowCapped && <EmptyDescription>{t('mail:syncCoverageLimited')}</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
@@ -120,10 +124,10 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
           <EmptyMedia variant="icon">
             <HugeiconsIcon icon={search ? Search01Icon : InboxIcon} />
           </EmptyMedia>
-          <EmptyTitle>{search ? '没有匹配的邮件' : filter === 'unread' ? '没有未读邮件' : '这里还没有邮件'}</EmptyTitle>
-          <EmptyDescription>{search ? '换个关键词试试。' : '新邮件同步后会显示在这里。'}</EmptyDescription>
+          <EmptyTitle>{search ? t('mail:noMatchingMail') : filter === 'unread' ? t('mail:noUnreadMail') : t('mail:noMailYet')}</EmptyTitle>
+          <EmptyDescription>{search ? t('mail:tryAnotherSearch') : t('mail:newMailWillAppear')}</EmptyDescription>
           {syncStatus.phase !== 'idle' && <EmptyDescription>{syncTitle} {syncDescription}</EmptyDescription>}
-          {syncStatus.windowCapped && <EmptyDescription>同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</EmptyDescription>}
+          {syncStatus.windowCapped && <EmptyDescription>{t('mail:syncCoverageLimited')}</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
@@ -132,7 +136,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
     <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
       <div
         role="list"
-        aria-label="邮件列表"
+        aria-label={t('mail:messageList')}
         aria-busy={stale || undefined}
         className={cn(
           'flex animate-in flex-col gap-2 px-3 py-3 duration-150 fade-in-0 transition-opacity',
@@ -154,12 +158,12 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
         <div className="flex flex-col items-center gap-2 px-3 pb-3">
           {loadMoreError && <p role="alert" className="text-sm text-destructive">{loadMoreError}</p>}
           <Button variant="outline" disabled={loadingMore || refreshing} onClick={onLoadMore}>
-            {loadingMore ? '正在加载…' : '加载更多'}
+            {loadingMore ? t('mail:loadingEllipsis') : t('mail:loadMore')}
           </Button>
         </div>
       )}
       {syncStatus.windowCapped && (
-        <p className="px-3 pb-3 text-center text-xs text-muted-foreground">同步覆盖受限：每轮最多同步窗口内最新的 1,000 封邮件头。</p>
+        <p className="px-3 pb-3 text-center text-xs text-muted-foreground">{t('mail:syncCoverageLimited')}</p>
       )}
     </ScrollArea>
   )
@@ -174,6 +178,7 @@ const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
 type EmailRowProps = { email: EmailSummary; account: Account | null; selected: boolean; previewLines: PreviewLines; onSelect: () => void }
 
 function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRowProps) {
+  useTranslation()
   return (
     <button
       type="button"
@@ -190,7 +195,7 @@ function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRow
           however long the sender is. A fixed blue, not the accent color: a red
           or amber accent would read as an error or clash with the star. */}
       <span className="-mr-1.5 flex w-2 shrink-0 justify-center">
-        {!email.isRead && <span aria-label="未读" className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
+        {!email.isRead && <span aria-label={t('mail:unread')} className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
       </span>
       <SenderAvatar sender={email.from} accountId={email.accountId} />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
@@ -214,11 +219,11 @@ function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRow
           {/* Unread is told by weight too, never by the dot's color alone. */}
           <div className={cn('flex items-center gap-1.5 text-xs', email.isRead ? 'font-normal text-foreground/75' : 'font-semibold')}>
             {email.isStarred && (
-              <HugeiconsIcon icon={StarIcon} aria-label="已加星标" fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
+              <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
             )}
-            <span className="truncate">{email.subject || '（无主题）'}</span>
+            <span className="truncate">{email.subject || t('mail:noSubject')}</span>
             {email.hasAttachment && (
-              <HugeiconsIcon icon={Attachment01Icon} aria-label="有附件" className="size-3.5 shrink-0 text-muted-foreground" />
+              <HugeiconsIcon icon={Attachment01Icon} aria-label={t('mail:hasAttachment')} className="size-3.5 shrink-0 text-muted-foreground" />
             )}
           </div>
         </div>

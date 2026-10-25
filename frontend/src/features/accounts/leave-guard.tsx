@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import { useState } from 'react'
 import {
   AlertDialog,
@@ -34,18 +35,19 @@ export function useLeaveGuard() {
     <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>放弃未保存的修改？</AlertDialogTitle>
-          <AlertDialogDescription>当前表单的修改和已输入的密码将被清除。</AlertDialogDescription>
+          <AlertDialogTitle>{t('accounts:discardChangesQuestion')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('accounts:discardChangesHint')}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>继续编辑</AlertDialogCancel>
+          <AlertDialogCancel>{t('accounts:continueEditing')}</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
               pending?.()
               setPending(null)
             }}
           >
-            放弃修改
+
+            {t('accounts:discardChanges')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

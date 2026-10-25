@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -20,16 +23,17 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from '@/components/ui/toast'
 import { formatFullTime } from '@/features/mail/format'
-import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
+import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { composeKeys } from '@/lib/query-client'
 import { errorSummary, recipientsPreview, STATE_LABELS } from './outbox-text'
 
 const addressText = (list: MailAddress[]) => list.map((item) => (item.name ? `${item.name} <${item.address}>` : item.address)).join('，')
 
 function Frame({ children, actions }: { children: React.ReactNode; actions: React.ReactNode }) {
+  useTranslation('composer')
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 px-3" role="toolbar" aria-label="操作">{actions}</div>
+      <div className="flex h-12 shrink-0 items-center gap-2 px-3" role="toolbar" aria-label={t('composer:detail.actions')}>{actions}</div>
       <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
     </div>
   )
@@ -54,8 +58,14 @@ function Placeholder({ icon, title, description }: { icon: typeof File01Icon; ti
   )
 }
 
-export const DraftPlaceholder = () => <Placeholder icon={File01Icon} title="未选择草稿" description="从左侧列表选择一份草稿。" />
-export const OutboxPlaceholder = () => <Placeholder icon={MailUpload01Icon} title="未选择邮件" description="从左侧列表选择一封邮件查看发送状态。" />
+export function DraftPlaceholder() {
+  useTranslation('composer')
+  return <Placeholder icon={File01Icon} title={t('composer:detail.noDraft')} description={t('composer:detail.noDraftDescription')} />
+}
+export function OutboxPlaceholder() {
+  useTranslation('composer')
+  return <Placeholder icon={MailUpload01Icon} title={t('composer:detail.noMessage')} description={t('composer:detail.noMessageDescription')} />
+}
 
 type DraftDetailProps = {
   client: MailxClient
@@ -68,6 +78,7 @@ type DraftDetailProps = {
 
 /** A saved draft: what it says so far, "继续编辑" (opens the composer) and 删除. */
 export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: DraftDetailProps) {
+  useTranslation('composer')
   const queryClient = useQueryClient()
   const [confirming, setConfirming] = useState(false)
   const draft = useQuery({ queryKey: [...composeKeys.drafts(), draftId], queryFn: () => client.getDraft(draftId) })
@@ -79,8 +90,8 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
     },
     onError: (cause) => {
       setConfirming(false)
-      toast.error(clientCode(cause) === 'draftLocked' ? '这封邮件已在发送队列中，不能删除' : '无法删除草稿', {
-        description: clientCode(cause) === 'draftLocked' ? undefined : clientFailure(cause).message,
+      toast.error(clientCode(cause) === 'draftLocked' ? t('composer:detail.lockedDelete') : t('composer:detail.deleteFailed'), {
+        description: clientCode(cause) === 'draftLocked' ? undefined : errorText(cause),
       })
     },
   })
@@ -92,44 +103,44 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
 
   if (draft.isError) {
     return clientFailureCode(draft.error) === 'notFound'
-      ? <Placeholder icon={File01Icon} title="这份草稿已不存在" description="它可能已被发送或删除。" />
-      : <CenteredPane><Empty><EmptyHeader><EmptyTitle>无法打开草稿</EmptyTitle><EmptyDescription>{clientFailure(draft.error).message}</EmptyDescription></EmptyHeader></Empty></CenteredPane>
+      ? <Placeholder icon={File01Icon} title={t('composer:draft.gone')} description={t('composer:draft.goneDescription')} />
+      : <CenteredPane><Empty><EmptyHeader><EmptyTitle>{t('composer:draft.openFailed')}</EmptyTitle><EmptyDescription>{errorText(draft.error)}</EmptyDescription></EmptyHeader></Empty></CenteredPane>
   }
   const data = draft.data
   const account = accounts.find((row) => row.id === data?.accountId)
   return (
     <Frame actions={(
       <>
-        <IconButton label="继续编辑" disabled={!data} onClick={() => onEdit(draftId)}>
+        <IconButton label={t('composer:action.continueEditing')} disabled={!data} onClick={() => onEdit(draftId)}>
           <HugeiconsIcon icon={PencilEdit02Icon} />
         </IconButton>
-        <IconButton label="删除" disabled={!data} onClick={() => setConfirming(true)}>
+        <IconButton label={t('composer:action.delete')} disabled={!data} onClick={() => setConfirming(true)}>
           <HugeiconsIcon icon={Delete02Icon} />
         </IconButton>
       </>
     )}>
       {data && (
         <article className="flex animate-in flex-col gap-4 p-4 duration-150 fade-in-0">
-          <h2 className="text-lg font-semibold">{data.subject || '（无主题）'}</h2>
+          <h2 className="text-lg font-semibold">{data.subject || t('composer:list.noSubject')}</h2>
           <div className="grid gap-0.5 text-xs text-muted-foreground">
-            {account && <div>发件人：{account.senderName ? `${account.senderName} <${account.emailAddress}>` : account.emailAddress}</div>}
-            <div>收件人：{data.to.length ? addressText(data.to) : '（无）'}</div>
-            {data.cc.length > 0 && <div>抄送：{addressText(data.cc)}</div>}
-            {data.bcc.length > 0 && <div>密送：{addressText(data.bcc)}</div>}
-            <div>最后修改：{formatFullTime(data.updatedAt)}</div>
+            {account && <div>{t('composer:detail.from')}{account.senderName ? `${account.senderName} <${account.emailAddress}>` : account.emailAddress}</div>}
+            <div>{t('composer:detail.to')}{data.to.length ? addressText(data.to) : t('composer:detail.none')}</div>
+            {data.cc.length > 0 && <div>{t('composer:detail.cc')}{addressText(data.cc)}</div>}
+            {data.bcc.length > 0 && <div>{t('composer:detail.bcc')}{addressText(data.bcc)}</div>}
+            <div>{t('composer:detail.modified')}{formatFullTime(data.updatedAt)}</div>
           </div>
-          <p className="text-sm break-words whitespace-pre-wrap">{data.bodyText || '（正文为空）'}</p>
+          <p className="text-sm break-words whitespace-pre-wrap">{data.bodyText || t('composer:detail.emptyBody')}</p>
         </article>
       )}
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这份草稿？</AlertDialogTitle>
-            <AlertDialogDescription>草稿会从这台电脑上删除，无法恢复。</AlertDialogDescription>
+            <AlertDialogTitle>{t('composer:detail.deleteTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('composer:draft.deleteDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>删除</AlertDialogAction>
+            <AlertDialogCancel>{t('composer:action.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>{t('composer:action.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -149,6 +160,7 @@ type OutboxDetailProps = {
 
 /** One unfinished send: status, who and what, why it stopped, and what can be done now. */
 export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailProps) {
+  useTranslation('composer')
   const queryClient = useQueryClient()
   const [confirmResend, setConfirmResend] = useState(false)
   const refresh = () => void queryClient.invalidateQueries({ queryKey: composeKeys.outbox() })
@@ -157,8 +169,8 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
     onSuccess: refresh,
     onError: (cause) => {
       refresh()
-      toast.error(clientCode(cause) === 'alreadySending' ? '已开始发送，无法撤销' : '操作没有完成', {
-        description: clientCode(cause) === 'alreadySending' ? undefined : clientFailure(cause).message,
+      toast.error(clientCode(cause) === 'alreadySending' ? t('composer:detail.alreadySending') : t('composer:detail.actionFailed'), {
+        description: clientCode(cause) === 'alreadySending' ? undefined : errorText(cause),
       })
     },
   })
@@ -176,45 +188,45 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
   return (
     <Frame actions={(
       <>
-        {item.state === 'queued' && <Button disabled={act.isPending} onClick={undo}>撤销</Button>}
-        {canRetry && <Button variant="outline" disabled={act.isPending} onClick={() => act.mutate(() => client.retryOutboxNow(item.id))}>立即重试</Button>}
-        {item.state === 'failed' && <Button disabled={!item.draftId} title={item.draftId ? undefined : '草稿已不存在'} onClick={() => item.draftId && onEdit(item.draftId)}>编辑并重新发送</Button>}
+        {item.state === 'queued' && <Button disabled={act.isPending} onClick={undo}>{t('composer:action.undo')}</Button>}
+        {canRetry && <Button variant="outline" disabled={act.isPending} onClick={() => act.mutate(() => client.retryOutboxNow(item.id))}>{t('composer:detail.retryNow')}</Button>}
+        {item.state === 'failed' && <Button disabled={!item.draftId} title={item.draftId ? undefined : t('composer:detail.draftGone')} onClick={() => item.draftId && onEdit(item.draftId)}>{t('composer:detail.editResend')}</Button>}
         {item.state === 'unknown' && (
           <>
-            <Button disabled={act.isPending} onClick={() => resolve('markSent')}>标记为已发出</Button>
-            <Button variant="outline" disabled={act.isPending} onClick={() => setConfirmResend(true)}>确认未发出，重新发送</Button>
+            <Button disabled={act.isPending} onClick={() => resolve('markSent')}>{t('composer:detail.markSent')}</Button>
+            <Button variant="outline" disabled={act.isPending} onClick={() => setConfirmResend(true)}>{t('composer:detail.resend')}</Button>
           </>
         )}
       </>
     )}>
       <article className="flex animate-in flex-col gap-4 p-4 duration-150 fade-in-0">
-        <h2 className="text-lg font-semibold">{item.subject || '（无主题）'}</h2>
+        <h2 className="text-lg font-semibold">{item.subject || t('composer:list.noSubject')}</h2>
         <div className="grid gap-0.5 text-xs text-muted-foreground">
-          <div>状态：<span className="font-medium text-foreground">{STATE_LABELS[item.state]}</span></div>
-          {account && <div>发件账号：{account.displayName}（{account.emailAddress}）</div>}
-          <div>收件人：{recipientsPreview(item) || '（无）'}</div>
-          <div>加入发送队列：{formatFullTime(item.firstQueuedAt)}</div>
-          {item.attempts > 0 && <div>已尝试 {item.attempts} 次</div>}
+          <div>{t('composer:detail.status')}<span className="font-medium text-foreground">{STATE_LABELS[item.state]}</span></div>
+          {account && <div>{t('composer:detail.sendingAccount')}{account.displayName}（{account.emailAddress}）</div>}
+          <div>{t('composer:detail.to')}{recipientsPreview(item) || t('composer:detail.none')}</div>
+          <div>{t('composer:detail.queuedAt')}{formatFullTime(item.firstQueuedAt)}</div>
+          {item.attempts > 0 && <div>{t('composer:detail.attempts', { count: item.attempts })}</div>}
         </div>
         {item.state === 'queued' && (
           <Alert role="status">
-            <AlertTitle>{item.nextAttemptAt ? '稍后会自动重试' : '等待发送'}</AlertTitle>
+            <AlertTitle>{item.nextAttemptAt ? t('composer:detail.retryLater') : t('composer:detail.waiting')}</AlertTitle>
             <AlertDescription>
               {item.nextAttemptAt
-                ? `${error ? `上次未发出：${errorSummary(error)}。` : ''}下次尝试：${formatFullTime(item.nextAttemptAt)}。`
-                : `预计发送时间：${formatFullTime(item.notBefore)}。在此之前可以撤销。`}
+                ? t('composer:detail.nextAttempt', { previous: error ? t('composer:detail.previousAttempt', { reason: errorSummary(error) }) : '', date: formatFullTime(item.nextAttemptAt) })
+                : t('composer:detail.scheduledSend', { date: formatFullTime(item.notBefore) })}
             </AlertDescription>
           </Alert>
         )}
-        {item.state === 'sending' && <Alert role="status"><AlertDescription>正在连接发信服务器…这一步无法撤销。</AlertDescription></Alert>}
+        {item.state === 'sending' && <Alert role="status"><AlertDescription>{t('composer:detail.connecting')}</AlertDescription></Alert>}
         {item.state === 'failed' && (
           <Alert variant="destructive" role="alert">
-            <AlertTitle>邮件没有发出</AlertTitle>
+            <AlertTitle>{t('composer:detail.notSent')}</AlertTitle>
             <AlertDescription>
               <p>{errorSummary(error)}</p>
-              {error?.text && error.reason !== 'unknown' && <p className="mt-1 opacity-80">服务器回复{error.smtpCode ? `（${error.smtpCode}）` : ''}：{error.text}</p>}
+              {error?.text && error.reason !== 'unknown' && <p className="mt-1 opacity-80">{t('composer:detail.serverReply', { code: error.smtpCode ? `（${error.smtpCode}）` : '', text: error.text })}</p>}
               {error && error.rejected.length > 0 && (
-                <ul aria-label="被拒绝的收件人" className="mt-2 grid gap-1">
+                <ul aria-label={t('composer:detail.rejectedRecipients')} className="mt-2 grid gap-1">
                   {error.rejected.map((entry) => (
                     <li key={entry.address} className="break-words">
                       <span className="font-medium">{entry.address}</span>（{entry.code}）{entry.text}
@@ -222,16 +234,16 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
                   ))}
                 </ul>
               )}
-              <p className="mt-2">可以修改后重新发送，草稿保持原样。</p>
+              <p className="mt-2">{t('composer:detail.editRetryDescription')}</p>
             </AlertDescription>
           </Alert>
         )}
         {item.state === 'unknown' && (
           <Alert role="alert">
-            <AlertTitle>服务器可能已收到这封邮件</AlertTitle>
+            <AlertTitle>{t('composer:detail.unknownTitle')}</AlertTitle>
             <AlertDescription>
-              <p>发送时连接中断，没有收到服务器的最终回复，MailX 无法确定邮件是否已发出，也不会自动重发。</p>
-              <p className="mt-1">请先到邮箱的已发送文件夹或收件人那里确认：已发出就选“标记为已发出”；确定没发出再选“重新发送”，重新发送沿用同一个 Message-ID，方便收件方去重。</p>
+              <p>{t('composer:detail.unknownDescription')}</p>
+              <p className="mt-1">{t('composer:detail.unknownInstructions')}</p>
             </AlertDescription>
           </Alert>
         )}
@@ -239,12 +251,12 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
       <AlertDialog open={confirmResend} onOpenChange={setConfirmResend}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确认这封邮件没有发出？</AlertDialogTitle>
-            <AlertDialogDescription>如果服务器其实已经收到，收件人会收到两封相同的邮件。重新发送会沿用同一个 Message-ID。</AlertDialogDescription>
+            <AlertDialogTitle>{t('composer:detail.resendTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('composer:detail.resendDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => { setConfirmResend(false); resolve('resend') }}>确认未发出，重新发送</AlertDialogAction>
+            <AlertDialogCancel>{t('composer:action.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { setConfirmResend(false); resolve('resend') }}>{t('composer:detail.resend')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

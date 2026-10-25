@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { useEffect, useImperativeHandle, useRef, useState, type Ref, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
@@ -36,9 +38,9 @@ type LinkPopup = MailBodySelection & { href: string }
 type FormatPopup = MailBodySelection & { kind: 'paragraph' | 'color' | 'highlight' }
 
 const alignActions = [
-  { value: 'left', label: '左对齐', icon: TextAlignLeftIcon },
-  { value: 'center', label: '居中对齐', icon: TextAlignCenterIcon },
-  { value: 'right', label: '右对齐', icon: TextAlignRightIcon },
+  { value: 'left', get label() { return t('composer:toolbar.alignLeft') }, icon: TextAlignLeftIcon },
+  { value: 'center', get label() { return t('composer:toolbar.alignCenter') }, icon: TextAlignCenterIcon },
+  { value: 'right', get label() { return t('composer:toolbar.alignRight') }, icon: TextAlignRightIcon },
 ] as const
 
 function popupButtons(container: HTMLElement) {
@@ -58,16 +60,16 @@ type FormatAction = {
 }
 
 const markActions: FormatAction[] = [
-  { label: '粗体', shortcut: 'B', icon: TextBoldIcon, mark: 'bold', execute: (editor) => editor.commands.toggleBold() },
-  { label: '斜体', shortcut: 'I', icon: TextItalicIcon, mark: 'italic', execute: (editor) => editor.commands.toggleItalic() },
-  { label: '下划线', shortcut: 'U', icon: TextUnderlineIcon, mark: 'underline', execute: (editor) => editor.commands.toggleUnderline() },
-  { label: '删除线', shortcut: 'Shift+S', icon: TextStrikethroughIcon, mark: 'strike', execute: (editor) => editor.commands.toggleStrike() },
+  { get label() { return t('composer:toolbar.bold') }, shortcut: 'B', icon: TextBoldIcon, mark: 'bold', execute: (editor) => editor.commands.toggleBold() },
+  { get label() { return t('composer:toolbar.italic') }, shortcut: 'I', icon: TextItalicIcon, mark: 'italic', execute: (editor) => editor.commands.toggleItalic() },
+  { get label() { return t('composer:toolbar.underline') }, shortcut: 'U', icon: TextUnderlineIcon, mark: 'underline', execute: (editor) => editor.commands.toggleUnderline() },
+  { get label() { return t('composer:toolbar.strike') }, shortcut: 'Shift+S', icon: TextStrikethroughIcon, mark: 'strike', execute: (editor) => editor.commands.toggleStrike() },
 ]
 const blockActions: FormatAction[] = [
-  { label: '无序列表', shortcut: 'Shift+8', icon: LeftToRightListBulletIcon, mark: 'bulletList', execute: (editor) => editor.commands.toggleBulletList() },
-  { label: '有序列表', shortcut: 'Shift+7', icon: LeftToRightListNumberIcon, mark: 'orderedList', execute: (editor) => editor.commands.toggleOrderedList() },
-  { label: '引用', shortcut: 'Shift+B', icon: QuoteDownIcon, mark: 'blockquote', execute: (editor) => editor.commands.toggleBlockquote() },
-  { label: '清除格式', icon: TextClearIcon, execute: (editor) => editor.chain().unsetAllMarks().command(({ tr }) => {
+  { get label() { return t('composer:toolbar.bulletList') }, shortcut: 'Shift+8', icon: LeftToRightListBulletIcon, mark: 'bulletList', execute: (editor) => editor.commands.toggleBulletList() },
+  { get label() { return t('composer:toolbar.orderedList') }, shortcut: 'Shift+7', icon: LeftToRightListNumberIcon, mark: 'orderedList', execute: (editor) => editor.commands.toggleOrderedList() },
+  { get label() { return t('composer:toolbar.quote') }, shortcut: 'Shift+B', icon: QuoteDownIcon, mark: 'blockquote', execute: (editor) => editor.commands.toggleBlockquote() },
+  { get label() { return t('composer:toolbar.clearFormatting') }, icon: TextClearIcon, execute: (editor) => editor.chain().unsetAllMarks().command(({ tr }) => {
     // unsetAllMarks only affects a range; an empty caret needs explicit clearing.
     if (tr.selection.empty) tr.setStoredMarks([])
     return true
@@ -76,6 +78,7 @@ const blockActions: FormatAction[] = [
 
 /** A host-independent editor. Draft revisions, saving and sending live outside. */
 export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef }: MailBodyEditorProps) {
+  const { i18n } = useTranslation('composer')
   const [linkPopup, setLinkPopup] = useState<LinkPopup | null>(null)
   const [linkError, setLinkError] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
@@ -170,6 +173,10 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     editor.setEditable(!readOnly, false)
     editor.view.dom.setAttribute('aria-readonly', String(readOnly))
   }, [editor, readOnly])
+
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.view.dom.setAttribute('aria-label', t('composer:field.body'))
+  }, [editor, i18n.resolvedLanguage])
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || editor.getHTML() === value) return
@@ -315,11 +322,11 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
 
   const historyButtons = (inMenu = false) => (
     <>
-      <IconButton label="撤销" tip="撤销（Cmd/Ctrl+Z）" size="icon-sm" disabled={readOnly || !state?.undo} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:action.undo')} tip={t('composer:toolbar.undoShortcut')} size="icon-sm" disabled={readOnly || !state?.undo} role={inMenu ? 'menuitem' : undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => { if (editor?.isEditable) { editor.view.focus(); editor.commands.undo() }; setMoreOpen(false) }}>
         <HugeiconsIcon icon={UndoIcon} strokeWidth={1.8} aria-hidden="true" />
       </IconButton>
-      <IconButton label="重做" tip="重做（Cmd/Ctrl+Shift+Z）" size="icon-sm" disabled={readOnly || !state?.redo} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:toolbar.redo')} tip={t('composer:toolbar.redoShortcut')} size="icon-sm" disabled={readOnly || !state?.redo} role={inMenu ? 'menuitem' : undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => { if (editor?.isEditable) { editor.view.focus(); editor.commands.redo() }; setMoreOpen(false) }}>
         <HugeiconsIcon icon={RedoIcon} strokeWidth={1.8} aria-hidden="true" />
       </IconButton>
@@ -337,12 +344,12 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
 
   const colorButtons = (inMenu = false) => (
     <>
-      <IconButton label="文字颜色" size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:toolbar.textColor')} size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
         aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'color'} className="mail-format-button"
         onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('color')}>
         <span className="mail-format-color-indicator" data-color={state?.color || undefined}><HugeiconsIcon icon={TextColorIcon} strokeWidth={1.8} aria-hidden="true" /></span>
       </IconButton>
-      <IconButton label="高亮" size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:toolbar.highlight')} size="icon-sm" disabled={readOnly || !editor} role={inMenu ? 'menuitem' : undefined}
         aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'highlight'} className="mail-format-button"
         onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('highlight')}>
         <span className="mail-format-color-indicator" data-highlight={state?.highlight || undefined}><HugeiconsIcon icon={PaintBoardIcon} strokeWidth={1.8} aria-hidden="true" /></span>
@@ -350,24 +357,24 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     </>
   )
   const formatChoices = formatPopup?.kind === 'paragraph'
-    ? [{ name: '0', label: '正文' }, ...[1, 2, 3].map((level) => ({ name: String(level), label: `标题 ${level}` }))]
-    : [{ name: '', label: formatPopup?.kind === 'color' ? '自动' : '无' }, ...(formatPopup?.kind === 'color' ? MAIL_COLORS : MAIL_HIGHLIGHTS)]
+    ? [{ name: '0', get label() { return t('composer:field.body') } }, ...[1, 2, 3].map((level) => ({ name: String(level), label: t('composer:toolbar.heading', { level }) }))]
+    : [{ name: '', label: formatPopup?.kind === 'color' ? t('composer:toolbar.auto') : t('composer:toolbar.none') }, ...(formatPopup?.kind === 'color' ? MAIL_COLORS : MAIL_HIGHLIGHTS)]
   const formatValue = formatPopup?.kind === 'paragraph' ? String(state?.heading ?? 0) : formatPopup?.kind === 'color' ? state?.color : state?.highlight
 
   return (
     <div ref={root} className="mail-body-editor">
-      <div role="toolbar" aria-label="正文格式" className="mail-format-toolbar">
+      <div role="toolbar" aria-label={t('composer:toolbar.format')} className="mail-format-toolbar">
         <div className="mail-format-group">
-          <IconButton label={`段落样式：${state?.heading ? `标题 ${state.heading}` : '正文'}`} tip="段落样式（标题：Cmd/Ctrl+Alt+1/2/3）" size="icon-sm"
+          <IconButton label={t('composer:toolbar.paragraphCurrent', { style: state?.heading ? t('composer:toolbar.heading', { level: state.heading }) : t('composer:field.body') })} tip={t('composer:toolbar.paragraphShortcut')} size="icon-sm"
             disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'paragraph'} className="mail-paragraph-trigger"
             onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('paragraph')}>
-            <span>{state?.heading ? `标题 ${state.heading}` : '正文'}</span><HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} aria-hidden="true" />
+            <span>{state?.heading ? t('composer:toolbar.heading', { level: state.heading }) : t('composer:field.body')}</span><HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
         </div>
         <div className="mail-format-group">{markActions.map((action) => actionButton(action))}</div>
         <div className="mail-format-group mail-format-colors">{colorButtons()}</div>
         <div className="mail-format-group">
-          <IconButton label="链接" tip="链接（Cmd/Ctrl+K）" size="icon-sm" disabled={readOnly || !editor} aria-pressed={state?.link ?? false}
+          <IconButton label={t('composer:toolbar.link')} tip={t('composer:toolbar.linkShortcut')} size="icon-sm" disabled={readOnly || !editor} aria-pressed={state?.link ?? false}
             className="mail-format-button" onMouseDown={(event) => event.preventDefault()} onClick={openLink}>
             <HugeiconsIcon icon={Link01Icon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
@@ -378,14 +385,14 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
         <div className="mail-format-group">{actionButton(blockActions[3])}</div>
         <div className="mail-format-group mail-format-secondary">{historyButtons()}</div>
         <div className="mail-format-more">
-          <IconButton ref={moreButton} label="更多格式" size="icon-sm" disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={moreOpen}
+          <IconButton ref={moreButton} label={t('composer:toolbar.more')} size="icon-sm" disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={moreOpen}
             onMouseDown={(event) => event.preventDefault()} onClick={() => { setLinkPopup(null); setFormatPopup(null); setMoreOpen(!moreOpen) }}>
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
         </div>
       </div>
       {!readOnly && linkPopup && (
-        <div ref={popup} role="dialog" aria-label="编辑链接" className="mail-editor-popup mail-link-popup"
+        <div ref={popup} role="dialog" aria-label={t('composer:toolbar.editLink')} className="mail-editor-popup mail-link-popup"
           onKeyDownCapture={(event) => {
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopup() }
             if (event.key === 'Enter' && (event.ctrlKey || event.metaKey || event.nativeEvent.isComposing || event.keyCode === 229 || linkComposing.current)) {
@@ -394,20 +401,20 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
             }
           }}>
           <form onSubmit={(event) => { event.preventDefault(); if (!linkComposing.current) applyLink() }}>
-            <label className="text-xs font-medium" htmlFor="mail-link-address">链接地址</label>
+            <label className="text-xs font-medium" htmlFor="mail-link-address">{t('composer:toolbar.linkAddress')}</label>
             <Input ref={linkInput} id="mail-link-address" defaultValue={linkPopup.href} placeholder="https://example.com" aria-invalid={linkError} aria-describedby={linkError ? 'mail-link-error' : undefined}
               onChange={() => setLinkError(false)} onCompositionStart={() => { linkComposing.current = true }} onCompositionEnd={() => { linkComposing.current = false }} autoComplete="off" />
-            {linkError && <p id="mail-link-error" role="alert" className="text-xs text-destructive">请输入 http、https 或 mailto 地址。</p>}
+            {linkError && <p id="mail-link-error" role="alert" className="text-xs text-destructive">{t('composer:toolbar.invalidLink')}</p>}
             <div className="flex justify-end gap-2">
-              {linkPopup.href && <Button type="button" variant="ghost" size="sm" onClick={() => applyLink(true)}>移除链接</Button>}
-              <Button type="button" variant="ghost" size="sm" onClick={closePopup}>取消</Button>
-              <Button type="submit" size="sm">应用</Button>
+              {linkPopup.href && <Button type="button" variant="ghost" size="sm" onClick={() => applyLink(true)}>{t('composer:toolbar.removeLink')}</Button>}
+              <Button type="button" variant="ghost" size="sm" onClick={closePopup}>{t('composer:action.cancel')}</Button>
+              <Button type="submit" size="sm">{t('composer:action.apply')}</Button>
             </div>
           </form>
         </div>
       )}
       {!readOnly && moreOpen && (
-        <div ref={popup} role="menu" aria-label="更多正文格式" className="mail-editor-popup mail-format-menu"
+        <div ref={popup} role="menu" aria-label={t('composer:toolbar.moreBody')} className="mail-editor-popup mail-format-menu"
           onKeyDownCapture={(event) => menuKeyDown(event)}>
           <div className="mail-format-group mail-menu-colors">{colorButtons(true)}</div>
           <div className="mail-format-group">{alignButtons(true)}</div>
@@ -416,7 +423,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
         </div>
       )}
       {!readOnly && formatPopup && (
-        <div ref={popup} role="menu" aria-label={formatPopup.kind === 'paragraph' ? '段落样式' : formatPopup.kind === 'color' ? '文字颜色' : '高亮颜色'}
+        <div ref={popup} role="menu" aria-label={formatPopup.kind === 'paragraph' ? t('composer:toolbar.paragraph') : formatPopup.kind === 'color' ? t('composer:toolbar.textColor') : t('composer:toolbar.highlightColor')}
           className={`mail-editor-popup mail-choice-popup ${formatPopup.kind === 'paragraph' ? 'mail-paragraph-menu' : 'mail-palette-menu'}`}
           onKeyDownCapture={(event) => menuKeyDown(event, formatPopup.kind === 'paragraph' ? 1 : 3)}>
           {formatChoices.map((choice) => (

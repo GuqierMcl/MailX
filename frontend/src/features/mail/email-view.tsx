@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
@@ -43,6 +45,7 @@ type EmailViewProps = {
 }
 
 export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, hidden = false }: EmailViewProps) {
+  useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
   // nothing open does the reader have no actions to offer.
@@ -53,7 +56,7 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
       {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
-          <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label="正在加载邮件">
+          <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
             <Skeleton className="h-6 w-2/3" />
             <Skeleton className="h-4 w-1/3" />
             <Skeleton className="h-40 w-full" />
@@ -62,7 +65,7 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
       ) : error ? (
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>无法打开邮件</EmptyTitle>
+            <EmptyTitle>{t('mail:openMailFailed')}</EmptyTitle>
             <EmptyDescription>{error}</EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -74,8 +77,8 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
             <EmptyMedia variant="icon">
               <HugeiconsIcon icon={MailOpen01Icon} />
             </EmptyMedia>
-            <EmptyTitle>未选择邮件</EmptyTitle>
-            <EmptyDescription>从左侧列表选择一封邮件查看内容。</EmptyDescription>
+            <EmptyTitle>{t('mail:noMessageSelected')}</EmptyTitle>
+            <EmptyDescription>{t('mail:selectMessageHint')}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}
@@ -85,30 +88,31 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
 
 // Archive and delete need mailbox moves; until then those buttons only show
 // where the actions will live.
-const PLACEHOLDER_ACTIONS: [string, IconSvgElement][] = [
-  ['归档', Archive02Icon],
-  ['删除', Delete02Icon],
-]
+const PLACEHOLDER_ACTIONS = [
+  ['mail:archive', Archive02Icon],
+  ['mail:delete', Delete02Icon],
+] as const satisfies readonly (readonly [string, IconSvgElement])[]
 
-const RESPOND_ACTIONS: ['reply' | 'replyAll' | 'forward', string, IconSvgElement][] = [
-  ['reply', '回复', MailReply01Icon],
-  ['replyAll', '全部回复', MailReplyAll01Icon],
-  ['forward', '转发', Forward01Icon],
-]
+const RESPOND_ACTIONS = [
+  ['reply', 'mail:reply', MailReply01Icon],
+  ['replyAll', 'mail:replyAll', MailReplyAll01Icon],
+  ['forward', 'mail:forward', Forward01Icon],
+] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
 function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond'] }) {
+  useTranslation()
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label="邮件操作">
+    <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label={t('mail:messageActions')}>
       <div className="flex items-center gap-1 not-first:ml-3">
-        {PLACEHOLDER_ACTIONS.map(([label, icon]) => (
-          <IconButton key={label} label={label} tip={`${label}（尚未实现）`} disabled>
+        {PLACEHOLDER_ACTIONS.map(([key, icon]) => (
+          <IconButton key={key} label={t(key)} tip={t('mail:notImplemented', { label: t(key) })} disabled>
             <HugeiconsIcon icon={icon} />
           </IconButton>
         ))}
       </div>
       <div className="flex items-center gap-1 not-first:ml-3">
-        {RESPOND_ACTIONS.map(([kind, label, icon]) => (
-          <IconButton key={kind} label={label} disabled={!summary} onClick={() => onRespond(kind)}>
+        {RESPOND_ACTIONS.map(([kind, key, icon]) => (
+          <IconButton key={kind} label={t(key)} disabled={!summary} onClick={() => onRespond(kind)}>
             <HugeiconsIcon icon={icon} />
           </IconButton>
         ))}
@@ -116,14 +120,14 @@ function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummar
       <div className="flex items-center gap-1 not-first:ml-3">
         <IconButton
           disabled={!summary}
-          label={summary?.isRead === false ? '标为已读' : '标为未读'}
+          label={summary?.isRead === false ? t('mail:markRead') : t('mail:markUnread')}
           onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
         >
           <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
         </IconButton>
         <IconButton
           disabled={!summary}
-          label={summary?.isStarred ? '取消星标' : '加星标'}
+          label={summary?.isStarred ? t('mail:unstar') : t('mail:star')}
           aria-pressed={summary?.isStarred ?? false}
           onClick={() => summary && onFlag(summary, 'starred', !summary.isStarred)}
           className={summary?.isStarred ? 'text-amber-500 hover:text-amber-500' : undefined}
@@ -131,7 +135,7 @@ function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummar
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </IconButton>
       </div>
-      <IconButton className="ml-auto" label="关闭邮件" tip="关闭邮件（Esc）" onClick={onClose}>
+      <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
       </IconButton>
     </div>
@@ -145,12 +149,13 @@ function addressList(addresses: MailAddress[]) {
 type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload'> & { email: EmailDetail }
 
 function EmailContent({ email, ...props }: ContentProps) {
+  useTranslation()
   const { summary, attachments } = email
   return (
     <article className="flex min-h-0 flex-1 animate-in flex-col overflow-hidden duration-150 fade-in-0">
       <ScrollArea className="max-h-[35%] shrink-0">
         <header className="flex flex-col gap-4 p-4">
-          <h2 className="text-lg font-semibold">{summary.subject || '（无主题）'}</h2>
+          <h2 className="text-lg font-semibold">{summary.subject || t('mail:noSubject')}</h2>
           <div className="flex items-start gap-3 text-sm">
             <SenderAvatar sender={summary.from} accountId={summary.accountId} size="lg" />
             <div className="grid min-w-0 flex-1 gap-0.5">
@@ -158,8 +163,8 @@ function EmailContent({ email, ...props }: ContentProps) {
                 {displayName(summary.from)}
                 {summary.from.name && <span className="ml-1 font-normal text-muted-foreground">&lt;{summary.from.address}&gt;</span>}
               </div>
-              {email.to.length > 0 && <div className="truncate text-xs text-muted-foreground">收件人：{addressList(email.to)}</div>}
-              {email.cc.length > 0 && <div className="truncate text-xs text-muted-foreground">抄送：{addressList(email.cc)}</div>}
+              {email.to.length > 0 && <div className="truncate text-xs text-muted-foreground">{t('mail:toLabel')}{addressList(email.to)}</div>}
+              {email.cc.length > 0 && <div className="truncate text-xs text-muted-foreground">{t('mail:ccLabel')}{addressList(email.cc)}</div>}
             </div>
             <time dateTime={summary.receivedAt} className="shrink-0 text-xs text-muted-foreground">
               {formatFullTime(summary.receivedAt)}
@@ -176,24 +181,25 @@ function EmailContent({ email, ...props }: ContentProps) {
 }
 
 const BODY_FAILURE: Record<BodyFailureCode, string> = {
-  tooLarge: '邮件超过 100 MB，暂不支持下载',
-  stale: '邮件已移动、删除或邮箱状态已变化，请刷新列表后重试。',
-  network: '连接邮箱失败，请检查网络后重试。',
-  authentication: '邮箱认证失败，请检查账号设置后重试。',
-  protocol: '邮件下载或解析失败，请重试。',
-  storage: '正文无法保存到本机，请检查可用空间后重试。',
+  get tooLarge() { return t('mail:messageTooLarge') },
+  get stale() { return t('mail:messageMovedOrDeleted') },
+  get network() { return t('mail:mailConnectionFailed') },
+  get authentication() { return t('mail:mailAuthenticationFailed') },
+  get protocol() { return t('mail:mailDownloadFailed') },
+  get storage() { return t('mail:bodyStorageFailed') },
 }
 
 function Body({ email, client, downloading, onDownload }: ContentProps) {
+  useTranslation()
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
   if (!body) return <Alert variant="destructive">
-    <AlertTitle>正文获取失败</AlertTitle>
-    <AlertDescription>{bodyFailure ? BODY_FAILURE[bodyFailure] : '未能获取正文，请重试。'}</AlertDescription>
-    <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>重试</Button>
+    <AlertTitle>{t('mail:bodyFetchFailed')}</AlertTitle>
+    <AlertDescription>{bodyFailure ? BODY_FAILURE[bodyFailure] : t('mail:retryBodyHint')}</AlertDescription>
+    <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>{t('mail:retry')}</Button>
   </Alert>
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
-    {body.truncated && <Alert><AlertDescription>正文过长，当前仅显示截断后的内容。</AlertDescription></Alert>}
+    {body.truncated && <Alert><AlertDescription>{t('mail:bodyTruncated')}</AlertDescription></Alert>}
     {body.hasHtml
       ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0} />
       : <PlainText text={body.text} />}
@@ -201,5 +207,6 @@ function Body({ email, client, downloading, onDownload }: ContentProps) {
 }
 
 function PlainText({ text }: { text: string | null }) {
-  return <ScrollArea className="h-full min-h-0 flex-1"><div className="whitespace-pre-wrap break-words">{text || '这封邮件没有正文内容。'}</div></ScrollArea>
+  useTranslation()
+  return <ScrollArea className="h-full min-h-0 flex-1"><div className="whitespace-pre-wrap break-words">{text || t('mail:bodyEmpty')}</div></ScrollArea>
 }

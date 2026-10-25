@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -6,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ImageFetchError, RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
-import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { useSettings, useUpdateSecurity } from '@/features/settings/settings-queries'
 
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
@@ -48,6 +51,7 @@ export function BodyDocument({ client, emailId, hasRemoteImages = false }: { cli
 function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
   client: MailxClient; emailId: string; policy: RemoteImagePolicy; dark: boolean; hasRemoteImages: boolean; onReload: () => void
 }) {
+  useTranslation()
   const [granted, setGranted] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [remember, setRemember] = useState(false)
@@ -59,13 +63,13 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
   }
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
     {policy === 'ask' && hasRemoteImages && !granted && !dismissed &&
-      <div role="status" aria-label="远程图片提示" className="flex h-9 w-full shrink-0 items-center gap-3 rounded-md bg-muted px-3 text-xs">
-        <span className="min-w-0 flex-1 truncate" title="此邮件包含远程图片。">此邮件包含远程图片。</span>
-        <label className="flex shrink-0 cursor-pointer items-center gap-1.5"><Checkbox checked={remember} onCheckedChange={(value) => setRemember(value === true)} disabled={update.isPending} />不再提示</label>
-        <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" onClick={load} disabled={update.isPending}>{update.isPending ? '保存中…' : '加载图片'}</Button>
-        <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label="关闭远程图片提示" onClick={() => setDismissed(true)} disabled={update.isPending}>×</Button>
+      <div role="status" aria-label={t('mail:remoteImagesNotice')} className="flex h-9 w-full shrink-0 items-center gap-3 rounded-md bg-muted px-3 text-xs">
+        <span className="min-w-0 flex-1 truncate" title={t('mail:containsRemoteImages')}>{t('mail:containsRemoteImages')}</span>
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5"><Checkbox checked={remember} onCheckedChange={(value) => setRemember(value === true)} disabled={update.isPending} />{t('mail:doNotAskAgain')}</label>
+        <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" onClick={load} disabled={update.isPending}>{update.isPending ? t('mail:savingEllipsis') : t('mail:loadImages')}</Button>
+        <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label={t('mail:closeRemoteImagesNotice')} onClick={() => setDismissed(true)} disabled={update.isPending}>×</Button>
       </div>}
-    {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
+    {update.isError && <Alert variant="destructive"><AlertTitle>{t('mail:settingsSaveFailed')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
       <DocumentSession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
   </div>
@@ -74,8 +78,9 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
 function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, onReload }: {
   client: MailxClient; emailId: string; allowImages: boolean; hasRemoteImages: boolean; dark: boolean; onReload: () => void
 }) {
+  useTranslation()
   const [documentToken, setDocumentToken] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ClientFailure | null>(null)
   const [imageStatuses, setImageStatuses] = useState<RemoteImageStatus[]>([])
   const [frameReady, setFrameReady] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -95,14 +100,14 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
       seen.add(event.requestId)
       const { emailId: id, index, documentToken, requestId } = event
       void client.openLink({ emailId: id, index, documentToken, requestId }).catch((failure: unknown) => {
-        if (live && active.current) setError(clientFailure(failure).message)
+        if (live && active.current) setError(clientFailure(failure))
       })
     })
     void client.prepareBody(emailId, allowImages).then((prepared) => {
       if (!live) { release(prepared.documentToken); return }
       currentToken.current = prepared.documentToken
       setDocumentToken(prepared.documentToken)
-    }).catch((failure: unknown) => { if (live) setError(clientFailure(failure).message) })
+    }).catch((failure: unknown) => { if (live) setError(clientFailure(failure)) })
     return () => {
       live = false
       active.current = false
@@ -135,7 +140,7 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
       setImageStatuses([])
       setDocumentToken(prepared.documentToken)
     } catch (failure) {
-      if (active.current && currentToken.current === previous) setError(clientFailure(failure).message)
+      if (active.current && currentToken.current === previous) setError(clientFailure(failure))
     } finally {
       if (active.current) setRetrying(false)
     }
@@ -167,13 +172,13 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
   const reasons = [...new Set(failedImages.map((status) => status.error).filter((reason): reason is ImageFetchError => reason !== null))]
 
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
-    {error && <Alert variant="destructive"><AlertTitle>正文显示或链接操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-    {failedImages.length > 0 && <div role="status" aria-label="图片加载状态" className="flex shrink-0 items-center gap-3 rounded-md bg-muted px-3 py-2 text-xs">
-      <span className="min-w-0 flex-1">{failedImages.length} 张图片未能加载 · {reasons.map((reason) => IMAGE_FAILURES[reason]).join('；')}</span>
-      <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>重试图片</Button>
+    {error && <Alert variant="destructive"><AlertTitle>{t('mail:bodyOrLinkFailed')}</AlertTitle><AlertDescription>{errorText(error)}</AlertDescription></Alert>}
+    {failedImages.length > 0 && <div role="status" aria-label={t('mail:imageLoadingStatus')} className="flex shrink-0 items-center gap-3 rounded-md bg-muted px-3 py-2 text-xs">
+      <span className="min-w-0 flex-1">{t('mail:imageFailureCount', { count: failedImages.length })} · {reasons.map((reason) => IMAGE_FAILURES[reason]).join('；')}</span>
+      <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>{t('mail:retryImages')}</Button>
     </div>}
     {!documentToken ? !error && <BodySkeleton /> :
-      <iframe key={documentToken} title="邮件 HTML 正文" sandbox="" referrerPolicy="no-referrer"
+      <iframe key={documentToken} title={t('mail:htmlBody')} sandbox="" referrerPolicy="no-referrer"
         src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => {
           if (loaded.current) { active.current = false; onReload() }
@@ -183,20 +188,21 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
 }
 
 const IMAGE_FAILURES: Record<ImageFetchError, string> = {
-  targetBlocked: '图片地址受限',
-  proxyPolicyRequired: '请在账号代理设置中允许解析图片域名',
-  dns: '无法解析图片服务器',
-  connect: '网络连接失败',
-  proxy: '代理连接失败',
-  tls: '图片服务器证书验证失败',
-  httpStatus: '图片服务器未返回图片',
-  unsupportedType: '暂不支持此图片格式',
-  invalidImage: '图片内容损坏或无法解码',
-  tooLarge: '图片超过大小或解码限制',
-  timeout: '图片加载超时',
-  cancelled: '图片加载已失效，请重新打开邮件',
+  get targetBlocked() { return t('mail:imageAddressRestricted') },
+  get proxyPolicyRequired() { return t('mail:allowImageDomainResolution') },
+  get dns() { return t('mail:imageDnsFailed') },
+  get connect() { return t('mail:networkConnectionFailed') },
+  get proxy() { return t('mail:proxyConnectionFailed') },
+  get tls() { return t('mail:imageCertificateFailed') },
+  get httpStatus() { return t('mail:imageServerNoImage') },
+  get unsupportedType() { return t('mail:unsupportedImageFormat') },
+  get invalidImage() { return t('mail:imageDecodeFailed') },
+  get tooLarge() { return t('mail:imageTooLarge') },
+  get timeout() { return t('mail:imageTimedOut') },
+  get cancelled() { return t('mail:imageExpired') },
 }
 
 export function BodySkeleton() {
-  return <Delayed><div role="status" aria-label="正在加载正文" className="flex flex-col gap-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-40 w-full" /></div></Delayed>
+  useTranslation()
+  return <Delayed><div role="status" aria-label={t('mail:loadingBody')} className="flex flex-col gap-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-40 w-full" /></div></Delayed>
 }

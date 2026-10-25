@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -18,8 +20,6 @@ import type { WindowHost } from '@/features/window-chrome/window-host'
 import type { MailxClient } from '@/lib/mailx-client'
 import { Composer, type ComposerController } from './composer'
 
-export const NEW_MAIL_TITLE = '新邮件'
-
 type ComposerAppProps = {
   client: MailxClient
   draftId: string
@@ -36,6 +36,7 @@ type ComposerAppProps = {
  * app is quitting nobody is asked: the draft is written and closed.
  */
 export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAppProps) {
+  useTranslation('composer')
   const controller = useRef<ComposerController | null>(null)
   const [subject, setSubject] = useState('')
   const [confirmClose, setConfirmClose] = useState(false)
@@ -43,7 +44,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
   const closing = useRef(false)
   const accounts = useQuery({ queryKey: ['composer', 'accounts'], queryFn: () => client.listAccounts() })
 
-  const title = subject.trim() || NEW_MAIL_TITLE
+  const title = subject.trim() || t('composer:window.newMail')
   useEffect(() => {
     document.title = title
   }, [title])
@@ -110,7 +111,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
       else await current.restoreBaseline()
     } catch {
       closing.current = false
-      toast.error(fresh ? '没能删除这份草稿' : '没能还原这份草稿', { description: '窗口保持打开，请重试。' })
+      toast.error(fresh ? t('composer:window.deleteFailed') : t('composer:window.restoreFailed'), { description: t('composer:window.keptOpen') })
       return
     }
     closeWindow()
@@ -138,26 +139,25 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
       <AlertDialog open={savePrompt} onOpenChange={setSavePrompt}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>要保存这封草稿吗？</AlertDialogTitle>
-            <AlertDialogDescription>保存后可以在“草稿”中继续编辑。</AlertDialogDescription>
+            <AlertDialogTitle>{t('composer:window.saveTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('composer:window.saveDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <Button variant="ghost" className="text-destructive hover:text-destructive sm:mr-auto" onClick={() => void discardAndClose()}>
-              不保存
-            </Button>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction autoFocus onClick={saveAndClose}>保存草稿</AlertDialogAction>
+              {t('composer:window.dontSave')}</Button>
+            <AlertDialogCancel>{t('composer:action.cancel')}</AlertDialogCancel>
+            <AlertDialogAction autoFocus onClick={saveAndClose}>{t('composer:window.save')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>草稿尚未保存</AlertDialogTitle>
-            <AlertDialogDescription>最近的修改没有写入本机。现在关闭会丢失这些修改。</AlertDialogDescription>
+            <AlertDialogTitle>{t('composer:window.unsavedTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('composer:window.unsavedDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t('composer:action.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -166,8 +166,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
                 closeWindow()
               }}
             >
-              仍要关闭（丢失未保存的修改）
-            </AlertDialogAction>
+              {t('composer:window.closeAnyway')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

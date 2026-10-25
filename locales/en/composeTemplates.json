@@ -1,0 +1,6 @@
+{
+  "newMailTitle": "New message",
+  "imageAlt": "[Image: {{alt}}]",
+  "replyIntro": "\nOn {{date}}, {{sender}} wrote:",
+  "forwardHeader": "\n---------- Forwarded message ----------\nFrom: {{sender}}\nDate: {{date}}\nSubject: {{subject}}\nTo: {{recipients}}"
+}

@@ -1,99 +1,53 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppearanceSettings, ComposeSettings, LayoutSettings, NotificationSettings, SecuritySettings, SettingsSnapshot } from '@/generated/accounts'
+import type { AppSettings, LayoutSettings } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
-import { applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
+import { DEFAULT_APPEARANCE, applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
+import { acceptSettingsSnapshot, beginSettingsEdit, committedSettings, finishSettingsEdit, latestSettingsSnapshot } from '@/lib/settings-cache'
+import { ensureSettingsWatch, retainSettingsWatch } from '@/i18n/settings-watch'
 
 export function useSettings(client: MailxClient) {
-  return useQuery({ queryKey: settingsKeys.all, queryFn: () => client.getSettings(), staleTime: Infinity })
+  const queryClient = useQueryClient()
+  useEffect(() => retainSettingsWatch(client, queryClient), [client, queryClient])
+  return useQuery({
+    queryKey: settingsKeys.all,
+    queryFn: async () => {
+      await ensureSettingsWatch(client, queryClient)
+      return acceptSettingsSnapshot(queryClient, await client.getSettings())
+    },
+    staleTime: Infinity,
+    structuralSharing: (_previous, incoming) => latestSettingsSnapshot(queryClient) ?? incoming,
+  })
 }
 
-/** Applies edits optimistically so the UI reacts at once; a rejected save rolls back. */
-export function useUpdateAppearance(client: MailxClient) {
+/** Canonical snapshots and pending edits stay separate, including across host events. */
+function useSettingsSection<K extends keyof AppSettings>(client: MailxClient, section: K, defaults: AppSettings[K], optimistic = true) {
   const queryClient = useQueryClient()
   return useMutation({
-    scope: { id: 'appearance-settings' },
-    mutationFn: (appearance: AppearanceSettings) => {
-      return client.updateSettings({ appearance })
+    scope: { id: `settings-${section}` },
+    mutationFn: (change: Partial<AppSettings[K]>) => {
+      const current = committedSettings(queryClient)?.[section]
+      return client.updateSettings({ [section]: { ...defaults, ...current, ...change } } as Partial<AppSettings>)
     },
-    onMutate: async (appearance) => {
+    onMutate: async (change) => {
       await queryClient.cancelQueries({ queryKey: settingsKeys.all })
-      const previous = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
-      if (previous) {
-        queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, {
-          ...previous,
-          settings: { ...previous.settings, appearance },
-        })
-      }
-      return { previous }
+      return optimistic ? beginSettingsEdit(queryClient, section, change) : undefined
     },
-    onError: (_error, _appearance, context) => {
-      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
-        ...current, settings: { ...current.settings, appearance: context.previous!.settings.appearance },
-      }))
-    },
-    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: {
-        ...snapshot.settings,
-        security: current?.settings.security ?? snapshot.settings.security,
-        layout: current?.settings.layout ?? snapshot.settings.layout,
-        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
-        compose: current?.settings.compose ?? snapshot.settings.compose,
-      },
-    })),
+    onSuccess: (snapshot, _change, token) => finishSettingsEdit(queryClient, token, snapshot),
+    onError: (_error, _change, token) => finishSettingsEdit(queryClient, token),
   })
 }
 
-export function useUpdateSecurity(client: MailxClient) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    scope: { id: 'security-settings' },
-    // Sections are replaced whole, so merge the change into the current values.
-    mutationFn: (change: Partial<SecuritySettings>) => {
-      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.security
-      return client.updateSettings({ security: { remoteImages: 'ask', senderAvatars: false, ...current, ...change } })
-    },
-    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: {
-        ...snapshot.settings,
-        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
-        layout: current?.settings.layout ?? snapshot.settings.layout,
-        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
-        compose: current?.settings.compose ?? snapshot.settings.compose,
-      },
-    })),
-  })
-}
-
-/**
- * Saves window layout such as the sidebar and list widths; the caller shows its
- * own value meanwhile. A change names only what moved: the rest of the layout
- * is taken from the saved copy when the save starts, so two writers (sidebar,
- * list) never overwrite each other's width.
- */
-export function useUpdateLayout(client: MailxClient) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    scope: { id: 'layout-settings' },
-    mutationFn: (change: Partial<LayoutSettings>) => {
-      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.layout
-      return client.updateSettings({ layout: { ...DEFAULT_LAYOUT, ...current, ...change } })
-    },
-    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: {
-        ...snapshot.settings,
-        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
-        security: current?.settings.security ?? snapshot.settings.security,
-        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
-        compose: current?.settings.compose ?? snapshot.settings.compose,
-      },
-    })),
-  })
-}
+export const useUpdateAppearance = (client: MailxClient) => useSettingsSection(client, 'appearance', DEFAULT_APPEARANCE)
+export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(client, 'security', { remoteImages: 'ask', senderAvatars: false })
+export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
+export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
+export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
+export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system' }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */
 export const LAYOUT_SAVE_DELAY_MS = 500
@@ -149,85 +103,4 @@ export function AppearanceSync({ client, importLegacy = true }: { client: MailxC
   }, [appearance])
 
   return null
-}
-
-/**
- * Saves notification preferences. Applied optimistically so switches respond
- * at once; a rejected save puts the previous values back.
- */
-export function useUpdateNotifications(client: MailxClient) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    scope: { id: 'notification-settings' },
-    mutationFn: (change: Partial<NotificationSettings>) => {
-      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.notifications
-      return client.updateSettings({ notifications: { ...DEFAULT_NOTIFICATIONS, ...current, ...change } })
-    },
-    onMutate: async (change) => {
-      await queryClient.cancelQueries({ queryKey: settingsKeys.all })
-      const previous = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
-      if (previous) {
-        queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, {
-          ...previous,
-          settings: { ...previous.settings, notifications: { ...previous.settings.notifications, ...change } },
-        })
-      }
-      return { previous }
-    },
-    onError: (_error, _change, context) => {
-      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
-        ...current, settings: { ...current.settings, notifications: context.previous!.settings.notifications },
-      }))
-    },
-    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: {
-        ...snapshot.settings,
-        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
-        security: current?.settings.security ?? snapshot.settings.security,
-        layout: current?.settings.layout ?? snapshot.settings.layout,
-        compose: current?.settings.compose ?? snapshot.settings.compose,
-      },
-    })),
-  })
-}
-
-/**
- * Saves the sending preferences (default sender account, undo window), applied at
- * once and rolled back if the core refuses. Sections are replaced whole, so the
- * change is merged into the saved values first.
- */
-export function useUpdateCompose(client: MailxClient) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    scope: { id: 'compose-settings' },
-    mutationFn: (change: Partial<ComposeSettings>) => {
-      const current = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)?.settings.compose
-      return client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 0, ...current, ...change } })
-    },
-    onMutate: async (change) => {
-      await queryClient.cancelQueries({ queryKey: settingsKeys.all })
-      const previous = queryClient.getQueryData<SettingsSnapshot>(settingsKeys.all)
-      if (previous) {
-        queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, {
-          ...previous,
-          settings: { ...previous.settings, compose: { ...previous.settings.compose, ...change } },
-        })
-      }
-      return { previous }
-    },
-    onError: (_error, _change, context) => {
-      if (context?.previous) queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => current && ({
-        ...current, settings: { ...current.settings, compose: context.previous!.settings.compose },
-      }))
-    },
-    onSuccess: (snapshot) => queryClient.setQueryData<SettingsSnapshot>(settingsKeys.all, (current) => ({
-      ...snapshot, settings: {
-        ...snapshot.settings,
-        appearance: current?.settings.appearance ?? snapshot.settings.appearance,
-        security: current?.settings.security ?? snapshot.settings.security,
-        layout: current?.settings.layout ?? snapshot.settings.layout,
-        notifications: current?.settings.notifications ?? snapshot.settings.notifications,
-      },
-    })),
-  })
 }

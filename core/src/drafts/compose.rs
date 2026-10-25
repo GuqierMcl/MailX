@@ -170,6 +170,7 @@ pub(crate) fn compose(
     own_address: &str,
     headers: &SourceHeaders,
     offset: FixedOffset,
+    locale: crate::SupportedLocale,
 ) -> Composed {
     let summary = &source.summary;
     let date = format_date(&summary.received_at, offset);
@@ -177,10 +178,11 @@ pub(crate) fn compose(
     let mut to = Vec::new();
     let mut cc = Vec::new();
     let body = if kind == DraftKind::Forward {
-        let header = format!(
-            "\n---------- 转发的邮件 ----------\n发件人：{sender}\n日期：{date}\n主题：{}\n收件人：{}",
-            summary.subject.replace(['\r', '\n'], " "),
-            display_list(&source.to),
+        let header = locale.forward_header(
+            &date,
+            &sender,
+            &summary.subject.replace(['\r', '\n'], " "),
+            &display_list(&source.to),
         );
         format!("{}{original}", plain_text_to_html(&header))
     } else {
@@ -200,7 +202,7 @@ pub(crate) fn compose(
         }
         format!(
             "{}<blockquote>{original}</blockquote>",
-            plain_text_to_html(&format!("\n{date}，{sender} 写道："))
+            plain_text_to_html(&locale.reply_intro(&date, &sender))
         )
     };
 

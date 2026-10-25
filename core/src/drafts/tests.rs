@@ -644,6 +644,58 @@ async fn from_requests_are_idempotent_and_reject_new() {
 }
 
 #[tokio::test]
+async fn localized_quotes_escape_values_and_replay_the_original_language() {
+    let f = fixture(&[plain("原始正文")]);
+    f.set_headers(
+        0,
+        "Budget <script>",
+        ("Ann <b>{{date}}", "ann@example.com"),
+        ("[]", "[]", "[]"),
+        Some("orig@example.com"),
+    );
+    let request = CreateDraftFromRequest {
+        email_id: f.emails[0].clone(),
+        kind: DraftKind::Reply,
+        client_mutation_id: id(),
+    };
+    let english = f
+        .core
+        .create_draft_from_localized(request.clone(), crate::SupportedLocale::En)
+        .unwrap();
+    assert!(english.body_text.starts_with("\nOn 2026-10-"));
+    assert!(
+        english
+            .body_text
+            .contains("Ann <b>{{date}} <ann@example.com> wrote:")
+    );
+    assert!(english.body_html.contains("&lt;b&gt;{{date}}"));
+    assert!(!english.body_html.contains("<b>{{date}}"));
+    assert!(english.body_text.contains("原始正文"));
+    assert_eq!(english.in_reply_to.as_deref(), Some("<orig@example.com>"));
+    let replay = f
+        .core
+        .create_draft_from_localized(request, crate::SupportedLocale::ZhCn)
+        .unwrap();
+    assert_eq!(replay, english);
+    let forward = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: DraftKind::Forward,
+                client_mutation_id: id(),
+            },
+            crate::SupportedLocale::En,
+        )
+        .unwrap();
+    assert!(forward.body_text.contains("Forwarded message"));
+    assert!(forward.body_text.contains("Date: 2026-10-"));
+    assert!(forward.body_text.contains("Subject: Budget <script>"));
+    assert!(!forward.body_html.contains("<script>"));
+    assert!(forward.in_reply_to.is_none());
+}
+
+#[tokio::test]
 async fn uncached_bodies_and_invisible_messages_are_distinct_errors() {
     let f = fixture(&[plain("a"), plain("b"), plain("c")]);
     f.db.execute(
@@ -971,6 +1023,38 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
     assert!(html.contains("margin:0"));
     assert!(html.contains("<meta charset=\"utf-8\">"));
     assert!(!html.contains("<style") && !html.contains("class="));
+}
+
+#[tokio::test]
+async fn localized_image_labels_follow_creation_language_and_replay_unchanged() {
+    let raw = b"Content-Type: text/html; charset=utf-8\r\n\r\n<p>Original text</p><p><img alt='{{date}} &lt;b&gt;&amp;'></p>".to_vec();
+    let f = fixture(&[raw]);
+    for kind in [DraftKind::Reply, DraftKind::ReplyAll, DraftKind::Forward] {
+        let request = CreateDraftFromRequest {
+            email_id: f.emails[0].clone(),
+            kind,
+            client_mutation_id: id(),
+        };
+        let english = f
+            .core
+            .create_draft_from_localized(request.clone(), crate::SupportedLocale::En)
+            .unwrap();
+        assert!(english.body_text.contains("[Image: {{date}} <b>&]"));
+        assert!(!english.body_text.contains("[图片："));
+        assert!(
+            english
+                .body_html
+                .contains("[Image: {{date}} &lt;b&gt;&amp;]")
+        );
+        assert!(!english.body_html.contains("<img") && !english.body_html.contains("<b>"));
+        let replay = f
+            .core
+            .create_draft_from_localized(request, crate::SupportedLocale::ZhCn)
+            .unwrap();
+        assert_eq!(replay, english);
+        let chinese = f.derive(0, kind).unwrap();
+        assert!(chinese.body_text.contains("[图片：{{date}} <b>&]"));
+    }
 }
 
 #[tokio::test]

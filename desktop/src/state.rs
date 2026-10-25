@@ -163,15 +163,14 @@ impl DesktopState {
 
     /// The current notification preferences, for code already off the async
     /// runtime. `None` when settings cannot be read: then nothing is shown.
-    pub(crate) fn notification_settings(&self) -> Option<mailx_core::NotificationSettings> {
-        Some(
-            self.settings_store()
-                .ok()?
-                .get()
-                .ok()?
-                .settings
-                .notifications,
-        )
+    pub(crate) fn notification_settings(
+        &self,
+    ) -> Option<(
+        mailx_core::NotificationSettings,
+        mailx_core::SupportedLocale,
+    )> {
+        let snapshot = self.settings_store().ok()?.get().ok()?;
+        Some((snapshot.settings.notifications, snapshot.effective_locale))
     }
 
     fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {
@@ -184,7 +183,10 @@ impl DesktopState {
             return Ok(store.clone());
         }
         let directory = self.0.data_dir.as_ref().map_err(Clone::clone)?;
-        let store = Arc::new(SettingsStore::open(directory)?);
+        let store = Arc::new(SettingsStore::open_with_locale(
+            directory,
+            crate::locale::system_locale(),
+        )?);
         *slot = Some(store.clone());
         Ok(store)
     }

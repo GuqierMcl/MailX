@@ -98,7 +98,7 @@ describe('read and starred changes', () => {
     expect(listed()).toMatchObject({ isRead: false, pendingChanges: false })
     await waitFor(() => expect(toasts()).toHaveLength(1))
     expect(toasts()[0]).toHaveTextContent('无法更改已读状态')
-    expect(toasts()[0]).toHaveTextContent('内容不存在。')
+    expect(toasts()[0]).toHaveTextContent('内容不存在或已不可用。')
     // Errors interrupt a screen reader (role="alert"); the other kinds wait their turn.
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.getByRole('alert')).toHaveTextContent('无法更改已读状态')
@@ -197,7 +197,7 @@ describe('toast outlet', () => {
     await userEvent.click(await screen.findByRole('button', { name: '关闭提示' }))
     await waitFor(() => expect(screen.queryByText('已保存')).not.toBeInTheDocument())
     // The toast also announces itself politely instead of stealing focus.
-    expect(screen.getByRole('region', { name: 'Notifications' })).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('region', { name: '通知' })).toHaveAttribute('aria-live', 'polite')
   })
 })
 

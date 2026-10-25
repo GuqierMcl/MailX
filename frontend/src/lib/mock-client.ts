@@ -20,6 +20,7 @@ import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
+import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
@@ -45,7 +46,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const accounts = dataset.accounts.map((account) => structuredClone(account))
   const emails = buildEmails(dataset)
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { settings: { appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
+
+  function readStoredSettings() {
+    try {
+      const value = JSON.parse(localStorage.getItem('mailx.mock.settings') ?? 'null') as typeof settings | null
+      if (value && Number.isSafeInteger(value.revision) && value.revision >= settings.revision &&
+          ['system', 'zh-CN', 'en'].includes(value.settings?.general?.language) &&
+          ['en', 'zh-CN'].includes(value.effectiveLocale) &&
+          ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
+            typeof value.settings[key as keyof typeof value.settings] === 'object')) settings = value
+    } catch { /* The browser preview cache is optional. */ }
+  }
+  readStoredSettings()
 
   const notFound = () => new MailxClientError(missing)
   const sendStepMs = options.sendStepMs ?? 600
@@ -294,13 +307,46 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
     onAppClosing: () => () => undefined,
     onComposerCloseRequested: () => () => undefined,
-    getSettings: async () => structuredClone(settings),
+    getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
+    async onSettingsChanged(listener) {
+      const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })
+      const storage = (event: StorageEvent) => {
+        if (event.key !== 'mailx.mock.settings' || !event.newValue) return
+        try {
+          const next = JSON.parse(event.newValue) as typeof settings
+          if (typeof next.revision === 'number' && next.revision > settings.revision &&
+              (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
+            settings = next
+            listener({ revision: settings.revision })
+          }
+        } catch { /* Ignore an invalid preview cache. */ }
+      }
+      window.addEventListener('mailx:mock-settings', own)
+      window.addEventListener('storage', storage)
+      return () => {
+        window.removeEventListener('mailx:mock-settings', own)
+        window.removeEventListener('storage', storage)
+      }
+    },
     async updateSettings(next) {
+      const save = async () => {
+      readStoredSettings()
+      if (next.general && !['system', 'zh-CN', 'en'].includes(next.general.language)) {
+        throw new MailxClientError({ code: 'validation', field: 'general.language', message: '配置参数无效。' })
+      }
       const appearance = next.appearance ?? settings.settings.appearance
       const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
       const mailFont = parseFontFamilies(appearance.mailFont).join(', ')
-      settings = { settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
+      const general = next.general ?? settings.settings.general
+      settings = { revision: settings.revision + 1,
+        effectiveLocale: general.language === 'system' ? systemLocale() : general.language,
+        settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
+      try { localStorage.setItem('mailx.mock.settings', JSON.stringify(settings)) } catch { /* Optional preview cache. */ }
+      window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
       return structuredClone(settings)
+      }
+      // Browser tabs share a preview store, just as WebViews share the host store.
+      return navigator.locks ? navigator.locks.request('mailx.mock.settings', save) : save()
     },
   }
 }

@@ -71,6 +71,7 @@
 ```sh
 bun install --frozen-lockfile
 bun run version:check
+bun run i18n:check
 bun run typecheck
 bun run lint
 bun run build
@@ -95,7 +96,7 @@ git diff --check
 
 `.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行：
 
-- Ubuntu：`version:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
+- Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
 MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.yml`，仅由 `workflow_dispatch` 手动触发，不再随每个 PR 或 main 推送自动运行。测试代码、平台矩阵与证据上传保留；在 GitHub Actions 的 `Body WebView` 工作流中选择目标分支运行。工作流合入默认分支后才会提供手动入口。
@@ -128,6 +129,7 @@ cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored
 - `core/src/settings/tests.rs`：缺文件不落盘、原子写入后重开读取、目录缺失时创建、字体列表按序拆分与去引号、可能逃逸 CSS 的字体名被拒、无效更新不改变状态、损坏 / 新版本 / 缺版本文件改名为 `.bak`、手改的单个字段回到默认值，以及前端看到的 camelCase 形状。
 - `desktop/src/state.rs` 测试检查核心未 Ready 时偏好仍可读写，数据目录不可用时返回 `storageUnavailable`。
 - `frontend/src/lib/appearance.test.ts` 检查字体栈（空值才用默认、按用户顺序、通用字体不加引号、末尾补 `sans-serif`）、强调色前景对比、CSSOM 变量应用与重置、首帧缓存的容错；`features/settings/` 测试检查设置弹窗标题与导航、外观保存、字体提交与拒绝提示、损坏文件提示，以及旧 `mailx.theme` 的一次性导入。
+- 语言字段、进程内设置 revision、事件订阅与统一缓存的新增范围见下文“2026-10-25 中英文文本适配”；通用设置页和外观等既有设置共用快照接收入口。
 - 手动运行 `bun run tauri dev`：修改主题、强调色、字体与字号后重启，确认保持且启动无闪烁；把 `settings.json` 改坏后启动，确认出现 `.bak` 与提示；把窗口缩到 768px 以下确认设置导航仍可用。三平台的字体回退、原生取色器与 WebView 表现需在对应系统上分别确认。
 
 ### 收件箱邮件头同步的检查与证据
@@ -409,6 +411,37 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - Windows 原生合成测试已使用本轮重新构建的 `body-webview-test` 二进制执行，WebView2 / EdgeDriver 均为 155.0.4283.62，**48/48 断言通过、canary 外部请求为 0**。覆盖中文正文、CID 图片、原生链接点击、恶意 HTML 与策略探针；使用临时合成 profile 和独立 WebView 数据目录，不访问真实账号或系统凭证。报告位于 `target/body-webview-evidence/remote-image-ab-windows-final/report.json`（本地生成证据，不提交）。验证中修复了新 profile 尚未创建便初始化图片缓存导致首次启动失败的问题，并补回归；测试 feature 的通知命令返回 unsupported，以配合其不装配通知模块的隔离方式。
 
 本轮原生 harness 不覆盖远程代理软件矩阵。Mihomo / sing-box 的 SOCKS、CONNECT、TUN、任意自定义 Fake-IP 网段及 macOS/Linux 本轮行为仍待实机验证；此前 Windows 网易/GitHub 两个来源的现场结果不扩展为全部服务商和代理兼容承诺。未发送真实邮件。
+
+### 2026-10-25 中英文文本适配
+
+首版文本适配已落地，范围与边界见[中英文文本适配](../architecture/internationalization.md)。公共 `locales/{zh-CN,en}/` 覆盖 8 个 namespace；日期 / 时间、数字、文件大小、列表连接与文件夹排序继续沿用现状，“昨天”等独立文案可以翻译。
+
+本次已确认 `bun run i18n:check`、`bun run typecheck`、`bun run lint`、生产构建、Rust workspace 测试、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy` 和 `bun run types:check` 通过。最终全量前端以 `bun run --cwd frontend test --maxWorkers 2` 执行，51 个文件、464 个测试通过，耗时 103.65 秒。资源门禁已加入根 `check` 和 CI，检查逻辑消息、复数分支、插值参数及 Rust 共享子集；测试耗时仅为本次执行记录，不是性能基准。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
+
+浏览器 mock 预览已实测语言切换与持久化：已打开的独立写信预览随设置从英文切换为中文，已输入的合成主题和正文保留，切换后实际执行撤销与重做可恢复正文。这证明浏览器预览路径的基本行为，不是实际 Tauri 多窗口、原生系统通知或三平台打包体验的实测。
+
+新增自动回归范围：
+
+- 设置存储：没有文件默认 `system`；合法旧文件缺字段补 `zh-CN`；非法语言字段回到 `system` 并保留其他设置；无效提交和写盘失败不递增 revision；成功保存后重开可恢复偏好；`effectiveLocale` 派生且不持久化。
+- 前端同步：监听注册完成后首次查询，订阅与查询交错时接收最新值，旧响应晚到不覆盖新 revision；保存与事件交错、跨设置节的待保存更改及失败回滚有独立覆盖；重新聚焦补读、监听失败重试及卸载清理。
+- 文本切换：真实资源参与测试；已有错误、模块级操作标签及附件状态能切换，用户输入和文件名保留；写信编辑器、dirty / revision、两步发送和撤销倒计时不因翻译重置。
+- 共享组件：通知区域和关闭按钮有本地化读屏标签；Windows / Linux 标题栏按钮无需宿主状态事件即可切换提示与读屏名称，并保持原按钮 DOM。
+- Rust 输出：中英文通知与英文单复数、隐藏预览、空主题、发送结果和测试通知；回复 / 转发新模板按有效语言生成、既有草稿不重写；变量不二次解析，引用头特殊字符按现有路径转义。
+
+独立审查补充：发现英文回复 / 转发中的图片替代文字仍使用中文占位标签，已将其接入共享 `composeTemplates.imageAlt` 并沿新建引用路径传入有效语言。新增 3 个 Rust 回归测试覆盖中英文、特殊字符转义、alt 中字面模板参数、512 KiB 引用上限，以及回复 / 全部回复 / 转发通过应用服务创建后跨语言重放保持原草稿。修复后 `cargo test --workspace --locked` 通过：core 459、账号集成 31、desktop 62，共 552 项通过；1 项真实系统凭据库测试按默认忽略。资源检查更新为 653 条逻辑消息，生产构建与其中的 TypeScript 检查通过。独立审查还单独执行了设置同步、缓存竞态及发件箱文本的 3 文件 / 11 用例，以及设置、localization、引用头与英文通知隐私的针对性 Rust 测试。
+
+本次文档核对补齐了架构总览的选型与目录、写信设计的当前语言与图片占位规则、界面规范的文案 / 读屏约定，以及开发指南的资源门禁和维护入口；API、桌面数据流、国际化说明、路线图与索引继续同步维护。独立复核未发现仍未处理的确定问题；以下平台体验待办不因此视为通过。
+
+远程 main 整合复查：基线从 `7786366` 快进至 `8a9a880`，纳入发布 / 版本工具和 SMTP Bcc 测试修正，并恢复本地文本适配。根 `check` 与前端 CI 同时保留 `version:test` 和 `i18n:check`，版本保持上游的 `0.1.0-alpha.1`，更新日志的 `[Unreleased]` 增加中英文功能条目。整合后 frozen install、版本一致性与发布准备检查、25 项版本工具测试、653 条资源检查、前端 51 文件 / 464 用例、Rust 552 项通过（另 1 项默认忽略）、生产构建、TypeScript、lint、Rust 格式、Clippy、生成类型与差异检查通过；发布说明本地预览已包含该功能。独立子代理另跑设置同步、缓存、发送按钮和编辑器的 4 文件 / 42 用例，未发现确定代码回归；发现并修正了上游首次预发布指引和版本命令示例的过时表述。发布工作流与各平台安装包验收仍按[发版流程](release.md)单独记录。
+
+剩余手动验收需要在对应环境记录结果，当前尚未把以下项目标为通过：
+
+- 浏览器 mock 的主窗口与写信窗口：英文长文本、窄窗口与缩放、命令面板、Tooltip、富文本工具栏和读屏名称；中英文切换后日期、数字和排序沿用原行为。
+- Windows / macOS / Linux 打包版本分别验证：main 与多个已打开 composer 同步、关闭重开和重启恢复、系统语言映射、核心启动失败时的语言、默认窗口标题及权限边界。
+- 写信中切换：保留未保存输入、编辑器内容与选区，不改变草稿 revision、dirty、发送确认步骤和撤销发送剩余时间；新建回复 / 转发使用新语言，已有引用头保持原样。
+- 原生通知：测试通知与合成新邮件 / 发送结果按当前语言生成；关闭预览后不出现主题和发件人；已有通知不因切换被重发。实际显示、声音、点击与原生系统文案仍按第 8 节逐平台记录。
+
+此轮没有新增三平台打包桌面或真实通知的实测结论；自动测试与浏览器预览不能替代这些证据。
 
 ## 6. 窗口行为的手动验证
 

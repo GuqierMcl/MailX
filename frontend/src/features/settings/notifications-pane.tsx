@@ -1,3 +1,6 @@
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
+import { errorText } from '@/i18n/errors'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -10,37 +13,39 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import type { NotificationSound } from '@/generated/accounts'
-import { clientFailure, type MailxClient } from '@/lib/mailx-client'
+import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { loadMailTree } from '@/features/mail/mail-tree'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateNotifications } from './settings-queries'
 
-const SOUNDS: Record<NotificationSound, string> = {
-  system: '系统默认',
-  chime: '清铃',
-  ding: '叮',
-  droplet: '水滴',
-  bubble: '气泡',
-  marimba: '木琴',
-  sparkle: '星光',
-  knock: '轻叩',
-  chord: '和弦',
-  none: '无声',
-}
+
 
 /** MailX plays these itself; the others belong to the system or are silent. */
 const OWN_SOUNDS: NotificationSound[] = ['chime', 'ding', 'droplet', 'bubble', 'marimba', 'sparkle', 'knock', 'chord']
 
 export function NotificationsPane({ client }: { client: MailxClient }) {
+  useTranslation()
+  const SOUNDS: Record<NotificationSound, string> = {
+    system: t('settings:soundSystem'),
+    chime: t('settings:soundChime'),
+    ding: t('settings:soundDing'),
+    droplet: t('settings:soundDroplet'),
+    bubble: t('settings:soundBubble'),
+    marimba: t('settings:soundMarimba'),
+    sparkle: t('settings:soundSparkle'),
+    knock: t('settings:soundKnock'),
+    chord: t('settings:soundChord'),
+    none: t('settings:soundNone'),
+  }
   const settings = useSettings(client)
   const update = useUpdateNotifications(client)
   // The mail tree already holds the accounts and refreshes when they change.
   const accounts = useQuery({ queryKey: mailKeys.tree(), queryFn: () => loadMailTree(client), select: (tree) => tree.accounts })
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
   if (settings.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>无法读取设置</AlertTitle><AlertDescription>{clientFailure(settings.error).message}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void settings.refetch()}>重试</Button>
+    <Alert variant="destructive"><AlertTitle>{t('settings:readFailed')}</AlertTitle><AlertDescription>{errorText(settings.error)}</AlertDescription></Alert>
+    <Button variant="outline" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
   </SettingsPage>
 
   const notifications = settings.data.settings.notifications
@@ -54,23 +59,23 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   }
 
   return <SettingsPage>
-    {update.isError && <Alert variant="destructive"><AlertTitle>设置保存失败</AlertTitle><AlertDescription>{clientFailure(update.error).message}</AlertDescription></Alert>}
-    <SettingsGroup title="新邮件通知">
-      <SettingsRow label="收到新邮件时提醒我" htmlFor="notifications.enabled">
+    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
+    <SettingsGroup title={t('settings:newMail')}>
+      <SettingsRow label={t('settings:notifyMe')} htmlFor="notifications.enabled">
         <Switch id="notifications.enabled" checked={notifications.enabled}
           onCheckedChange={(enabled) => update.mutate({ enabled })} />
       </SettingsRow>
-      <SettingsRow label="通知里显示发件人和主题" htmlFor="notifications.showPreview">
+      <SettingsRow label={t('settings:showPreview')} htmlFor="notifications.showPreview">
         <Switch id="notifications.showPreview" checked={notifications.showPreview} disabled={off}
           onCheckedChange={(showPreview) => update.mutate({ showPreview })} />
       </SettingsRow>
-      <SettingsRow label="正在使用时也通知" htmlFor="notifications.whenFocused">
+      <SettingsRow label={t('settings:whenFocused')} htmlFor="notifications.whenFocused">
         <Switch id="notifications.whenFocused" checked={notifications.whenFocused} disabled={off}
           onCheckedChange={(whenFocused) => update.mutate({ whenFocused })} />
       </SettingsRow>
-      <SettingsRow label="提示音" htmlFor="notifications.sound">
+      <SettingsRow label={t('settings:sound')} htmlFor="notifications.sound">
         {OWN_SOUNDS.includes(notifications.sound) && (
-          <Button variant="ghost" size="icon-sm" aria-label="试听" disabled={off}
+          <Button variant="ghost" size="icon-sm" aria-label={t('settings:previewSound')} disabled={off}
             onClick={() => void client.previewSound(notifications.sound).catch(() => undefined)}>
             <HugeiconsIcon icon={PlayIcon} />
           </Button>
@@ -86,12 +91,12 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
           <SelectContent>{Object.entries(SOUNDS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsRow>
-      <SettingsRow label="测试通知" description="没有出现通知时，请在系统设置里允许 MailX 发送通知。">
+      <SettingsRow label={t('settings:testNotification')} description={t('settings:testNotificationHint')}>
         <TestNotification client={client} disabled={off} />
       </SettingsRow>
     </SettingsGroup>
     {accounts.data && accounts.data.length > 0 && (
-      <SettingsGroup title="按账号">
+      <SettingsGroup title={t('settings:byAccount')}>
         {accounts.data.map((account) => (
           <SettingsRow key={account.id} htmlFor={`notifications.account.${account.id}`}
             label={<span className="flex min-w-0 items-center gap-2">
@@ -109,6 +114,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
 }
 
 function TestNotification({ client, disabled }: { client: MailxClient; disabled: boolean }) {
+  useTranslation()
   const [state, setState] = useState<'idle' | 'busy' | 'sent' | 'failed'>('idle')
   const send = () => {
     setState('busy')
@@ -116,9 +122,9 @@ function TestNotification({ client, disabled }: { client: MailxClient; disabled:
   }
   return (
     <div className="flex items-center gap-3">
-      {state === 'sent' && <span role="status" className="text-xs text-muted-foreground">已发送</span>}
-      {state === 'failed' && <span role="alert" className="text-xs text-destructive">发送失败</span>}
-      <Button variant="outline" size="sm" disabled={disabled || state === 'busy'} onClick={send}>发送测试通知</Button>
+      {state === 'sent' && <span role="status" className="text-xs text-muted-foreground">{t('settings:sent')}</span>}
+      {state === 'failed' && <span role="alert" className="text-xs text-destructive">{t('settings:sendFailed')}</span>}
+      <Button variant="outline" size="sm" disabled={disabled || state === 'busy'} onClick={send}>{t('settings:sendTest')}</Button>
     </div>
   )
 }

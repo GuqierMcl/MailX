@@ -30,7 +30,9 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN' }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
+  let settingsRevision = 0
+  const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
   return {
     available: true,
     getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
@@ -60,8 +62,9 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     requestLink: vi.fn<MailxClient['requestLink']>().mockResolvedValue(undefined),
     openLink: vi.fn<MailxClient['openLink']>().mockResolvedValue(undefined),
     onLinkRequest: vi.fn<MailxClient['onLinkRequest']>().mockReturnValue(() => undefined),
-    getSettings: vi.fn<MailxClient['getSettings']>().mockResolvedValue({ settings: preferences, stored: true, recovered: false }),
-    updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch }; return { settings: preferences, stored: true, recovered: false } }),
+    getSettings: vi.fn<MailxClient['getSettings']>().mockImplementation(async () => settingsSnapshot()),
+    updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch }; settingsRevision += 1; return settingsSnapshot() }),
+    onSettingsChanged: vi.fn<MailxClient['onSettingsChanged']>().mockImplementation(async () => () => undefined),
     testNotification: vi.fn<MailxClient['testNotification']>().mockResolvedValue(undefined),
     previewSound: vi.fn<MailxClient['previewSound']>().mockResolvedValue(undefined),
     onNotificationOpen: vi.fn<MailxClient['onNotificationOpen']>().mockReturnValue(() => undefined),

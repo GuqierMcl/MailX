@@ -1,3 +1,6 @@
+import { errorText } from '@/i18n/errors'
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AlertCircleIcon, MailOpen01Icon } from '@hugeicons/core-free-icons'
@@ -18,7 +21,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toast'
-import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
+import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 import { RecipientField } from './recipient-field'
 import { SendButton } from './send-button'
@@ -54,7 +57,10 @@ type ComposerProps = {
   controllerRef?: Ref<ComposerController>
 }
 
-const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', saved: '已保存', saving: '正在保存…', failed: '保存失败' }
+type ValidationKey = 'composer:validation.recipientsRequired' | 'composer:validation.invalidRecipients' | 'composer:validation.senderUnavailable' | 'composer:validation.credentials' | 'composer:validation.unsaved' | 'composer:validation.alreadyQueued'
+type ComposerProblem = { key: ValidationKey } | { cause: unknown }
+
+const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', get saved() { return t('composer:save.saved') }, get saving() { return t('composer:save.saving') }, get failed() { return t('composer:save.failed') } }
 
 /**
  * The writing surface: sender, recipients, subject, rich-text body and the bottom
@@ -63,16 +69,17 @@ const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', saved: '已保存', 
  * the host, which reaches in through `controllerRef`.
  */
 export function Composer({ client, draftId, accounts, onSubjectChange, onSent, onDiscarded, controllerRef }: ComposerProps) {
+  useTranslation('composer')
   // Also load on mount for other hosts, independently of the draft's response.
   const { Component: MailBodyEditor, failed: editorLoadFailed, retry: retryEditor } = useMailBodyEditor()
   const editor = useDraftEditor(client, draftId, (notice) => {
-    if (notice.kind === 'conflict') toast.info('草稿已在别处修改，已加载最新版本', { description: '你刚才未保存的改动没有被应用。' })
-    else toast.info('这封邮件已进入发送队列，不能再编辑')
+    if (notice.kind === 'conflict') toast.info(t('composer:notice.conflict'), { get description() { return t('composer:notice.conflictDescription') } })
+    else toast.info(t('composer:notice.locked'))
   })
   const { fields } = editor
   const [showCc, setShowCc] = useState(false)
   const [showBcc, setShowBcc] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ComposerProblem | null>(null)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -101,8 +108,8 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       <Empty className="h-full">
         <EmptyHeader>
           <EmptyMedia variant="icon"><HugeiconsIcon icon={MailOpen01Icon} /></EmptyMedia>
-          <EmptyTitle>这份草稿已不存在</EmptyTitle>
-          <EmptyDescription>它可能已被发送或删除。关闭此窗口即可。</EmptyDescription>
+          <EmptyTitle>{t('composer:draft.gone')}</EmptyTitle>
+          <EmptyDescription>{t('composer:draft.goneWindowDescription')}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -111,15 +118,15 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
     return (
       <Empty className="h-full">
         <EmptyHeader>
-          <EmptyTitle>无法打开草稿</EmptyTitle>
-          <EmptyDescription>{editor.problem.message}</EmptyDescription>
+          <EmptyTitle>{t('composer:draft.openFailed')}</EmptyTitle>
+          <EmptyDescription>{errorText(editor.problem)}</EmptyDescription>
         </EmptyHeader>
-        <Button variant="outline" onClick={() => void editor.reload()}>重试</Button>
+        <Button variant="outline" onClick={() => void editor.reload()}>{t('composer:action.retry')}</Button>
       </Empty>
     )
   }
   if (!fields) {
-    return <div role="status" aria-label="正在打开草稿" className="flex flex-1 items-center justify-center"><Spinner className="size-5" /></div>
+    return <div role="status" aria-label={t('composer:draft.opening')} className="flex flex-1 items-center justify-center"><Spinner className="size-5" /></div>
   }
 
   const readOnly = editor.readOnly
@@ -133,25 +140,25 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
     if (!latest) return null
     const all = [...latest.to, ...latest.cc, ...latest.bcc]
     if (all.length === 0) {
-      setError('请至少填写一个收件人。')
+      setError({ key: 'composer:validation.recipientsRequired' })
       return null
     }
     if (all.some((item) => !item.valid)) {
-      setError('有收件人地址无效，请修改或移除标红的地址。')
+      setError({ key: 'composer:validation.invalidRecipients' })
       return null
     }
     const sender = accounts.find((row) => row.id === latest.accountId)
     if (!sender) {
-      setError('发件账号不可用，请重新选择。')
+      setError({ key: 'composer:validation.senderUnavailable' })
       return null
     }
     if (sender.authentication.smtp.trust !== 'trusted' || !sender.authentication.smtp.passwordConfigured) {
-      setError('该账号的发信凭证需要重新确认，请先在主窗口的账号设置中处理。')
+      setError({ key: 'composer:validation.credentials' })
       return null
     }
     const { ok } = await editor.flush()
     if (!ok) {
-      setError('草稿尚未保存成功，暂时不能发送。')
+      setError({ key: 'composer:validation.unsaved' })
       return null
     }
     return editor.revision()
@@ -166,12 +173,12 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
     } catch (cause) {
       const code = clientFailureCode(cause)
       if (code === 'conflict') {
-        toast.info('草稿已在别处修改，已加载最新版本，请确认后再发送')
+        toast.info(t('composer:notice.conflictBeforeSend'))
         await editor.reload()
       } else if (code === 'draftLocked') {
         editor.markLocked()
-        setError('这封邮件已经在发送队列中。')
-      } else setError(clientFailure(cause).message)
+        setError({ key: 'composer:validation.alreadyQueued' })
+      } else setError({ cause })
     } finally {
       setBusy(false)
     }
@@ -184,23 +191,24 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       await editor.remove()
       onDiscarded()
     } catch (cause) {
-      setError(clientFailure(cause).message)
+      setError({ cause })
     } finally {
       setBusy(false)
     }
   }
 
   const failedSave = editor.status === 'failed'
+  const problemText = error ? ('key' in error ? t(error.key) : errorText(error.cause)) : null
   return (
-    <section aria-label="写邮件" data-slot="composer" className="flex min-h-0 flex-1 flex-col">
+    <section aria-label={t('composer:field.compose')} data-slot="composer" className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-col gap-0.5 px-3 pt-3">
         {readOnly && (
           <Alert className="mb-2" role="status">
-            <AlertDescription>这封邮件已进入发送队列，不能再修改。可在主窗口的发件箱里撤销或查看进度。</AlertDescription>
+            <AlertDescription>{t('composer:draft.lockedDescription')}</AlertDescription>
           </Alert>
         )}
         <div className="flex items-center gap-2 rounded-lg px-2 py-1">
-          <span id="composer-from-label" className="w-14 shrink-0 text-xs text-muted-foreground">发件人</span>
+          <span id="composer-from-label" className="w-14 shrink-0 text-xs text-muted-foreground">{t('composer:field.from')}</span>
           <Select
             value={fields.accountId}
             items={accountItems}
@@ -211,7 +219,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
               aria-labelledby="composer-from-label"
               className="h-7 min-w-0 max-w-full border-transparent bg-transparent text-sm shadow-none hover:bg-muted/50 dark:bg-transparent dark:hover:bg-muted/50"
             >
-              <SelectValue>{() => (account ? accountLabel(account) : '选择发件账号')}</SelectValue>
+              <SelectValue>{() => (account ? accountLabel(account) : t('composer:field.chooseSender'))}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {accounts.map((row) => (
@@ -226,22 +234,22 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           </Select>
         </div>
         <RecipientField
-          label="收件人"
+          label={t('composer:field.to')}
           value={fields.to}
           disabled={readOnly}
           autoFocus={fields.to.length === 0 && !fields.subject}
           onChange={(to) => editor.update({ to })}
           trailing={(
             <>
-              {!ccVisible && <Button type="button" variant="ghost" size="xs" disabled={readOnly} onClick={() => setShowCc(true)}>抄送</Button>}
-              {!bccVisible && <Button type="button" variant="ghost" size="xs" disabled={readOnly} onClick={() => setShowBcc(true)}>密送</Button>}
+              {!ccVisible && <Button type="button" variant="ghost" size="xs" disabled={readOnly} onClick={() => setShowCc(true)}>{t('composer:field.cc')}</Button>}
+              {!bccVisible && <Button type="button" variant="ghost" size="xs" disabled={readOnly} onClick={() => setShowBcc(true)}>{t('composer:field.bcc')}</Button>}
             </>
           )}
         />
-        {ccVisible && <RecipientField label="抄送" value={fields.cc} disabled={readOnly} onChange={(cc) => editor.update({ cc })} />}
-        {bccVisible && <RecipientField label="密送" value={fields.bcc} disabled={readOnly} onChange={(bcc) => editor.update({ bcc })} />}
+        {ccVisible && <RecipientField label={t('composer:field.cc')} value={fields.cc} disabled={readOnly} onChange={(cc) => editor.update({ cc })} />}
+        {bccVisible && <RecipientField label={t('composer:field.bcc')} value={fields.bcc} disabled={readOnly} onChange={(bcc) => editor.update({ bcc })} />}
         <div className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors focus-within:bg-muted/50 hover:bg-muted/30">
-          <label htmlFor="composer-subject" className="w-14 shrink-0 text-xs text-muted-foreground">主题</label>
+          <label htmlFor="composer-subject" className="w-14 shrink-0 text-xs text-muted-foreground">{t('composer:field.subject')}</label>
           <input
             id="composer-subject"
             value={fields.subject}
@@ -257,11 +265,11 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         <MailBodyEditor value={fields.bodyHtml} readOnly={readOnly} onChange={(bodyHtml) => editor.update({ bodyHtml })} />
       ) : editorLoadFailed ? (
         <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">
-          <p>编辑器加载失败</p>
-          <Button type="button" variant="outline" onClick={retryEditor}>重新加载编辑器</Button>
+          <p>{t('composer:editor.loadFailed')}</p>
+          <Button type="button" variant="outline" onClick={retryEditor}>{t('composer:editor.reload')}</Button>
         </div>
       ) : (
-        <div role="status" className="flex min-h-0 flex-1 items-center justify-center">正在打开编辑器…</div>
+        <div role="status" className="flex min-h-0 flex-1 items-center justify-center">{t('composer:editor.opening')}</div>
       )}
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
@@ -273,21 +281,20 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
             className={cn('inline-flex h-6 min-w-20 shrink-0 items-center', failedSave && !readOnly ? 'text-destructive' : 'text-muted-foreground')}
           >
             <span key={readOnly ? 'locked' : editor.status} className="animate-in duration-150 fade-in-0 motion-reduce:animate-none">
-              {readOnly ? '已在发送队列中' : STATUS_TEXT[editor.status]}
+              {readOnly ? t('composer:draft.queued') : STATUS_TEXT[editor.status]}
             </span>
           </span>
-          {failedSave && !readOnly && <Button type="button" variant="ghost" size="xs" onClick={editor.retry}>重试</Button>}
+          {failedSave && !readOnly && <Button type="button" variant="ghost" size="xs" onClick={editor.retry}>{t('composer:action.retry')}</Button>}
           {(error || hasInvalid) && (
             <span role="alert" className="flex min-w-0 items-center gap-1 text-destructive">
               <HugeiconsIcon icon={AlertCircleIcon} className="size-3.5 shrink-0" />
-              <span className="truncate" title={error ?? undefined}>{error ?? '有收件人地址无效'}</span>
+              <span className="truncate" title={problemText ?? undefined}>{problemText ?? t('composer:validation.invalidAddress')}</span>
             </span>
           )}
         </div>
         <Button type="button" variant="ghost" className="h-8 px-3 text-sm" disabled={readOnly || busy}
           onClick={() => (empty ? void discard() : setConfirmDiscard(true))}>
-          丢弃
-        </Button>
+          {t('composer:action.discard')}</Button>
         <SendButton
           subjectEmpty={!fields.subject.trim()}
           disabled={readOnly || busy}
@@ -299,12 +306,12 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>丢弃这封草稿？</AlertDialogTitle>
-            <AlertDialogDescription>草稿会从这台电脑上删除，无法恢复。</AlertDialogDescription>
+            <AlertDialogTitle>{t('composer:draft.discardTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('composer:draft.deleteDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void discard()}>丢弃</AlertDialogAction>
+            <AlertDialogCancel>{t('composer:action.continueEditing')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void discard()}>{t('composer:action.discard')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

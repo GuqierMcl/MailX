@@ -32,13 +32,14 @@
     "release:notes": "bun scripts/release-notes.mjs",
     "types:generate": "bun scripts/generate-types.mjs",
     "types:check": "bun scripts/generate-types.mjs --check",
+    "i18n:check": "bun scripts/check-i18n.mjs",
     "icons:generate": "bun scripts/generate-icons.mjs",
     "icons:check": "bun scripts/generate-icons.mjs --check",
     "rust:check": "cargo check --workspace --locked",
     "rust:fmt": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "rust:test": "cargo test --workspace --locked",
-    "check": "bun run version:check && bun run version:test && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
+    "check": "bun run version:check && bun run version:test && bun run i18n:check && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2"

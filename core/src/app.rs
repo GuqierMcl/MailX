@@ -289,6 +289,16 @@ impl MailxCore {
     /// is cached. Never downloads: an uncached body is `BodyNotCached`, and the
     /// caller fetches it with `fetch_body` first.
     pub fn create_draft_from(&self, request: CreateDraftFromRequest) -> Result<Draft, AppError> {
+        self.create_draft_from_localized(request, crate::SupportedLocale::ZhCn)
+    }
+
+    /// The host supplies language only for newly generated quote text. Replayed
+    /// mutation ids return the original draft without rewriting its contents.
+    pub fn create_draft_from_localized(
+        &self,
+        request: CreateDraftFromRequest,
+        locale: crate::SupportedLocale,
+    ) -> Result<Draft, AppError> {
         let source = self.accounts()?.draft_source(&request)?;
         let (detail, account_address, message_id, raw) = match source {
             crate::accounts::DraftSource::Existing(draft) => return Ok(draft),
@@ -311,6 +321,7 @@ impl MailxCore {
             &account_address,
             &headers,
             crate::accounts::local_offset(),
+            locale,
         )?;
         self.announce_draft(&draft, DraftChange::Created);
         Ok(draft)

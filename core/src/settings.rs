@@ -5,6 +5,7 @@
 //! aside to `settings.json.bak` instead of being overwritten in place. Settings
 //! never hold secrets and do not depend on account storage being open.
 
+use crate::SupportedLocale;
 use crate::error::{AppError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -232,11 +233,43 @@ impl ComposeSettings {
     }
 }
 
+/// Language preference is validated on input; a string lets field validation
+/// report `general.language` rather than a generic deserialization error.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GeneralSettings {
+    #[ts(type = "LanguagePreference")]
+    #[serde(deserialize_with = "deserialize_language")]
+    pub language: String,
+}
+
+fn deserialize_language<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    // Keep malformed values in the normal field-validation path so IPC gets a
+    // useful field name without echoing any of the original input.
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().unwrap_or_default().to_owned())
+}
+
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            language: "system".into(),
+        }
+    }
+}
+
+fn valid_language(value: &str) -> bool {
+    matches!(value, "system" | "zh-CN" | "en")
+}
+
 /// Section updates merge under the store lock so simultaneous saves cannot
 /// overwrite another settings page with a stale frontend snapshot.
 #[derive(Clone, Debug, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    pub general: Option<GeneralSettings>,
     pub appearance: Option<AppearanceSettings>,
     pub security: Option<SecuritySettings>,
     pub layout: Option<LayoutSettings>,
@@ -247,6 +280,7 @@ pub struct SettingsPatch {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub general: GeneralSettings,
     pub appearance: AppearanceSettings,
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
@@ -262,6 +296,17 @@ pub struct SettingsSnapshot {
     pub stored: bool,
     /// The previous file could not be used and was moved to `settings.json.bak`.
     pub recovered: bool,
+    pub effective_locale: SupportedLocale,
+    /// Monotonic within this settings-store lifetime; never persisted.
+    #[ts(type = "number")]
+    pub revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsChanged {
+    #[ts(type = "number")]
+    pub revision: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -280,6 +325,9 @@ struct SettingsFileRef<'a> {
 impl AppSettings {
     /// Validates client input and returns its canonical form.
     pub fn normalized(self) -> Result<Self, AppError> {
+        if !valid_language(&self.general.language) {
+            return Err(AppError::validation("general.language"));
+        }
         let appearance = self.appearance;
         if !(NAV_WIDTH_MIN..=NAV_WIDTH_MAX).contains(&self.layout.nav_width) {
             return Err(AppError::validation("layout.navWidth"));
@@ -305,6 +353,7 @@ impl AppSettings {
             ..self.compose
         };
         Ok(Self {
+            general: self.general,
             security: self.security,
             layout: self.layout,
             notifications,
@@ -338,6 +387,11 @@ impl AppSettings {
             },
         };
         Self {
+            general: if valid_language(&self.general.language) {
+                self.general
+            } else {
+                GeneralSettings::default()
+            },
             security: self.security,
             notifications,
             compose,
@@ -458,14 +512,20 @@ struct State {
     settings: AppSettings,
     stored: bool,
     recovered: bool,
+    revision: u64,
 }
 
 impl State {
-    fn snapshot(&self) -> SettingsSnapshot {
+    fn snapshot(&self, system_locale: SupportedLocale) -> SettingsSnapshot {
         SettingsSnapshot {
             settings: self.settings.clone(),
             stored: self.stored,
             recovered: self.recovered,
+            effective_locale: SupportedLocale::resolve(
+                &self.settings.general.language,
+                system_locale,
+            ),
+            revision: self.revision,
         }
     }
 }
@@ -473,6 +533,7 @@ impl State {
 pub struct SettingsStore {
     directory: PathBuf,
     state: Mutex<State>,
+    system_locale: SupportedLocale,
 }
 
 fn storage_error() -> AppError {
@@ -483,12 +544,21 @@ impl SettingsStore {
     /// Loads settings without creating the directory or file. Only I/O errors
     /// other than a missing file fail; unusable content is moved aside.
     pub fn open(data_directory: &Path) -> Result<Self, AppError> {
+        Self::open_with_locale(data_directory, SupportedLocale::En)
+    }
+
+    /// Hosts resolve the system language once; the core never calls platform APIs.
+    pub fn open_with_locale(
+        data_directory: &Path,
+        system_locale: SupportedLocale,
+    ) -> Result<Self, AppError> {
         let path = data_directory.join(SETTINGS_FILE_NAME);
         let state = match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == ErrorKind::NotFound => State {
                 settings: AppSettings::default(),
                 stored: false,
                 recovered: false,
+                revision: 0,
             },
             Err(_) => return Err(storage_error()),
             Ok(metadata) => match read_file(&path, &metadata) {
@@ -496,6 +566,7 @@ impl SettingsStore {
                     settings,
                     stored: true,
                     recovered: false,
+                    revision: 0,
                 },
                 None => {
                     fs::rename(&path, data_directory.join(BACKUP_FILE_NAME))
@@ -504,6 +575,7 @@ impl SettingsStore {
                         settings: AppSettings::default(),
                         stored: false,
                         recovered: true,
+                        revision: 0,
                     }
                 }
             },
@@ -511,16 +583,24 @@ impl SettingsStore {
         Ok(Self {
             directory: data_directory.to_owned(),
             state: Mutex::new(state),
+            system_locale,
         })
     }
 
     pub fn get(&self) -> Result<SettingsSnapshot, AppError> {
-        Ok(self.state.lock().map_err(|_| storage_error())?.snapshot())
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| storage_error())?
+            .snapshot(self.system_locale))
     }
 
     pub fn patch(&self, patch: SettingsPatch) -> Result<SettingsSnapshot, AppError> {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
         let settings = AppSettings {
+            general: patch
+                .general
+                .unwrap_or_else(|| state.settings.general.clone()),
             appearance: patch
                 .appearance
                 .unwrap_or_else(|| state.settings.appearance.clone()),
@@ -540,11 +620,12 @@ impl SettingsStore {
         .normalized()?;
         write_file(&self.directory, &settings)?;
         *state = State {
+            revision: state.revision.saturating_add(1),
             settings,
             stored: true,
             recovered: false,
         };
-        Ok(state.snapshot())
+        Ok(state.snapshot(self.system_locale))
     }
 
     /// Replaces all settings. The file is written atomically before the
@@ -554,11 +635,12 @@ impl SettingsStore {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
         write_file(&self.directory, &settings)?;
         *state = State {
+            revision: state.revision.saturating_add(1),
             settings,
             stored: true,
             recovered: false,
         };
-        Ok(state.snapshot())
+        Ok(state.snapshot(self.system_locale))
     }
 }
 
@@ -567,7 +649,35 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
         return None;
     }
     let text = fs::read_to_string(path).ok()?;
-    let file: SettingsFile = serde_json::from_str(&text).ok()?;
+    let mut json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if let Some(file) = json.as_object_mut()
+        && !file.contains_key("settings")
+    {
+        file.insert("settings".into(), serde_json::json!({}));
+    }
+    // Existing settings files predate language selection. Preserve their UI
+    // language; invalid language fields recover independently of other settings.
+    if let Some(settings) = json
+        .get_mut("settings")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        match settings.get_mut("general") {
+            None => {
+                settings.insert("general".into(), serde_json::json!({"language": "zh-CN"}));
+            }
+            Some(general) => {
+                let language = general.get("language").and_then(serde_json::Value::as_str);
+                let value = match language {
+                    None if general.is_object() && general.get("language").is_none() => "zh-CN",
+                    Some(value) if valid_language(value) => value,
+                    _ => "system",
+                }
+                .to_owned();
+                *general = serde_json::json!({"language": value});
+            }
+        }
+    }
+    let file: SettingsFile = serde_json::from_value(json).ok()?;
     (file.version == CURRENT_VERSION).then(|| file.settings.sanitized())
 }
 

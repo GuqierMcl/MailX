@@ -30,7 +30,7 @@ describe('folder sync state snapshots', () => {
       phase: 'failed', failure: { code: 'authentication', message: '请检查账号设置。', detail: null, willRetry: false },
       folders: [exampleFolderSyncState('sent', { phase: 'waiting' })],
     })
-    expect(folderSyncStatus([sent], { [account.id]: state }, false)).toEqual({ phase: 'failed', failure: '请检查账号设置。', windowCapped: false })
+    expect(folderSyncStatus([sent], { [account.id]: state }, false)).toEqual({ phase: 'failed', failure: '邮箱服务器拒绝了账号登录，请检查密码或授权码。', windowCapped: false })
   })
 
   it('shows a completed empty scope for an account without an inbox', () => {

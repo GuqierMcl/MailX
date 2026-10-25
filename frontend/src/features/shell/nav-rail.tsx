@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { SidebarLeft01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
@@ -23,6 +25,7 @@ type NavRailProps = {
  * the right doubles as the resize handle.
  */
 export function NavRail({ open, label, width, resizing, onResizeStart, onResize, onResizeEnd, children }: NavRailProps) {
+  useTranslation()
   const drag = useRef<{ x: number; width: number; last: number } | null>(null)
 
   const start = (event: PointerEvent<HTMLDivElement>) => {
@@ -78,7 +81,7 @@ export function NavRail({ open, label, width, resizing, onResizeStart, onResize,
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整侧边栏宽度"
+          aria-label={t('common:resizeSidebar')}
           aria-valuemin={NAV_MIN}
           aria-valuemax={NAV_MAX}
           aria-valuenow={width}
@@ -104,8 +107,9 @@ export function NavRail({ open, label, width, resizing, onResizeStart, onResize,
 }
 
 export function NavRailTrigger({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  useTranslation()
   return (
-    <Button variant="ghost" size="icon-sm" aria-label={open ? '收起侧边栏' : '展开侧边栏'} onClick={onToggle}>
+    <Button variant="ghost" size="icon-sm" aria-label={open ? t('common:collapseSidebar') : t('common:expandSidebar')} onClick={onToggle}>
       <HugeiconsIcon icon={open ? SidebarLeftIcon : SidebarLeft01Icon} strokeWidth={2} />
     </Button>
   )

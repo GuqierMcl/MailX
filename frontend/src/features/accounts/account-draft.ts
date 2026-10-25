@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 
@@ -75,7 +76,7 @@ function invalid(field: string, message: string): never {
 
 function port(value: string, field: string): number {
   if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
-    invalid(field, '端口需要是 1 到 65535 之间的整数。')
+    invalid(field, t('accounts:invalidPort'))
   }
   return Number(value)
 }
@@ -83,25 +84,25 @@ function port(value: string, field: string): number {
 function host(value: string, field: string): string {
   const result = value.trim()
   if (!result || /[\s/@?#]/.test(result) || result.includes('://')) {
-    invalid(field, '请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')
+    invalid(field, t('accounts:invalidHost'))
   }
   return result
 }
 
 function connection(value: ConnectionDraft, protocol: 'imap' | 'smtp'): ConnectionConfig {
-  if (!value.username.trim()) invalid(`${protocol}.username`, '请填写协议登录用户名。')
+  if (!value.username.trim()) invalid(`${protocol}.username`, t('accounts:loginRequired'))
   return { ...value, host: host(value.host, `${protocol}.host`), port: port(value.port, `${protocol}.port`), username: value.username.trim() }
 }
 
 function secret(value: SecretDraft, field: string): SecretUpdate {
   if (!value.replace) return { action: 'keep' }
-  if (!value.value) invalid(field, '请重新输入密码或授权码，空白不会覆盖已保存的凭证。')
+  if (!value.value) invalid(field, t('accounts:passwordRequired'))
   return { action: 'replace', value: value.value }
 }
 
 /** Validates the draft into a connection; throws a field error for the first problem. */
 export function draftToConnection(draft: AccountDraft, account: Account | null): ConnectionInput {
-  if (!/^[^\s@]+@[^\s@]+$/.test(draft.emailAddress.trim())) invalid('emailAddress', '请填写有效的邮箱地址。')
+  if (!/^[^\s@]+@[^\s@]+$/.test(draft.emailAddress.trim())) invalid('emailAddress', t('accounts:invalidEmail'))
   const imap = connection(draft.imap, 'imap')
   const smtp = connection(draft.smtp, 'smtp')
   const authentication: ConnectionInput['authentication'] = draft.mode === 'shared'
@@ -109,7 +110,7 @@ export function draftToConnection(draft: AccountDraft, account: Account | null):
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
   let route: ConnectionInput['route'] = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }
   if (draft.routeKind === 'custom') {
-    if (draft.proxyAuth && !draft.proxyUsername.trim()) invalid('proxyUsername', '请填写代理用户名。')
+    if (draft.proxyAuth && !draft.proxyUsername.trim()) invalid('proxyUsername', t('accounts:proxyUsernameRequired'))
     route = {
       kind: 'custom', proxyKind: draft.proxyKind,
       host: host(draft.proxyHost, 'proxyHost'), port: port(draft.proxyPort, 'proxyPort'), dns: 'proxy',

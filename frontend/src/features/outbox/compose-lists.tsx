@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { t } from '@/i18n'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { File01Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
 import type { Account, DraftSummary, OutboxItem } from '@/generated/accounts'
@@ -67,34 +69,35 @@ type DraftListProps = {
 }
 
 export function DraftList({ drafts, loading, error, accounts, selectedId, onSelect }: DraftListProps) {
-  if (error) return <EmptyShell title="草稿"><Empty><EmptyHeader><EmptyTitle>无法加载草稿</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
+  useTranslation('composer')
+  if (error) return <EmptyShell title={t('composer:list.drafts')}><Empty><EmptyHeader><EmptyTitle>{t('composer:list.draftsFailed')}</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
   if (loading && !drafts) return <div className="min-h-0 flex-1" />
   if (!drafts || drafts.length === 0) {
     return (
-      <EmptyShell title="草稿">
+      <EmptyShell title={t('composer:list.drafts')}>
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon"><HugeiconsIcon icon={File01Icon} /></EmptyMedia>
-            <EmptyTitle>没有草稿</EmptyTitle>
-            <EmptyDescription>写到一半的邮件会自动保存在这里，只存在这台电脑上。</EmptyDescription>
+            <EmptyTitle>{t('composer:list.noDrafts')}</EmptyTitle>
+            <EmptyDescription>{t('composer:list.noDraftsDescription')}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       </EmptyShell>
     )
   }
   return (
-    <ListShell title="草稿" label="草稿列表">
+    <ListShell title={t('composer:list.drafts')} label={t('composer:list.draftsLabel')}>
       {drafts.map((draft) => {
         const to = draft.to.map((item) => item.name || item.address).join('、')
         const account = accountName(accounts, draft.accountId)
         return (
           <Row key={draft.id} selected={draft.id === selectedId} onSelect={() => onSelect(draft.id)}>
             <div className="flex w-full items-center gap-2">
-              <span className={cn('min-w-0 truncate', to ? 'font-semibold' : 'font-normal text-muted-foreground')}>{to || '（无收件人）'}</span>
+              <span className={cn('min-w-0 truncate', to ? 'font-semibold' : 'font-normal text-muted-foreground')}>{to || t('composer:list.noRecipients')}</span>
               {account && <span className="min-w-0 shrink truncate text-xs text-muted-foreground">| {account}</span>}
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{formatListTime(draft.updatedAt)}</span>
             </div>
-            <span className="w-full truncate text-xs text-foreground/75">{draft.subject || '（无主题）'}</span>
+            <span className="w-full truncate text-xs text-foreground/75">{draft.subject || t('composer:list.noSubject')}</span>
             {draft.preview && <span className="line-clamp-1 w-full text-xs text-muted-foreground">{draft.preview}</span>}
           </Row>
         )
@@ -118,33 +121,34 @@ const STATE_TONE: Record<string, string> = {
 }
 
 export function OutboxList({ items, loading, error, accounts, selectedId, onSelect }: OutboxListProps) {
-  if (error) return <EmptyShell title="发件箱"><Empty><EmptyHeader><EmptyTitle>无法加载发件箱</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
+  useTranslation('composer')
+  if (error) return <EmptyShell title={t('composer:list.outbox')}><Empty><EmptyHeader><EmptyTitle>{t('composer:list.outboxFailed')}</EmptyTitle><EmptyDescription>{error}</EmptyDescription></EmptyHeader></Empty></EmptyShell>
   if (loading && !items) return <div className="min-h-0 flex-1" />
   if (!items || items.length === 0) {
     return (
-      <EmptyShell title="发件箱">
+      <EmptyShell title={t('composer:list.outbox')}>
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon"><HugeiconsIcon icon={MailUpload01Icon} /></EmptyMedia>
-            <EmptyTitle>发件箱是空的</EmptyTitle>
-            <EmptyDescription>正在发送、发送失败或需要确认的邮件会出现在这里。</EmptyDescription>
+            <EmptyTitle>{t('composer:list.noOutbox')}</EmptyTitle>
+            <EmptyDescription>{t('composer:list.noOutboxDescription')}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       </EmptyShell>
     )
   }
   return (
-    <ListShell title="发件箱" label="发件箱列表">
+    <ListShell title={t('composer:list.outbox')} label={t('composer:list.outboxLabel')}>
       {items.map((item) => {
         const account = accountName(accounts, item.accountId)
         return (
           <Row key={item.id} selected={item.id === selectedId} onSelect={() => onSelect(item.id)}>
             <div className="flex w-full items-center gap-2">
-              <span className="min-w-0 truncate font-semibold">{recipientsPreview(item) || '（无收件人）'}</span>
+              <span className="min-w-0 truncate font-semibold">{recipientsPreview(item) || t('composer:list.noRecipients')}</span>
               {account && <span className="min-w-0 shrink truncate text-xs text-muted-foreground">| {account}</span>}
               <span className={cn('ml-auto shrink-0 text-xs font-medium', STATE_TONE[item.state] ?? 'text-muted-foreground')}>{STATE_LABELS[item.state]}</span>
             </div>
-            <span className="w-full truncate text-xs text-foreground/75">{item.subject || '（无主题）'}</span>
+            <span className="w-full truncate text-xs text-foreground/75">{item.subject || t('composer:list.noSubject')}</span>
           </Row>
         )
       })}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft, DraftKind } from '@/generated/accounts'
-import { clientFailure, clientFailureCode, type MailxClient } from '@/lib/mailx-client'
+import { clientFailure, clientFailureCode, type MailxClient, type ClientFailure } from '@/lib/mailx-client'
 import { recipientsFromAddresses, toMailAddresses, type Recipient } from './address-parse'
 import { draftHtmlIsEmpty } from './draft-html'
 
@@ -27,7 +27,7 @@ export type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 export const SAVING_INDICATOR_DELAY_MS = 400
 
 /** Why the editor cannot be used: the draft is not there, or something else broke. */
-export type EditorProblem = { message: string }
+export type EditorProblem = ClientFailure
 
 function fieldsOf(draft: Draft): EditorFields {
   return {
@@ -117,7 +117,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     } catch (cause) {
       if (!alive.current) return
       if (clientFailureCode(cause) === 'notFound') setGone(true)
-      else setProblem({ message: clientFailure(cause).message })
+      else setProblem(clientFailure(cause))
     }
   }, [apply, client, draftId])
 
@@ -134,7 +134,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
       (cause) => {
         if (!alive.current) return
         if (clientFailureCode(cause) === 'notFound') setGone(true)
-        else setProblem({ message: clientFailure(cause).message })
+        else setProblem(clientFailure(cause))
       },
     )
     return () => {

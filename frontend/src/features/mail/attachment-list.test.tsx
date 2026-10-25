@@ -5,6 +5,7 @@ import { testClient } from '@/features/accounts/test-fixtures'
 import type { AttachmentSummary } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { AttachmentList } from './attachment-list'
+import { i18n } from '@/i18n'
 
 const report: AttachmentSummary = {
   id: 'mail-1:2', filename: '季度报告.pdf', mimeType: 'application/pdf', size: 1_258_291, isInline: false,
@@ -21,6 +22,22 @@ function setup(save?: (client: ReturnType<typeof testClient>) => void) {
 afterEach(() => vi.useRealTimers())
 
 describe('attachment list', () => {
+  it('switches existing labels and failures without changing attachment data or saving again', async () => {
+    const client = setup((mock) => mock.saveAttachment.mockRejectedValue(new MailxClientError({
+      code: 'storageUnavailable', field: null, message: 'legacy message must not be shown',
+    })))
+    await userEvent.click(screen.getByRole('button', { name: '保存附件 notes.txt' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法读写本地数据')
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(screen.getByText('2 attachments')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save attachment notes.txt' })).toBeEnabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot access local data')
+    expect(screen.getByText('季度报告.pdf')).toBeInTheDocument()
+    expect(screen.getByText('1.2 MB')).toBeInTheDocument()
+    expect(screen.queryByText('legacy message must not be shown')).not.toBeInTheDocument()
+    expect(client.saveAttachment).toHaveBeenCalledTimes(1)
+  })
+
   it('lists name and size without the sender-claimed type', () => {
     setup()
     expect(screen.getByText('2 个附件')).toBeInTheDocument()

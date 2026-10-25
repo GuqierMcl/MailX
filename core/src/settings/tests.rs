@@ -3,6 +3,7 @@ use tempfile::TempDir;
 
 fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
+        general: GeneralSettings::default(),
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
@@ -29,6 +30,136 @@ fn missing_file_yields_defaults_without_creating_anything() {
     assert!(!snapshot.stored);
     assert!(!snapshot.recovered);
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn language_selection_resolves_with_the_host_and_preserves_old_files() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open_with_locale(directory.path(), SupportedLocale::En).unwrap();
+    let fresh = store.get().unwrap();
+    assert_eq!(fresh.settings.general.language, "system");
+    assert_eq!(fresh.effective_locale, SupportedLocale::En);
+    assert_eq!(fresh.revision, 0);
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"}}}"#,
+    )
+    .unwrap();
+    let legacy = SettingsStore::open_with_locale(directory.path(), SupportedLocale::En)
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(legacy.settings.general.language, "zh-CN");
+    assert_eq!(legacy.effective_locale, SupportedLocale::ZhCn);
+    assert_eq!(legacy.settings.appearance.theme, ThemeMode::Dark);
+    assert!(!legacy.recovered);
+}
+
+#[test]
+fn invalid_saved_language_recovers_only_that_field() {
+    for invalid in [
+        serde_json::json!("fr"),
+        serde_json::json!(17),
+        serde_json::Value::Null,
+    ] {
+        let directory = TempDir::new().unwrap();
+        let value = serde_json::json!({"version":1,"settings":{"general":{"language":invalid},"appearance":{"theme":"dark"}}});
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
+        let snapshot = SettingsStore::open_with_locale(directory.path(), SupportedLocale::ZhCn)
+            .unwrap()
+            .get()
+            .unwrap();
+        assert_eq!(snapshot.settings.general.language, "system");
+        assert_eq!(snapshot.effective_locale, SupportedLocale::ZhCn);
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+    }
+}
+
+#[test]
+fn malformed_ipc_language_reports_the_specific_field() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    for invalid in [
+        serde_json::json!("fr"),
+        serde_json::json!(17),
+        serde_json::Value::Null,
+    ] {
+        let patch: SettingsPatch =
+            serde_json::from_value(serde_json::json!({"general":{"language":invalid}})).unwrap();
+        let error = store.patch(patch).unwrap_err();
+        assert_eq!(error.code, ErrorCode::Validation);
+        assert_eq!(error.field.as_deref(), Some("general.language"));
+    }
+    assert_eq!(store.get().unwrap().revision, 0);
+}
+
+#[test]
+fn language_commit_is_versioned_and_invalid_input_leaves_it_untouched() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open_with_locale(directory.path(), SupportedLocale::ZhCn).unwrap();
+    let selected = store
+        .patch(SettingsPatch {
+            general: Some(GeneralSettings {
+                language: "en".into(),
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(selected.revision, 1);
+    assert_eq!(selected.effective_locale, SupportedLocale::En);
+    let error = store
+        .patch(SettingsPatch {
+            general: Some(GeneralSettings {
+                language: "xx".into(),
+            }),
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("general.language"));
+    assert_eq!(store.get().unwrap(), selected);
+    let edited = store
+        .patch(SettingsPatch {
+            appearance: Some(AppearanceSettings {
+                theme: ThemeMode::Dark,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert_eq!(edited.settings.general.language, "en");
+    let persisted: serde_json::Value =
+        serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+    assert!(persisted.get("revision").is_none());
+    assert!(persisted.get("effectiveLocale").is_none());
+    assert_eq!(
+        SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .revision,
+        0
+    );
+}
+
+#[test]
+fn failed_disk_commit_does_not_publish_a_new_language_or_revision() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open_with_locale(directory.path(), SupportedLocale::ZhCn).unwrap();
+    let before = store.get().unwrap();
+    fs::create_dir(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
+    assert!(
+        store
+            .patch(SettingsPatch {
+                general: Some(GeneralSettings {
+                    language: "en".into()
+                }),
+                ..Default::default()
+            })
+            .is_err()
+    );
+    assert_eq!(store.get().unwrap(), before);
 }
 
 #[test]
@@ -198,6 +329,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
+                "general": { "language": "system" },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -219,7 +351,9 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0 }
             },
             "stored": false,
-            "recovered": false
+            "recovered": false,
+            "effectiveLocale": "en",
+            "revision": 0
         })
     );
 }

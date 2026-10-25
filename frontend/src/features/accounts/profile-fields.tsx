@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { Field, FieldDescription, FieldError, FieldLabel, FieldTitle } from '@/components/ui/field'
@@ -5,14 +7,16 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { ACCOUNT_COLORS } from './account-color'
 import { AccountAvatar } from './account-avatar'
+import type { ClientFailure } from '@/lib/mailx-client'
+import { errorText } from '@/i18n/errors'
 
 type ProfileFieldsProps = {
   displayName: string
   color: string | null
-  nameError?: string | null
+  nameError?: ClientFailure | null
   /** The name recipients see in `From`; empty sends with the bare address. */
   senderName: string
-  senderNameError?: string | null
+  senderNameError?: ClientFailure | null
   onSenderNameChange(value: string): void
   /** Called when editing the sender name settles (blur or Enter). */
   onSenderNameCommit?(): void
@@ -25,14 +29,15 @@ type ProfileFieldsProps = {
 
 /** Name and identification color: how the account looks in MailX, nothing more. */
 export function ProfileFields({ displayName, color, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
-  const choices: { value: string | null; name: string }[] = [{ value: null, name: '无颜色' }, ...ACCOUNT_COLORS]
+  useTranslation()
+  const choices: { value: string | null; name: string }[] = [{ value: null, name: t('accounts:noColor') }, ...ACCOUNT_COLORS]
   return (
     <div className="flex flex-col gap-6">
       <Field data-invalid={!!nameError}>
-        <FieldLabel htmlFor="displayName">账号名称</FieldLabel>
+        <FieldLabel htmlFor="displayName">{t('accounts:accountName')}</FieldLabel>
         <div className="flex items-center gap-3">
           <AccountAvatar displayName={displayName} color={color} className="size-8 text-sm" />
-          <Input id="displayName" value={displayName} disabled={disabled} placeholder="例如：工作邮箱"
+          <Input id="displayName" value={displayName} disabled={disabled} placeholder={t('accounts:accountNamePlaceholder')}
             aria-invalid={!!nameError} aria-describedby={nameError ? 'displayName-error' : undefined}
             onChange={(event) => onDisplayNameChange(event.target.value)}
             onBlur={() => onDisplayNameCommit?.()}
@@ -43,11 +48,11 @@ export function ProfileFields({ displayName, color, nameError, senderName, sende
               }
             }} />
         </div>
-        {nameError ? <FieldError id="displayName-error">{nameError}</FieldError> : <FieldDescription>只用于 MailX 中的显示。</FieldDescription>}
+        {nameError ? <FieldError id="displayName-error">{errorText(nameError)}</FieldError> : <FieldDescription>{t('accounts:accountNameHint')}</FieldDescription>}
       </Field>
       <Field data-invalid={!!senderNameError}>
-        <FieldLabel htmlFor="senderName">发件人名称</FieldLabel>
-        <Input id="senderName" value={senderName} disabled={disabled} placeholder="收件人看到的名字，可留空" maxLength={128}
+        <FieldLabel htmlFor="senderName">{t('accounts:senderName')}</FieldLabel>
+        <Input id="senderName" value={senderName} disabled={disabled} placeholder={t('accounts:senderNamePlaceholder')} maxLength={128}
           autoComplete="off"
           aria-invalid={!!senderNameError} aria-describedby={senderNameError ? 'senderName-error' : undefined}
           onChange={(event) => onSenderNameChange(event.target.value)}
@@ -58,10 +63,10 @@ export function ProfileFields({ displayName, color, nameError, senderName, sende
               onSenderNameCommit?.()
             }
           }} />
-        {senderNameError ? <FieldError id="senderName-error">{senderNameError}</FieldError> : <FieldDescription>写在发出邮件的“发件人”里，留空则只显示邮箱地址。</FieldDescription>}
+        {senderNameError ? <FieldError id="senderName-error">{errorText(senderNameError)}</FieldError> : <FieldDescription>{t('accounts:senderNameHint')}</FieldDescription>}
       </Field>
       <Field>
-        <FieldTitle id="account-color-label">标识颜色</FieldTitle>
+        <FieldTitle id="account-color-label">{t('accounts:identificationColor')}</FieldTitle>
         <div role="radiogroup" aria-labelledby="account-color-label" className="flex flex-wrap gap-2">
           {choices.map((choice) => {
             const checked = choice.value === color
@@ -80,7 +85,7 @@ export function ProfileFields({ displayName, color, nameError, senderName, sende
             )
           })}
         </div>
-        <FieldDescription>在侧边栏和账号列表中区分不同邮箱。</FieldDescription>
+        <FieldDescription>{t('accounts:identificationColorHint')}</FieldDescription>
       </Field>
     </div>
   )

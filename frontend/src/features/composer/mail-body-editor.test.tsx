@@ -1,3 +1,4 @@
+import { i18n } from '@/i18n'
 import { createRef, lazy, StrictMode, Suspense } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -15,7 +16,10 @@ beforeAll(() => {
   Range.prototype.getBoundingClientRect = () => new DOMRect()
   document.elementFromPoint = () => null
 })
-afterEach(() => { editors.splice(0).forEach((editor) => editor.destroy()) })
+afterEach(() => {
+  editors.splice(0).forEach((editor) => editor.destroy())
+  void i18n.changeLanguage('zh-CN')
+})
 
 function engine(content = '<p></p>') {
   const editor = new Editor({ ...mailEditorOptions(), content })
@@ -262,6 +266,23 @@ describe('MailBodyEditor', () => {
     rerender('<p>x</p>')
     expect(screen.queryByRole('dialog', { name: '编辑链接' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '正文' })).toHaveTextContent('x')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('changes toolbar and accessible text while preserving the body, selection and undo history', async () => {
+    const { editorRef, onChange } = renderEditor()
+    const body = await screen.findByRole('textbox', { name: '正文' })
+    act(() => editorRef.current?.setSelection({ from: 1, to: 6 }))
+    await userEvent.click(screen.getByRole('button', { name: '粗体' }))
+    const html = body.innerHTML
+    const selection = editorRef.current?.getSelection()
+    onChange.mockClear()
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(screen.getByRole('textbox', { name: 'Message body' })).toBe(body)
+    expect(body.innerHTML).toBe(html)
+    expect(editorRef.current?.getSelection()).toEqual(selection)
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Bold' })).toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
   })
 

@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Account } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { exampleAccount, exampleSyncState, testClient } from './test-fixtures'
 import { AccountsDialog } from './accounts-dialog'
+import { i18n } from '@/i18n'
 
 const second = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人邮箱', emailAddress: 'me@example.com', color: '#16a34a' })
 
@@ -17,6 +18,19 @@ function renderDialog(rows: Account[] = [exampleAccount()], target: { accountId?
 }
 
 describe('accounts dialog', () => {
+  it('keeps unsaved profile input and updates an existing field error when switching language', async () => {
+    const { client, dialog } = renderDialog()
+    const name = await within(dialog).findByLabelText('账号名称')
+    fireEvent.change(name, { target: { value: ' ' } })
+    fireEvent.blur(name)
+    expect(within(dialog).getByText('请填写账号名称。')).toBeInTheDocument()
+    await act(async () => { await i18n.changeLanguage('en') })
+    expect(within(dialog).getByLabelText('Account name')).toBe(name)
+    expect(name).toHaveValue(' ')
+    expect(within(dialog).getByText('Enter an account name.')).toBeInTheDocument()
+    expect(client.updateProfile).not.toHaveBeenCalled()
+  })
+
   it('shows the profile and a read-only connection summary', async () => {
     const account = exampleAccount()
     const { client, dialog } = renderDialog([account])
@@ -74,7 +88,7 @@ describe('accounts dialog', () => {
     const field = await within(dialog).findByLabelText('发件人名称')
     fireEvent.change(field, { target: { value: 'bad' } })
     fireEvent.blur(field)
-    expect(await within(dialog).findByText('发件人名称不能包含控制字符。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('配置参数无效，请检查标记的字段。')).toBeInTheDocument()
     expect(field).toHaveAttribute('aria-invalid', 'true')
   })
 
@@ -94,7 +108,7 @@ describe('accounts dialog', () => {
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '红' }))
     expect(await within(dialog).findByText('资料未保存')).toBeInTheDocument()
-    expect(within(dialog).getByText('无法写入本机数据。')).toBeInTheDocument()
+    expect(within(dialog).getByText('无法读写本地数据，请检查可用空间与访问权限。')).toBeInTheDocument()
   })
 
   it('saves a name typed but not committed when switching accounts', async () => {
@@ -134,7 +148,7 @@ describe('accounts dialog', () => {
     const stopped = exampleSyncState({ phase: 'failed', failure: { code: 'authentication', message: '服务器拒绝了登录。', detail: null, willRetry: false } })
     const again = renderDialog([exampleAccount()], {}, testClient([exampleAccount()]), { [exampleAccount().id]: stopped })
     expect(await within(again.dialog).findByText('同步已停止')).toBeInTheDocument()
-    expect(within(again.dialog).getByText(/服务器拒绝了登录/)).toBeInTheDocument()
+    expect(within(again.dialog).getByText(/邮箱服务器拒绝了账号登录/)).toBeInTheDocument()
   })
 
   it('shows an empty state with an add button when there are no accounts', async () => {

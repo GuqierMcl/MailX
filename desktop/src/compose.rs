@@ -49,7 +49,6 @@ const MIN_HEIGHT: f64 = 420.0;
 const CASCADE_STEP: f64 = 32.0;
 /// Composers cascade over this many positions, then start again.
 const CASCADE_SLOTS: usize = 8;
-const NEW_MAIL_TITLE: &str = "新邮件";
 
 /// Close bookkeeping shared by all windows.
 #[derive(Default)]
@@ -209,11 +208,16 @@ pub(crate) async fn drafts_create_from(
     let args = authorize(&window, "drafts_create_from")
         .and_then(|_| parse::<RequestArgs<CreateDraftFromRequest>>(request.body()));
     Ok(respond(match args {
-        Ok(args) => {
-            state
-                .run(move |core| core.create_draft_from(args.request))
-                .await
-        }
+        Ok(args) => match state.settings(|store| store.get()).await {
+            Ok(snapshot) => {
+                state
+                    .run(move |core| {
+                        core.create_draft_from_localized(args.request, snapshot.effective_locale)
+                    })
+                    .await
+            }
+            Err(error) => Err(error),
+        },
         Err(error) => Err(error),
     }))
 }
@@ -500,9 +504,13 @@ fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid, fresh: bool) -> tauri::
     let slot = composer_windows(app).len();
     let navigation_app = app.clone();
     let url = composer_url(draft_id, fresh);
+    let locale = app
+        .try_state::<DesktopState>()
+        .and_then(|state| state.notification_settings().map(|(_, locale)| locale))
+        .unwrap_or_else(crate::locale::system_locale);
     let builder = window_chrome::style_builder(
         WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
-            .title(NEW_MAIL_TITLE)
+            .title(locale.new_mail_title())
             .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
             .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
             .visible(false)

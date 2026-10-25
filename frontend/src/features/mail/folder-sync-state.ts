@@ -1,5 +1,6 @@
 import type { Account, AccountSyncState, Folder } from '@/generated/accounts'
 import type { ListSyncStatus } from './email-list'
+import { errorText } from '@/i18n/errors'
 
 /** The snapshot query and event delivery may complete in either order. */
 export function acceptsSyncState(account: Pick<Account, 'mailboxSourceId'>, previous: AccountSyncState | undefined, next: AccountSyncState) {
@@ -15,7 +16,7 @@ export function folderSyncStatus(folders: Folder[], states: Record<string, Accou
     const failure = accounts.find((state) => state.phase === 'failed')?.failure
     const phase = failure ? 'failed' : accounts.some((state) => state.phase === 'syncing') ? 'syncing'
       : accounts.length > 0 && accounts.every((state) => state.phase === 'idle') ? 'idle' : 'waiting'
-    return { phase, failure: failure?.message ?? null, windowCapped }
+    return { phase, failure: failure ? errorText(failure) : null, windowCapped }
   }
   const scoped = folders.map((folder) => {
     const account = states[folder.accountId]
@@ -28,5 +29,5 @@ export function folderSyncStatus(folders: Folder[], states: Record<string, Accou
   const failed = scoped.find((state) => state.phase === 'failed')
   const phase = failed ? 'failed' : scoped.some((state) => state.phase === 'syncing') ? 'syncing'
     : scoped.length === 0 || scoped.some((state) => state.phase === 'waiting') ? 'waiting' : 'idle'
-  return { phase, failure: failed?.failure?.message ?? null, windowCapped }
+  return { phase, failure: failed?.failure ? errorText(failed.failure) : null, windowCapped }
 }

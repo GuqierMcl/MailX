@@ -11,6 +11,7 @@ pub mod drafts;
 pub mod error;
 pub mod events;
 mod imap;
+pub mod localization;
 pub mod mail;
 mod net;
 pub mod secrets;
@@ -30,13 +31,15 @@ pub use app::{
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
+pub use localization::{LanguagePreference, SupportedLocale};
 pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, ComposeSettings, FontSize, LayoutSettings, MailTheme,
-    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
-    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    AppSettings, AppearanceSettings, ComposeSettings, FontSize, GeneralSettings, LayoutSettings,
+    MailTheme, NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy,
+    SecuritySettings, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
+    mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
