@@ -1,9 +1,28 @@
+use std::sync::Arc;
+
 use mailx_core::secrets::{SecretStore, SecretStoreError, SecretValue};
 
 /// Only native, durable credential stores are enabled in Cargo.toml. Never use
 /// keyring's mock/default fallback as a production backend.
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("MailX needs a native SecretStore adapter on this platform");
+
+/// The credential store the application uses. macOS asks for permission per
+/// keychain item, so there every secret lives in one item (see `secret_vault`);
+/// Windows and Linux have no such per-item prompt and keep one item per secret.
+pub(crate) fn system_store(service: String) -> Arc<dyn SecretStore> {
+    let per_item = SystemSecretStore::new(service);
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(crate::secret_vault::VaultSecretStore::new(Arc::new(
+            per_item,
+        )))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Arc::new(per_item)
+    }
+}
 
 pub(crate) struct SystemSecretStore {
     service: String,
@@ -74,6 +93,55 @@ mod tests {
             std::io::Error::other("synthetic-secret"),
         )));
         assert_eq!(error, SecretStoreError::Unavailable);
+    }
+
+    /// Explicit opt-in: the vault on top of the real macOS keychain. It writes a
+    /// synthetic legacy item, then checks the lazy migration, the next-start
+    /// cleanup and deletion, and removes everything it created.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires an unlocked native credential store"]
+    fn native_vault_migrates_and_cleans_up() {
+        use crate::secret_vault::VaultSecretStore;
+        let service = format!("com.mailxapp.test.{}", uuid::Uuid::new_v4());
+        let per_item = || Arc::new(SystemSecretStore::new(service.clone()));
+        let key = "mailx/synthetic/entry";
+        let secret = SecretValue::new(uuid::Uuid::new_v4().to_string());
+        let result = (|| {
+            per_item().set(key, &secret)?;
+            let first = VaultSecretStore::new(per_item());
+            assert_eq!(
+                first
+                    .get(key)?
+                    .ok_or(SecretStoreError::Failed)?
+                    .expose_secret(),
+                secret.expose_secret()
+            );
+            assert!(
+                per_item().get(key)?.is_some(),
+                "old item kept for one start"
+            );
+            let second = VaultSecretStore::new(per_item());
+            assert_eq!(
+                second
+                    .get(key)?
+                    .ok_or(SecretStoreError::Failed)?
+                    .expose_secret(),
+                secret.expose_secret()
+            );
+            assert!(
+                per_item().get(key)?.is_none(),
+                "old item removed next start"
+            );
+            second.delete(key)?;
+            assert!(VaultSecretStore::new(per_item()).get(key)?.is_none());
+            Ok::<_, SecretStoreError>(())
+        })();
+        // Cleanup of the synthetic items, whatever happened above.
+        let raw = per_item();
+        raw.delete(key).expect("synthetic item removed");
+        raw.delete("vault").expect("synthetic vault removed");
+        result.expect("native vault roundtrip succeeded");
     }
 
     /// Explicit opt-in: creates and removes a synthetic native-store entry.
