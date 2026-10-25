@@ -546,9 +546,7 @@ impl Storage {
                         .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(3, size))?;
                     Ok(AttachmentSummary {
                         id: format!("{id}:{index}"),
-                        filename: row
-                            .get::<_, Option<String>>(1)?
-                            .unwrap_or_else(|| "未命名附件".into()),
+                        filename: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         mime_type: row.get(2)?,
                         size,
                         is_inline: false,
