@@ -125,7 +125,7 @@ pub(super) async fn sync_folder(
     let previous = memory.remove(folder_id);
     let account_id = &token.account_id;
     let source = &token.source;
-    let status = session.status(remote_name).await?;
+    let (status, examined) = session.status_or_examine(remote_name).await?;
     let id = account_id.to_owned();
     let source_id = source.to_owned();
     let folder = folder_id.to_owned();
@@ -143,7 +143,10 @@ pub(super) async fn sync_folder(
         return Ok(());
     }
 
-    let mailbox = session.examine(remote_name).await?;
+    let mailbox = match examined {
+        Some(mailbox) => mailbox,
+        None => session.examine(remote_name).await?,
+    };
     let target = SyncTarget {
         account_id: account_id.to_owned(),
         mailbox_source_id: source.to_owned(),

@@ -1153,6 +1153,80 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
 }
 
 #[tokio::test]
+async fn lossy_status_name_still_syncs_headers_and_preserves_the_status_fast_path() {
+    let fixture = fixture();
+    let mut memory = FolderMemory::new();
+    let mut first = commands(21, &[2, 3]);
+    first[2].1 =
+        "* STATUS \"???\" (MESSAGES 999 UNSEEN 888 UIDNEXT 999 UIDVALIDITY 999)\r\n{tag} OK\r\n"
+            .into();
+    first.insert(
+        4,
+        (
+            "UID SEARCH UNSEEN".into(),
+            "* SEARCH 2\r\n{tag} OK\r\n".into(),
+        ),
+    );
+    add_headers(&mut first, &[(2, "Unread"), (3, "Other")]);
+    let (result, changed) = run_with(&fixture, first.clone(), true, &mut memory).await;
+    result.unwrap();
+    assert!(changed);
+    {
+        let service = fixture.service.lock().unwrap();
+        let folders = service.list_folders(&fixture.account_id).unwrap();
+        assert!(folders[0].counts_known);
+        assert_eq!((folders[0].total_count, folders[0].unread_count), (2, 1));
+        let page = service.list_emails(&EmailListQuery::default()).unwrap();
+        assert_eq!(page.items.len(), 2);
+        let folder = &service
+            .sync_folders(&fixture.account_id, &fixture.source)
+            .unwrap()[0]
+            .0;
+        let target = crate::accounts::messages::SyncTarget {
+            account_id: fixture.account_id.clone(),
+            mailbox_source_id: fixture.source.clone(),
+            folder_id: folder.clone(),
+            uid_validity: 21,
+        };
+        assert_eq!(service.cached_uids(&target).unwrap().len(), 2);
+    }
+    // The fallback already opened the folder. No second EXAMINE is needed,
+    // and an unchanged round still skips the window search and flag fetches.
+    first.truncate(5);
+    let (result, changed) = run_with(&fixture, first, true, &mut memory).await;
+    result.unwrap();
+    assert!(!changed);
+}
+
+#[tokio::test]
+async fn failed_status_fallback_preserves_counts_and_cached_headers() {
+    let fixture = fixture();
+    let mut first = commands(21, &[2, 3]);
+    add_headers(&mut first, &[(2, "Old"), (3, "Kept")]);
+    run(&fixture, first, true).await.unwrap();
+
+    let mut failed = commands(21, &[]);
+    failed[2].1 = "{tag} OK\r\n".into();
+    failed.truncate(4);
+    failed.push(("UID SEARCH UNSEEN".into(), "{tag} OK\r\n".into()));
+    assert!(run(&fixture, failed, false).await.is_err());
+    let service = fixture.service.lock().unwrap();
+    let folders = service.list_folders(&fixture.account_id).unwrap();
+    assert_eq!(
+        folders[0].total_count, 2,
+        "failed fallback is not an empty folder"
+    );
+    assert_eq!(
+        service
+            .list_emails(&EmailListQuery::default())
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn an_unchanged_folder_skips_the_full_round_and_reports_no_change() {
     let fixture = fixture();
     let mut memory = FolderMemory::new();
