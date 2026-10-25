@@ -11,6 +11,8 @@ mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
 mod state;
+#[cfg(not(feature = "body-webview-test"))]
+mod storage_location;
 mod window_access;
 mod window_chrome;
 
@@ -66,12 +68,24 @@ fn main() {
             }
             #[cfg(not(feature = "body-webview-test"))]
             {
-                let data_dir = app.path().app_data_dir().map_err(|_| {
-                    mailx_core::AppError::new(mailx_core::ErrorCode::StorageUnavailable)
-                });
-                let secrets = Arc::new(secret_store::SystemSecretStore::new(
-                    app.config().identifier.clone(),
-                ));
+                let storage = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|_| {
+                        mailx_core::AppError::new(mailx_core::ErrorCode::StorageUnavailable)
+                    })
+                    .and_then(|dir| {
+                        storage_location::storage(
+                            &dir,
+                            std::env::var_os(storage_location::DATA_DIR_OVERRIDE).as_deref(),
+                        )
+                    });
+                let secret_service = storage
+                    .as_ref()
+                    .map(|storage| storage.secret_service.clone())
+                    .unwrap_or_else(|_| storage_location::SECRET_SERVICE.to_owned());
+                let data_dir = storage.map(|storage| storage.data_dir);
+                let secrets = Arc::new(secret_store::SystemSecretStore::new(secret_service));
                 // Sync and write-back events only hint the UI to refetch or
                 // tell the user something; a lost one is harmless.
                 let handle = app.handle().clone();

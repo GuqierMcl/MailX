@@ -80,7 +80,7 @@ mod tests {
     #[test]
     #[ignore = "requires an unlocked native credential store"]
     fn native_secret_store_roundtrip() {
-        let store = SystemSecretStore::new(format!("dev.mailx.test.{}", uuid::Uuid::new_v4()));
+        let store = SystemSecretStore::new(format!("com.mailxapp.test.{}", uuid::Uuid::new_v4()));
         let key = "synthetic-entry";
         let value = SecretValue::new(uuid::Uuid::new_v4().to_string());
         assert!(store.get(key).expect("native store readable").is_none());
