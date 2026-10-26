@@ -1,6 +1,6 @@
 # 桌面应用内更新
 
-状态：**设计已确认，未实现**（2026-10-27）。本文记录检查时机、网络路径、发版规则、签名与交互的已确认决定；实现落地后把状态改为已实现，并补充验证记录。
+状态：**已实现，未做过真实端到端更新**（设计确认于 2026-10-27）。本文记录检查时机、网络路径、发版规则、签名与交互的已确认决定与实现；验证记录见第 10 节，没有实测的部分在那里如实列出。
 
 ## 1. 目标与边界
 
@@ -52,7 +52,13 @@
 ## 5. 网络路径
 
 - 更新请求由桌面宿主发出，走应用自己的 HTTP 客户端（`tauri-plugin-updater` 内置），**不经过核心的账号路由，也不读取任何账号的代理设置**。账号代理只服务该账号的邮件协议连接。
-- 应遵循系统代理；TUN 在网络层生效，无需处理。插件所用 HTTP 库是否默认读取系统代理，必须在实现时对锁定版本的源码核实并记录结论，不能凭印象；若不读取，需显式配置后再接入。
+- 应遵循系统代理；TUN 在网络层生效，无需处理。**对锁定版本源码的核实结论**（`tauri-plugin-updater` 2.14.0、`reqwest` 0.13.5、`hyper-util` 0.1.21，源码在 `~/.cargo/registry/src/*/` 下）：**macOS 与 Windows 默认读取系统代理，无需额外配置**。
+  - `tauri-plugin-updater-2.14.0/Cargo.toml` 的默认特性含 `system-proxy`，它打开 `reqwest/system-proxy`；`desktop/Cargo.toml` 使用默认特性，未关闭。
+  - `tauri-plugin-updater-2.14.0/src/updater.rs:584`、`:842`：用 `ClientBuilder::new()` 建客户端，只有显式配置 `no_proxy` / `proxy` 才改变行为（`:35-41`），本应用不配置。
+  - `reqwest-0.13.5/src/async_impl/client.rs:310`：`auto_sys_proxy` 默认 `true`；`:417-418`：为真时追加 `ProxyMatcher::system()`。
+  - `hyper-util-0.1.21/src/client/proxy/matcher.rs:238-247`（`from_system`）：先读环境变量（`HTTPS_PROXY` / `NO_PROXY` 等），再按平台读系统设置——macOS 走 `mac::with_system`（SystemConfiguration 的代理设置），Windows 走 `win::with_system`（注册表 Internet Settings）。
+  - **Linux 只读环境变量**，不读桌面环境（GNOME / KDE）的代理设置；Linux 用户需要代理时应通过 `HTTPS_PROXY` 启动应用。这是结论，不是已验证的行为（本机未在 Linux 上运行）。
+  - 宿主不使用 `core/src/net`，也不读任何账号的代理；自定义账号代理失败“不得回退直连”的规则只约束邮件协议连接，与更新请求无关。
 - 只请求 `github.com` 的 Release 下载地址（含其重定向目标）；不新增其他域名。
 
 ## 6. 检查时机
@@ -140,3 +146,13 @@
 - **工作流**：先用手动触发验证签名能成功、`.sig` 与 `latest.json` 生成正确，再打标签。
 - **手动端到端**：装一个带更新器的旧版本，发布一个更高版本的普通 Release，验证检查、下载、立即重启、退出时安装在 macOS 与 Windows 上各走通一次；Linux AppImage 能做则做，未做如实记录。
 - 自动测试通过不等于真实更新已验证；未实测的平台在文档中写明。
+
+## 11. 服务端兼容
+
+状态：**规划，未实现**。未来服务器 / Web 版只做“提示有新版本并显示更新说明”，不下载、不安装；界面上用 `canInstall: false` 表达这一点。
+
+- **能力开关而不是写死安装**：宿主发给前端的更新状态带 `canInstall`（桌面端为 `true`）。前端所有更新界面（标题栏图标、弹窗、通知、关于页）都经 `MailxClient` 取状态，并按 `canInstall` 分支：为 `false` 时弹窗只有版本、渲染后的更新说明和“在 GitHub 查看”链接，没有下载 / 重启按钮与进度，标题栏图标只会出现“有新版本”一种状态。前端测试覆盖了 `canInstall: false` 不出现任何下载 / 安装控件。
+- **检查由服务端进程发起，浏览器不检查**：避免把访问者的 IP 暴露给 GitHub（隐私），也不需要放宽页面的 CSP。检查沿用标准代理环境变量（`HTTPS_PROXY` / `NO_PROXY` 等），不使用任何邮箱账号的代理。
+- **可由服务端配置关闭自动检查**：离线或自托管部署必须能关掉，不留任何出站请求。
+- **读同一份 `latest.json`**：服务端只读 `version`、`notes`（可选 `pub_date`），不要求 `platforms`；版本比较与清单解析是桌面宿主里不依赖 Tauri 的纯函数（`desktop/src/updater/policy.rs`），日后可原样移到 `core` 供服务端使用，当前**没有**移动。
+- **统一版本号的副作用**：只改桌面端的发布也会让服务端用户收到“有新版本”。CHANGELOG 条目可以用 `[桌面端]` / `[服务端]` 前缀，让更新说明里一眼看出与自己有无关系。
