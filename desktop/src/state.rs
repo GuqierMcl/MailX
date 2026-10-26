@@ -173,6 +173,13 @@ impl DesktopState {
         Some((snapshot.settings.notifications, snapshot.effective_locale))
     }
 
+    /// Whether the periodic update check is on. Read fresh on every tick so
+    /// the switch in Settings takes effect without a restart.
+    pub(crate) async fn auto_check_updates(&self) -> Result<bool, AppError> {
+        self.settings(|store| Ok(store.get()?.settings.general.auto_check_updates))
+            .await
+    }
+
     fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {
         let mut slot = self
             .0

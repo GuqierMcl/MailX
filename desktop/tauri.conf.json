@@ -30,6 +30,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "targets": ["dmg", "nsis", "deb", "rpm", "appimage"],
     "category": "Productivity",
@@ -42,6 +43,15 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwREUwOEM5RUQ5RUE4RTkKUldUcHFKN3R5UWplc0s3WjdwUGRCNDlXTnFWdjcxQmN4c3UzeXpveVpFeHB2dlRxYWFHVzl3c0EK",
+      "endpoints": ["https://github.com/GuqierMcl/MailX/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   },
   "version": "../package.json"
 }

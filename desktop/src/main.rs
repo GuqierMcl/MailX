@@ -16,6 +16,8 @@ mod secret_vault;
 mod state;
 #[cfg(not(feature = "body-webview-test"))]
 mod storage_location;
+#[cfg_attr(feature = "body-webview-test", allow(dead_code))]
+mod updater;
 mod window_access;
 mod window_chrome;
 
@@ -44,6 +46,8 @@ fn main() {
     }));
     #[cfg(not(feature = "body-webview-test"))]
     let builder = builder.plugin(tauri_plugin_notification::init());
+    #[cfg(not(feature = "body-webview-test"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .append_invoke_initialization_script(include_str!("subframe_guard.js"))
@@ -140,6 +144,8 @@ fn main() {
                 let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
                 app.manage(compose::Lifecycle::default());
+                app.manage(updater::UpdaterState::default());
+                updater::start_scheduler(app.handle());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
                 state.start_initialization();
@@ -193,6 +199,12 @@ fn main() {
             compose::outbox_resolve_unknown,
             compose::composer_open,
             compose::composer_close,
+            updater::updater_get_state,
+            updater::updater_check,
+            updater::updater_download,
+            updater::updater_cancel,
+            updater::updater_restart,
+            updater::updater_open_link,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the MailX desktop host")
@@ -206,6 +218,12 @@ fn main() {
                 && compose::main_close_requested(_app)
             {
                 api.prevent_exit();
+            }
+            // Every window is gone and every composer has saved: install a
+            // downloaded update now, and relaunch when the user asked to.
+            #[cfg(not(feature = "body-webview-test"))]
+            if matches!(_event, tauri::RunEvent::Exit) {
+                updater::on_exit(_app);
             }
         });
 }

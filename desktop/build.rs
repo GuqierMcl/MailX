@@ -43,6 +43,12 @@ fn main() {
             "outbox_resolve_unknown",
             "composer_open",
             "composer_close",
+            "updater_get_state",
+            "updater_check",
+            "updater_download",
+            "updater_cancel",
+            "updater_restart",
+            "updater_open_link",
         ]),
     ))
     .expect("failed to prepare the MailX desktop host");
