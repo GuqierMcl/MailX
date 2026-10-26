@@ -147,6 +147,18 @@
 - **手动端到端**：装一个带更新器的旧版本，发布一个更高版本的普通 Release，验证检查、下载、立即重启、退出时安装在 macOS 与 Windows 上各走通一次；Linux AppImage 能做则做，未做如实记录。
 - 自动测试通过不等于真实更新已验证；未实测的平台在文档中写明。
 
+### 验证记录（2026-10-27，macOS arm64 开发机）
+
+已运行并通过：`bun run check`（含 `version:check`、`i18n:check`、`types:check`、`typecheck`、`lint`、前端测试、`build`）、`bun run version:test`（含 `scripts/updater-manifest.test.mjs`）、`cargo fmt`、`clippy -D warnings`、`cargo test --workspace --locked`（含宿主 `updater` 的状态机 / 日程 / 版本 / 清单解析 / 链接白名单测试与窗口白名单表）、`actionlint`、`git diff --check`。
+
+`bun run tauri build` 的实际结果：
+
+- `bundle.targets` 在 macOS 上原本只有 `dmg`，此时**不会**生成 `.app.tar.gz`。已加入 `app` 目标（实现中的唯一偏离：规格要求保持 targets 不变，但没有它就没有 macOS 更新包）。
+- 加入后构建产出 `MailX.app`、`MailX_0.1.0-alpha.2_aarch64.dmg` 和 `MailX.app.tar.gz (updater)`，随后因缺少私钥报 `A public key has been found, but no private key. Make sure to set TAURI_SIGNING_PRIVATE_KEY`，**命令以退出码 1 结束，没有生成 `.sig`**。没有用任何密钥绕过。
+- 因此没有私钥的本地构建需要关闭更新包：`bun run tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'`（已确认退出码 0，只产出 `.app` 与 `.dmg`）。CI 在 `release` 环境里提供密钥。
+
+**未验证**：任何真实的端到端更新（检查 → 下载 → 验签 → 安装 → 重启）；签名后的构建与 `.sig`；Windows（NSIS 被动安装模式、安装时进程退出）与 Linux（AppImage 替换）上的行为与更新包文件名（`-setup.exe` / `.AppImage` 的名称与 `latest.json` 匹配规则按 Tauri 2 的文档约定编写，未在 CI 上见过实际产物）；系统代理在 Windows / Linux 上的实际表现（仅核对了源码）；`release` 环境、工作流整体与 `latest.json` 的生成（只有脚本单测与 `actionlint`，没有跑过工作流）。真实服务商网络环境下的下载取消、中途断网也没有实测。
+
 ## 11. 服务端兼容
 
 状态：**规划，未实现**。未来服务器 / Web 版只做“提示有新版本并显示更新说明”，不下载、不安装；界面上用 `canInstall: false` 表达这一点。

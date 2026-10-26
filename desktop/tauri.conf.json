@@ -32,7 +32,7 @@
   "bundle": {
     "createUpdaterArtifacts": true,
     "active": true,
-    "targets": ["dmg", "nsis", "deb", "rpm", "appimage"],
+    "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
     "category": "Productivity",
     "shortDescription": "本地优先的 AI 原生邮件工作台",
     "icon": [

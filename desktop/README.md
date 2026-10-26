@@ -29,7 +29,7 @@ bun run tauri dev
 
 `desktop/tauri.conf.json` 的 `beforeDevCommand` / `beforeBuildCommand` 分别调用根目录工作区中的前端脚本，`devUrl` 指向 Vite 的 `5173` 端口，`frontendDist` 指向 `../frontend/dist`。`scripts/tauri.mjs` 让根目录命令在配置文件位于 `desktop/` 子目录时仍能正确调用 Tauri CLI。账号界面经统一 MailxClient 调用 IPC，领域类型由 Rust 生成；契约仍可随实现演化。
 
-应用标识为 `com.mailxapp.desktop`（对应域名 `mailxapp.com`）；Cargo 包名、命令行别名和镜像名称尚未作为正式命名冻结。`bundle.active` 为 `true`，`bundle.createUpdaterArtifacts` 让构建额外产出可自更新的 `.app.tar.gz` / NSIS / `.AppImage` 与对应 `.sig`，发版由 `.github/workflows/release.yml` 生成未签名的安装包和 `latest.json`，流程见[发版流程](../docs/development/release.md)。`plugins.updater` 的内置公钥只能验证对应私钥签出的包：没有私钥的本地构建不会产生 `.sig`，`bun run tauri build` 会报签名相关的错误或直接跳过。用户数据目录和系统凭据 service 都不依赖 identifier，所以以后调整标识不会让已有账号和邮件缓存消失；但 Tauri 自己按 identifier 命名的 WebView 存储、缓存和窗口位置文件会随标识变化而重建。
+应用标识为 `com.mailxapp.desktop`（对应域名 `mailxapp.com`）；Cargo 包名、命令行别名和镜像名称尚未作为正式命名冻结。`bundle.active` 为 `true`，`bundle.createUpdaterArtifacts` 让构建额外产出可自更新的 `.app.tar.gz` / NSIS / `.AppImage` 与对应 `.sig`，发版由 `.github/workflows/release.yml` 生成未签名的安装包和 `latest.json`，流程见[发版流程](../docs/development/release.md)。`plugins.updater` 的内置公钥只能验证对应私钥签出的包：没有私钥时，`bun run tauri build` 会在生成 `.app.tar.gz` 之后因缺少 `TAURI_SIGNING_PRIVATE_KEY` 以退出码 1 结束；本地构建可加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'`。macOS 的 `bundle.targets` 因此包含 `app`（否则不会生成更新包）。用户数据目录和系统凭据 service 都不依赖 identifier，所以以后调整标识不会让已有账号和邮件缓存消失；但 Tauri 自己按 identifier 命名的 WebView 存储、缓存和窗口位置文件会随标识变化而重建。
 
 更新主 Logo 后，在仓库根目录运行 `bun run icons:generate`，再用 `bun run icons:check` 验证生成文件。不要手工修改 `icons/` 下的派生资源；托盘资源的存在不代表托盘功能已开启。完整目录与使用方式见[品牌资源说明](../branding/README.md)。
 
