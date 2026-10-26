@@ -241,6 +241,9 @@ pub struct GeneralSettings {
     #[ts(type = "LanguagePreference")]
     #[serde(deserialize_with = "deserialize_language")]
     pub language: String,
+    /// Check for a new version shortly after start and every few hours. Off,
+    /// only the manual check in Settings → About runs.
+    pub auto_check_updates: bool,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -256,6 +259,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             language: "system".into(),
+            auto_check_updates: true,
         }
     }
 }
@@ -390,7 +394,10 @@ impl AppSettings {
             general: if valid_language(&self.general.language) {
                 self.general
             } else {
-                GeneralSettings::default()
+                GeneralSettings {
+                    auto_check_updates: self.general.auto_check_updates,
+                    ..GeneralSettings::default()
+                }
             },
             security: self.security,
             notifications,
@@ -673,7 +680,16 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                     _ => "system",
                 }
                 .to_owned();
+                // Only the language is normalized; other fields keep their
+                // stored value and fall back to their own default if invalid.
+                let auto_check = general
+                    .get("autoCheckUpdates")
+                    .filter(|value| value.is_boolean())
+                    .cloned();
                 *general = serde_json::json!({"language": value});
+                if let (Some(general), Some(auto_check)) = (general.as_object_mut(), auto_check) {
+                    general.insert("autoCheckUpdates".into(), auto_check);
+                }
             }
         }
     }

@@ -102,6 +102,7 @@ fn language_commit_is_versioned_and_invalid_input_leaves_it_untouched() {
         .patch(SettingsPatch {
             general: Some(GeneralSettings {
                 language: "en".into(),
+                ..GeneralSettings::default()
             }),
             ..Default::default()
         })
@@ -112,6 +113,7 @@ fn language_commit_is_versioned_and_invalid_input_leaves_it_untouched() {
         .patch(SettingsPatch {
             general: Some(GeneralSettings {
                 language: "xx".into(),
+                ..GeneralSettings::default()
             }),
             ..Default::default()
         })
@@ -153,7 +155,8 @@ fn failed_disk_commit_does_not_publish_a_new_language_or_revision() {
         store
             .patch(SettingsPatch {
                 general: Some(GeneralSettings {
-                    language: "en".into()
+                    language: "en".into(),
+                    ..GeneralSettings::default()
                 }),
                 ..Default::default()
             })
@@ -329,7 +332,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "general": { "language": "system" },
+                "general": { "language": "system", "autoCheckUpdates": true },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -718,4 +721,47 @@ fn hand_edited_invalid_compose_values_fall_back_to_defaults() {
         .compose;
     assert_eq!(compose.undo_send_seconds, 0);
     assert_eq!(compose.default_account_id, "keep-me");
+}
+
+#[test]
+fn update_check_preference_defaults_on_and_survives_language_recovery() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join(SETTINGS_FILE_NAME);
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"}}}"#,
+    )
+    .unwrap();
+    let legacy = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(legacy.settings.general.auto_check_updates);
+
+    for general in [
+        r#"{"language":"zh-CN","autoCheckUpdates":false}"#,
+        r#"{"language":"xx","autoCheckUpdates":false}"#,
+        r#"{"autoCheckUpdates":false}"#,
+    ] {
+        let text = format!(r#"{{"version":1,"settings":{{"general":{general}}}}}"#);
+        fs::write(&path, text).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.settings.general.auto_check_updates, "{general}");
+        assert!(!snapshot.recovered);
+    }
+
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"general":{"language":"en","autoCheckUpdates":"no"}}}"#,
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(snapshot.settings.general.language, "en");
+    assert!(snapshot.settings.general.auto_check_updates);
 }
