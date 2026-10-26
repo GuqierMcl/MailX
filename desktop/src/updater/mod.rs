@@ -117,6 +117,7 @@ async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> Updat
         Ok(_) => UpdateState::Idle,
         Err(()) if manual => UpdateState::Failed {
             stage: FailureStage::Check,
+            version: None,
         },
         Err(()) => UpdateState::Idle,
     };
@@ -174,6 +175,7 @@ async fn run_download(app: AppHandle, state: UpdaterState, update: Update, gener
             }
             Err(_) => UpdateState::Failed {
                 stage: FailureStage::Download,
+                version: Some(version),
             },
         }
     };

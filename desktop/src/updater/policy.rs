@@ -46,6 +46,8 @@ pub(crate) enum UpdateState {
     },
     Failed {
         stage: FailureStage,
+        /// The version whose download failed, so the modal can still name it.
+        version: Option<String>,
     },
 }
 
@@ -64,7 +66,8 @@ impl UpdateState {
                 | Self::Downloading { .. }
                 | Self::Ready { .. }
                 | Self::Failed {
-                    stage: FailureStage::Download
+                    stage: FailureStage::Download,
+                    ..
                 }
         )
     }
@@ -74,7 +77,8 @@ impl UpdateState {
             self,
             Self::Available { .. }
                 | Self::Failed {
-                    stage: FailureStage::Download
+                    stage: FailureStage::Download,
+                    ..
                 }
         )
     }
@@ -291,7 +295,10 @@ mod tests {
     }
 
     fn failed(stage: FailureStage) -> UpdateState {
-        UpdateState::Failed { stage }
+        UpdateState::Failed {
+            stage,
+            version: None,
+        }
     }
 
     #[test]
@@ -383,7 +390,7 @@ mod tests {
         let json = serde_json::to_value(failed(FailureStage::Download)).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({"phase": "failed", "stage": "download"})
+            serde_json::json!({"phase": "failed", "stage": "download", "version": null})
         );
         assert_eq!(
             serde_json::to_value(UpdateState::Idle).unwrap(),

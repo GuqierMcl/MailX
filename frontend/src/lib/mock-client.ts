@@ -307,6 +307,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
     onAppClosing: () => () => undefined,
     onComposerCloseRequested: () => () => undefined,
+    // The browser preview has no updater: it announces a version but cannot install one.
+    getUpdateState: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
+    checkForUpdates: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
+    downloadUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
+    cancelUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
+    restartToUpdate: async () => { throw new MailxClientError({ code: 'unsupported', message: '当前版本尚不支持此认证方式。', field: null }) },
+    openUpdateLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
+    onUpdateState: () => () => undefined,
     getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
     async onSettingsChanged(listener) {
       const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })
@@ -350,6 +358,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
   }
 }
+
+/** Preview-only release notes, shaped like a real `latest.json` section. */
+const PREVIEW_UPDATE = {
+  version: '0.1.0-alpha.3',
+  current: '0.1.0-alpha.2',
+  date: Math.floor(Date.parse('2026-11-01T08:00:00Z') / 1000),
+  notes: `## 新功能\n\n- 应用内更新：发现新版本后可在设置里查看说明并下载\n- **写信附件** 与 **已发送副本** 的列表展示\n- 修复未命名附件显示为空白的问题\n\n> 预览页面只展示说明，不能安装更新。\n\n\`bun run check\` 通过。`,
+} as const
 
 const missing = { code: 'notFound', message: '内容不存在。', field: null } as const
 
