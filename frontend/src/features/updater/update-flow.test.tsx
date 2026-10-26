@@ -20,14 +20,14 @@ const titleBarLabel = () => document.querySelector('[data-slot="title-bar-traili
 function setup(initial: UpdateSnapshot, options: { canInstall?: boolean } = {}) {
   const client = testClient()
   client.getUpdateState.mockResolvedValue(options.canInstall === undefined ? initial : { ...initial, canInstall: options.canInstall } as UpdateSnapshot)
-  let emit = (_state: UpdateSnapshot) => undefined
-  client.onUpdateState.mockImplementation((listener) => { emit = listener; return () => undefined })
+  const state: { emit: (next: UpdateSnapshot) => void } = { emit: () => undefined }
+  client.onUpdateState.mockImplementation((listener) => { state.emit = listener; return () => undefined })
   function Harness() {
     const { snapshot, openDialog } = useUpdater()
     return <><UpdateIndicator snapshot={snapshot} onOpen={openDialog} /></>
   }
   render(withTitleBar(<><Toaster /><UpdaterProvider client={client}><Harness /></UpdaterProvider></>))
-  return { client, emit: (state: UpdateSnapshot) => emit(state) }
+  return { client, emit: (next: UpdateSnapshot) => state.emit(next) }
 }
 
 describe('the update flow', () => {
@@ -99,8 +99,8 @@ describe('update notices', () => {
     try {
       const client = testClient()
       client.getUpdateState.mockResolvedValue({ canInstall: true, phase: 'idle' })
-      let emit = (_state: UpdateSnapshot) => undefined
-      client.onUpdateState.mockImplementation((listener) => { emit = listener; return () => undefined })
+      const state: { emit: (next: UpdateSnapshot) => void } = { emit: () => undefined }
+      client.onUpdateState.mockImplementation((listener) => { state.emit = listener; return () => undefined })
       function Manual() {
         const { check } = useUpdater()
         return <button type="button" onClick={() => void check()}>check</button>
@@ -108,12 +108,12 @@ describe('update notices', () => {
       render(withTitleBar(<><Toaster /><UpdaterProvider client={client}><Manual /></UpdaterProvider></>))
 
       // The automatic check finds 0.2.0: a toast, not the modal.
-      emit(available)
+      state.emit(available)
       expect(await screen.findByText('MailX 0.2.0 可用')).toBeInTheDocument()
       expect(screen.queryByRole('dialog', { name: 'MailX 0.2.0' })).not.toBeInTheDocument()
       // The same version again in the same run says nothing new.
-      emit({ canInstall: true, phase: 'checking' })
-      emit(available)
+      state.emit({ canInstall: true, phase: 'checking' })
+      state.emit(available)
       expect(screen.getAllByText('MailX 0.2.0 可用')).toHaveLength(1)
       // Closing the toast leaves the title-bar button.
       await userEvent.click(screen.getByRole('button', { name: '查看更新' }))
