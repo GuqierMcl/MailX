@@ -46,7 +46,7 @@
   }
   ```
 
-  文件名以实际构建产物为准；两个 macOS 架构的 `.app.tar.gz` 若同名，必须改名后再上传。缺任何一个平台都让工作流失败，不发出不完整的 `latest.json`。
+  文件名由 `scripts/release-assets.mjs` 统一改为 `MailX_<版本>_<平台><扩展名>`，平台取发布矩阵的名字（`macos-arm64`、`macos-x64`、`windows-x64`、`linux-x64`），`.sig` 跟随同名：`MailX_0.1.0-alpha.4_macos-arm64.dmg`、`MailX_0.1.0-alpha.4_windows-x64-setup.exe`、`MailX_0.1.0-alpha.4_macos-x64.app.tar.gz`。用户按操作系统选下载，架构只在名字里体现。缺任何一个平台都让工作流失败，不发出不完整的 `latest.json`。
 - 更新说明取自 `notes`：一次请求同时拿到版本与说明，不访问 GitHub API。在网页上修改 Release 正文不会同步到 `notes`，正本仍是 `CHANGELOG.md`。
 
 ## 5. 网络路径
