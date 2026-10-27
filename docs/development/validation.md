@@ -90,7 +90,7 @@ cargo build -p mailx-desktop --locked
 git diff --check
 ```
 
-`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。当前 `bundle.active=false`，它不代表已经生成安装包。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。账号核心及前端已有针对性测试，`cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。
+`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。它会生成本机平台的安装包；因为 `bundle.createUpdaterArtifacts` 打开，没有 `TAURI_SIGNING_PRIVATE_KEY` 时会在产出 `.app.tar.gz` 之后以退出码 1 结束，本地验证可加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 关闭更新包（签名与 `.sig` 只在 CI 的 `release` 环境里验证）。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。账号核心及前端已有针对性测试，`cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。
 
 ### 持续集成
 

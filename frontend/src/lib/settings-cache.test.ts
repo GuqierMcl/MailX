@@ -8,7 +8,7 @@ describe('settings snapshots and pending edits', () => {
   it('rejects a late response after a newer language was committed', async () => {
     const cache = createQueryClient()
     const old = await testClient().getSettings()
-    const latest: SettingsSnapshot = { ...old, revision: 2, effectiveLocale: 'en', settings: { ...old.settings, general: { language: 'en' } } }
+    const latest: SettingsSnapshot = { ...old, revision: 2, effectiveLocale: 'en', settings: { ...old.settings, general: { language: 'en', autoCheckUpdates: true } } }
     acceptSettingsSnapshot(cache, latest)
     acceptSettingsSnapshot(cache, old)
     expect(cache.getQueryData(settingsKeys.all)).toEqual(latest)
@@ -20,7 +20,7 @@ describe('settings snapshots and pending edits', () => {
     acceptSettingsSnapshot(cache, initial)
     const appearance = beginSettingsEdit(cache, 'appearance', { theme: 'dark' })
     const layout = beginSettingsEdit(cache, 'layout', { navWidth: 300 })
-    acceptSettingsSnapshot(cache, { ...initial, revision: 2, effectiveLocale: 'en', settings: { ...initial.settings, general: { language: 'en' } } })
+    acceptSettingsSnapshot(cache, { ...initial, revision: 2, effectiveLocale: 'en', settings: { ...initial.settings, general: { language: 'en', autoCheckUpdates: true } } })
     finishSettingsEdit(cache, appearance)
     const result = cache.getQueryData<SettingsSnapshot>(settingsKeys.all)!
     expect(result.settings.general.language).toBe('en')
@@ -43,7 +43,7 @@ describe('settings snapshots and pending edits', () => {
   it('rechecks a snapshot at the final query write when an event arrives in the intervening microtask', async () => {
     const cache = createQueryClient()
     const old = await testClient().getSettings()
-    const latest: SettingsSnapshot = { ...old, revision: 2, effectiveLocale: 'en', settings: { ...old.settings, general: { language: 'en' } } }
+    const latest: SettingsSnapshot = { ...old, revision: 2, effectiveLocale: 'en', settings: { ...old.settings, general: { language: 'en', autoCheckUpdates: true } } }
     await cache.fetchQuery({
       queryKey: settingsKeys.all,
       queryFn: async () => {

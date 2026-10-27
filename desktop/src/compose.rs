@@ -619,6 +619,13 @@ fn composer_close_requested(app: &AppHandle, label: &str) {
     });
 }
 
+/// A quit that waits for open composers to save first, like Cmd+Q does.
+pub(crate) fn request_quit(app: &AppHandle) {
+    if !main_close_requested(app) {
+        app.exit(0);
+    }
+}
+
 /// Returns whether the app's exit is held back (main window closed, or a
 /// quit from the menu / Cmd+Q). Without composers
 /// there is nothing to wait for and the app exits as it always did.

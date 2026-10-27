@@ -16,6 +16,7 @@
 - 按需下载并缓存邮件正文，在隔离的阅读视图中显示；支持已读 / 星标写回、附件保存与新邮件通知。
 - 富文本写信（Tiptap、本地草稿、回复与转发、独立写信窗口），经发送队列通过 SMTP 发信。
 - 中英文界面与语言设置：支持跟随系统，主窗口与写信窗口同步切换，新通知及新建回复 / 转发的引用使用所选语言。([#29](https://github.com/GuqierMcl/MailX/pull/29))
+- 应用内更新：启动约 30 秒后和之后每 6 小时检查一次新版本（可在设置中关闭自动检查）；发现新版本时标题栏出现提示，弹窗里可以阅读更新说明、下载并立即重启安装，或选择下次退出时安装。链接一律用系统浏览器打开。
 
 ### Optimization
 
@@ -31,6 +32,7 @@
 
 ### Changed
 
+- 更新说明（标题栏提示、更新弹窗与“关于”页）只在你点了“检查更新”或自动检查发现新版本时出现；自动检查失败时不打扰你，等下一轮再说。
 - 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。
 
 [Unreleased]: https://github.com/GuqierMcl/MailX/commits/main

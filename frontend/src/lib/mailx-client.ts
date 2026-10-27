@@ -30,6 +30,7 @@ import type {
   UpdateProfileRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
+import type { UpdateSnapshot } from '@/features/updater/types'
 
 export type ClientFailure = AppError | {
   code: 'hostUnavailable' | 'transport'
@@ -137,6 +138,22 @@ export interface MailxClient {
   onAppClosing(listener: () => void): () => void
   /** Composer window. The system asked to close it: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
   onComposerCloseRequested(listener: () => void): () => void
+
+  // --- Updates (docs/architecture/updater.md). Main window only.
+  /** The current update state, including whether this edition can install one. */
+  getUpdateState(): Promise<UpdateSnapshot>
+  /** Checks the release manifest now; a failure comes back as a `failed` snapshot. */
+  checkForUpdates(): Promise<UpdateSnapshot>
+  /** Starts downloading the version that was found; progress arrives through `onUpdateState`. */
+  downloadUpdate(): Promise<UpdateSnapshot>
+  /** Stops a download in progress and returns to `available`. */
+  cancelUpdate(): Promise<UpdateSnapshot>
+  /** Quits gracefully, installs, and relaunches. Refused (`alreadySending`) while mail is being sent. */
+  restartToUpdate(): Promise<UpdateSnapshot>
+  /** Opens a release-notes link in the system browser; the host accepts `https:` only. */
+  openUpdateLink(url: string): Promise<void>
+  /** Every change of the update state. */
+  onUpdateState(listener: (snapshot: UpdateSnapshot) => void): () => void
 }
 
 export type NotificationOpen = { accountId: string; emailId: string | null; outboxId?: string | null }
@@ -148,6 +165,7 @@ export const HOST_EVENTS = {
   appClosing: 'mailx://app-closing',
   composerCloseRequested: 'mailx://composer-close-requested',
   settingsChanged: 'mailx://settings-changed',
+  updater: 'mailx://updater-state',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -286,5 +304,12 @@ export function createDesktopClient(): MailxClient {
     onDrafts: (listener) => subscribe<DraftChanged>(HOST_EVENTS.drafts, listener),
     onAppClosing: (listener) => subscribe<void>(HOST_EVENTS.appClosing, () => listener()),
     onComposerCloseRequested: (listener) => subscribe<void>(HOST_EVENTS.composerCloseRequested, () => listener()),
+    getUpdateState: () => call<UpdateSnapshot>('updater_get_state'),
+    checkForUpdates: () => call<UpdateSnapshot>('updater_check'),
+    downloadUpdate: () => call<UpdateSnapshot>('updater_download'),
+    cancelUpdate: () => call<UpdateSnapshot>('updater_cancel'),
+    restartToUpdate: () => call<UpdateSnapshot>('updater_restart'),
+    openUpdateLink: (url) => call<void>('updater_open_link', { url }),
+    onUpdateState: (listener) => subscribe<UpdateSnapshot>(HOST_EVENTS.updater, listener),
   }
 }

@@ -666,7 +666,7 @@ describe('the folded reader survives a restart', () => {
   const toggle = () => screen.getByRole('button', { name: /^(收起|展开)邮件内容$/ })
   const savedLayout = (client: ReturnType<typeof setup>['client'], readerCollapsed: boolean) =>
     client.getSettings.mockResolvedValue({
-      settings: { ...DEFAULT_SETTINGS, general: { language: 'zh-CN' }, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, effectiveLocale: 'zh-CN', revision: 0, stored: true, recovered: false,
+      settings: { ...DEFAULT_SETTINGS, general: { language: 'zh-CN', autoCheckUpdates: true }, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, effectiveLocale: 'zh-CN', revision: 0, stored: true, recovered: false,
     })
 
   it('starts folded when it was left folded, and shown by default', async () => {

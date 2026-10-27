@@ -1,6 +1,9 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
+import { UpdaterProvider } from '@/features/updater/updater-provider'
+import { useUpdater } from '@/features/updater/updater-context'
+import { UpdateIndicator } from '@/features/updater/update-indicator'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { StartupGate } from '@/features/startup/startup-gate'
@@ -12,7 +15,7 @@ import {
   previewPlatformFromUrl,
 } from '@/features/window-chrome/window-host'
 import { isTauri } from '@tauri-apps/api/core'
-import { createDesktopClient } from '@/lib/mailx-client'
+import { createDesktopClient, type MailxClient } from '@/lib/mailx-client'
 import { windowRole } from '@/lib/composer-window'
 import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
@@ -76,13 +79,27 @@ function App() {
       <TitleBarSlotsProvider>
         <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
           <TitleBar host={windowHost} />
-          <ThemeToggle client={client} />
-          <div className="relative min-h-0 flex-1 overflow-auto">
-            <StartupGate client={client} />
-          </div>
+          {/* Encloses the gate too: Settings → About reads the update state. */}
+          <UpdaterProvider client={client}>
+            <UpdaterTitleBar client={client} />
+            <div className="relative min-h-0 flex-1 overflow-auto">
+              <StartupGate client={client} />
+            </div>
+          </UpdaterProvider>
         </div>
       </TitleBarSlotsProvider>
     </QueryClientProvider>
+  )
+}
+
+/** The update button and the theme toggle share the trailing slot, in that order. */
+function UpdaterTitleBar({ client }: { client: MailxClient }) {
+  const { snapshot, openDialog } = useUpdater()
+  return (
+    <>
+      <UpdateIndicator snapshot={snapshot} onOpen={openDialog} />
+      <ThemeToggle client={client} />
+    </>
   )
 }
 

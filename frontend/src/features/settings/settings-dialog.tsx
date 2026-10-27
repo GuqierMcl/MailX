@@ -22,6 +22,7 @@ import { NotificationsPane } from './notifications-pane'
 import { ComposePane } from './compose-pane'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { GeneralPane } from './general-pane'
+import { AutoCheckRow, UpdateStatusRow } from '@/features/updater/about-updates'
 
 export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'about'
 /** Where the dialog opens. */
@@ -95,7 +96,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
-              {section === 'about' && <AboutSection />}
+              {section === 'about' && <AboutSection client={client} />}
             </div>
           </main>
         </SidebarProvider>
@@ -104,7 +105,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
   )
 }
 
-function AboutSection() {
+function AboutSection({ client }: { client: MailxClient }) {
   useTranslation()
   return (
     <SettingsPage>
@@ -112,6 +113,8 @@ function AboutSection() {
         <SettingsRow label={t('settings:version')}>
           <span className="text-sm text-muted-foreground tabular-nums">{__APP_VERSION__}</span>
         </SettingsRow>
+        <UpdateStatusRow />
+        <AutoCheckRow client={client} />
       </SettingsGroup>
       <SettingsGroup title={t('settings:privacy')} description={t('settings:privacyDescription')}>
         <SettingsRow label={t('settings:dataLocation')} description={t('settings:dataLocationDescription')} />

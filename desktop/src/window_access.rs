@@ -104,6 +104,12 @@ const MAIN_ONLY: &[&str] = &[
     "outbox_retry_now",
     "outbox_resolve_unknown",
     "composer_open",
+    "updater_get_state",
+    "updater_check",
+    "updater_download",
+    "updater_cancel",
+    "updater_restart",
+    "updater_open_link",
 ];
 
 /// Commands both kinds may call.
@@ -321,6 +327,12 @@ mod tests {
             ("outbox_resolve_unknown", true, false),
             ("composer_open", true, false),
             ("composer_close", false, true),
+            ("updater_get_state", true, false),
+            ("updater_check", true, false),
+            ("updater_download", true, false),
+            ("updater_cancel", true, false),
+            ("updater_restart", true, false),
+            ("updater_open_link", true, false),
         ];
         for (command, by_main, by_composer) in table {
             assert_eq!(command_allowed(main, command), by_main, "main {command}");

@@ -286,7 +286,12 @@ export type LanguagePreference = "system" | "zh-CN" | "en";
 
 export type SupportedLocale = "zh-CN" | "en";
 
-export type GeneralSettings = { language: LanguagePreference, };
+export type GeneralSettings = { language: LanguagePreference,
+/**
+ * Check for a new version shortly after start and every few hours. Off,
+ * only the manual check in Settings → About runs.
+ */
+autoCheckUpdates: boolean, };
 
 export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
 
