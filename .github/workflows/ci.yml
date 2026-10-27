@@ -65,6 +65,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -90,13 +91,20 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # The package mirror is the one slow spot of this job: normally 30 seconds,
+      # but one run sat for 24 minutes on a stalled download. A download that
+      # receives nothing for 30 seconds is retried, and the step is capped so a
+      # bad mirror costs minutes, not the whole job.
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config
       # rustup reads rust-toolchain.toml and installs the pinned toolchain.
@@ -116,3 +124,51 @@ jobs:
         run: bun run types:check
       - run: bun run rust:clippy
       - run: bun run rust:test
+
+  # The one check the branch ruleset should require. A matrix job that is skipped
+  # reports a single unexpanded name ("Rust (${{ matrix.os }})"), never the three
+  # names the ruleset waits for, so requiring the matrix jobs directly leaves every
+  # docs-only pull request pending forever. This job always runs and decides:
+  #   - code changed: the frontend job and every Rust matrix job must have passed;
+  #   - documentation only: they must have been skipped (or passed);
+  #   - anything failed or was cancelled, or change detection broke: fail.
+  result:
+    name: CI result
+    needs: [changes, frontend, rust]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Judge the checks
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          FRONTEND: ${{ needs.frontend.result }}
+          RUST: ${{ needs.rust.result }}
+        run: |
+          echo "change detection: $CHANGES (code=$CODE)  frontend: $FRONTEND  rust: $RUST"
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Change detection did not succeed, so nothing can be trusted."
+            exit 1
+          fi
+          case "$CODE" in
+            true)
+              if [ "$FRONTEND" != "success" ] || [ "$RUST" != "success" ]; then
+                echo "::error::Code changed, so the frontend and Rust checks must pass."
+                exit 1
+              fi
+              ;;
+            false)
+              for result in "$FRONTEND" "$RUST"; do
+                case "$result" in
+                  success | skipped) ;;
+                  *) echo "::error::A check ended as '$result'."; exit 1 ;;
+                esac
+              done
+              ;;
+            *)
+              echo "::error::Unexpected change detection output '$CODE'."
+              exit 1
+              ;;
+          esac
+          echo "All required checks are satisfied."
