@@ -30,6 +30,7 @@
     "version:set": "bun scripts/bump-version.mjs set",
     "version:test": "bun test ./scripts/",
     "release:notes": "bun scripts/release-notes.mjs",
+    "release:assets": "bun scripts/release-assets.mjs",
     "types:generate": "bun scripts/generate-types.mjs",
     "types:check": "bun scripts/generate-types.mjs --check",
     "i18n:check": "bun scripts/check-i18n.mjs",

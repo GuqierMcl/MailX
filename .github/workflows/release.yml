@@ -117,37 +117,24 @@ jobs:
       # bundle.targets in desktop/tauri.conf.json lists every format; each runner
       # builds the ones it supports (dmg, nsis, deb + rpm + appimage).
       - run: bun run tauri build
-      - name: Collect installers and updater bundles
+      - name: Collect and rename installers
         shell: bash
         run: |
           mkdir dist-release
           find target/release/bundle -type f \
-            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.app.tar.gz' -o -name '*.sig' \) \
             -exec cp -v {} dist-release/ \;
-          # What createUpdaterArtifacts adds next to the installers: `*.sig` files
-          # and the bundle each signature covers.
-          find target/release/bundle -type f \( -name '*.app.tar.gz' -o -name '*.sig' \) \
-            -exec cp -v {} dist-release/ \;
-          # Both macOS architectures name the bundle after the product; rename so
-          # they can sit in one directory and be told apart by target.
-          version="${{ needs.verify.outputs.version }}"
-          case "${{ matrix.name }}" in
-            macos-arm64) arch=aarch64 ;;
-            macos-x64) arch=x64 ;;
-            *) arch="" ;;
-          esac
-          if [ -n "$arch" ]; then
-            for file in dist-release/*.app.tar.gz; do
-              [ -e "$file" ] || continue
-              mv -v "$file" "dist-release/MailX_${version}_${arch}.app.tar.gz"
-            done
-            for file in dist-release/*.app.tar.gz.sig; do
-              [ -e "$file" ] || continue
-              mv -v "$file" "dist-release/MailX_${version}_${arch}.app.tar.gz.sig"
-            done
-          fi
+          # Name every asset after the operating system it installs on, so a
+          # download is chosen by OS and architecture is only the suffix:
+          #   MailX_<version>_macos-arm64.dmg, MailX_<version>_windows-x64-setup.exe
+          bun scripts/release-assets.mjs \
+            --dir dist-release \
+            --version "${{ needs.verify.outputs.version }}" \
+            --platform "${{ matrix.name }}"
           ls -l dist-release
           test -n "$(ls dist-release)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.name }}
