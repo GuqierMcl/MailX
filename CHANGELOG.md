@@ -29,6 +29,7 @@
 
 ### Changed
 
+- 下载页的安装包文件名改为按系统命名（如 `MailX_<版本>_macos-arm64.dmg`、`MailX_<版本>_windows-x64-setup.exe`），便于直接按操作系统选择。
 - 此前的预览版（0.1.0-alpha.1、0.1.0-alpha.2）不含应用内更新，需要手动下载安装本版本一次；从本版本起可以在应用内更新。
 - 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。
 
