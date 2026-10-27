@@ -6,7 +6,7 @@
 //! download is just aborting the task that owns the request.
 
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use mailx_core::{AppError, ErrorCode, OutboxState};
 use serde::Deserialize;
@@ -22,13 +22,11 @@ use crate::window_chrome::MAIN_WINDOW;
 mod policy;
 
 use policy::{
-    AutoCheck, FailureStage, Snapshot, UpdateState, auto_check, cap_notes, is_newer, next_wait,
-    progress_due,
+    AutoCheck, CHECK_TIMEOUT, DOWNLOAD_TIMEOUT, FailureStage, Snapshot, UpdateState, auto_check,
+    cap_notes, is_newer, next_wait, progress_due,
 };
 
 pub(crate) const STATE_EVENT: &str = "mailx://updater-state";
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Why a restart or quit-time install cannot go ahead right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,12 +97,16 @@ async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> Updat
     }
     emit(app, &UpdateState::Checking);
 
-    let checked = match app.updater_builder().timeout(REQUEST_TIMEOUT).build() {
+    let checked = match app.updater_builder().timeout(CHECK_TIMEOUT).build() {
         Ok(updater) => updater.check().await.map_err(|_| ()),
         Err(_) => Err(()),
     };
     let next = match checked {
         Ok(Some(update)) if is_newer(&update.current_version, &update.version) => {
+            // The check's 30 s limit is carried into the download by the plugin;
+            // the installer needs far longer for its whole body.
+            let mut update = update;
+            update.timeout = Some(DOWNLOAD_TIMEOUT);
             let next = UpdateState::Available {
                 version: update.version.clone(),
                 current: update.current_version.clone(),

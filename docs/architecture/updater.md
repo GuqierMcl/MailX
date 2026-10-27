@@ -23,7 +23,7 @@
 
 - 更新器签名用 Tauri 的 minisign 密钥对。公钥（密钥 ID `B0DE08C9ED9EA8E9`）写入 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey`，随应用发布。
 - 私钥与密码在 GitHub `release` 环境的 secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥由维护者离线保管，**未设密码**；`…_PASSWORD` secret 已存在，内容未知，第一次接入时需先用手动触发的工作流单独验证签名能成功。
-- `release` 环境目前**没有**分支 / 标签保护；建议维护者在网页上限制为只允许 `v*` 标签。
+- `release` 环境目前**没有**分支 / 标签保护。建议维护者在网页上把它的部署分支 / 标签规则限制为 **`v*` 标签和 `main` 分支**两者：构建任务都在这个环境里跑，而打开 `createUpdaterArtifacts` 后没有私钥的构建会直接失败，所以 `workflow_dispatch` 的试跑同样需要它——从 `main` 触发是允许的，从其他分支触发会被环境拒绝。这需要在 GitHub 网页上手动设置，代码里不配置。
 - 私钥或密码丢失：已安装用户无法再自动更新，只能手动安装带新公钥的版本。更换公钥同理，需要过渡版本。
 
 ## 4. 产物与 `latest.json`
@@ -156,6 +156,8 @@
 - `bundle.targets` 在 macOS 上原本只有 `dmg`，此时**不会**生成 `.app.tar.gz`。已加入 `app` 目标（实现中的唯一偏离：规格要求保持 targets 不变，但没有它就没有 macOS 更新包）。
 - 加入后构建产出 `MailX.app`、`MailX_0.1.0-alpha.2_aarch64.dmg` 和 `MailX.app.tar.gz (updater)`，随后因缺少私钥报 `A public key has been found, but no private key. Make sure to set TAURI_SIGNING_PRIVATE_KEY`，**命令以退出码 1 结束，没有生成 `.sig`**。没有用任何密钥绕过。
 - 因此没有私钥的本地构建需要关闭更新包：`bun run tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'`（已确认退出码 0，只产出 `.app` 与 `.dmg`）。CI 在 `release` 环境里提供密钥。
+
+**后续修正**（验收反馈）：下载不再沿用检查的 30 秒超时——`Update::timeout` 在开始下载前改为 30 分钟（`DOWNLOAD_TIMEOUT`，检查仍是 `CHECK_TIMEOUT` = 30 秒），因为插件把这个超时用作整个下载请求的上限（`tauri-plugin-updater-2.14.0/src/updater.rs:328` 的说明，`:591` 处应用）。
 
 **未验证**：任何真实的端到端更新（检查 → 下载 → 验签 → 安装 → 重启）；签名后的构建与 `.sig`；Windows（NSIS 被动安装模式、安装时进程退出）与 Linux（AppImage 替换）上的行为与更新包文件名（`-setup.exe` / `.AppImage` 的名称与 `latest.json` 匹配规则按 Tauri 2 的文档约定编写，未在 CI 上见过实际产物）；系统代理在 Windows / Linux 上的实际表现（仅核对了源码）；`release` 环境、工作流整体与 `latest.json` 的生成（只有脚本单测与 `actionlint`，没有跑过工作流）。真实服务商网络环境下的下载取消、中途断网也没有实测。
 

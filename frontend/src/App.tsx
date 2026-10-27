@@ -79,12 +79,13 @@ function App() {
       <TitleBarSlotsProvider>
         <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
           <TitleBar host={windowHost} />
+          {/* Encloses the gate too: Settings → About reads the update state. */}
           <UpdaterProvider client={client}>
             <UpdaterTitleBar client={client} />
+            <div className="relative min-h-0 flex-1 overflow-auto">
+              <StartupGate client={client} />
+            </div>
           </UpdaterProvider>
-          <div className="relative min-h-0 flex-1 overflow-auto">
-            <StartupGate client={client} />
-          </div>
         </div>
       </TitleBarSlotsProvider>
     </QueryClientProvider>

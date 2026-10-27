@@ -9,6 +9,16 @@ use serde::{Deserialize, Serialize};
 
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// The release manifest is a few kilobytes: a slow answer means a broken
+/// network, not a slow link.
+pub(crate) const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+/// The installer is over 10 MB. `tauri-plugin-updater` applies one request
+/// timeout to the whole download (`Update::download`, the `self.timeout`
+/// request option), so this is the time allowed for the *entire* body, not
+/// between chunks: on a slow link the check timeout would cut it off. The user
+/// can cancel, so the ceiling can be generous.
+pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 pub(crate) const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(250);
 /// The release notes come from a remote manifest: cap what reaches the UI.
 pub(crate) const NOTES_LIMIT: usize = 20_000;
@@ -299,6 +309,14 @@ mod tests {
             stage,
             version: None,
         }
+    }
+
+    #[test]
+    fn the_download_gets_much_longer_than_the_check() {
+        // A 30 s ceiling would abort a 15 MB bundle on a slow link; the check
+        // stays short so a broken network fails quietly and quickly.
+        assert_eq!(CHECK_TIMEOUT, Duration::from_secs(30));
+        assert!(DOWNLOAD_TIMEOUT >= CHECK_TIMEOUT * 10);
     }
 
     #[test]
