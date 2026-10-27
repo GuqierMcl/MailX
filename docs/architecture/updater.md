@@ -157,7 +157,7 @@
 - 加入后构建产出 `MailX.app`、`MailX_0.1.0-alpha.2_aarch64.dmg` 和 `MailX.app.tar.gz (updater)`，随后因缺少私钥报 `A public key has been found, but no private key. Make sure to set TAURI_SIGNING_PRIVATE_KEY`，**命令以退出码 1 结束，没有生成 `.sig`**。没有用任何密钥绕过。
 - 因此没有私钥的本地构建需要关闭更新包：`bun run tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'`（已确认退出码 0，只产出 `.app` 与 `.dmg`）。CI 在 `release` 环境里提供密钥。
 
-**后续修正**（验收反馈）：下载不再沿用检查的 30 秒超时——`Update::timeout` 在开始下载前改为 30 分钟（`DOWNLOAD_TIMEOUT`，检查仍是 `CHECK_TIMEOUT` = 30 秒），因为插件把这个超时用作整个下载请求的上限（`tauri-plugin-updater-2.14.0/src/updater.rs:328` 的说明，`:591` 处应用）。
+**后续修正**（验收反馈）：下载不再沿用检查的 30 秒超时——`Update::timeout` 在开始下载前改为 20 分钟（`DOWNLOAD_TIMEOUT`，检查仍是 `CHECK_TIMEOUT` = 30 秒），因为插件把这个超时用作整个下载请求的上限（`tauri-plugin-updater-2.14.0/src/updater.rs:328` 的说明，`:591` 处应用）。
 
 **未验证**：任何真实的端到端更新（检查 → 下载 → 验签 → 安装 → 重启）；签名后的构建与 `.sig`；Windows（NSIS 被动安装模式、安装时进程退出）与 Linux（AppImage 替换）上的行为与更新包文件名（`-setup.exe` / `.AppImage` 的名称与 `latest.json` 匹配规则按 Tauri 2 的文档约定编写，未在 CI 上见过实际产物）；系统代理在 Windows / Linux 上的实际表现（仅核对了源码）；`release` 环境、工作流整体与 `latest.json` 的生成（只有脚本单测与 `actionlint`，没有跑过工作流）。真实服务商网络环境下的下载取消、中途断网也没有实测。
 

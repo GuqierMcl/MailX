@@ -17,7 +17,7 @@ pub(crate) const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// request option), so this is the time allowed for the *entire* body, not
 /// between chunks: on a slow link the check timeout would cut it off. The user
 /// can cancel, so the ceiling can be generous.
-pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 pub(crate) const PROGRESS_EMIT_GAP: Duration = Duration::from_millis(250);
 /// The release notes come from a remote manifest: cap what reaches the UI.
