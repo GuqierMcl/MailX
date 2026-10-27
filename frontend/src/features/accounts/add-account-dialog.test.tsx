@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { MailxClientError } from '@/lib/mailx-client'
+import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
 
@@ -34,10 +35,11 @@ async function toProfile(dialog: HTMLElement) {
 }
 
 describe('add account wizard', () => {
-  it('starts with the method cards and shows no connection fields yet', () => {
+  it('starts with the searchable provider list and shows no connection fields yet', () => {
     const { dialog } = renderDialog()
     expect(within(dialog).getByText('第 1 步，共 3 步')).toBeInTheDocument()
     expect(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('searchbox', { name: '搜索邮箱服务商' })).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('邮箱地址')).not.toBeInTheDocument()
   })
 
@@ -45,10 +47,10 @@ describe('add account wizard', () => {
     const { dialog } = renderDialog()
     const next = within(dialog).getByRole('button', { name: '下一步' })
     expect(next).toBeDisabled()
-    const card = within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })
-    expect(card).toHaveTextContent('其他邮箱')
-    await userEvent.click(card)
-    expect(card).toHaveAttribute('aria-checked', 'true')
+    const option = within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })
+    expect(option).toHaveAccessibleDescription('手动配置其他邮箱')
+    await userEvent.click(option)
+    expect(option).toBeChecked()
     expect(within(dialog).queryByLabelText('邮箱地址')).not.toBeInTheDocument()
     await userEvent.click(next)
     expect(within(dialog).getByLabelText('邮箱地址')).toBeInTheDocument()
@@ -154,7 +156,77 @@ describe('add account wizard', () => {
     const { dialog } = renderDialog()
     await chooseImap(dialog)
     await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
-    expect(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })).toHaveAttribute('aria-checked', 'true')
+    expect(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })).toBeChecked()
     expect(within(dialog).getByRole('button', { name: '下一步' })).toBeEnabled()
+  })
+
+  it('clears a hidden choice and keeps next disabled after clearing the search', async () => {
+    const { dialog } = renderDialog()
+    await userEvent.click(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ }))
+    const search = within(dialog).getByRole('searchbox', { name: '搜索邮箱服务商' })
+    fireEvent.change(search, { target: { value: 'not-a-provider' } })
+    expect(within(dialog).queryByRole('radio')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('status')).toHaveTextContent('没有找到匹配的服务商')
+    expect(within(dialog).getByRole('button', { name: '下一步' })).toBeDisabled()
+    fireEvent.change(search, { target: { value: '' } })
+    expect(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })).not.toBeChecked()
+    expect(within(dialog).getByRole('button', { name: '下一步' })).toBeDisabled()
+  })
+
+  it('keeps the query and choice when returning, and resets them on a fresh opening', async () => {
+    const client = testClient()
+    const props = { client, accounts: [], onClose: vi.fn(), onCreated: vi.fn() }
+    const { rerender } = render(<AddAccountDialog {...props} open />)
+    const search = screen.getByRole('searchbox', { name: '搜索邮箱服务商' })
+    fireEvent.change(search, { target: { value: ' imap ' } })
+    await chooseImap(screen.getByRole('dialog'))
+    await userEvent.click(screen.getByRole('button', { name: '上一步' }))
+    expect(screen.getByRole('searchbox')).toHaveValue(' imap ')
+    expect(screen.getByRole('radio', { name: /IMAP\/SMTP/ })).toBeChecked()
+    rerender(<AddAccountDialog {...props} open={false} />)
+    rerender(<AddAccountDialog {...props} open />)
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+    expect(screen.getByRole('radio', { name: /IMAP\/SMTP/ })).not.toBeChecked()
+  })
+
+  it('opens the connection step by double clicking a provider row', async () => {
+    const { dialog } = renderDialog()
+    await userEvent.dblClick(within(dialog).getByText('手动配置其他邮箱'))
+    expect(within(dialog).getByLabelText('邮箱地址')).toBeInTheDocument()
+    expect(within(dialog).getByText('第 2 步，共 3 步')).toBeInTheDocument()
+  })
+
+  it('clears a choice hidden by a language change and does not restore it when switching back', async () => {
+    const { dialog } = renderDialog()
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'IMAP/SMTP' }))
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: '手动配置' } })
+    expect(within(dialog).getByRole('button', { name: '下一步' })).toBeEnabled()
+    try {
+      await act(async () => { await i18n.changeLanguage('en') })
+      expect(within(dialog).queryByRole('radio')).not.toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Next' })).toBeDisabled()
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      expect(within(dialog).getByRole('radio', { name: 'IMAP/SMTP' })).not.toBeChecked()
+      expect(within(dialog).getByRole('button', { name: '下一步' })).toBeDisabled()
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+    }
+  })
+
+  it('validates the retained choice when returning after a language change', async () => {
+    const { dialog } = renderDialog()
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: '手动配置' } })
+    await chooseImap(dialog)
+    try {
+      await act(async () => { await i18n.changeLanguage('en') })
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Back' }))
+      expect(within(dialog).getByRole('searchbox')).toHaveValue('手动配置')
+      expect(within(dialog).queryByRole('radio')).not.toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Next' })).toBeDisabled()
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      expect(within(dialog).getByRole('radio', { name: 'IMAP/SMTP' })).not.toBeChecked()
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+    }
   })
 })

@@ -89,9 +89,10 @@ function host(value: string, field: string): string {
   return result
 }
 
-function connection(value: ConnectionDraft, protocol: 'imap' | 'smtp'): ConnectionConfig {
-  if (!value.username.trim()) invalid(`${protocol}.username`, t('accounts:loginRequired'))
-  return { ...value, host: host(value.host, `${protocol}.host`), port: port(value.port, `${protocol}.port`), username: value.username.trim() }
+function connection(value: ConnectionDraft, protocol: 'imap' | 'smtp', emailAddress: string): ConnectionConfig {
+  // Use Unicode White_Space plus U+FEFF at both the JS and Rust input boundaries.
+  const username = value.username.replace(/^[\s\u0085]+|[\s\u0085]+$/g, '') || emailAddress
+  return { ...value, host: host(value.host, `${protocol}.host`), port: port(value.port, `${protocol}.port`), username }
 }
 
 function secret(value: SecretDraft, field: string): SecretUpdate {
@@ -102,9 +103,10 @@ function secret(value: SecretDraft, field: string): SecretUpdate {
 
 /** Validates the draft into a connection; throws a field error for the first problem. */
 export function draftToConnection(draft: AccountDraft, account: Account | null): ConnectionInput {
-  if (!/^[^\s@]+@[^\s@]+$/.test(draft.emailAddress.trim())) invalid('emailAddress', t('accounts:invalidEmail'))
-  const imap = connection(draft.imap, 'imap')
-  const smtp = connection(draft.smtp, 'smtp')
+  const emailAddress = draft.emailAddress.trim()
+  if (!/^[^\s@]+@[^\s@]+$/.test(emailAddress)) invalid('emailAddress', t('accounts:invalidEmail'))
+  const imap = connection(draft.imap, 'imap', emailAddress)
+  const smtp = connection(draft.smtp, 'smtp', emailAddress)
   const authentication: ConnectionInput['authentication'] = draft.mode === 'shared'
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
@@ -118,5 +120,5 @@ export function draftToConnection(draft: AccountDraft, account: Account | null):
       authentication: draft.proxyAuth ? { username: draft.proxyUsername.trim(), password: secret(draft.proxyPassword, 'proxyPassword') } : null,
     }
   }
-  return { emailAddress: draft.emailAddress.trim(), providerId: account?.providerId ?? null, imap, smtp, authentication, route }
+  return { emailAddress, providerId: account?.providerId ?? null, imap, smtp, authentication, route }
 }

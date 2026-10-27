@@ -124,5 +124,11 @@
   "identificationColorHint": "在侧边栏和账号列表中区分不同邮箱。",
   "otherProvider": "其他邮箱",
   "stepProgress": "第 {{step}} 步，共 {{total}} 步",
-  "replaceCredential": "替换{{label}}"
+  "replaceCredential": "替换{{label}}",
+  "usernameDefaultHint": "留空时使用邮箱地址。",
+  "usernameDefaultPlaceholder": "默认使用邮箱地址",
+  "genericProviderDescription": "手动配置其他邮箱",
+  "searchProviders": "搜索邮箱服务商",
+  "searchProvidersPlaceholder": "搜索服务商、域名或关键词…",
+  "noProvidersFound": "没有找到匹配的服务商，试试其他关键词。"
 }

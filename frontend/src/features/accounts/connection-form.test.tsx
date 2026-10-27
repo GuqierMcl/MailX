@@ -34,6 +34,55 @@ describe('connection form', () => {
     expect(screen.getByLabelText('邮箱地址')).toBeInTheDocument()
   })
 
+  it('keeps usernames empty while previewing and submitting the current email as their default', async () => {
+    const { submit } = renderForm()
+    const imapUsername = screen.getByLabelText('IMAP 登录用户名')
+    const smtpUsername = screen.getByLabelText('SMTP 登录用户名')
+    expect(imapUsername).toHaveAttribute('placeholder', '默认使用邮箱地址')
+    expect(imapUsername).toHaveAccessibleDescription('留空时使用邮箱地址。')
+    for (const [label, value] of Object.entries({
+      '邮箱地址': ' first@example.com ', 'IMAP 主机': 'imap.example.com', 'SMTP 主机': 'smtp.example.com',
+      '收发密码': 'synthetic-secret',
+    })) fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    expect(imapUsername).toHaveAttribute('placeholder', 'first@example.com')
+    fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'current@example.com' } })
+    expect(imapUsername).toHaveAttribute('placeholder', 'current@example.com')
+    expect(smtpUsername).toHaveAttribute('placeholder', 'current@example.com')
+    expect(imapUsername).toHaveValue('')
+    expect(smtpUsername).toHaveValue('')
+    await userEvent.click(screen.getByRole('button', { name: '保存账号' }))
+    const [connection, draft] = submit.mock.calls[0]
+    expect(connection).toMatchObject({ imap: { username: 'current@example.com' }, smtp: { username: 'current@example.com' } })
+    expect(draft.imap.username).toBe('')
+    expect(draft.smtp.username).toBe('')
+  })
+
+  it('shows saved usernames on edit and uses the new email only after a username is cleared', async () => {
+    const account = exampleAccount()
+    const { submit } = renderForm(account)
+    expect(screen.getByLabelText('IMAP 登录用户名')).toHaveValue(account.imap.username)
+    expect(screen.getByLabelText('SMTP 登录用户名')).toHaveValue(account.smtp.username)
+    fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'new@example.com' } })
+    fireEvent.change(screen.getByLabelText('SMTP 登录用户名'), { target: { value: '' } })
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    expect(submit.mock.calls[0][0]).toMatchObject({
+      imap: { username: account.imap.username }, smtp: { username: 'new@example.com' },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
+    })
+  })
+
+  it('keeps the username default hint accessible alongside a field error', async () => {
+    renderForm(exampleAccount(), () => {
+      throw new MailxClientError({ code: 'validation', field: 'imap.username', message: '登录用户名无效。' })
+    })
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    const username = screen.getByLabelText('IMAP 登录用户名')
+    expect(username).toHaveAttribute('aria-invalid', 'true')
+    expect(username).toHaveAttribute('aria-describedby', 'imap.username-description imap.username-error')
+    expect(username).toHaveAccessibleDescription(/留空时使用邮箱地址。/)
+    expect(document.getElementById('imap.username-error')).toBeInTheDocument()
+  })
+
   it('submits shared credentials once, clears secret input while pending, and retains different login names', async () => {
     let finish!: () => void
     const { submit } = renderForm(null, () => new Promise<void>((resolve) => { finish = resolve }))

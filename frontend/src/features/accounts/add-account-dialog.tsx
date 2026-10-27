@@ -2,14 +2,11 @@ import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { Tick02Icon } from '@hugeicons/core-free-icons'
 import type { Account, ConnectionInput } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { FieldDescription } from '@/components/ui/field'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { SettingsPage } from '@/features/settings/settings-layout'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
@@ -18,8 +15,8 @@ import { nextAccountColor } from './account-color'
 import { ConnectionForm } from './connection-form'
 import { useLeaveGuard } from './leave-guard'
 import { ProfileFields } from './profile-fields'
-import { ProviderIcon } from './provider-badge'
-import { PROVIDERS, type MailProvider } from './providers'
+import { ProviderPicker } from './provider-picker'
+import { filterProviders, type MailProvider } from './providers'
 
 const STEP_COUNT = 3
 /** Fields a failed create can blame on the profile step; anything else is the connection's. */
@@ -49,6 +46,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   useTranslation()
   const guard = useLeaveGuard()
   const [step, setStep] = useState<Step>({ kind: 'method', selected: null })
+  const [providerQuery, setProviderQuery] = useState('')
   const [formVersion, setFormVersion] = useState(0)
   // Which way the last step change went, so the new step slides in from that side.
   const [direction, setDirection] = useState<'forward' | 'back'>('forward')
@@ -69,6 +67,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     setWasOpen(open)
     if (open) {
       setStep({ kind: 'method', selected: null })
+      setProviderQuery('')
       setDirection('forward')
       setDisplayName('')
       setNameTouched(false)
@@ -82,9 +81,11 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     }
   }
 
-  // Anything typed past the method cards counts as unsaved.
+  // Anything typed past the provider list counts as unsaved.
   const unsaved = step.kind === 'profile' || guard.dirty
   const stepNumber = step.kind === 'method' ? 1 : step.kind === 'connection' ? 2 : 3
+  const selectedMethod = step.kind === 'method' && step.selected && filterProviders([step.selected], providerQuery).length > 0
+    ? step.selected : null
 
   const showConnection = (method: MailProvider, resume?: AccountDraft, error?: ClientFailure, way: 'forward' | 'back' = 'forward') => {
     setDirection(way)
@@ -151,35 +152,10 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
           )}>
             {step.kind === 'method' && (
               <>
-                <p id="add-account-methods" className="shrink-0 px-6 pb-3 text-sm text-muted-foreground">{t('accounts:chooseProvider')}</p>
-                {/* The list of providers will grow, so it scrolls inside a dialog of fixed height. */}
-                <ScrollArea className="min-h-0 flex-1">
-                  <div role="radiogroup" aria-labelledby="add-account-methods" className="grid grid-cols-2 gap-3 px-6 pb-6 sm:grid-cols-3">
-                    {PROVIDERS.map((item) => {
-                      const checked = step.selected === item
-                      return (
-                        <button key={item.id ?? 'generic'} type="button" role="radio" aria-checked={checked}
-                          onClick={() => setStep({ kind: 'method', selected: item })}
-                          onDoubleClick={() => showConnection(item)}
-                          className={cn(
-                            'relative flex flex-col items-center gap-2 rounded-lg border px-3 py-4 text-center outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring',
-                            checked && 'border-primary bg-primary/5 ring-1 ring-primary hover:bg-primary/5',
-                          )}>
-                          {checked && (
-                            <span className="absolute top-2 right-2 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                              <HugeiconsIcon icon={Tick02Icon} className="size-3" strokeWidth={3} />
-                            </span>
-                          )}
-                          <ProviderIcon provider={item} />
-                          <span className="text-sm font-medium">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">{item.domain}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </ScrollArea>
-                <footer className="flex shrink-0 items-center justify-end gap-4 border-t px-6 py-3">
-                  <Button disabled={!step.selected} onClick={() => step.selected && showConnection(step.selected)}>{t('accounts:next')}</Button>
+                <ProviderPicker selected={step.selected} query={providerQuery} onQueryChange={setProviderQuery}
+                  onSelect={(selected) => setStep({ kind: 'method', selected })} onAdvance={showConnection} />
+                <footer className="flex shrink-0 items-center justify-end gap-4 px-6 py-3">
+                  <Button disabled={!selectedMethod} onClick={() => selectedMethod && showConnection(selectedMethod)}>{t('accounts:next')}</Button>
                 </footer>
               </>
             )}

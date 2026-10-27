@@ -656,6 +656,14 @@ fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
         if connection.port == 0 {
             return Err(AppError::validation(&format!("{name}.port")));
         }
+        // Match the frontend: Unicode White_Space plus the JavaScript BOM whitespace.
+        connection.username = connection
+            .username
+            .trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
+            .to_owned();
+        if connection.username.is_empty() {
+            connection.username = config.email_address.clone();
+        }
         if !valid_text(&connection.username, 320) {
             return Err(AppError::validation(&format!("{name}.username")));
         }

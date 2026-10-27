@@ -147,6 +147,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color` 与 `senderName`）和全部连接字段。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
 
+创建和修改连接中的 `imap.username` / `smtp.username` 仍为字符串字段，各自去掉首尾空白（Unicode `White_Space` 加 `U+FEFF`，前后端一致）后，空字符串使用本次有效 `emailAddress`，非空值保留大小写。核心先完成规范化，再计算创建请求的幂等身份、邮箱来源与凭证信任；读取 DTO 返回实际保存的有效用户名。因此留空和明确填写同一邮箱地址的创建请求等价。保存后用户名不随邮箱地址自动变化；再次留空保存才按新的邮箱地址解析。有效登录身份改变时，现有来源及凭证确认规则继续适用；SMTP 仍使用配置的密码认证。
+
 `Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color` 与 `senderName`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
