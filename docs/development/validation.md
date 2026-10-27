@@ -94,6 +94,8 @@ git diff --check
 
 ### 持续集成
 
+CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，安装步骤仍有 8 分钟总上限，更新索引时的临时错误也必须使步骤失败。2026-10-28 排查的 [main CI 40540404597](https://github.com/GuqierMcl/MailX/actions/runs/40540404597) 在 Azure Ubuntu 镜像缓慢下载依赖时触发该上限，Linux 的编译和测试尚未开始；同次前端、macOS 与 Windows 检查已通过。修复的工作流已通过本地 `actionlint`（含 ShellCheck）与差异检查，实际 Ubuntu 安装和三平台结果以修复提交对应的 CI 为准。
+
 `.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行：
 
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。

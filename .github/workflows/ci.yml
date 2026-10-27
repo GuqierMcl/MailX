@@ -94,16 +94,24 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      # The package mirror is the one slow spot of this job: normally 30 seconds,
-      # but one run sat for 24 minutes on a stalled download. A download that
-      # receives nothing for 30 seconds is retried, and the step is capped so a
-      # bad mirror costs minutes, not the whole job.
+      # The runner's Azure Ubuntu mirror can make slow progress until the
+      # installation deadline. Prefer the official HTTPS mirrors, while keeping
+      # retries, connection/read timeouts and the overall step limit.
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 8
         run: |
+          # Support both direct Ubuntu sources and the runner's mirror+file layout.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
+            fi
+          done
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" update --error-on=any
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config
