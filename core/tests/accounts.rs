@@ -170,6 +170,150 @@ fn persists_config_across_restart_without_disclosing_secrets() {
 }
 
 #[test]
+fn mail_usernames_default_independently_and_preserve_explicit_case() {
+    let (_directory, _secrets, mut service) = setup();
+    for (imap, smtp, expected_imap, expected_smtp) in [
+        ("", "", "Alice@example.com", "Alice@example.com"),
+        ("", "smtp-user", "Alice@example.com", "smtp-user"),
+        ("imap-user", "", "imap-user", "Alice@example.com"),
+        (" \t ", "\u{3000}", "Alice@example.com", "Alice@example.com"),
+        (
+            "\u{feff}",
+            "\u{85}",
+            "Alice@example.com",
+            "Alice@example.com",
+        ),
+        (
+            "\u{feff} \u{85}\u{3000}",
+            "\u{85}\t\u{feff}",
+            "Alice@example.com",
+            "Alice@example.com",
+        ),
+        ("  IMAP-Alice  ", " SMTP-Alice ", "IMAP-Alice", "SMTP-Alice"),
+        (
+            "\u{feff}\u{85} IMAP-Alice \u{85}\u{feff}",
+            "\u{85}\u{feff} SMTP-Alice \u{feff}\u{85}",
+            "IMAP-Alice",
+            "SMTP-Alice",
+        ),
+    ] {
+        let mut input = config();
+        input["emailAddress"] = json!("  Alice@example.com ");
+        input["imap"]["username"] = json!(imap);
+        input["smtp"]["username"] = json!(smtp);
+        let account = service
+            .create(create_request(&Uuid::new_v4().to_string(), input))
+            .unwrap();
+        assert_eq!(account.email_address, "Alice@example.com");
+        assert_eq!(account.imap.username, expected_imap);
+        assert_eq!(account.smtp.username, expected_smtp);
+        assert_eq!(account.authentication.imap.trust, CredentialTrust::Trusted);
+        assert_eq!(account.authentication.smtp.trust, CredentialTrust::Trusted);
+        assert_eq!(service.get(&account.id).unwrap(), account);
+    }
+}
+
+#[test]
+fn default_and_explicit_mail_usernames_have_the_same_create_identity() {
+    let (_directory, secrets, mut service) = setup();
+    let request_id = Uuid::new_v4().to_string();
+    let mut input = config();
+    input["imap"]["username"] = json!("\u{feff}\u{85}");
+    input["smtp"]["username"] = json!(" \u{85}\u{feff} ");
+    let account = service
+        .create(create_request(&request_id, input.clone()))
+        .unwrap();
+    input["imap"]["username"] = input["emailAddress"].clone();
+    input["smtp"]["username"] = json!(" alice@example.com ");
+    assert_eq!(
+        service.create(create_request(&request_id, input)).unwrap(),
+        account
+    );
+    assert_eq!(service.list().unwrap().len(), 1);
+    assert_eq!(secrets.len(), 1);
+}
+
+#[test]
+fn default_mail_usernames_keep_trust_until_the_effective_identity_changes() {
+    let (_directory, secrets, mut service) = setup();
+    let mut input = config();
+    input["imap"]["username"] = json!("");
+    input["smtp"]["username"] = json!("");
+    let original = service
+        .create(create_request(&Uuid::new_v4().to_string(), input.clone()))
+        .unwrap();
+    input["authentication"]["password"] = json!({"action":"keep"});
+    input["imap"]["username"] = json!(" ");
+    let same = service
+        .update_connection(update_request(&original, input.clone()))
+        .unwrap();
+    assert_eq!(same.mailbox_source_id, original.mailbox_source_id);
+    assert_eq!(same.authentication, original.authentication);
+
+    // Saved usernames are concrete values, so changing only the display email
+    // leaves both logins and their trust untouched.
+    input["emailAddress"] = json!("other@example.com");
+    input["imap"]["username"] = json!(same.imap.username);
+    input["smtp"]["username"] = json!(same.smtp.username);
+    let explicit = service
+        .update_connection(update_request(&same, input.clone()))
+        .unwrap();
+    assert_eq!(explicit.mailbox_source_id, original.mailbox_source_id);
+    assert_eq!(explicit.authentication, original.authentication);
+
+    input["imap"]["username"] = json!("");
+    input["smtp"]["username"] = json!(" ");
+    let changed = service
+        .update_connection(update_request(&explicit, input.clone()))
+        .unwrap();
+    assert_eq!(changed.imap.username, "other@example.com");
+    assert_eq!(changed.smtp.username, "other@example.com");
+    assert_ne!(changed.mailbox_source_id, original.mailbox_source_id);
+    assert_eq!(
+        changed.authentication.imap.trust,
+        CredentialTrust::NeedsConfirmation
+    );
+    assert_eq!(
+        changed.authentication.smtp.trust,
+        CredentialTrust::NeedsConfirmation
+    );
+    assert_eq!(secrets.len(), 1);
+
+    input["authentication"]["password"] = json!({"action":"replace","value":"confirmed-password"});
+    let confirmed = service
+        .update_connection(update_request(&changed, input))
+        .unwrap();
+    assert_eq!(confirmed.mailbox_source_id, changed.mailbox_source_id);
+    assert_eq!(
+        confirmed.authentication.imap.trust,
+        CredentialTrust::Trusted
+    );
+    assert_eq!(
+        confirmed.authentication.smtp.trust,
+        CredentialTrust::Trusted
+    );
+}
+
+#[test]
+fn mail_username_normalization_still_rejects_invalid_nonempty_values() {
+    let (directory, secrets, mut service) = setup();
+    for protocol in ["imap", "smtp"] {
+        for username in ["alice\nother".to_owned(), "a".repeat(321)] {
+            let mut input = config();
+            input[protocol]["username"] = json!(username);
+            assert_eq!(
+                service
+                    .create(create_request(&Uuid::new_v4().to_string(), input))
+                    .unwrap_err(),
+                AppError::validation(&format!("{protocol}.username"))
+            );
+        }
+    }
+    assert_eq!(count(&db(directory.path()), "accounts"), 0);
+    assert_eq!(secrets.len(), 0);
+}
+
+#[test]
 fn identical_creates_are_idempotent_but_changes_and_secret_changes_conflict() {
     let (_directory, _secrets, mut service) = setup();
     let request = Uuid::new_v4().to_string();

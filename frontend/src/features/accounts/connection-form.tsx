@@ -48,27 +48,31 @@ type InputFieldProps = {
   value: string
   onChange(value: string): void
   placeholder?: string
+  description?: string
   inputMode?: 'numeric' | 'email' | 'text'
   error?: ClientFailure | null
   autoComplete?: string
 }
 
-function TextField({ id, label, value, onChange, placeholder, inputMode, error, autoComplete = 'off' }: InputFieldProps) {
+function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off' }: InputFieldProps) {
   const invalid = error?.field === id
+  const describedBy = [description && `${id}-description`, invalid && `${id}-error`].filter(Boolean).join(' ') || undefined
   return (
     <Field data-invalid={invalid}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder}
         inputMode={inputMode} autoComplete={autoComplete} autoCapitalize="none" spellCheck={false}
-        aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined} />
+        aria-invalid={invalid} aria-describedby={describedBy} />
+      {description && <FieldDescription id={`${id}-description`}>{description}</FieldDescription>}
       {invalid && <FieldError id={`${id}-error`}>{errorText(error)}</FieldError>}
     </Field>
   )
 }
 
-function ConnectionFields({ protocol, value, onChange, error }: {
+function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
   protocol: 'imap' | 'smtp'
   value: ConnectionDraft
+  emailAddress: string
   onChange(value: ConnectionDraft): void
   error: ClientFailure | null
 }) {
@@ -93,7 +97,8 @@ function ConnectionFields({ protocol, value, onChange, error }: {
           </Field>
         </div>
         <TextField id={`${protocol}.username`} label={t('accounts:serverUsername', { name })} value={value.username}
-          placeholder={t('accounts:fullEmailHint')} error={error} onChange={(username) => onChange({ ...value, username })} />
+          placeholder={emailAddress.trim() || t('accounts:usernameDefaultPlaceholder')} description={t('accounts:usernameDefaultHint')}
+          error={error} onChange={(username) => onChange({ ...value, username })} />
     </SettingsGroup>
   )
 }
@@ -225,8 +230,8 @@ export function ConnectionForm({
           <SettingsGroup title={t('accounts:emailAddress')} description={t('accounts:emailAddressDescription')}>
             <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} />
           </SettingsGroup>
-          <ConnectionFields protocol="imap" value={draft.imap} onChange={(value) => change('imap', value)} error={error} />
-          <ConnectionFields protocol="smtp" value={draft.smtp} onChange={(value) => change('smtp', value)} error={error} />
+          <ConnectionFields protocol="imap" value={draft.imap} emailAddress={draft.emailAddress} onChange={(value) => change('imap', value)} error={error} />
+          <ConnectionFields protocol="smtp" value={draft.smtp} emailAddress={draft.emailAddress} onChange={(value) => change('smtp', value)} error={error} />
           <SettingsGroup title={t('accounts:authentication')} description={t('accounts:authenticationDescription')}>
               <RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label={t('accounts:authenticationMode')}>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">{t('accounts:sharedPassword')}</FieldLabel></Field>

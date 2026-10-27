@@ -4,7 +4,7 @@ import { Mail01Icon } from '@hugeicons/core-free-icons'
 
 /**
  * A mail provider MailX knows how to add, and how to label afterwards. The
- * add-account cards, the account manager and the connection dialog all read
+ * add-account list, the account manager and the connection dialog all read
  * this list, so a new provider is one entry here plus its connection step.
  */
 export type MailProvider = {
@@ -13,6 +13,12 @@ export type MailProvider = {
   name: string
   /** The address suffix people recognize, e.g. `gmail.com`. */
   domain: string
+  /** A short, localized explanation shown beside the provider's name. */
+  description: string
+  /** Alternate names and terms people may search for. */
+  searchAliases?: readonly string[]
+  /** A bundled logo URL, e.g. an imported local SVG; `icon` is the fallback. */
+  logo?: string
   /** The provider's mark; the generic mail icon stands in until it has one. */
   icon: IconSvgElement
 }
@@ -22,10 +28,22 @@ export const GENERIC_PROVIDER: MailProvider = {
   name: 'IMAP/SMTP',
   // Works with any server, so it names no single suffix.
   get domain() { return t('accounts:otherProvider') },
+  get description() { return t('accounts:genericProviderDescription') },
+  searchAliases: ['manual', 'custom', 'other', '手动', '自定义', '其他邮箱'],
   icon: Mail01Icon,
 }
 
 export const PROVIDERS: MailProvider[] = [GENERIC_PROVIDER]
+
+/** Local filtering keeps the registry's order and follows the current UI language. */
+export function filterProviders(providers: readonly MailProvider[], query: string): MailProvider[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return providers.filter((provider) => {
+    const searchable = [provider.name, provider.domain, provider.description, ...(provider.searchAliases ?? [])]
+      .join(' ').toLowerCase()
+    return terms.every((term) => searchable.includes(term))
+  })
+}
 
 /**
  * The provider an account was added with. An id this build does not know
