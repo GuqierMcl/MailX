@@ -21,9 +21,6 @@
 ### Optimization
 
 - 设置窗口默认打开第一项“通用”，便于调整语言。([#29](https://github.com/GuqierMcl/MailX/pull/29))
-
-### Optimization
-
 - macOS 上所有账号密码合并存放在一个钥匙串条目中，启动时最多只需授权一次，不再每个账号一次；旧条目会在首次启动时迁入、下次启动时清理。
 
 ### Fixed
@@ -32,7 +29,7 @@
 
 ### Changed
 
-- 更新说明（标题栏提示、更新弹窗与“关于”页）只在你点了“检查更新”或自动检查发现新版本时出现；自动检查失败时不打扰你，等下一轮再说。
+- 此前的预览版（0.1.0-alpha.1、0.1.0-alpha.2）不含应用内更新，需要手动下载安装本版本一次；从本版本起可以在应用内更新。
 - 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。
 
 [Unreleased]: https://github.com/GuqierMcl/MailX/commits/main

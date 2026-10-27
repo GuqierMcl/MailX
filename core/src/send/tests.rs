@@ -191,6 +191,28 @@ impl Fx {
             })
             .collect()
     }
+
+    /// Waits until the announced states are `expected`, the order of the first
+    /// two aside. The worker commits a state before it emits the event, and
+    /// `queue_send` announces `Queued` only after its own commit, so a worker that
+    /// is already running can announce `Sending` first, and a test that saw the
+    /// new state in the database can be a moment ahead of the events. The UI
+    /// treats events as "reload the outbox", so the order does not matter there.
+    async fn states_become(&self, id: &str, expected: &[OutboxState]) {
+        let matches = |got: &[OutboxState]| {
+            let mut got = got.to_vec();
+            if got.len() >= 2 && got[0] == OutboxState::Sending && got[1] == OutboxState::Queued {
+                got.swap(0, 1);
+            }
+            got == expected
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !matches(&self.states(id)) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let got = self.states(id);
+        assert!(matches(&got), "{got:?} is not {expected:?}");
+    }
 }
 
 fn connections(seen: &Seen) -> usize {
@@ -363,14 +385,15 @@ async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
     assert!(fx.core.list_outbox(None, false).unwrap().is_empty());
     assert_eq!(fx.core.list_outbox(None, true).unwrap().len(), 1);
 
-    assert_eq!(
-        fx.states(&item.id),
-        [
+    fx.states_become(
+        &item.id,
+        &[
             OutboxState::Queued,
             OutboxState::Sending,
-            OutboxState::Accepted
-        ]
-    );
+            OutboxState::Accepted,
+        ],
+    )
+    .await;
     let drafts: Vec<DraftChange> = fx
         .events
         .lock()
@@ -443,15 +466,15 @@ async fn definite_failures_are_recorded_and_never_retried() {
         assert_eq!(connections(&seen), 1, "{name}");
         assert_eq!(fx.core.get_outbox(&item.id).unwrap().attempts, 1);
         assert!(fx.core.get_draft(&draft.id).is_ok(), "{name}");
-        assert_eq!(
-            fx.states(&item.id),
-            [
+        fx.states_become(
+            &item.id,
+            &[
                 OutboxState::Queued,
                 OutboxState::Sending,
-                OutboxState::Failed
+                OutboxState::Failed,
             ],
-            "{name}"
-        );
+        )
+        .await;
     }
 }
 

@@ -361,8 +361,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
 
 /** Preview-only release notes, shaped like a real `latest.json` section. */
 const PREVIEW_UPDATE = {
-  version: '0.1.0-alpha.3',
-  current: '0.1.0-alpha.2',
+  // A made-up newer version, so the sample stays valid whatever the app version is.
+  version: '99.0.0',
+  current: __APP_VERSION__,
   date: Math.floor(Date.parse('2026-11-01T08:00:00Z') / 1000),
   notes: `## 新功能\n\n- 应用内更新：发现新版本后可在设置里查看说明并下载\n- **写信附件** 与 **已发送副本** 的列表展示\n- 修复未命名附件显示为空白的问题\n\n> 预览页面只展示说明，不能安装更新。\n\n\`bun run check\` 通过。`,
 } as const

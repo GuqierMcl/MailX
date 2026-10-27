@@ -16,7 +16,7 @@ function renderAbout(update: UpdateSnapshot) {
 describe('the About page', () => {
   it('has a check button and the automatic check switch, but no last-check time', async () => {
     const { client, dialog } = renderAbout({ canInstall: true, phase: 'idle' })
-    expect(within(dialog).getByText('0.1.0-alpha.2')).toBeInTheDocument()
+    expect(within(dialog).getByText(__APP_VERSION__)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '检查更新' })).toBeInTheDocument()
     expect(await within(dialog).findByRole('switch', { name: '自动检查更新' })).toBeChecked()
     // A last-check time is deliberately not shown anywhere.
