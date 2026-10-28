@@ -17,7 +17,7 @@
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - QQ / Foxmail 接入：阅读[调研与接入方案](reference/qq-foxmail-integration.md)，预设与登录诊断已有实现，真实收发矩阵待验。
-- 网易 163 / 126 / yeah.net 接入：阅读[调研与接入方案](reference/netease-163-126-integration.md)，三个预设、添加前测试登录、授权码引导与安全策略拒绝诊断已有实现，真实个人账号收发待验收。
+- 网易 163 / 126 / yeah.net 接入：阅读[调研与接入方案](reference/netease-163-126-integration.md)，三个预设、添加前测试登录、授权码引导与安全策略拒绝诊断已有实现，已有用户真实邮箱手测反馈，完整兼容矩阵待补充。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
 
 ## 目录职责
