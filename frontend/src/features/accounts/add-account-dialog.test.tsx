@@ -27,6 +27,17 @@ async function chooseImap(dialog: HTMLElement) {
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
 }
 
+async function chooseQq(dialog: HTMLElement, query = 'qq') {
+  fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: query } })
+  await userEvent.click(within(dialog).getByRole('radio', { name: 'QQ 邮箱' }))
+  await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+}
+
+function fillQqConnection(dialog: HTMLElement, emailAddress = 'synthetic@qq.com') {
+  fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: emailAddress } })
+  fireEvent.change(within(dialog).getByLabelText('授权码'), { target: { value: 'syntheticcodeabc' } })
+}
+
 async function toProfile(dialog: HTMLElement) {
   await chooseImap(dialog)
   fillConnection(dialog)
@@ -76,6 +87,62 @@ describe('add account wizard', () => {
       displayName: '新邮箱', color: '#7c3aed', emailAddress: 'new@example.com', providerId: null,
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-secret' } },
     })
+  })
+
+  it.each(['123456789@qq.com', 'synthetic@qq.com', 'synthetic@foxmail.com'])('saves %s with the QQ preset from only an address and authorization code', async (emailAddress) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseQq(dialog, emailAddress.endsWith('@foxmail.com') ? 'foxmail' : 'qq')
+    expect(within(dialog).getByText('高级设置')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
+    fillQqConnection(dialog, emailAddress)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount).toHaveBeenCalledOnce()
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
+      emailAddress, providerId: 'qq',
+      imap: { host: 'imap.qq.com', port: 993, tls: 'implicit', username: emailAddress },
+      smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit', username: emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
+      route: { kind: 'direct' },
+    })
+  })
+
+  it('retains the QQ address and authorization code when returning from the profile', async () => {
+    const { dialog } = renderDialog()
+    await chooseQq(dialog)
+    fillQqConnection(dialog, 'synthetic@foxmail.com')
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    await within(dialog).findByLabelText('账号名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue('synthetic@foxmail.com')
+    expect(within(dialog).getByLabelText('授权码')).toHaveValue('syntheticcodeabc')
+  })
+
+  it('keeps a non-QQ mailbox out of the QQ preset and clears its authorization code after validation', async () => {
+    const { client, dialog } = renderDialog()
+    await chooseQq(dialog)
+    fillQqConnection(dialog, 'synthetic@example.com')
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveAttribute('aria-invalid', 'true')
+    expect(within(dialog).getByLabelText('授权码')).toHaveValue('')
+    expect(within(dialog).queryByLabelText('账号名称')).not.toBeInTheDocument()
+    expect(client.createAccount).not.toHaveBeenCalled()
+  })
+
+  it('returns a rejected QQ credential to an empty authorization-code field without losing the address', async () => {
+    const client = testClient()
+    client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'sharedPassword', message: '凭证无效。' }))
+    const { dialog } = renderDialog(client)
+    await chooseQq(dialog)
+    fillQqConnection(dialog)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    await within(dialog).findByLabelText('账号名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    expect(await within(dialog).findByLabelText('授权码')).toHaveValue('')
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue('synthetic@qq.com')
+    expect(within(dialog).getByLabelText('授权码')).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('sends the sender name with the new account, empty by default', async () => {

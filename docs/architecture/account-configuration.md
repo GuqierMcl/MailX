@@ -1,6 +1,6 @@
 # 账号配置与凭证生命周期
 
-状态：**账号配置已实现 / 邮件连接与 OAuth 为后续设计**。当前提供桌面的创建、列表、详情与修改，保存后始终为 `unverified`（尚未验证连接）。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
+状态：**账号配置、协议连接与独立收发登录诊断已有实现 / OAuth 为后续设计**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在账号设置验证该配置版本的 IMAP / SMTP 登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
 
 ## 1. 对象与身份
 
@@ -40,7 +40,7 @@ type SecretUpdate =
 
 凭证信任绑定协议、规范化主机、端口、TLS 和登录用户名。首次输入或明确替换密码时，将当时的对应端点记录为受信范围。仅改端点并保留密码不会扩大信任：该连接返回 `needsConfirmation`。代理协议、端点或用户名变化同样不能自动继承原代理密码的信任。
 
-当前没有连接测试或单独的“信任新端点”命令；用户可以重新输入密码以建立新配置的信任关系。`trusted` 仅表示凭证适用于所配置的接收方，不证明服务器可达、证书有效或密码正确。未来连接器必须在认证前检查信任，再完成 TLS 验证；不能将旧凭证直接发往新端点。
+已有针对已保存账号的独立连接诊断，没有单独的“信任新端点”命令；诊断不能扩大凭证信任。用户可以重新输入密码以建立新配置的信任关系。`trusted` 仅表示凭证适用于所配置的接收方，不证明服务器可达、证书有效或密码正确。连接器在认证前检查信任并验证 TLS，不能将旧凭证直接发往新端点。
 
 支持保存 `direct`、`inherit` 与 `custom` 路由；自定义代理为 SOCKS5 或 HTTP CONNECT，目标 DNS 策略固定为 `proxy`。主机字段接受主机名或 IP，不接受带协议、路径或 userinfo 的 URL。邮件 TLS 只允许隐式 TLS 或强制 STARTTLS。
 

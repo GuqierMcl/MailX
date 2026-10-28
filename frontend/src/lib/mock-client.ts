@@ -126,6 +126,21 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!account) throw notFound()
       return structuredClone(account)
     },
+    async verifyAccountConnection(accountId, expectedRevision, signal) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const account = accounts.find((row) => row.id === accountId)
+      if (!account) throw notFound()
+      if (account.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '配置已被修改，请重新加载后重试。', field: null })
+      const check = (configured: boolean, trust: string): import('@/generated/accounts').ProtocolVerification => !configured
+        ? { status: 'failed', stage: 'configuration', code: 'credentialMissing' }
+        : trust !== 'trusted' ? { status: 'failed', stage: 'configuration', code: 'credentialUntrusted' }
+        : { status: 'verified', stage: 'complete', code: null }
+      return { accountId, revision: account.revision, imap: check(account.authentication.imap.passwordConfigured, account.authentication.imap.trust), smtp: check(account.authentication.smtp.passwordConfigured, account.authentication.smtp.trust) }
+    },
+    async openProviderHelp(providerId) {
+      if (providerId !== 'qq') throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
+      window.open('https://help.mail.qq.com/detail/0/1087', '_blank', 'noopener,noreferrer')
+    },
     async createAccount({ config }) {
       const account = accountFromConfig(crypto.randomUUID(), 1, config)
       accounts.push(account)

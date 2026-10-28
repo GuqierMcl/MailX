@@ -149,3 +149,32 @@ describe('drafts and sending commands', () => {
     await expect(client.openComposer('d')).rejects.toMatchObject({ failure: { code: 'hostUnavailable' } })
   })
 })
+
+describe('saved connection verification', () => {
+  it('binds cancellation to the unique attempt and removes the abort listener', async () => {
+    const report = { accountId: 'account', revision: 3, imap: { status: 'verified', stage: 'complete', code: null }, smtp: { status: 'verified', stage: 'complete', code: null } }
+    let complete!: (value: unknown) => void
+    vi.mocked(invoke).mockImplementation((command) => command === 'accounts_verify_connection'
+      ? new Promise((resolve) => { complete = resolve })
+      : Promise.resolve({ ok: true, data: null, requestId: 'cancel' }))
+    const controller = new AbortController()
+    const pending = createDesktopClient().verifyAccountConnection('account', 3, controller.signal)
+    const args = vi.mocked(invoke).mock.calls[0][1] as { request: { verificationId: string } }
+    controller.abort()
+    expect(invoke).toHaveBeenCalledWith('accounts_cancel_verification', { request: { accountId: 'account', verificationId: args.request.verificationId } })
+    complete({ ok: true, data: report, requestId: 'verify' })
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(args.request.verificationId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('does not begin an already cancelled verification and forwards help by provider only', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const client = createDesktopClient()
+    await expect(client.verifyAccountConnection('account', 2, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(invoke).not.toHaveBeenCalled()
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'help' })
+    await client.openProviderHelp('qq')
+    expect(invoke).toHaveBeenCalledWith('accounts_open_provider_help', { providerId: 'qq' })
+  })
+})

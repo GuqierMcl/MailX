@@ -16,6 +16,7 @@
 - 国际化适配：查看[中英文文本适配](architecture/internationalization.md)，首版已实现界面与错误文本、语言设置、多窗口同步及 Rust 通知 / 引用模板；三平台打包体验与原生通知待验，日期等区域格式化仍为 Planned。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
+- QQ / Foxmail 接入：阅读[调研与接入方案](reference/qq-foxmail-integration.md)，预设与登录诊断已有实现，真实收发矩阵待验。
 - 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
 
 ## 目录职责

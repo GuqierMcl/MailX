@@ -25,8 +25,11 @@ mod sync;
 pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use app::{
-    Activity, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BodyBinding, BodyDocument,
-    BodyLinks, FlagChange, MailxCore, MessageFlag, RemoteImageStatus,
+    AccountConnectionVerification, Activity, AttachmentFile, AttachmentInfo, AvatarImage,
+    AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
+    ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
+    FlagChange, MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus,
+    VerifyAccountConnection,
 };
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};

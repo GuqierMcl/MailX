@@ -106,6 +106,24 @@ senderName: string | null, emailAddress: string, providerId: string | null, mail
  */
 defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, createdAt: string, updatedAt: string, };
 
+export type VerifyAccountConnection = { accountId: string, expectedRevision: number,
+/**
+ * Unique per attempt, so closing an old view cannot cancel a newer attempt.
+ */
+verificationId: string, };
+
+export type CancelConnectionVerification = { accountId: string, verificationId: string, };
+
+export type ConnectionVerificationStatus = "verified" | "failed";
+
+export type ConnectionVerificationStage = "configuration" | "connection" | "tls" | "authentication" | "mailbox" | "complete";
+
+export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMissing" | "secretStore" | "network" | "proxy" | "tls" | "timeout" | "authentication" | "authUnavailable" | "protocol" | "cancelled" | "unsupported" | "configuration";
+
+export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
+
+export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, };
+
 export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
 
 export type Folder = { id: string, accountId: string, parentId: string | null, name: string, role: FolderRole,

@@ -42,6 +42,12 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
     updateConnection: vi.fn<MailxClient['updateConnection']>().mockImplementation(async ({ accountId, expectedRevision }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), revision: expectedRevision + 1 })),
     updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile })),
+    verifyAccountConnection: vi.fn<MailxClient['verifyAccountConnection']>().mockImplementation(async (accountId, revision) => ({
+      accountId, revision,
+      imap: { status: 'verified', stage: 'complete', code: null },
+      smtp: { status: 'verified', stage: 'complete', code: null },
+    })),
+    openProviderHelp: vi.fn<MailxClient['openProviderHelp']>().mockResolvedValue(undefined),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
     setFlag: vi.fn<MailxClient['setFlag']>().mockResolvedValue('queued'),

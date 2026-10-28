@@ -26,6 +26,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SettingsGroup, SettingsPage, SettingsRow } from '@/features/settings/settings-layout'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { AccountAvatar } from './account-avatar'
+import { ConnectionVerification } from './connection-verification'
+import { QqAuthHelp } from './qq-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
 import { ProviderBadge } from './provider-badge'
@@ -217,6 +219,7 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: A
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
           <AlertDescription>{errorText(stopped)}  {t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          {account.providerId === 'qq' && stopped.code === 'authentication' && <QqAuthHelp client={client} />}
           <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       )}
@@ -235,6 +238,7 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection }: A
         <SettingsRow label={t('accounts:credentials')} description={credentials(account, needsTrust)} />
         <SettingsRow label={t('accounts:networkRoute')} description={route(account.route)} />
         <Button variant="outline" className="w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+        <ConnectionVerification account={account} client={client} />
       </SettingsGroup>
     </SettingsPage>
   )

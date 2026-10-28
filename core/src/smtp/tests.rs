@@ -659,3 +659,36 @@ fn outcome_types_never_print_the_password() {
     let hook = DataStarted::new(|| async { Ok(()) });
     assert_eq!(format!("{hook:?}"), "DataStarted");
 }
+
+#[tokio::test]
+async fn verification_authenticates_and_quits_without_any_delivery_commands() {
+    for starttls in [false, true] {
+        let tls = TestTls::for_names(&["localhost"]);
+        let mode = if starttls {
+            Mode::StartTls(tls.server.clone())
+        } else {
+            Mode::Implicit(tls.server.clone())
+        };
+        let (port, seen) = fake_server::start(Script::new(mode)).await;
+        let login = login(
+            port,
+            if starttls {
+                TlsMode::StartTls
+            } else {
+                TlsMode::Implicit
+            },
+        );
+        verify_connection(&NetRoute::default(), &login, &fast(), &tls_for(&tls))
+            .await
+            .unwrap();
+        let log = commands(&seen);
+        assert!(saw(&seen, "AUTH") && saw(&seen, "QUIT"), "{log:?}");
+        assert!(
+            !log.iter().any(|command| ["MAIL", "RCPT", "DATA", "BODY"]
+                .iter()
+                .any(|verb| command.starts_with(verb))),
+            "{log:?}"
+        );
+        assert!(seen.lock().unwrap().body.is_empty());
+    }
+}

@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-20。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP、连接测试和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、收发连接诊断、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-28。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP 尚未开放；收发登录诊断与固定服务商帮助链接仅向主窗口开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -427,3 +427,41 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 `Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别对应“已发送”“发送失败”“可能已发送，需要确认”的当前语言译文。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题使用当前语言的占位文本）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新邮件通知该字段为 `null`），主窗口据此选中发件箱项。
 
 新邮件、发送结果和测试通知都按生成时的有效语言取资源；切换语言不撤回、不重发已显示的系统通知。通知过滤、隐私和声音规则沿用现状。共享文本与预览隐藏有自动测试，三平台真实通知显示和点击仍需按[验证策略](../development/validation.md#8-新邮件通知的手动验证)分别记录。
+
+### 收发连接诊断与服务商帮助
+
+QQ / Foxmail 使用 `providerId=qq` 和既有 `password/shared` 认证，预设只为新账号填充 `imap.qq.com:993`、`smtp.qq.com:465` 和隐式 TLS。已保存的端点、独立用户名、路由与凭证不会被预设覆盖；`providerId` 不授予新端点信任。原通用配置账号不自动迁移。
+
+| MailxClient 方法 | Tauri 命令与参数 | 结果 |
+| --- | --- | --- |
+| `verifyAccountConnection(accountId, expectedRevision, signal?)` | `accounts_verify_connection`，`{ request: { accountId, expectedRevision, verificationId } }` | `AccountConnectionVerification` |
+| adapter 的 AbortSignal 处理 | `accounts_cancel_verification`，`{ request: { accountId, verificationId } }` | 无数据；只取消对应尝试 |
+| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；当前仅接受 `qq`，由系统浏览器打开固定官方授权码指引 |
+
+上述命令只向受信主窗口开放，诊断和取消还要求核心 Ready；写信窗口和邮件正文不能调用。两个 ID 均为 UUID，verificationId 由 adapter 为每次尝试新建；未知顶层字段被拒绝。帮助命令不接受客户端 URL，未知 providerId 返回固定参数错误，不扩大任意外链打开权限。
+
+核心在准备登录计划和返回报告前检查账号连接 revision；开始时版本不同或检查期间连接已更新则返回 `conflict`。网络操作前释放账号存储锁；IMAP 与 SMTP 均经过已保存账号路由、凭证端点信任和 TLS 校验，自定义代理失败不回退直连。同账号最多一个诊断，重复尝试返回 `conflict`；取消按账号与 verificationId 隔离，支持取消请求先于诊断注册到达，不让旧取消中止新尝试。
+
+整次调用共用 45 秒预算，覆盖计划准备、两协议并行探测和最终版本核对。取消或超时丢弃在途网络会话；准备/版本核对的等待也受同一预算和取消信号控制。已经进入系统凭据库的同步操作不能强制中断，但它恢复后会检查取消/期限，不继续发起新网络请求。
+
+IMAP 仅建立有界会话、LOGIN、CAPABILITY、按能力发送 ID、NOOP 和退出；不执行 LIST、FETCH 或写标记。SMTP 复用正式发信的 TLS/EHLO/AUTH 路径，认证后只 QUIT，不执行 MAIL、RCPT、DATA。诊断不创建草稿或发送队列项，不改变 `connectionStatus=unverified`，也不持久化成功结论。
+
+```ts
+type ProtocolVerification = {
+  status: 'verified' | 'failed';
+  stage: 'configuration' | 'connection' | 'tls' | 'authentication' | 'mailbox' | 'complete';
+  code: 'credentialUntrusted' | 'credentialMissing' | 'secretStore' | 'network' | 'proxy'
+    | 'tls' | 'timeout' | 'authentication' | 'authUnavailable' | 'protocol'
+    | 'cancelled' | 'unsupported' | 'configuration' | null;
+};
+type AccountConnectionVerification = {
+  accountId: string;
+  revision: number;
+  imap: ProtocolVerification;
+  smtp: ProtocolVerification;
+};
+```
+
+成功项为 `verified/complete/null`；失败项只包含固定阶段和原因码，不包含服务端原始回复、目录名、邮件或秘密。网页根据当前语言显示消息。QQ 认证失败提供开通协议、更新授权码、检查完整地址和网页安全验证的排查步骤，不把模糊的认证拒绝细分为未经证实的确定原因。
+
+报告仅对这次探测的配置版本有效。切换账号、关闭界面、取消或连接版本变化都会取消旧尝试并丢弃迟到结果。收信和发信结果分别展示，“登录验证通过”明确不代表实际邮件投递或完整服务商兼容通过。

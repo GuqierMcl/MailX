@@ -6,14 +6,15 @@ import { MailxClientError } from '@/lib/mailx-client'
 import type { AccountDraft } from './account-draft'
 import { ConnectionForm } from './connection-form'
 import { exampleAccount } from './test-fixtures'
+import { QQ_PROVIDER, type MailProvider } from './providers'
 
 type Submit = (connection: ConnectionInput, draft: AccountDraft) => Promise<void> | void
 
-function renderForm(account: Account | null = null, onSubmit: Submit = vi.fn()) {
+function renderForm(account: Account | null = null, onSubmit: Submit = vi.fn(), provider?: MailProvider) {
   const submit = vi.fn(onSubmit)
   const onReload = vi.fn()
   render(
-    <ConnectionForm account={account} intro={{ title: '说明', description: '说明' }} submitLabel={account ? '保存更改' : '保存账号'}
+    <ConnectionForm account={account} provider={provider} intro={{ title: '说明', description: '说明' }} submitLabel={account ? '保存更改' : '保存账号'}
       submittingLabel="保存中…" onSubmit={submit} onReload={onReload} onBusyChange={vi.fn()} onDirtyChange={vi.fn()} />,
   )
   return { submit, onReload }
@@ -68,6 +69,50 @@ describe('connection form', () => {
     expect(submit.mock.calls[0][0]).toMatchObject({
       imap: { username: account.imap.username }, smtp: { username: 'new@example.com' },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
+    })
+  })
+
+  it('keeps saved QQ endpoints, login identities, credentials and proxy instead of reapplying its preset', async () => {
+    const account = exampleAccount({
+      providerId: 'qq', emailAddress: 'synthetic@foxmail.com',
+      imap: { host: 'imap.custom.example', port: 1993, tls: 'implicit', username: 'receive-identity@qq.com' },
+      smtp: { host: 'smtp.custom.example', port: 1587, tls: 'startTls', username: 'send-identity@qq.com' },
+      route: { kind: 'custom', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 8080, dns: 'proxy', imageProxyDns: false, authentication: null },
+    })
+    const { submit } = renderForm(account, vi.fn(), QQ_PROVIDER)
+    const advanced = screen.getByText('高级设置').closest('details')
+    if (!advanced?.open) await userEvent.click(screen.getByText('高级设置'))
+    expect(screen.getByLabelText('IMAP 主机')).toHaveValue(account.imap.host)
+    expect(screen.getByLabelText('SMTP 主机')).toHaveValue(account.smtp.host)
+    expect(screen.getByLabelText('IMAP 登录用户名')).toHaveValue(account.imap.username)
+    expect(screen.getByLabelText('SMTP 登录用户名')).toHaveValue(account.smtp.username)
+    expect(screen.getByLabelText('代理主机')).toHaveValue('proxy.example.com')
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    expect(submit).toHaveBeenCalledOnce()
+    expect(submit.mock.calls[0][0]).toMatchObject({
+      providerId: 'qq', emailAddress: account.emailAddress,
+      imap: account.imap, smtp: account.smtp, route: account.route,
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
+    })
+  })
+
+  it('opens QQ advanced settings and focuses a hidden field rejected by the backend', async () => {
+    const account = exampleAccount({ providerId: 'qq', emailAddress: 'synthetic@qq.com' })
+    renderForm(account, () => {
+      throw new MailxClientError({ code: 'validation', field: 'imap.host', message: '服务器无效。' })
+    }, QQ_PROVIDER)
+    const summary = screen.getByText('高级设置')
+    const details = summary.closest('details')
+    expect(details).toHaveAttribute('open')
+    await userEvent.click(summary)
+    expect(details).not.toHaveAttribute('open')
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    const host = screen.getByLabelText('IMAP 主机')
+    await waitFor(() => {
+      expect(details).toHaveAttribute('open')
+      expect(host).toBeVisible()
+      expect(host).toHaveAttribute('aria-invalid', 'true')
+      expect(host).toHaveFocus()
     })
   })
 

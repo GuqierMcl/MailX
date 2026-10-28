@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
   Account,
+  AccountConnectionVerification,
   AccountSyncState,
   AppError,
   AppSettings,
@@ -54,6 +55,10 @@ export interface MailxClient {
   retryStartup(): Promise<StartupStatus>
   listAccounts(): Promise<Account[]>
   getAccount(accountId: string): Promise<Account>
+  /** Authenticates both saved endpoints without sending mail; abort cancels this attempt only. */
+  verifyAccountConnection(accountId: string, expectedRevision: number, signal?: AbortSignal): Promise<AccountConnectionVerification>
+  /** Opens the fixed, reviewed help page for the selected supported provider. */
+  openProviderHelp(providerId: string): Promise<void>
   createAccount(request: CreateAccountRequest): Promise<Account>
   /** Replaces the connection; the account's sync restarts with it right away. */
   updateConnection(request: UpdateConnectionRequest): Promise<Account>
@@ -217,6 +222,20 @@ export function createDesktopClient(): MailxClient {
     retryStartup: () => call<StartupStatus>('app_retry_startup'),
     listAccounts: () => call<Account[]>('accounts_list'),
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
+    async verifyAccountConnection(accountId, expectedRevision, signal) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const verificationId = crypto.randomUUID()
+      const abort = () => { void call<void>('accounts_cancel_verification', { request: { accountId, verificationId } }).catch(() => undefined) }
+      signal?.addEventListener('abort', abort, { once: true })
+      try {
+        const result = await call<AccountConnectionVerification>('accounts_verify_connection', { request: { accountId, expectedRevision, verificationId } })
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        return result
+      } finally {
+        signal?.removeEventListener('abort', abort)
+      }
+    },
+    openProviderHelp: (providerId) => call<void>('accounts_open_provider_help', { providerId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
     updateConnection: (request) => call<Account>('accounts_update_connection', { request }),
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),

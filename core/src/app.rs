@@ -34,11 +34,17 @@ mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 mod flags;
+mod verification;
 pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use flags::{FlagChange, MessageFlag};
+pub use verification::{
+    AccountConnectionVerification, CancelConnectionVerification, ConnectionVerificationCode,
+    ConnectionVerificationStage, ConnectionVerificationStatus, ProtocolVerification,
+    VerifyAccountConnection,
+};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
@@ -54,6 +60,7 @@ pub struct MailxCore {
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
     events: Events,
+    verification: Arc<verification::VerificationRegistry>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -155,6 +162,7 @@ impl MailxCore {
             avatars: Arc::default(),
             images,
             events,
+            verification: Arc::default(),
         })
     }
 
@@ -208,6 +216,7 @@ impl MailxCore {
         // Queued mail follows the new route and credentials on its next
         // attempt; a changed address fails the unsent items.
         self.outbox.wake(&account.id);
+        self.verification.invalidate(&account.id);
         body_restart?;
         Ok(account)
     }

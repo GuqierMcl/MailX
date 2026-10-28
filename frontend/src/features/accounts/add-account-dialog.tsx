@@ -164,9 +164,13 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                 <ConnectionForm
                   key={formVersion}
                   account={null}
+                  provider={step.method}
+                  onOpenHelp={() => client.openProviderHelp(step.method.id ?? '')}
                   initialDraft={step.resume}
                   initialError={step.error}
-                  intro={{ title: t('accounts:manualSetup'), description: t('accounts:serverParametersHint') }}
+                  intro={step.method.id === 'qq'
+                    ? { title: t('accounts:qqSetupTitle'), description: t('accounts:qqSetupDescription') }
+                    : { title: t('accounts:manualSetup'), description: t('accounts:serverParametersHint') }}
                   submitLabel={t('accounts:next')}
                   submittingLabel={t('accounts:next')}
                   onBack={back}
