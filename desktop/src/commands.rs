@@ -250,6 +250,9 @@ struct ProviderHelpArgs {
 fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
     match provider_id {
         "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
+        "netease163" | "netease126" => Ok(
+            "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
+        ),
         _ => Err(AppError::validation("providerId")),
     }
 }
@@ -860,7 +863,22 @@ mod tests {
             provider_help_url("qq").unwrap(),
             "https://help.mail.qq.com/detail/0/1087"
         );
-        for provider in ["https://attacker.invalid", "foxmail", "qq/../", ""] {
+        for provider in ["netease163", "netease126"] {
+            assert_eq!(
+                provider_help_url(provider).unwrap(),
+                "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b"
+            );
+        }
+        for provider in [
+            "https://attacker.invalid",
+            "foxmail",
+            "qq/../",
+            "",
+            "netease",
+            "netease163/../",
+            "NETEASE126",
+            "yeah",
+        ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
                 AppError::validation("providerId")

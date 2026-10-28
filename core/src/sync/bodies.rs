@@ -491,6 +491,7 @@ fn imap_failure(error: ImapError) -> BodyFailureCode {
     match error {
         ImapError::TooLarge => BodyFailureCode::TooLarge,
         ImapError::Authentication(_) => BodyFailureCode::Authentication,
+        ImapError::ProviderPolicy => BodyFailureCode::ProviderPolicy,
         ImapError::Net(_) | ImapError::Timeout => BodyFailureCode::Network,
         _ => BodyFailureCode::Protocol,
     }

@@ -36,6 +36,7 @@ impl ReceiveGuard {
         match self.0.load(Ordering::Acquire) {
             1 => Err(ImapError::TooLarge),
             2 => Err(super::protocol()),
+            3 => Err(ImapError::ProviderPolicy),
             _ => result,
         }
     }
@@ -77,7 +78,11 @@ impl fmt::Debug for ReceiveStream {
 impl ReceiveStream {
     fn reject(&self, error: ImapError) -> io::Error {
         self.guard.0.store(
-            if error == ImapError::TooLarge { 1 } else { 2 },
+            match error {
+                ImapError::TooLarge => 1,
+                ImapError::ProviderPolicy => 3,
+                _ => 2,
+            },
             Ordering::Release,
         );
         io::Error::new(io::ErrorKind::InvalidData, "invalid IMAP frame")
@@ -124,6 +129,13 @@ impl AsyncRead for ReceiveStream {
                     if byte[0] == b'\n' {
                         if !this.line.ends_with(b"\r\n") {
                             return Poll::Ready(Err(this.reject(super::protocol())));
+                        }
+                        // Inspect only parsed status responses, never literal/header content.
+                        if let Ok(([], response)) =
+                            async_imap::imap_proto::Response::parse(&this.line)
+                            && crate::imap::policy::response(&response)
+                        {
+                            return Poll::Ready(Err(this.reject(ImapError::ProviderPolicy)));
                         }
                         let literal = match literal_length(&this.line, &mut this.nesting) {
                             Ok(literal) => literal,

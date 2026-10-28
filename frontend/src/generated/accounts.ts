@@ -142,7 +142,7 @@ export type ConnectionVerificationStatus = "verified" | "failed";
 
 export type ConnectionVerificationStage = "configuration" | "connection" | "tls" | "authentication" | "mailbox" | "complete";
 
-export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMissing" | "secretStore" | "network" | "proxy" | "tls" | "timeout" | "authentication" | "authUnavailable" | "protocol" | "cancelled" | "unsupported" | "configuration";
+export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMissing" | "secretStore" | "network" | "proxy" | "tls" | "timeout" | "authentication" | "providerPolicy" | "authUnavailable" | "protocol" | "cancelled" | "unsupported" | "configuration";
 
 export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
 
@@ -164,7 +164,7 @@ export type MailAddress = { name: string | null, address: string, };
 
 export type BodyState = "missing" | "fetching" | "ready" | "failed";
 
-export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication" | "protocol" | "storage";
+export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication" | "providerPolicy" | "protocol" | "storage";
 
 export type EmailSummary = { id: string, accountId: string, folderId: string, subject: string, from: MailAddress,
 /**
@@ -210,7 +210,7 @@ body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 
-export type SyncFailureCode = "authentication" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
+export type SyncFailureCode = "authentication" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**

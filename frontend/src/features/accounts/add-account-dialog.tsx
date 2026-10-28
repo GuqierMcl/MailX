@@ -170,8 +170,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   onOpenHelp={() => client.openProviderHelp(step.method.id ?? '')}
                   initialDraft={step.resume}
                   initialError={step.error}
-                  intro={step.method.id === 'qq'
-                    ? { title: t('accounts:qqSetupTitle'), description: t('accounts:qqSetupDescription') }
+                  intro={step.method.setup
+                    ? { title: step.method.setup.title, description: step.method.setup.description }
                     : { title: t('accounts:manualSetup'), description: t('accounts:serverParametersHint') }}
                   submitLabel={t('accounts:next')}
                   submittingLabel={t('accounts:next')}

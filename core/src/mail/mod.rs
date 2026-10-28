@@ -62,6 +62,7 @@ pub enum BodyFailureCode {
     Stale,
     Network,
     Authentication,
+    ProviderPolicy,
     Protocol,
     Storage,
 }

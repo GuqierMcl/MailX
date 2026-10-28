@@ -1366,3 +1366,50 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     let _ = worker.await;
     assert!(woken.is_ok(), "the worker kept waiting out its backoff");
 }
+
+#[tokio::test]
+async fn provider_policy_stops_before_reconnect_or_later_folders_and_keeps_cached_headers() {
+    let fixture = fixture();
+    let mut existing = commands(21, &[2]);
+    add_headers(&mut existing, &[(2, "Cached")]);
+    run(&fixture, existing, true).await.unwrap();
+    let targets = replace_targets(&fixture, &[("INBOX", true), ("Later", true)]);
+    let mut script = authenticate_commands();
+    script.push((
+        "STATUS ".into(),
+        "{tag} NO Unsafe Login. Please contact kefu@188.com for help private-marker\r\n".into(),
+    ));
+    let (session, peer) = scripted_session(script).await;
+    let result = sync_targets(
+        &fixture.shared,
+        &fixture.token,
+        targets,
+        session,
+        &mut FolderMemory::new(),
+        || async {
+            panic!("policy refusal must not reconnect");
+            #[allow(unreachable_code)]
+            Err(ImapError::Timeout)
+        },
+    )
+    .await;
+    let Outcome::Blocked(failure) = result else {
+        panic!("policy must stop automatic retries");
+    };
+    assert_eq!(failure.code, SyncFailureCode::ProviderPolicy);
+    assert!(!failure.will_retry);
+    assert_eq!(failure.detail, None);
+    assert!(
+        !serde_json::to_string(&failure)
+            .unwrap()
+            .contains("private-marker")
+    );
+    let page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    assert!(page.items.iter().any(|mail| mail.subject == "Cached"));
+    peer.await.unwrap();
+}

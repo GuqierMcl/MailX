@@ -19,6 +19,7 @@
   "transport": "Communication with the desktop app was interrupted. Reload and try again.",
   "hostUnavailable": "Manage accounts in the MailX desktop app.",
   "authentication": "The mail server rejected sign-in. Check your password or app password.",
+  "providerPolicy": "The mail provider's security policy blocked this connection. Check security notices on its website, resolve them, then try again manually.",
   "credentialUntrusted": "Confirm the account credentials in account settings.",
   "credentialMissing": "Account credentials are missing. Enter them again in account settings.",
   "network": "The network connection failed. Try again later.",

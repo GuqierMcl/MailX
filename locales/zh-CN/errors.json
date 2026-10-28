@@ -19,6 +19,7 @@
   "transport": "与桌面应用的通信中断，请重新加载配置后重试。",
   "hostUnavailable": "请在 MailX 桌面应用中管理账号。",
   "authentication": "邮箱服务器拒绝了账号登录，请检查密码或授权码。",
+  "providerPolicy": "邮箱服务商的安全策略阻止了连接。请先查看官网安全提示，处理后手动重试。",
   "credentialUntrusted": "账号凭证需要重新确认，请在账号设置中处理。",
   "credentialMissing": "没有找到账号凭证，请在账号设置中重新输入。",
   "network": "网络连接失败，请稍后重试。",

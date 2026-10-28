@@ -582,7 +582,7 @@ async fn account_revision_change_restarts_old_work_without_reusing_its_session()
         fail(
             &fixture.manager.shared,
             &old_token,
-            BodyFailureCode::Protocol
+            BodyFailureCode::ProviderPolicy
         )
         .await
         .unwrap_err()
@@ -727,4 +727,46 @@ async fn cached_body_can_rebuild_its_sanitizer_offline_without_any_connection() 
         SANITIZER_VERSION
     );
     assert!(fixture.connections.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn provider_policy_preserves_cached_mail_and_only_an_explicit_body_retry_reconnects() {
+    let mut fixture = fixture(&[None, None]);
+    let cached = fetch(&fixture, 0);
+    let request = connection(&mut fixture).await;
+    let (ready, release, peer) = session(1, 7, RAW).await;
+    assert!(request.send(Ok(ready)).is_ok());
+    release.send(()).unwrap();
+    assert_ready(&finished(cached).await.unwrap());
+    peer.await.unwrap();
+
+    let blocked = fetch(&fixture, 1);
+    let request = connection(&mut fixture).await;
+    assert!(request.send(Err(ImapError::ProviderPolicy)).is_ok());
+    let failed = finished(blocked).await.unwrap();
+    assert_eq!(failed.summary.body_state, BodyState::Failed);
+    assert_eq!(failed.body_failure, Some(BodyFailureCode::ProviderPolicy));
+    assert!(
+        !serde_json::to_string(&failed)
+            .unwrap()
+            .contains("Unsafe Login")
+    );
+    tokio::task::yield_now().await;
+    assert!(fixture.connections.try_recv().is_err());
+    assert_ready(
+        &fixture
+            .manager
+            .fetch(fixture.messages[0].clone())
+            .await
+            .unwrap(),
+    );
+    assert!(fixture.connections.try_recv().is_err());
+
+    let retry = fetch(&fixture, 1);
+    let request = connection(&mut fixture).await;
+    let (ready, release, peer) = session(2, 7, RAW).await;
+    assert!(request.send(Ok(ready)).is_ok());
+    release.send(()).unwrap();
+    assert_ready(&finished(retry).await.unwrap());
+    peer.await.unwrap();
 }

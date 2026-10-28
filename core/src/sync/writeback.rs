@@ -48,6 +48,8 @@ pub(crate) enum RoundEnd {
     /// Nothing can be done until the account changes (login rejected, trust
     /// lost, account gone).
     Blocked,
+    /// Keep all pending changes; only explicit sync/settings recovery restarts.
+    ProviderPolicy,
 }
 
 fn backoff(failures: u32) -> Duration {
@@ -173,6 +175,17 @@ impl Queue for Mutex<AccountService> {
     }
 }
 
+fn failed_round(error: ImapError, waiting: usize) -> RoundEnd {
+    match error {
+        ImapError::ProviderPolicy => RoundEnd::ProviderPolicy,
+        ImapError::Authentication(_) => RoundEnd::Blocked,
+        _ => RoundEnd::Retry(WriteBackReport {
+            waiting,
+            ..WriteBackReport::default()
+        }),
+    }
+}
+
 /// Runs one round for an account: read the queue, connect, push.
 pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: &str) -> RoundEnd {
     let id = account_id.to_owned();
@@ -209,20 +222,14 @@ pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: 
     };
     let mut session = match imap::open_session(&plan.route, &plan.login).await {
         Ok(session) => session,
-        Err(ImapError::Authentication(_)) => return RoundEnd::Blocked,
-        Err(_) => {
-            return RoundEnd::Retry(WriteBackReport {
-                waiting: changes.len(),
-                ..WriteBackReport::default()
-            });
-        }
+        Err(error) => return failed_round(error, changes.len()),
     };
     let result = push_changes(&mut session, service.as_ref(), changes).await;
     let _ = session.logout().await;
     match result {
         Ok(report) if report.waiting > 0 => RoundEnd::Retry(report),
         Ok(report) => RoundEnd::Done(report),
-        Err(_) => RoundEnd::Retry(WriteBackReport::default()),
+        Err(error) => failed_round(error, 0),
     }
 }
 
@@ -496,5 +503,39 @@ mod tests {
         assert!(matches!(result, Err(ImapError::Protocol(_))));
         assert!(queue.calls().iter().all(|call| !call.starts_with("finish")));
         let _ = server.await;
+    }
+    #[tokio::test]
+    async fn provider_policy_keeps_flags_queued_and_never_downgrades_a_star_to_local_only() {
+        for during_store in [false, true] {
+            let policy =
+                "{tag} NO Unsafe Login. Please contact kefu@188.com for help private-marker\r\n";
+            let script = if during_store {
+                vec![
+                    (
+                        "SELECT".into(),
+                        "* OK [UIDVALIDITY 9] x\r\n{tag} OK [READ-WRITE] done\r\n".into(),
+                    ),
+                    ("UID STORE".into(), policy.into()),
+                ]
+            } else {
+                vec![("SELECT".into(), policy.into())]
+            };
+            let (mut session, peer) = test_writable_session(script).await;
+            let queue = Recorder::default();
+            let error = push_changes(&mut session, &queue, vec![change(1, Flag::Flagged, true)])
+                .await
+                .unwrap_err();
+            assert_eq!(error, ImapError::ProviderPolicy);
+            assert_eq!(failed_round(error, 1), RoundEnd::ProviderPolicy);
+            assert!(
+                queue.calls().is_empty(),
+                "policy must neither acknowledge nor alter the queue"
+            );
+            peer.await.unwrap();
+        }
+        assert!(matches!(
+            failed_round(ImapError::Rejected, 1),
+            RoundEnd::Retry(_)
+        ));
     }
 }

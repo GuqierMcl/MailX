@@ -2,6 +2,7 @@ import { t } from '@/i18n'
 import type { IconSvgElement } from '@hugeicons/react'
 import { Mail01Icon } from '@hugeicons/core-free-icons'
 import qqmailLogo from '@/assets/providers/qqmail.png'
+import neteaseLogo from '@/assets/providers/netease.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -10,10 +11,23 @@ export type ProviderPreset = {
   smtp: Omit<ConnectionConfig, 'username'>
 }
 
+/** Guidance for a preset that signs in with a client authorization code. */
+export type ProviderSetup = {
+  title: string
+  description: string
+  emailHint: string
+  emailPlaceholder: string
+  emailRequired: string
+  authorizationCodeHint: string
+  rangeHint?: string
+  authenticationHelp: string
+  providerPolicyHelp?: string
+}
+
 /**
  * A mail provider MailX knows how to add, and how to label afterwards. The
  * add-account list, the account manager and the connection dialog all read
- * this list, so a new provider is one entry here plus its connection step.
+ * this list; presets and setup guidance stay with the provider's entry.
  */
 export type MailProvider = {
   /** Stored as the account's `providerId`; `null` is a manually configured server. */
@@ -31,6 +45,8 @@ export type MailProvider = {
   icon: IconSvgElement
   /** Defaults for a new account only; saved connections always keep their values. */
   preset?: ProviderPreset
+  /** Localized guidance; its presence enables the compact authorization-code form. */
+  setup?: ProviderSetup
 }
 
 export const GENERIC_PROVIDER: MailProvider = {
@@ -58,9 +74,63 @@ export const QQ_PROVIDER: MailProvider = {
     imap: { host: 'imap.qq.com', port: 993, tls: 'implicit' },
     smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit' },
   },
+  get setup() {
+    return {
+      title: t('accounts:qqSetupTitle'),
+      description: t('accounts:qqSetupDescription'),
+      emailHint: t('accounts:qqEmailHint'),
+      emailPlaceholder: 'you@qq.com',
+      emailRequired: t('accounts:qqEmailRequired'),
+      authorizationCodeHint: t('accounts:qqAuthorizationCodeHint'),
+      rangeHint: t('accounts:qqRangeHint'),
+      authenticationHelp: t('accounts:qqAuthenticationHelp'),
+    }
+  },
 }
 
-export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, GENERIC_PROVIDER]
+function neteaseProvider(id: string, domain: '163.com' | '126.com'): MailProvider {
+  const brand = domain === '163.com' ? '163' : '126'
+  return {
+    id,
+    get name() { return t('accounts:neteaseProviderName', { brand }) },
+    domain,
+    get description() { return t('accounts:neteaseProviderDescription', { domain }) },
+    searchAliases: ['网易', '网易邮箱', 'NetEase', brand],
+    logo: neteaseLogo,
+    icon: Mail01Icon,
+    preset: {
+      domains: [domain],
+      imap: { host: `imap.${domain}`, port: 993, tls: 'implicit' },
+      smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit' },
+    },
+    get setup() {
+      return {
+        title: t('accounts:neteaseSetupTitle', { brand }),
+        description: t('accounts:neteaseSetupDescription'),
+        emailHint: t('accounts:neteaseEmailHint', { domain }),
+        emailPlaceholder: `you@${domain}`,
+        emailRequired: t('accounts:providerEmailRequired', { domains: `@${domain}` }),
+        authorizationCodeHint: t('accounts:neteaseAuthorizationCodeHint'),
+        rangeHint: t('accounts:neteaseRangeHint'),
+        authenticationHelp: t('accounts:neteaseAuthenticationHelp'),
+        providerPolicyHelp: t('accounts:neteaseProviderPolicyHelp'),
+      }
+    },
+  }
+}
+
+export const NETEASE_163_PROVIDER = neteaseProvider('netease163', '163.com')
+export const NETEASE_126_PROVIDER = neteaseProvider('netease126', '126.com')
+
+export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, GENERIC_PROVIDER]
+
+/** Address errors use only the preset's reviewed domains and localized guidance. */
+export function providerEmailRequired(provider: MailProvider): string {
+  if (!provider.preset) return t('accounts:invalidEmail')
+  return provider.setup?.emailRequired ?? t('accounts:providerEmailRequired', {
+    domains: provider.preset.domains.map((domain) => `@${domain}`).join(' / '),
+  })
+}
 
 /** Local filtering keeps the registry's order and follows the current UI language. */
 export function filterProviders(providers: readonly MailProvider[], query: string): MailProvider[] {

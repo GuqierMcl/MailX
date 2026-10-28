@@ -143,8 +143,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return { accountId, revision: account.revision, imap: check(account.authentication.imap.passwordConfigured, account.authentication.imap.trust), smtp: check(account.authentication.smtp.passwordConfigured, account.authentication.smtp.trust) }
     },
     async openProviderHelp(providerId) {
-      if (providerId !== 'qq') throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
-      window.open('https://help.mail.qq.com/detail/0/1087', '_blank', 'noopener,noreferrer')
+      const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
+        : providerId === 'netease163' || providerId === 'netease126'
+          ? 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
+          : null
+      if (!url) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
+      window.open(url, '_blank', 'noopener,noreferrer')
     },
     async createAccount({ config }) {
       const account = accountFromConfig(crypto.randomUUID(), 1, config)

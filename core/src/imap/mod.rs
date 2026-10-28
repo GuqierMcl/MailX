@@ -1,6 +1,7 @@
 //! Read-only IMAP operations for folder/header synchronization and body loading.
 
 mod body;
+mod policy;
 pub(crate) mod utf7;
 pub(crate) use body::open_body_session;
 #[cfg(test)]
@@ -13,8 +14,8 @@ use std::time::Duration;
 use async_imap::Client;
 use async_imap::error::Error as ImapProtocolError;
 use async_imap::imap_proto::{
-    AttributeValue, MailboxDatum, MessageSection, Response, ResponseCode, SectionPath, Status,
-    StatusAttribute,
+    AttributeValue, Capability, MailboxDatum, MessageSection, Response, ResponseCode, SectionPath,
+    Status, StatusAttribute,
 };
 use async_imap::types::{Flag, NameAttribute};
 use chrono::{DateTime, FixedOffset, NaiveDate};
@@ -63,6 +64,8 @@ pub(crate) enum ImapError {
     Net(NetError),
     /// The server rejected the username or password.
     Authentication(String),
+    /// A recognized provider security policy rejected access. Never contains server text.
+    ProviderPolicy,
     /// The server does not support a required step, such as STARTTLS.
     Unsupported(String),
     /// The server answered with something the client could not use.
@@ -81,6 +84,7 @@ impl fmt::Display for ImapError {
         match self {
             Self::Net(error) => error.fmt(formatter),
             Self::Authentication(reason) => write!(formatter, "login rejected: {reason}"),
+            Self::ProviderPolicy => formatter.write_str("provider security policy rejected access"),
             Self::Unsupported(reason) => write!(formatter, "unsupported by server: {reason}"),
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
             Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
@@ -104,7 +108,10 @@ impl From<NetError> for ImapError {
 }
 
 impl From<ImapProtocolError> for ImapError {
-    fn from(_error: ImapProtocolError) -> Self {
+    fn from(error: ImapProtocolError) -> Self {
+        if policy::library_rejection(&error) {
+            return Self::ProviderPolicy;
+        }
         // NO/BAD, parser errors and I/O wrappers may contain server-controlled
         // header or credential data. Never forward their Display/Debug output.
         Self::Protocol("IMAP command failed".into())
@@ -212,22 +219,49 @@ pub(crate) async fn open_session(
     route: &NetRoute,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
+    let guard = body::ReceiveGuard::default();
+    let result = async {
+        let (client, gate) = connect_client(route, login, &guard).await?;
+        let result = authenticate(client, login).await;
+        // Header synchronization has its own command collectors. Keep this
+        // receive gate only for greeting/login, whose library parser drops BYE.
+        gate.disable();
+        result
+    }
+    .await;
+    guard.check(result)
+}
+
+/// Transport setup shared with the dedicated body connection. Every plaintext
+/// authentication phase is bounded, including unsolicited policy rejections.
+async fn connect_client(
+    route: &NetRoute,
+    login: &ImapLogin,
+    guard: &body::ReceiveGuard,
+) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
     let stream = net::connect(route, &login.host, login.port).await?;
-    let client = match login.tls {
-        TlsMode::Implicit => greet(net::upgrade_tls(stream, &login.host).await?).await?,
+    match login.tls {
+        TlsMode::Implicit => {
+            let stream = net::upgrade_tls(stream, &login.host).await?;
+            let (stream, gate) = guard.wrap(stream);
+            Ok((greet(stream).await?, gate))
+        }
         TlsMode::StartTls => {
+            let (stream, plaintext) = guard.wrap(stream);
             let mut client = greet(stream).await?;
             step(client.run_command_and_check_ok("STARTTLS", None))
                 .await
                 .map_err(|error| match error {
-                    ImapError::Timeout => error,
+                    ImapError::Timeout | ImapError::ProviderPolicy => error,
                     _ => ImapError::Unsupported("STARTTLS".into()),
                 })?;
-            // No greeting follows STARTTLS; the session continues inside TLS.
-            Client::new(net::upgrade_tls(client.into_inner(), &login.host).await?)
+            plaintext.disable();
+            let stream = net::upgrade_tls(client.into_inner(), &login.host).await?;
+            let (stream, gate) = guard.wrap(stream);
+            // STARTTLS continues inside TLS without another greeting.
+            Ok((Client::new(stream), gate))
         }
-    };
-    authenticate(client, login).await
+    }
 }
 
 /// The production connection entry remains `open_session`; tests can supply an
@@ -237,7 +271,11 @@ pub(crate) async fn test_session(
     stream: BoxedStream,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
-    authenticate(greet(stream).await?, login).await
+    let guard = body::ReceiveGuard::default();
+    let (stream, gate) = guard.wrap(stream);
+    let result = async { authenticate(greet(stream).await?, login).await }.await;
+    gate.disable();
+    guard.check(result)
 }
 
 /// A session over an in-memory peer that may SELECT and STORE, for the write-back
@@ -275,6 +313,7 @@ async fn greet(stream: BoxedStream) -> Result<Client<BoxedStream>, ImapError> {
     })
     .await?;
     match greeting {
+        Some(response) if policy::response(response.parsed()) => Err(ImapError::ProviderPolicy),
         Some(_) => Ok(client),
         None => Err(ImapError::Protocol(
             "connection closed before the greeting".into(),
@@ -286,26 +325,37 @@ async fn authenticate(
     client: Client<BoxedStream>,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
-    let mut inner = timeout(
+    let inner = timeout(
         COMMAND_TIMEOUT,
         client.login(&login.username, login.password.expose_secret()),
     )
     .await
     .map_err(|_| ImapError::Timeout)?
     .map_err(|(error, _)| match error {
+        error if policy::library_rejection(&error) => ImapError::ProviderPolicy,
         ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => {
             ImapError::Authentication("credentials were rejected".into())
         }
         other => ImapError::from(other),
     })?;
 
-    let capabilities = step(inner.capabilities()).await?;
     let mut session = Session {
         inner,
         body_guard: None,
         completion: None,
     };
-    if capabilities.has_str("ID") {
+    // The library collector drops tagged NO/BAD. Use the same checked
+    // completion boundary as mailbox commands so policy refusals cannot vanish.
+    let capabilities = session
+        .checked_command("CAPABILITY", |response, _| {
+            Ok(match response {
+            Response::Capabilities(values) => Some(values.iter().any(|value|
+                matches!(value, Capability::Atom(name) if name.eq_ignore_ascii_case("ID")))),
+            _ => None,
+        })
+        })
+        .await?;
+    if capabilities.into_iter().any(|has_id| has_id) {
         // Identification is optional, but timeout/EOF cannot leave a partially
         // consumed response on the connection used for mailbox commands.
         let command = format!(
@@ -688,6 +738,9 @@ impl Session {
                         ImapError::Protocol("IMAP connection closed before completion".into())
                     })?;
                 let raw = response.borrow_owner();
+                if policy::response(response.parsed()) {
+                    return Err(ImapError::ProviderPolicy);
+                }
                 match response.parsed() {
                     Response::Done {
                         tag: response_tag,
@@ -1049,7 +1102,7 @@ mod tests {
                 .collect(),
         ));
         let result = async {
-            let mut session = authenticate(greet(Box::new(client)).await?, &login()).await?;
+            let mut session = test_session(Box::new(client), &login()).await?;
             let folders = session.list_folders().await?;
             let _ = session.logout().await;
             Ok(folders)
@@ -1101,6 +1154,51 @@ mod tests {
             "\\Noselect folders are not queried"
         );
         assert_eq!(folders[3].delimiter.as_deref(), Some("/"));
+    }
+
+    #[tokio::test]
+    async fn provider_policy_is_redacted_at_login_capability_id_and_directory_boundaries() {
+        let login = ("LOGIN", "{tag} OK\r\n");
+        let caps = ("CAPABILITY", "* CAPABILITY IMAP4rev1 ID\r\n{tag} OK\r\n");
+        let policy =
+            "{tag} NO Unsafe Login. Please contact kefu@188.com for help private-marker\r\n";
+        for script in [
+            vec![("LOGIN", policy)],
+            vec![(
+                "LOGIN",
+                "* BYE Unsafe Login. Please contact kefu@188.com for help private-marker\r\n",
+            )],
+            vec![login, ("CAPABILITY", policy)],
+            vec![login, caps, ("ID", policy)],
+            vec![login, caps, ("ID", "{tag} OK\r\n"), ("LIST", policy)],
+        ] {
+            let error = run(script).await.unwrap_err();
+            assert_eq!(error, ImapError::ProviderPolicy);
+            assert!(!format!("{error:?} {error}").contains("private-marker"));
+            assert!(!format!("{error:?} {error}").contains("kefu"));
+        }
+        let (mut session, server) = header_session(vec![("NOOP".into(), policy.into())]).await;
+        assert_eq!(session.verify_noop().await, Err(ImapError::ProviderPolicy));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unknown_rejections_and_positive_text_do_not_become_provider_policy() {
+        let unknown = "{tag} NO Unsafe Login may mean something else private-marker\r\n";
+        assert!(matches!(
+            run(vec![("LOGIN", unknown)]).await,
+            Err(ImapError::Authentication(_))
+        ));
+        let (mut session, server) = header_session(vec![("NOOP".into(), unknown.into())]).await;
+        assert_eq!(session.verify_noop().await, Err(ImapError::Rejected));
+        server.await.unwrap();
+        let (mut session, server) = header_session(vec![(
+            "NOOP".into(),
+            "{tag} OK Unsafe Login. Please contact kefu@188.com for help\r\n".into(),
+        )])
+        .await;
+        session.verify_noop().await.unwrap();
+        server.await.unwrap();
     }
 
     #[tokio::test]

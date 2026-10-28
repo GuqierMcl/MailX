@@ -52,15 +52,15 @@ describe('on-demand body queries', () => {
     expect(cache.getQueriesData({ queryKey: mailKeys.email('one') }).some(([, data]) => (data as EmailDetail | undefined)?.body?.text === 'cached text')).toBe(false)
   })
 
-  it('downloads once in StrictMode, keeps ready metadata over old headers, and never retries failed DTOs automatically', async () => {
+  it.each(['network', 'providerPolicy'] as const)('downloads once in StrictMode, preserves %s without automatic retries, and keeps a manual retry over old headers', async (bodyFailure) => {
     const { client, wrapper } = setup()
-    client.fetchBody.mockResolvedValueOnce({ ...mail(), summary: { ...mail().summary, bodyState: 'failed' }, bodyFailure: 'network' })
+    client.fetchBody.mockResolvedValueOnce({ ...mail(), summary: { ...mail().summary, bodyState: 'failed' }, bodyFailure })
     const { result, rerender } = renderHook(({ id }) => useEmailBody(client, { id, accountId: account.id }, [account], { [account.id]: state }), { wrapper, initialProps: { id: 'one' } })
-    await waitFor(() => expect(result.current.email?.bodyFailure).toBe('network'))
+    await waitFor(() => expect(result.current.email?.bodyFailure).toBe(bodyFailure))
     rerender({ id: 'two' })
     await waitFor(() => expect(result.current.email?.summary.bodyState).toBe('failed'))
     rerender({ id: 'one' })
-    await waitFor(() => expect(result.current.email?.bodyFailure).toBe('network'))
+    await waitFor(() => expect(result.current.email?.bodyFailure).toBe(bodyFailure))
     expect(client.fetchBody.mock.calls.filter(([id]) => id === 'one')).toHaveLength(1)
     client.fetchBody.mockResolvedValue(mail('one', true))
     act(() => { result.current.download(); result.current.download() })

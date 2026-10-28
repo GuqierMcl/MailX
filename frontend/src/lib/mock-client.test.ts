@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from 'vitest'
 import { emailQuery } from '@/features/mail/format'
 import { createMockClient } from './mock-client'
 
+describe('mock provider help', () => {
+  it('opens only the fixed official URL for each supported provider', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    try {
+      const client = createMockClient()
+      for (const providerId of ['qq', 'netease163', 'netease126']) {
+        await client.openProviderHelp(providerId)
+        expect(open).toHaveBeenLastCalledWith(providerId === 'qq'
+          ? 'https://help.mail.qq.com/detail/0/1087'
+          : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
+      }
+      for (const providerId of ['https://example.com', 'constructor', 'netease', '']) {
+        await expect(client.openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
+      }
+      expect(open).toHaveBeenCalledTimes(3)
+    } finally { open.mockRestore() }
+  })
+})
+
 describe('mock email pagination', () => {
   it('paginates the filtered inbox without duplicating or omitting summaries', async () => {
     const client = createMockClient()

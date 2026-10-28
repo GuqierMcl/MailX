@@ -377,7 +377,7 @@ function SyncFailureAction({ failure }: { failure: SyncFailure }) {
       <TooltipContent side="right" className="max-w-72">
         <p>{errorText(failure)}</p>
         {failure.detail && <p className="mt-1 opacity-70">{failure.detail}</p>}
-        <p className="mt-1 opacity-70">{failure.willRetry ? t('mail:willRetryAutomatically') : t('mail:retryAfterAccountChange')}</p>
+        <p className="mt-1 opacity-70">{failure.willRetry ? t('mail:willRetryAutomatically') : failure.code === 'providerPolicy' ? t('mail:retryAfterProviderPolicy') : t('mail:retryAfterAccountChange')}</p>
       </TooltipContent>
     </Tooltip>
   )

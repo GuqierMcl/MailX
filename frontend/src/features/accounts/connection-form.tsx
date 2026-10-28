@@ -1,4 +1,4 @@
-import { errorText } from '@/i18n/errors'
+import { errorText, type ErrorContext } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useRef, useState, type ReactNode } from 'react'
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { clientFailure, type ClientFailure } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
-import { providerOf, type MailProvider } from './providers'
+import { providerEmailRequired, providerOf, type MailProvider } from './providers'
 import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 
 type FormProps = {
@@ -55,7 +55,7 @@ type InputFieldProps = {
   inputMode?: 'numeric' | 'email' | 'text'
   error?: ClientFailure | null
   autoComplete?: string
-  errorContext?: string
+  errorContext?: ErrorContext
 }
 
 function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
@@ -153,7 +153,9 @@ export function ConnectionForm({
 }: FormProps) {
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
-  const isQq = provider.id === 'qq'
+  const setup = provider.setup
+  const authorizationCode = !!setup
+  const errorContext = !account && provider.preset ? { emailAddress: providerEmailRequired(provider) } : undefined
   const [draft, setDraft] = useState(() => resume ?? initialDraft(account, provider))
   const [advanced, setAdvanced] = useState(!!account || !!resume)
   const [helpFailed, setHelpFailed] = useState(false)
@@ -228,10 +230,10 @@ export function ConnectionForm({
               </RadioGroup>
               {account && !sameMode && <FieldDescription>{t('accounts:authenticationChanged')}</FieldDescription>}</>)
   const passwordFields = (<>{draft.mode === 'shared'
-                ? <PasswordField id="sharedPassword" label={t(isQq ? 'accounts:authorizationCode' : 'accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={isQq} />
+                ? <PasswordField id="sharedPassword" label={t(authorizationCode ? 'accounts:authorizationCode' : 'accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
                 : <>
-                    <PasswordField id="imapPassword" label={t(isQq ? 'accounts:incomingAuthorizationCode' : 'accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={isQq} />
-                    <PasswordField id="smtpPassword" label={t(isQq ? 'accounts:outgoingAuthorizationCode' : 'accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} authorizationCode={isQq} />
+                    <PasswordField id="imapPassword" label={t(authorizationCode ? 'accounts:incomingAuthorizationCode' : 'accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
+                    <PasswordField id="smtpPassword" label={t(authorizationCode ? 'accounts:outgoingAuthorizationCode' : 'accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} authorizationCode={authorizationCode} />
                   </>}</>)
   const routeFields = (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
               <Field>
@@ -288,7 +290,7 @@ export function ConnectionForm({
         <Alert role="status">
           <AlertTitle>{intro.title}</AlertTitle>
           <AlertDescription>{intro.description}</AlertDescription>
-          {isQq && onOpenHelp && <Button variant="link" className="mt-1 h-auto w-fit px-0" disabled={saving} onClick={() => {
+          {setup && onOpenHelp && <Button variant="link" className="mt-1 h-auto w-fit px-0" disabled={saving} onClick={() => {
             setHelpFailed(false)
             void onOpenHelp().catch(() => setHelpFailed(true))
           }}>{t('accounts:getAuthorizationCode')}</Button>}
@@ -298,22 +300,22 @@ export function ConnectionForm({
         {error && (
           <Alert variant="destructive">
             <AlertTitle>{error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
-            <AlertDescription>{errorText(error, isQq ? 'qq' : undefined)}  {t('accounts:passwordsCleared')}</AlertDescription>
+            <AlertDescription>{errorText(error, errorContext)}  {t('accounts:passwordsCleared')}</AlertDescription>
             {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
               <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
           </Alert>
         )}
         <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
-          <SettingsGroup title={t('accounts:emailAddress')} description={t(isQq ? 'accounts:qqEmailHint' : 'accounts:emailAddressDescription')}>
-            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={isQq ? "you@qq.com" : "you@example.com"} inputMode="email" error={error} errorContext={isQq ? "qq" : undefined} />
+          <SettingsGroup title={t('accounts:emailAddress')} description={setup?.emailHint ?? t('accounts:emailAddressDescription')}>
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={setup?.emailPlaceholder ?? "you@example.com"} inputMode="email" error={error} errorContext={errorContext} />
           </SettingsGroup>
-          {isQq && (
-            <SettingsGroup title={t('accounts:authorizationCode')} description={t('accounts:qqAuthorizationCodeHint')}>
+          {setup && (
+            <SettingsGroup title={t('accounts:authorizationCode')} description={setup.authorizationCodeHint}>
               {passwordFields}
-              <FieldDescription>{t('accounts:qqRangeHint')}</FieldDescription>
+              {setup.rangeHint && <FieldDescription>{setup.rangeHint}</FieldDescription>}
             </SettingsGroup>
           )}
-          {isQq ? (
+          {setup ? (
             <details open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}>
               <summary className="cursor-pointer rounded-md py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">{t('accounts:advancedSettings')}</summary>
               <div className="flex flex-col gap-6 pt-4">

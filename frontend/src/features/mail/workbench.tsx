@@ -523,6 +523,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
               onClose={() => setOpened(null)}
               email={opened ? body.email : null}
+              providerId={accounts.find((account) => account.id === opened?.accountId)?.providerId ?? null}
               loading={opened !== null && body.detail.isPending}
               error={opened && body.detail.isError ? errorText(body.detail.error) : null}
               downloading={body.pending}

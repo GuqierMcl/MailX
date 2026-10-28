@@ -577,3 +577,75 @@ async fn short_command_tags_interoperate_with_servers_that_limit_tag_echoes() {
     );
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn body_guard_preserves_provider_policy_at_every_negative_response_phase() {
+    for failed in ["LOGIN", "CAPABILITY", "ID", "EXAMINE", "UID FETCH"] {
+        let (client, server) = tokio::io::duplex(16 * 1024);
+        let peer = tokio::spawn(async move {
+            let mut server = BufReader::new(server);
+            server.get_mut().write_all(b"* OK ready\r\n").await.unwrap();
+            for (expected, success) in [
+                ("LOGIN", "{tag} OK\r\n"),
+                ("CAPABILITY", "* CAPABILITY IMAP4rev1 ID\r\n{tag} OK\r\n"),
+                ("ID", "* ID NIL\r\n{tag} OK\r\n"),
+                (
+                    "EXAMINE",
+                    "* 1 EXISTS\r\n* OK [UIDVALIDITY 7] x\r\n{tag} OK\r\n",
+                ),
+                ("UID FETCH", ""),
+            ] {
+                let tag = command(&mut server, expected).await;
+                let reply = if expected == failed {
+                    "{tag} NO Unsafe Login. Please contact kefu@188.com for help private-marker\r\n"
+                } else {
+                    success
+                };
+                server
+                    .get_mut()
+                    .write_all(reply.replace("{tag}", &tag).as_bytes())
+                    .await
+                    .unwrap();
+                if expected == failed {
+                    return;
+                }
+            }
+        });
+        let result = async {
+            let mut session = test_body_session(Box::new(client), &login()).await?;
+            session.examine("INBOX").await?;
+            session.fetch_message(42, None).await
+        }
+        .await;
+        assert_eq!(result, Err(ImapError::ProviderPolicy), "{failed}");
+        peer.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn policy_text_inside_message_literals_is_ordinary_mail_content() {
+    let raw = b"Subject: Unsafe Login. Please contact kefu@188.com for help\r\n\r\n* NO Unsafe Login. Please contact kefu@188.com for help\r\n";
+    let (client, server) = tokio::io::duplex(16 * 1024);
+    let peer = tokio::spawn(async move {
+        let mut server = BufReader::new(server);
+        authenticated_peer(&mut server).await;
+        let tag = command(&mut server, "EXAMINE").await;
+        server
+            .get_mut()
+            .write_all(format!("* 1 EXISTS\r\n* OK [UIDVALIDITY 7] x\r\n{tag} OK\r\n").as_bytes())
+            .await
+            .unwrap();
+        let tag = command(&mut server, "UID FETCH").await;
+        let mut reply = format!("* 1 FETCH (UID 42 BODY[] {{{}}}\r\n", raw.len()).into_bytes();
+        reply.extend_from_slice(raw);
+        reply.extend_from_slice(format!(")\r\n{tag} OK\r\n").as_bytes());
+        server.get_mut().write_all(&reply).await.unwrap();
+    });
+    let mut session = test_body_session(Box::new(client), &login()).await.unwrap();
+    session.examine("INBOX").await.unwrap();
+    assert_eq!(
+        session.fetch_message(42, None).await.unwrap(),
+        Some(raw.to_vec())
+    );
+    peer.await.unwrap();
+}

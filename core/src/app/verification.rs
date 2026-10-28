@@ -61,6 +61,7 @@ pub enum ConnectionVerificationCode {
     Tls,
     Timeout,
     Authentication,
+    ProviderPolicy,
     AuthUnavailable,
     Protocol,
     Cancelled,
@@ -420,6 +421,7 @@ fn imap_failure(error: ImapError) -> ProtocolVerification {
         ImapError::Net(NetError::Connect(_)) => (S::Connection, C::Network),
         ImapError::Timeout | ImapError::Net(NetError::Timeout) => (S::Connection, C::Timeout),
         ImapError::Authentication(_) => (S::Authentication, C::Authentication),
+        ImapError::ProviderPolicy => (S::Authentication, C::ProviderPolicy),
         ImapError::Unsupported(_) => (S::Connection, C::Unsupported),
         _ => (S::Mailbox, C::Protocol),
     };

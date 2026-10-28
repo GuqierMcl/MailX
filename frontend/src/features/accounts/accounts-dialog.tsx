@@ -27,7 +27,7 @@ import { SettingsGroup, SettingsPage, SettingsRow } from '@/features/settings/se
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { AccountAvatar } from './account-avatar'
 import { ConnectionVerification } from './connection-verification'
-import { QqAuthHelp } from './qq-auth-help'
+import { ProviderAuthHelp } from './provider-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
 import { ProviderBadge } from './provider-badge'
@@ -236,8 +236,8 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
       ) : stopped && (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
-          <AlertDescription>{errorText(stopped)}  {t('accounts:retryAfterConnectionChange')}</AlertDescription>
-          {account.providerId === 'qq' && stopped.code === 'authentication' && <QqAuthHelp client={client} />}
+          <AlertDescription>{errorText(stopped)}  {stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          {(stopped.code === 'authentication' || stopped.code === 'providerPolicy') && <ProviderAuthHelp client={client} providerId={account.providerId} reason={stopped.code} />}
           <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       )}

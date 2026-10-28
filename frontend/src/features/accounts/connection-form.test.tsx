@@ -6,7 +6,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import type { AccountDraft } from './account-draft'
 import { ConnectionForm } from './connection-form'
 import { exampleAccount } from './test-fixtures'
-import { QQ_PROVIDER, type MailProvider } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
 
 type Submit = (connection: ConnectionInput, draft: AccountDraft) => Promise<void> | void
 
@@ -72,14 +72,14 @@ describe('connection form', () => {
     })
   })
 
-  it('keeps saved QQ endpoints, login identities, credentials and proxy instead of reapplying its preset', async () => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
     const account = exampleAccount({
-      providerId: 'qq', emailAddress: 'synthetic@foxmail.com',
+      providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}`,
       imap: { host: 'imap.custom.example', port: 1993, tls: 'implicit', username: 'receive-identity@qq.com' },
       smtp: { host: 'smtp.custom.example', port: 1587, tls: 'startTls', username: 'send-identity@qq.com' },
       route: { kind: 'custom', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 8080, dns: 'proxy', imageProxyDns: false, authentication: null },
     })
-    const { submit } = renderForm(account, vi.fn(), QQ_PROVIDER)
+    const { submit } = renderForm(account, vi.fn(), provider)
     const advanced = screen.getByText('高级设置').closest('details')
     if (!advanced?.open) await userEvent.click(screen.getByText('高级设置'))
     expect(screen.getByLabelText('IMAP 主机')).toHaveValue(account.imap.host)
@@ -90,17 +90,17 @@ describe('connection form', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
     expect(submit).toHaveBeenCalledOnce()
     expect(submit.mock.calls[0][0]).toMatchObject({
-      providerId: 'qq', emailAddress: account.emailAddress,
+      providerId: provider.id, emailAddress: account.emailAddress,
       imap: account.imap, smtp: account.smtp, route: account.route,
       authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     })
   })
 
-  it('opens QQ advanced settings and focuses a hidden field rejected by the backend', async () => {
-    const account = exampleAccount({ providerId: 'qq', emailAddress: 'synthetic@qq.com' })
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
+    const account = exampleAccount({ providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}` })
     renderForm(account, () => {
       throw new MailxClientError({ code: 'validation', field: 'imap.host', message: '服务器无效。' })
-    }, QQ_PROVIDER)
+    }, provider)
     const summary = screen.getByText('高级设置')
     const details = summary.closest('details')
     expect(details).toHaveAttribute('open')
@@ -161,6 +161,22 @@ describe('connection form', () => {
     fireEvent.change(screen.getByLabelText('发信密码'), { target: { value: 'send-secret' } })
     await user.click(screen.getByRole('button', { name: '保存账号' }))
     expect(submit.mock.calls[0][0].authentication).toEqual({ kind: 'password', mode: 'separate', imapPassword: { action: 'replace', value: 'receive-secret' }, smtpPassword: { action: 'replace', value: 'send-secret' } })
+  })
+
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('clears an in-flight $id authorization code and prevents duplicate submissions', async (provider) => {
+    let finish!: () => void
+    const { submit } = renderForm(null, () => new Promise<void>((resolve) => { finish = resolve }), provider)
+    fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: `synthetic@${provider.preset!.domains[0]}` } })
+    fireEvent.change(screen.getByLabelText('授权码'), { target: { value: 'synthetic-authorization-code' } })
+    const save = screen.getByRole('button', { name: '保存账号' })
+    fireEvent.click(save)
+    fireEvent.click(save)
+    expect(submit).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('授权码')).toHaveValue('')
+    expect(screen.getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(submit.mock.calls[0][0].authentication).toEqual({ kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-authorization-code' } })
+    await act(async () => { finish() })
+    expect(screen.getByRole('button', { name: '保存账号' })).toBeEnabled()
   })
 
   it('edits with explicit keep actions without reading any password', async () => {

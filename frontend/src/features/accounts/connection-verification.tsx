@@ -5,7 +5,7 @@ import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Button } from '@/components/ui/button'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { QqAuthHelp } from './qq-auth-help'
+import { ProviderAuthHelp } from './provider-auth-help'
 
 type VerificationState =
   | { kind: 'idle' | 'checking' | 'cancelled' }
@@ -52,6 +52,7 @@ function ConnectionVerificationAttempt({ account, client }: { account: Account; 
   const report = state.kind === 'ready' ? state.report : null
   const passed = report?.imap.status === 'verified' && report.smtp.status === 'verified'
   const authenticationFailed = report?.imap.code === 'authentication' || report?.smtp.code === 'authentication'
+  const policyFailed = report?.imap.code === 'providerPolicy' || report?.smtp.code === 'providerPolicy'
 
   return (
     <div className="flex flex-col items-start gap-3">
@@ -83,7 +84,7 @@ function ConnectionVerificationAttempt({ account, client }: { account: Account; 
           </div>
         )}
       </div>
-      {account.providerId === 'qq' && authenticationFailed && <QqAuthHelp client={client} />}
+      {(authenticationFailed || policyFailed) && <ProviderAuthHelp client={client} providerId={account.providerId} reason={policyFailed ? 'providerPolicy' : 'authentication'} />}
     </div>
   )
 }

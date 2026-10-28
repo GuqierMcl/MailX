@@ -50,6 +50,8 @@ pub enum SyncPhase {
 pub enum SyncFailureCode {
     /// The server rejected the login. Not retried until the account changes.
     Authentication,
+    /// Provider security policy; only an explicit refresh/settings change retries.
+    ProviderPolicy,
     /// The saved password was confirmed for other settings and needs re-entry.
     CredentialUntrusted,
     CredentialMissing,
@@ -157,12 +159,42 @@ impl Shared {
             if !Self::active(state, token) {
                 return;
             }
+            // A policy refusal remains visible until an explicit restart. A
+            // concurrent header round cannot hide a write-back refusal with Idle.
+            let policy = state
+                .failure
+                .as_ref()
+                .filter(|failure| failure.code == SyncFailureCode::ProviderPolicy)
+                .cloned();
             change(state);
+            if let Some(policy) = policy {
+                state.phase = SyncPhase::Failed;
+                state.failure = Some(policy);
+            }
             state.sequence = state.sequence.saturating_add(1);
             state.clone()
         };
         // The monotonic token lets consumers reject any reordered delivery.
         self.events.emit(&CoreEvent::Sync(state));
+    }
+
+    fn policy_blocked(&self, token: &WorkerToken) -> bool {
+        self.states.lock().is_ok_and(|states| {
+            states.get(&token.account_id).is_some_and(|state| {
+                Self::active(state, token)
+                    && state
+                        .failure
+                        .as_ref()
+                        .is_some_and(|failure| failure.code == SyncFailureCode::ProviderPolicy)
+            })
+        })
+    }
+
+    fn block_policy(&self, token: &WorkerToken) {
+        self.update(token, |state| {
+            state.phase = SyncPhase::Failed;
+            state.failure = Some(failure(SyncFailureCode::ProviderPolicy, None, false));
+        });
     }
 
     pub(super) fn folder_update(
@@ -317,6 +349,14 @@ impl SyncManager {
 
     /// Tells the account's write-back worker that a local change is waiting.
     pub(crate) fn changes_waiting(&self, account_id: &str) {
+        if self.shared.states.lock().is_ok_and(|states| {
+            states
+                .get(account_id)
+                .and_then(|state| state.failure.as_ref())
+                .is_some_and(|failure| failure.code == SyncFailureCode::ProviderPolicy)
+        }) {
+            return;
+        }
         if let Ok(writers) = self.writers.lock()
             && let Some((_, wake)) = writers.get(account_id)
         {
@@ -353,7 +393,7 @@ impl SyncManager {
                             .get(&token.account_id)
                             .is_some_and(|state| Shared::active(state, &token))
                     });
-                    if !live {
+                    if !live || shared.policy_blocked(&token) {
                         return;
                     }
                     match writeback::run_round(&service, &account).await {
@@ -377,6 +417,10 @@ impl SyncManager {
                             }
                         }
                         writeback::RoundEnd::Blocked => break,
+                        writeback::RoundEnd::ProviderPolicy => {
+                            shared.block_policy(&token);
+                            return;
+                        }
                     }
                 }
             }
@@ -385,10 +429,22 @@ impl SyncManager {
     }
 
     /// Starts the next round of an account's worker now instead of after its
-    /// wait or backoff. Returns false when no worker is running, e.g. a login
-    /// the server rejected: retrying that without a settings change could lock
-    /// the account, so it is deliberately not woken.
+    /// wait or backoff. A recognized provider policy is explicitly retried by
+    /// starting a fresh generation, including flag write-back. Other stopped
+    /// login/setup failures still require a connection settings change.
     pub(crate) fn refresh(&self, account_id: &str) -> bool {
+        let policy = self.shared.states.lock().is_ok_and(|states| {
+            states
+                .get(account_id)
+                .and_then(|state| state.failure.as_ref())
+                .is_some_and(|failure| failure.code == SyncFailureCode::ProviderPolicy)
+        });
+        if policy {
+            // This is the explicit user recovery path. New flags and activity
+            // changes never restart a worker stopped by a security policy.
+            self.restart(account_id);
+            return true;
+        }
         let running = self.workers.lock().is_ok_and(|workers| {
             workers
                 .get(account_id)
@@ -606,6 +662,9 @@ async fn run(
     let mut memory = messages::FolderMemory::new();
     let mut cadence = Cadence::default();
     loop {
+        if shared.policy_blocked(&token) {
+            return;
+        }
         shared.begin_round(&token);
         let before = revision_total(&shared, &token);
         let pause = match sync_once(&shared, &token, &mut last_folder_refresh, &mut memory).await {
@@ -756,6 +815,13 @@ pub(super) async fn with_store<T: Send + 'static>(
         {
             return Err(SyncError::Stale);
         }
+        if states
+            .get(&token.account_id)
+            .and_then(|state| state.failure.as_ref())
+            .is_some_and(|failure| failure.code == SyncFailureCode::ProviderPolicy)
+        {
+            return Err(SyncError::Imap(ImapError::ProviderPolicy));
+        }
         // Keep the generation guard until the short transaction is finished.
         operation(&mut service).map_err(SyncError::Storage)
     })
@@ -802,6 +868,9 @@ async fn sync_once(
         Err(error) => return from_sync_error(error),
     };
     shared.reconcile_targets(token, &cached, false);
+    if shared.policy_blocked(token) {
+        return classify(ImapError::ProviderPolicy);
+    }
     let mut session = match imap::open_session(&plan.route, &plan.login).await {
         Ok(session) => session,
         Err(error) => return classify(error),
@@ -864,8 +933,17 @@ where
     let mut reconnect_failures = 0u32;
     let mut failed = None;
     for (folder_id, remote_name) in targets {
+        if shared.policy_blocked(token) {
+            return classify(ImapError::ProviderPolicy);
+        }
         while session.is_none() {
+            if shared.policy_blocked(token) {
+                return classify(ImapError::ProviderPolicy);
+            }
             tokio::time::sleep(backoff(reconnect_failures.saturating_sub(1))).await;
+            if shared.policy_blocked(token) {
+                return classify(ImapError::ProviderPolicy);
+            }
             match connect().await {
                 Ok(connected) => {
                     session = Some(connected);
@@ -924,6 +1002,14 @@ where
                 let usable = error.session_usable();
                 let failure = match classify(error) {
                     Outcome::Transient(failure) => failure,
+                    Outcome::Blocked(failure) => {
+                        shared.folder_update(token, &folder_id, |folder| {
+                            folder.phase = FolderSyncPhase::Failed;
+                            folder.failure = Some(failure.clone());
+                            folder.data_revision = folder.data_revision.saturating_add(1);
+                        });
+                        return Outcome::Blocked(failure);
+                    }
                     outcome => return outcome,
                 };
                 shared.folder_update(token, &folder_id, |folder| {
@@ -971,6 +1057,9 @@ fn from_sync_error(error: SyncError) -> Outcome {
 fn classify(error: ImapError) -> Outcome {
     let detail = Some(error.to_string());
     match error {
+        ImapError::ProviderPolicy => {
+            Outcome::Blocked(failure(SyncFailureCode::ProviderPolicy, None, false))
+        }
         ImapError::Authentication(_) => {
             Outcome::Blocked(failure(SyncFailureCode::Authentication, detail, false))
         }
@@ -1001,6 +1090,7 @@ fn classify(error: ImapError) -> Outcome {
 fn failure(code: SyncFailureCode, detail: Option<String>, will_retry: bool) -> SyncFailure {
     let message = match code {
         SyncFailureCode::Authentication => "服务器拒绝了登录，请检查用户名和密码或授权码。",
+        SyncFailureCode::ProviderPolicy => "服务商安全策略拒绝访问，请按服务商指引处理后手动重试。",
         SyncFailureCode::CredentialUntrusted => {
             "服务器或登录身份已改变，请在账号设置中重新输入密码。"
         }
@@ -1031,6 +1121,7 @@ mod tests {
     use crate::accounts::sync_plan::tests::config;
     use crate::secrets::test_support::MemorySecrets;
     use crate::secrets::{SecretStore, SecretStoreError, SecretValue};
+    use futures_util::FutureExt;
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::TempDir;
@@ -1092,6 +1183,76 @@ mod tests {
         assert!(manager.workers.lock().unwrap().is_empty());
         assert!(manager.writers.lock().unwrap().is_empty());
         assert!(manager.wakers.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_policy_only_explicit_refresh_restarts_and_old_results_cannot_reblock() {
+        let directory = TempDir::new().unwrap();
+        let mut service =
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
+        let account = service.create(serde_json::from_value(json!({
+            "requestId": uuid::Uuid::new_v4().to_string(), "config": config(json!({"kind":"direct"}))
+        })).unwrap()).unwrap();
+        let service = Arc::new(Mutex::new(service));
+        let manager = SyncManager::new(
+            service.clone(),
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+        );
+        manager.restart(&account.id);
+        // No task is polled on this current-thread runtime: use its actual
+        // generation and real wake signals without making network connections.
+        let state = manager.states().pop().unwrap();
+        let old = WorkerToken {
+            account_id: account.id.clone(),
+            source: account.mailbox_source_id.clone(),
+            revision: account.revision,
+            generation: state.generation,
+        };
+        manager.shared.block_policy(&old);
+        let signal = manager.writers.lock().unwrap()[&account.id].1.clone();
+        assert!(signal.notified().now_or_never().is_some()); // drain initial round
+        manager.changes_waiting(&account.id);
+        assert!(signal.notified().now_or_never().is_none());
+        manager.set_activity(Activity::Background);
+        manager.set_activity(Activity::Active);
+        manager.shared.update(&old, |state| {
+            state.phase = SyncPhase::Idle;
+            state.failure = None;
+        });
+        assert!(manager.shared.policy_blocked(&old));
+        let failed = manager.states().pop().unwrap();
+        assert_eq!(failed.phase, SyncPhase::Failed);
+        assert!(!failed.failure.unwrap().will_retry);
+        manager.workers.lock().unwrap()[&account.id].abort();
+        let wake = Arc::new(tokio::sync::Notify::new());
+        super::run(
+            manager.shared.clone(),
+            old.clone(),
+            wake,
+            manager.activity.subscribe(),
+        )
+        .await;
+        assert!(manager.shared.policy_blocked(&old));
+
+        assert!(manager.refresh(&account.id));
+        let current = manager.states().pop().unwrap();
+        assert!(current.generation > old.generation);
+        assert!(current.failure.is_none());
+        manager.shared.block_policy(&old);
+        assert!(
+            manager.states().pop().unwrap().failure.is_none(),
+            "late old policy cannot stop a new generation"
+        );
+        manager.shared.block_policy(&WorkerToken {
+            generation: current.generation,
+            ..old.clone()
+        });
+        manager.restart(&account.id); // connection-update recovery uses this same path
+        assert!(manager.states().pop().unwrap().failure.is_none());
+        manager.shared.block_policy(&old);
+        assert!(manager.states().pop().unwrap().failure.is_none());
+        manager.shutdown();
     }
 
     #[tokio::test]
@@ -1376,6 +1537,7 @@ mod tests {
     fn login_and_setup_problems_wait_for_the_user_instead_of_retrying() {
         for error in [
             ImapError::Authentication("NO".into()),
+            ImapError::ProviderPolicy,
             ImapError::Unsupported("STARTTLS".into()),
         ] {
             assert!(matches!(

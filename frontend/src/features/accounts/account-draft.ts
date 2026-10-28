@@ -1,7 +1,7 @@
 import { t } from '@/i18n'
 import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
-import type { MailProvider } from './providers'
+import { providerEmailRequired, type MailProvider } from './providers'
 
 export type ConnectionDraft = Omit<ConnectionConfig, 'port'> & { port: string }
 export type SecretDraft = { replace: boolean; value: string }
@@ -107,7 +107,7 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
   const emailAddress = draft.emailAddress.trim()
   if (!/^[^\s@]+@[^\s@]+$/.test(emailAddress)) invalid('emailAddress', t('accounts:invalidEmail'))
   if (!account && provider?.preset && !provider.preset.domains.includes(emailAddress.split('@')[1].toLowerCase())) {
-    invalid('emailAddress', t('accounts:qqEmailRequired'))
+    invalid('emailAddress', providerEmailRequired(provider))
   }
   const imap = connection(draft.imap, 'imap', emailAddress)
   const smtp = connection(draft.smtp, 'smtp', emailAddress)
