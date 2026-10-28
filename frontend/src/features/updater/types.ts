@@ -11,27 +11,27 @@ export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'r
 /** Which step failed, so "retry" can do the right thing. */
 export type UpdateFailureStage = 'check' | 'download'
 
+/** Release metadata stays available throughout downloading, completion and retry. */
+export type ReleaseDetails = {
+  current: string
+  notes: string | null
+  /** Publication time in seconds since the Unix epoch, when the manifest had one. */
+  date: number | null
+}
+
 export type UpdateSnapshot =
   | { canInstall: boolean; phase: 'idle' }
   | { canInstall: boolean; phase: 'checking' }
-  | {
-    canInstall: boolean
-    phase: 'available'
-    version: string
-    current: string
-    notes: string | null
-    /** Publication time in seconds since the Unix epoch, when the manifest had one. */
-    date: number | null
-  }
-  | { canInstall: boolean; phase: 'downloading'; version: string; downloaded: number; total: number | null }
-  | { canInstall: boolean; phase: 'ready'; version: string }
+  | ({ canInstall: boolean; phase: 'available'; version: string } & ReleaseDetails)
+  | ({ canInstall: boolean; phase: 'downloading'; version: string; downloaded: number; total: number | null } & ReleaseDetails)
+  | ({ canInstall: boolean; phase: 'ready'; version: string } & ReleaseDetails)
   | {
     canInstall: boolean
     phase: 'failed'
-    stage: UpdateFailureStage
-    /** The version whose download failed; a failed check has none. */
-    version: string | null
+    stage: 'check'
+    version: null
   }
+  | ({ canInstall: boolean; phase: 'failed'; stage: 'download'; version: string } & ReleaseDetails)
 
 export const IDLE_UPDATE: UpdateSnapshot = { canInstall: false, phase: 'idle' }
 
