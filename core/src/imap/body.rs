@@ -12,14 +12,15 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::time::timeout;
 
 use super::{COMMAND_TIMEOUT, ImapError, ImapLogin, Session};
+#[cfg(test)]
 use crate::accounts::types::TlsMode;
 use crate::mail::render::MAX_MESSAGE_BYTES;
 #[cfg(test)]
 use crate::net::BoxedStream;
-use crate::net::{self, NetRoute};
+use crate::net::NetRoute;
 
 mod receive;
-pub(super) use receive::ReceiveGuard;
+pub(super) use receive::{PlaintextGate, ReceiveGuard};
 const MAX_CONTROL_BYTES: usize = 1024 * 1024;
 const MAX_LINE_BYTES: usize = 64 * 1024;
 const MAX_NESTING: usize = 32;
@@ -35,28 +36,9 @@ pub(crate) async fn open_body_session(
 ) -> Result<Session, ImapError> {
     let guard = ReceiveGuard::default();
     let result = async {
-        let stream = net::connect(route, &login.host, login.port).await?;
-        let client = match login.tls {
-            TlsMode::Implicit => {
-                let stream = net::upgrade_tls(stream, &login.host).await?;
-                let (stream, _) = guard.wrap(stream);
-                super::greet(stream).await?
-            }
-            TlsMode::StartTls => {
-                let (stream, plaintext) = guard.wrap(stream);
-                let mut client = super::greet(stream).await?;
-                super::step(client.run_command_and_check_ok("STARTTLS", None))
-                    .await
-                    .map_err(|error| match error {
-                        ImapError::Timeout => error,
-                        _ => ImapError::Unsupported("STARTTLS".into()),
-                    })?;
-                plaintext.disable();
-                let stream = net::upgrade_tls(client.into_inner(), &login.host).await?;
-                let (stream, _) = guard.wrap(stream);
-                async_imap::Client::new(stream)
-            }
-        };
+        // Unlike header sync, the body connection keeps its receive gate for
+        // EXAMINE and MIME transfer as well as authentication.
+        let (client, _gate) = super::connect_client(route, login, &guard).await?;
         let mut session = super::authenticate(client, login).await?;
         session.body_guard = Some(guard.clone());
         Ok(session)
@@ -353,6 +335,9 @@ fn classify_response(raw: &[u8], tag: &str, uid: u32) -> Result<Reply, ImapError
     let (remaining, response) = Response::parse(raw).map_err(|_| protocol())?;
     if !remaining.is_empty() {
         return Err(protocol());
+    }
+    if super::policy::response(&response) {
+        return Err(ImapError::ProviderPolicy);
     }
     match response {
         Response::Done {

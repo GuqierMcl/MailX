@@ -11,6 +11,8 @@ fn main() {
             "accounts_update_profile",
             "accounts_verify_connection",
             "accounts_cancel_verification",
+            "accounts_verify_draft_connection",
+            "accounts_cancel_draft_verification",
             "accounts_open_provider_help",
             "folders_list",
             "emails_list",

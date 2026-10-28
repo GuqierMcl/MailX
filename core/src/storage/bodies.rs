@@ -329,6 +329,7 @@ fn failure_value(failure: BodyFailureCode) -> &'static str {
         BodyFailureCode::Stale => "stale",
         BodyFailureCode::Network => "network",
         BodyFailureCode::Authentication => "authentication",
+        BodyFailureCode::ProviderPolicy => "providerPolicy",
         BodyFailureCode::Protocol => "protocol",
         BodyFailureCode::Storage => "storage",
     }

@@ -29,7 +29,7 @@ v0.1 不实现第三方 MCP Server 接入，因此“内置 AI + 对外 MCP Serv
 | --- | --- | --- |
 | 通用 IMAP / SMTP 测试服务 | TLS + 测试凭证 | 可重复故障注入与基本收发 |
 | QQ / Foxmail | IMAP / SMTP + 16 位授权码；已有预设 | 数字/英文 QQ 地址与 Foxmail 身份分别验证，真实发信、标记写回、收取范围变化、已发送副本及路由；见[接入方案](../reference/qq-foxmail-integration.md) |
-| 163 | 服务商允许的授权码或应用专用凭证 | 开通指引、ID 扩展需求、直连；具体规则实施时核验 |
+| 网易 163 / 126 / yeah.net | IMAP / SMTP + 客户端授权码；已有三个独立预设 | 官方参数与 IMAP ID 要求已核查，已有用户真实邮箱手测反馈；完整域名、平台与收发兼容矩阵待补充，见[接入方案](../reference/netease-163-126-integration.md) |
 | Gmail | OAuth 2.0 + XOAUTH2 为正式路径 | 同意范围、刷新、标签文件夹语义、走代理 |
 | Outlook.com / Microsoft 365 | OAuth 2.0 + XOAUTH2 | 租户策略、SMTP 可用性、刷新失败提示 |
 | 企业邮箱 | 手动端点 + 届时已实现的认证方式 | 私有 CA 的明确配置、协议可用性 |

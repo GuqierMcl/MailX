@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { QQ_PROVIDER } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -58,6 +58,25 @@ describe('QQ provider domain boundary', () => {
     try {
       draftToConnection(draft, null, QQ_PROVIDER)
       expect.fail('Unsupported QQ domain was accepted')
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(MailxClientError)
+      expect((cause as MailxClientError).failure).toMatchObject({ code: 'validation', field: 'emailAddress' })
+    }
+  })
+})
+
+describe.each([
+  { provider: NETEASE_163_PROVIDER, domain: '163.com' },
+  { provider: NETEASE_126_PROVIDER, domain: '126.com' },
+  { provider: NETEASE_YEAH_PROVIDER, domain: 'yeah.net' },
+])('NetEase provider domain boundary: $domain', ({ provider, domain }) => {
+  it.each([...['163.com', '126.com', 'yeah.net'].filter((other) => other !== domain), `sub.${domain}`, `${domain}.evil`, `evil${domain}`, 'qq.com', 'vip.163.com', 'vip.126.com'])('rejects %s before submitting a credential', (unsupportedDomain) => {
+    const draft = initialDraft(null, provider)
+    draft.emailAddress = `synthetic@${unsupportedDomain}`
+    draft.sharedPassword.value = 'synthetic-authorization-code'
+    try {
+      draftToConnection(draft, null, provider)
+      expect.fail('Unsupported NetEase domain was accepted')
     } catch (cause) {
       expect(cause).toBeInstanceOf(MailxClientError)
       expect((cause as MailxClientError).failure).toMatchObject({ code: 'validation', field: 'emailAddress' })

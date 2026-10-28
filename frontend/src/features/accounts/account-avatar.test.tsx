@@ -1,10 +1,10 @@
 import { render } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { AccountAvatar } from './account-avatar'
-import { QQ_PROVIDER } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 describe('account avatar', () => {
-  it('defaults a known provider to its bundled logo while retaining the account color and requested size', () => {
+  it('defaults a known provider to its bundled logo with the account color as a thin border and requested size', () => {
     const { container } = render(<AccountAvatar displayName="工作邮箱" color="#2563eb" providerId="qq" className="size-[18px] text-[10px]" />)
     const avatar = container.querySelector('[data-slot="account-avatar"]')!
     const logo = avatar.querySelector('img')!
@@ -12,7 +12,9 @@ describe('account avatar', () => {
     expect(logo).toHaveAttribute('alt', '')
     expect(logo).toHaveAttribute('aria-hidden', 'true')
     expect(avatar).toHaveAttribute('aria-hidden', 'true')
-    expect(avatar).toHaveStyle({ backgroundColor: '#2563eb' })
+    expect(avatar).toHaveStyle({ borderColor: '#2563eb' })
+    expect(avatar).not.toHaveStyle({ backgroundColor: '#2563eb' })
+    expect(avatar).not.toHaveClass('bg-background')
     expect(avatar).toHaveClass('size-[18px]')
     expect(avatar).not.toHaveTextContent('工')
   })
@@ -23,6 +25,17 @@ describe('account avatar', () => {
     expect(avatar.querySelector('img')).toBeNull()
     expect(avatar).toHaveTextContent(/^M$/)
     expect(avatar).toHaveStyle({ backgroundColor: '#16a34a' })
+  })
+
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('reuses the account icon preference for $id without a network logo lookup', (provider) => {
+    const { container, rerender } = render(<AccountAvatar displayName="网易邮箱" color="#2563eb" providerId={provider.id} />)
+    const logo = container.querySelector('img')!
+    expect(logo).toHaveAttribute('src', provider.logo)
+    expect(logo.getAttribute('src')).not.toMatch(/^https?:/)
+    expect(logo).toHaveAttribute('alt', '')
+    rerender(<AccountAvatar displayName="网易邮箱" color="#2563eb" providerId={provider.id} useProviderIcon={false} />)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('[data-slot="account-avatar"]')).toHaveTextContent(/^网$/)
   })
 
   it.each([undefined, null, 'future-provider'])('falls back to the neutral initial for provider %s without a bundled logo', (providerId) => {

@@ -5,6 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -36,6 +37,14 @@ async function chooseQq(dialog: HTMLElement, query = 'qq') {
 function fillQqConnection(dialog: HTMLElement, emailAddress = 'synthetic@qq.com') {
   fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: emailAddress } })
   fireEvent.change(within(dialog).getByLabelText('授权码'), { target: { value: 'syntheticcodeabc' } })
+}
+
+async function chooseProvider(dialog: HTMLElement, provider: MailProvider) {
+  fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: provider.preset!.domains[0] } })
+  const option = within(dialog).getByRole('radio', { name: provider.name })
+  expect(option.closest('label')!.querySelector('img')).toHaveAttribute('src', provider.logo)
+  await userEvent.click(option)
+  await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
 }
 
 async function toProfile(dialog: HTMLElement) {
@@ -107,6 +116,88 @@ describe('add account wizard', () => {
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
       route: { kind: 'direct' },
     })
+  })
+
+  it.each([
+    { provider: NETEASE_163_PROVIDER, emailAddress: 'Synthetic@163.COM', domain: '163.com' },
+    { provider: NETEASE_126_PROVIDER, emailAddress: 'Synthetic@126.COM', domain: '126.com' },
+    { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'Synthetic@YEAH.NET', domain: 'yeah.net' },
+  ])('adds $provider.id through the authorization-code flow and keeps the original login identity', async ({ provider, emailAddress, domain }) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseProvider(dialog, provider)
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveAttribute('placeholder', `you@${domain}`)
+    expect(within(dialog).getByText('高级设置')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '如何获取授权码' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith(provider.id)
+    fillQqConnection(dialog, emailAddress)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    const preference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
+    expect(preference).toBeChecked()
+    await userEvent.click(preference)
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue(emailAddress)
+    expect(within(dialog).getByLabelText('授权码')).toHaveValue('syntheticcodeabc')
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByRole('switch', { name: '使用服务商图标' })).not.toBeChecked()
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount).toHaveBeenCalledOnce()
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
+      emailAddress, providerId: provider.id, useProviderIcon: false,
+      imap: { host: `imap.${domain}`, port: 993, tls: 'implicit', username: emailAddress },
+      smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit', username: emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
+      route: { kind: 'direct' },
+    })
+  })
+
+  it.each([
+    { provider: NETEASE_163_PROVIDER, emailAddress: 'synthetic@126.com' },
+    { provider: NETEASE_126_PROVIDER, emailAddress: 'synthetic@163.com' },
+    { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'synthetic@163.com' },
+  ])('keeps the other NetEase domain out of $provider.id and clears its entered authorization code', async ({ provider, emailAddress }) => {
+    const { client, dialog } = renderDialog()
+    await chooseProvider(dialog, provider)
+    fillQqConnection(dialog, emailAddress)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveAttribute('aria-invalid', 'true')
+    expect(within(dialog).getByLabelText('授权码')).toHaveValue('')
+    expect(within(dialog).queryByLabelText('账号名称')).not.toBeInTheDocument()
+    expect(client.createAccount).not.toHaveBeenCalled()
+  })
+
+  it('discards a NetEase authorization code and advanced overrides when choosing a different provider', async () => {
+    const { client, dialog } = renderDialog()
+    await chooseProvider(dialog, NETEASE_163_PROVIDER)
+    fillQqConnection(dialog, 'synthetic@163.com')
+    await userEvent.click(within(dialog).getByText('高级设置'))
+    fireEvent.change(within(dialog).getByLabelText('IMAP 主机'), { target: { value: 'imap.override.example' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '放弃修改' }))
+    await chooseProvider(dialog, NETEASE_126_PROVIDER)
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue('')
+    expect(within(dialog).getByLabelText('授权码')).toHaveValue('')
+    await userEvent.click(within(dialog).getByText('高级设置'))
+    expect(within(dialog).getByLabelText('IMAP 主机')).toHaveValue('imap.126.com')
+    expect(client.createAccount).not.toHaveBeenCalled()
+  })
+
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('returns a rejected $id credential to an empty field while preserving the address', async (provider) => {
+    const client = testClient()
+    client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'sharedPassword', message: 'PRIVATE_SYNTHETIC_SERVER_RESPONSE' }))
+    const { dialog } = renderDialog(client)
+    await chooseProvider(dialog, provider)
+    const emailAddress = `synthetic@${provider.preset!.domains[0]}`
+    fillQqConnection(dialog, emailAddress)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    await within(dialog).findByLabelText('账号名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    expect(await within(dialog).findByLabelText('授权码')).toHaveValue('')
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue(emailAddress)
+    expect(within(dialog).getByLabelText('授权码')).toHaveAttribute('aria-invalid', 'true')
+    expect(dialog).not.toHaveTextContent('PRIVATE_SYNTHETIC_SERVER_RESPONSE')
+    expect(client.createAccount).toHaveBeenCalledOnce()
   })
 
   it('keeps an opted-out provider icon choice when returning through the connection step', async () => {

@@ -48,6 +48,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [step, setStep] = useState<Step>({ kind: 'method', selected: null })
   const [providerQuery, setProviderQuery] = useState('')
   const [formVersion, setFormVersion] = useState(0)
+  const [verificationResetVersion, setVerificationResetVersion] = useState(0)
   // Which way the last step change went, so the new step slides in from that side.
   const [direction, setDirection] = useState<'forward' | 'back'>('forward')
   const [displayName, setDisplayName] = useState('')
@@ -139,13 +140,18 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(next) => !next && guard.leave(onClose, unsaved)}>
+      <Dialog open={open} onOpenChange={(next) => {
+        if (!next) {
+          setVerificationResetVersion((version) => version + 1)
+          guard.leave(onClose, unsaved)
+        }
+      }}>
         <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[640px]">
           <DialogDescription className="sr-only">{t('accounts:addAccountDescription')}</DialogDescription>
           <header className="flex shrink-0 items-baseline gap-2 px-6 py-4 pr-12">
-            <DialogTitle className="text-base font-semibold">{t('accounts:addAccount')}</DialogTitle>
-            {step.kind !== 'method' && <span className="text-sm text-muted-foreground">{step.method.name}</span>}
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums">{t('accounts:stepProgress', { step: stepNumber, total: STEP_COUNT })}</span>
+            <DialogTitle className="shrink-0 text-base font-semibold">{t('accounts:addAccount')}</DialogTitle>
+            {step.kind !== 'method' && <span className="min-w-0 truncate text-sm text-muted-foreground">{step.method.name}</span>}
+            <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">{t('accounts:stepProgress', { step: stepNumber, total: STEP_COUNT })}</span>
           </header>
           {/* Keyed by step so each change replays the slide; skipped when reduced motion is preferred. */}
           <div key={step.kind} className={cn(
@@ -167,11 +173,13 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   key={formVersion}
                   account={null}
                   provider={step.method}
+                  verificationClient={client}
+                  verificationResetKey={`${open}:${verificationResetVersion}`}
                   onOpenHelp={() => client.openProviderHelp(step.method.id ?? '')}
                   initialDraft={step.resume}
                   initialError={step.error}
-                  intro={step.method.id === 'qq'
-                    ? { title: t('accounts:qqSetupTitle'), description: t('accounts:qqSetupDescription') }
+                  intro={step.method.setup
+                    ? { title: step.method.setup.title, description: step.method.setup.description }
                     : { title: t('accounts:manualSetup'), description: t('accounts:serverParametersHint') }}
                   submitLabel={t('accounts:next')}
                   submittingLabel={t('accounts:next')}

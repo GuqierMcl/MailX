@@ -1,4 +1,5 @@
 pub(crate) mod bodies;
+pub(crate) mod draft_connection;
 mod drafts;
 mod outbox;
 mod removal;

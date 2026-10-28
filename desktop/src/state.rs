@@ -456,6 +456,8 @@ mod tests {
             Arc::new(MemorySecrets::default()),
             Arc::new(|_: &mailx_core::CoreEvent| {}),
         );
+        // Async connection diagnostics use this path directly, before any probe.
+        assert_eq!(state.core().err().unwrap().code, ErrorCode::CoreNotReady);
         let error =
             tauri::async_runtime::block_on(state.run(|_| Ok::<_, AppError>(()))).unwrap_err();
         assert_eq!(error.code, ErrorCode::CoreNotReady);

@@ -5,7 +5,7 @@ import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Button } from '@/components/ui/button'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { QqAuthHelp } from './qq-auth-help'
+import { ProviderAuthHelp } from './provider-auth-help'
 
 type VerificationState =
   | { kind: 'idle' | 'checking' | 'cancelled' }
@@ -50,8 +50,6 @@ function ConnectionVerificationAttempt({ account, client }: { account: Account; 
   }
 
   const report = state.kind === 'ready' ? state.report : null
-  const passed = report?.imap.status === 'verified' && report.smtp.status === 'verified'
-  const authenticationFailed = report?.imap.code === 'authentication' || report?.smtp.code === 'authentication'
 
   return (
     <div className="flex flex-col items-start gap-3">
@@ -69,21 +67,34 @@ function ConnectionVerificationAttempt({ account, client }: { account: Account; 
       <div role="status" aria-live="polite" className="w-full text-sm">
         {state.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
         {state.kind === 'failed' && <p className="text-destructive">{state.failure.code === 'conflict' ? t('accounts:verificationStale') : errorText(state.failure)}</p>}
-        {report && (
-          <div className="flex flex-col gap-2">
-            <p className={passed ? 'text-muted-foreground' : 'text-destructive'}>{t(passed ? 'accounts:verificationSucceeded' : 'accounts:verificationFailed')}</p>
-            {(['imap', 'smtp'] as const).map((protocol) => (
-              <div key={protocol} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-                <span>{t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')}</span>
-                <span className={report[protocol].status === 'verified' ? 'text-muted-foreground' : 'text-destructive'}>
-                  {report[protocol].status === 'verified' ? t('accounts:verificationPassed') : failureText(report[protocol].code)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        {report && <ConnectionVerificationReport report={report} client={client} providerId={account.providerId} />}
       </div>
-      {account.providerId === 'qq' && authenticationFailed && <QqAuthHelp client={client} />}
     </div>
   )
+}
+
+/** Saved and unsaved connections share the same protocol results and reviewed help. */
+export function ConnectionVerificationReport({ report, client, providerId }: {
+  report: Pick<AccountConnectionVerification, 'imap' | 'smtp'>
+  client: MailxClient
+  providerId: string | null
+}) {
+  useTranslation()
+  const passed = report.imap.status === 'verified' && report.smtp.status === 'verified'
+  const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
+  const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
+  return <div className="flex w-full flex-col gap-3 text-sm">
+    <p className={passed ? 'text-muted-foreground' : 'text-destructive'}>{t(passed ? 'accounts:verificationSucceeded' : 'accounts:verificationFailed')}</p>
+    <div className="flex flex-col gap-2">
+      {(['imap', 'smtp'] as const).map((protocol) => (
+        <div key={protocol} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+          <span>{t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')}</span>
+          <span className={report[protocol].status === 'verified' ? 'text-muted-foreground' : 'text-destructive'}>
+            {report[protocol].status === 'verified' ? t('accounts:verificationPassed') : failureText(report[protocol].code)}
+          </span>
+        </div>
+      ))}
+    </div>
+    {(authenticationFailed || policyFailed) && <ProviderAuthHelp client={client} providerId={providerId} reason={policyFailed ? 'providerPolicy' : 'authentication'} />}
+  </div>
 }

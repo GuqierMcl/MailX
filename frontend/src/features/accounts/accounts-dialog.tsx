@@ -7,7 +7,6 @@ import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountRemoval, AccountSyncState, RouteConfig } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { IconButton } from '@/components/icon-button'
 import { Delayed } from '@/components/ui/delayed'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -27,7 +26,7 @@ import { SettingsGroup, SettingsPage, SettingsRow } from '@/features/settings/se
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { AccountAvatar } from './account-avatar'
 import { ConnectionVerification } from './connection-verification'
-import { QqAuthHelp } from './qq-auth-help'
+import { ProviderAuthHelp } from './provider-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
 import { ProviderBadge } from './provider-badge'
@@ -98,10 +97,11 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
             <Sidebar collapsible="none"
               className="h-auto w-full shrink-0 border-b pr-12 md:h-full md:w-(--sidebar-width) md:border-b-0 md:pr-0">
               <SidebarHeader className="shrink-0 flex-row items-center justify-between gap-3 px-4 py-3 md:pt-5">
-                <DialogTitle className="text-base font-semibold">{t('accounts:emailAccounts')}</DialogTitle>
-                <IconButton label={t('accounts:addAccountShort')} variant="default" size="icon-sm" disabled={removing} onClick={onAddAccount}>
-                  <HugeiconsIcon icon={Add01Icon} />
-                </IconButton>
+                <DialogTitle className="min-w-0 text-base font-semibold">{t('accounts:emailAccounts')}</DialogTitle>
+                <Button size="sm" disabled={removing} onClick={onAddAccount}>
+                  <HugeiconsIcon icon={Add01Icon} aria-hidden />
+                  {t('accounts:addAccountShort')}
+                </Button>
               </SidebarHeader>
               <SidebarContent>
                 <SidebarGroup className="py-2 md:p-2">
@@ -236,8 +236,8 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
       ) : stopped && (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
-          <AlertDescription>{errorText(stopped)}  {t('accounts:retryAfterConnectionChange')}</AlertDescription>
-          {account.providerId === 'qq' && stopped.code === 'authentication' && <QqAuthHelp client={client} />}
+          <AlertDescription>{errorText(stopped)}  {stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          {(stopped.code === 'authentication' || stopped.code === 'providerPolicy') && <ProviderAuthHelp client={client} providerId={account.providerId} reason={stopped.code} />}
           <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       )}

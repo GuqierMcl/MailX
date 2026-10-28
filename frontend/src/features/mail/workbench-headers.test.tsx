@@ -66,6 +66,24 @@ const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).ge
 const listedRows = () => screen.queryAllByRole('listitem').filter((row) => row.closest('[aria-label="邮件列表"]'))
 
 describe('synced inbox headers', () => {
+  it('uses the saved owning provider for policy help and waits for an explicit body retry', async () => {
+    const item = email('policy', { bodyState: 'failed', from: { name: null, address: 'sender@163.com' } })
+    const { client } = setup([item])
+    client.listAccounts.mockResolvedValue([exampleAccount({ providerId: 'netease126', emailAddress: 'synthetic@126.com' })])
+    client.getEmail.mockResolvedValue({ ...detail(item), bodyFailure: 'providerPolicy' })
+    client.fetchBody.mockResolvedValue({ ...detail({ ...item, bodyState: 'ready' }), body: { text: 'after explicit retry', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } })
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(rows()[0])
+    expect(await screen.findByText(/阻止了正文下载/)).toBeInTheDocument()
+    expect(client.fetchBody).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '查看官方帮助' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith('netease126')
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('after explicit retry')).toBeInTheDocument()
+    expect(client.fetchBody).toHaveBeenCalledExactlyOnceWith(item.id)
+  })
+
   it('requests 100 headers, appends the cursor page and hides load more at the end', async () => {
     const items = Array.from({ length: 103 }, (_, index) => email(String(index)))
     const { client } = setup(items)

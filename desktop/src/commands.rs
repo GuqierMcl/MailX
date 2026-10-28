@@ -1,8 +1,9 @@
 use mailx_core::{
     Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
-    CancelConnectionVerification, CreateAccountRequest, EmailDetail, EmailListQuery, EmailPage,
-    ErrorCode, Folder, RemoveAccountRequest, SettingsPatch, SettingsSnapshot,
-    UpdateConnectionRequest, UpdateProfileRequest, VerifyAccountConnection,
+    CancelConnectionVerification, CancelDraftVerification, CreateAccountRequest,
+    DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage, ErrorCode, Folder,
+    RemoveAccountRequest, SettingsPatch, SettingsSnapshot, UpdateConnectionRequest,
+    UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
@@ -241,6 +242,37 @@ pub(crate) async fn accounts_cancel_verification(
     })))
 }
 
+/// Authentication-only checks for the unsaved add-account form.
+#[tauri::command]
+pub(crate) async fn accounts_verify_draft_connection(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<DraftConnectionVerification>, ()> {
+    let args = authorize(&window, "accounts_verify_draft_connection")
+        .and_then(|_| parse::<WriteArgs<VerifyDraftConnection>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.verify_draft_connection(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_cancel_draft_verification(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "accounts_cancel_draft_verification")
+        .and_then(|_| parse::<WriteArgs<CancelDraftVerification>>(request.body()));
+    Ok(respond(args.and_then(|args| {
+        state.core()?.cancel_draft_verification(args.request)
+    })))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderHelpArgs {
@@ -250,6 +282,9 @@ struct ProviderHelpArgs {
 fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
     match provider_id {
         "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
+        "netease163" | "netease126" | "neteaseYeah" => Ok(
+            "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
+        ),
         _ => Err(AppError::validation("providerId")),
     }
 }
@@ -879,7 +914,22 @@ mod tests {
             provider_help_url("qq").unwrap(),
             "https://help.mail.qq.com/detail/0/1087"
         );
-        for provider in ["https://attacker.invalid", "foxmail", "qq/../", ""] {
+        for provider in ["netease163", "netease126", "neteaseYeah"] {
+            assert_eq!(
+                provider_help_url(provider).unwrap(),
+                "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b"
+            );
+        }
+        for provider in [
+            "https://attacker.invalid",
+            "foxmail",
+            "qq/../",
+            "",
+            "netease",
+            "netease163/../",
+            "NETEASE126",
+            "yeah",
+        ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
                 AppError::validation("providerId")
@@ -891,6 +941,58 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn draft_verification_accepts_only_the_supplied_connection_and_attempt_id() {
+        let connection = json!({
+            "emailAddress":"fixture@example.test", "providerId":"neteaseYeah",
+            "imap":{"host":"imap.yeah.net","port":993,"tls":"implicit","username":"fixture@example.test"},
+            "smtp":{"host":"smtp.yeah.net","port":465,"tls":"implicit","username":"fixture@example.test"},
+            "authentication":{"kind":"password","mode":"shared","password":{"action":"replace","value":"synthetic-secret"}},
+            "route":{"kind":"direct"}
+        });
+        let args = json!({"request":{"verificationId":"attempt", "connection":connection}});
+        assert!(parse::<WriteArgs<VerifyDraftConnection>>(&InvokeBody::Json(args.clone())).is_ok());
+        for extra in ["accountId", "secretRef", "actor"] {
+            let mut forged = args.clone();
+            forged["request"][extra] = json!("synthetic-secret");
+            let error = parse::<WriteArgs<VerifyDraftConnection>>(&InvokeBody::Json(forged))
+                .err()
+                .unwrap();
+            assert_eq!(error, AppError::validation("request"));
+            assert!(
+                !serde_json::to_string(&error)
+                    .unwrap()
+                    .contains("synthetic-secret")
+            );
+        }
+        let mut unknown_connection = args;
+        unknown_connection["request"]["connection"]["secretRef"] = json!("synthetic-secret");
+        assert!(
+            parse::<WriteArgs<VerifyDraftConnection>>(&InvokeBody::Json(unknown_connection))
+                .is_err()
+        );
+        let malformed = json!({"request":{"verificationId":"attempt", "connection":{
+            "emailAddress":["synthetic-secret"]
+        }}});
+        assert_eq!(
+            parse::<WriteArgs<VerifyDraftConnection>>(&InvokeBody::Json(malformed))
+                .err()
+                .unwrap(),
+            AppError::validation("request")
+        );
+        assert!(
+            parse::<WriteArgs<CancelDraftVerification>>(&InvokeBody::Json(json!({
+                "request":{"verificationId":"attempt"}
+            })))
+            .is_ok()
+        );
+        for extra in ["accountId", "connection", "password", "secretRef"] {
+            let mut args = json!({"request":{"verificationId":"attempt"}});
+            args["request"][extra] = json!("synthetic-secret");
+            assert!(parse::<WriteArgs<CancelDraftVerification>>(&InvokeBody::Json(args)).is_err());
+        }
     }
 
     #[test]

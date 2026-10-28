@@ -142,9 +142,27 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         : { status: 'verified', stage: 'complete', code: null }
       return { accountId, revision: account.revision, imap: check(account.authentication.imap.passwordConfigured, account.authentication.imap.trust), smtp: check(account.authentication.smtp.passwordConfigured, account.authentication.smtp.trust) }
     },
+    async verifyDraftConnection(connection, signal) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const authentication = connection.authentication
+      if (authentication.kind !== 'password') throw new MailxClientError({ code: 'unsupported', message: '', field: 'authentication' })
+      const secrets: [import('@/generated/accounts').SecretUpdate, string][] = authentication.mode === 'shared'
+        ? [[authentication.password, 'sharedPassword']]
+        : [[authentication.imapPassword, 'imapPassword'], [authentication.smtpPassword, 'smtpPassword']]
+      if (connection.route.kind === 'custom' && connection.route.authentication) secrets.push([connection.route.authentication.password, 'proxyPassword'])
+      for (const [secret, field] of secrets) {
+        if (secret.action !== 'replace' || !secret.value) throw new MailxClientError({ code: 'validation', message: '', field })
+      }
+      const verified = { status: 'verified' as const, stage: 'complete' as const, code: null }
+      return { verificationId: crypto.randomUUID(), imap: { ...verified }, smtp: { ...verified } }
+    },
     async openProviderHelp(providerId) {
-      if (providerId !== 'qq') throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
-      window.open('https://help.mail.qq.com/detail/0/1087', '_blank', 'noopener,noreferrer')
+      const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
+        : providerId === 'netease163' || providerId === 'netease126' || providerId === 'neteaseYeah'
+          ? 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
+          : null
+      if (!url) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
+      window.open(url, '_blank', 'noopener,noreferrer')
     },
     async createAccount({ config }) {
       const account = accountFromConfig(crypto.randomUUID(), 1, config)

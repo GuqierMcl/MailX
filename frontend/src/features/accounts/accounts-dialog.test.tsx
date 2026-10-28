@@ -276,7 +276,7 @@ describe('accounts dialog', () => {
     const otherAccount = within(dialog).getByTitle('backup@example.com · IMAP/SMTP')
     expect(otherAccount).toBeDisabled()
     fireEvent.click(otherAccount)
-    const add = within(dialog).getByLabelText('添加账号')
+    const add = within(dialog).getByRole('button', { name: '添加账号', hidden: true })
     expect(add).toBeDisabled()
     fireEvent.click(add)
     fireEvent.keyDown(confirmation, { key: 'Escape' })

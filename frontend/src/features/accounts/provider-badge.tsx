@@ -12,7 +12,7 @@ function ProviderMark({ provider, className }: { provider: MailProvider; classNa
 export function ProviderIcon({ provider, className }: { provider: MailProvider; className?: string }) {
   return (
     <span aria-hidden className={cn('flex size-10 shrink-0 items-center justify-center rounded-md bg-muted', className)}>
-      <ProviderMark provider={provider} className="size-1/2" />
+      <ProviderMark provider={provider} className={provider.logo ? 'size-4/5' : 'size-1/2'} />
     </span>
   )
 }

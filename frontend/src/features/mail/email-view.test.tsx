@@ -1,8 +1,10 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { MailxClient } from '@/lib/mailx-client'
+import type { EmailDetail } from '@/generated/accounts'
+import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { EmailView } from './email-view'
 import { i18n } from '@/i18n'
 
@@ -57,5 +59,42 @@ describe('reader toolbar tooltips', () => {
     setup()
     await focus('关闭邮件')
     expect(await screen.findByText('关闭邮件（Esc）')).toBeInTheDocument()
+  })
+})
+
+describe('body failure guidance', () => {
+  it.each([
+    ['providerPolicy', 'netease163', /阻止了正文下载/],
+    ['providerPolicy', 'netease126', /阻止了正文下载/],
+    ['providerPolicy', 'neteaseYeah', /阻止了正文下载/],
+    ['providerPolicy', null, /阻止了正文下载/],
+    ['authentication', 'netease163', /邮箱认证失败/],
+  ] as const)('explains %s for %s and retries only when the reader asks', async (bodyFailure, providerId, expectedHint) => {
+    const account = exampleAccount({ providerId })
+    const email: EmailDetail = {
+      summary: {
+        id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
+        from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
+        isRead: false, isStarred: false, pendingChanges: false, hasAttachment: false, bodyState: 'failed', preview: '',
+      },
+      to: [], cc: [], replyTo: [], attachments: [], body: null, bodyFailure,
+    }
+    const onDownload = vi.fn()
+    const client = testClient([account])
+    render(<TooltipProvider><EmailView client={client} email={email} providerId={providerId} loading={false} error={null} downloading={false}
+      onDownload={onDownload} onFlag={vi.fn()} onClose={vi.fn()} onRespond={vi.fn()} /></TooltipProvider>)
+    expect(screen.getByText('正文获取失败')).toBeInTheDocument()
+    expect(screen.getByText(expectedHint)).toBeInTheDocument()
+    if (bodyFailure === 'providerPolicy') expect(screen.queryByText(/邮箱认证失败/)).not.toBeInTheDocument()
+    expect(onDownload).not.toHaveBeenCalled()
+    if (bodyFailure === 'providerPolicy' && providerId) {
+      await userEvent.click(screen.getByRole('button', { name: '查看官方帮助' }))
+      expect(client.openProviderHelp).toHaveBeenCalledWith(providerId)
+    } else {
+      expect(screen.queryByRole('button', { name: '查看官方帮助' })).not.toBeInTheDocument()
+      expect(client.openProviderHelp).not.toHaveBeenCalled()
+    }
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(onDownload).toHaveBeenCalledOnce()
   })
 })

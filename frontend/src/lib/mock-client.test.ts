@@ -1,6 +1,84 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emailQuery } from '@/features/mail/format'
 import { createMockClient } from './mock-client'
+import type { ConnectionInput } from '@/generated/accounts'
+
+describe('mock provider help', () => {
+  it('opens only the fixed official URL for each supported provider', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    try {
+      const client = createMockClient()
+      for (const providerId of ['qq', 'netease163', 'netease126', 'neteaseYeah']) {
+        await client.openProviderHelp(providerId)
+        expect(open).toHaveBeenLastCalledWith(providerId === 'qq'
+          ? 'https://help.mail.qq.com/detail/0/1087'
+          : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
+      }
+      for (const providerId of ['https://example.com', 'constructor', 'netease', '']) {
+        await expect(client.openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
+      }
+      expect(open).toHaveBeenCalledTimes(4)
+    } finally { open.mockRestore() }
+  })
+})
+
+describe('mock unsaved connection verification', () => {
+  function connection(): ConnectionInput {
+    return {
+      emailAddress: 'synthetic@yeah.net', providerId: 'neteaseYeah',
+      imap: { host: 'imap.yeah.net', port: 993, tls: 'implicit', username: 'synthetic@yeah.net' },
+      smtp: { host: 'smtp.yeah.net', port: 465, tls: 'implicit', username: 'synthetic@yeah.net' },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-authorization-code' } },
+      route: { kind: 'direct' },
+    }
+  }
+
+  it('returns independent transient reports without creating an account or changing mail, drafts or delivery', async () => {
+    const client = createMockClient()
+    const accounts = await client.listAccounts()
+    const emails = await client.listEmails(emailQuery({}))
+    const input = connection()
+    const first = await client.verifyDraftConnection(input)
+    const second = await client.verifyDraftConnection(input)
+    expect(first.verificationId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(second.verificationId).not.toBe(first.verificationId)
+    expect(first).toMatchObject({
+      imap: { status: 'verified', stage: 'complete', code: null },
+      smtp: { status: 'verified', stage: 'complete', code: null },
+    })
+    expect(input).toEqual(connection())
+    expect(await client.listAccounts()).toEqual(accounts)
+    expect(await client.listEmails(emailQuery({}))).toEqual(emails)
+    expect(await client.listDrafts()).toEqual([])
+    expect(await client.listOutbox({ includeAll: true })).toEqual([])
+  })
+
+  it('requires supplied secrets even if a saved account already has usable credentials', async () => {
+    const client = createMockClient()
+    const accounts = await client.listAccounts()
+    const saved = accounts[0]
+    const input = { ...connection(), emailAddress: saved.emailAddress,
+      authentication: { kind: 'password' as const, mode: 'shared' as const, password: { action: 'keep' as const } } }
+    await expect(client.verifyDraftConnection(input)).rejects.toMatchObject({ failure: { code: 'validation', field: 'sharedPassword' } })
+    expect(await client.listAccounts()).toEqual(accounts)
+  })
+
+  it('requires an explicit proxy password instead of borrowing one from stored settings', async () => {
+    const client = createMockClient()
+    const input: ConnectionInput = { ...connection(), route: { kind: 'custom', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 8080,
+      dns: 'proxy', imageProxyDns: false, confirmImageProxyDns: false, authentication: { username: 'proxy-user', password: { action: 'keep' } } } }
+    await expect(client.verifyDraftConnection(input)).rejects.toMatchObject({ failure: { code: 'validation', field: 'proxyPassword' } })
+  })
+
+  it('rejects an already cancelled attempt without changing the account list', async () => {
+    const client = createMockClient()
+    const accounts = await client.listAccounts()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(client.verifyDraftConnection(connection(), controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await client.listAccounts()).toEqual(accounts)
+  })
+})
 
 describe('mock email pagination', () => {
   it('paginates the filtered inbox without duplicating or omitting summaries', async () => {

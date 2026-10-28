@@ -4,6 +4,8 @@ import type {
   Account,
   AccountRemoval,
   AccountConnectionVerification,
+  ConnectionInput,
+  DraftConnectionVerification,
   AccountSyncState,
   AppError,
   AppSettings,
@@ -59,6 +61,8 @@ export interface MailxClient {
   getAccount(accountId: string): Promise<Account>
   /** Authenticates both saved endpoints without sending mail; abort cancels this attempt only. */
   verifyAccountConnection(accountId: string, expectedRevision: number, signal?: AbortSignal): Promise<AccountConnectionVerification>
+  /** Tests the supplied connection without saving an account or sending mail. */
+  verifyDraftConnection(connection: ConnectionInput, signal?: AbortSignal): Promise<DraftConnectionVerification>
   /** Opens the fixed, reviewed help page for the selected supported provider. */
   openProviderHelp(providerId: string): Promise<void>
   createAccount(request: CreateAccountRequest): Promise<Account>
@@ -236,6 +240,20 @@ export function createDesktopClient(): MailxClient {
       try {
         const result = await call<AccountConnectionVerification>('accounts_verify_connection', { request: { accountId, expectedRevision, verificationId } })
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        return result
+      } finally {
+        signal?.removeEventListener('abort', abort)
+      }
+    },
+    async verifyDraftConnection(connection, signal) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const verificationId = crypto.randomUUID()
+      const abort = () => { void call<void>('accounts_cancel_draft_verification', { request: { verificationId } }).catch(() => undefined) }
+      signal?.addEventListener('abort', abort, { once: true })
+      try {
+        const result = await call<DraftConnectionVerification>('accounts_verify_draft_connection', { request: { verificationId, connection } })
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        if (result.verificationId !== verificationId) throw new MailxClientError(clientFailure(null))
         return result
       } finally {
         signal?.removeEventListener('abort', abort)

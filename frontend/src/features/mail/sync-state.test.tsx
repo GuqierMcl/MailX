@@ -62,6 +62,22 @@ describe('folder sync in the workbench', () => {
     expect(screen.getByText('修改账号设置后会重新尝试。')).toBeInTheDocument()
   })
 
+  it('explains a provider policy refusal without implying that editing credentials alone will fix it', async () => {
+    const policyFailure: AccountSyncState = {
+      ...failed,
+      failure: { code: 'providerPolicy', message: 'PRIVATE_SYNTHETIC_SERVER_RESPONSE', detail: null, willRetry: false },
+    }
+    const { client } = desktopLike([], [policyFailure])
+    render(<Workbench client={client} />)
+    const action = await screen.findByRole('button', { name: /^同步失败：.*服务商/ })
+    expect(screen.getByText('暂无文件夹')).toBeInTheDocument()
+    await userEvent.hover(action)
+    expect(await screen.findByText('按服务商指引处理后，可手动同步此账号重试。', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.queryByText('修改账号设置后会重新尝试。')).not.toBeInTheDocument()
+    expect(screen.queryByText('PRIVATE_SYNTHETIC_SERVER_RESPONSE')).not.toBeInTheDocument()
+    expect(client.refreshSync).not.toHaveBeenCalled()
+  })
+
   it('tells the user inbox headers are syncing', async () => {
     const { client } = desktopLike([folder('INBOX', { role: 'inbox' })], [exampleSyncState({ phase: 'syncing', folders: [exampleFolderSyncState('INBOX', { phase: 'syncing' })] })])
     render(<Workbench client={client} />)

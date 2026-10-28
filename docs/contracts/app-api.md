@@ -112,7 +112,7 @@ type EmailPage = {
 | `openLink(grant)` | `links_open`，`{ emailId, index, documentToken, requestId }` | null |
 
 `EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number }`。
-`bodyFailure` 为 null 或 `tooLarge | stale | network | authentication | protocol | storage`。
+`bodyFailure` 为 null 或 `tooLarge | stale | network | authentication | providerPolicy | protocol | storage`。`providerPolicy` 表示服务商以明确的安全策略信号拒绝访问，只保存固定原因，不保存服务端原文；已缓存正文仍可读取，失败下载由用户处理后手动重试。
 `AttachmentSummary` 包含 id、filename、mimeType、size、isInline；邮件未给出附件名时 filename 为空字符串，界面按当前语言显示占位名，核心不生成面向用户的文本；本轮不提供附件保存接口。
 HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
@@ -207,7 +207,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 - 目录状态与数据 coverage 各有职责：同步失败保留已有缓存；`windowCapped` 说明窗口超限；尚未获得有效服务器计数时用 `countsKnown=false` 表示。计数优先来自 STATUS；STATUS 完整成功但目录名无法匹配或计数缺失时，核心可用原始目录名的只读 EXAMINE + 完整 UID SEARCH UNSEEN 取得计数，成功后同样标为已知，失败保留上次计数。
 - 账号 `lastSyncedAt` 仅在整轮全部成功时推进；局部目录失败不得宣称账号整轮成功。目录状态为运行态，重启后重建；窗口、邮件和最后已知计数仍持久化。
 
-`failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改；单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
+`failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改。新增 `providerPolicy` 同样停止自动同步与标记写回，但在用户处理服务商安全策略后，允许显式手动同步重启对应账号任务；修改连接也可恢复。缓存及待写标记保留，新标记和窗口前后台切换不自动解除停止状态。普通单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
 
 ### 应用偏好设置
 
@@ -431,13 +431,13 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 收发连接诊断与服务商帮助
 
-QQ / Foxmail 使用 `providerId=qq` 和既有 `password/shared` 认证，预设只为新账号填充 `imap.qq.com:993`、`smtp.qq.com:465` 和隐式 TLS。已保存的端点、独立用户名、路由与凭证不会被预设覆盖；`providerId` 不授予新端点信任。原通用配置账号不自动迁移。
+QQ / Foxmail 使用 `providerId=qq`，网易 163 / 126 / yeah.net 分别使用 `netease163` / `netease126` / `neteaseYeah`，均复用既有 `password/shared` 认证。预设只为新账号填充端点：QQ 为 `imap.qq.com:993`、`smtp.qq.com:465`；网易分别为 `imap.163.com:993` / `smtp.163.com:465`、`imap.126.com:993` / `smtp.126.com:465`、`imap.yeah.net:993` / `smtp.yeah.net:465`，均为隐式 TLS。默认登录名为本次完整邮箱地址，授权码作为密码类秘密处理。已保存的端点、独立用户名、路由与凭证不会被预设覆盖；`providerId` 不授予新端点信任。原通用配置账号不自动迁移，VIP、企业及其他网易域名不套用这三个免费邮箱预设。
 
 | MailxClient 方法 | Tauri 命令与参数 | 结果 |
 | --- | --- | --- |
 | `verifyAccountConnection(accountId, expectedRevision, signal?)` | `accounts_verify_connection`，`{ request: { accountId, expectedRevision, verificationId } }` | `AccountConnectionVerification` |
 | adapter 的 AbortSignal 处理 | `accounts_cancel_verification`，`{ request: { accountId, verificationId } }` | 无数据；只取消对应尝试 |
-| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；当前仅接受 `qq`，由系统浏览器打开固定官方授权码指引 |
+| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；仅接受 `qq`、`netease163`、`netease126`、`neteaseYeah`，由系统浏览器打开对应固定官方授权码指引 |
 
 上述命令只向受信主窗口开放，诊断和取消还要求核心 Ready；写信窗口和邮件正文不能调用。两个 ID 均为 UUID，verificationId 由 adapter 为每次尝试新建；未知顶层字段被拒绝。帮助命令不接受客户端 URL，未知 providerId 返回固定参数错误，不扩大任意外链打开权限。
 
@@ -452,7 +452,7 @@ type ProtocolVerification = {
   status: 'verified' | 'failed';
   stage: 'configuration' | 'connection' | 'tls' | 'authentication' | 'mailbox' | 'complete';
   code: 'credentialUntrusted' | 'credentialMissing' | 'secretStore' | 'network' | 'proxy'
-    | 'tls' | 'timeout' | 'authentication' | 'authUnavailable' | 'protocol'
+    | 'tls' | 'timeout' | 'authentication' | 'providerPolicy' | 'authUnavailable' | 'protocol'
     | 'cancelled' | 'unsupported' | 'configuration' | null;
 };
 type AccountConnectionVerification = {
@@ -463,9 +463,34 @@ type AccountConnectionVerification = {
 };
 ```
 
-成功项为 `verified/complete/null`；失败项只包含固定阶段和原因码，不包含服务端原始回复、目录名、邮件或秘密。网页根据当前语言显示消息。QQ 认证失败提供开通协议、更新授权码、检查完整地址和网页安全验证的排查步骤，不把模糊的认证拒绝细分为未经证实的确定原因。
+成功项为 `verified/complete/null`；失败项只包含固定阶段和原因码，不包含服务端原始回复、目录名、邮件或秘密。网页根据当前语言显示消息。QQ 与网易按各自官方规则提供认证失败排查步骤；明确的 IMAP `Unsafe Login` 信号归为 `providerPolicy`，提供安全策略引导。未开服务、错误或撤销授权码在缺少明确信号时仍只是通用认证拒绝，不自动细分或断言凭证无效。
 
 报告仅对这次探测的配置版本有效。切换账号、关闭界面、取消或连接版本变化都会取消旧尝试并丢弃迟到结果。收信和发信结果分别展示，“登录验证通过”明确不代表实际邮件投递或完整服务商兼容通过。
+
+### 添加前测试登录
+
+添加向导可调用独立的草稿配置验证，无需先保存账号；适用于手动配置及全部已实现服务商。现有已保存账号的验证接口与 revision 校验保持不变。
+
+| MailxClient 方法 | Tauri 命令与参数 | 结果 |
+| --- | --- | --- |
+| `verifyDraftConnection(connection, signal?)` | `accounts_verify_draft_connection`，`{ request: { verificationId, connection: ConnectionInput } }` | `DraftConnectionVerification` |
+| adapter 的 AbortSignal 处理 | `accounts_cancel_draft_verification`，`{ request: { verificationId } }` | 无数据；仅取消对应草稿尝试 |
+
+```ts
+type DraftConnectionVerification = {
+  verificationId: string;
+  imap: ProtocolVerification;
+  smtp: ProtocolVerification;
+};
+```
+
+两个命令仅可信 main 窗口且核心 Ready 时开放；写信窗口及正文不能调用。`verificationId` 是 adapter 为每次尝试生成的 UUID，返回 ID 不匹配按固定通信错误处理。输入使用创建时的字段规范化与校验，只支持本次提供的密码类秘密，shared、separate 和代理凭证均必须使用 `replace`；`keep` 返回固定字段错误，OAuth 仍不支持。
+
+后端纯内存准备 IMAP / SMTP 登录计划，不获取 AccountService 锁、不读写数据库、不访问 SecretStore、不创建临时账号或后台同步。两协议按当前输入的独立端点/登录名/凭证及同一所选路由执行，TLS 校验和代理失败不回退直连的规则不变。`inherit` 沿用当前应用默认直连；图片代理 DNS 许可不用于邮件登录。
+
+一次探测共享 45 秒总预算，涵盖参数准备、两协议网络探测及收尾；两协议并行并分别返回固定结果。复用上述 IMAP LOGIN/CAPABILITY/可选 ID/NOOP/退出和 SMTP EHLO/AUTH/QUIT，不获取目录、邮件或标记，不进入发件队列，不更新持久化连接状态。未保存尝试使用独立单一在途槽，不占用已有账号诊断；并发返回 `conflict`。取消支持先于注册到达，按尝试 ID 隔离，不能用旧取消影响新请求；超时、取消均关闭在途会话。响应只含固定阶段和原因，不回传凭据、端点或原始服务端文字。
+
+测试是可选操作，成功只证明本次登录探测，不证明实际投递。字段变化、下一步、返回、关闭或卸载会取消并丢弃旧报告；测试完成和取消保留本地表单输入以便修正或保存，退出/最终提交继续遵循已有秘密清理规则。浏览器 mock 返回合成结果，不连接邮箱服务商。
 
 ### 移除本机账号
 

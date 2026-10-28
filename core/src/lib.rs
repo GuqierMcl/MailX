@@ -27,9 +27,9 @@ pub use accounts::types::*;
 pub use app::{
     AccountConnectionVerification, Activity, AttachmentFile, AttachmentInfo, AvatarImage,
     AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
-    ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
-    FlagChange, MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus,
-    VerifyAccountConnection,
+    CancelDraftVerification, ConnectionVerificationCode, ConnectionVerificationStage,
+    ConnectionVerificationStatus, DraftConnectionVerification, FlagChange, MailxCore, MessageFlag,
+    ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};

@@ -26,6 +26,7 @@ import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime } from './format'
 import { SenderAvatar } from './sender-avatar'
 import { useCloseOnEscape } from './use-close-on-escape'
+import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
 
 type EmailViewProps = {
   client: MailxClient
@@ -36,6 +37,8 @@ type EmailViewProps = {
   downloading: boolean
   onDownload: () => void
   email: EmailDetail | null
+  /** The owning account's saved provider; mail content cannot choose its help link. */
+  providerId?: string | null
   loading: boolean
   error: string | null
   /** The reader is folded away: keys must not close a message nobody can see. */
@@ -44,7 +47,7 @@ type EmailViewProps = {
   onRespond: (kind: 'reply' | 'replyAll' | 'forward') => void
 }
 
-export function EmailView({ email, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, hidden = false }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, hidden = false }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -70,7 +73,7 @@ export function EmailView({ email, loading, error, client, downloading, onDownlo
           </EmptyHeader>
         </Empty>
       ) : email ? (
-        <EmailContent email={email} client={client} downloading={downloading} onDownload={onDownload} />
+        <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} />
       ) : (
         <Empty>
           <EmptyHeader>
@@ -146,7 +149,7 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload'> & { email: EmailDetail }
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId'> & { email: EmailDetail }
 
 function EmailContent({ email, ...props }: ContentProps) {
   useTranslation()
@@ -185,17 +188,19 @@ const BODY_FAILURE: Record<BodyFailureCode, string> = {
   get stale() { return t('mail:messageMovedOrDeleted') },
   get network() { return t('mail:mailConnectionFailed') },
   get authentication() { return t('mail:mailAuthenticationFailed') },
+  get providerPolicy() { return t('mail:mailProviderPolicyFailed') },
   get protocol() { return t('mail:mailDownloadFailed') },
   get storage() { return t('mail:bodyStorageFailed') },
 }
 
-function Body({ email, client, downloading, onDownload }: ContentProps) {
+function Body({ email, providerId, client, downloading, onDownload }: ContentProps) {
   useTranslation()
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
   if (!body) return <Alert variant="destructive">
     <AlertTitle>{t('mail:bodyFetchFailed')}</AlertTitle>
     <AlertDescription>{bodyFailure ? BODY_FAILURE[bodyFailure] : t('mail:retryBodyHint')}</AlertDescription>
+    {bodyFailure === 'providerPolicy' && <ProviderAuthHelp client={client} providerId={providerId ?? null} reason="providerPolicy" />}
     <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>{t('mail:retry')}</Button>
   </Alert>
   return <div className="flex min-h-0 flex-1 flex-col gap-3">

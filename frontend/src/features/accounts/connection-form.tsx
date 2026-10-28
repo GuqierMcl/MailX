@@ -1,8 +1,8 @@
-import { errorText } from '@/i18n/errors'
+import { errorText, type ErrorContext } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useRef, useState, type ReactNode } from 'react'
-import type { Account, AuthenticationMode, ConnectionInput, TlsMode } from '@/generated/accounts'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Account, AuthenticationMode, ConnectionInput, DraftConnectionVerification, TlsMode } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,16 +11,21 @@ import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { clientFailure, type ClientFailure } from '@/lib/mailx-client'
+import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
-import { providerOf, type MailProvider } from './providers'
+import { providerEmailRequired, providerOf, type MailProvider } from './providers'
 import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
+import { ConnectionVerificationReport } from './connection-verification'
 
 type FormProps = {
   /** The saved account whose connection is edited; `null` for a new one. */
   account: Account | null
   provider?: MailProvider
   onOpenHelp?(): Promise<void>
+  /** Adds optional testing of the unsaved connection in the add-account wizard. */
+  verificationClient?: MailxClient
+  /** Invalidates reports when the containing wizard closes or asks to leave. */
+  verificationResetKey?: string
   /** Where to resume, e.g. coming back to this step of the add-account wizard. */
   initialDraft?: AccountDraft
   /** A failure to show on arrival, e.g. a later step's save rejected this connection. */
@@ -55,8 +60,13 @@ type InputFieldProps = {
   inputMode?: 'numeric' | 'email' | 'text'
   error?: ClientFailure | null
   autoComplete?: string
-  errorContext?: string
+  errorContext?: ErrorContext
 }
+
+type LoginTestState = (
+  | { kind: 'idle' | 'checking' | 'cancelled' }
+  | { kind: 'ready'; report: DraftConnectionVerification }
+) & { scopeKey: string }
 
 function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
   const invalid = error?.field === id
@@ -149,30 +159,48 @@ function PasswordField({ id, label, value, onChange, canKeep, error, authorizati
  */
 export function ConnectionForm({
   account, provider: selectedProvider, onOpenHelp, initialDraft: resume, initialError = null, intro, submitLabel, submittingLabel,
-  onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack,
+  onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack, verificationClient, verificationResetKey = '',
 }: FormProps) {
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
-  const isQq = provider.id === 'qq'
+  const setup = provider.setup
+  const authorizationCode = !!setup
+  const errorContext = !account && provider.preset ? { emailAddress: providerEmailRequired(provider) } : undefined
   const [draft, setDraft] = useState(() => resume ?? initialDraft(account, provider))
   const [advanced, setAdvanced] = useState(!!account || !!resume)
   const [helpFailed, setHelpFailed] = useState(false)
   const [error, setError] = useState<ClientFailure | null>(initialError)
+  const [testError, setTestError] = useState(false)
   const [saving, setSaving] = useState(false)
   const pending = useRef(false)
+  const testPending = useRef<AbortController | null>(null)
+  const [loginTest, setLoginTest] = useState<LoginTestState>({ kind: 'idle', scopeKey: verificationResetKey })
+  const currentTest = loginTest.scopeKey === verificationResetKey ? loginTest : { kind: 'idle' as const }
+  useEffect(() => () => {
+    testPending.current?.abort()
+    testPending.current = null
+  }, [verificationResetKey])
   const sameMode = account?.authentication.mode === draft.mode
   const oldProxyAuth = account?.route.kind === 'custom' ? account.route.authentication : null
   const needsTrust = account && (account.authentication.imap.trust === 'needsConfirmation'
     || account.authentication.smtp.trust === 'needsConfirmation'
     || oldProxyAuth?.trust === 'needsConfirmation')
 
+  function resetTest() {
+    testPending.current?.abort()
+    testPending.current = null
+    setLoginTest({ kind: 'idle', scopeKey: verificationResetKey })
+  }
+
   function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
+    resetTest()
     setDraft((current) => changeDraft(current, key, value))
     onDirtyChange(true)
     setError(null)
   }
 
   function changeMode(mode: AuthenticationMode) {
+    resetTest()
     setDraft((current) => ({
       ...current, mode,
       sharedPassword: { replace: true, value: '' },
@@ -190,9 +218,41 @@ export function ConnectionForm({
     if (field) requestAnimationFrame(() => document.getElementById(field)?.focus())
   }
 
+  async function testLogin() {
+    if (!verificationClient || testPending.current || pending.current) return
+    setError(null)
+    setTestError(true)
+    let connection: ConnectionInput
+    try {
+      connection = draftToConnection(draft, account, provider)
+    } catch (cause) {
+      resetTest()
+      showFailure(clientFailure(cause))
+      return
+    }
+    const controller = new AbortController()
+    testPending.current = controller
+    setLoginTest({ kind: 'checking', scopeKey: verificationResetKey })
+    try {
+      const report = await verificationClient.verifyDraftConnection(connection, controller.signal)
+      if (testPending.current === controller && !controller.signal.aborted) {
+        setLoginTest({ kind: 'ready', report, scopeKey: verificationResetKey })
+      }
+    } catch (cause) {
+      if (testPending.current === controller && !controller.signal.aborted) {
+        setLoginTest({ kind: 'idle', scopeKey: verificationResetKey })
+        showFailure(clientFailure(cause))
+      }
+    } finally {
+      if (testPending.current === controller) testPending.current = null
+    }
+  }
+
   async function save() {
     if (pending.current) return
+    resetTest()
     setError(null)
+    setTestError(false)
     let connection
     try {
       connection = draftToConnection(draft, account, provider)
@@ -228,10 +288,10 @@ export function ConnectionForm({
               </RadioGroup>
               {account && !sameMode && <FieldDescription>{t('accounts:authenticationChanged')}</FieldDescription>}</>)
   const passwordFields = (<>{draft.mode === 'shared'
-                ? <PasswordField id="sharedPassword" label={t(isQq ? 'accounts:authorizationCode' : 'accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={isQq} />
+                ? <PasswordField id="sharedPassword" label={t(authorizationCode ? 'accounts:authorizationCode' : 'accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
                 : <>
-                    <PasswordField id="imapPassword" label={t(isQq ? 'accounts:incomingAuthorizationCode' : 'accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={isQq} />
-                    <PasswordField id="smtpPassword" label={t(isQq ? 'accounts:outgoingAuthorizationCode' : 'accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} authorizationCode={isQq} />
+                    <PasswordField id="imapPassword" label={t(authorizationCode ? 'accounts:incomingAuthorizationCode' : 'accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
+                    <PasswordField id="smtpPassword" label={t(authorizationCode ? 'accounts:outgoingAuthorizationCode' : 'accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} authorizationCode={authorizationCode} />
                   </>}</>)
   const routeFields = (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
               <Field>
@@ -281,14 +341,14 @@ export function ConnectionForm({
     <SettingsPage footer={<>
       <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
       <div className="flex shrink-0 gap-2">
-        {onBack && <Button variant="outline" onClick={onBack} disabled={saving}>{t('accounts:back')}</Button>}
+        {onBack && <Button variant="outline" onClick={() => { resetTest(); onBack() }} disabled={saving}>{t('accounts:back')}</Button>}
         <Button onClick={() => { void save() }} disabled={saving || unavailable}>{saving ? submittingLabel : submitLabel}</Button>
       </div>
     </>}>
         <Alert role="status">
           <AlertTitle>{intro.title}</AlertTitle>
           <AlertDescription>{intro.description}</AlertDescription>
-          {isQq && onOpenHelp && <Button variant="link" className="mt-1 h-auto w-fit px-0" disabled={saving} onClick={() => {
+          {setup && onOpenHelp && <Button variant="link" className="mt-1 h-auto w-fit px-0" disabled={saving} onClick={() => {
             setHelpFailed(false)
             void onOpenHelp().catch(() => setHelpFailed(true))
           }}>{t('accounts:getAuthorizationCode')}</Button>}
@@ -297,23 +357,23 @@ export function ConnectionForm({
         {needsTrust && <Alert variant="destructive"><AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle><AlertDescription>{t('accounts:confirmChangedCredentials')}</AlertDescription></Alert>}
         {error && (
           <Alert variant="destructive">
-            <AlertTitle>{error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
-            <AlertDescription>{errorText(error, isQq ? 'qq' : undefined)}  {t('accounts:passwordsCleared')}</AlertDescription>
+            <AlertTitle>{testError ? t('accounts:loginTestFailed') : error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
+            <AlertDescription>{errorText(error, errorContext)}  {!testError && t('accounts:passwordsCleared')}</AlertDescription>
             {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
               <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
           </Alert>
         )}
         <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
-          <SettingsGroup title={t('accounts:emailAddress')} description={t(isQq ? 'accounts:qqEmailHint' : 'accounts:emailAddressDescription')}>
-            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={isQq ? "you@qq.com" : "you@example.com"} inputMode="email" error={error} errorContext={isQq ? "qq" : undefined} />
+          <SettingsGroup title={t('accounts:emailAddress')} description={setup?.emailHint ?? t('accounts:emailAddressDescription')}>
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={setup?.emailPlaceholder ?? "you@example.com"} inputMode="email" error={error} errorContext={errorContext} />
           </SettingsGroup>
-          {isQq && (
-            <SettingsGroup title={t('accounts:authorizationCode')} description={t('accounts:qqAuthorizationCodeHint')}>
+          {setup && (
+            <SettingsGroup title={t('accounts:authorizationCode')} description={setup.authorizationCodeHint}>
               {passwordFields}
-              <FieldDescription>{t('accounts:qqRangeHint')}</FieldDescription>
+              {setup.rangeHint && <FieldDescription>{setup.rangeHint}</FieldDescription>}
             </SettingsGroup>
           )}
-          {isQq ? (
+          {setup ? (
             <details open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}>
               <summary className="cursor-pointer rounded-md py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">{t('accounts:advancedSettings')}</summary>
               <div className="flex flex-col gap-6 pt-4">
@@ -333,6 +393,22 @@ export function ConnectionForm({
             </>
           )}
         </FieldSet>
+        {verificationClient && <SettingsGroup title={t('accounts:testLogin')} description={t('accounts:draftVerificationHint')}>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" disabled={saving || unavailable || !verificationClient.available || currentTest.kind === 'checking'} onClick={() => void testLogin()}>
+              {t(currentTest.kind === 'checking' ? 'accounts:testingLogin' : 'accounts:testLogin')}
+            </Button>
+            {currentTest.kind === 'checking' && <Button variant="ghost" onClick={() => {
+              testPending.current?.abort()
+              testPending.current = null
+              setLoginTest({ kind: 'cancelled', scopeKey: verificationResetKey })
+            }}>{t('accounts:cancelLoginTest')}</Button>}
+          </div>
+          <div role="status" aria-live="polite" className="text-sm">
+            {currentTest.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
+            {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} />}
+          </div>
+        </SettingsGroup>}
     </SettingsPage>
   )
 }

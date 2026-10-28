@@ -364,3 +364,19 @@ fn external_errors_are_reduced_to_fixed_codes() {
         );
     }
 }
+
+#[test]
+fn provider_policy_diagnostic_is_a_fixed_code_with_no_server_text() {
+    let report = imap_failure(ImapError::ProviderPolicy);
+    assert_eq!(report.stage, ConnectionVerificationStage::Authentication);
+    assert_eq!(
+        report.code,
+        Some(ConnectionVerificationCode::ProviderPolicy)
+    );
+    assert_eq!(
+        serde_json::to_value(report).unwrap(),
+        json!({
+            "status": "failed", "stage": "authentication", "code": "providerPolicy"
+        })
+    );
+}

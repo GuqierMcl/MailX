@@ -5,6 +5,7 @@ import type { AccountConnectionVerification } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { ConnectionVerification } from './connection-verification'
 import { exampleAccount, testClient } from './test-fixtures'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 function report(accountId: string, revision: number): AccountConnectionVerification {
   return {
@@ -30,8 +31,8 @@ describe('account connection verification', () => {
     expect(client.queueSend).not.toHaveBeenCalled()
   })
 
-  it('keeps IMAP success distinct from SMTP authentication failure and offers QQ authorization help', async () => {
-    const account = exampleAccount({ providerId: 'qq' })
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('keeps IMAP success distinct from SMTP authentication failure and offers $id authorization help', async (provider) => {
+    const account = exampleAccount({ providerId: provider.id })
     const client = testClient([account])
     client.verifyAccountConnection.mockResolvedValue({
       ...report(account.id, account.revision),
@@ -41,10 +42,63 @@ describe('account connection verification', () => {
     await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
     expect(await screen.findByText('登录验证未通过')).toBeInTheDocument()
     expect(within(screen.getByRole('status')).getAllByText('登录成功')).toHaveLength(1)
-    expect(screen.getByText(/请确认已开启 IMAP\/SMTP/)).toBeInTheDocument()
+    expect(screen.getByText(provider.setup!.authenticationHelp)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '如何获取授权码' }))
-    expect(client.openProviderHelp).toHaveBeenCalledWith('qq')
+    expect(client.openProviderHelp).toHaveBeenCalledWith(provider.id)
     expect(screen.queryByText('登录验证通过，尚未测试实际投递。')).not.toBeInTheDocument()
+  })
+
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('explains a $id mailbox policy refusal separately from a rejected authorization code', async (provider) => {
+    const account = exampleAccount({ providerId: provider.id })
+    const client = testClient([account])
+    client.verifyAccountConnection.mockResolvedValue({
+      ...report(account.id, account.revision),
+      imap: { status: 'failed', stage: 'mailbox', code: 'providerPolicy' },
+    })
+    render(<ConnectionVerification account={account} client={client} />)
+    await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
+    expect(await screen.findByText('登录验证未通过')).toBeInTheDocument()
+    expect(within(screen.getByRole('status')).getAllByText('登录成功')).toHaveLength(1)
+    expect(screen.getByText(provider.setup!.providerPolicyHelp!)).toBeInTheDocument()
+    expect(screen.queryByText(provider.setup!.authenticationHelp)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '如何获取授权码' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '查看官方帮助' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith(provider.id)
+    expect(client.verifyAccountConnection).toHaveBeenCalledOnce()
+    expect(client.queueSend).not.toHaveBeenCalled()
+  })
+
+  it('keeps a provider policy failure actionable without guessing a provider for a manual account', async () => {
+    const account = exampleAccount()
+    const client = testClient([account])
+    client.verifyAccountConnection.mockResolvedValue({
+      ...report(account.id, account.revision),
+      imap: { status: 'failed', stage: 'mailbox', code: 'providerPolicy' },
+    })
+    render(<ConnectionVerification account={account} client={client} />)
+    await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
+    expect(await screen.findByText('登录验证未通过')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/服务商/)
+    expect(screen.queryByRole('button', { name: '查看官方帮助' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '如何获取授权码' })).not.toBeInTheDocument()
+    expect(client.openProviderHelp).not.toHaveBeenCalled()
+  })
+
+  it('prioritizes provider policy guidance when the other protocol also rejects authentication', async () => {
+    const provider = NETEASE_163_PROVIDER
+    const account = exampleAccount({ providerId: provider.id })
+    const client = testClient([account])
+    client.verifyAccountConnection.mockResolvedValue({
+      ...report(account.id, account.revision),
+      imap: { status: 'failed', stage: 'mailbox', code: 'providerPolicy' },
+      smtp: { status: 'failed', stage: 'authentication', code: 'authentication' },
+    })
+    render(<ConnectionVerification account={account} client={client} />)
+    await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
+    expect(await screen.findByText(provider.setup!.providerPolicyHelp!)).toBeInTheDocument()
+    expect(screen.queryByText(provider.setup!.authenticationHelp)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '如何获取授权码' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看官方帮助' })).toBeInTheDocument()
   })
 
   it('cancels the request and ignores a successful reply arriving after cancellation', async () => {

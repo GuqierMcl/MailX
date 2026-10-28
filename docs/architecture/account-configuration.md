@@ -1,6 +1,6 @@
 # 账号配置与凭证生命周期
 
-状态：**账号配置、协议连接与独立收发登录诊断已有实现 / OAuth 为后续设计**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在账号设置验证该配置版本的 IMAP / SMTP 登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
+状态：**账号配置、协议连接与独立收发登录诊断已有实现 / OAuth 为后续设计**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在添加向导测试当前填写的 IMAP / SMTP 登录，也可在账号设置验证已保存配置版本的登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
 
 ## 1. 对象与身份
 
@@ -20,7 +20,7 @@
 
 ## 2. 认证与写入型秘密
 
-当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，产品引导可随后按服务商区分。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
+当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，QQ / Foxmail、网易 163 / 126 / yeah.net 已有各自的授权码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
 
 秘密修改必须明确选择：
 
@@ -35,6 +35,10 @@ type SecretUpdate =
 输入 DTO 与输出 DTO 分开。结果仅含认证配置 ID、`generation`、`passwordConfigured` 和 `trust` 等元数据，不返回密码或内部 `secretRef`。客户端也不能指定这些后端引用。Rust `SecretValue` 不实现输出序列化，Debug 脱敏并在释放时清理内存。前端仅短暂保留密码输入，提交后清空，不写入浏览器持久存储。
 
 `revision` 是连接配置（地址、服务器、凭证、路由）的版本，用于乐观锁，同步与正文下载也以它判断工作是否过期；认证 `generation` 表达凭证版本，两者职责不同。名称、标识颜色、发件人名称和 `useProviderIcon` 属于资料，有单独的修改请求，不推进 `revision`、不修改凭证、不重启同步。`useProviderIcon` 只控制是否使用可用的服务商图标，创建省略时默认 `true`；v12 将已有账号的对应列初始化为开启，旧账号快照或 journal 缺少此字段时也按 `true` 读取。连接提交（含崩溃后重放的日志）只写连接相关的列，不会覆盖之后修改的资料，已关闭的图标偏好不会因修改连接或恢复旧日志而重新开启。当前更换密码属于配置操作，会同时推进相应版本；后续后台 token 刷新仅推进凭证版本，不应制造用户表单冲突。
+
+QQ / Foxmail、网易 163、网易 126、网易 yeah.net 分别以 `qq`、`netease163`、`netease126`、`neteaseYeah` 保存服务商标识。三个网易入口使用各自的 `imap` / `smtp` 域名与 993 / 465 隐式 TLS 端点，向导默认完整邮箱登录名和共享客户端授权码；预设只初始化新账号，不覆盖已有手动配置、独立用户名、路由或图标偏好。免费网易入口分别只接受精确的 `163.com` / `126.com` / `yeah.net`，VIP 和企业邮箱暂用各自手动端点。授权码长度说明仅为引导，通用秘密模型不增加网易专属长度限制，也不改写输入字符。
+
+添加向导的“测试登录”直接验证当前内存配置，不创建临时账号、不读取或写入 SecretStore、不写数据库、不启动同步。新配置的收发及代理秘密必须由本次输入提供（`replace`）；不允许 `keep` 借用已有账号的凭据。测试沿用创建配置的规范化与字段校验、所选路由与 TLS，点击测试仅表示用户授权向当前填写端点进行登录探测。结果不会变成持久化的信任或连接状态；测试可跳过，输入变化、离开连接步骤或关闭向导即取消并丢弃旧结果。
 
 ## 3. 端点信任与路由
 
