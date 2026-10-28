@@ -4,7 +4,7 @@ import { AccountAvatar } from './account-avatar'
 import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 describe('account avatar', () => {
-  it('defaults a known provider to its bundled logo while retaining the account color and requested size', () => {
+  it('defaults a known provider to its bundled logo with the account color as a thin border and requested size', () => {
     const { container } = render(<AccountAvatar displayName="工作邮箱" color="#2563eb" providerId="qq" className="size-[18px] text-[10px]" />)
     const avatar = container.querySelector('[data-slot="account-avatar"]')!
     const logo = avatar.querySelector('img')!
@@ -12,7 +12,9 @@ describe('account avatar', () => {
     expect(logo).toHaveAttribute('alt', '')
     expect(logo).toHaveAttribute('aria-hidden', 'true')
     expect(avatar).toHaveAttribute('aria-hidden', 'true')
-    expect(avatar).toHaveStyle({ backgroundColor: '#2563eb' })
+    expect(avatar).toHaveStyle({ borderColor: '#2563eb' })
+    expect(avatar).not.toHaveStyle({ backgroundColor: '#2563eb' })
+    expect(avatar).not.toHaveClass('bg-background')
     expect(avatar).toHaveClass('size-[18px]')
     expect(avatar).not.toHaveTextContent('工')
   })
