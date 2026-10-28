@@ -63,9 +63,9 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
         <DialogDescription className="sr-only">{t('settings:dialogDescription')}</DialogDescription>
         {/* Narrow windows turn the side navigation into a top strip instead of hiding it. */}
-        <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
+        <SidebarProvider className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-cols-[var(--sidebar-width)_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto]">
           <Sidebar collapsible="none"
-            className="h-auto w-full shrink-0 flex-row items-center border-b pr-12 md:h-full md:w-(--sidebar-width) md:flex-col md:items-stretch md:border-b-0 md:pr-0">
+            className="h-auto w-full shrink-0 flex-row items-center border-b pr-12 md:col-start-1 md:row-start-1 md:h-full md:w-(--sidebar-width) md:flex-col md:items-stretch md:border-b-0 md:pr-0">
             <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
               <DialogTitle className="text-base font-semibold">{t('settings:title')}</DialogTitle>
             </SidebarHeader>
@@ -86,7 +86,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               </SidebarGroup>
             </SidebarContent>
           </Sidebar>
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <main className="flex min-h-0 min-w-0 flex-col overflow-hidden md:col-start-2 md:row-span-2 md:row-start-1">
             <header className="flex h-14 shrink-0 items-center gap-2 px-6 md:h-16 md:pr-12">
               <h2 className="text-sm font-medium">{sectionName}</h2>
             </header>
@@ -99,6 +99,10 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'about' && <AboutSection client={client} />}
             </div>
           </main>
+          <footer className="flex min-w-0 flex-col gap-0.5 bg-sidebar px-4 pt-3 pb-4 md:col-start-1 md:row-start-2">
+            <p className="text-sm font-medium text-sidebar-foreground/70">MailX</p>
+            <p className="text-xs break-all text-muted-foreground tabular-nums">{__APP_VERSION__}</p>
+          </footer>
         </SidebarProvider>
       </DialogContent>
     </Dialog>

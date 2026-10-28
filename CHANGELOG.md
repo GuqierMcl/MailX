@@ -26,6 +26,7 @@
 
 ### Optimization
 
+- 设置弹窗左下角显示 MailX 与当前版本号，切换设置页时始终可见。
 - 标识颜色提供叉号“不标识”选项，选择后隐藏颜色圆环，服务商图标恢复完整大小。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 账号管理的强调色添加按钮显示“添加账号”，不再因打开弹窗自动出现提示；使用服务商图标的账号头像保留透明背景，账号颜色仅显示为细圆环，并增加图标与圆环之间的留白。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - QQ 邮箱改用企鹅标识，163 / 126 / yeah.net 使用独立图标，所有邮箱服务商图标统一为经过压缩的 SVG。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
