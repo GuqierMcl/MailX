@@ -151,8 +151,21 @@ impl AccountService {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
         let (address, name) = self.storage.account_sender(&draft.account_id)?;
-        let message_id = new_message_id(&address)?;
         let files = self.storage.attachment_files(&draft.id)?;
+        // Adding an attachment is checked too, but a forward may prefill past
+        // the policy so the user can trim it rather than losing the draft
+        // (sending.md section 16.8). Queueing is the authoritative check.
+        let policy = self.attachment_policy(&draft.account_id)?;
+        if u32::try_from(files.len()).unwrap_or(u32::MAX) > policy.max_count {
+            return Err(AppError::new(ErrorCode::TooManyAttachments));
+        }
+        let total = files
+            .iter()
+            .fold(0_u64, |sum, file| sum.saturating_add(file.summary.size));
+        if total > policy.max_total_bytes {
+            return Err(AppError::new(ErrorCode::AttachmentTooLarge));
+        }
+        let message_id = new_message_id(&address)?;
         Ok(SendPlan::Build(Box::new(SendBuild {
             draft,
             address,

@@ -1,7 +1,7 @@
 //! Draft rows. Content has been validated before it gets here.
 use rusqlite::{OptionalExtension, Row, params};
 
-use super::{Storage, decode, encode};
+use super::{Storage, attachments::NewAttachment, decode, encode};
 use crate::{
     AppError, ErrorCode,
     drafts::{
@@ -126,8 +126,20 @@ impl Storage {
             .ok_or_else(|| AppError::new(ErrorCode::NotFound))
     }
 
-    pub(crate) fn insert_draft(&self, draft: &NewDraft<'_>) -> Result<Draft, AppError> {
-        self.db.execute(
+    pub(crate) fn insert_draft(&mut self, draft: &NewDraft<'_>) -> Result<Draft, AppError> {
+        self.insert_draft_with(draft, &[])
+    }
+
+    /// The draft row and its carried-over attachments in one transaction: a
+    /// failure leaves neither. Attachments do not bump the revision; the draft
+    /// is still the one the create request produced.
+    pub(crate) fn insert_draft_with(
+        &mut self,
+        draft: &NewDraft<'_>,
+        attachments: &[NewAttachment<'_>],
+    ) -> Result<Draft, AppError> {
+        let tx = self.db.transaction()?;
+        tx.execute(
             "INSERT INTO drafts (id, account_id, kind, source_email_id, to_addresses,
                 cc_addresses, bcc_addresses, subject, body_text, in_reply_to,
                 references_header, created_at, updated_at, revision, client_mutation_id,
@@ -151,6 +163,27 @@ impl Storage {
                 draft.content.body_html,
             ],
         )?;
+        for attachment in attachments {
+            let size = i64::try_from(attachment.blob.size)
+                .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+            tx.execute(
+                "INSERT INTO draft_attachments
+                    (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
+                     origin, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8)",
+                params![
+                    draft.id,
+                    attachment.id,
+                    attachment.file_name,
+                    attachment.media_type,
+                    size,
+                    attachment.blob.sha256,
+                    attachment.origin.as_str(),
+                    draft.now,
+                ],
+            )?;
+        }
+        tx.commit()?;
         self.get_draft(draft.id)
     }
 

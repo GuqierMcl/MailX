@@ -4,6 +4,12 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::{
+    AppError, ErrorCode,
+    mail::{filename::safe_file_name, render},
+    storage::bodies::{BlobStore, StoredBlob},
+};
+
 /// Where an attachment came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +90,48 @@ impl AttachmentPolicy {
 fn server_limit_mb(size: u64) -> u32 {
     let raw = u128::from(size) * 100 / 137;
     u32::try_from(raw / (1024 * 1024)).unwrap_or(u32::MAX)
+}
+
+/// One file a forward carries over, already in the blob store.
+pub(crate) struct ForwardedFile {
+    pub file_name: String,
+    pub media_type: String,
+    pub blob: StoredBlob,
+}
+
+/// Decodes the source message's attachments and writes them to the blob store,
+/// for a forward draft (sending.md section 16.8). Inline resources are left for
+/// the later `cid:` batch. The limits are deliberately not applied here: an
+/// over-limit source still yields a draft the user can trim, and queueing
+/// applies the policy again.
+pub(crate) fn forwarded_files(
+    raw: &[u8],
+    blobs: &BlobStore,
+) -> Result<Vec<ForwardedFile>, AppError> {
+    if raw.is_empty() {
+        // No raw copy to read; nothing to carry.
+        return Ok(Vec::new());
+    }
+    let decoded = render::attachment_contents(raw)
+        .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
+    decoded
+        .into_iter()
+        .map(|part| {
+            // Same cleanup as an added file, so a forwarded name stays the
+            // sender's; only a nameless part gets a name from its type.
+            let file_name = part
+                .file_name
+                .as_deref()
+                .and_then(sanitize_file_name)
+                .unwrap_or_else(|| safe_file_name(None, &part.mime_type));
+            let media_type = sniff_media_type(&part.bytes, &file_name);
+            Ok(ForwardedFile {
+                file_name,
+                media_type,
+                blob: blobs.put(&part.bytes)?,
+            })
+        })
+        .collect()
 }
 
 /// Adds a file to a draft; the bytes travel beside the request, not in it.

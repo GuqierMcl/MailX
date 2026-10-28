@@ -4,18 +4,31 @@ use uuid::Uuid;
 
 use super::{AccountService, new_id, now, validate_uuid};
 use crate::{
-    AppError, ErrorCode,
+    AppError, AttachmentOrigin, ErrorCode,
     drafts::{
+        attachments::ForwardedFile,
         compose::{self, Composed, SourceHeaders},
         types::*,
         validate::{self, DraftContent},
     },
     mail::{BodyState, EmailDetail},
     storage::{
+        attachments::NewAttachment,
         bodies::{BlobStore, StoredBlob},
         drafts::NewDraft,
     },
 };
+
+/// Everything `create_draft_from_source` builds the draft from, read while the
+/// store lock was released.
+pub(crate) struct SourceMessage<'a> {
+    pub detail: &'a EmailDetail,
+    pub account_address: &'a str,
+    pub headers: &'a SourceHeaders,
+    /// What a forward carries over from the message, already in the blob store;
+    /// empty for replies and for messages without files.
+    pub forwarded: &'a [ForwardedFile],
+}
 
 /// What `create_draft_from` needs from the store before it touches any file.
 pub(crate) enum DraftSource {
@@ -165,16 +178,21 @@ impl AccountService {
         })
     }
 
-    /// Second half: build the content (no I/O) and store it.
+    /// Second half: build the content (no I/O) and store it, with its
+    /// attachments in the same transaction.
     pub(crate) fn create_draft_from_source(
         &mut self,
         request: &CreateDraftFromRequest,
-        detail: &EmailDetail,
-        account_address: &str,
-        headers: &SourceHeaders,
+        source: &SourceMessage<'_>,
         offset: FixedOffset,
         locale: crate::SupportedLocale,
     ) -> Result<Draft, AppError> {
+        let SourceMessage {
+            detail,
+            account_address,
+            headers,
+            forwarded,
+        } = source;
         let text = detail
             .body
             .as_ref()
@@ -218,18 +236,33 @@ impl AccountService {
         self.storage.get_email(&request.email_id)?;
         let id = new_id();
         let now = now();
-        self.storage.insert_draft(&NewDraft {
-            id: &id,
-            account_id: &detail.summary.account_id,
-            kind: request.kind,
-            source_email_id: Some(&request.email_id),
-            content: &content,
-            in_reply_to: in_reply_to.as_deref(),
-            references: references.as_deref(),
-            now: &now,
-            client_mutation_id: &request.client_mutation_id,
-            canonical: &canonical,
-        })
+        let ids: Vec<String> = forwarded.iter().map(|_| new_id()).collect();
+        let attachments: Vec<NewAttachment<'_>> = forwarded
+            .iter()
+            .zip(&ids)
+            .map(|(file, id)| NewAttachment {
+                id,
+                file_name: &file.file_name,
+                media_type: &file.media_type,
+                blob: &file.blob,
+                origin: AttachmentOrigin::Forwarded,
+            })
+            .collect();
+        self.storage.insert_draft_with(
+            &NewDraft {
+                id: &id,
+                account_id: &detail.summary.account_id,
+                kind: request.kind,
+                source_email_id: Some(&request.email_id),
+                content: &content,
+                in_reply_to: in_reply_to.as_deref(),
+                references: references.as_deref(),
+                now: &now,
+                client_mutation_id: &request.client_mutation_id,
+                canonical: &canonical,
+            },
+            &attachments,
+        )
     }
 
     pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {

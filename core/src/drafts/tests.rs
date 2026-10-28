@@ -1296,3 +1296,101 @@ async fn identical_content_shares_one_blob_and_cleanup_keeps_referenced_ones() {
     let kept = storage.attachment_files(&draft.id).unwrap();
     assert_eq!(storage.blobs.read(&kept[0].blob).unwrap(), b"same bytes");
 }
+
+fn mixed(parts: &[(&str, &str)]) -> Vec<u8> {
+    let mut raw = String::from(
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody\r\n",
+    );
+    for (headers, content) in parts {
+        raw.push_str(&format!("--b\r\n{headers}\r\n\r\n{content}\r\n"));
+    }
+    raw.push_str("--b--\r\n");
+    raw.into_bytes()
+}
+
+const PDF: &str = "Content-Type: application/pdf; name=\"a.pdf\"\r\nContent-Disposition: attachment; filename=\"a.pdf\"\r\nContent-Transfer-Encoding: base64";
+const PNG: &str = "Content-Type: image/png\r\nContent-ID: <logo@x>\r\nContent-Disposition: inline; filename=\"logo.png\"\r\nContent-Transfer-Encoding: base64";
+
+#[tokio::test]
+async fn forward_carries_non_inline_attachments_only_and_replays_add_nothing() {
+    // "%PDF-1.7 hi" and a PNG signature, base64-encoded.
+    let f = fixture(&[mixed(&[(PDF, "JVBERi0xLjcgaGk="), (PNG, "iVBORw0KGgo=")])]);
+    let request = CreateDraftFromRequest {
+        email_id: f.emails[0].clone(),
+        kind: DraftKind::Forward,
+        client_mutation_id: id(),
+    };
+    let draft = f.core.create_draft_from(request.clone()).unwrap();
+    let [file] = &draft.attachments[..] else {
+        panic!("only the PDF is carried")
+    };
+    assert_eq!(file.file_name, "a.pdf");
+    assert_eq!(file.media_type, "application/pdf");
+    assert_eq!(file.size, 11);
+    assert_eq!(file.origin, AttachmentOrigin::Forwarded);
+
+    let replay = f.core.create_draft_from(request).unwrap();
+    assert_eq!(replay.id, draft.id);
+    assert_eq!(replay.attachments.len(), 1);
+    let rows: i64 =
+        f.db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+async fn reply_does_not_carry_attachments() {
+    let f = fixture(&[mixed(&[(PDF, "JVBERi0xLjcgaGk=")])]);
+    let draft = f.derive(0, DraftKind::Reply).unwrap();
+    assert!(draft.attachments.is_empty());
+}
+
+#[tokio::test]
+async fn forward_without_attachments_has_an_empty_list() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.derive(0, DraftKind::Forward).unwrap();
+    assert!(draft.attachments.is_empty());
+}
+
+#[tokio::test]
+async fn forward_over_the_policy_still_creates_the_draft_and_blocks_sending() {
+    // 21 files exceed the default count limit of 20.
+    let parts: Vec<(&str, &str)> = (0..21).map(|_| (PDF, "JVBERi0xLjcgaGk=")).collect();
+    let f = fixture(&[mixed(&parts)]);
+    let draft = f.derive(0, DraftKind::Forward).unwrap();
+    assert_eq!(draft.attachments.len(), 21);
+    assert!(
+        draft
+            .attachments
+            .iter()
+            .all(|file| file.origin == AttachmentOrigin::Forwarded)
+    );
+    // The draft survives; queueing is where the policy is enforced again.
+    let request = crate::QueueSendRequest {
+        draft_id: draft.id.clone(),
+        expected_revision: draft.revision,
+        client_mutation_id: id(),
+    };
+    let service = f.core.service_for_tests();
+    let queued = service
+        .lock()
+        .unwrap()
+        .prepare_send(&request, 0)
+        .map(|_| ());
+    assert_eq!(code(queued).0, ErrorCode::TooManyAttachments);
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
+}
+
+#[tokio::test]
+async fn forward_of_an_uncached_body_is_still_body_not_cached() {
+    let f = fixture(&[plain("x")]);
+    f.db.execute(
+        "UPDATE messages SET body_state = 'missing' WHERE id = ?1",
+        [&f.emails[0]],
+    )
+    .unwrap();
+    let (error, _) = code(f.derive(0, DraftKind::Forward));
+    assert_eq!(error, ErrorCode::BodyNotCached);
+}

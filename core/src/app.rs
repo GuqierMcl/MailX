@@ -360,11 +360,23 @@ impl MailxCore {
             None => Vec::new(),
         };
         let headers = crate::drafts::compose::parse_headers(&raw, message_id);
+        // A forward carries the original files over (sending.md section 16.8).
+        // Only this first creation prefills; a replay returned above adds nothing.
+        let forwarded = match request.kind {
+            crate::DraftKind::Forward => {
+                let blobs = self.accounts()?.body_blobs();
+                crate::drafts::attachments::forwarded_files(&raw, &blobs)?
+            }
+            _ => Vec::new(),
+        };
         let draft = self.accounts()?.create_draft_from_source(
             &request,
-            &detail,
-            &account_address,
-            &headers,
+            &crate::accounts::SourceMessage {
+                detail: &detail,
+                account_address: &account_address,
+                headers: &headers,
+                forwarded: &forwarded,
+            },
             crate::accounts::local_offset(),
             locale,
         )?;
