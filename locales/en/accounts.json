@@ -122,6 +122,8 @@
   "senderNameHint": "Shown in the From field of outgoing mail. Leave blank to show only the email address.",
   "identificationColor": "Identification color",
   "identificationColorHint": "Helps distinguish mailboxes in the sidebar and account list.",
+  "useProviderIcon": "Use provider icon",
+  "useProviderIconHint": "Turn off to use the account’s initial and identification color.",
   "otherProvider": "Other email",
   "stepProgress": "Step {{step}} of {{total}}",
   "replaceCredential": "Replace {{label}}",

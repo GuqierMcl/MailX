@@ -51,7 +51,11 @@ color: string | null,
  * The name recipients see in `From`; `null` or empty sends with the bare
  * address. Unlike `displayName` it is never shown only to the user.
  */
-senderName: string | null, };
+senderName: string | null,
+/**
+ * Prefer known provider artwork when available; omitted defaults to true.
+ */
+useProviderIcon: boolean, };
 
 export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
@@ -63,7 +67,11 @@ color: string | null,
 /**
  * The name recipients see in `From`; omitted, `null` or empty for none.
  */
-senderName: string | null, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+senderName: string | null,
+/**
+ * Prefer known provider artwork when available; omitted defaults to true.
+ */
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
@@ -112,7 +120,11 @@ color: string | null,
 /**
  * The name recipients see in `From`, or `null` to send the bare address.
  */
-senderName: string | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
+senderName: string | null,
+/**
+ * Appearance only. Defaults to true for credential journals from older builds.
+ */
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */

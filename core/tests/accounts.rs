@@ -94,11 +94,13 @@ fn keep_config() -> Value {
     value
 }
 /// Builds a connection update from a full account config; the profile fields
-/// (name, color) belong to a separate request.
+/// belong to a separate request.
 fn update_request(account: &Account, mut value: Value) -> UpdateConnectionRequest {
     let object = value.as_object_mut().unwrap();
     object.remove("displayName");
     object.remove("color");
+    object.remove("senderName");
+    object.remove("useProviderIcon");
     serde_json::from_value(
         json!({"accountId":account.id,"expectedRevision":account.revision,"connection":value}),
     )
@@ -984,6 +986,172 @@ fn profile_request(account: &Account, display_name: &str, color: Value) -> Updat
         json!({"accountId":account.id,"profile":{"displayName":display_name,"color":color}}),
     )
     .unwrap()
+}
+
+#[test]
+fn provider_icon_creation_defaults_and_old_create_identities_remain_compatible() {
+    let (directory, _secrets, mut service) = setup();
+    let request_id = Uuid::new_v4().to_string();
+    let original = service
+        .create(create_request(&request_id, config()))
+        .unwrap();
+    assert!(original.use_provider_icon);
+    let saved: String = db(directory.path())
+        .query_row(
+            "SELECT canonical_config FROM create_requests WHERE request_id=?1",
+            [&request_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!saved.contains("useProviderIcon"));
+    let mut explicit_default = config();
+    explicit_default["useProviderIcon"] = json!(true);
+    assert_eq!(
+        service
+            .create(create_request(&request_id, explicit_default))
+            .unwrap(),
+        original
+    );
+    let mut disabled = config();
+    disabled["useProviderIcon"] = json!(false);
+    assert_eq!(
+        service
+            .create(create_request(&request_id, disabled.clone()))
+            .unwrap_err()
+            .code,
+        ErrorCode::IdempotencyConflict
+    );
+    let disabled_request_id = Uuid::new_v4().to_string();
+    let account = service
+        .create(create_request(&disabled_request_id, disabled.clone()))
+        .unwrap();
+    assert!(!account.use_provider_icon);
+    assert_eq!(
+        service
+            .create(create_request(&disabled_request_id, disabled))
+            .unwrap(),
+        account
+    );
+    assert_eq!(
+        service
+            .create(create_request(&disabled_request_id, config()))
+            .unwrap_err()
+            .code,
+        ErrorCode::IdempotencyConflict
+    );
+
+    let mut old_account = serde_json::to_value(&original).unwrap();
+    old_account
+        .as_object_mut()
+        .unwrap()
+        .remove("useProviderIcon");
+    assert_eq!(
+        serde_json::from_value::<Account>(old_account).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn provider_icon_profile_is_persisted_isolated_and_kept_after_connection_updates() {
+    let (directory, secrets, mut service) = setup();
+    let first = create(&mut service);
+    let second = create(&mut service);
+    let secret_writes = secrets.state.lock().unwrap().set_count;
+    let disabled = service
+        .update_profile(
+            serde_json::from_value(json!({
+                "accountId": first.id,
+                "profile": {"displayName": first.display_name, "color": first.color,
+                    "senderName": first.sender_name, "useProviderIcon": false},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!disabled.use_provider_icon);
+    assert_eq!(disabled.revision, first.revision);
+    assert_eq!(disabled.authentication, first.authentication);
+    assert_eq!(disabled.mailbox_source_id, first.mailbox_source_id);
+    assert_eq!(disabled.route, first.route);
+    assert_eq!(disabled.route_revision, first.route_revision);
+    assert_eq!(secrets.state.lock().unwrap().set_count, secret_writes);
+    assert_eq!(service.get(&second.id).unwrap(), second);
+    assert_eq!(count(&db(directory.path()), "credential_journal"), 0);
+
+    drop(service);
+    let mut reopened = AccountService::open(directory.path(), secrets).unwrap();
+    assert!(!reopened.get(&first.id).unwrap().use_provider_icon);
+    assert!(reopened.get(&second.id).unwrap().use_provider_icon);
+    let reconnected = reopened
+        .update_connection(update_request(&disabled, keep_config()))
+        .unwrap();
+    assert!(!reconnected.use_provider_icon);
+    assert_eq!(reconnected.revision, first.revision + 1);
+    assert_eq!(reopened.get(&first.id).unwrap(), reconnected);
+    assert_eq!(reopened.get(&second.id).unwrap(), second);
+}
+
+fn remove_icon_preference_from_pending_journal(database: &Connection) {
+    let snapshot: String = database
+        .query_row("SELECT snapshot_json FROM credential_journal", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let mut snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+    snapshot["account"]
+        .as_object_mut()
+        .unwrap()
+        .remove("useProviderIcon");
+    database
+        .execute(
+            "UPDATE credential_journal SET snapshot_json=?1",
+            [serde_json::to_string(&snapshot).unwrap()],
+        )
+        .unwrap();
+}
+
+#[test]
+fn legacy_creation_journal_defaults_provider_icon_to_enabled() {
+    let (directory, secrets, mut service) = setup();
+    let request_id = Uuid::new_v4().to_string();
+    secrets.fail_next_set(1, true);
+    assert!(
+        service
+            .create(create_request(&request_id, config()))
+            .is_err()
+    );
+    remove_icon_preference_from_pending_journal(&db(directory.path()));
+    drop(service);
+
+    let mut reopened = AccountService::open(directory.path(), secrets).unwrap();
+    let recovered = reopened
+        .create(create_request(&request_id, config()))
+        .unwrap();
+    assert!(recovered.use_provider_icon);
+    assert_eq!(count(&db(directory.path()), "credential_journal"), 0);
+}
+
+#[test]
+fn legacy_connection_journal_preserves_a_disabled_provider_icon_profile() {
+    let (directory, secrets, mut service) = setup();
+    let original = create(&mut service);
+    secrets.fail_next_set(1, true);
+    assert!(
+        service
+            .update_connection(update_request(&original, config()))
+            .is_err()
+    );
+    let database = db(directory.path());
+    remove_icon_preference_from_pending_journal(&database);
+    database
+        .execute("UPDATE accounts SET use_provider_icon=0", [])
+        .unwrap();
+    drop(service);
+
+    let reopened = AccountService::open(directory.path(), secrets).unwrap();
+    let recovered = reopened.get(&original.id).unwrap();
+    assert!(!recovered.use_provider_icon);
+    assert_eq!(recovered.revision, original.revision + 1);
+    assert_eq!(count(&database, "credential_journal"), 0);
 }
 
 #[test]

@@ -18,6 +18,7 @@ const ME_STUDIO: MailAddress = { name: 'Alex Morgan', address: 'alex@example.net
 function config(displayName: string, color: string, address: string, domain: string): AccountConfigInput {
   return {
     displayName,
+    useProviderIcon: true,
     senderName: null,
     color,
     emailAddress: address,

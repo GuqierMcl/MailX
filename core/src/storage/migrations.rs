@@ -93,6 +93,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["account_removals", "removed_create_requests", "secret_gc"],
         sql: include_str!("migrations/0011_account_removal.sql"),
     },
+    Migration {
+        version: 12,
+        description: "account provider icon preference",
+        required_tables: &["accounts"],
+        sql: include_str!("migrations/0012_account_provider_icon.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -497,7 +503,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 11);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 12);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -668,7 +674,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            11
+            12
         );
     }
 
@@ -736,6 +742,38 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn provider_icon_migration_enables_existing_accounts_and_constrains_the_flag() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(11)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id,
+             created_at, updated_at) VALUES ('a', 3, 'Keep', 'local@example.test', 'source', 't', 't');",
+        )
+        .unwrap();
+
+        apply(&mut db, MIGRATIONS).unwrap();
+        let (revision, enabled): (u32, bool) = db
+            .query_row(
+                "SELECT revision, use_provider_icon FROM accounts WHERE id='a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(revision, 3);
+        assert!(enabled);
+        db.execute("UPDATE accounts SET use_provider_icon=0", [])
+            .unwrap();
+        assert!(
+            db.execute("UPDATE accounts SET use_provider_icon=2", [])
+                .is_err()
+        );
+        assert!(
+            db.execute("UPDATE accounts SET use_provider_icon=NULL", [])
+                .is_err()
+        );
     }
 
     #[test]

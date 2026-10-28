@@ -101,12 +101,28 @@ describe('add account wizard', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     expect(client.createAccount).toHaveBeenCalledOnce()
     expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
-      emailAddress, providerId: 'qq',
+      emailAddress, providerId: 'qq', useProviderIcon: true,
       imap: { host: 'imap.qq.com', port: 993, tls: 'implicit', username: emailAddress },
       smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit', username: emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
       route: { kind: 'direct' },
     })
+  })
+
+  it('keeps an opted-out provider icon choice when returning through the connection step', async () => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseQq(dialog)
+    fillQqConnection(dialog)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    const preference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
+    expect(preference).toBeChecked()
+    await userEvent.click(preference)
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByRole('switch', { name: '使用服务商图标' })).not.toBeChecked()
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ providerId: 'qq', useProviderIcon: false })
   })
 
   it('retains the QQ address and authorization code when returning from the profile', async () => {

@@ -131,6 +131,7 @@ impl AccountService {
             display_name: old.account.display_name.clone(),
             color: old.account.color.clone(),
             sender_name: old.account.sender_name.clone(),
+            use_provider_icon: old.account.use_provider_icon,
         };
         let (snapshot, writes) = self.build(request.connection, profile, Some(&old))?;
         let current_refs = snapshot.refs();
@@ -151,7 +152,7 @@ impl AccountService {
     }
 
     /// Replaces the profile. `revision` stays put, so running sync work is not
-    /// invalidated, and no credential is read or written.
+    /// invalidated, and no credential is changed.
     pub fn update_profile(
         &mut self,
         mut request: UpdateProfileRequest,
@@ -322,6 +323,7 @@ impl AccountService {
             display_name: profile.display_name,
             color: profile.color,
             sender_name: profile.sender_name,
+            use_provider_icon: profile.use_provider_icon,
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
@@ -789,6 +791,10 @@ fn canonical_config(
     }
     if let Some(sender_name) = &profile.sender_name {
         canonical["senderName"] = serde_json::json!(sender_name);
+    }
+    // The default stays absent so requests recorded before this preference match.
+    if !profile.use_provider_icon {
+        canonical["useProviderIcon"] = serde_json::json!(false);
     }
     encode(&canonical)
 }

@@ -7,13 +7,13 @@ import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountRemoval, AccountSyncState, RouteConfig } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/icon-button'
 import { Delayed } from '@/components/ui/delayed'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -97,8 +97,11 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
           <SidebarProvider className="min-h-0 flex-1 flex-col md:flex-row">
             <Sidebar collapsible="none"
               className="h-auto w-full shrink-0 border-b pr-12 md:h-full md:w-(--sidebar-width) md:border-b-0 md:pr-0">
-              <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
+              <SidebarHeader className="shrink-0 flex-row items-center justify-between gap-3 px-4 py-3 md:pt-5">
                 <DialogTitle className="text-base font-semibold">{t('accounts:emailAccounts')}</DialogTitle>
+                <IconButton label={t('accounts:addAccountShort')} variant="default" size="icon-sm" disabled={removing} onClick={onAddAccount}>
+                  <HugeiconsIcon icon={Add01Icon} />
+                </IconButton>
               </SidebarHeader>
               <SidebarContent>
                 <SidebarGroup className="py-2 md:p-2">
@@ -107,7 +110,7 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
                       {visibleAccounts.map((row) => (
                         <SidebarMenuItem key={row.id} className="shrink-0">
                           <SidebarMenuButton disabled={removing} isActive={row.id === activeId} title={`${row.emailAddress} · ${providerOf(row.providerId).name}`} onClick={() => setSelectedId(row.id)}>
-                            <AccountAvatar displayName={row.displayName} color={row.color} className="size-5 text-[10px]" />
+                            <AccountAvatar displayName={row.displayName} color={row.color} providerId={row.providerId} useProviderIcon={row.useProviderIcon} className="size-5 text-[10px]" />
                             <span>{row.displayName}</span>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -116,13 +119,6 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
                   </SidebarGroupContent>
                 </SidebarGroup>
               </SidebarContent>
-              <SidebarFooter className="hidden md:flex">
-                <Button variant="outline" className="w-full" disabled={removing} onClick={onAddAccount}>
-                  <HugeiconsIcon icon={Add01Icon} />
-
-                  {t('accounts:addAccountShort')}
-                </Button>
-              </SidebarFooter>
             </Sidebar>
             <main className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-4 md:pt-12">
               {activeId ? (
@@ -155,16 +151,6 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
                     </EmptyContent>
                   </Empty>
                 </SettingsPage>
-              )}
-              {/* The sidebar footer is hidden on narrow windows; keep adding reachable there. */}
-              {activeId && (
-                <div className="px-6 pb-4 md:hidden">
-                  <Button variant="outline" disabled={removing} onClick={onAddAccount}>
-                    <HugeiconsIcon icon={Add01Icon} />
-
-                    {t('accounts:addAccountShort')}
-                  </Button>
-                </div>
               )}
             </main>
           </SidebarProvider>
@@ -314,10 +300,11 @@ function ProfileEditor({ client, account, onSaved, removal }: ProfileEditorProps
   const [displayName, setDisplayName] = useState(account.displayName)
   const [color, setColor] = useState(account.color)
   const [senderName, setSenderName] = useState(account.senderName ?? '')
+  const [useProviderIcon, setUseProviderIcon] = useState(account.useProviderIcon)
   const [nameError, setNameError] = useState<ClientFailure | null>(null)
   const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' })
-  const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName })
+  const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName, useProviderIcon: account.useProviderIcon })
   const queue = useRef<Promise<void>>(Promise.resolve())
   const typed = useRef(displayName)
   const alive = useRef(true)
@@ -326,7 +313,7 @@ function ProfileEditor({ client, account, onSaved, removal }: ProfileEditorProps
     if (removal.current.removed) return
     const profile = { ...committed.current, ...patch }
     if (profile.displayName === committed.current.displayName && profile.color === committed.current.color &&
-      profile.senderName === committed.current.senderName) return
+      profile.senderName === committed.current.senderName && profile.useProviderIcon === committed.current.useProviderIcon) return
     committed.current = profile
     if (alive.current) setStatus({ kind: 'saving' })
     queue.current = queue.current.then(async () => {
@@ -405,6 +392,12 @@ function ProfileEditor({ client, account, onSaved, removal }: ProfileEditorProps
       <ProfileFields
         displayName={displayName}
         color={color}
+        providerId={account.providerId}
+        useProviderIcon={useProviderIcon}
+        onUseProviderIconChange={(next) => {
+          setUseProviderIcon(next)
+          save({ useProviderIcon: next })
+        }}
         nameError={nameError}
         senderName={senderName}
         senderNameError={senderNameError}

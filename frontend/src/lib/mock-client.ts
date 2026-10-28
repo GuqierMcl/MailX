@@ -159,7 +159,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (current.revision !== expectedRevision) {
         throw new MailxClientError({ code: 'conflict', message: '配置已被修改，请重新加载后重试。', field: null })
       }
-      const config = { ...connection, displayName: current.displayName, color: current.color, senderName: current.senderName }
+      const config = { ...connection, displayName: current.displayName, color: current.color, senderName: current.senderName, useProviderIcon: current.useProviderIcon }
       accounts[index] = { ...accountFromConfig(accountId, expectedRevision + 1, config), createdAt: current.createdAt }
       return structuredClone(accounts[index])
     },
@@ -168,7 +168,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (index < 0) throw notFound()
       const displayName = profile.displayName.trim()
       if (!displayName) throw new MailxClientError({ code: 'validation', message: '请填写账号名称。', field: 'displayName' })
-      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, updatedAt: new Date().toISOString() }
+      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, useProviderIcon: profile.useProviderIcon ?? true, updatedAt: new Date().toISOString() }
       return structuredClone(accounts[index])
     },
     async removeAccount({ accountId, expectedRevision }) {
@@ -442,6 +442,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     revision,
     displayName: config.displayName,
     color: config.color ?? null,
+    useProviderIcon: config.useProviderIcon ?? true,
     senderName: config.senderName?.trim() || null,
     emailAddress: config.emailAddress,
     providerId: config.providerId,
@@ -463,6 +464,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
 const DEFAULT_ACCOUNTS: Account[] = [
   accountFromConfig(WORK, 1, {
     displayName: '工作邮箱',
+    useProviderIcon: true,
     color: '#2563eb',
     senderName: null,
     emailAddress: 'lin.wei@example.com',
@@ -474,6 +476,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
   }),
   accountFromConfig(PERSONAL, 1, {
     displayName: '个人邮箱',
+    useProviderIcon: true,
     color: '#16a34a',
     senderName: null,
     emailAddress: 'linwei.home@example.org',

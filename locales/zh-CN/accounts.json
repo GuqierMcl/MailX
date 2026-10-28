@@ -122,6 +122,8 @@
   "senderNameHint": "写在发出邮件的“发件人”里，留空则只显示邮箱地址。",
   "identificationColor": "标识颜色",
   "identificationColorHint": "在侧边栏和账号列表中区分不同邮箱。",
+  "useProviderIcon": "使用服务商图标",
+  "useProviderIconHint": "关闭后使用账号名称首字母和标识颜色。",
   "otherProvider": "其他邮箱",
   "stepProgress": "第 {{step}} 步，共 {{total}} 步",
   "replaceCredential": "替换{{label}}",

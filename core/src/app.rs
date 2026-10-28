@@ -252,7 +252,7 @@ impl MailxCore {
         Ok(account)
     }
 
-    /// Renames or recolors an account. Sync and body downloads keep running.
+    /// Updates an account's profile. Sync and body downloads keep running.
     pub fn update_account_profile(
         &self,
         request: UpdateProfileRequest,
@@ -712,12 +712,13 @@ mod tests {
             .update_account_profile(
                 serde_json::from_value(json!({
                     "accountId": account.id,
-                    "profile": {"displayName": "Renamed", "color": "#2563eb"},
+                    "profile": {"displayName": "Renamed", "color": "#2563eb", "useProviderIcon": false},
                 }))
                 .unwrap(),
             )
             .unwrap();
         assert_eq!(renamed.revision, account.revision);
+        assert!(!renamed.use_provider_icon);
         assert_eq!(core.sync_states()[0].generation, generation);
 
         let mut value = config(json!({"kind":"direct"}));
@@ -728,6 +729,7 @@ mod tests {
             .update_account_connection(connection_update(&account.id, account.revision, value))
             .unwrap();
         assert_eq!(moved.display_name, "Renamed");
+        assert!(!moved.use_provider_icon);
         assert_eq!(core.sync_states()[0].generation, generation + 1);
     }
 

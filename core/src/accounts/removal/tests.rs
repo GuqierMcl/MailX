@@ -455,6 +455,32 @@ fn removal_collects_applied_and_unapplied_journals_without_applying_them() {
             .is_err()
     );
     assert_eq!(count(&f.service, "credential_journal"), 2);
+    // Both journal shapes may have been written before provider icon preferences.
+    let legacy_snapshots: Vec<(String, String)> = f
+        .service
+        .storage
+        .db
+        .prepare("SELECT id, snapshot_json FROM credential_journal")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for (journal_id, snapshot) in legacy_snapshots {
+        let mut snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+        snapshot["account"]
+            .as_object_mut()
+            .unwrap()
+            .remove("useProviderIcon");
+        f.service
+            .storage
+            .db
+            .execute(
+                "UPDATE credential_journal SET snapshot_json=?2 WHERE id=?1",
+                rusqlite::params![journal_id, serde_json::to_string(&snapshot).unwrap()],
+            )
+            .unwrap();
+    }
     f.secrets.0.lock().unwrap().fail_delete_after_write = false;
     f.secrets.0.lock().unwrap().locked = true;
     let removed = f.service.remove(request(&f.account)).unwrap();

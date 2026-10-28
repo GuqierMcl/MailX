@@ -100,7 +100,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
         {accounts.data.map((account) => (
           <SettingsRow key={account.id} htmlFor={`notifications.account.${account.id}`}
             label={<span className="flex min-w-0 items-center gap-2">
-              <AccountAvatar displayName={account.displayName} color={account.color} className="size-[18px] text-[10px]" />
+              <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
               <span className="truncate">{account.displayName}</span>
             </span>}
             description={account.emailAddress}>

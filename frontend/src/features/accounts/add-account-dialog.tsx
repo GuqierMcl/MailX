@@ -20,7 +20,7 @@ import { filterProviders, type MailProvider } from './providers'
 
 const STEP_COUNT = 3
 /** Fields a failed create can blame on the profile step; anything else is the connection's. */
-const PROFILE_FIELDS = new Set(['displayName', 'color', 'senderName'])
+const PROFILE_FIELDS = new Set(['displayName', 'color', 'senderName', 'useProviderIcon'])
 
 type Step =
   | { kind: 'method'; selected: MailProvider | null }
@@ -54,6 +54,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [nameTouched, setNameTouched] = useState(false)
   const [color, setColor] = useState<string | null>(null)
   const [senderName, setSenderName] = useState('')
+  const [useProviderIcon, setUseProviderIcon] = useState(true)
   const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
   const [nameError, setNameError] = useState<ClientFailure | null>(null)
   const [saveError, setSaveError] = useState<ClientFailure | null>(null)
@@ -74,6 +75,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
       setColor(nextAccountColor(accounts))
       setNameError(null)
       setSenderName('')
+      setUseProviderIcon(true)
       setSenderNameError(null)
       setSaveError(null)
       guard.setDirty(false)
@@ -117,7 +119,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     guard.setBusy(true)
     setSaveError(null)
     try {
-      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: senderName.trim() || null } })
+      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: senderName.trim() || null, useProviderIcon } })
       guard.setDirty(false)
       onCreated(saved)
     } catch (cause) {
@@ -208,6 +210,9 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   <ProfileFields
                     displayName={displayName}
                     color={color}
+                    providerId={step.method.id}
+                    useProviderIcon={useProviderIcon}
+                    onUseProviderIconChange={setUseProviderIcon}
                     nameError={nameError}
                     senderName={senderName}
                     senderNameError={senderNameError}

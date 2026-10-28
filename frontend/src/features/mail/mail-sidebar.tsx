@@ -164,7 +164,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                       render={<SidebarMenuButton title={account.emailAddress} className={cn('font-medium', sync?.failure ? 'pr-14' : 'pr-8')} />}
                     >
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
-                      <AccountAvatar displayName={account.displayName} color={account.color} className="size-[18px] text-[10px]" />
+                      <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
                     <AccountSyncSlot

@@ -49,7 +49,7 @@ describe('accounts dialog', () => {
     fireEvent.change(name, { target: { value: '  新名称 ' } })
     fireEvent.blur(name)
     await waitFor(() => expect(onAccountsChanged).toHaveBeenCalledOnce())
-    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null } })
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null, useProviderIcon: true } })
     expect(client.updateConnection).not.toHaveBeenCalled()
     expect(await within(dialog).findByText('已保存')).toBeInTheDocument()
   })
@@ -58,8 +58,36 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog()
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null, useProviderIcon: true } }))
     expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('saves provider icon choices per account without changing the connection', async () => {
+    const first = exampleAccount({ providerId: 'qq', useProviderIcon: true })
+    const other = exampleAccount({ ...second, providerId: 'qq', useProviderIcon: false })
+    const { client, dialog } = renderDialog([first, other])
+    const preference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
+    expect(preference).toBeChecked()
+    await userEvent.click(preference)
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
+      accountId: first.id,
+      profile: { displayName: first.displayName, color: first.color, senderName: first.senderName, useProviderIcon: false },
+    }))
+    await userEvent.click(within(dialog).getByRole('button', { name: other.displayName }))
+    const otherPreference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
+    expect(otherPreference).not.toBeChecked()
+    await userEvent.click(otherPreference)
+    await waitFor(() => expect(client.updateProfile).toHaveBeenLastCalledWith({
+      accountId: other.id,
+      profile: { displayName: other.displayName, color: other.color, senderName: other.senderName, useProviderIcon: true },
+    }))
+    expect(client.updateConnection).not.toHaveBeenCalled()
+  })
+
+  it('offers no provider icon preference for a manually configured mailbox', async () => {
+    const { dialog } = renderDialog()
+    await within(dialog).findByLabelText('账号名称')
+    expect(within(dialog).queryByRole('switch', { name: '使用服务商图标' })).not.toBeInTheDocument()
   })
 
   it('saves the sender name when editing settles, trimmed, and clears it with an empty value', async () => {
@@ -70,14 +98,14 @@ describe('accounts dialog', () => {
     fireEvent.change(field, { target: { value: '  Lin Wei ' } })
     fireEvent.blur(field)
     await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
-      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: 'Lin Wei' },
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: 'Lin Wei', useProviderIcon: true },
     }))
     expect(field).toHaveValue('Lin Wei')
 
     fireEvent.change(field, { target: { value: ' ' } })
     fireEvent.keyDown(field, { key: 'Enter' })
     await waitFor(() => expect(client.updateProfile).toHaveBeenLastCalledWith({
-      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: null },
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true },
     }))
   })
 
@@ -115,7 +143,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog([exampleAccount(), second])
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '没按回车' } })
     await userEvent.click(within(dialog).getByRole('button', { name: /个人邮箱/ }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null, useProviderIcon: true } }))
     await waitFor(() => expect(client.getAccount).toHaveBeenCalledWith(second.id))
   })
 
@@ -229,7 +257,6 @@ describe('accounts dialog', () => {
     client.removeAccount.mockReturnValue(new Promise((_, no) => { reject = no }))
     const { dialog, onClose, onAddAccount } = renderDialog([account, second, third], {}, client)
     const trigger = await within(dialog).findByRole('button', { name: '移除账号' })
-    const addButtons = within(dialog).getAllByRole('button', { name: '添加账号' })
     fireEvent.click(trigger)
     const confirmation = await screen.findByRole('alertdialog')
     const remove = within(confirmation).getByRole('button', { name: '移除账号' })
@@ -249,10 +276,9 @@ describe('accounts dialog', () => {
     const otherAccount = within(dialog).getByTitle('backup@example.com · IMAP/SMTP')
     expect(otherAccount).toBeDisabled()
     fireEvent.click(otherAccount)
-    for (const add of addButtons) {
-      expect(add).toBeDisabled()
-      fireEvent.click(add)
-    }
+    const add = within(dialog).getByLabelText('添加账号')
+    expect(add).toBeDisabled()
+    fireEvent.click(add)
     fireEvent.keyDown(confirmation, { key: 'Escape' })
     expect(within(confirmation).getByRole('button', { name: '取消' })).toBeDisabled()
     expect(client.getAccount).not.toHaveBeenCalledWith(third.id)

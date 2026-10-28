@@ -22,6 +22,7 @@
 
 ### Optimization
 
+- 账号管理的添加按钮移至列表右上角并使用强调色；已选择服务商的账号默认使用服务商图标，可在每个账号的资料中单独关闭。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 添加账号和修改连接时，IMAP / SMTP 登录用户名留空会使用邮箱地址。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))
 - 添加账号的服务商选择改为 Logo、名称与短描述的单行列表，支持按名称、域名和关键词搜索。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))
 - 设置窗口默认打开第一项“通用”，便于调整语言。([#29](https://github.com/GuqierMcl/MailX/pull/29))
