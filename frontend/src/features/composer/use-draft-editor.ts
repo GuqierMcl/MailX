@@ -80,6 +80,8 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   // The content as it was when the window opened; "不保存" on an existing draft restores it.
   const baseline = useRef<EditorFields | null>(null)
   const removed = useRef(false)
+  // Account removal is final, including while a load/save is still in flight.
+  const detached = useRef(false)
   const revision = useRef(0)
   const dirty = useRef(false)
   const saving = useRef<Promise<void> | null>(null)
@@ -109,13 +111,14 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
 
   const reload = useCallback(async () => {
     clearTimeout(timer.current)
+    if (detached.current || !alive.current) return
     try {
       const draft = await client.getDraft(draftId)
-      if (!alive.current) return
+      if (!alive.current || detached.current) return
       apply(draft)
       setProblem(null)
     } catch (cause) {
-      if (!alive.current) return
+      if (!alive.current || detached.current) return
       if (clientFailureCode(cause) === 'notFound') setGone(true)
       else setProblem(clientFailure(cause))
     }
@@ -126,13 +129,13 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     // The first load, written as a promise chain rather than `reload()` so no state is set inside the effect body.
     client.getDraft(draftId).then(
       (draft) => {
-        if (!alive.current) return
+        if (!alive.current || detached.current) return
         baseline.current ??= fieldsOf(draft)
         apply(draft)
         setProblem(null)
       },
       (cause) => {
-        if (!alive.current) return
+        if (!alive.current || detached.current) return
         if (clientFailureCode(cause) === 'notFound') setGone(true)
         else setProblem(clientFailure(cause))
       },
@@ -143,9 +146,20 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     }
   }, [apply, client, draftId])
 
+  useEffect(() => client.onAccountRemoved((report) => {
+    // The draft may have changed sender since this window opened. Only the
+    // committed deletion report can tell us whether this draft was removed.
+    if (!report.draftIds.includes(draftId)) return
+    detached.current = true
+    clearTimeout(timer.current)
+    dirty.current = false
+    failed.current = false
+    setGone(true)
+  }), [client, draftId])
+
   // The queue holds, releases or deletes this draft: follow it.
   useEffect(() => client.onDrafts((change) => {
-    if (change.draftId !== draftId) return
+    if (change.draftId !== draftId || detached.current) return
     if (change.change === 'locked') setLocked(true)
     else if (change.change === 'unlocked') {
       setLocked(false)
@@ -154,15 +168,16 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   }), [client, draftId, reload, setLocked])
 
   const runSave = useCallback((): Promise<void> => {
+    if (detached.current || !alive.current) return Promise.resolve()
     if (saving.current) return saving.current
     const round = (async () => {
       try {
-        while (dirty.current && alive.current && !lockedRef.current) {
+        while (dirty.current && alive.current && !detached.current && !lockedRef.current) {
           const snapshot = latest.current
           if (!snapshot) return
           dirty.current = false
           // Local saves are usually instant: only a slow one earns a "saving" label.
-          const slow = setTimeout(() => { if (alive.current) setStatus('saving') }, SAVING_INDICATOR_DELAY_MS)
+          const slow = setTimeout(() => { if (alive.current && !detached.current) setStatus('saving') }, SAVING_INDICATOR_DELAY_MS)
           try {
             const saved = await client.updateDraft({
               id: draftId,
@@ -175,6 +190,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
               bodyHtml: snapshot.bodyHtml,
             })
             clearTimeout(slow)
+            if (!alive.current || detached.current) return
             revision.current = saved.revision
             failed.current = false
             if (alive.current && !dirty.current) {
@@ -189,6 +205,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
             }
           } catch (cause) {
             clearTimeout(slow)
+            if (!alive.current || detached.current) return
             const code = clientFailureCode(cause)
             if (code === 'conflict') {
               // Someone else saved a newer version: show it rather than overwrite it.
@@ -220,7 +237,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   }, [client, draftId, reload, setLocked])
 
   const update = useCallback((patch: Partial<EditorFields>) => {
-    if (lockedRef.current || !latest.current) return
+    if (detached.current || !alive.current || lockedRef.current || !latest.current) return
     const next = { ...latest.current, ...patch }
     latest.current = next
     dirty.current = true
@@ -236,13 +253,14 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   /** Writes what is pending. `ok` means nothing unsaved remains. */
   const flush = useCallback(async (maxMs = FLUSH_LIMIT_MS): Promise<{ ok: boolean }> => {
     clearTimeout(timer.current)
+    if (detached.current || !alive.current) return { ok: false }
     if (lockedRef.current) return { ok: true }
     let limit: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<void>((resolve) => { limit = setTimeout(resolve, maxMs) })
     try {
       await Promise.race([(async () => {
         // A save already running may finish before the newest edits go out.
-        while (saving.current || dirty.current) {
+        while (!detached.current && alive.current && (saving.current || dirty.current)) {
           if (saving.current) await saving.current
           else {
             await runSave()
@@ -254,24 +272,27 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     } finally {
       clearTimeout(limit)
     }
-    return { ok: !dirty.current && !saving.current && !failed.current }
+    return { ok: !detached.current && alive.current && !dirty.current && !saving.current && !failed.current }
   }, [runSave])
 
   /** Retries a failed save now. */
   const retry = useCallback(() => {
-    if (!dirty.current) return
+    if (detached.current || !alive.current || !dirty.current) return
     failed.current = false
     void runSave()
   }, [runSave])
 
   const remove = useCallback(async () => {
+    if (detached.current || !alive.current) return
     clearTimeout(timer.current)
     dirty.current = false
     removed.current = true
     if (saving.current) await saving.current
+    if (detached.current || !alive.current) return
     try {
       await client.deleteDraft(draftId)
     } catch (cause) {
+      if (detached.current || !alive.current) return
       removed.current = false
       throw cause
     }
@@ -286,9 +307,11 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
 
   /** Writes the opening content back (after any save in flight), at the latest revision. */
   const restoreBaseline = useCallback(async () => {
+    if (detached.current || !alive.current) return
     clearTimeout(timer.current)
     dirty.current = false
     if (saving.current) await saving.current
+    if (detached.current || !alive.current) return
     const before = baseline.current
     if (!before || lockedRef.current || !changed()) return
     const saved = await client.updateDraft({
@@ -301,6 +324,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
       subject: before.subject,
       bodyHtml: before.bodyHtml,
     })
+    if (detached.current || !alive.current) return
     revision.current = saved.revision
   }, [changed, client, draftId])
 
@@ -323,6 +347,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     revision: () => revision.current,
     isEmpty: () => (latest.current ? fieldsAreEmpty(latest.current) : false),
     latest: () => latest.current,
+    isAvailable: () => alive.current && !detached.current,
   }
 }
 

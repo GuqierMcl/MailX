@@ -1,7 +1,7 @@
 import { render, screen } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { GENERIC_PROVIDER, providerOf } from './providers'
+import { filterProviders, GENERIC_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
   it('labels a manually configured account as IMAP/SMTP', () => {
@@ -12,6 +12,11 @@ describe('mail providers', () => {
 
   it('still labels a provider this build does not know', () => {
     expect(providerOf('future-mail')).toMatchObject({ id: 'future-mail', name: 'future-mail' })
+  })
+
+  it.each(['qq', 'QQ.COM', 'foxmail', 'FOXMAIL.COM', '腾讯邮箱'])('finds the shared QQ/Foxmail entry when searching for %s', (query) => {
+    expect(filterProviders(PROVIDERS, query)).toEqual([QQ_PROVIDER])
+    expect(providerOf('qq')).toBe(QQ_PROVIDER)
   })
 
   it('uses a bundled logo when the provider supplies one', () => {

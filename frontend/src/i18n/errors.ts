@@ -11,7 +11,7 @@ export function errorText(error: unknown, context?: string): string {
       if (/\.port$|^proxyPort$/.test(field)) return t('accounts:invalidPort')
       if (/\.host$|^proxyHost$/.test(field)) return t('accounts:invalidHost')
       if (/\.username$/.test(field)) return t('accounts:loginRequired')
-      if (field === 'emailAddress') return t('accounts:invalidEmail')
+      if (field === 'emailAddress') return t(context === 'qq' ? 'accounts:qqEmailRequired' : 'accounts:invalidEmail')
       if (field === 'proxyUsername') return t('accounts:proxyUsernameRequired')
       if (/Password$|^sharedPassword$/.test(field)) return t('accounts:passwordRequired')
       if (field === 'displayName') return t('accounts:accountNameRequired')

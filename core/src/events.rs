@@ -22,6 +22,8 @@ pub const NEW_MAIL_DETAILS: usize = 3;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum CoreEvent {
+    /// A local account and its data were removed; every account picker refetches.
+    AccountRemoved(crate::accounts::types::AccountRemoval),
     /// An account's sync state changed; readers refetch on new revisions.
     Sync(AccountSyncState),
     /// A read / starred write-back round finished.

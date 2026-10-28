@@ -19,6 +19,7 @@ pub(crate) use flag_changes::{Flag, LocalChange, PendingChange};
 pub(crate) mod messages;
 mod migrations;
 pub(crate) mod outbox;
+mod removal;
 
 pub(crate) struct Storage {
     pub db: Connection,
@@ -79,8 +80,8 @@ impl Storage {
     }
 
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
-        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name FROM accounts WHERE id=?1", [id], |r| {
-            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?))
+        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon FROM accounts WHERE id=?1", [id], |r| {
+            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?))
         }).optional()?.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
         let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json FROM auth_profiles WHERE account_id=?1 AND kind='password'")?;
         let records = profile_statement
@@ -145,6 +146,7 @@ impl Storage {
                 display_name: basic.1,
                 color: basic.7,
                 sender_name: basic.8,
+                use_provider_icon: basic.9,
                 email_address: basic.2,
                 provider_id: basic.3,
                 mailbox_source_id: basic.4,
@@ -258,13 +260,14 @@ impl Storage {
         updated_at: &str,
     ) -> Result<(), AppError> {
         let changed = self.db.execute(
-            "UPDATE accounts SET display_name=?2,color=?3,sender_name=?5,updated_at=?4 WHERE id=?1",
+            "UPDATE accounts SET display_name=?2,color=?3,sender_name=?5,use_provider_icon=?6,updated_at=?4 WHERE id=?1",
             params![
                 id,
                 profile.display_name,
                 profile.color,
                 updated_at,
-                profile.sender_name
+                profile.sender_name,
+                profile.use_provider_icon
             ],
         )?;
         if changed == 0 {
@@ -288,9 +291,9 @@ impl Storage {
             return Err(AppError::new(ErrorCode::Conflict));
         }
         if current.is_none() {
-            tx.execute("INSERT INTO accounts(id,revision,display_name,color,sender_name,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![account.id,account.revision,account.display_name,account.color,account.sender_name,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
+            tx.execute("INSERT INTO accounts(id,revision,display_name,color,sender_name,use_provider_icon,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![account.id,account.revision,account.display_name,account.color,account.sender_name,account.use_provider_icon,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
         } else {
-            // A connection commit never writes the profile (name, color); those
+            // A connection commit never writes the profile; those fields
             // have their own update and must not be reverted by a replayed journal.
             tx.execute("UPDATE accounts SET revision=?2,email_address=?3,provider_id=?4,mailbox_source_id=?5,updated_at=?6 WHERE id=?1",params![account.id,account.revision,account.email_address,account.provider_id,account.mailbox_source_id,account.updated_at])?;
         }

@@ -10,7 +10,8 @@ use tokio::runtime::Handle;
 
 use crate::accounts::AccountService;
 use crate::accounts::types::{
-    Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
+    Account, AccountRemoval, CreateAccountRequest, RemoveAccountRequest, UpdateConnectionRequest,
+    UpdateProfileRequest,
 };
 use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
@@ -34,11 +35,17 @@ mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 mod flags;
+mod verification;
 pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use flags::{FlagChange, MessageFlag};
+pub use verification::{
+    AccountConnectionVerification, CancelConnectionVerification, ConnectionVerificationCode,
+    ConnectionVerificationStage, ConnectionVerificationStatus, ProtocolVerification,
+    VerifyAccountConnection,
+};
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
@@ -54,6 +61,7 @@ pub struct MailxCore {
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
     events: Events,
+    verification: Arc<verification::VerificationRegistry>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -155,6 +163,7 @@ impl MailxCore {
             avatars: Arc::default(),
             images,
             events,
+            verification: Arc::default(),
         })
     }
 
@@ -190,6 +199,36 @@ impl MailxCore {
         Ok(account)
     }
 
+    /// Removes only local account data. The sending check and deletion share
+    /// the service lock, so a queue worker cannot claim a message between them.
+    pub fn remove_account(
+        &self,
+        request: RemoveAccountRequest,
+    ) -> Result<AccountRemoval, AppError> {
+        let removed = {
+            let mut service = self.accounts()?;
+            let removed = service.remove(request)?;
+            // All body work takes these locks in service -> flights order.
+            // The deletion has committed: retiring work must not report a
+            // cleanup failure as though the account were still present.
+            self.bodies.retire(&removed.account_id);
+            removed
+        };
+        self.sync.retire(&removed.account_id);
+        self.outbox.retire(&removed.account_id);
+        self.verification.invalidate(&removed.account_id);
+        self.events
+            .emit(&CoreEvent::AccountRemoved(removed.clone()));
+        for draft_id in &removed.draft_ids {
+            self.events.emit(&CoreEvent::DraftChanged(DraftChanged {
+                draft_id: draft_id.clone(),
+                account_id: removed.account_id.clone(),
+                change: DraftChange::Deleted,
+            }));
+        }
+        Ok(removed)
+    }
+
     /// Replaces an account's connection and restarts its sync right away, so
     /// no connection made under the old server, route or credentials survives.
     pub fn update_account_connection(
@@ -208,11 +247,12 @@ impl MailxCore {
         // Queued mail follows the new route and credentials on its next
         // attempt; a changed address fails the unsent items.
         self.outbox.wake(&account.id);
+        self.verification.invalidate(&account.id);
         body_restart?;
         Ok(account)
     }
 
-    /// Renames or recolors an account. Sync and body downloads keep running.
+    /// Updates an account's profile. Sync and body downloads keep running.
     pub fn update_account_profile(
         &self,
         request: UpdateProfileRequest,
@@ -535,6 +575,91 @@ mod tests {
     }
 
     #[test]
+    fn account_removal_retires_sync_and_announces_every_deleted_draft() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let core = MailxCore::open(
+            directory.path(),
+            Arc::new(MemorySecrets::default()),
+            runtime.handle().clone(),
+            Arc::new(move |event: &CoreEvent| sink.lock().unwrap().push(event.clone())),
+        )
+        .unwrap();
+        let account = create(&core, closed_port());
+        let draft = core
+            .create_draft(
+                CreateDraftRequest {
+                    account_id: Some(account.id.clone()),
+                    to: vec![],
+                    cc: vec![],
+                    bcc: vec![],
+                    subject: "local draft".into(),
+                    body_html: "<p>text</p>".into(),
+                    client_mutation_id: Uuid::new_v4().to_string(),
+                },
+                "",
+            )
+            .unwrap();
+        assert_eq!(
+            core.remove_account(RemoveAccountRequest {
+                account_id: account.id.clone(),
+                expected_revision: account.revision + 1,
+            })
+            .unwrap_err()
+            .code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(core.get_draft(&draft.id).unwrap().id, draft.id);
+        assert!(
+            core.sync_states()
+                .iter()
+                .any(|state| state.account_id == account.id)
+        );
+        assert!(
+            !captured
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, CoreEvent::AccountRemoved(_)))
+        );
+        let removed = core
+            .remove_account(RemoveAccountRequest {
+                account_id: account.id.clone(),
+                expected_revision: account.revision,
+            })
+            .unwrap();
+        assert_eq!(removed.draft_ids, vec![draft.id.clone()]);
+        assert!(core.list_accounts().unwrap().is_empty());
+        assert!(core.sync_states().is_empty());
+        assert_eq!(
+            core.get_draft(&draft.id).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        // An update/create may have committed before removal but invoke these
+        // starts afterwards; neither may restore the removed runtime state.
+        core.sync.restart(&account.id);
+        core.outbox.wake(&account.id);
+        assert!(core.sync_states().is_empty());
+        let events = captured.lock().unwrap();
+        let removal_index = events
+            .iter()
+            .position(
+                |event| matches!(event, CoreEvent::AccountRemoved(value) if value == &removed),
+            )
+            .unwrap();
+        let deleted_index = events
+            .iter()
+            .position(|event| {
+                matches!(event, CoreEvent::DraftChanged(value)
+                if value.draft_id == draft.id && value.change == DraftChange::Deleted)
+            })
+            .unwrap();
+        assert!(removal_index < deleted_index);
+    }
+
+    #[test]
     fn an_unreachable_server_is_reported_and_retried() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let directory = TempDir::new().unwrap();
@@ -587,12 +712,13 @@ mod tests {
             .update_account_profile(
                 serde_json::from_value(json!({
                     "accountId": account.id,
-                    "profile": {"displayName": "Renamed", "color": "#2563eb"},
+                    "profile": {"displayName": "Renamed", "color": "#2563eb", "useProviderIcon": false},
                 }))
                 .unwrap(),
             )
             .unwrap();
         assert_eq!(renamed.revision, account.revision);
+        assert!(!renamed.use_provider_icon);
         assert_eq!(core.sync_states()[0].generation, generation);
 
         let mut value = config(json!({"kind":"direct"}));
@@ -603,6 +729,7 @@ mod tests {
             .update_account_connection(connection_update(&account.id, account.revision, value))
             .unwrap();
         assert_eq!(moved.display_name, "Renamed");
+        assert!(!moved.use_provider_icon);
         assert_eq!(core.sync_states()[0].generation, generation + 1);
     }
 

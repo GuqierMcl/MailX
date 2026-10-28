@@ -1,6 +1,14 @@
 import { t } from '@/i18n'
 import type { IconSvgElement } from '@hugeicons/react'
 import { Mail01Icon } from '@hugeicons/core-free-icons'
+import qqmailLogo from '@/assets/providers/qqmail.png'
+import type { ConnectionConfig } from '@/generated/accounts'
+
+export type ProviderPreset = {
+  domains: readonly string[]
+  imap: Omit<ConnectionConfig, 'username'>
+  smtp: Omit<ConnectionConfig, 'username'>
+}
 
 /**
  * A mail provider MailX knows how to add, and how to label afterwards. The
@@ -21,6 +29,8 @@ export type MailProvider = {
   logo?: string
   /** The provider's mark; the generic mail icon stands in until it has one. */
   icon: IconSvgElement
+  /** Defaults for a new account only; saved connections always keep their values. */
+  preset?: ProviderPreset
 }
 
 export const GENERIC_PROVIDER: MailProvider = {
@@ -33,7 +43,24 @@ export const GENERIC_PROVIDER: MailProvider = {
   icon: Mail01Icon,
 }
 
-export const PROVIDERS: MailProvider[] = [GENERIC_PROVIDER]
+const QQ_DOMAINS = ['qq.com', 'vip.qq.com', 'foxmail.com'] as const
+
+export const QQ_PROVIDER: MailProvider = {
+  id: 'qq',
+  get name() { return t('accounts:qqProviderName') },
+  domain: QQ_DOMAINS.join(' / '),
+  get description() { return t('accounts:qqProviderDescription') },
+  searchAliases: ['qq', 'foxmail', '腾讯', '腾讯邮箱', 'QQ邮箱', 'VIP邮箱'],
+  logo: qqmailLogo,
+  icon: Mail01Icon,
+  preset: {
+    domains: QQ_DOMAINS,
+    imap: { host: 'imap.qq.com', port: 993, tls: 'implicit' },
+    smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit' },
+  },
+}
+
+export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, GENERIC_PROVIDER]
 
 /** Local filtering keeps the registry's order and follows the current UI language. */
 export function filterProviders(providers: readonly MailProvider[], query: string): MailProvider[] {

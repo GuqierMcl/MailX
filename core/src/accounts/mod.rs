@@ -1,6 +1,7 @@
 pub(crate) mod bodies;
 mod drafts;
 mod outbox;
+mod removal;
 pub(crate) use drafts::{DraftSource, local_offset};
 pub(crate) use outbox::Next;
 #[cfg(any(test, feature = "body-webview-test"))]
@@ -81,6 +82,12 @@ impl AccountService {
         validate_connection(&mut connection)?;
         validate_profile(&mut profile)?;
         validate_create_secrets(&connection)?;
+        if self
+            .storage
+            .create_request_was_removed(&request.request_id)?
+        {
+            return Err(AppError::new(ErrorCode::IdempotencyConflict));
+        }
         self.recover()?;
         let canonical = canonical_config(&profile, &connection)?;
         if let Some((id, saved)) = self.storage.create_request(&request.request_id)? {
@@ -124,6 +131,7 @@ impl AccountService {
             display_name: old.account.display_name.clone(),
             color: old.account.color.clone(),
             sender_name: old.account.sender_name.clone(),
+            use_provider_icon: old.account.use_provider_icon,
         };
         let (snapshot, writes) = self.build(request.connection, profile, Some(&old))?;
         let current_refs = snapshot.refs();
@@ -144,7 +152,7 @@ impl AccountService {
     }
 
     /// Replaces the profile. `revision` stays put, so running sync work is not
-    /// invalidated, and no credential is read or written.
+    /// invalidated, and no credential is changed.
     pub fn update_profile(
         &mut self,
         mut request: UpdateProfileRequest,
@@ -184,6 +192,9 @@ impl AccountService {
     }
 
     fn recover(&mut self) -> Result<(), AppError> {
+        // A locked host store must never resurrect an account whose removal
+        // already committed, or prevent opening its remaining local data.
+        self.cleanup_removed_secrets().ok();
         for mut journal in self.storage.journals()? {
             if journal.applied {
                 self.cleanup(&journal).ok();
@@ -312,6 +323,7 @@ impl AccountService {
             display_name: profile.display_name,
             color: profile.color,
             sender_name: profile.sender_name,
+            use_provider_icon: profile.use_provider_icon,
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
@@ -779,6 +791,10 @@ fn canonical_config(
     }
     if let Some(sender_name) = &profile.sender_name {
         canonical["senderName"] = serde_json::json!(sender_name);
+    }
+    // The default stays absent so requests recorded before this preference match.
+    if !profile.use_provider_icon {
+        canonical["useProviderIcon"] = serde_json::json!(false);
     }
     encode(&canonical)
 }

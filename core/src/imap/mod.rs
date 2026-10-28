@@ -324,6 +324,12 @@ async fn authenticate(
 }
 
 impl Session {
+    /// Authentication diagnostics never select a mailbox or fetch message data.
+    pub(crate) async fn verify_noop(&mut self) -> Result<(), ImapError> {
+        self.checked_command::<()>("NOOP", |_, _| Ok(None)).await?;
+        Ok(())
+    }
+
     pub(crate) async fn list_folders(&mut self) -> Result<Vec<RemoteFolder>, ImapError> {
         // async-imap 0.12's LIST stream drops tagged NO/BAD. Wait for an
         // explicit OK ourselves before allowing folder deletion reconciliation.

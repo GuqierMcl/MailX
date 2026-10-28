@@ -492,53 +492,25 @@ async fn authenticate(
     }
 }
 
-/// Dot-stuffs `message` for the DATA phase: every line break becomes CRLF
-/// (bare LF and bare CR included), lines starting with `.` get another `.`,
-/// and the data ends with `CRLF . CRLF`.
-pub(crate) fn data_payload(message: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(message.len() + 16);
-    let mut at_line_start = true;
-    let mut index = 0;
-    while index < message.len() {
-        let byte = message[index];
-        match byte {
-            b'\r' | b'\n' => {
-                if byte == b'\r' && message.get(index + 1) == Some(&b'\n') {
-                    index += 1;
-                }
-                out.extend_from_slice(b"\r\n");
-                at_line_start = true;
-            }
-            _ => {
-                if at_line_start && byte == b'.' {
-                    out.push(b'.');
-                }
-                out.push(byte);
-                at_line_start = false;
-            }
-        }
-        index += 1;
-    }
-    if !at_line_start {
-        out.extend_from_slice(b"\r\n");
-    }
-    out.extend_from_slice(b".\r\n");
-    out
-}
-
-/// `Ok` carries a finished outcome too; `Err` is only a convenience for `?`.
-async fn session(
+/// A diagnostic authenticates and quits without constructing an envelope or
+/// entering any delivery phase. The caller owns its total timeout/cancellation.
+pub(crate) async fn verify_connection(
     route: &NetRoute,
     login: &SmtpLogin,
-    envelope: &SmtpEnvelope,
-    mime: &[u8],
     timeouts: &Timeouts,
     tls: &TlsSource,
-    on_data_started: DataStarted,
-) -> Result<SmtpOutcome, SmtpOutcome> {
-    if envelope.recipients.is_empty() || !mime.is_ascii() {
-        return Err(permanent(FailureReason::InvalidMessage));
-    }
+) -> Result<(), SmtpOutcome> {
+    let (mut conn, _) = authenticated_connection(route, login, timeouts, tls).await?;
+    conn.quit(timeouts.quit).await;
+    Ok(())
+}
+
+async fn authenticated_connection(
+    route: &NetRoute,
+    login: &SmtpLogin,
+    timeouts: &Timeouts,
+    tls: &TlsSource,
+) -> Result<(Conn, Capabilities), SmtpOutcome> {
     let secret = &login.password;
 
     let stream = net::connect(route, &login.host, login.port)
@@ -589,6 +561,59 @@ async fn session(
     }
 
     authenticate(&mut conn, login, &caps, timeouts.command).await?;
+
+    Ok((conn, caps))
+}
+
+/// Dot-stuffs `message` for the DATA phase: every line break becomes CRLF
+/// (bare LF and bare CR included), lines starting with `.` get another `.`,
+/// and the data ends with `CRLF . CRLF`.
+pub(crate) fn data_payload(message: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(message.len() + 16);
+    let mut at_line_start = true;
+    let mut index = 0;
+    while index < message.len() {
+        let byte = message[index];
+        match byte {
+            b'\r' | b'\n' => {
+                if byte == b'\r' && message.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+                out.extend_from_slice(b"\r\n");
+                at_line_start = true;
+            }
+            _ => {
+                if at_line_start && byte == b'.' {
+                    out.push(b'.');
+                }
+                out.push(byte);
+                at_line_start = false;
+            }
+        }
+        index += 1;
+    }
+    if !at_line_start {
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(b".\r\n");
+    out
+}
+
+/// `Ok` carries a finished outcome too; `Err` is only a convenience for `?`.
+async fn session(
+    route: &NetRoute,
+    login: &SmtpLogin,
+    envelope: &SmtpEnvelope,
+    mime: &[u8],
+    timeouts: &Timeouts,
+    tls: &TlsSource,
+    on_data_started: DataStarted,
+) -> Result<SmtpOutcome, SmtpOutcome> {
+    if envelope.recipients.is_empty() || !mime.is_ascii() {
+        return Err(permanent(FailureReason::InvalidMessage));
+    }
+    let secret = &login.password;
+    let (mut conn, caps) = authenticated_connection(route, login, timeouts, tls).await?;
 
     let payload = data_payload(mime);
     if let Some(limit) = caps.size

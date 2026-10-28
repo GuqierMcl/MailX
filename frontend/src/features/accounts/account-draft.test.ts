@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
+import { QQ_PROVIDER } from './providers'
+import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
   it.each([
@@ -45,6 +47,21 @@ describe('login username defaults', () => {
       imap: { username: account.emailAddress }, smtp: { username: account.emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     })
+  })
+})
+
+describe('QQ provider domain boundary', () => {
+  it.each(['qq.com.evil', 'evilqq.com', 'sub.vip.qq.com', 'vip.qq.com.evil', 'evilvip.qq.com', 'sub.qq.com'])('rejects %s rather than treating a suffix or subdomain as a supported mailbox', (domain) => {
+    const draft = initialDraft(null, QQ_PROVIDER)
+    draft.emailAddress = `synthetic@${domain}`
+    draft.sharedPassword.value = 'synthetic-secret'
+    try {
+      draftToConnection(draft, null, QQ_PROVIDER)
+      expect.fail('Unsupported QQ domain was accepted')
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(MailxClientError)
+      expect((cause as MailxClientError).failure).toMatchObject({ code: 'validation', field: 'emailAddress' })
+    }
   })
 })
 

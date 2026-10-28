@@ -2,17 +2,22 @@ import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
-import { Field, FieldDescription, FieldError, FieldLabel, FieldTitle } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { ACCOUNT_COLORS } from './account-color'
 import { AccountAvatar } from './account-avatar'
+import { providerOf } from './providers'
 import type { ClientFailure } from '@/lib/mailx-client'
 import { errorText } from '@/i18n/errors'
 
 type ProfileFieldsProps = {
   displayName: string
   color: string | null
+  providerId?: string | null
+  useProviderIcon?: boolean
+  onUseProviderIconChange?(value: boolean): void
   nameError?: ClientFailure | null
   /** The name recipients see in `From`; empty sends with the bare address. */
   senderName: string
@@ -28,7 +33,7 @@ type ProfileFieldsProps = {
 }
 
 /** Name and identification color: how the account looks in MailX, nothing more. */
-export function ProfileFields({ displayName, color, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
+export function ProfileFields({ displayName, color, providerId, useProviderIcon = true, onUseProviderIconChange, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
   useTranslation()
   const choices: { value: string | null; name: string }[] = [{ value: null, name: t('accounts:noColor') }, ...ACCOUNT_COLORS]
   return (
@@ -36,7 +41,7 @@ export function ProfileFields({ displayName, color, nameError, senderName, sende
       <Field data-invalid={!!nameError}>
         <FieldLabel htmlFor="displayName">{t('accounts:accountName')}</FieldLabel>
         <div className="flex items-center gap-3">
-          <AccountAvatar displayName={displayName} color={color} className="size-8 text-sm" />
+          <AccountAvatar displayName={displayName} color={color} providerId={providerId} useProviderIcon={useProviderIcon} className="size-8 text-sm" />
           <Input id="displayName" value={displayName} disabled={disabled} placeholder={t('accounts:accountNamePlaceholder')}
             aria-invalid={!!nameError} aria-describedby={nameError ? 'displayName-error' : undefined}
             onChange={(event) => onDisplayNameChange(event.target.value)}
@@ -65,6 +70,15 @@ export function ProfileFields({ displayName, color, nameError, senderName, sende
           }} />
         {senderNameError ? <FieldError id="senderName-error">{errorText(senderNameError)}</FieldError> : <FieldDescription>{t('accounts:senderNameHint')}</FieldDescription>}
       </Field>
+      {providerId && providerOf(providerId).logo && onUseProviderIconChange && (
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="useProviderIcon">{t('accounts:useProviderIcon')}</FieldLabel>
+            <FieldDescription>{t('accounts:useProviderIconHint')}</FieldDescription>
+          </FieldContent>
+          <Switch id="useProviderIcon" checked={useProviderIcon} onCheckedChange={onUseProviderIconChange} disabled={disabled} />
+        </Field>
+      )}
       <Field>
         <FieldTitle id="account-color-label">{t('accounts:identificationColor')}</FieldTitle>
         <div role="radiogroup" aria-labelledby="account-color-label" className="flex flex-wrap gap-2">

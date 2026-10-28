@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-20。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP、连接测试和邮件写操作尚未开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、收发连接诊断、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-28。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP、MCP 尚未开放；收发登录诊断与固定服务商帮助链接仅向主窗口开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -142,14 +142,14 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 账号分两部分，各自一个修改请求，生命周期不同：
 
-- **资料**（`profile`：`displayName`、`color`、`senderName`）只影响显示或发件人署名。`senderName` 是收件人在 `From` 中看到的名字，保存时去首尾空白，空值或 `null` 清除；含控制字符（含 CR / LF，防头部注入）或超过 128 个字符返回 `validation`，`field` 为 `senderName`；省略等同 `null`。修改不推进 `revision`、不读写凭证、不重启同步；以最后一次写入为准，不做乐观锁。`color` 为 `#rrggbb`（规范为小写）或 `null`，空字符串等同 `null`。
-- **连接**（`connection`：`emailAddress`、可空 `providerId`、`imap` / `smtp`、`authentication`、`route`）决定 MailX 如何访问邮箱。修改必须匹配 `expectedRevision`，成功后推进 `revision`，宿主立即重启该账号的同步与正文下载，旧连接不会沿用。修改连接不会改动资料。
+- **资料**（`profile`：`displayName`、`color`、`senderName`、`useProviderIcon`）只影响显示或发件人署名。`senderName` 是收件人在 `From` 中看到的名字，保存时去首尾空白，空值或 `null` 清除；含控制字符（含 CR / LF，防头部注入）或超过 128 个字符返回 `validation`，`field` 为 `senderName`；省略等同 `null`。`useProviderIcon` 是是否使用可用服务商图标的布尔偏好，默认 `true`。修改资料不推进 `revision`、不修改凭证、不重启同步；以最后一次写入为准，不做乐观锁。`color` 为 `#rrggbb`（规范为小写）或 `null`，空字符串等同 `null`。
+- **连接**（`connection`：`emailAddress`、可空 `providerId`、`imap` / `smtp`、`authentication`、`route`）决定 MailX 如何访问邮箱。修改必须匹配 `expectedRevision`，成功后推进 `revision`，宿主立即重启该账号的同步与正文下载，旧连接不会沿用。修改连接及其 journal 恢复不会改动资料，已关闭的 `useProviderIcon` 也保持关闭。
 
-创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color` 与 `senderName`）和全部连接字段。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
+创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color`、`senderName` 与 `useProviderIcon`）和全部连接字段；省略 `useProviderIcon` 时使用 `true`。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
 
 创建和修改连接中的 `imap.username` / `smtp.username` 仍为字符串字段，各自去掉首尾空白（Unicode `White_Space` 加 `U+FEFF`，前后端一致）后，空字符串使用本次有效 `emailAddress`，非空值保留大小写。核心先完成规范化，再计算创建请求的幂等身份、邮箱来源与凭证信任；读取 DTO 返回实际保存的有效用户名。因此留空和明确填写同一邮箱地址的创建请求等价。保存后用户名不随邮箱地址自动变化；再次留空保存才按新的邮箱地址解析。有效登录身份改变时，现有来源及凭证确认规则继续适用；SMTP 仍使用配置的密码认证。
 
-`Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color` 与 `senderName`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
+`Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color`、`senderName` 与 `useProviderIcon`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。已有数据库账号升级后、旧账号快照或 journal 缺少 `useProviderIcon` 时，默认值均为 `true`。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
 
@@ -257,7 +257,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `jobs.get` / `jobs.cancel` | jobId → job 状态 | GET / POST `/api/v1/jobs/{id}` / `…/cancel` |
 | `ai.start` / `ai.get` / `ai.cancel` | Run 请求 / runId → Run 快照 | POST / GET `/api/v1/ai/runs` / `…/{id}` / `…/{id}/cancel` |
 
-OAuth、附件上传、设置和删除账号的细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
+OAuth、附件上传和后续设置细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
 
 ## 4. 邮件写操作一致性
 
@@ -427,3 +427,58 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 `Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别对应“已发送”“发送失败”“可能已发送，需要确认”的当前语言译文。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题使用当前语言的占位文本）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新邮件通知该字段为 `null`），主窗口据此选中发件箱项。
 
 新邮件、发送结果和测试通知都按生成时的有效语言取资源；切换语言不撤回、不重发已显示的系统通知。通知过滤、隐私和声音规则沿用现状。共享文本与预览隐藏有自动测试，三平台真实通知显示和点击仍需按[验证策略](../development/validation.md#8-新邮件通知的手动验证)分别记录。
+
+### 收发连接诊断与服务商帮助
+
+QQ / Foxmail 使用 `providerId=qq` 和既有 `password/shared` 认证，预设只为新账号填充 `imap.qq.com:993`、`smtp.qq.com:465` 和隐式 TLS。已保存的端点、独立用户名、路由与凭证不会被预设覆盖；`providerId` 不授予新端点信任。原通用配置账号不自动迁移。
+
+| MailxClient 方法 | Tauri 命令与参数 | 结果 |
+| --- | --- | --- |
+| `verifyAccountConnection(accountId, expectedRevision, signal?)` | `accounts_verify_connection`，`{ request: { accountId, expectedRevision, verificationId } }` | `AccountConnectionVerification` |
+| adapter 的 AbortSignal 处理 | `accounts_cancel_verification`，`{ request: { accountId, verificationId } }` | 无数据；只取消对应尝试 |
+| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；当前仅接受 `qq`，由系统浏览器打开固定官方授权码指引 |
+
+上述命令只向受信主窗口开放，诊断和取消还要求核心 Ready；写信窗口和邮件正文不能调用。两个 ID 均为 UUID，verificationId 由 adapter 为每次尝试新建；未知顶层字段被拒绝。帮助命令不接受客户端 URL，未知 providerId 返回固定参数错误，不扩大任意外链打开权限。
+
+核心在准备登录计划和返回报告前检查账号连接 revision；开始时版本不同或检查期间连接已更新则返回 `conflict`。网络操作前释放账号存储锁；IMAP 与 SMTP 均经过已保存账号路由、凭证端点信任和 TLS 校验，自定义代理失败不回退直连。同账号最多一个诊断，重复尝试返回 `conflict`；取消按账号与 verificationId 隔离，支持取消请求先于诊断注册到达，不让旧取消中止新尝试。
+
+整次调用共用 45 秒预算，覆盖计划准备、两协议并行探测和最终版本核对。取消或超时丢弃在途网络会话；准备/版本核对的等待也受同一预算和取消信号控制。已经进入系统凭据库的同步操作不能强制中断，但它恢复后会检查取消/期限，不继续发起新网络请求。
+
+IMAP 仅建立有界会话、LOGIN、CAPABILITY、按能力发送 ID、NOOP 和退出；不执行 LIST、FETCH 或写标记。SMTP 复用正式发信的 TLS/EHLO/AUTH 路径，认证后只 QUIT，不执行 MAIL、RCPT、DATA。诊断不创建草稿或发送队列项，不改变 `connectionStatus=unverified`，也不持久化成功结论。
+
+```ts
+type ProtocolVerification = {
+  status: 'verified' | 'failed';
+  stage: 'configuration' | 'connection' | 'tls' | 'authentication' | 'mailbox' | 'complete';
+  code: 'credentialUntrusted' | 'credentialMissing' | 'secretStore' | 'network' | 'proxy'
+    | 'tls' | 'timeout' | 'authentication' | 'authUnavailable' | 'protocol'
+    | 'cancelled' | 'unsupported' | 'configuration' | null;
+};
+type AccountConnectionVerification = {
+  accountId: string;
+  revision: number;
+  imap: ProtocolVerification;
+  smtp: ProtocolVerification;
+};
+```
+
+成功项为 `verified/complete/null`；失败项只包含固定阶段和原因码，不包含服务端原始回复、目录名、邮件或秘密。网页根据当前语言显示消息。QQ 认证失败提供开通协议、更新授权码、检查完整地址和网页安全验证的排查步骤，不把模糊的认证拒绝细分为未经证实的确定原因。
+
+报告仅对这次探测的配置版本有效。切换账号、关闭界面、取消或连接版本变化都会取消旧尝试并丢弃迟到结果。收信和发信结果分别展示，“登录验证通过”明确不代表实际邮件投递或完整服务商兼容通过。
+
+### 移除本机账号
+
+`MailxClient.removeAccount(request)` 调用主窗口专用 `accounts_remove`，参数为 `{ request: { accountId, expectedRevision } }`。UUID 和版本由 core 校验，未知字段被拒绝，启动必须 Ready；写信窗口、邮件正文、HTTP 和 MCP 没有此操作权限。
+
+```ts
+type RemoveAccountRequest = { accountId: string; expectedRevision: number };
+type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPending: boolean };
+```
+
+`MailxCore::remove_account` 在与发送领取共享的服务锁和删除事务内检查连接版本与队列状态。有 `sending` 项返回 `alreadySending`，版本不匹配返回 `conflict`，两者均不修改数据；未知账号且无删除收据为 `notFound`。成功清除该账号所有来源的配置、邮件引用、草稿与发件记录，保留删除收据和创建请求墓碑；以同一账号 ID 和原版本重试返回原来的 `draftIds`，凭证待清理状态按当时结果返回。旧创建请求 ID 返回 `idempotencyConflict`。
+
+该操作不联系服务商、不发送 IMAP 删除命令，也不撤回已提交邮件或撤销服务商授权码。终态和 `unknown` 发件记录随账号清除，确认文案必须始终说明邮件可能已经送达。有在途 SMTP 时拒绝移除，不强制中断后声称发送已撤销。
+
+提交后退休同步/写回、正文、空闲发信和诊断任务，撤销正文令牌、外链确认和远程图片权限。core 发 `AccountRemoved`，desktop 向可信 main/composer 窗口广播 `mailx://account-removed`，载荷为 `AccountRemoval`，随后发各实际删除草稿的 `mailx://drafts` Deleted 事件。前端 `onAccountRemoved` 清理查询与选择，写信窗口以 `draftIds` 判断自身是否应停止保存并直接关闭；不以打开窗口时的旧账号猜测。
+
+`credentialsPending=true` 表示本机移除已提交，但部分 SecretStore 删除尚未完成；提示待清理并允许应用后续重试，不能作为账号删除失败重试创建。缓存文件、共享引用和恢复边界见[账号配置](../architecture/account-configuration.md#6-操作与后台任务契约)。

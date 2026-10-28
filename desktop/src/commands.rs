@@ -1,7 +1,8 @@
 use mailx_core::{
-    Account, AccountSyncState, ApiResult, AppError, CreateAccountRequest, EmailDetail,
-    EmailListQuery, EmailPage, ErrorCode, Folder, SettingsPatch, SettingsSnapshot,
-    UpdateConnectionRequest, UpdateProfileRequest,
+    Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
+    CancelConnectionVerification, CreateAccountRequest, EmailDetail, EmailListQuery, EmailPage,
+    ErrorCode, Folder, RemoveAccountRequest, SettingsPatch, SettingsSnapshot,
+    UpdateConnectionRequest, UpdateProfileRequest, VerifyAccountConnection,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
@@ -159,6 +160,30 @@ pub(crate) async fn accounts_create(
     }))
 }
 
+/// Removes this account's local data after the revision and sending checks.
+#[tauri::command]
+pub(crate) async fn accounts_remove(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<AccountRemoval>, ()> {
+    let args = authorize(&window, "accounts_remove")
+        .and_then(|_| parse::<WriteArgs<RemoveAccountRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            let result = state
+                .run(move |core| core.remove_account(args.request))
+                .await;
+            if let Ok(removed) = &result {
+                protocol.revoke_account(&removed.account_id);
+            }
+            result
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 /// Replaces the connection; the account's sync restarts immediately.
 #[tauri::command]
 pub(crate) async fn accounts_update_connection(
@@ -181,6 +206,68 @@ pub(crate) async fn accounts_update_connection(
         }
         Err(error) => Err(error),
     }))
+}
+
+/// Authentication-only checks for the selected saved connection.
+#[tauri::command]
+pub(crate) async fn accounts_verify_connection(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<AccountConnectionVerification>, ()> {
+    let args = authorize(&window, "accounts_verify_connection")
+        .and_then(|_| parse::<WriteArgs<VerifyAccountConnection>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.verify_account_connection(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_cancel_verification(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "accounts_cancel_verification")
+        .and_then(|_| parse::<WriteArgs<CancelConnectionVerification>>(request.body()));
+    Ok(respond(args.and_then(|args| {
+        state
+            .core()?
+            .cancel_account_connection_verification(args.request)
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderHelpArgs {
+    provider_id: String,
+}
+
+fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
+    match provider_id {
+        "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
+        _ => Err(AppError::validation("providerId")),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_open_provider_help(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    use tauri_plugin_opener::OpenerExt;
+    let args = authorize(&window, "accounts_open_provider_help")
+        .and_then(|_| parse::<ProviderHelpArgs>(request.body()));
+    Ok(respond(args.and_then(|args| {
+        window
+            .opener()
+            .open_url(provider_help_url(&args.provider_id)?, None::<&str>)
+            .map_err(|_| AppError::new(ErrorCode::Internal))
+    })))
 }
 
 /// Renames or recolors an account without touching its connection or sync.
@@ -761,6 +848,30 @@ mod tests {
         }
         assert!(parse::<EmptyArgs>(&InvokeBody::Json(json!({"actor":"admin"}))).is_err());
         assert!(parse::<EmptyArgs>(&InvokeBody::Raw(vec![1, 2])).is_err());
+    }
+
+    #[test]
+    fn verification_and_help_reject_arbitrary_targets_and_secret_arguments() {
+        let args = json!({"request": {"accountId":"account", "expectedRevision":1, "verificationId":"attempt"}});
+        assert!(parse::<WriteArgs<VerifyAccountConnection>>(&InvokeBody::Json(args)).is_ok());
+        let forged = json!({"request": {"accountId":"account", "expectedRevision":1, "verificationId":"attempt", "password":"secret", "host":"attacker"}});
+        assert!(parse::<WriteArgs<VerifyAccountConnection>>(&InvokeBody::Json(forged)).is_err());
+        assert_eq!(
+            provider_help_url("qq").unwrap(),
+            "https://help.mail.qq.com/detail/0/1087"
+        );
+        for provider in ["https://attacker.invalid", "foxmail", "qq/../", ""] {
+            assert_eq!(
+                provider_help_url(provider).unwrap_err(),
+                AppError::validation("providerId")
+            );
+        }
+        assert!(
+            parse::<ProviderHelpArgs>(&InvokeBody::Json(
+                json!({"providerId":"qq", "url":"https://attacker.invalid"})
+            ))
+            .is_err()
+        );
     }
 
     #[test]

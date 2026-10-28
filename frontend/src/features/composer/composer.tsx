@@ -135,6 +135,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
 
   // First press of the send button: check, save, and hand back the saved revision.
   const prepare = async (): Promise<number | null> => {
+    if (!editor.isAvailable()) return null
     setError(null)
     const latest = editor.latest()
     if (!latest) return null
@@ -157,6 +158,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       return null
     }
     const { ok } = await editor.flush()
+    if (!editor.isAvailable()) return null
     if (!ok) {
       setError({ key: 'composer:validation.unsaved' })
       return null
@@ -166,11 +168,14 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
 
   // Second press: queue at the revision that was saved when the button asked.
   const send = async (expectedRevision: number) => {
+    if (!editor.isAvailable()) return
     setBusy(true)
     try {
       await client.queueSend({ draftId, expectedRevision, clientMutationId: crypto.randomUUID() })
+      if (!editor.isAvailable()) return
       onSent()
     } catch (cause) {
+      if (!editor.isAvailable()) return
       const code = clientFailureCode(cause)
       if (code === 'conflict') {
         toast.info(t('composer:notice.conflictBeforeSend'))
@@ -180,20 +185,23 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         setError({ key: 'composer:validation.alreadyQueued' })
       } else setError({ cause })
     } finally {
-      setBusy(false)
+      if (editor.isAvailable()) setBusy(false)
     }
   }
 
   const discard = async () => {
+    if (!editor.isAvailable()) return
     setConfirmDiscard(false)
     setBusy(true)
     try {
       await editor.remove()
+      if (!editor.isAvailable()) return
       onDiscarded()
     } catch (cause) {
+      if (!editor.isAvailable()) return
       setError({ cause })
     } finally {
-      setBusy(false)
+      if (editor.isAvailable()) setBusy(false)
     }
   }
 

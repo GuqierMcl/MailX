@@ -12,6 +12,8 @@
 
 ### Feature
 
+- 账号管理支持移除本机账号，清理本地邮件、草稿和发件记录；发送中保护、凭证清理重试和写信窗口联动避免误发或恢复已移除账号。
+- QQ 邮箱 / Foxmail 添加入口：支持 @qq.com、@vip.qq.com 和 @foxmail.com，显示 QQ 邮箱图标，预填收发服务器并提供授权码指引；账号设置支持分别验证收信与发信登录。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 本地优先的桌面邮件工作台预览：经账号路由登录 IMAP，同步文件夹与邮件头，提供统一收件箱、本地头部搜索与分页。
 - 按需下载并缓存邮件正文，在隔离的阅读视图中显示；支持已读 / 星标写回、附件保存与新邮件通知。
 - 富文本写信（Tiptap、本地草稿、回复与转发、独立写信窗口），经发送队列通过 SMTP 发信。
@@ -20,6 +22,7 @@
 
 ### Optimization
 
+- 账号管理的添加按钮移至列表右上角并使用强调色；已选择服务商的账号默认使用服务商图标，可在每个账号的资料中单独关闭。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 添加账号和修改连接时，IMAP / SMTP 登录用户名留空会使用邮箱地址。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))
 - 添加账号的服务商选择改为 Logo、名称与短描述的单行列表，支持按名称、域名和关键词搜索。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))
 - 设置窗口默认打开第一项“通用”，便于调整语言。([#29](https://github.com/GuqierMcl/MailX/pull/29))

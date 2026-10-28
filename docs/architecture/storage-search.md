@@ -24,6 +24,8 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 
 账号相关 ID 使用 UUID 字符串，时间当前存 UTC RFC 3339 文本。`accounts`、`mail_connections`、`auth_profiles`、`network_routes` 的关系与字段见[账号配置](account-configuration.md)；`create_requests` 记录不含秘密的创建幂等信息，`credential_journal` 记录可恢复的配置快照与秘密引用，`schema_migrations` 记录版本及 checksum。当前没有旧草案中的账号级单一 `auth_kind` 或混合接收/发送配置字段。
 
+`accounts.use_provider_icon`（v12）以 0 / 1 保存是否使用可用服务商图标的资料偏好，默认 1。已有账号升级后和缺少此字段的旧账号快照 / journal 均默认启用。更新此偏好不推进连接 `revision`、不修改凭证或重启同步；连接更新与 journal 恢复不覆盖已保存的偏好。
+
 ### 已建邮件表
 
 | 表 | 实际字段与结构 | 关键约束 |
@@ -103,7 +105,9 @@ FTS5 trigram 对主题、地址显示文本和已缓存纯文本的检索仍是�
 
 ## 6. 迁移与恢复
 
-当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按序以逐步事务执行，当前登记至 v4，可从已有 v1 / v2 / v3 顺序升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与写入前还恢复凭证更新 journal，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
+当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按序以逐步事务执行，当前登记至 v12，可从已有版本顺序升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与账号写入前还恢复凭证更新 journal 和移除后的凭证清理意图，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
+
+账号移除使用一个事务核对连接 revision 与无 `sending` 项，再清除配置及其全部来源的缓存、草稿和发件记录。v11 的 `account_removals`、`removed_create_requests` 与 `secret_gc` 保存可重试收据、禁止创建请求重放的墓碑和不含秘密的清理引用；凭证删除失败不恢复已移除账号。共享 blob 只删除数据库引用，下次启动 GC 再回收孤立文件，不在运行中执行全局 GC；已保存到用户选择路径的附件不受账号移除影响。
 
 [数据库迁移与启动方案](database-migrations.md)记录本轮已实现的迁移核心和启动准入；升级前备份、恢复入口和完整故障矩阵仍是后续要求。
 

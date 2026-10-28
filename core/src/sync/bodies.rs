@@ -159,6 +159,24 @@ impl BodyManager {
         }
         failure.map_or(Ok(()), Err)
     }
+
+    /// Caller holds the service lock after deletion. No new flight can be
+    /// registered, and already queued completions observe the missing account.
+    pub(crate) fn retire(&self, account_id: &str) {
+        let mut flights = self
+            .shared
+            .flights
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        flights.messages.retain(|_, flight| {
+            if flight.token.identity.account_id != account_id {
+                return true;
+            }
+            flight.abort.abort();
+            flight.result.send_replace(Some(Err(stale())));
+            false
+        });
+    }
 }
 
 impl BodyManager {

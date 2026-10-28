@@ -7,6 +7,9 @@
 //! user asked otherwise, and which sound goes with it.
 mod sounds;
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
 use mailx_core::{
     NewMail, NotificationSettings, NotificationSound, OutboxChanged, OutboxState, SupportedLocale,
 };
@@ -30,6 +33,52 @@ const SYSTEM_SOUND: &str = "NSUserNotificationDefaultSoundName";
 const SYSTEM_SOUND: &str = "Default";
 #[cfg(not(any(target_os = "macos", windows)))]
 const SYSTEM_SOUND: &str = "message-new-email";
+
+/// A delayed core event or notification lookup may outlive account removal.
+/// The final delivery shares this lock with retirement, so it cannot display
+/// a new notification after the account-removed event reaches the host.
+#[derive(Default)]
+pub(crate) struct AccountNotifications {
+    removed: Mutex<HashSet<String>>,
+}
+
+impl AccountNotifications {
+    pub(crate) fn retire(&self, account_id: &str) {
+        self.removed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(account_id.to_owned());
+    }
+
+    fn deliver<T>(
+        &self,
+        account_id: &str,
+        prepare: impl FnOnce() -> Option<T>,
+        show: impl FnOnce(T),
+    ) -> bool {
+        if !self
+            .removed
+            .lock()
+            .is_ok_and(|removed| !removed.contains(account_id))
+        {
+            return false;
+        }
+        // Settings and window lookups can block. Do not hold the retirement
+        // lock while waiting for them; check again before the native side effect.
+        let Some(prepared) = prepare() else {
+            return false;
+        };
+        let Ok(removed) = self.removed.lock() else {
+            return false;
+        };
+        if removed.contains(account_id) {
+            return false;
+        }
+        show(prepared);
+        drop(removed);
+        true
+    }
+}
 
 /// Everything needed to show one notification, decided without side effects.
 #[derive(Debug, PartialEq, Eq)]
@@ -171,16 +220,19 @@ fn window_in_front<R: Runtime>(app: &AppHandle<R>) -> bool {
 pub(crate) fn new_mail<R: Runtime>(
     app: &AppHandle<R>,
     mail: NewMail,
+    accounts: Arc<AccountNotifications>,
     settings: impl FnOnce() -> Option<(NotificationSettings, SupportedLocale)> + Send + 'static,
 ) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some((settings, locale)) = settings() else {
-            return;
-        };
-        if let Some(shown) = plan_localized(&mail, &settings, window_in_front(&app), locale) {
-            show(&app, shown);
-        }
+        accounts.deliver(
+            &mail.account_id,
+            || {
+                let (settings, locale) = settings()?;
+                plan_localized(&mail, &settings, window_in_front(&app), locale)
+            },
+            |shown| show(&app, shown),
+        );
     });
 }
 
@@ -190,6 +242,7 @@ pub(crate) fn new_mail<R: Runtime>(
 pub(crate) fn send_result<R: Runtime>(
     app: &AppHandle<R>,
     change: OutboxChanged,
+    accounts: Arc<AccountNotifications>,
     lookup: impl FnOnce() -> Option<(NotificationSettings, Option<String>, SupportedLocale)>
     + Send
     + 'static,
@@ -199,18 +252,20 @@ pub(crate) fn send_result<R: Runtime>(
     }
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some((settings, subject, locale)) = lookup() else {
-            return;
-        };
-        if let Some(shown) = plan_send_result_localized(
-            &change,
-            subject.as_deref(),
-            &settings,
-            window_in_front(&app),
-            locale,
-        ) {
-            show(&app, shown);
-        }
+        accounts.deliver(
+            &change.account_id,
+            || {
+                let (settings, subject, locale) = lookup()?;
+                plan_send_result_localized(
+                    &change,
+                    subject.as_deref(),
+                    &settings,
+                    window_in_front(&app),
+                    locale,
+                )
+            },
+            |shown| show(&app, shown),
+        );
     });
 }
 
@@ -309,6 +364,54 @@ fn plan_send_result(
 mod tests {
     use super::*;
     use mailx_core::{MailAddress, NewMailMessage};
+
+    #[test]
+    fn removed_accounts_reject_late_notifications_and_in_flight_settings_lookups() {
+        use std::sync::{
+            Barrier,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let accounts = Arc::new(AccountNotifications::default());
+        let looked_up = Arc::new(Barrier::new(2));
+        let resume = Arc::new(Barrier::new(2));
+        let shown = Arc::new(AtomicUsize::new(0));
+        let worker = {
+            let accounts = accounts.clone();
+            let looked_up = looked_up.clone();
+            let resume = resume.clone();
+            let shown = shown.clone();
+            std::thread::spawn(move || {
+                accounts.deliver(
+                    "removed",
+                    || {
+                        looked_up.wait();
+                        resume.wait();
+                        Some(())
+                    },
+                    |_| {
+                        shown.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
+            })
+        };
+        looked_up.wait();
+        accounts.retire("removed");
+        resume.wait();
+        assert!(!worker.join().unwrap());
+        assert!(!accounts.deliver::<()>(
+            "removed",
+            || panic!("late events must not look up settings"),
+            |_| panic!("removed account must stay quiet")
+        ));
+        assert!(accounts.deliver(
+            "other",
+            || Some(()),
+            |_| {
+                shown.fetch_add(1, Ordering::SeqCst);
+            }
+        ));
+        assert_eq!(shown.load(Ordering::SeqCst), 1);
+    }
 
     fn mail(count: u32, ids: &[&str]) -> NewMail {
         NewMail {

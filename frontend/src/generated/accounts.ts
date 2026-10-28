@@ -51,7 +51,11 @@ color: string | null,
  * The name recipients see in `From`; `null` or empty sends with the bare
  * address. Unlike `displayName` it is never shown only to the user.
  */
-senderName: string | null, };
+senderName: string | null,
+/**
+ * Prefer known provider artwork when available; omitted defaults to true.
+ */
+useProviderIcon: boolean, };
 
 export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
@@ -63,13 +67,29 @@ color: string | null,
 /**
  * The name recipients see in `From`; omitted, `null` or empty for none.
  */
-senderName: string | null, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+senderName: string | null,
+/**
+ * Prefer known provider artwork when available; omitted defaults to true.
+ */
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
 export type UpdateConnectionRequest = { accountId: string, expectedRevision: number, connection: ConnectionInput, };
 
 export type UpdateProfileRequest = { accountId: string, profile: AccountProfileInput, };
+
+export type RemoveAccountRequest = { accountId: string, expectedRevision: number, };
+
+export type AccountRemoval = { accountId: string,
+/**
+ * Includes every deleted local draft so hosts can retire its editor.
+ */
+draftIds: Array<string>,
+/**
+ * Local removal committed; host-owned credentials will be retried later.
+ */
+credentialsPending: boolean, };
 
 export type CredentialTrust = "trusted" | "needsConfirmation";
 
@@ -100,11 +120,33 @@ color: string | null,
 /**
  * The name recipients see in `From`, or `null` to send the bare address.
  */
-senderName: string | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
+senderName: string | null,
+/**
+ * Appearance only. Defaults to true for credential journals from older builds.
+ */
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */
 defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, createdAt: string, updatedAt: string, };
+
+export type VerifyAccountConnection = { accountId: string, expectedRevision: number,
+/**
+ * Unique per attempt, so closing an old view cannot cancel a newer attempt.
+ */
+verificationId: string, };
+
+export type CancelConnectionVerification = { accountId: string, verificationId: string, };
+
+export type ConnectionVerificationStatus = "verified" | "failed";
+
+export type ConnectionVerificationStage = "configuration" | "connection" | "tls" | "authentication" | "mailbox" | "complete";
+
+export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMissing" | "secretStore" | "network" | "proxy" | "tls" | "timeout" | "authentication" | "authUnavailable" | "protocol" | "cancelled" | "unsupported" | "configuration";
+
+export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
+
+export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, };
 
 export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
 

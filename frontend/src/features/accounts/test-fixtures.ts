@@ -9,7 +9,7 @@ import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
-    displayName: '工作邮箱', color: null, senderName: null, emailAddress: 'work@example.com', providerId: null,
+    displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, emailAddress: 'work@example.com', providerId: null,
     mailboxSourceId: 'source-a', imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'receive@example.com' },
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'send@example.com' },
     authentication: { mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
@@ -39,9 +39,17 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     retryStartup: vi.fn<MailxClient['retryStartup']>().mockResolvedValue(startup),
     listAccounts: vi.fn<MailxClient['listAccounts']>().mockResolvedValue(rows),
     getAccount: vi.fn<MailxClient['getAccount']>().mockImplementation(async (id) => rows.find((row) => row.id === id) ?? exampleAccount()),
-    createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
+    createAccount: vi.fn<MailxClient['createAccount']>().mockImplementation(async ({ config }) => exampleAccount({ useProviderIcon: config.useProviderIcon ?? true })),
     updateConnection: vi.fn<MailxClient['updateConnection']>().mockImplementation(async ({ accountId, expectedRevision }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), revision: expectedRevision + 1 })),
-    updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile })),
+    updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile, useProviderIcon: profile.useProviderIcon ?? true })),
+    removeAccount: vi.fn<MailxClient['removeAccount']>().mockImplementation(async ({ accountId }) => ({ accountId, draftIds: [], credentialsPending: false })),
+    onAccountRemoved: vi.fn<MailxClient['onAccountRemoved']>().mockReturnValue(() => undefined),
+    verifyAccountConnection: vi.fn<MailxClient['verifyAccountConnection']>().mockImplementation(async (accountId, revision) => ({
+      accountId, revision,
+      imap: { status: 'verified', stage: 'complete', code: null },
+      smtp: { status: 'verified', stage: 'complete', code: null },
+    })),
+    openProviderHelp: vi.fn<MailxClient['openProviderHelp']>().mockResolvedValue(undefined),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),
     setFlag: vi.fn<MailxClient['setFlag']>().mockResolvedValue('queued'),

@@ -38,6 +38,7 @@ import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
 import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
+import { clearRemovedAccount } from './account-removal'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -67,6 +68,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
+  const removedAccounts = useRef(new Set<string>())
   // The message the reader shows. It is its own state, not "whichever listed message
   // matches": changing mailbox, filter or search, or the list refreshing, never
   // closes it. Only opening another message, closing it, or it ceasing to exist does.
@@ -77,7 +79,13 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   const tree = useQuery({
     queryKey: mailKeys.tree(),
-    queryFn: () => loadMailTree(client),
+    queryFn: async () => {
+      const tree = await loadMailTree(client)
+      return {
+        accounts: tree.accounts.filter((account) => !removedAccounts.current.has(account.id)),
+        folders: tree.folders.filter((folder) => !removedAccounts.current.has(folder.accountId)),
+      }
+    },
   })
   const settingsQuery = useSettings(client)
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
@@ -129,12 +137,26 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [queryClient])
   useEffect(() => () => clearTimeout(treeReloadTimer.current), [])
 
+  useEffect(() => client.onAccountRemoved((report) => {
+    removedAccounts.current.add(report.accountId)
+    clearTimeout(treeReloadTimer.current)
+    const nextSync = { ...syncSnapshots.current }
+    delete nextSync[report.accountId]
+    syncSnapshots.current = nextSync
+    setSyncStates(nextSync)
+    setOpened((opened) => opened?.accountId === report.accountId ? null : opened)
+    setMailbox((current) => current.kind === 'folder' && current.folder.accountId === report.accountId
+      ? { kind: 'unified', role: 'inbox' } : current)
+    setDraftChoice((id) => id && report.draftIds.includes(id) ? null : id)
+    clearRemovedAccount(queryClient, report)
+  }), [client, queryClient])
+
   const accountIdentity = JSON.stringify(accounts.map(({ id, mailboxSourceId }) => [id, mailboxSourceId]).sort())
   useEffect(() => {
     let active = true
     const currentAccounts = new Map<string, string>(JSON.parse(accountIdentity))
     const apply = (state: AccountSyncState) => {
-      if (!active) return
+      if (!active || removedAccounts.current.has(state.accountId)) return
       const source = currentAccounts.get(state.accountId)
       const previous = syncSnapshots.current[state.accountId]
       if (!source || !acceptsSyncState({ mailboxSourceId: source }, previous, state)) return

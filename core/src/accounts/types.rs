@@ -131,6 +131,13 @@ pub struct AccountProfileInput {
     /// address. Unlike `displayName` it is never shown only to the user.
     #[serde(default)]
     pub sender_name: Option<String>,
+    /// Prefer known provider artwork when available; omitted defaults to true.
+    #[serde(default = "default_use_provider_icon")]
+    pub use_provider_icon: bool,
+}
+
+fn default_use_provider_icon() -> bool {
+    true
 }
 
 /// How MailX reaches the mailbox: identity, servers, credentials and route.
@@ -156,6 +163,9 @@ pub struct AccountConfigInput {
     /// The name recipients see in `From`; omitted, `null` or empty for none.
     #[serde(default)]
     pub sender_name: Option<String>,
+    /// Prefer known provider artwork when available; omitted defaults to true.
+    #[serde(default = "default_use_provider_icon")]
+    pub use_provider_icon: bool,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub imap: ConnectionConfig,
@@ -171,6 +181,7 @@ impl AccountConfigInput {
                 display_name: self.display_name,
                 color: self.color,
                 sender_name: self.sender_name,
+                use_provider_icon: self.use_provider_icon,
             },
             ConnectionInput {
                 email_address: self.email_address,
@@ -199,6 +210,25 @@ pub struct UpdateConnectionRequest {
     #[ts(type = "number")]
     pub expected_revision: u32,
     pub connection: ConnectionInput,
+}
+
+/// Removes only the account's local data; never deletes mail on its server.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoveAccountRequest {
+    pub account_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRemoval {
+    pub account_id: String,
+    /// Includes every deleted local draft so hosts can retire its editor.
+    pub draft_ids: Vec<String>,
+    /// Local removal committed; host-owned credentials will be retried later.
+    pub credentials_pending: bool,
 }
 
 /// Replaces the profile. Leaves `revision` and any running sync untouched;
@@ -285,6 +315,9 @@ pub struct Account {
     /// The name recipients see in `From`, or `null` to send the bare address.
     #[serde(default)]
     pub sender_name: Option<String>,
+    /// Appearance only. Defaults to true for credential journals from older builds.
+    #[serde(default = "default_use_provider_icon")]
+    pub use_provider_icon: bool,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub mailbox_source_id: String,

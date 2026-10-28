@@ -1,6 +1,7 @@
 import { t } from '@/i18n'
 import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
+import type { MailProvider } from './providers'
 
 export type ConnectionDraft = Omit<ConnectionConfig, 'port'> & { port: string }
 export type SecretDraft = { replace: boolean; value: string }
@@ -25,13 +26,13 @@ export type AccountDraft = {
   confirmImageProxyDns: boolean
 }
 
-export function initialDraft(account: Account | null): AccountDraft {
+export function initialDraft(account: Account | null, provider?: MailProvider): AccountDraft {
   const proxy = account?.route.kind === 'custom' ? account.route : null
   const secret = (configured?: boolean): SecretDraft => ({ replace: !configured, value: '' })
   return {
     emailAddress: account?.emailAddress ?? '',
-    imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', port: '993', tls: 'implicit', username: '' },
-    smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', port: '465', tls: 'implicit', username: '' },
+    imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
+    smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
     mode: account?.authentication.mode ?? 'shared',
     sharedPassword: secret(account?.authentication.imap.passwordConfigured),
     imapPassword: secret(account?.authentication.imap.passwordConfigured),
@@ -102,9 +103,12 @@ function secret(value: SecretDraft, field: string): SecretUpdate {
 }
 
 /** Validates the draft into a connection; throws a field error for the first problem. */
-export function draftToConnection(draft: AccountDraft, account: Account | null): ConnectionInput {
+export function draftToConnection(draft: AccountDraft, account: Account | null, provider?: MailProvider): ConnectionInput {
   const emailAddress = draft.emailAddress.trim()
   if (!/^[^\s@]+@[^\s@]+$/.test(emailAddress)) invalid('emailAddress', t('accounts:invalidEmail'))
+  if (!account && provider?.preset && !provider.preset.domains.includes(emailAddress.split('@')[1].toLowerCase())) {
+    invalid('emailAddress', t('accounts:qqEmailRequired'))
+  }
   const imap = connection(draft.imap, 'imap', emailAddress)
   const smtp = connection(draft.smtp, 'smtp', emailAddress)
   const authentication: ConnectionInput['authentication'] = draft.mode === 'shared'
@@ -120,5 +124,5 @@ export function draftToConnection(draft: AccountDraft, account: Account | null):
       authentication: draft.proxyAuth ? { username: draft.proxyUsername.trim(), password: secret(draft.proxyPassword, 'proxyPassword') } : null,
     }
   }
-  return { emailAddress, providerId: account?.providerId ?? null, imap, smtp, authentication, route }
+  return { emailAddress, providerId: account ? account.providerId : provider?.id ?? null, imap, smtp, authentication, route }
 }

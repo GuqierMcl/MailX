@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use mailx_core::{
-    AppError, CreateDraftFromRequest, CreateDraftRequest, Draft, DraftChanged, DraftSummary,
-    ErrorCode, OutboxChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
+    AccountRemoval, AppError, CreateDraftFromRequest, CreateDraftRequest, Draft, DraftChanged,
+    DraftSummary, ErrorCode, OutboxChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
     UnknownResolution, UpdateDraftRequest,
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,9 @@ pub(crate) const OUTBOX_EVENT: &str = "mailx://outbox";
 /// Pushed to the main window and the affected composer when the queue locks,
 /// releases or deletes a draft.
 pub(crate) const DRAFTS_EVENT: &str = "mailx://drafts";
+/// Every account picker must forget a removed account, including composers
+/// whose current draft belongs to a different account.
+pub(crate) const ACCOUNT_REMOVED_EVENT: &str = "mailx://account-removed";
 /// Pushed to every composer when the main window is closing: flush the draft,
 /// then call `composer_close`.
 const APP_CLOSING_EVENT: &str = "mailx://app-closing";
@@ -118,6 +121,25 @@ pub(crate) fn emit_outbox(app: &AppHandle, change: &OutboxChanged) {
 
 pub(crate) fn emit_draft(app: &AppHandle, change: &DraftChanged) {
     emit_to_labels(app, DRAFTS_EVENT, Some(&change.draft_id), change);
+}
+
+fn account_event_target(label: &str, url: &tauri::Url) -> bool {
+    WindowKind::parse(label).is_some() && window_access::url_allowed(url)
+}
+
+pub(crate) fn emit_account_removed(app: &AppHandle, removed: &AccountRemoval) {
+    for (label, window) in app.webview_windows() {
+        if window
+            .url()
+            .is_ok_and(|url| account_event_target(&label, &url))
+        {
+            let _ = app.emit_to(
+                EventTarget::webview_window(label),
+                ACCOUNT_REMOVED_EVENT,
+                removed.clone(),
+            );
+        }
+    }
 }
 
 // --------------------------------------------------------------- commands
@@ -676,6 +698,19 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tauri::ipc::InvokeBody;
+
+    #[test]
+    fn account_removal_targets_only_trusted_main_and_composers() {
+        let app = tauri::Url::parse("tauri://localhost/index.html").unwrap();
+        let external = tauri::Url::parse("https://mail.example.test").unwrap();
+        let composer = composer_label(&uuid::Uuid::new_v4());
+        for label in [MAIN_WINDOW, composer.as_str()] {
+            assert!(account_event_target(label, &app));
+            assert!(!account_event_target(label, &external));
+        }
+        assert!(!account_event_target("composer-invalid", &app));
+        assert!(!account_event_target("body", &app));
+    }
 
     #[test]
     fn events_go_to_main_and_the_affected_composer_only() {

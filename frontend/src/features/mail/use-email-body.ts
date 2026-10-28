@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Account, AccountSyncState, EmailDetail, EmailSummary } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -21,7 +21,9 @@ export type OpenedEmail = Pick<EmailSummary, 'id' | 'accountId'>
 export function useEmailBody(client: MailxClient, opened: OpenedEmail | null,
   accounts: Account[], states: Record<string, AccountSyncState>) {
   const queryClient = useQueryClient()
-  const identities = new Map(accounts.map((account) => [account.id, bodyIdentity(account, states[account.id])]))
+  const [removedAccounts, setRemovedAccounts] = useState(() => new Set<string>())
+  const identities = new Map(accounts.filter((account) => !removedAccounts.has(account.id))
+    .map((account) => [account.id, bodyIdentity(account, states[account.id])]))
   const identity = opened ? identities.get(opened.accountId) ?? '' : ''
   const id = opened?.id ?? ''
   const key = useMemo(() => [...mailKeys.email(id), identity] as const, [id, identity])
@@ -30,6 +32,12 @@ export function useEmailBody(client: MailxClient, opened: OpenedEmail | null,
   const current = useRef(identities)
   useLayoutEffect(() => { current.current = identities })
   useEffect(() => () => { current.current = new Map() }, [])
+  useEffect(() => client.onAccountRemoved(({ accountId }) => {
+    // An in-flight fetch can finish before the tree update renders. Revoke its
+    // authority synchronously so it cannot repopulate a removed account's cache.
+    current.current.delete(accountId)
+    setRemovedAccounts((previous) => new Set(previous).add(accountId))
+  }), [client])
 
   const detail = useQuery({
     queryKey: key,
