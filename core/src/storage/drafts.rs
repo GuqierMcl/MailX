@@ -65,6 +65,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
             created_at: created,
             updated_at: updated,
             revision,
+            attachments: Vec::new(),
         })
     })())
 }
@@ -143,19 +144,21 @@ impl Storage {
             )
             .optional()?;
         found
-            .map(|(draft, canonical)| Ok((draft?, canonical)))
+            .map(|(draft, canonical)| Ok((self.with_attachments(draft?)?, canonical)))
             .transpose()
     }
 
     pub(crate) fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
-        self.db
+        let draft = self
+            .db
             .query_row(
                 &format!("SELECT {COLUMNS} FROM drafts WHERE id = ?1"),
                 [id],
                 parse,
             )
             .optional()?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))??;
+        self.with_attachments(draft)
     }
 
     pub(crate) fn list_drafts(
@@ -170,6 +173,7 @@ impl Storage {
             .query_map([account_id], parse)?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
+            .map(|draft| draft.and_then(|draft| self.with_attachments(draft)))
             .filter(|draft| !matches!(draft, Ok(draft) if draft.is_blank()))
             .map(|draft| {
                 let draft = draft?;
@@ -195,7 +199,7 @@ impl Storage {
             .query_map([], parse)?
             .collect::<Result<Vec<_>, _>>()?;
         for draft in drafts {
-            let draft = draft?;
+            let draft = self.with_attachments(draft?)?;
             if draft.is_blank() && !self.draft_locked(&draft.id)? {
                 self.db
                     .execute("DELETE FROM drafts WHERE id = ?1", [&draft.id])?;

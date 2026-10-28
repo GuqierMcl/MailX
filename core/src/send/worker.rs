@@ -21,7 +21,7 @@ use crate::accounts::{AccountService, Next};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
 use crate::smtp::{self, DataStarted, SmtpOutcome, Timeouts, TlsSource, plan_failure};
-use crate::storage::outbox::Changed;
+use crate::storage::outbox::{Changed, ClaimedJob};
 
 /// What tests replace: the clock, the SMTP time budgets and the trust store.
 #[derive(Clone)]
@@ -222,20 +222,25 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                     Ok(plan) if !plan.sender_address.eq_ignore_ascii_case(&job.envelope.from) => {
                         Err(OutboxError::reason("accountChanged"))
                     }
-                    Ok(plan) => {
-                        let hook = data_started(&shared, &service, item_id.clone());
-                        let outcome = smtp::send_with_tls(
-                            &plan.route,
-                            &plan.login,
-                            &job.envelope,
-                            &job.mime,
-                            &shared.config.timeouts,
-                            &shared.config.tls,
-                            hook,
-                        )
-                        .await;
-                        Ok(outcome)
-                    }
+                    Ok(plan) => match read_snapshot(&job).await {
+                        // The frozen bytes are gone or damaged: fail before any
+                        // data goes out, and never rebuild them from the draft.
+                        None => Err(OutboxError::reason("snapshotMissing")),
+                        Some(mime) => {
+                            let hook = data_started(&shared, &service, item_id.clone());
+                            let outcome = smtp::send_with_tls(
+                                &plan.route,
+                                &plan.login,
+                                &job.envelope,
+                                &mime,
+                                &shared.config.timeouts,
+                                &shared.config.tls,
+                                hook,
+                            )
+                            .await;
+                            Ok(outcome)
+                        }
+                    },
                 };
                 let first_queued =
                     parse_stamp(&job.item.first_queued_at).unwrap_or_else(|| clock.now());
@@ -297,6 +302,16 @@ async fn record(
     if let Ok(Some(changed)) = result {
         shared.announce(vec![changed]);
     }
+}
+
+/// Reads the item's snapshot from the blob store, hash and size verified.
+async fn read_snapshot(job: &ClaimedJob) -> Option<Vec<u8>> {
+    let snapshot = job.snapshot.clone()?;
+    let blobs = job.blobs.clone();
+    tokio::task::spawn_blocking(move || blobs.read(&snapshot).ok())
+        .await
+        .ok()
+        .flatten()
 }
 
 #[cfg(test)]

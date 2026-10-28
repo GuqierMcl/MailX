@@ -9,10 +9,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 
 use crate::accounts::AccountService;
+use crate::accounts::outbox::SendPlan;
 use crate::accounts::types::{
     Account, AccountRemoval, CreateAccountRequest, RemoveAccountRequest, UpdateConnectionRequest,
     UpdateProfileRequest,
 };
+use crate::drafts::attachments::{AddAttachmentRequest, AttachmentPolicy, RemoveAttachmentRequest};
 use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
 };
@@ -385,6 +387,27 @@ impl MailxCore {
         Ok(draft)
     }
 
+    /// Attaches `bytes` (read by the host) to a draft as `request.file_name`.
+    pub fn add_attachment(
+        &self,
+        request: AddAttachmentRequest,
+        bytes: &[u8],
+    ) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.add_attachment(request, bytes)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok(draft)
+    }
+
+    pub fn remove_attachment(&self, request: RemoveAttachmentRequest) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.remove_attachment(request)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok(draft)
+    }
+
+    pub fn attachment_policy(&self, account_id: &str) -> Result<AttachmentPolicy, AppError> {
+        self.accounts()?.attachment_policy(account_id)
+    }
+
     pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
         let draft = self.accounts()?.get_draft(id)?;
         self.accounts()?.delete_draft(id)?;
@@ -406,9 +429,22 @@ impl MailxCore {
         if caller != Caller::Composer {
             return Err(AppError::new(ErrorCode::Forbidden));
         }
-        let (item, locked) =
-            self.accounts()?
-                .queue_send(&request, undo_send_seconds, self.outbox.now())?;
+        // The store lock is held to read the draft and again to commit; reading
+        // attachment blobs and building the MIME happen in between, without it.
+        let plan = self.accounts()?.prepare_send(&request, undo_send_seconds)?;
+        let (item, locked) = match plan {
+            SendPlan::Replay(item) => (*item, None),
+            SendPlan::Build(build) => {
+                let frozen = build.freeze()?;
+                self.accounts()?.commit_send(
+                    &request,
+                    undo_send_seconds,
+                    &build,
+                    frozen,
+                    self.outbox.now(),
+                )?
+            }
+        };
         if let Some(locked) = locked {
             self.outbox.shared.announce(vec![Changed {
                 item: item.clone(),

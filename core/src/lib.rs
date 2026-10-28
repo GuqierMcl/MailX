@@ -31,6 +31,10 @@ pub use app::{
     ConnectionVerificationStatus, DraftConnectionVerification, FlagChange, MailxCore, MessageFlag,
     ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
+pub use drafts::attachments::{
+    AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary,
+    RemoveAttachmentRequest,
+};
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};

@@ -12,6 +12,7 @@
 //! addresses, so outcomes carry only the reply code plus a sanitized,
 //! length-limited text.
 
+pub(crate) mod attachment;
 #[cfg(test)]
 pub(crate) mod fake_server;
 pub(crate) mod message;

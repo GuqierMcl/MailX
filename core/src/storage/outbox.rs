@@ -6,7 +6,11 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params};
 
-use super::{Storage, decode, encode};
+use super::{
+    Storage,
+    bodies::{BlobStore, StoredBlob},
+    decode, encode,
+};
 use crate::{
     AppError, ErrorCode,
     send::clock::stamp,
@@ -34,7 +38,9 @@ pub(crate) struct NewOutbox<'a> {
     pub client_mutation_id: &'a str,
     pub canonical: &'a str,
     pub message_id: &'a str,
-    pub mime: &'a [u8],
+    pub snapshot: &'a StoredBlob,
+    /// What the snapshot was built from; the insert fails if the draft moved on.
+    pub frozen: Option<&'a FrozenDraft>,
     pub envelope: &'a SmtpEnvelope,
     pub subject: &'a str,
     pub recipients_preview: &'a [String],
@@ -42,10 +48,18 @@ pub(crate) struct NewOutbox<'a> {
     pub now: DateTime<Utc>,
 }
 
+/// The draft state a snapshot was built from (sending.md section 16.6).
+pub(crate) struct FrozenDraft {
+    pub revision: u32,
+    pub attachment_ids: Vec<String>,
+}
+
 /// What the worker needs to attempt one item.
 pub(crate) struct ClaimedJob {
     pub item: OutboxItem,
-    pub mime: Vec<u8>,
+    /// The frozen MIME bytes; `None` when the row has no snapshot (released or lost).
+    pub snapshot: Option<StoredBlob>,
+    pub blobs: BlobStore,
     pub envelope: SmtpEnvelope,
 }
 
@@ -148,7 +162,7 @@ fn item_in(db: &rusqlite::Connection, id: &str) -> Result<OutboxItem, AppError> 
     .ok_or_else(|| AppError::new(ErrorCode::NotFound))?
 }
 
-fn live_for_draft(db: &rusqlite::Connection, draft_id: &str) -> Result<bool, AppError> {
+pub(super) fn live_for_draft(db: &rusqlite::Connection, draft_id: &str) -> Result<bool, AppError> {
     Ok(db.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM outbox WHERE draft_id = ?1 AND {LIVE})"),
         [draft_id],
@@ -165,7 +179,48 @@ fn unlocked(item: &OutboxItem) -> Option<DraftChanged> {
     })
 }
 
+/// Lets go of the snapshots of a draft's failed and canceled items: nothing
+/// resends them, and the next cleanup may free the blobs.
+fn release_snapshots(tx: &rusqlite::Connection, draft_id: &str, now: &str) -> Result<(), AppError> {
+    tx.execute(
+        "UPDATE outbox SET snapshot_hash = NULL, snapshot_size = NULL, snapshot_released_at = ?2
+         WHERE draft_id = ?1 AND state IN ('failed', 'canceled') AND snapshot_hash IS NOT NULL",
+        params![draft_id, now],
+    )?;
+    Ok(())
+}
+
 impl Storage {
+    /// Moves snapshots that predate migration 14 out of `outbox.mime` into the
+    /// blob store. Idempotent: the blob is written (and synced) before the row
+    /// is touched, so a crash leaves either the old row or the new one.
+    pub(crate) fn migrate_outbox_snapshots(&mut self) -> Result<(), AppError> {
+        loop {
+            let pending: Option<(String, Vec<u8>)> = self
+                .db
+                .query_row(
+                    "SELECT id, mime FROM outbox
+                     WHERE mime IS NOT NULL ORDER BY created_at, id LIMIT 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let Some((id, mime)) = pending else {
+                return Ok(());
+            };
+            let blob = self.blobs.put(&mime)?;
+            self.db.execute(
+                "UPDATE outbox SET snapshot_hash = ?2, snapshot_size = ?3, mime = NULL
+                 WHERE id = ?1",
+                params![
+                    id,
+                    blob.sha256,
+                    i64::try_from(blob.size).unwrap_or(i64::MAX)
+                ],
+            )?;
+        }
+    }
+
     pub(crate) fn draft_locked(&self, draft_id: &str) -> Result<bool, AppError> {
         live_for_draft(&self.db, draft_id)
     }
@@ -215,12 +270,34 @@ impl Storage {
         {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
+        if let (Some(draft_id), Some(frozen)) = (new.draft_id, new.frozen) {
+            let revision: Option<u32> = tx
+                .query_row(
+                    "SELECT revision FROM drafts WHERE id = ?1",
+                    [draft_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let ids = {
+                let mut statement = tx.prepare(
+                    "SELECT id FROM draft_attachments WHERE draft_id = ?1 ORDER BY rowid",
+                )?;
+                statement
+                    .query_map([draft_id], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            // The snapshot is stale: the orphan blob is left for the next cleanup.
+            if revision != Some(frozen.revision) || ids != frozen.attachment_ids {
+                return Err(AppError::new(ErrorCode::Conflict));
+            }
+        }
         let now = stamp(new.now);
         tx.execute(
             "INSERT INTO outbox (id, draft_id, account_id, client_mutation_id, queue_canonical,
-                message_id, mime, envelope, subject, recipients_preview, recipient_count, state,
-                not_before, attempts, first_queued_at, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', ?12, 0, ?13, ?13, ?13)",
+                message_id, snapshot_hash, snapshot_size, envelope, subject, recipients_preview,
+                recipient_count, state, not_before, attempts, first_queued_at, created_at,
+                updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?14, ?8, ?9, ?10, ?11, 'queued', ?12, 0, ?13, ?13, ?13)",
             params![
                 new.id,
                 new.draft_id,
@@ -228,15 +305,20 @@ impl Storage {
                 new.client_mutation_id,
                 new.canonical,
                 new.message_id,
-                new.mime,
+                new.snapshot.sha256,
                 encode(new.envelope)?,
                 new.subject,
                 encode(&new.recipients_preview)?,
                 new.envelope.recipients.len() as i64,
                 stamp(new.not_before),
                 now,
+                i64::try_from(new.snapshot.size).unwrap_or(i64::MAX),
             ],
         )?;
+        if let Some(draft_id) = new.draft_id {
+            // A re-queue supersedes this draft's earlier failed or canceled tries.
+            release_snapshots(&tx, draft_id, &now)?;
+        }
         let item = item_in(&tx, new.id)?;
         tx.commit()?;
         Ok(item)
@@ -348,10 +430,10 @@ impl Storage {
             if rows == 0 {
                 continue;
             }
-            let (mime, envelope): (Vec<u8>, String) = tx.query_row(
-                "SELECT mime, envelope FROM outbox WHERE id = ?1",
+            let (hash, size, envelope): (Option<String>, Option<i64>, String) = tx.query_row(
+                "SELECT snapshot_hash, snapshot_size, envelope FROM outbox WHERE id = ?1",
                 [&id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?;
             let item = item_in(&tx, &id)?;
             tx.commit()?;
@@ -362,7 +444,10 @@ impl Storage {
             return Ok((
                 Claim::Job(Box::new(ClaimedJob {
                     item,
-                    mime,
+                    snapshot: hash
+                        .zip(size.and_then(|size| u64::try_from(size).ok()))
+                        .map(|(sha256, size)| StoredBlob { sha256, size }),
+                    blobs: self.blobs.clone(),
                     envelope: decode(&envelope)?,
                 })),
                 Some(changed),
@@ -592,9 +677,11 @@ impl Storage {
         let stamp_now = stamp(now);
         tx.execute(
             "INSERT INTO outbox (id, draft_id, account_id, client_mutation_id, queue_canonical,
-                message_id, mime, envelope, subject, recipients_preview, recipient_count, state,
-                not_before, attempts, first_queued_at, created_at, updated_at)
-             SELECT ?2, draft_id, account_id, ?3, ?4, message_id, mime, envelope, subject,
+                message_id, snapshot_hash, snapshot_size, envelope, subject, recipients_preview,
+                recipient_count, state, not_before, attempts, first_queued_at, created_at,
+                updated_at)
+             SELECT ?2, draft_id, account_id, ?3, ?4, message_id, snapshot_hash, snapshot_size,
+                    envelope, subject,
                     recipients_preview, recipient_count, 'queued', ?5, 0, ?5, ?5, ?5
              FROM outbox WHERE id = ?1",
             params![id, new_id, mutation_id, canonical, stamp_now],

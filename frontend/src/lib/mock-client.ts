@@ -87,15 +87,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const found = options.resolveDraft(id)
     const draft: Draft = found ?? {
       id, accountId: accounts[0]?.id ?? '', kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '<p></p>', bodyText: '',
-      inReplyTo: null, references: null, createdAt: now, updatedAt: now, revision: 1,
+      inReplyTo: null, references: null, createdAt: now, updatedAt: now, revision: 1, attachments: [],
     }
     if (!accounts.some((row) => row.id === draft.accountId)) draft.accountId = accounts[0]?.id ?? ''
     drafts.set(id, draft)
     return draft
   }
-  function newDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt' | 'revision'>) {
+  function newDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt' | 'revision' | 'attachments'>) {
     const now = new Date().toISOString()
-    const created: Draft = { ...draft, id: crypto.randomUUID(), createdAt: now, updatedAt: now, revision: 1 }
+    const created: Draft = { ...draft, id: crypto.randomUUID(), createdAt: now, updatedAt: now, revision: 1, attachments: [] }
     drafts.set(created.id, created)
     announceDraft({ draftId: created.id, accountId: created.accountId, change: 'created' })
     return created

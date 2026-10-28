@@ -708,10 +708,13 @@ impl Storage {
             "UPDATE messages SET body_state = 'missing', body_failure = NULL WHERE body_state = 'fetching'",
             [],
         )?;
+        // Message bodies, draft attachments and the unreleased send snapshots.
         let referenced = {
-            let mut statement = self
-                .db
-                .prepare("SELECT DISTINCT raw_sha256 FROM message_bodies")?;
+            let mut statement = self.db.prepare(
+                "SELECT raw_sha256 FROM message_bodies
+                 UNION SELECT blob_hash FROM draft_attachments
+                 UNION SELECT snapshot_hash FROM outbox WHERE snapshot_hash IS NOT NULL",
+            )?;
             statement
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<HashSet<_>, _>>()?

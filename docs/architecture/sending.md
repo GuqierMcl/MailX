@@ -269,7 +269,7 @@ v0.1 的原则：**服务器没有副本时，MailX 本地一定有；服务器�
 - 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`update_draft` 与 `delete_draft` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
 - `accepted` 行保留 `mime`、`envelope`、`accepted_at`、`server_reply`，即本地已发送副本；`server_copy_message_id` 与 `deleted_locally_at` 已建列，由第 5 步使用，本步不读写。
 
-当前没有附件，快照直接存在 `outbox.mime` 列。第 16 节确定改为内容寻址的 blob 文件，行内只记哈希与大小（对应存储设计里的 `mime_blob_id`），并新增 `draft_attachments`；迁移方式见第 16.6 节。
+快照已改为内容寻址的 blob 文件（第 16.6 节，迁移 v14）：`outbox` 行只记 `snapshot_hash`、`snapshot_size` 与释放时间 `snapshot_released_at`，`mime` 列可空、新行不再写入，旧行由启动外迁搬进 blob 后清空。草稿附件在 `draft_attachments`（迁移 v13）。
 
 ## 11. 权限与宿主
 
@@ -288,7 +288,7 @@ v0.1 的原则：**服务器没有副本时，MailX 本地一定有；服务器�
 | 4（4a 已实现宿主与客户端层：窗口、capability、命令、事件、通知、生命周期；4b 已实现界面） | 写信窗口、capability、宿主命令、标题栏；`Composer`、两步发送按钮、草稿与发件箱视图、提示、设置项 | 前端组件与交互测试；macOS 实机，Windows / Linux 待验 |
 | 5 | 本地已发送副本的列表合并与阅读（与服务器副本对上已移到第 16.12 节 A5） | 存储与查询测试 |
 | 6 | 真实服务商自发自收 | 每次需用户单独授权，只发往测试账号白名单 |
-| 7（设计已确认，未实现） | 写信附件、转发原邮件附件、快照改存 blob、已发送快照释放，细分见第 16.12 节 | 见第 16.12 节 |
+| 7（A0–A3 已实现于核心，其余未实现） | 写信附件、转发原邮件附件、快照改存 blob、已发送快照释放，细分见第 16.12 节 | 见第 16.12 节 |
 
 每一步都同步更新[应用 API](../contracts/app-api.md)与[验证策略](../development/validation.md)，用测试结果说话，不以测试文件存在宣称通过。
 
@@ -457,9 +457,9 @@ v0.1 的原则：**服务器没有副本时，MailX 本地一定有；服务器�
 
 实现位置：前端 `mail-body-format-extensions.ts`、`mail-body-editor.tsx` 与本地样式表；核心 `core/src/drafts/body.rs`。没有新增依赖、数据库迁移或 DTO 字段。自动测试、浏览器预览与未验证范围见[验证记录](../development/validation.md)。
 
-## 16. 写信附件（设计已确认，未实现）
+## 16. 写信附件（A0–A3 已实现于核心，宿主、界面与转发预填未实现）
 
-2026-10-28 确认。本节与第 1、8、9、10 节有出入时以本节为准，前面各节已同步改写。现有实现（`outbox.mime` 列、无附件的 `multipart/alternative`）不是约束，按本节调整。
+2026-10-28 确认。本节与第 1、8、9、10 节有出入时以本节为准，前面各节已同步改写。现有实现（`outbox.mime` 列、无附件的 `multipart/alternative`）不是约束，按本节调整。A0–A3 的落地情况与实现层差异见 16.6 末尾与 16.12；宿主命令（16.9 / A6）与转发预填（16.8 / A7）仍未接入。
 
 ### 16.1 范围
 
@@ -536,7 +536,15 @@ v0.1 的原则：**服务器没有副本时，MailX 本地一定有；服务器�
 - 发送从快照文件读取并校验哈希。快照缺失或损坏时在正文开始前失败（永久失败，不重新生成），不会出现 `unknown`。
 - 现有超时只覆盖等待回复；写出大正文改用"无进展超时"（暂定 2 分钟内没写出任何字节即失败），不设总时长上限。实现时核对第 4 节的超时表。
 - blob 回收沿用存储设计：业务删除只删数据库引用，启动 GC 把 `draft_attachments` 与队列项快照都算作存活引用，再回收孤立文件。
-- 迁移：迁移脚本重建 `outbox` 表，新增快照哈希与字节数列，`mime` 列改为可空。旧行的字节由启动时一次幂等的外迁步骤写成 blob 后再清空该列，失败可以重跑。`mime` 列暂保留为可空、新行不再写入，留到之后的迁移删除。这超出了[数据库迁移](database-migrations.md)的纯 SQL 步骤，实现时一并修订该文档。
+- 迁移：迁移脚本重建 `outbox` 表，新增快照哈希与字节数列，`mime` 列改为可空。旧行的字节由启动时一次幂等的外迁步骤写成 blob 后再清空该列，失败可以重跑。`mime` 列暂保留为可空、新行不再写入，留到之后的迁移删除。这超出了[数据库迁移](database-migrations.md)的纯 SQL 步骤，该文档已相应增加第 4.4 节（非 SQL 的启动外迁）并更新版本清单。
+
+**A0–A3 的落地（2026-10-28）**：
+
+- 迁移 v13 `0013_draft_attachments.sql`、v14 `0014_outbox_snapshot_blob.sql`（重建 `outbox`，保留自引用 `superseded_by` 与全部索引）。外迁为 `Storage::migrate_outbox_snapshots`，在 `Storage::open` 里位于迁移之后、启动 GC 与任何 worker 之前；启动 GC 的存活引用现在是 `message_bodies.raw_sha256`、`draft_attachments.blob_hash` 与 `outbox.snapshot_hash` 的并集。
+- 附件核心接口：`MailxCore::add_attachment(request, bytes)`、`remove_attachment(request)`、`attachment_policy(account_id)`；请求类型 `AddAttachmentRequest` / `RemoveAttachmentRequest`，返回完整 `Draft`。文件名的清洗与媒体类型嗅探在 `core/src/drafts/attachments.rs`。
+- 入队分三段：`AccountService::prepare_send`（持锁读取）→ `SendBuild::freeze`（不持锁：读 blob 并校验哈希、构造 MIME、写快照 blob）→ `commit_send`（一个事务内核对 `revision` 与附件 ID 列表、插入队列项并锁定草稿）。核对不符返回 `conflict`，已写的快照无人引用，留给启动 GC；`Core::queue_send` 按这三段调用。
+- 发送从快照文件读取并校验哈希；缺失或损坏时以 `snapshotMissing` 永久失败，正文未开始，不重新生成。`failed` / 已撤销行的快照在该草稿被重新入队时清空并记 `snapshot_released_at`（同一事务）；发件箱中删除行本身的命令尚不存在，届时同样清空。
+- 与本节原文的差异：附件 DTO 命名为 `DraftAttachmentSummary`（`mail::AttachmentSummary` 已用于已缓存邮件的附件）；新增错误码 `attachmentTooLarge` 与 `tooManyAttachments`；`AttachmentPolicy` 目前恒为默认值（单封 20 MiB、20 个），按账号覆盖与 `SIZE` 记录属 A4。
 
 ### 16.7 已发送快照释放
 
@@ -592,10 +600,10 @@ v0.1 的原则：**服务器没有副本时，MailX 本地一定有；服务器�
 
 | 步骤 | 内容 | 主要验证 |
 | --- | --- | --- |
-| A0 | 迁移与外迁：快照改为 blob；GC 纳入草稿附件和快照 | 迁移、外迁幂等与重跑，GC 不误删 |
-| A1 | `draft_attachments`、添加和移除附件、`revision` 与锁定 | 重复内容、重名、0 字节、超上限、锁定后拒绝 |
-| A2 | `multipart/mixed` 与文件名编码 | 有无附件两种结构、中文与超长文件名 |
-| A3 | 入队冻结与快照 blob、`accepted` 后释放附件引用 | 入队后删草稿仍能发、重试同一字节、快照损坏在正文前失败 |
+| A0（已实现于核心） | 迁移与外迁：快照改为 blob；GC 纳入草稿附件和快照 | 迁移、外迁幂等与重跑，GC 不误删 |
+| A1（已实现于核心，未接命令） | `draft_attachments`、添加和移除附件、`revision` 与锁定 | 重复内容、重名、0 字节、超上限、锁定后拒绝 |
+| A2（已实现于核心） | `multipart/mixed` 与文件名编码 | 有无附件两种结构、中文与超长文件名 |
+| A3（已实现于核心） | 入队冻结与快照 blob、`accepted` 后释放附件引用 | 入队后删草稿仍能发、重试同一字节、快照损坏在正文前失败 |
 | A4 | SMTP：`5.3.4` / `5.2.3` 映射、记录 `SIZE`、无进展超时 | 模拟服务器在 `MAIL FROM` 与最终回复两处拒绝 |
 | A5 | 头部同步按 Message-ID 对上服务器副本（写入 `server_copy_message_id`），对上后释放已发送快照 | 对上、永远对不上、`unknown` 不释放、对上幂等 |
 | A6 | 宿主命令、文件对话框与拖放、写信窗口附件栏 | 主窗口无权调用、DTO 不含路径、中英文文案 |

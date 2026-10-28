@@ -626,6 +626,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         created_at: String::new(),
         updated_at: String::new(),
         revision: 1,
+        attachments: vec![],
     };
     let id = super::message::new_message_id("zhang@example.com").unwrap();
     let built = build(&OutgoingMessage {
@@ -634,6 +635,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         draft: &draft,
         message_id: &id,
         date: super::message::local_now(),
+        attachments: &[],
     })
     .unwrap();
     let (mut run, seen, _tls) = plain_via_starttls(|_| {}).await;

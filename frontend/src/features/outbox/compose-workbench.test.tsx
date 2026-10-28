@@ -17,7 +17,7 @@ const mail: EmailSummary = {
 const detail: EmailDetail = { summary: mail, to: [], cc: [], replyTo: [], body: { text: '正文', hasHtml: false, truncated: false, remoteImagesBlocked: 0 }, bodyFailure: null, attachments: [] }
 
 function draft(id = '3f2b8c1e-9a4d-4e6f-8b1a-2c3d4e5f6a7b'): Draft {
-  return { id, accountId: account.id, kind: 'new', sourceEmailId: null, to: [{ name: null, address: 'li@example.org' }], cc: [], bcc: [], subject: '草稿主题', bodyHtml: '<p>草稿正文</p>', bodyText: '草稿正文', inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 2 }
+  return { id, accountId: account.id, kind: 'new', sourceEmailId: null, to: [{ name: null, address: 'li@example.org' }], cc: [], bcc: [], subject: '草稿主题', bodyHtml: '<p>草稿正文</p>', bodyText: '草稿正文', inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 2, attachments: [] }
 }
 const summary = (d: Draft): DraftSummary => ({ id: d.id, accountId: d.accountId, kind: d.kind, sourceEmailId: null, to: d.to, subject: d.subject, preview: d.bodyText, updatedAt: d.updatedAt, revision: d.revision })
 

@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -421,7 +421,7 @@ references: string | null, createdAt: string, updatedAt: string,
 /**
  * Advances on every saved change; updates must present the one they saw.
  */
-revision: number, };
+revision: number, attachments: Array<DraftAttachmentSummary>, };
 
 export type DraftSummary = { id: string, accountId: string, kind: DraftKind, sourceEmailId: string | null, to: Array<MailAddress>, subject: string,
 /**
@@ -446,6 +446,24 @@ export type UpdateDraftRequest = { id: string, expectedRevision: number,
  * `null` keeps the current sender account.
  */
 accountId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyHtml: string, };
+
+export type AddAttachmentRequest = { draftId: string, expectedRevision: number,
+/**
+ * The name the host got from the user; the core cleans it up.
+ */
+fileName: string, };
+
+export type RemoveAttachmentRequest = { draftId: string, attachmentId: string, expectedRevision: number, };
+
+export type DraftAttachmentSummary = { id: string, fileName: string, mediaType: string, size: number, origin: AttachmentOrigin, };
+
+export type AttachmentOrigin = "user" | "forwarded";
+
+export type AttachmentPolicy = {
+/**
+ * Sum of the raw attachment bytes of one draft.
+ */
+maxTotalBytes: number, maxCount: number, };
 
 export type OutboxState = "queued" | "sending" | "accepted" | "failed" | "unknown" | "canceled";
 

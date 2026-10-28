@@ -22,7 +22,7 @@ const account = exampleAccount({ senderName: '林薇' })
 function draft(overrides: Partial<Draft> = {}): Draft {
   return {
     id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
-    inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, ...overrides,
+    inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, attachments: [], ...overrides,
   }
 }
 
