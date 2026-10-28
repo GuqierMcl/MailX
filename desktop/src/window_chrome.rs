@@ -14,6 +14,11 @@ use tauri::{
 };
 #[cfg(not(feature = "body-webview-test"))]
 use tauri::{Runtime, plugin::TauriPlugin};
+#[cfg(target_os = "macos")]
+use tauri::{
+    utils::config::WindowEffectsConfig,
+    window::{Effect, EffectState},
+};
 #[cfg(not(feature = "body-webview-test"))]
 use tauri_plugin_window_state::StateFlags;
 
@@ -119,6 +124,9 @@ pub(crate) struct WindowChrome {
     /// Controls drawn by the frontend after the title content.
     trailing: Vec<WindowButton>,
     state: WindowState,
+    /// The window material shows through a transparent webview, so the frontend
+    /// may draw the canvas translucent. Only macOS applies one today.
+    translucent: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -179,7 +187,17 @@ pub(crate) fn style_builder<'a, R: tauri::Runtime, M: Manager<R>>(
         .hidden_title(true)
         .traffic_light_position(TRAFFIC_LIGHT_POSITION)
         // No link preview popup on long press; the builder method is macOS-only.
-        .allow_link_preview(false);
+        .allow_link_preview(false)
+        // The system menu material behind a transparent webview; the frontend
+        // draws the canvas translucent and keeps the islands opaque.
+        .transparent(true)
+        .effects(WindowEffectsConfig {
+            effects: vec![Effect::Menu],
+            state: Some(EffectState::FollowsWindowActiveState),
+            radius: None,
+            color: None,
+            interactive: false,
+        });
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
     builder
@@ -192,7 +210,26 @@ pub(crate) fn chrome(window: &WebviewWindow) -> WindowChrome {
         leading,
         trailing,
         state: read_state(window, None),
+        translucent: cfg!(target_os = "macos"),
     }
+}
+
+/// The app theme the user chose; the window follows it so the window material
+/// matches the page.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum WindowTheme {
+    System,
+    Light,
+    Dark,
+}
+
+pub(crate) fn set_theme(window: &WebviewWindow, theme: WindowTheme) -> tauri::Result<()> {
+    window.set_theme(match theme {
+        WindowTheme::System => None,
+        WindowTheme::Light => Some(tauri::Theme::Light),
+        WindowTheme::Dark => Some(tauri::Theme::Dark),
+    })
 }
 
 pub(crate) fn perform(window: &WebviewWindow, action: WindowAction) -> tauri::Result<()> {

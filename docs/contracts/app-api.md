@@ -161,8 +161,9 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 | 命令与参数 | 结果 |
 | --- | --- |
-| `window_get_chrome`，无参数 | `{ platform, leading, trailing, state }`：平台、标题内容前后要绘制的按钮、`{ maximized, fullscreen, focused }` |
+| `window_get_chrome`，无参数 | `{ platform, leading, trailing, state, translucent }`：平台、标题内容前后要绘制的按钮、`{ maximized, fullscreen, focused }`、窗口背后是否有系统材质（目前仅 macOS 为 true） |
 | `window_perform`，`{ action }` | `action` 为 `minimize` / `toggleMaximize` / `close` / `startDragging` / `titleBarDoubleClick` |
+| `window_set_theme`，`{ theme }` | `theme` 为 `system` / `light` / `dark`；只作用于调用窗口，使窗口材质与应用主题一致 |
 
 状态变化通过 `mailx://window-state` 事件推送，定向到变化所属的窗口（main 或各写信窗口）。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。这两个命令对 main 和写信窗口都开放，且只作用于调用它的窗口；写信窗口的双击偏好与 Linux 按钮布局与 main 完全相同。
 
@@ -172,7 +173,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 | 命令 | main | composer | 说明 |
 | --- | --- | --- | --- |
-| `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform` | 是 | 是 | 窗口命令只作用于调用窗口 |
+| `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform`、`window_set_theme` | 是 | 是 | 窗口命令只作用于调用窗口 |
 | `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
 | `drafts_create { request }`、`drafts_create_from { request }`、`drafts_list { accountId? }` | 是 | 否 | 创建在 main 完成；`drafts_create` 由宿主读取 `compose.defaultAccountId` 传给核心；`drafts_create_from` 由宿主读取当前 `effectiveLocale` 生成引用头 |
 | `outbox_queue_send { draftId, expectedRevision, clientMutationId }` | 否（`validation`） | 仅自己的草稿 | 宿主读取 `compose.undoSendSeconds`；主体固定为 `Composer` |

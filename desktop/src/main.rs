@@ -210,6 +210,7 @@ fn main() {
             commands::notifications_preview_sound,
             commands::window_get_chrome,
             commands::window_perform,
+            commands::window_set_theme,
             compose::drafts_create,
             compose::drafts_create_from,
             compose::drafts_list,

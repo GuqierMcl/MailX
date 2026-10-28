@@ -1,3 +1,4 @@
+import { syncWindowTheme } from '@/features/window-chrome/window-host'
 import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -107,6 +108,8 @@ function applyTheme(theme: ThemeMode) {
   const query = window.matchMedia('(prefers-color-scheme: dark)')
   const update = () =>
     document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'system' && query.matches))
+  // The window material follows the window's own appearance, which has to match the page.
+  syncWindowTheme(theme)
   update()
   if (theme !== 'system') return
   query.addEventListener('change', update)
