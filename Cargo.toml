@@ -13,7 +13,7 @@ publish = false
 [workspace.dependencies]
 mailx-core = { path = "core" }
 serde = { version = "1", features = ["derive"] }
-tauri = { version = "2.11.5" }
+tauri = { version = "2.11.5", features = ["macos-private-api"] }
 tauri-build = { version = "2.6.3" }
 
 [workspace.lints.rust]

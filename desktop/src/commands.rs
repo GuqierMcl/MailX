@@ -9,7 +9,7 @@ use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody
 
 use crate::state::{DesktopState, StartupStatus};
 use crate::window_access::{self, WindowKind};
-use crate::window_chrome::{self, WindowAction, WindowChrome};
+use crate::window_chrome::{self, WindowAction, WindowChrome, WindowTheme};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -746,6 +746,12 @@ struct WindowPerformArgs {
     action: WindowAction,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WindowSetThemeArgs {
+    theme: WindowTheme,
+}
+
 #[tauri::command]
 pub(crate) async fn settings_get(
     window: WebviewWindow,
@@ -823,6 +829,19 @@ pub(crate) fn window_perform(
         .and_then(|_| parse::<WindowPerformArgs>(request.body()));
     respond(args.and_then(|args| {
         window_chrome::perform(&window, args.action).map_err(|_| AppError::new(ErrorCode::Internal))
+    }))
+}
+
+#[tauri::command]
+pub(crate) fn window_set_theme(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> ApiResult<()> {
+    let args = authorize(&window, "window_set_theme")
+        .and_then(|_| parse::<WindowSetThemeArgs>(request.body()));
+    respond(args.and_then(|args| {
+        window_chrome::set_theme(&window, args.theme)
+            .map_err(|_| AppError::new(ErrorCode::Internal))
     }))
 }
 

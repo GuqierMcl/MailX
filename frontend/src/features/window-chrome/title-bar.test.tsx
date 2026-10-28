@@ -9,7 +9,7 @@ const normal: WindowState = { maximized: false, fullscreen: false, focused: true
 function fakeHost(chrome: Partial<WindowChrome> & Pick<WindowChrome, 'platform'>) {
   let emit: (state: WindowState) => void = () => undefined
   const host: WindowHost = {
-    getChrome: async () => ({ leading: [], trailing: [], state: normal, ...chrome }),
+    getChrome: async () => ({ leading: [], trailing: [], state: normal, translucent: false, ...chrome }),
     perform: vi.fn(),
     onStateChange(listener) {
       emit = listener

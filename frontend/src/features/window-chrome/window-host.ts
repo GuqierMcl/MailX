@@ -15,6 +15,8 @@ export type WindowChrome = {
   /** Controls drawn after the title content. */
   trailing: WindowButton[]
   state: WindowState
+  /** The window material shows through the webview, so the canvas may be drawn translucent. */
+  translucent: boolean
 }
 
 /** The window behind the title bar: the desktop host, or a dev preview in the browser. */
@@ -25,6 +27,12 @@ export interface WindowHost {
 }
 
 const STATE_EVENT = 'mailx://window-state'
+
+/** Keeps the native window (and its material) in the app theme the user chose; a no-op outside the desktop app. */
+export function syncWindowTheme(theme: 'system' | 'light' | 'dark') {
+  if (!isTauri()) return
+  invoke('window_set_theme', { theme }).catch(() => undefined)
+}
 
 export function createDesktopWindowHost(): WindowHost | null {
   if (!isTauri()) return null
@@ -63,7 +71,13 @@ export function createPreviewWindowHost(platform: WindowPlatform): WindowHost {
   let state: WindowState = { maximized: false, fullscreen: false, focused: true }
   const listeners = new Set<(state: WindowState) => void>()
   return {
-    getChrome: async () => ({ platform, leading: [], trailing: PREVIEW_BUTTONS[platform], state }),
+    getChrome: async () => ({
+      platform,
+      leading: [],
+      trailing: PREVIEW_BUTTONS[platform],
+      state,
+      translucent: false,
+    }),
     perform(action) {
       if (action !== 'toggleMaximize' && action !== 'titleBarDoubleClick') return
       state = { ...state, maximized: !state.maximized }

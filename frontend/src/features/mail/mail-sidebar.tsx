@@ -1,7 +1,7 @@
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { errorText } from '@/i18n/errors'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Alert02Icon,
@@ -86,6 +86,26 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
     saveCollapsed(next)
   }
 
+  const scroller = useRef<HTMLDivElement>(null)
+  const [fade, setFade] = useState({ top: false, bottom: false })
+  const updateFade = () => {
+    const el = scroller.current
+    if (!el) return
+    const top = el.scrollTop > 1
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+    setFade((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }))
+  }
+  // The list hides its scrollbar, so a fade at each clipped edge is the only hint that more lies beyond.
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    updateFade()
+    const observer = new ResizeObserver(updateFade)
+    observer.observe(el)
+    for (const child of el.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [])
+
   const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
   const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
   const unifiedCountsKnown = inboxes.every((folder) => folder.countsKnown)
@@ -104,7 +124,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent ref={scroller} onScroll={updateFade} style={fadeMask(fade)}>
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -229,6 +249,15 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
       </SidebarFooter>
     </div>
   )
+}
+
+const FADE_SIZE = '1.75rem'
+
+/** Fades the list out toward each edge that has more content behind it. */
+function fadeMask({ top, bottom }: { top: boolean; bottom: boolean }): React.CSSProperties | undefined {
+  if (!top && !bottom) return undefined
+  const mask = `linear-gradient(to bottom, ${top ? `transparent, black ${FADE_SIZE}` : 'black'}, ${bottom ? `black calc(100% - ${FADE_SIZE}), transparent` : 'black'})`
+  return { maskImage: mask, WebkitMaskImage: mask }
 }
 
 /** The sync glyph; it turns while a round runs. */
