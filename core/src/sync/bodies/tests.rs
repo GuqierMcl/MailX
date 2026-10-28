@@ -349,6 +349,49 @@ async fn one_account_queues_bodies_while_another_account_can_download() {
 }
 
 #[tokio::test]
+async fn account_removal_settles_pending_bodies_and_rejects_late_completion() {
+    let mut fixture = fixture(&[None]);
+    let pending = fetch(&fixture, 0);
+    let request = connection(&mut fixture).await;
+    let token = fixture.manager.shared.flights.lock().unwrap().messages[&fixture.messages[0]]
+        .token
+        .clone();
+    {
+        let mut service = fixture.service.lock().unwrap();
+        service
+            .remove(crate::RemoveAccountRequest {
+                account_id: fixture.account.id.clone(),
+                expected_revision: fixture.account.revision,
+            })
+            .unwrap();
+        fixture.manager.retire(&fixture.account.id);
+    }
+    assert_eq!(
+        finished(pending).await.unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert!(request.send(Err(ImapError::Timeout)).is_err());
+    assert_eq!(
+        fail(&fixture.manager.shared, &token, BodyFailureCode::Network)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    complete(&fixture.manager.shared, &token, Err(internal()));
+    assert_eq!(
+        fixture
+            .manager
+            .fetch(fixture.messages[0].clone())
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert!(fixture.connections.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn restart_settles_waiters_and_old_completion_cannot_replace_new_body() {
     let mut fixture = fixture(&[None]);
     let first = fetch(&fixture, 0);

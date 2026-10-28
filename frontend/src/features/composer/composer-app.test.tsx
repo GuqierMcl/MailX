@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
-import type { Draft } from '@/generated/accounts'
-import { MailxClientError } from '@/lib/mailx-client'
+import type { Account, Draft } from '@/generated/accounts'
+import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import { TitleBarSlotsProvider } from '@/features/window-chrome/title-bar'
 import { ComposerApp } from './composer-app'
 import { AUTOSAVE_DELAY_MS } from './use-draft-editor'
@@ -27,8 +27,8 @@ function draft(overrides: Partial<Draft> = {}): Draft {
   }
 }
 
-function setup(initial: Draft = draft(), fresh = false) {
-  const client = testClient([account])
+function setup(initial: Draft = draft(), fresh = false, rows: Account[] = [account]) {
+  const client = testClient(rows)
   let current = initial
   client.getDraft.mockImplementation(async () => structuredClone(current))
   client.updateDraft.mockImplementation(async (request) => {
@@ -38,8 +38,13 @@ function setup(initial: Draft = draft(), fresh = false) {
   const handlers: { close: () => void; quit: () => void } = { close: () => undefined, quit: () => undefined }
   client.onComposerCloseRequested.mockImplementation((listener) => { handlers.close = listener; return () => undefined })
   client.onAppClosing.mockImplementation((listener) => { handlers.quit = listener; return () => undefined })
+  const removalListeners = new Set<Parameters<MailxClient['onAccountRemoved']>[0]>()
+  client.onAccountRemoved.mockImplementation((listener) => { removalListeners.add(listener); return () => { removalListeners.delete(listener) } })
+  const removeAccount = (draftIds = [DRAFT_ID]) => act(() => {
+    removalListeners.forEach((listener) => listener({ accountId: account.id, draftIds, credentialsPending: false }))
+  })
   render(<TitleBarSlotsProvider><ComposerApp client={client} draftId={DRAFT_ID} fresh={fresh} host={null} /></TitleBarSlotsProvider>)
-  return { client, handlers }
+  return { client, handlers, removeAccount }
 }
 
 const body = () => screen.findByRole('textbox', { name: '正文' })
@@ -190,5 +195,48 @@ describe('composer window', () => {
     await userEvent.click(await screen.findByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(client.closeComposer).toHaveBeenCalled())
     expect(client.deleteDraft).not.toHaveBeenCalled()
+  })
+
+  it('force closes an account-removed draft without flushing, deleting or asking', async () => {
+    const { client, handlers, removeAccount } = setup(draft({ subject: 'Original' }))
+    fireEvent.change(await body(), { target: { value: 'Unsaved edits' } })
+    await act(async () => { handlers.close() })
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+    removeAccount()
+    await waitFor(() => expect(client.closeComposer).toHaveBeenCalledWith(true))
+    await act(async () => { handlers.close(); handlers.quit() })
+    expect(client.closeComposer).toHaveBeenCalledTimes(1)
+    expect(client.updateDraft).not.toHaveBeenCalled()
+    expect(client.deleteDraft).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('textbox', { name: '正文' })).not.toBeInTheDocument()
+  })
+
+  it('refreshes the sender list without closing a draft absent from the deletion report', async () => {
+    const other = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', emailAddress: 'other@example.com', displayName: '个人邮箱' })
+    const { client, removeAccount } = setup(draft({ accountId: other.id }), false, [account, other])
+    await body()
+    client.listAccounts.mockResolvedValue([other])
+    removeAccount([])
+    await waitFor(() => expect(client.listAccounts).toHaveBeenCalledTimes(2))
+    expect(client.closeComposer).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: '正文' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '发件人' })).toHaveTextContent('other@example.com')
+  })
+
+  it('ignores a late queue success after the account removal already closed its composer', async () => {
+    const { client, removeAccount } = setup(draft({ to: [{ address: 'li@example.org', name: null }], subject: 'Hello' }))
+    let resolveQueue!: (item: Awaited<ReturnType<MailxClient['queueSend']>>) => void
+    client.queueSend.mockReturnValue(new Promise((resolve) => { resolveQueue = resolve }))
+    await body()
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await screen.findByRole('button', { name: '确认发送' })
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    await userEvent.click(screen.getByRole('button', { name: '确认发送' }))
+    expect(client.queueSend).toHaveBeenCalledTimes(1)
+    removeAccount()
+    await act(async () => resolveQueue({} as never))
+    expect(client.closeComposer).toHaveBeenCalledExactlyOnceWith(true)
+    expect(client.updateDraft).not.toHaveBeenCalled()
   })
 })

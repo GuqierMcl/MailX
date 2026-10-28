@@ -42,6 +42,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     createAccount: vi.fn<MailxClient['createAccount']>().mockResolvedValue(exampleAccount()),
     updateConnection: vi.fn<MailxClient['updateConnection']>().mockImplementation(async ({ accountId, expectedRevision }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), revision: expectedRevision + 1 })),
     updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile })),
+    removeAccount: vi.fn<MailxClient['removeAccount']>().mockImplementation(async ({ accountId }) => ({ accountId, draftIds: [], credentialsPending: false })),
+    onAccountRemoved: vi.fn<MailxClient['onAccountRemoved']>().mockReturnValue(() => undefined),
     verifyAccountConnection: vi.fn<MailxClient['verifyAccountConnection']>().mockImplementation(async (accountId, revision) => ({
       accountId, revision,
       imap: { status: 'verified', stage: 'complete', code: null },

@@ -257,7 +257,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `jobs.get` / `jobs.cancel` | jobId → job 状态 | GET / POST `/api/v1/jobs/{id}` / `…/cancel` |
 | `ai.start` / `ai.get` / `ai.cancel` | Run 请求 / runId → Run 快照 | POST / GET `/api/v1/ai/runs` / `…/{id}` / `…/{id}/cancel` |
 
-OAuth、附件上传、设置和删除账号的细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
+OAuth、附件上传和后续设置细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
 
 ## 4. 邮件写操作一致性
 
@@ -465,3 +465,20 @@ type AccountConnectionVerification = {
 成功项为 `verified/complete/null`；失败项只包含固定阶段和原因码，不包含服务端原始回复、目录名、邮件或秘密。网页根据当前语言显示消息。QQ 认证失败提供开通协议、更新授权码、检查完整地址和网页安全验证的排查步骤，不把模糊的认证拒绝细分为未经证实的确定原因。
 
 报告仅对这次探测的配置版本有效。切换账号、关闭界面、取消或连接版本变化都会取消旧尝试并丢弃迟到结果。收信和发信结果分别展示，“登录验证通过”明确不代表实际邮件投递或完整服务商兼容通过。
+
+### 移除本机账号
+
+`MailxClient.removeAccount(request)` 调用主窗口专用 `accounts_remove`，参数为 `{ request: { accountId, expectedRevision } }`。UUID 和版本由 core 校验，未知字段被拒绝，启动必须 Ready；写信窗口、邮件正文、HTTP 和 MCP 没有此操作权限。
+
+```ts
+type RemoveAccountRequest = { accountId: string; expectedRevision: number };
+type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPending: boolean };
+```
+
+`MailxCore::remove_account` 在与发送领取共享的服务锁和删除事务内检查连接版本与队列状态。有 `sending` 项返回 `alreadySending`，版本不匹配返回 `conflict`，两者均不修改数据；未知账号且无删除收据为 `notFound`。成功清除该账号所有来源的配置、邮件引用、草稿与发件记录，保留删除收据和创建请求墓碑；以同一账号 ID 和原版本重试返回原来的 `draftIds`，凭证待清理状态按当时结果返回。旧创建请求 ID 返回 `idempotencyConflict`。
+
+该操作不联系服务商、不发送 IMAP 删除命令，也不撤回已提交邮件或撤销服务商授权码。终态和 `unknown` 发件记录随账号清除，确认文案必须始终说明邮件可能已经送达。有在途 SMTP 时拒绝移除，不强制中断后声称发送已撤销。
+
+提交后退休同步/写回、正文、空闲发信和诊断任务，撤销正文令牌、外链确认和远程图片权限。core 发 `AccountRemoved`，desktop 向可信 main/composer 窗口广播 `mailx://account-removed`，载荷为 `AccountRemoval`，随后发各实际删除草稿的 `mailx://drafts` Deleted 事件。前端 `onAccountRemoved` 清理查询与选择，写信窗口以 `draftIds` 判断自身是否应停止保存并直接关闭；不以打开窗口时的旧账号猜测。
+
+`credentialsPending=true` 表示本机移除已提交，但部分 SecretStore 删除尚未完成；提示待清理并允许应用后续重试，不能作为账号删除失败重试创建。缓存文件、共享引用和恢复边界见[账号配置](../architecture/account-configuration.md#6-操作与后台任务契约)。

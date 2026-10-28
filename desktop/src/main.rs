@@ -97,6 +97,8 @@ fn main() {
                 // tell the user something; a lost one is harmless.
                 let handle = app.handle().clone();
                 let settings_handle = app.handle().clone();
+                let notification_accounts =
+                    Arc::new(notifications::AccountNotifications::default());
                 let events: mailx_core::Events =
                     Arc::new(move |event: &mailx_core::CoreEvent| match event {
                         mailx_core::CoreEvent::Sync(sync_state) => {
@@ -117,28 +119,47 @@ fn main() {
                             compose::emit_outbox(&handle, change);
                             let app = settings_handle.clone();
                             let outbox_id = change.outbox_id.clone();
-                            notifications::send_result(&handle, change.clone(), move || {
-                                let state = app.try_state::<state::DesktopState>()?;
-                                let (settings, locale) = state.notification_settings()?;
-                                // The subject is read only to show it, and only
-                                // when previews are on.
-                                let subject = settings
-                                    .show_preview
-                                    .then(|| state.core().ok()?.get_outbox(&outbox_id).ok())
-                                    .flatten()
-                                    .map(|item| item.subject);
-                                Some((settings, subject, locale))
-                            });
+                            notifications::send_result(
+                                &handle,
+                                change.clone(),
+                                notification_accounts.clone(),
+                                move || {
+                                    let state = app.try_state::<state::DesktopState>()?;
+                                    let (settings, locale) = state.notification_settings()?;
+                                    // The subject is read only to show it, and only
+                                    // when previews are on.
+                                    let subject = settings
+                                        .show_preview
+                                        .then(|| state.core().ok()?.get_outbox(&outbox_id).ok())
+                                        .flatten()
+                                        .map(|item| item.subject);
+                                    Some((settings, subject, locale))
+                                },
+                            );
+                        }
+                        mailx_core::CoreEvent::AccountRemoved(removed) => {
+                            notification_accounts.retire(&removed.account_id);
+                            if let Some(protocol) =
+                                handle.try_state::<std::sync::Arc<body_protocol::BodyProtocol>>()
+                            {
+                                protocol.revoke_account(&removed.account_id);
+                            }
+                            compose::emit_account_removed(&handle, removed);
                         }
                         mailx_core::CoreEvent::DraftChanged(change) => {
                             compose::emit_draft(&handle, change);
                         }
                         mailx_core::CoreEvent::NewMail(mail) => {
                             let app = settings_handle.clone();
-                            notifications::new_mail(&handle, mail.clone(), move || {
-                                app.try_state::<state::DesktopState>()?
-                                    .notification_settings()
-                            });
+                            notifications::new_mail(
+                                &handle,
+                                mail.clone(),
+                                notification_accounts.clone(),
+                                move || {
+                                    app.try_state::<state::DesktopState>()?
+                                        .notification_settings()
+                                },
+                            );
                         }
                     });
                 let state = state::DesktopState::new(data_dir, secrets, events);
@@ -160,6 +181,7 @@ fn main() {
             commands::accounts_list,
             commands::accounts_get,
             commands::accounts_create,
+            commands::accounts_remove,
             commands::accounts_update_connection,
             commands::accounts_update_profile,
             commands::accounts_verify_connection,

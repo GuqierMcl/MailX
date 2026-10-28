@@ -4,7 +4,7 @@
 //! hold the account database lock across network I/O: they read a sync plan,
 //! talk to the server unlocked, then store the result in a short transaction.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -263,6 +263,9 @@ impl Shared {
 pub(crate) struct SyncManager {
     shared: Arc<Shared>,
     runtime: Handle,
+    /// Serializes registration with removal, including delayed starts from a
+    /// create or connection update that committed before the removal.
+    retired: Mutex<HashSet<String>>,
     workers: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Ends the wait between rounds early when the user asks for a refresh.
     wakers: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -289,6 +292,7 @@ impl SyncManager {
                 events,
             }),
             runtime,
+            retired: Mutex::new(HashSet::new()),
             workers: Mutex::new(HashMap::new()),
             wakers: Mutex::new(HashMap::new()),
             writers: Mutex::new(HashMap::new()),
@@ -407,6 +411,12 @@ impl SyncManager {
     /// Starts, or restarts with fresh settings, the worker for an account.
     /// An old connection is never reused after the account changes.
     pub(crate) fn restart(&self, account_id: &str) {
+        let Ok(retired) = self.retired.lock() else {
+            return;
+        };
+        if retired.contains(account_id) {
+            return;
+        }
         let Ok(mut workers) = self.workers.lock() else {
             return;
         };
@@ -464,6 +474,41 @@ impl SyncManager {
         );
         drop(workers);
         self.start_writer(account_id, writer_token);
+    }
+
+    /// Called after releasing the service lock: restart takes workers before
+    /// service, while body registration takes service before flights.
+    pub(crate) fn retire(&self, account_id: &str) {
+        let mut retired = self
+            .retired
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        retired.insert(account_id.to_owned());
+        if let Some(worker) = self
+            .workers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id)
+        {
+            worker.abort();
+        }
+        if let Some((worker, _)) = self
+            .writers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id)
+        {
+            worker.abort();
+        }
+        self.wakers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id);
+        self.shared
+            .states
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id);
     }
 
     pub(crate) fn states(&self) -> Vec<AccountSyncState> {
@@ -1014,6 +1059,39 @@ mod tests {
         fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
             self.inner.delete(key)
         }
+    }
+
+    #[tokio::test]
+    async fn retired_account_rejects_delayed_sync_and_writeback_starts() {
+        let directory = TempDir::new().unwrap();
+        let mut service =
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
+        let account = service
+            .create(
+                serde_json::from_value(json!({
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "config": config(json!({"kind": "direct"}))
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let service = Arc::new(Mutex::new(service));
+        let manager = SyncManager::new(
+            service.clone(),
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+        );
+        manager.restart(&account.id);
+        assert_eq!(manager.states().len(), 1);
+        assert_eq!(manager.writers.lock().unwrap().len(), 1);
+        manager.retire(&account.id);
+        manager.restart(&account.id);
+        manager.changes_waiting(&account.id);
+        assert!(!manager.refresh(&account.id));
+        assert!(manager.states().is_empty());
+        assert!(manager.workers.lock().unwrap().is_empty());
+        assert!(manager.writers.lock().unwrap().is_empty());
+        assert!(manager.wakers.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

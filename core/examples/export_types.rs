@@ -31,6 +31,8 @@ fn main() {
         CreateAccountRequest,
         UpdateConnectionRequest,
         UpdateProfileRequest,
+        RemoveAccountRequest,
+        AccountRemoval,
         CredentialTrust,
         AuthenticationSummary,
         PasswordAuthenticationSummary,

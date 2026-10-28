@@ -4,7 +4,7 @@
 //! the login plan under the lock, talks to the server unlocked, and records the
 //! result in a short transaction. The route and credentials are those of the
 //! moment the attempt starts; the snapshot only fixes the content.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -65,6 +65,7 @@ type Worker = (JoinHandle<()>, Arc<Notify>);
 pub(crate) struct OutboxManager {
     pub(crate) shared: Arc<Shared>,
     runtime: Handle,
+    retired: Mutex<HashSet<String>>,
     workers: Mutex<HashMap<String, Worker>>,
 }
 
@@ -82,6 +83,7 @@ impl OutboxManager {
                 config,
             }),
             runtime,
+            retired: Mutex::new(HashSet::new()),
             workers: Mutex::new(HashMap::new()),
         }
     }
@@ -92,6 +94,12 @@ impl OutboxManager {
 
     /// Starts the account's worker if it is not running, else wakes it.
     pub(crate) fn start(&self, account_id: &str) {
+        let Ok(retired) = self.retired.lock() else {
+            return;
+        };
+        if retired.contains(account_id) {
+            return;
+        }
         let Ok(mut workers) = self.workers.lock() else {
             return;
         };
@@ -113,6 +121,24 @@ impl OutboxManager {
     /// New item, cancel, retry now or account change: look at the queue again.
     pub(crate) fn wake(&self, account_id: &str) {
         self.start(account_id);
+    }
+
+    /// Deletion already committed under the same service lock as queue claims.
+    /// Keep the id retired so a delayed wake cannot recreate its worker.
+    pub(crate) fn retire(&self, account_id: &str) {
+        let mut retired = self
+            .retired
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        retired.insert(account_id.to_owned());
+        if let Some((worker, _)) = self
+            .workers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id)
+        {
+            worker.abort();
+        }
     }
 }
 
@@ -270,5 +296,32 @@ async fn record(
     // it (queued or unknown by the body-start mark), never a silent resend.
     if let Ok(Some(changed)) = result {
         shared.announce(vec![changed]);
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+    use crate::secrets::test_support::MemorySecrets;
+
+    #[tokio::test]
+    async fn retired_outbox_rejects_delayed_start_and_wake() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let service = Arc::new(Mutex::new(
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap(),
+        ));
+        let manager = OutboxManager::new(
+            &service,
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+            SendConfig::default(),
+        );
+        let id = uuid::Uuid::new_v4().to_string();
+        manager.start(&id);
+        assert_eq!(manager.workers.lock().unwrap().len(), 1);
+        manager.retire(&id);
+        manager.start(&id);
+        manager.wake(&id);
+        assert!(manager.workers.lock().unwrap().is_empty());
     }
 }

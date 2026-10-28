@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
   Account,
+  AccountRemoval,
   AccountConnectionVerification,
   AccountSyncState,
   AppError,
@@ -29,6 +30,7 @@ import type {
   SettingsSnapshot,
   UpdateConnectionRequest,
   UpdateProfileRequest,
+  RemoveAccountRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { UpdateSnapshot } from '@/features/updater/types'
@@ -64,6 +66,10 @@ export interface MailxClient {
   updateConnection(request: UpdateConnectionRequest): Promise<Account>
   /** Renames or recolors the account; sync keeps running. */
   updateProfile(request: UpdateProfileRequest): Promise<Account>
+  /** Removes local data only. A sending item blocks removal; retries return the same receipt. */
+  removeAccount(request: RemoveAccountRequest): Promise<AccountRemoval>
+  /** Main and composer windows refresh accounts and retire the exact removed drafts. */
+  onAccountRemoved(listener: (removal: AccountRemoval) => void): () => void
   listFolders(accountId: string): Promise<Folder[]>
   listSyncStates(): Promise<AccountSyncState[]>
   /**
@@ -239,6 +245,8 @@ export function createDesktopClient(): MailxClient {
     createAccount: (request) => call<Account>('accounts_create', { request }),
     updateConnection: (request) => call<Account>('accounts_update_connection', { request }),
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
+    removeAccount: (request) => call<AccountRemoval>('accounts_remove', { request }),
+    onAccountRemoved: (listener) => subscribe<AccountRemoval>('mailx://account-removed', listener),
     listFolders: (accountId) => call<Folder[]>('folders_list', { accountId }),
     listSyncStates: () => call<AccountSyncState[]>('sync_states'),
     setFlag: (emailId, flag, wanted) => call('emails_set_flag', { emailId, flag, wanted }),

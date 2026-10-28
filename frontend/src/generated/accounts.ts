@@ -71,6 +71,18 @@ export type UpdateConnectionRequest = { accountId: string, expectedRevision: num
 
 export type UpdateProfileRequest = { accountId: string, profile: AccountProfileInput, };
 
+export type RemoveAccountRequest = { accountId: string, expectedRevision: number, };
+
+export type AccountRemoval = { accountId: string,
+/**
+ * Includes every deleted local draft so hosts can retire its editor.
+ */
+draftIds: Array<string>,
+/**
+ * Local removal committed; host-owned credentials will be retried later.
+ */
+credentialsPending: boolean, };
+
 export type CredentialTrust = "trusted" | "needsConfirmation";
 
 export type AuthenticationSummary = { id: string, generation: number, passwordConfigured: boolean, trust: CredentialTrust, };

@@ -1,8 +1,8 @@
 use mailx_core::{
-    Account, AccountConnectionVerification, AccountSyncState, ApiResult, AppError,
+    Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
     CancelConnectionVerification, CreateAccountRequest, EmailDetail, EmailListQuery, EmailPage,
-    ErrorCode, Folder, SettingsPatch, SettingsSnapshot, UpdateConnectionRequest,
-    UpdateProfileRequest, VerifyAccountConnection,
+    ErrorCode, Folder, RemoveAccountRequest, SettingsPatch, SettingsSnapshot,
+    UpdateConnectionRequest, UpdateProfileRequest, VerifyAccountConnection,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
@@ -155,6 +155,30 @@ pub(crate) async fn accounts_create(
             state
                 .run(move |core| core.create_account(args.request))
                 .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+/// Removes this account's local data after the revision and sending checks.
+#[tauri::command]
+pub(crate) async fn accounts_remove(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<AccountRemoval>, ()> {
+    let args = authorize(&window, "accounts_remove")
+        .and_then(|_| parse::<WriteArgs<RemoveAccountRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            let result = state
+                .run(move |core| core.remove_account(args.request))
+                .await;
+            if let Ok(removed) = &result {
+                protocol.revoke_account(&removed.account_id);
+            }
+            result
         }
         Err(error) => Err(error),
     }))

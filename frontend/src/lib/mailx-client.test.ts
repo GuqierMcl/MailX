@@ -8,6 +8,12 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true) })
 
 describe('desktop client boundary', () => {
+  it('removes only the named account at the confirmed revision and returns its receipt', async () => {
+    const data = { accountId: 'account', draftIds: ['draft'], credentialsPending: true }
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data, requestId: 'request' })
+    await expect(createDesktopClient().removeAccount({ accountId: 'account', expectedRevision: 3 })).resolves.toEqual(data)
+    expect(invoke).toHaveBeenCalledWith('accounts_remove', { request: { accountId: 'account', expectedRevision: 3 } })
+  })
   it('unwraps results and forwards only the selected account identifier', async () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: { id: 'test' }, requestId: 'request' })
     expect(await createDesktopClient().getAccount('test')).toEqual({ id: 'test' })

@@ -201,6 +201,25 @@ pub struct UpdateConnectionRequest {
     pub connection: ConnectionInput,
 }
 
+/// Removes only the account's local data; never deletes mail on its server.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoveAccountRequest {
+    pub account_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRemoval {
+    pub account_id: String,
+    /// Includes every deleted local draft so hosts can retire its editor.
+    pub draft_ids: Vec<String>,
+    /// Local removal committed; host-owned credentials will be retried later.
+    pub credentials_pending: bool,
+}
+
 /// Replaces the profile. Leaves `revision` and any running sync untouched;
 /// the last write wins.
 #[derive(Clone, Debug, Deserialize, TS)]

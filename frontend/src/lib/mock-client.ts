@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountRemoval,
   AccountConfigInput,
   Draft,
   DraftChanged,
@@ -67,10 +68,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const draftsByMutation = new Map<string, string>()
   const draftListeners = new Set<(change: DraftChanged) => void>()
   const lockedDrafts = new Set<string>()
+  const removedDrafts = new Set<string>()
+  const removals = new Map<string, { revision: number; result: AccountRemoval }>()
+  const removalListeners = new Set<(removal: AccountRemoval) => void>()
   const announceDraft = (change: DraftChanged) => draftListeners.forEach((listener) => listener(structuredClone(change)))
   const clone = <T,>(value: T) => structuredClone(value)
 
   function requireDraft(id: string) {
+    if (removedDrafts.has(id)) throw notFound()
     const draft = drafts.get(id) ?? adoptDraft(id)
     if (!draft) throw notFound()
     return draft
@@ -166,6 +171,34 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, updatedAt: new Date().toISOString() }
       return structuredClone(accounts[index])
     },
+    async removeAccount({ accountId, expectedRevision }) {
+      const receipt = removals.get(accountId)
+      if (receipt) {
+        if (receipt.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '', field: null })
+        removalListeners.forEach((listener) => listener(clone(receipt.result)))
+        return clone(receipt.result)
+      }
+      const index = accounts.findIndex((account) => account.id === accountId)
+      if (index < 0) throw notFound()
+      if (accounts[index].revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '', field: null })
+      // Check before changing any account data, just like the core transaction.
+      outbox.removeAccount(accountId)
+      const draftIds = [...drafts.values()].filter((draft) => draft.accountId === accountId).map((draft) => draft.id)
+      accounts.splice(index, 1)
+      for (let i = folders.length - 1; i >= 0; i--) if (folders[i].accountId === accountId) folders.splice(i, 1)
+      for (let i = emails.length - 1; i >= 0; i--) if (emails[i].summary.accountId === accountId) emails.splice(i, 1)
+      for (const draftId of draftIds) {
+        drafts.delete(draftId)
+        removedDrafts.add(draftId)
+        lockedDrafts.delete(draftId)
+      }
+      const result = { accountId, draftIds, credentialsPending: false }
+      removals.set(accountId, { revision: expectedRevision, result })
+      removalListeners.forEach((listener) => listener(clone(result)))
+      for (const draftId of draftIds) announceDraft({ accountId, draftId, change: 'deleted' })
+      return clone(result)
+    },
+    onAccountRemoved(listener) { removalListeners.add(listener); return () => { removalListeners.delete(listener) } },
     listFolders: async (accountId) => structuredClone(folders.filter((folder) => folder.accountId === accountId)),
     listSyncStates: async () =>
       accounts.map((account) => ({
@@ -277,6 +310,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async getDraft(id) { return clone(requireDraft(id)) },
     async updateDraft(request) {
       const draft = requireDraft(request.id)
+      if (request.accountId && !accounts.some((account) => account.id === request.accountId)) throw notFound()
       if (lockedDrafts.has(draft.id)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
       if (draft.revision !== request.expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
       const { id: _id, expectedRevision: _revision, accountId, ...content } = request
@@ -843,6 +877,17 @@ function createMockOutbox(stepMs: number) {
     subscribe(listener: (change: OutboxChanged) => void) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
+    },
+    removeAccount(accountId: string) {
+      const affected = [...items.values()].filter((item) => item.accountId === accountId)
+      if (affected.some((item) => item.state === 'sending')) throw new MailxClientError({ code: 'alreadySending', message: '', field: null })
+      for (const item of affected) {
+        clearTimeout(timers.get(item.id))
+        timers.delete(item.id)
+        plans.delete(item.id)
+        items.delete(item.id)
+      }
+      for (const [mutation, itemId] of byMutation) if (!items.has(itemId)) byMutation.delete(mutation)
     },
   }
 

@@ -6,6 +6,7 @@ fn main() {
             "accounts_list",
             "accounts_get",
             "accounts_create",
+            "accounts_remove",
             "accounts_update_connection",
             "accounts_update_profile",
             "accounts_verify_connection",

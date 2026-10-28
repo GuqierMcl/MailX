@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { Account } from '@/generated/accounts'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,7 +43,14 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
   const [confirmClose, setConfirmClose] = useState(false)
   const [savePrompt, setSavePrompt] = useState(false)
   const closing = useRef(false)
-  const accounts = useQuery({ queryKey: ['composer', 'accounts'], queryFn: () => client.listAccounts() })
+  const removed = useRef(false)
+  const [draftRemoved, setDraftRemoved] = useState(false)
+  const removedAccounts = useRef(new Set<string>())
+  const queryClient = useQueryClient()
+  const accounts = useQuery({
+    queryKey: ['composer', 'accounts'],
+    queryFn: async () => (await client.listAccounts()).filter((account) => !removedAccounts.current.has(account.id)),
+  })
 
   const title = subject.trim() || t('composer:window.newMail')
   useEffect(() => {
@@ -50,8 +58,26 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
   }, [title])
 
   const closeWindow = useCallback(() => {
+    if (removed.current) return
     void client.closeComposer().catch(() => undefined)
   }, [client])
+
+  useEffect(() => client.onAccountRemoved((report) => {
+    removedAccounts.current.add(report.accountId)
+    const key = ['composer', 'accounts']
+    void queryClient.cancelQueries({ queryKey: key })
+    queryClient.setQueryData<Account[]>(key, (rows) => rows?.filter((account) => !removedAccounts.current.has(account.id)))
+    void queryClient.invalidateQueries({ queryKey: key })
+    if (removed.current || !report.draftIds.includes(draftId)) return
+    removed.current = true
+    closing.current = true
+    setSavePrompt(false)
+    setConfirmClose(false)
+    // Unmount the editor immediately. This bypasses saving, deleting and restoring
+    // content; the backend already removed exactly the drafts in this report.
+    setDraftRemoved(true)
+    void client.closeComposer(true).catch(() => undefined)
+  }), [client, draftId, queryClient])
 
   // Writes the draft, drops it when empty, then closes. `askOnFailure` is for the
   // system's close request: if the write failed, the user decides. When the whole
@@ -65,12 +91,14 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
       return
     }
     const { ok } = await current.flush()
+    if (removed.current) return
     if (!ok && askOnFailure) {
       closing.current = false
       setConfirmClose(true)
       return
     }
     if (ok && current.isEmpty() && !current.isReadOnly()) await current.discard().catch(() => undefined)
+    if (removed.current) return
     closeWindow()
   }, [closeWindow])
 
@@ -85,6 +113,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
     if (current.isEmpty()) {
       closing.current = true
       await current.discard().catch(() => undefined)
+      if (removed.current) return
       closeWindow()
       return
     }
@@ -110,10 +139,12 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
       if (fresh) await current.discard()
       else await current.restoreBaseline()
     } catch {
+      if (removed.current) return
       closing.current = false
       toast.error(fresh ? t('composer:window.deleteFailed') : t('composer:window.restoreFailed'), { description: t('composer:window.keptOpen') })
       return
     }
+    if (removed.current) return
     closeWindow()
   }
 
@@ -125,7 +156,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
       <TitleBar host={host} title={title} />
       <div className="flex min-h-0 flex-1 pr-2 pb-2 pl-2">
         <Island>
-          <Composer
+          {!draftRemoved && <Composer
             client={client}
             draftId={draftId}
             accounts={accounts.data ?? []}
@@ -133,7 +164,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
             onSubjectChange={setSubject}
             onSent={closeWindow}
             onDiscarded={closeWindow}
-          />
+          />}
         </Island>
       </div>
       <AlertDialog open={savePrompt} onOpenChange={setSavePrompt}>

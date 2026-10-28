@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { emailQuery } from '@/features/mail/format'
 import { createMockClient } from './mock-client'
 
@@ -19,6 +19,50 @@ describe('mock email pagination', () => {
     expect(ids.length).toBeGreaterThan(2)
     expect(ids).toEqual(all.items.map((item) => item.id))
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('mock account removal', () => {
+  const content = { to: [{ name: null, address: 'test@example.com' }], cc: [], bcc: [], subject: 'local', bodyHtml: '<p>draft</p>' }
+
+  it('cancels queued delivery, removes local data and replays the same receipt without touching another account', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = createMockClient()
+      const [account, other] = await client.listAccounts()
+      const draft = await client.createDraft({ accountId: account.id, ...content, clientMutationId: 'draft' })
+      await client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: 'queue' })
+      const otherDraft = await client.createDraft({ accountId: other.id, ...content, clientMutationId: 'other' })
+      const removed = vi.fn()
+      const unsubscribe = client.onAccountRemoved(removed)
+      const request = { accountId: account.id, expectedRevision: account.revision }
+      const receipt = await client.removeAccount(request)
+      expect(receipt.draftIds).toEqual([draft.id])
+      expect(removed).toHaveBeenCalledWith(receipt)
+      await vi.runAllTimersAsync()
+      expect(await client.listOutbox({ includeAll: true })).toEqual([])
+      await expect(client.getDraft(draft.id)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+      expect(await client.getDraft(otherDraft.id)).toMatchObject({ accountId: other.id })
+      expect((await client.listEmails(emailQuery({}))).items.every((item) => item.accountId !== account.id)).toBe(true)
+      await expect(client.removeAccount(request)).resolves.toEqual(receipt)
+      await expect(client.removeAccount({ ...request, expectedRevision: account.revision + 1 })).rejects.toMatchObject({ failure: { code: 'conflict' } })
+      unsubscribe()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('rejects removal while sending with no local data loss', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = createMockClient({ sendStepMs: 100 })
+      const [account] = await client.listAccounts()
+      const draft = await client.createDraft({ accountId: account.id, ...content, clientMutationId: 'draft' })
+      await client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: 'queue' })
+      await vi.advanceTimersByTimeAsync(100)
+      await expect(client.removeAccount({ accountId: account.id, expectedRevision: account.revision })).rejects.toMatchObject({ failure: { code: 'alreadySending' } })
+      expect(await client.getAccount(account.id)).toEqual(account)
+      expect(await client.getDraft(draft.id)).toMatchObject({ id: draft.id })
+      await vi.runAllTimersAsync()
+    } finally { vi.useRealTimers() }
   })
 })
 

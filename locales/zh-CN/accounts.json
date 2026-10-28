@@ -160,5 +160,18 @@
   "verificationAuthUnavailable": "服务器不支持当前认证方式。",
   "verificationConfiguration": "连接配置不可用，请修改连接后重试。",
   "verificationSecretStore": "系统凭据库暂不可用，请解锁后重试。",
-  "verificationStale": "配置已改变，请重新验证当前连接。"
+  "verificationStale": "配置已改变，请重新验证当前连接。",
+  "removeAccount": "移除账号",
+  "removeAccountTitle": "移除“{{name}}”？",
+  "removeAccountDescription": "将移除此设备上的账号配置、凭证和本地邮件记录。服务器上的邮件不会被删除，再次添加后可以重新同步。",
+  "removeAccountComposerHint": "该账号的写信窗口将关闭，未保存内容、所有本地草稿和发件记录将一并移除。",
+  "removeAccountDeliveryHint": "已提交或结果不确定的邮件可能已经送达，移除账号不会撤回这些邮件。",
+  "removeAccountSummary": "本地草稿：{{drafts}} 封 · 等待发送：{{queued}} 封。",
+  "loadingRemovalSummary": "正在检查草稿和发件箱…",
+  "removeAccountUnknown": "另有 {{unknown}} 封邮件的发送结果尚不确定，可能已经送达；移除会清除这些本地记录。",
+  "removeAccountSending": "有邮件正在发送，请等待发送结束后再移除账号。",
+  "removeAccountConflict": "账号连接已改变，请重新加载后确认要移除的账号。",
+  "removingAccount": "正在移除…",
+  "accountRemoved": "账号已移除",
+  "credentialCleanupPending": "账号已从本机移除。部分凭证暂未清理，应用会在凭据库可用后重试。"
 }

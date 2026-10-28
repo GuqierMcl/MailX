@@ -10,7 +10,8 @@ use tokio::runtime::Handle;
 
 use crate::accounts::AccountService;
 use crate::accounts::types::{
-    Account, CreateAccountRequest, UpdateConnectionRequest, UpdateProfileRequest,
+    Account, AccountRemoval, CreateAccountRequest, RemoveAccountRequest, UpdateConnectionRequest,
+    UpdateProfileRequest,
 };
 use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
@@ -196,6 +197,36 @@ impl MailxCore {
         self.sync.restart(&account.id);
         self.outbox.start(&account.id);
         Ok(account)
+    }
+
+    /// Removes only local account data. The sending check and deletion share
+    /// the service lock, so a queue worker cannot claim a message between them.
+    pub fn remove_account(
+        &self,
+        request: RemoveAccountRequest,
+    ) -> Result<AccountRemoval, AppError> {
+        let removed = {
+            let mut service = self.accounts()?;
+            let removed = service.remove(request)?;
+            // All body work takes these locks in service -> flights order.
+            // The deletion has committed: retiring work must not report a
+            // cleanup failure as though the account were still present.
+            self.bodies.retire(&removed.account_id);
+            removed
+        };
+        self.sync.retire(&removed.account_id);
+        self.outbox.retire(&removed.account_id);
+        self.verification.invalidate(&removed.account_id);
+        self.events
+            .emit(&CoreEvent::AccountRemoved(removed.clone()));
+        for draft_id in &removed.draft_ids {
+            self.events.emit(&CoreEvent::DraftChanged(DraftChanged {
+                draft_id: draft_id.clone(),
+                account_id: removed.account_id.clone(),
+                change: DraftChange::Deleted,
+            }));
+        }
+        Ok(removed)
     }
 
     /// Replaces an account's connection and restarts its sync right away, so
@@ -541,6 +572,91 @@ mod tests {
             .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn account_removal_retires_sync_and_announces_every_deleted_draft() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = TempDir::new().unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let core = MailxCore::open(
+            directory.path(),
+            Arc::new(MemorySecrets::default()),
+            runtime.handle().clone(),
+            Arc::new(move |event: &CoreEvent| sink.lock().unwrap().push(event.clone())),
+        )
+        .unwrap();
+        let account = create(&core, closed_port());
+        let draft = core
+            .create_draft(
+                CreateDraftRequest {
+                    account_id: Some(account.id.clone()),
+                    to: vec![],
+                    cc: vec![],
+                    bcc: vec![],
+                    subject: "local draft".into(),
+                    body_html: "<p>text</p>".into(),
+                    client_mutation_id: Uuid::new_v4().to_string(),
+                },
+                "",
+            )
+            .unwrap();
+        assert_eq!(
+            core.remove_account(RemoveAccountRequest {
+                account_id: account.id.clone(),
+                expected_revision: account.revision + 1,
+            })
+            .unwrap_err()
+            .code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(core.get_draft(&draft.id).unwrap().id, draft.id);
+        assert!(
+            core.sync_states()
+                .iter()
+                .any(|state| state.account_id == account.id)
+        );
+        assert!(
+            !captured
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, CoreEvent::AccountRemoved(_)))
+        );
+        let removed = core
+            .remove_account(RemoveAccountRequest {
+                account_id: account.id.clone(),
+                expected_revision: account.revision,
+            })
+            .unwrap();
+        assert_eq!(removed.draft_ids, vec![draft.id.clone()]);
+        assert!(core.list_accounts().unwrap().is_empty());
+        assert!(core.sync_states().is_empty());
+        assert_eq!(
+            core.get_draft(&draft.id).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        // An update/create may have committed before removal but invoke these
+        // starts afterwards; neither may restore the removed runtime state.
+        core.sync.restart(&account.id);
+        core.outbox.wake(&account.id);
+        assert!(core.sync_states().is_empty());
+        let events = captured.lock().unwrap();
+        let removal_index = events
+            .iter()
+            .position(
+                |event| matches!(event, CoreEvent::AccountRemoved(value) if value == &removed),
+            )
+            .unwrap();
+        let deleted_index = events
+            .iter()
+            .position(|event| {
+                matches!(event, CoreEvent::DraftChanged(value)
+                if value.draft_id == draft.id && value.change == DraftChange::Deleted)
+            })
+            .unwrap();
+        assert!(removal_index < deleted_index);
     }
 
     #[test]

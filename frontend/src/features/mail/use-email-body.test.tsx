@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest'
 import type { EmailDetail } from '@/generated/accounts'
 import { exampleAccount, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { createQueryClient, mailKeys } from '@/lib/query-client'
+import type { MailxClient } from '@/lib/mailx-client'
+import { clearRemovedAccount } from './account-removal'
 import { bodyIdentity, useEmailBody } from './use-email-body'
 
 const account = exampleAccount()
@@ -32,6 +34,24 @@ function setup() {
 }
 
 describe('on-demand body queries', () => {
+  it('withdraws a download immediately when its account is removed before the next tree render', async () => {
+    const { client, cache, wrapper } = setup()
+    const listeners = new Set<Parameters<MailxClient['onAccountRemoved']>[0]>()
+    client.onAccountRemoved.mockImplementation((listener) => { listeners.add(listener); return () => { listeners.delete(listener) } })
+    const download = deferred<EmailDetail>()
+    client.fetchBody.mockReturnValue(download.promise)
+    const { result } = renderHook(() => useEmailBody(client, mail().summary, [account], { [account.id]: state }), { wrapper })
+    await waitFor(() => expect(client.fetchBody).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      const report = { accountId: account.id, draftIds: [], credentialsPending: false }
+      listeners.forEach((listener) => listener(report))
+      clearRemovedAccount(cache, report)
+      download.resolve(mail('one', true))
+    })
+    expect(result.current.identity).toBe('')
+    expect(cache.getQueriesData({ queryKey: mailKeys.email('one') }).some(([, data]) => (data as EmailDetail | undefined)?.body?.text === 'cached text')).toBe(false)
+  })
+
   it('downloads once in StrictMode, keeps ready metadata over old headers, and never retries failed DTOs automatically', async () => {
     const { client, wrapper } = setup()
     client.fetchBody.mockResolvedValueOnce({ ...mail(), summary: { ...mail().summary, bodyState: 'failed' }, bodyFailure: 'network' })

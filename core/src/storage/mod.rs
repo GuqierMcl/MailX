@@ -19,6 +19,7 @@ pub(crate) use flag_changes::{Flag, LocalChange, PendingChange};
 pub(crate) mod messages;
 mod migrations;
 pub(crate) mod outbox;
+mod removal;
 
 pub(crate) struct Storage {
     pub db: Connection,

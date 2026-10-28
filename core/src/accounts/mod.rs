@@ -1,6 +1,7 @@
 pub(crate) mod bodies;
 mod drafts;
 mod outbox;
+mod removal;
 pub(crate) use drafts::{DraftSource, local_offset};
 pub(crate) use outbox::Next;
 #[cfg(any(test, feature = "body-webview-test"))]
@@ -81,6 +82,12 @@ impl AccountService {
         validate_connection(&mut connection)?;
         validate_profile(&mut profile)?;
         validate_create_secrets(&connection)?;
+        if self
+            .storage
+            .create_request_was_removed(&request.request_id)?
+        {
+            return Err(AppError::new(ErrorCode::IdempotencyConflict));
+        }
         self.recover()?;
         let canonical = canonical_config(&profile, &connection)?;
         if let Some((id, saved)) = self.storage.create_request(&request.request_id)? {
@@ -184,6 +191,9 @@ impl AccountService {
     }
 
     fn recover(&mut self) -> Result<(), AppError> {
+        // A locked host store must never resurrect an account whose removal
+        // already committed, or prevent opening its remaining local data.
+        self.cleanup_removed_secrets().ok();
         for mut journal in self.storage.journals()? {
             if journal.applied {
                 self.cleanup(&journal).ok();
