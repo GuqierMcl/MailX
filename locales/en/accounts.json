@@ -113,7 +113,7 @@
   "discardChangesHint": "Changes to this form and any entered passwords will be cleared.",
   "continueEditing": "Keep editing",
   "discardChanges": "Discard changes",
-  "noColor": "No color",
+  "noColor": "None",
   "accountName": "Account name",
   "accountNamePlaceholder": "For example: Work email",
   "accountNameHint": "Only used for display in MailX.",

@@ -113,7 +113,7 @@
   "discardChangesHint": "当前表单的修改和已输入的密码将被清除。",
   "continueEditing": "继续编辑",
   "discardChanges": "放弃修改",
-  "noColor": "无颜色",
+  "noColor": "不标识",
   "accountName": "账号名称",
   "accountNamePlaceholder": "例如：工作邮箱",
   "accountNameHint": "只用于 MailX 中的显示。",

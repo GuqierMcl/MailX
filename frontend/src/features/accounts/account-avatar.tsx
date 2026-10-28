@@ -4,7 +4,7 @@ import { providerOf } from './providers'
 
 /**
  * A bundled provider mark when enabled, otherwise the account's initial.
- * Its identification color forms a thin border around the inset provider mark.
+ * An optional identification color forms a thin border around the inset mark.
  */
 export function AccountAvatar({ displayName, color, providerId, useProviderIcon = true, className }: {
   displayName: string
@@ -22,7 +22,7 @@ export function AccountAvatar({ displayName, color, providerId, useProviderIcon 
       style={color ? logo ? { borderColor: color } : { backgroundColor: color } : undefined}
       className={cn(
         'inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium select-none',
-        logo ? 'border border-border p-0.5'
+        logo ? 'border border-transparent p-0.5'
           : color ? 'text-white' : 'bg-muted text-muted-foreground ring-1 ring-border ring-inset',
         className,
       )}

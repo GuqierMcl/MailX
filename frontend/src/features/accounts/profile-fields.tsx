@@ -90,11 +90,13 @@ export function ProfileFields({ displayName, color, providerId, useProviderIcon 
                 onClick={() => !checked && onColorChange(choice.value)}
                 style={choice.value ? { backgroundColor: choice.value } : undefined}
                 className={cn(
-                  'flex size-7 items-center justify-center rounded-full text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50',
-                  !choice.value && 'bg-muted text-muted-foreground ring-1 ring-border ring-inset',
+                  'flex h-7 items-center justify-center rounded-full outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50',
+                  choice.value ? 'w-7 text-white' : 'border border-border px-2 text-xs font-medium text-muted-foreground',
                   checked && 'ring-2 ring-foreground ring-offset-2 ring-offset-background',
                 )}>
-                {checked && <HugeiconsIcon icon={Tick02Icon} className="size-4" strokeWidth={2.5} />}
+                {choice.value
+                  ? checked && <HugeiconsIcon icon={Tick02Icon} className="size-4" strokeWidth={2.5} />
+                  : choice.name}
               </button>
             )
           })}
