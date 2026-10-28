@@ -35,6 +35,7 @@ fn main() {
             "notifications_preview_sound",
             "window_get_chrome",
             "window_perform",
+            "window_set_theme",
             "drafts_create",
             "drafts_create_from",
             "drafts_list",

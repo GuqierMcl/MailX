@@ -117,13 +117,15 @@
 - 过滤与排序由面板自己做（`shouldFilter={false}`），保证"搜索"项始终第一；中文输入法组字期间的 `Enter` 由 `cmdk` 忽略。
 - 邮件预览目前只搜当前范围，不是跨邮箱搜索；跨邮箱搜索需要核心先提供查询。
 
-## 第二阶段：毛玻璃（Planned）
+## 第二阶段：毛玻璃（macOS 已实现，其余平台未做，实机未验证）
 
-第一阶段刻意不做毛玻璃，只改结构。之后的做法：
+第一阶段刻意不做毛玻璃，只改结构。现在的做法：
 
-- 画布层改为半透明并加 `backdrop-filter: blur(20px) saturate(180%)`；因为画布色已集中在 `.app-canvas`，只需要改这几个变量。
-- 浏览器 CSS 不能替代窗口级材质：真正的 vibrancy / 透明窗口需要在 `desktop/` 的 Rust 侧配置，三个平台的支持和降级方式要单独验证。
-- 岛保持不透明或高不透明度，以保证文字可读；描边与阴影沿用现有 token。
+- 窗口级材质只在 macOS 配置：`desktop/src/window_chrome.rs` 的 `style_builder` 让窗口透明并套用系统 `Menu` 材质（NSVisualEffectView，随窗口激活状态变化；换成 `Sidebar` 更淡，`HudWindow` 恒为深色不适用），因此需要 `macos-private-api` 特性与 `tauri.conf.json` 的 `macOSPrivateApi`（该特性不适用于 Mac App Store 分发）。Windows（Mica / Acrylic）与 Linux 没有实现，保持不透明画布。
+- `window_get_chrome` 返回 `translucent`，标题栏据此给 `<html>` 加 `data-translucent`；`index.css` 在该属性下把 `.app-canvas` 的 `--sidebar` 等变量改成半透明，所以画布色仍只在这几个变量里。浏览器预览没有窗口材质，`translucent` 恒为 false。
+- 系统材质跟随窗口自己的明暗，所以应用主题变化时前端调用 `window_set_theme`（`system` / `light` / `dark`），让窗口与页面一致；固定主题下同样半透明。
+- 没有使用 CSS `backdrop-filter`：它只能模糊页面内部，不能替代窗口级材质。
+- 岛保持不透明，以保证文字可读；描边与阴影沿用现有 token。
 
 ## 写信窗口（已实现界面，三平台实机未验证）
 

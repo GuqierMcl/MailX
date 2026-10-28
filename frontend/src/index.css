@@ -63,6 +63,21 @@ body { margin: 0; min-width: 320px; }
   --sidebar-accent: oklch(0.22 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
 }
+/* With a window material behind the webview the canvas lets it show through; islands stay opaque. */
+html[data-translucent],
+html[data-translucent] body {
+  background-color: transparent;
+}
+html[data-translucent] .app-canvas {
+  --sidebar: oklch(0.95 0 0 / 10%);
+  --sidebar-accent: oklch(0 0 0 / 7%);
+  --sidebar-border: oklch(0 0 0 / 10%);
+}
+html[data-translucent].dark .app-canvas {
+  --sidebar: oklch(0.115 0 0 / 10%);
+  --sidebar-accent: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 8%);
+}
 
 @theme inline {
   --font-heading: var(--font-sans);

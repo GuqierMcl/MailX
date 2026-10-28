@@ -4,7 +4,7 @@ import { useCallback, useContext, useMemo, useRef, useState, type MouseEvent, ty
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { TitleBarSlotsContext, type TitleBarSide, type TitleBarSlotElements } from './title-bar-slots'
-import { useWindowChrome } from './use-window-chrome'
+import { useTranslucentCanvas, useWindowChrome } from './use-window-chrome'
 import type { WindowAction, WindowButton, WindowHost, WindowPlatform } from './window-host'
 
 /** Elements that keep their own pointer behaviour instead of moving the window. */
@@ -71,6 +71,7 @@ type TitleBarProps = {
  */
 export function TitleBar({ host, title, children }: TitleBarProps) {
   const chrome = useWindowChrome(host)
+  useTranslucentCanvas(chrome)
   const register = useContext(TitleBarSlotsContext)?.register
   const leadingSlot = useCallback((element: HTMLElement | null) => register?.('leading', element), [register])
   const centerSlot = useCallback((element: HTMLElement | null) => register?.('center', element), [register])
