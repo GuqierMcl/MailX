@@ -305,7 +305,7 @@ export function ConnectionForm({
         )}
         <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
           <SettingsGroup title={t('accounts:emailAddress')} description={t(isQq ? 'accounts:qqEmailHint' : 'accounts:emailAddressDescription')}>
-            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={isQq ? "you@qq.com / you@foxmail.com" : "you@example.com"} inputMode="email" error={error} errorContext={isQq ? "qq" : undefined} />
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={isQq ? "you@qq.com" : "you@example.com"} inputMode="email" error={error} errorContext={isQq ? "qq" : undefined} />
           </SettingsGroup>
           {isQq && (
             <SettingsGroup title={t('accounts:authorizationCode')} description={t('accounts:qqAuthorizationCodeHint')}>

@@ -43,16 +43,18 @@ export const GENERIC_PROVIDER: MailProvider = {
   icon: Mail01Icon,
 }
 
+const QQ_DOMAINS = ['qq.com', 'vip.qq.com', 'foxmail.com'] as const
+
 export const QQ_PROVIDER: MailProvider = {
   id: 'qq',
   get name() { return t('accounts:qqProviderName') },
-  domain: 'qq.com / foxmail.com',
+  domain: QQ_DOMAINS.join(' / '),
   get description() { return t('accounts:qqProviderDescription') },
-  searchAliases: ['qq', 'foxmail', '腾讯', '腾讯邮箱', 'QQ邮箱'],
+  searchAliases: ['qq', 'foxmail', '腾讯', '腾讯邮箱', 'QQ邮箱', 'VIP邮箱'],
   logo: qqmailLogo,
   icon: Mail01Icon,
   preset: {
-    domains: ['qq.com', 'foxmail.com'],
+    domains: QQ_DOMAINS,
     imap: { host: 'imap.qq.com', port: 993, tls: 'implicit' },
     smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit' },
   },

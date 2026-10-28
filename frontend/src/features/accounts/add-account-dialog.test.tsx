@@ -89,9 +89,9 @@ describe('add account wizard', () => {
     })
   })
 
-  it.each(['123456789@qq.com', 'synthetic@qq.com', 'synthetic@foxmail.com'])('saves %s with the QQ preset from only an address and authorization code', async (emailAddress) => {
+  it.each(['123456789@qq.com', 'synthetic@qq.com', 'synthetic@vip.qq.com', 'Synthetic@VIP.QQ.COM', 'synthetic@foxmail.com'])('saves %s with the QQ preset from only an address and authorization code', async (emailAddress) => {
     const { client, dialog, onCreated } = renderDialog()
-    await chooseQq(dialog, emailAddress.endsWith('@foxmail.com') ? 'foxmail' : 'qq')
+    await chooseQq(dialog, emailAddress.split('@')[1])
     expect(within(dialog).getByText('高级设置')).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
     fillQqConnection(dialog, emailAddress)
