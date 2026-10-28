@@ -6,6 +6,8 @@ mod body_protocol;
 mod body_webview_test;
 mod commands;
 mod compose;
+#[cfg_attr(feature = "body-webview-test", allow(dead_code))]
+mod lifecycle;
 mod locale;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
@@ -16,6 +18,10 @@ mod secret_vault;
 mod state;
 #[cfg(not(feature = "body-webview-test"))]
 mod storage_location;
+#[cfg_attr(feature = "body-webview-test", allow(dead_code))]
+mod tray;
+#[cfg(target_os = "linux")]
+mod tray_support;
 #[cfg_attr(feature = "body-webview-test", allow(dead_code))]
 mod updater;
 mod window_access;
@@ -165,6 +171,8 @@ fn main() {
                 let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
                 app.manage(compose::Lifecycle::default());
+                app.manage(lifecycle::LifecycleState::default());
+                app.manage(tray::TrayState::default());
                 app.manage(updater::UpdaterState::default());
                 updater::start_scheduler(app.handle());
                 // Prepare the data directory before exposing business commands;
@@ -172,12 +180,19 @@ fn main() {
                 state.start_initialization();
                 notifications::on_click(app.handle());
                 window_chrome::create_main_window(app.handle())?;
+                lifecycle::setup(app.handle());
                 Ok(())
             }
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_get_startup_status,
             commands::app_retry_startup,
+            lifecycle::app_get_lifecycle,
+            lifecycle::app_resolve_close,
+            lifecycle::app_quit,
+            lifecycle::app_cancel_quit,
+            lifecycle::app_confirm_quit,
+            lifecycle::app_desktop_ready,
             commands::accounts_list,
             commands::accounts_get,
             commands::accounts_create,
@@ -227,6 +242,7 @@ fn main() {
             compose::outbox_resolve_unknown,
             compose::composer_open,
             compose::composer_close,
+            compose::composer_cancel_close,
             updater::updater_get_state,
             updater::updater_check,
             updater::updater_download,
@@ -237,15 +253,18 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build the MailX desktop host")
         .run(|_app, _event| {
-            // A quit from the menu or Cmd+Q gives open composers the same
-            // chance to save as closing the main window does.
+            // Explicit quit bypasses the main-window close preference and waits
+            // for UI persistence and active sending before committing exit.
             #[cfg(not(feature = "body-webview-test"))]
-            if let tauri::RunEvent::ExitRequested {
-                code: None, api, ..
-            } = &_event
-                && compose::main_close_requested(_app)
+            if let tauri::RunEvent::ExitRequested { api, .. } = &_event
+                && !compose::is_exiting(_app)
             {
                 api.prevent_exit();
+                compose::request_quit(_app);
+            }
+            #[cfg(all(target_os = "macos", not(feature = "body-webview-test")))]
+            if matches!(_event, tauri::RunEvent::Reopen { .. }) {
+                window_chrome::focus_main_window(_app);
             }
             // Every window is gone and every composer has saved: install a
             // downloaded update now, and relaunch when the user asked to.

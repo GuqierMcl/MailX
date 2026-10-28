@@ -37,7 +37,7 @@ describe('language settings synchronization', () => {
     const initial = await client.getSettings()
     client.getSettings.mockClear()
     const slow = deferred<SettingsSnapshot>()
-    const latest: SettingsSnapshot = { ...initial, revision: 2, effectiveLocale: 'en', settings: { ...initial.settings, general: { language: 'en', autoCheckUpdates: true } } }
+    const latest: SettingsSnapshot = { ...initial, revision: 2, effectiveLocale: 'en', settings: { ...initial.settings, general: { language: 'en', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false } } }
     client.getSettings.mockReturnValueOnce(slow.promise).mockResolvedValue(latest)
     let changed: ((change: { revision: number }) => void) | undefined
     client.onSettingsChanged.mockImplementation(async (listener) => { changed = listener; return () => undefined })
@@ -56,7 +56,7 @@ describe('language settings synchronization', () => {
     client.onSettingsChanged.mockRejectedValueOnce(new Error('temporary')).mockResolvedValue(stop)
     const view = render(<><SettingsSync client={client} /><LanguageProbe /></>)
     await waitFor(() => expect(client.getSettings).toHaveBeenCalled())
-    const latest = await client.updateSettings({ general: { language: 'en', autoCheckUpdates: true } })
+    const latest = await client.updateSettings({ general: { language: 'en', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false } })
     client.getSettings.mockResolvedValue(latest)
     act(() => window.dispatchEvent(new Event('focus')))
     expect(await screen.findByText('General')).toBeInTheDocument()
@@ -71,7 +71,7 @@ describe('language settings synchronization', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: '语言' }))
     await userEvent.click(await screen.findByRole('option', { name: 'English' }))
     await waitFor(() => expect(i18n.language).toBe('en'))
-    expect(client.updateSettings).toHaveBeenCalledWith({ general: { language: 'en', autoCheckUpdates: true } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ general: { language: 'en', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false } })
     expect(screen.getByRole('combobox', { name: 'Language' })).toHaveTextContent('English')
     expect(JSON.parse(localStorage.getItem('mailx.language')!)).toEqual({ language: 'en', effectiveLocale: 'en' })
   })

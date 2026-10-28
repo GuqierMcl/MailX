@@ -332,7 +332,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "general": { "language": "system", "autoCheckUpdates": true },
+                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -764,4 +764,149 @@ fn update_check_preference_defaults_on_and_survives_language_recovery() {
         .unwrap();
     assert_eq!(snapshot.settings.general.language, "en");
     assert!(snapshot.settings.general.auto_check_updates);
+}
+
+#[test]
+fn background_preferences_default_without_changing_legacy_language() {
+    let directory = TempDir::new().unwrap();
+    for general in [serde_json::json!({}), serde_json::json!({"language": "en"})] {
+        let value = serde_json::json!({"version": 1, "settings": {"general": general}});
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert_eq!(snapshot.settings.general.close_behavior, CloseBehavior::Ask);
+        assert!(!snapshot.settings.general.show_menu_bar_icon);
+        assert_eq!(
+            snapshot.settings.general.language,
+            general
+                .get("language")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("zh-CN")
+        );
+        assert!(!snapshot.recovered);
+    }
+}
+
+#[test]
+fn saved_background_preferences_recover_independently() {
+    let directory = TempDir::new().unwrap();
+    let cases = [
+        (
+            serde_json::json!({"language": 17, "autoCheckUpdates": false, "closeBehavior": "background", "showMenuBarIcon": true}),
+            "system",
+            false,
+            CloseBehavior::Background,
+            true,
+        ),
+        (
+            serde_json::json!({"language": "en", "autoCheckUpdates": "invalid", "closeBehavior": "quit", "showMenuBarIcon": true}),
+            "en",
+            true,
+            CloseBehavior::Quit,
+            true,
+        ),
+        (
+            serde_json::json!({"language": "en", "autoCheckUpdates": false, "closeBehavior": "invalid", "showMenuBarIcon": true}),
+            "en",
+            false,
+            CloseBehavior::Ask,
+            true,
+        ),
+        (
+            serde_json::json!({"language": "en", "closeBehavior": 4, "showMenuBarIcon": null}),
+            "en",
+            true,
+            CloseBehavior::Ask,
+            false,
+        ),
+        (
+            serde_json::json!({"language": "en", "closeBehavior": "background", "showMenuBarIcon": "yes"}),
+            "en",
+            true,
+            CloseBehavior::Background,
+            false,
+        ),
+    ];
+    for (general, language, auto_check_updates, close_behavior, show_menu_bar_icon) in cases {
+        let value = serde_json::json!({"version": 1, "settings": {"general": general, "appearance": {"theme": "dark"}}});
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert_eq!(
+            snapshot.settings.general,
+            GeneralSettings {
+                language: language.into(),
+                auto_check_updates,
+                close_behavior,
+                show_menu_bar_icon,
+            },
+            "{general}"
+        );
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+    }
+    let settings = AppSettings {
+        general: GeneralSettings {
+            language: "invalid".into(),
+            auto_check_updates: false,
+            close_behavior: CloseBehavior::Quit,
+            show_menu_bar_icon: true,
+        },
+        ..Default::default()
+    }
+    .sanitized();
+    assert_eq!(settings.general.language, "system");
+    assert!(!settings.general.auto_check_updates);
+    assert_eq!(settings.general.close_behavior, CloseBehavior::Quit);
+    assert!(settings.general.show_menu_bar_icon);
+}
+
+#[test]
+fn native_close_choice_preserves_current_settings_and_versions_the_commit() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    // Another window's edit lands while the native close prompt is open.
+    let latest = store
+        .patch(SettingsPatch {
+            general: Some(GeneralSettings {
+                language: "en".into(),
+                auto_check_updates: false,
+                show_menu_bar_icon: true,
+                ..Default::default()
+            }),
+            appearance: Some(AppearanceSettings {
+                theme: ThemeMode::Dark,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    let chosen = store.set_close_behavior(CloseBehavior::Background).unwrap();
+    let mut expected = latest.settings;
+    expected.general.close_behavior = CloseBehavior::Background;
+    assert_eq!(chosen.settings, expected);
+    assert_eq!(chosen.revision, latest.revision + 1);
+    assert!(chosen.stored);
+    assert!(!chosen.recovered);
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(restored.settings, expected);
+    assert_eq!(restored.revision, 0);
+    assert_eq!(restored.effective_locale, SupportedLocale::En);
+}
+
+#[test]
+fn failed_native_close_choice_does_not_change_memory_or_revision() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let before = store.get().unwrap();
+    fs::create_dir(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
+    assert!(store.set_close_behavior(CloseBehavior::Quit).is_err());
+    assert_eq!(store.get().unwrap(), before);
 }

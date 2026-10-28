@@ -16,12 +16,12 @@
 | `branding/mobile/ios/` | Tauri 生成的 iPhone / iPad / App Store 常见尺寸，RGB 无透明通道 | 后续 iOS 使用时的预备资源 |
 | `branding/fonts/` | 生成文字路径使用的固定 Inter 派生字体与 OFL 许可证 | 只用于离线生成，保证不同机器上的字标一致 |
 | `desktop/icons/` | 多尺寸 `icon.ico`、`icon.icns`、PNG、Windows 商店图标、主稿副本 | Tauri 桌面窗口及未来安装包 |
-| `desktop/icons/tray/` | 黑白透明图标 16 / 20 / 24 / 32 / 40 / 48 / 64 px；macOS template 22 / 44 px | 后续系统托盘功能 |
+| `desktop/icons/tray/` | 黑白透明图标 16 / 20 / 24 / 32 / 40 / 48 / 64 px；macOS template 22 / 44 px | macOS 菜单栏 template 资源；Windows/Linux 通知区域使用有底色的 32px 应用图标 |
 | `frontend/public/` | SVG / ICO / PNG favicon、180 px Apple Touch、Safari mask、主稿副本、Web manifest | 浏览器标签、网站收藏、当前页面 Logo |
 | `frontend/public/pwa/` | 192 / 512 px 普通和 maskable 图标 | 未来 Web 安装入口与系统裁切 |
 | `branding/generated-assets.json` | 每个生成文件的路径、字节数、SHA-256 与 PNG 尺寸 | 核对产物和发现过期资源 |
 
-桌面和前端目录中的图标是构建所需的生成副本，不是第二套设计源稿。移动端、托盘和 PWA 文件的存在仅表示准备了素材：当前没有移动端工程、托盘实现或 Service Worker，不能据此宣称这些功能已经可用。
+桌面和前端目录中的图标是构建所需的生成副本，不是第二套设计源稿。移动端、托盘和 PWA 文件的存在仅表示准备了素材：当前没有移动端工程或 Service Worker；托盘入口已接入 desktop，不能据此宣称这些功能已经可用。
 
 ## 选择合适的版本
 
@@ -32,7 +32,7 @@
 - **只要名称**：使用 `wordmark-black.svg` / `wordmark-white.svg`。所有字标已转成路径，不需要接收方安装字体。
 - **由系统裁切外形的场合**：使用 `app-maskable.svg` 或专用 maskable PNG。底色铺满，白色标记收在中心安全区，避免圆形裁切切掉图形。
 - **iOS / Apple Touch**：使用专用满底色 PNG。iOS 文件不含透明通道，不把透明圆角桌面图标直接用于应用商店。
-- **macOS 托盘**：`trayTemplate.png` 和 `trayTemplate@2x.png` 是黑色透明模板；未来接入时仍需通过宿主 API 启用 template 行为，文件名本身不会自动开启。
+- **macOS 托盘**：`trayTemplate.png` 和 `trayTemplate@2x.png` 是黑色透明模板；宿主已通过 API 启用 template 行为，文件名本身不会自动开启。
 
 favicon 在不改变标记的前提下收紧了画布留白。它与完整桌面图标是同一设计的不同用途导出，不能用 favicon 反向覆盖主稿。
 

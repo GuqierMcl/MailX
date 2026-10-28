@@ -30,7 +30,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoCheckUpdates: true }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
   let settingsRevision = 0
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
   return {
@@ -95,9 +95,11 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     resolveUnknown: vi.fn<MailxClient['resolveUnknown']>().mockRejectedValue(new Error('unused')),
     openComposer: vi.fn<MailxClient['openComposer']>().mockResolvedValue(undefined),
     closeComposer: vi.fn<MailxClient['closeComposer']>().mockResolvedValue(undefined),
+    cancelComposerClose: vi.fn<MailxClient['cancelComposerClose']>().mockResolvedValue(undefined),
     onOutbox: vi.fn<MailxClient['onOutbox']>().mockReturnValue(() => undefined),
     onDrafts: vi.fn<MailxClient['onDrafts']>().mockReturnValue(() => undefined),
     onAppClosing: vi.fn<MailxClient['onAppClosing']>().mockReturnValue(() => undefined),
+    onAppCloseCancelled: vi.fn<MailxClient['onAppCloseCancelled']>().mockReturnValue(() => undefined),
     onComposerCloseRequested: vi.fn<MailxClient['onComposerCloseRequested']>().mockReturnValue(() => undefined),
     getUpdateState: vi.fn<MailxClient['getUpdateState']>().mockResolvedValue({ canInstall: true, phase: 'idle' }),
     checkForUpdates: vi.fn<MailxClient['checkForUpdates']>().mockResolvedValue({ canInstall: true, phase: 'idle' }),

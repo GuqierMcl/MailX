@@ -334,12 +334,23 @@ export type LanguagePreference = "system" | "zh-CN" | "en";
 
 export type SupportedLocale = "zh-CN" | "en";
 
+export type CloseBehavior = "ask" | "background" | "quit";
+
 export type GeneralSettings = { language: LanguagePreference,
 /**
  * Check for a new version shortly after start and every few hours. Off,
  * only the manual check in Settings → About runs.
  */
-autoCheckUpdates: boolean, };
+autoCheckUpdates: boolean,
+/**
+ * Ask until the user chooses whether closing should keep MailX running.
+ * The desktop host applies platform and tray availability constraints.
+ */
+closeBehavior: CloseBehavior,
+/**
+ * Optional macOS menu bar shortcut; the Dock remains available.
+ */
+showMenuBarIcon: boolean, };
 
 export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
 

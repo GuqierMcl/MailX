@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mailx_core::{
@@ -35,15 +35,16 @@ pub(crate) const DRAFTS_EVENT: &str = "mailx://drafts";
 /// Every account picker must forget a removed account, including composers
 /// whose current draft belongs to a different account.
 pub(crate) const ACCOUNT_REMOVED_EVENT: &str = "mailx://account-removed";
-/// Pushed to every composer when the main window is closing: flush the draft,
-/// then call `composer_close`.
+/// Pushed to every composer for an explicit application quit: save, then acknowledge
+/// the generation with `composer_close`, or cancel with `composer_cancel_close`.
 const APP_CLOSING_EVENT: &str = "mailx://app-closing";
 /// Pushed to a composer when the system asked to close it (red button, Alt+F4,
 /// the drawn close button): flush the draft, then call `composer_close`.
 const CLOSE_REQUESTED_EVENT: &str = "mailx://composer-close-requested";
 
-/// How long the frontend gets to flush before the host closes anyway.
-pub(crate) const CLOSE_GRACE: Duration = Duration::from_secs(3);
+const CLOSE_CANCELLED_EVENT: &str = "mailx://app-close-cancelled";
+/// A slow draft or SMTP transaction cancels quitting; it never forces data loss.
+const QUIT_WAIT_LIMIT: Duration = Duration::from_secs(30);
 const WINDOW_WIDTH: f64 = 760.0;
 const WINDOW_HEIGHT: f64 = 680.0;
 const MIN_WIDTH: f64 = 520.0;
@@ -53,42 +54,141 @@ const CASCADE_STEP: f64 = 32.0;
 /// Composers cascade over this many positions, then start again.
 const CASCADE_SLOTS: usize = 8;
 
-/// Close bookkeeping shared by all windows.
+/// Window acknowledgements and explicit quit attempts share one generation space.
 #[derive(Default)]
 pub(crate) struct Lifecycle {
-    /// The main window is closing and the app will exit.
-    quitting: AtomicBool,
-    /// Every composer is gone and `exit` has been called; nothing holds back
-    /// the close that follows.
     exiting: AtomicBool,
-    /// Composers with an outstanding close request, by generation so a timer
-    /// never closes a window that reused the label.
-    pending: Mutex<HashMap<String, u64>>,
-    generation: AtomicU64,
+    control: Mutex<CloseControl>,
+    /// Only worker threads take this lock. A cancelled attempt resumes sending
+    /// before a later attempt pauses it, even when the first pause was delayed.
+    coordinator: Mutex<()>,
+}
+
+#[derive(Default)]
+struct CloseControl {
+    pending: HashMap<String, u64>,
+    quitting: Option<u64>,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CloseRequest {
+    generation: u64,
 }
 
 impl Lifecycle {
-    /// Records a close request; `None` when one is already outstanding.
     fn begin_close(&self, label: &str) -> Option<u64> {
-        let mut pending = self.pending.lock().ok()?;
-        if pending.contains_key(label) {
+        let mut control = self.control.lock().ok()?;
+        if control.quitting.is_some() {
             return None;
         }
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        pending.insert(label.to_owned(), generation);
+        if let Some(generation) = control.pending.get(label) {
+            return Some(*generation);
+        }
+        control.generation += 1;
+        let generation = control.generation;
+        control.pending.insert(label.to_owned(), generation);
         Some(generation)
     }
 
+    fn begin_quit(&self, labels: impl IntoIterator<Item = String>) -> Option<u64> {
+        let mut control = self.control.lock().ok()?;
+        if self.exiting.load(Ordering::SeqCst) || control.quitting.is_some() {
+            return None;
+        }
+        control.generation += 1;
+        let generation = control.generation;
+        control.quitting = Some(generation);
+        control.pending = labels
+            .into_iter()
+            .map(|label| (label, generation))
+            .collect();
+        Some(generation)
+    }
+
+    #[cfg(test)]
     fn is_pending(&self, label: &str, generation: u64) -> bool {
-        self.pending
+        self.control
             .lock()
-            .is_ok_and(|pending| pending.get(label) == Some(&generation))
+            .is_ok_and(|control| control.pending.get(label) == Some(&generation))
+    }
+
+    fn accepts_close(&self, label: &str, generation: Option<u64>, force: bool) -> bool {
+        if force {
+            return true;
+        }
+        self.control.lock().is_ok_and(|control| match generation {
+            Some(generation) => control.pending.get(label) == Some(&generation),
+            None => !control.pending.contains_key(label),
+        })
+    }
+
+    fn current_quit(&self) -> Option<u64> {
+        self.control
+            .lock()
+            .ok()
+            .and_then(|control| control.quitting)
+    }
+
+    fn cancel(&self, request: Option<(&str, u64)>) -> Option<CloseRequest> {
+        let mut control = self.control.lock().ok()?;
+        if self.exiting.load(Ordering::SeqCst) {
+            return None;
+        }
+        if let Some((label, generation)) = request {
+            if control.pending.get(label) != Some(&generation) {
+                return None;
+            }
+            if control.quitting.is_none() {
+                control.pending.remove(label);
+                return Some(CloseRequest { generation });
+            }
+        }
+        let generation = control.quitting.take()?;
+        control.pending.clear();
+        Some(CloseRequest { generation })
+    }
+
+    fn cancel_generation(&self, generation: u64) -> Option<CloseRequest> {
+        let mut control = self.control.lock().ok()?;
+        if self.exiting.load(Ordering::SeqCst) || control.quitting != Some(generation) {
+            return None;
+        }
+        control.quitting = None;
+        control.pending.clear();
+        Some(CloseRequest { generation })
     }
 
     fn finish(&self, label: &str) {
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.remove(label);
+        if let Ok(mut control) = self.control.lock() {
+            control.pending.remove(label);
         }
+    }
+
+    fn confirm_main(&self, generation: u64) -> Result<(), AppError> {
+        let mut control = self
+            .control
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        if control.quitting != Some(generation)
+            || control.pending.get(MAIN_WINDOW) != Some(&generation)
+        {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
+        control.pending.remove(MAIN_WINDOW);
+        Ok(())
+    }
+
+    fn complete_quit(&self, generation: u64) -> bool {
+        let Ok(control) = self.control.lock() else {
+            return false;
+        };
+        if control.quitting != Some(generation) || !control.pending.is_empty() {
+            return false;
+        }
+        self.exiting.store(true, Ordering::SeqCst);
+        true
     }
 }
 
@@ -191,10 +291,10 @@ struct OpenArgs {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CloseArgs {
-    /// Accepted for the contract; the host closes either way, because the
-    /// frontend has already flushed (or given up) before calling.
-    #[serde(rename = "force")]
-    _force: bool,
+    /// Account removal has already deleted the draft and may bypass an outstanding close.
+    force: bool,
+    #[serde(default)]
+    generation: Option<u64>,
 }
 
 #[tauri::command]
@@ -446,11 +546,17 @@ pub(crate) async fn composer_open(
     });
     let result = async {
         let (id, fresh) = args?;
+        if is_quitting(&app) {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
         let text = id.hyphenated().to_string();
         // The draft must exist; a window for nothing is never created.
         state
             .run(move |core| core.get_draft(&text).map(|_| ()))
             .await?;
+        if is_quitting(&app) {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
         open_composer(&app, &id, fresh).map_err(|_| AppError::new(ErrorCode::Internal))
     }
     .await;
@@ -467,10 +573,36 @@ pub(crate) async fn composer_close(
 ) -> Result<ApiResult<()>, ()> {
     let args =
         authorize(&window, "composer_close").and_then(|_| parse::<CloseArgs>(request.body()));
-    Ok(respond(args.and_then(|_| {
+    Ok(respond(args.and_then(|args| {
+        if !window.app_handle().state::<Lifecycle>().accepts_close(
+            window.label(),
+            args.generation,
+            args.force,
+        ) {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
         window
             .destroy()
             .map_err(|_| AppError::new(ErrorCode::Internal))
+    })))
+}
+
+/// Cancels an ordinary window close or the matching whole-application quit.
+#[tauri::command]
+pub(crate) async fn composer_cancel_close(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "composer_cancel_close")
+        .and_then(|_| parse::<CloseRequest>(request.body()));
+    Ok(respond(args.map(|request| {
+        let app = window.app_handle();
+        if let Some(cancelled) = app
+            .state::<Lifecycle>()
+            .cancel(Some((window.label(), request.generation)))
+        {
+            close_cancelled(app, cancelled);
+        }
     })))
 }
 
@@ -580,7 +712,7 @@ fn placement(app: &AppHandle, slot: usize) -> Option<(f64, f64)> {
 }
 
 /// Installs close handling on a window: composers hand the close to their
-/// page first; the main window hands the whole app's close to every composer.
+/// page first; the main window follows its own background/quit preference.
 pub(crate) fn watch_close(window: &WebviewWindow) {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
@@ -589,13 +721,12 @@ pub(crate) fn watch_close(window: &WebviewWindow) {
     };
     window.on_window_event(move |event| match (event, kind) {
         (WindowEvent::CloseRequested { api, .. }, WindowKind::Main) => {
-            if main_close_requested(&app) {
+            if !is_exiting(&app) {
                 api.prevent_close();
+                crate::lifecycle::close_main_requested(&app);
             }
         }
         (WindowEvent::CloseRequested { api, .. }, WindowKind::Composer(_)) => {
-            // Always intercepted: only `composer_close` (destroy) or the
-            // timer below ends the window.
             api.prevent_close();
             composer_close_requested(&app, &label);
         }
@@ -612,85 +743,124 @@ fn composer_close_requested(app: &AppHandle, label: &str) {
     let Some(lifecycle) = app.try_state::<Lifecycle>() else {
         return;
     };
-    // While the app is quitting every composer already has its request.
-    if lifecycle.quitting.load(Ordering::SeqCst) {
-        return;
-    }
     let Some(generation) = lifecycle.begin_close(label) else {
         return;
     };
     let _ = app.emit_to(
         EventTarget::webview_window(label),
         CLOSE_REQUESTED_EVENT,
-        (),
+        CloseRequest { generation },
     );
-    let app = app.clone();
-    let label = label.to_owned();
-    std::thread::spawn(move || {
-        std::thread::sleep(CLOSE_GRACE);
-        let Some(lifecycle) = app.try_state::<Lifecycle>() else {
-            return;
-        };
-        // Still waiting for the page, and the window is still the same one.
-        if lifecycle.is_pending(&label, generation)
-            && let Some(window) = app.get_webview_window(&label)
-        {
-            let _ = window.destroy();
-        }
-        lifecycle.finish(&label);
-    });
 }
 
-/// A quit that waits for open composers to save first, like Cmd+Q does.
+pub(crate) fn is_exiting(app: &AppHandle) -> bool {
+    app.try_state::<Lifecycle>()
+        .is_some_and(|state| state.exiting.load(Ordering::SeqCst))
+}
+
+pub(crate) fn is_quitting(app: &AppHandle) -> bool {
+    app.try_state::<Lifecycle>()
+        .is_some_and(|state| state.current_quit().is_some())
+}
+
+pub(crate) fn quit_generation(app: &AppHandle) -> Option<u64> {
+    app.try_state::<Lifecycle>()
+        .and_then(|state| state.current_quit())
+}
+
+pub(crate) fn confirm_main_quit(app: &AppHandle, generation: u64) -> Result<(), AppError> {
+    app.state::<Lifecycle>().confirm_main(generation)
+}
+
+pub(crate) fn cancel_quit_generation(app: &AppHandle, generation: u64) {
+    if let Some(state) = app.try_state::<Lifecycle>()
+        && let Some(cancelled) = state.cancel_generation(generation)
+    {
+        close_cancelled(app, cancelled);
+    }
+}
+
+fn close_cancelled(app: &AppHandle, cancelled: CloseRequest) {
+    let _ = app.emit(CLOSE_CANCELLED_EVENT, cancelled);
+    crate::updater::cancel_restart(app);
+    crate::lifecycle::publish(app);
+}
+
+pub(crate) fn cancel_quit(app: &AppHandle) {
+    if let Some(state) = app.try_state::<Lifecycle>()
+        && let Some(cancelled) = state.cancel(None)
+    {
+        close_cancelled(app, cancelled);
+    }
+}
+
+/// An explicit quit saves composers and lets active SMTP transactions finish.
+/// No ordinary window close enters this path. A cancelled/expired generation
+/// cannot close a window or terminate a subsequent session.
 pub(crate) fn request_quit(app: &AppHandle) {
-    if !main_close_requested(app) {
-        app.exit(0);
-    }
-}
-
-/// Returns whether the app's exit is held back (main window closed, or a
-/// quit from the menu / Cmd+Q). Without composers
-/// there is nothing to wait for and the app exits as it always did.
-pub(crate) fn main_close_requested(app: &AppHandle) -> bool {
-    if let Some(lifecycle) = app.try_state::<Lifecycle>() {
-        if lifecycle.exiting.load(Ordering::SeqCst) {
-            return false;
-        }
-        if lifecycle.quitting.load(Ordering::SeqCst) {
-            // Already waiting; a second click does not start another round.
-            return true;
-        }
-    }
-    let composers = composer_windows(app);
-    if composers.is_empty() {
-        return false;
-    }
     let Some(lifecycle) = app.try_state::<Lifecycle>() else {
-        return false;
+        return;
     };
-    lifecycle.quitting.store(true, Ordering::SeqCst);
+    let composers = composer_windows(app);
+    let labels = composers
+        .iter()
+        .map(|window| window.label().to_owned())
+        .chain(crate::lifecycle::main_ready(app).then(|| MAIN_WINDOW.to_owned()));
+    let Some(generation) = lifecycle.begin_quit(labels) else {
+        return;
+    };
+    crate::lifecycle::publish(app);
     for window in &composers {
         let _ = app.emit_to(
             EventTarget::webview_window(window.label()),
             APP_CLOSING_EVENT,
-            (),
+            CloseRequest { generation },
         );
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + CLOSE_GRACE;
-        while std::time::Instant::now() < deadline && !composer_windows(&app).is_empty() {
+        let lifecycle = app.state::<Lifecycle>();
+        let _coordinator = lifecycle
+            .coordinator
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if lifecycle.current_quit() != Some(generation) {
+            return;
+        }
+        let core = app
+            .try_state::<DesktopState>()
+            .and_then(|state| state.core().ok());
+        if let Some(core) = &core {
+            core.begin_shutdown();
+        }
+        let deadline = std::time::Instant::now() + QUIT_WAIT_LIMIT;
+        loop {
+            if lifecycle.current_quit() != Some(generation) {
+                if let Some(core) = &core {
+                    core.cancel_shutdown();
+                }
+                return;
+            }
+            if composer_windows(&app).is_empty()
+                && core.as_ref().is_none_or(|core| core.shutdown_idle())
+                && lifecycle.complete_quit(generation)
+            {
+                app.exit(0);
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                if let Some(cancelled) = lifecycle.cancel_generation(generation) {
+                    close_cancelled(&app, cancelled);
+                    crate::lifecycle::quit_timed_out(&app);
+                }
+                if let Some(core) = &core {
+                    core.cancel_shutdown();
+                }
+                return;
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
-        for window in composer_windows(&app) {
-            let _ = window.destroy();
-        }
-        if let Some(lifecycle) = app.try_state::<Lifecycle>() {
-            lifecycle.exiting.store(true, Ordering::SeqCst);
-        }
-        app.exit(0);
     });
-    true
 }
 
 #[cfg(test)]
@@ -783,18 +953,62 @@ mod tests {
     fn a_close_request_is_recorded_once_per_window_and_generation() {
         let lifecycle = Lifecycle::default();
         let first = lifecycle.begin_close("composer-a").unwrap();
-        assert!(lifecycle.begin_close("composer-a").is_none());
+        assert_eq!(lifecycle.begin_close("composer-a"), Some(first));
         let other = lifecycle.begin_close("composer-b").unwrap();
         assert_ne!(first, other);
         assert!(lifecycle.is_pending("composer-a", first));
-        // The window went away and the label was reused: the old timer must
-        // not close the new window.
+        // A late acknowledgement must not close a new window with this label.
         lifecycle.finish("composer-a");
         assert!(!lifecycle.is_pending("composer-a", first));
         let second = lifecycle.begin_close("composer-a").unwrap();
         assert_ne!(first, second);
         assert!(!lifecycle.is_pending("composer-a", first));
         assert!(lifecycle.is_pending("composer-a", second));
+    }
+
+    #[test]
+    fn cancelling_a_close_allows_the_window_to_be_closed_again() {
+        let lifecycle = Lifecycle::default();
+        let first = lifecycle.begin_close("composer-a").unwrap();
+        assert!(lifecycle.cancel(Some(("composer-a", first))).is_some());
+        let second = lifecycle.begin_close("composer-a").unwrap();
+        assert_ne!(first, second);
+        assert!(lifecycle.cancel(Some(("composer-a", first))).is_none());
+        assert!(lifecycle.is_pending("composer-a", second));
+    }
+
+    #[test]
+    fn cancelled_quit_acknowledgements_cannot_complete_a_later_quit() {
+        let lifecycle = Lifecycle::default();
+        let first = lifecycle.begin_quit(["composer-a".to_owned()]).unwrap();
+        assert!(lifecycle.begin_close("composer-b").is_none());
+        assert!(lifecycle.cancel(Some(("composer-a", first))).is_some());
+        let second = lifecycle.begin_quit(["composer-a".to_owned()]).unwrap();
+        assert!(!lifecycle.is_pending("composer-a", first));
+        assert!(!lifecycle.accepts_close("composer-a", Some(first), false));
+        assert!(!lifecycle.accepts_close("composer-a", None, false));
+        assert!(lifecycle.accepts_close("composer-a", Some(second), false));
+        assert!(lifecycle.accepts_close("composer-a", None, true));
+        assert!(lifecycle.cancel_generation(first).is_none());
+        assert!(!lifecycle.complete_quit(first));
+        assert!(!lifecycle.complete_quit(second));
+        lifecycle.finish("composer-a");
+        assert!(lifecycle.complete_quit(second));
+        assert!(lifecycle.cancel(None).is_none());
+    }
+
+    #[test]
+    fn main_settings_ack_is_required_and_bound_to_the_quit_attempt() {
+        let lifecycle = Lifecycle::default();
+        let first = lifecycle.begin_quit([MAIN_WINDOW.to_owned()]).unwrap();
+        assert!(!lifecycle.complete_quit(first));
+        lifecycle.cancel_generation(first).unwrap();
+        let second = lifecycle.begin_quit([MAIN_WINDOW.to_owned()]).unwrap();
+        assert!(lifecycle.confirm_main(first).is_err());
+        assert!(!lifecycle.complete_quit(second));
+        lifecycle.confirm_main(second).unwrap();
+        assert!(lifecycle.confirm_main(second).is_err());
+        assert!(lifecycle.complete_quit(second));
     }
 
     #[test]
