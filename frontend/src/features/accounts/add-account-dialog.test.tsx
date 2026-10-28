@@ -5,7 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, type MailProvider } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -121,6 +121,7 @@ describe('add account wizard', () => {
   it.each([
     { provider: NETEASE_163_PROVIDER, emailAddress: 'Synthetic@163.COM', domain: '163.com' },
     { provider: NETEASE_126_PROVIDER, emailAddress: 'Synthetic@126.COM', domain: '126.com' },
+    { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'Synthetic@YEAH.NET', domain: 'yeah.net' },
   ])('adds $provider.id through the authorization-code flow and keeps the original login identity', async ({ provider, emailAddress, domain }) => {
     const { client, dialog, onCreated } = renderDialog()
     await chooseProvider(dialog, provider)
@@ -154,6 +155,7 @@ describe('add account wizard', () => {
   it.each([
     { provider: NETEASE_163_PROVIDER, emailAddress: 'synthetic@126.com' },
     { provider: NETEASE_126_PROVIDER, emailAddress: 'synthetic@163.com' },
+    { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'synthetic@163.com' },
   ])('keeps the other NetEase domain out of $provider.id and clears its entered authorization code', async ({ provider, emailAddress }) => {
     const { client, dialog } = renderDialog()
     await chooseProvider(dialog, provider)
@@ -181,7 +183,7 @@ describe('add account wizard', () => {
     expect(client.createAccount).not.toHaveBeenCalled()
   })
 
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('returns a rejected $id credential to an empty field while preserving the address', async (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('returns a rejected $id credential to an empty field while preserving the address', async (provider) => {
     const client = testClient()
     client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'sharedPassword', message: 'PRIVATE_SYNTHETIC_SERVER_RESPONSE' }))
     const { dialog } = renderDialog(client)

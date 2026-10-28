@@ -1,8 +1,10 @@
 import { t } from '@/i18n'
 import type { IconSvgElement } from '@hugeicons/react'
 import { Mail01Icon } from '@hugeicons/core-free-icons'
-import qqmailLogo from '@/assets/providers/qqmail.png'
-import neteaseLogo from '@/assets/providers/netease.png'
+import qqmailLogo from '@/assets/providers/qqmail.svg'
+import netease163Logo from '@/assets/providers/netease-163.svg'
+import netease126Logo from '@/assets/providers/netease-126.svg'
+import neteaseYeahLogo from '@/assets/providers/netease-yeah.svg'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -88,15 +90,15 @@ export const QQ_PROVIDER: MailProvider = {
   },
 }
 
-function neteaseProvider(id: string, domain: '163.com' | '126.com'): MailProvider {
-  const brand = domain === '163.com' ? '163' : '126'
+function neteaseProvider(id: string, domain: '163.com' | '126.com' | 'yeah.net', logo: string): MailProvider {
+  const brand = domain === 'yeah.net' ? 'yeah.net' : domain.split('.')[0]
   return {
     id,
     get name() { return t('accounts:neteaseProviderName', { brand }) },
     domain,
     get description() { return t('accounts:neteaseProviderDescription', { domain }) },
     searchAliases: ['网易', '网易邮箱', 'NetEase', brand],
-    logo: neteaseLogo,
+    logo,
     icon: Mail01Icon,
     preset: {
       domains: [domain],
@@ -119,10 +121,11 @@ function neteaseProvider(id: string, domain: '163.com' | '126.com'): MailProvide
   }
 }
 
-export const NETEASE_163_PROVIDER = neteaseProvider('netease163', '163.com')
-export const NETEASE_126_PROVIDER = neteaseProvider('netease126', '126.com')
+export const NETEASE_163_PROVIDER = neteaseProvider('netease163', '163.com', netease163Logo)
+export const NETEASE_126_PROVIDER = neteaseProvider('netease126', '126.com', netease126Logo)
+export const NETEASE_YEAH_PROVIDER = neteaseProvider('neteaseYeah', 'yeah.net', neteaseYeahLogo)
 
-export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, GENERIC_PROVIDER]
+export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, GENERIC_PROVIDER]
 
 /** Address errors use only the preset's reviewed domains and localized guidance. */
 export function providerEmailRequired(provider: MailProvider): string {

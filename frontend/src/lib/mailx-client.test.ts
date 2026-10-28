@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { createDesktopClient, MailxClientError } from './mailx-client'
 import { emailQuery } from '@/features/mail/format'
+import type { ConnectionInput } from '@/generated/accounts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 
@@ -182,5 +183,70 @@ describe('saved connection verification', () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'help' })
     await client.openProviderHelp('qq')
     expect(invoke).toHaveBeenCalledWith('accounts_open_provider_help', { providerId: 'qq' })
+  })
+})
+
+describe('unsaved connection verification boundary', () => {
+  const connection: ConnectionInput = {
+    emailAddress: 'synthetic@163.com', providerId: 'netease163',
+    imap: { host: 'imap.163.com', port: 993, tls: 'implicit', username: 'synthetic@163.com' },
+    smtp: { host: 'smtp.163.com', port: 465, tls: 'implicit', username: 'synthetic@163.com' },
+    authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-authorization-code' } },
+    route: { kind: 'custom', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080, dns: 'proxy', imageProxyDns: false, confirmImageProxyDns: false,
+      authentication: { username: 'proxy-user', password: { action: 'replace', value: 'synthetic-proxy-secret' } } },
+  }
+  const protocols = {
+    imap: { status: 'verified', stage: 'complete', code: null },
+    smtp: { status: 'failed', stage: 'authentication', code: 'authentication' },
+  }
+
+  it('tests the complete transient connection and stops listening for cancellation after its bound report completes', async () => {
+    vi.mocked(invoke).mockImplementation(async (_command, args) => {
+      const { verificationId } = (args as { request: { verificationId: string } }).request
+      return { ok: true, data: { verificationId, ...protocols }, requestId: 'test' }
+    })
+    const controller = new AbortController()
+    const result = await createDesktopClient().verifyDraftConnection(connection, controller.signal)
+    expect(result).toMatchObject(protocols)
+    expect(result.verificationId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('accounts_verify_draft_connection', { request: { verificationId: result.verificationId, connection } })
+    controller.abort()
+    expect(invoke).toHaveBeenCalledOnce()
+  })
+
+  it('cancels one unique attempt without cancelling a concurrent test or accepting a late success', async () => {
+    const complete = new Map<string, (value: unknown) => void>()
+    vi.mocked(invoke).mockImplementation((command, args) => {
+      if (command !== 'accounts_verify_draft_connection') return Promise.resolve({ ok: true, data: null, requestId: 'cancel' })
+      const { verificationId } = (args as { request: { verificationId: string } }).request
+      return new Promise((resolve) => { complete.set(verificationId, resolve) })
+    })
+    const client = createDesktopClient()
+    const controller = new AbortController()
+    const first = client.verifyDraftConnection(connection, controller.signal).catch((error: unknown) => error)
+    const second = client.verifyDraftConnection(connection)
+    const [firstId, secondId] = [...complete.keys()]
+    expect(firstId).not.toBe(secondId)
+    controller.abort()
+    expect(invoke).toHaveBeenLastCalledWith('accounts_cancel_draft_verification', { request: { verificationId: firstId } })
+    complete.get(secondId)!({ ok: true, data: { verificationId: secondId, ...protocols }, requestId: 'second' })
+    await expect(second).resolves.toMatchObject({ verificationId: secondId, ...protocols })
+    complete.get(firstId)!({ ok: true, data: { verificationId: firstId, ...protocols }, requestId: 'first' })
+    expect(await first).toMatchObject({ name: 'AbortError' })
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      'accounts_verify_draft_connection', 'accounts_verify_draft_connection', 'accounts_cancel_draft_verification',
+    ])
+  })
+
+  it('refuses a report from a different attempt', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: { verificationId: 'different-attempt', ...protocols }, requestId: 'wrong' })
+    await expect(createDesktopClient().verifyDraftConnection(connection)).rejects.toBeInstanceOf(MailxClientError)
+  })
+
+  it('does not start a test which was already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(createDesktopClient().verifyDraftConnection(connection, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

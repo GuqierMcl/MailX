@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, QQ_PROVIDER } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -66,10 +66,11 @@ describe('QQ provider domain boundary', () => {
 })
 
 describe.each([
-  [NETEASE_163_PROVIDER, '163.com', '126.com'],
-  [NETEASE_126_PROVIDER, '126.com', '163.com'],
-] as const)('NetEase provider domain boundary: %s', (provider, domain, otherDomain) => {
-  it.each([otherDomain, `sub.${domain}`, `${domain}.evil`, `evil${domain}`, 'qq.com', 'vip.163.com', 'vip.126.com', 'yeah.net'])('rejects %s before submitting a credential', (unsupportedDomain) => {
+  { provider: NETEASE_163_PROVIDER, domain: '163.com' },
+  { provider: NETEASE_126_PROVIDER, domain: '126.com' },
+  { provider: NETEASE_YEAH_PROVIDER, domain: 'yeah.net' },
+])('NetEase provider domain boundary: $domain', ({ provider, domain }) => {
+  it.each([...['163.com', '126.com', 'yeah.net'].filter((other) => other !== domain), `sub.${domain}`, `${domain}.evil`, `evil${domain}`, 'qq.com', 'vip.163.com', 'vip.126.com'])('rejects %s before submitting a credential', (unsupportedDomain) => {
     const draft = initialDraft(null, provider)
     draft.emailAddress = `synthetic@${unsupportedDomain}`
     draft.sharedPassword.value = 'synthetic-authorization-code'

@@ -12,7 +12,8 @@
 
 ### Feature
 
-- 新增网易 163 / 126 邮箱添加入口，显示网易官方图标，预填加密收发服务器并提供客户端授权码指引。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
+- 添加邮箱时可在保存前测试当前收信与发信登录，支持取消、修改后重测，也可跳过测试继续添加。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
+- 新增网易 163 / 126 / yeah.net 邮箱添加入口，显示各自的服务商图标，预填加密收发服务器并提供客户端授权码指引。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 账号管理支持移除本机账号，清理本地邮件、草稿和发件记录；发送中保护、凭证清理重试和写信窗口联动避免误发或恢复已移除账号。
 - QQ 邮箱 / Foxmail 添加入口：支持 @qq.com、@vip.qq.com 和 @foxmail.com，显示 QQ 邮箱图标，预填收发服务器并提供授权码指引；账号设置支持分别验证收信与发信登录。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 本地优先的桌面邮件工作台预览：经账号路由登录 IMAP，同步文件夹与邮件头，提供统一收件箱、本地头部搜索与分页。
@@ -23,6 +24,7 @@
 
 ### Optimization
 
+- QQ 邮箱改用企鹅标识，163 / 126 / yeah.net 使用独立图标，所有邮箱服务商图标统一为经过压缩的 SVG。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 账号管理的添加按钮移至列表右上角并使用强调色；已选择服务商的账号默认使用服务商图标，可在每个账号的资料中单独关闭。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 添加账号和修改连接时，IMAP / SMTP 登录用户名留空会使用邮箱地址。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))
 - 添加账号的服务商选择改为 Logo、名称与短描述的单行列表，支持按名称、域名和关键词搜索。 ([#40](https://github.com/GuqierMcl/MailX/pull/40))

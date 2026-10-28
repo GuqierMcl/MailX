@@ -5,7 +5,7 @@ import type { AccountConnectionVerification } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { ConnectionVerification } from './connection-verification'
 import { exampleAccount, testClient } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, QQ_PROVIDER } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 function report(accountId: string, revision: number): AccountConnectionVerification {
   return {
@@ -31,7 +31,7 @@ describe('account connection verification', () => {
     expect(client.queueSend).not.toHaveBeenCalled()
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('keeps IMAP success distinct from SMTP authentication failure and offers $id authorization help', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('keeps IMAP success distinct from SMTP authentication failure and offers $id authorization help', async (provider) => {
     const account = exampleAccount({ providerId: provider.id })
     const client = testClient([account])
     client.verifyAccountConnection.mockResolvedValue({
@@ -48,7 +48,7 @@ describe('account connection verification', () => {
     expect(screen.queryByText('登录验证通过，尚未测试实际投递。')).not.toBeInTheDocument()
   })
 
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('explains a $id mailbox policy refusal separately from a rejected authorization code', async (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('explains a $id mailbox policy refusal separately from a rejected authorization code', async (provider) => {
     const account = exampleAccount({ providerId: provider.id })
     const client = testClient([account])
     client.verifyAccountConnection.mockResolvedValue({

@@ -1,7 +1,7 @@
 import { render } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { AccountAvatar } from './account-avatar'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, QQ_PROVIDER } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 describe('account avatar', () => {
   it('defaults a known provider to its bundled logo while retaining the account color and requested size', () => {
@@ -25,7 +25,7 @@ describe('account avatar', () => {
     expect(avatar).toHaveStyle({ backgroundColor: '#16a34a' })
   })
 
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('reuses the account icon preference for $id without a network logo lookup', (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('reuses the account icon preference for $id without a network logo lookup', (provider) => {
     const { container, rerender } = render(<AccountAvatar displayName="网易邮箱" color="#2563eb" providerId={provider.id} />)
     const logo = container.querySelector('img')!
     expect(logo).toHaveAttribute('src', provider.logo)

@@ -49,6 +49,11 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
       imap: { status: 'verified', stage: 'complete', code: null },
       smtp: { status: 'verified', stage: 'complete', code: null },
     })),
+    verifyDraftConnection: vi.fn<MailxClient['verifyDraftConnection']>().mockResolvedValue({
+      verificationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      imap: { status: 'verified', stage: 'complete', code: null },
+      smtp: { status: 'verified', stage: 'complete', code: null },
+    }),
     openProviderHelp: vi.fn<MailxClient['openProviderHelp']>().mockResolvedValue(undefined),
     listFolders: vi.fn<MailxClient['listFolders']>().mockResolvedValue([]),
     listSyncStates: vi.fn<MailxClient['listSyncStates']>().mockResolvedValue(rows.map((account) => exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId }))),

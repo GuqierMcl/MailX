@@ -42,9 +42,10 @@ pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use flags::{FlagChange, MessageFlag};
 pub use verification::{
-    AccountConnectionVerification, CancelConnectionVerification, ConnectionVerificationCode,
-    ConnectionVerificationStage, ConnectionVerificationStatus, ProtocolVerification,
-    VerifyAccountConnection,
+    AccountConnectionVerification, CancelConnectionVerification, CancelDraftVerification,
+    ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
+    DraftConnectionVerification, ProtocolVerification, VerifyAccountConnection,
+    VerifyDraftConnection,
 };
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
@@ -62,6 +63,7 @@ pub struct MailxCore {
     images: Arc<crate::storage::image_cache::ImageCache>,
     events: Events,
     verification: Arc<verification::VerificationRegistry>,
+    draft_verification: Arc<verification::VerificationRegistry>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -164,6 +166,7 @@ impl MailxCore {
             images,
             events,
             verification: Arc::default(),
+            draft_verification: Arc::default(),
         })
     }
 

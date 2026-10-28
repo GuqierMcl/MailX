@@ -1,4 +1,4 @@
-//! Bounded, read-only diagnostics for an explicitly selected saved connection.
+//! Bounded, read-only diagnostics for saved connections and unsaved new accounts.
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -8,13 +8,31 @@ use tokio::sync::watch;
 use ts_rs::TS;
 
 use super::MailxCore;
+use crate::accounts::draft_connection;
+use crate::accounts::types::ConnectionInput;
 use crate::accounts::{sync_plan::PlanError, validate_uuid};
 use crate::error::{AppError, ErrorCode};
 use crate::imap::{self, ImapError};
-use crate::net::NetError;
+use crate::net::{NetError, NetRoute};
 use crate::smtp::{self, FailureReason, SmtpOutcome};
 
 const BUDGET: Duration = Duration::from_secs(45);
+// The main window has one add-account form. Its unsaved attempts share one
+// slot, independently of diagnostics for existing saved accounts.
+const DRAFT_SLOT: &str = "draft";
+
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VerifyDraftConnection {
+    pub verification_id: String,
+    pub connection: ConnectionInput,
+}
+
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CancelDraftVerification {
+    pub verification_id: String,
+}
 
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -99,6 +117,14 @@ impl ProtocolVerification {
 pub struct AccountConnectionVerification {
     pub account_id: String,
     pub revision: u32,
+    pub imap: ProtocolVerification,
+    pub smtp: ProtocolVerification,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftConnectionVerification {
+    pub verification_id: String,
     pub imap: ProtocolVerification,
     pub smtp: ProtocolVerification,
 }
@@ -225,6 +251,59 @@ impl VerificationRegistry {
 }
 
 impl MailxCore {
+    /// Tests only the supplied new-account configuration. It never acquires the
+    /// account service, writes durable state, or resolves stored credentials.
+    pub async fn verify_draft_connection(
+        &self,
+        request: VerifyDraftConnection,
+    ) -> Result<DraftConnectionVerification, AppError> {
+        let deadline = tokio::time::Instant::now() + BUDGET;
+        validate_uuid(&request.verification_id, "verificationId")?;
+        let (_registration, cancelled) = self
+            .draft_verification
+            .start(DRAFT_SLOT, &request.verification_id)?;
+        let mut result = bounded(deadline, cancelled.clone(), async {
+            let prepare_control = cancelled.clone();
+            let plan = tokio::task::spawn_blocking(move || {
+                check_active(&prepare_control, deadline)?;
+                let plan = draft_connection::prepare(request.connection)?;
+                check_active(&prepare_control, deadline)?;
+                Ok::<_, AppError>(plan)
+            })
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))??;
+            Ok::<_, AppError>(tokio::join!(
+                verify_imap(&plan.route, &plan.imap),
+                verify_smtp(&plan.route, &plan.smtp),
+            ))
+        })
+        .await;
+        let final_control = *cancelled.borrow();
+        if final_control != VerificationControl::Active {
+            result = Err(final_control);
+        } else if tokio::time::Instant::now() >= deadline {
+            result = Err(VerificationControl::TimedOut);
+        }
+        let (imap, smtp) = match result {
+            Ok(result) => result?,
+            Err(reason) => interrupted(reason),
+        };
+        Ok(DraftConnectionVerification {
+            verification_id: request.verification_id,
+            imap,
+            smtp,
+        })
+    }
+
+    pub fn cancel_draft_verification(
+        &self,
+        request: CancelDraftVerification,
+    ) -> Result<(), AppError> {
+        validate_uuid(&request.verification_id, "verificationId")?;
+        self.draft_verification
+            .cancel(DRAFT_SLOT, &request.verification_id)
+    }
+
     /// Checks a saved version without fetching mail, changing flags, or sending.
     pub async fn verify_account_connection(
         &self,
@@ -267,37 +346,13 @@ impl MailxCore {
             let imap = async {
                 match plans.0 {
                     Err(error) => plan_failure(error),
-                    Ok(plan) => {
-                        // The receive guard bounds unsolicited responses as well
-                        // as command timeouts; no LIST result is collected.
-                        let mut session =
-                            match imap::open_body_session(&plan.route, &plan.login).await {
-                                Ok(session) => session,
-                                Err(error) => return imap_failure(error),
-                            };
-                        let result = session.verify_noop().await;
-                        let _ = session.logout().await;
-                        match result {
-                            Ok(()) => ProtocolVerification::verified(),
-                            Err(error) => imap_failure(error),
-                        }
-                    }
+                    Ok(plan) => verify_imap(&plan.route, &plan.login).await,
                 }
             };
             let smtp = async {
                 match plans.1 {
                     Err(error) => plan_failure(error),
-                    Ok(plan) => match smtp::verify_connection(
-                        &plan.route,
-                        &plan.login,
-                        &smtp::Timeouts::default(),
-                        &smtp::TlsSource::Platform,
-                    )
-                    .await
-                    {
-                        Ok(()) => ProtocolVerification::verified(),
-                        Err(error) => smtp_failure(error),
-                    },
+                    Ok(plan) => verify_smtp(&plan.route, &plan.login).await,
                 }
             };
             let (imap, smtp) = tokio::join!(imap, smtp);
@@ -334,16 +389,7 @@ impl MailxCore {
             Err(VerificationControl::Invalidated) => {
                 return Err(AppError::new(ErrorCode::Conflict));
             }
-            Err(reason) => {
-                let code = if reason == VerificationControl::TimedOut {
-                    ConnectionVerificationCode::Timeout
-                } else {
-                    ConnectionVerificationCode::Cancelled
-                };
-                let failed =
-                    ProtocolVerification::failed(ConnectionVerificationStage::Connection, code);
-                (failed.clone(), failed)
-            }
+            Err(reason) => interrupted(reason),
         };
         Ok(AccountConnectionVerification {
             account_id: request.account_id,
@@ -361,6 +407,49 @@ impl MailxCore {
         validate_uuid(&request.verification_id, "verificationId")?;
         self.verification
             .cancel(&request.account_id, &request.verification_id)
+    }
+}
+
+fn interrupted(reason: VerificationControl) -> (ProtocolVerification, ProtocolVerification) {
+    let code = if reason == VerificationControl::TimedOut {
+        ConnectionVerificationCode::Timeout
+    } else {
+        ConnectionVerificationCode::Cancelled
+    };
+    let failed = ProtocolVerification::failed(ConnectionVerificationStage::Connection, code);
+    (failed.clone(), failed)
+}
+
+async fn verify_imap(route: &NetRoute, login: &imap::ImapLogin) -> ProtocolVerification {
+    // The receive guard bounds unsolicited responses as well as command
+    // timeouts. This opens no mailbox and never issues LIST or FETCH.
+    let session = match imap::open_body_session(route, login).await {
+        Ok(session) => session,
+        Err(error) => return imap_failure(error),
+    };
+    verify_authenticated_imap(session).await
+}
+
+async fn verify_authenticated_imap(mut session: imap::Session) -> ProtocolVerification {
+    let result = session.verify_noop().await;
+    let _ = session.logout().await;
+    match result {
+        Ok(()) => ProtocolVerification::verified(),
+        Err(error) => imap_failure(error),
+    }
+}
+
+async fn verify_smtp(route: &NetRoute, login: &smtp::SmtpLogin) -> ProtocolVerification {
+    match smtp::verify_connection(
+        route,
+        login,
+        &smtp::Timeouts::default(),
+        &smtp::TlsSource::Platform,
+    )
+    .await
+    {
+        Ok(()) => ProtocolVerification::verified(),
+        Err(error) => smtp_failure(error),
     }
 }
 
@@ -448,5 +537,7 @@ fn smtp_failure(outcome: SmtpOutcome) -> ProtocolVerification {
     ProtocolVerification::failed(stage, code)
 }
 
+#[cfg(test)]
+mod draft_tests;
 #[cfg(test)]
 mod tests;

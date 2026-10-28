@@ -138,6 +138,10 @@ verificationId: string, };
 
 export type CancelConnectionVerification = { accountId: string, verificationId: string, };
 
+export type VerifyDraftConnection = { verificationId: string, connection: ConnectionInput, };
+
+export type CancelDraftVerification = { verificationId: string, };
+
 export type ConnectionVerificationStatus = "verified" | "failed";
 
 export type ConnectionVerificationStage = "configuration" | "connection" | "tls" | "authentication" | "mailbox" | "complete";
@@ -147,6 +151,8 @@ export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMiss
 export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
 
 export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, };
+
+export type DraftConnectionVerification = { verificationId: string, imap: ProtocolVerification, smtp: ProtocolVerification, };
 
 export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
 

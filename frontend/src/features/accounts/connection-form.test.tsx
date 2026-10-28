@@ -6,7 +6,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import type { AccountDraft } from './account-draft'
 import { ConnectionForm } from './connection-form'
 import { exampleAccount } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
+import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
 
 type Submit = (connection: ConnectionInput, draft: AccountDraft) => Promise<void> | void
 
@@ -72,7 +72,7 @@ describe('connection form', () => {
     })
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
     const account = exampleAccount({
       providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}`,
       imap: { host: 'imap.custom.example', port: 1993, tls: 'implicit', username: 'receive-identity@qq.com' },
@@ -96,7 +96,7 @@ describe('connection form', () => {
     })
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
     const account = exampleAccount({ providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}` })
     renderForm(account, () => {
       throw new MailxClientError({ code: 'validation', field: 'imap.host', message: '服务器无效。' })
@@ -163,7 +163,7 @@ describe('connection form', () => {
     expect(submit.mock.calls[0][0].authentication).toEqual({ kind: 'password', mode: 'separate', imapPassword: { action: 'replace', value: 'receive-secret' }, smtpPassword: { action: 'replace', value: 'send-secret' } })
   })
 
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER])('clears an in-flight $id authorization code and prevents duplicate submissions', async (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('clears an in-flight $id authorization code and prevents duplicate submissions', async (provider) => {
     let finish!: () => void
     const { submit } = renderForm(null, () => new Promise<void>((resolve) => { finish = resolve }), provider)
     fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: `synthetic@${provider.preset!.domains[0]}` } })
