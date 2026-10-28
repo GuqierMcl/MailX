@@ -2873,7 +2873,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-core"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "ammonia",
  "async-imap",
@@ -2912,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-desktop"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "gtk",
  "keyring",

@@ -14,9 +14,9 @@
 
 - 添加邮箱时可在保存前测试当前收信与发信登录，支持取消、修改后重测，也可跳过测试继续添加。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 新增网易 163 / 126 / yeah.net 邮箱添加入口，显示各自的服务商图标，预填加密收发服务器并提供客户端授权码指引。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
-- macOS 主窗口与写信窗口的侧栏与标题栏使用系统毛玻璃材质（跟随应用主题）。
-- 邮箱列表内容超出时，上下边缘渐隐，提示还有更多内容。
-- 账号管理支持移除本机账号，清理本地邮件、草稿和发件记录；发送中保护、凭证清理重试和写信窗口联动避免误发或恢复已移除账号。
+- macOS 主窗口与写信窗口的侧栏与标题栏使用系统毛玻璃材质（跟随应用主题）。 ([#43](https://github.com/GuqierMcl/MailX/pull/43))
+- 邮箱列表内容超出时，上下边缘渐隐，提示还有更多内容。 ([#43](https://github.com/GuqierMcl/MailX/pull/43))
+- 账号管理支持移除本机账号，清理本地邮件、草稿和发件记录；发送中保护、凭证清理重试和写信窗口联动避免误发或恢复已移除账号。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - QQ 邮箱 / Foxmail 添加入口：支持 @qq.com、@vip.qq.com 和 @foxmail.com，显示 QQ 邮箱图标，预填收发服务器并提供授权码指引；账号设置支持分别验证收信与发信登录。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 本地优先的桌面邮件工作台预览：经账号路由登录 IMAP，同步文件夹与邮件头，提供统一收件箱、本地头部搜索与分页。
 - 按需下载并缓存邮件正文，在隔离的阅读视图中显示；支持已读 / 星标写回、附件保存与新邮件通知。
@@ -42,8 +42,9 @@
 
 ### Changed
 
+- 从 0.1.0-alpha.4 升级时，本地数据库自动从 v10 升级到 v12，以支持移除账号和服务商图标偏好；旧版无法直接打开升级后的数据，如需降级，请使用升级前的数据备份。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - 下载页的安装包文件名改为按系统命名（如 `MailX_<版本>_macos-arm64.dmg`、`MailX_<版本>_windows-x64-setup.exe`），便于直接按操作系统选择。
-- 此前的预览版（0.1.0-alpha.1、0.1.0-alpha.2）不含应用内更新，需要手动下载安装本版本一次；从本版本起可以在应用内更新。
-- 应用标识改为 `com.mailxapp.desktop`，用户数据目录改为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目改用服务名 `MailX`。此前版本的数据留在旧目录、旧凭据不会自动迁移：需要把旧目录里的内容移到新目录，并重新输入各账号的密码或授权码。
+- 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
+- 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
 [Unreleased]: https://github.com/GuqierMcl/MailX/commits/main
