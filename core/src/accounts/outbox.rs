@@ -319,6 +319,16 @@ impl AccountService {
         Ok(Step { changed, next })
     }
 
+    /// Keeps the `SIZE` the server advertised on the last session. `None` (no
+    /// usable `EHLO`) changes nothing; `Some(0)` is the protocol's "no stated
+    /// limit" and stores nothing, so an older hint is cleared rather than kept.
+    pub(crate) fn record_smtp_size(&self, account_id: &str, size: Option<u64>) {
+        if let Some(size) = size {
+            // Best effort: a failed hint write must not disturb settling the send.
+            let _ = self.storage.set_smtp_size_limit(account_id, Some(size));
+        }
+    }
+
     pub(crate) fn outbox_data_started(&self, id: &str, now: DateTime<Utc>) -> Result<(), AppError> {
         self.storage.mark_data_started(id, now)
     }

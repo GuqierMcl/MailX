@@ -8,12 +8,15 @@ use crate::{
 };
 
 impl AccountService {
-    /// What a draft of this account may carry. One default now; provider
-    /// metadata overrides it later (sending.md section 16.4).
+    /// What a draft of this account may carry. The enforced limits are one
+    /// default; the server's last advertised `SIZE` only adds a hint
+    /// (sending.md section 16.4).
     pub fn attachment_policy(&self, account_id: &str) -> Result<AttachmentPolicy, AppError> {
         validate_uuid(account_id, "accountId")?;
         if self.storage.account_exists(account_id)? {
-            Ok(AttachmentPolicy::default())
+            Ok(AttachmentPolicy::with_server_size(
+                self.storage.smtp_size_limit(account_id)?,
+            ))
         } else {
             Err(AppError::new(ErrorCode::NotFound))
         }

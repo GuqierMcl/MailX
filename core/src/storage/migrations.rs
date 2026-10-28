@@ -111,6 +111,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["outbox"],
         sql: include_str!("migrations/0014_outbox_snapshot_blob.sql"),
     },
+    Migration {
+        version: 15,
+        description: "account SMTP size limit",
+        required_tables: &["accounts"],
+        sql: include_str!("migrations/0015_account_smtp_size_limit.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -515,7 +521,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 14);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 15);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -686,7 +692,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            14
+            15
         );
     }
 

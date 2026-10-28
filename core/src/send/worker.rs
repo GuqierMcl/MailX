@@ -228,7 +228,7 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                         None => Err(OutboxError::reason("snapshotMissing")),
                         Some(mime) => {
                             let hook = data_started(&shared, &service, item_id.clone());
-                            let outcome = smtp::send_with_tls(
+                            let attempt = smtp::send_with_tls(
                                 &plan.route,
                                 &plan.login,
                                 &job.envelope,
@@ -238,7 +238,15 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                                 hook,
                             )
                             .await;
-                            Ok(outcome)
+                            let account_id = job.item.account_id.clone();
+                            let size = attempt.advertised_size;
+                            blocking(&service, move |service| {
+                                service.record_smtp_size(&account_id, size);
+                                Ok(())
+                            })
+                            .await
+                            .ok();
+                            Ok(attempt.outcome)
                         }
                     },
                 };

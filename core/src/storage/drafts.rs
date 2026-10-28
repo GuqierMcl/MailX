@@ -88,6 +88,33 @@ impl Storage {
         )?)
     }
 
+    /// Last `SIZE` the account's SMTP server advertised, in bytes of whole
+    /// MIME. `None` when nothing was learned or the server names no limit.
+    pub(crate) fn smtp_size_limit(&self, id: &str) -> Result<Option<u64>, AppError> {
+        let value: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT smtp_size_limit FROM accounts WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(value.and_then(|v| u64::try_from(v).ok()))
+    }
+
+    /// Remembers the advertised `SIZE`; `None` clears it (the server now names
+    /// no limit). A missing account is not an error: it may have been removed
+    /// while the send was in flight.
+    pub(crate) fn set_smtp_size_limit(&self, id: &str, size: Option<u64>) -> Result<(), AppError> {
+        let value = size.and_then(|v| i64::try_from(v).ok()).filter(|v| *v > 0);
+        self.db.execute(
+            "UPDATE accounts SET smtp_size_limit = ?2 WHERE id = ?1",
+            rusqlite::params![id, value],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn account_address(&self, id: &str) -> Result<String, AppError> {
         self.db
             .query_row(

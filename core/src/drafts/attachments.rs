@@ -51,6 +51,11 @@ pub struct AttachmentPolicy {
     #[ts(type = "number")]
     pub max_total_bytes: u64,
     pub max_count: u32,
+    /// Raw attachment capacity, in whole MB, that the account's SMTP server
+    /// advertised (`SIZE` / 1.37 for base64 and MIME overhead, rounded down).
+    /// Only a hint for the composer; `maxTotalBytes` stays the enforced limit.
+    /// `None` until a send has learned it.
+    pub server_limit_mb: Option<u32>,
 }
 
 impl Default for AttachmentPolicy {
@@ -58,8 +63,27 @@ impl Default for AttachmentPolicy {
         Self {
             max_total_bytes: 20 * 1024 * 1024,
             max_count: 20,
+            server_limit_mb: None,
         }
     }
+}
+
+impl AttachmentPolicy {
+    /// The default policy plus what the server's `SIZE` says. `SIZE 0` is the
+    /// protocol's "no stated limit" and counts as nothing learned.
+    pub fn with_server_size(size: Option<u64>) -> Self {
+        Self {
+            server_limit_mb: size.filter(|size| *size > 0).map(server_limit_mb),
+            ..Self::default()
+        }
+    }
+}
+
+/// MB of raw attachment a message of `size` bytes can carry: base64 grows
+/// content by 4/3 and line breaks and headers add a little more, ~1.37 overall.
+fn server_limit_mb(size: u64) -> u32 {
+    let raw = u128::from(size) * 100 / 137;
+    u32::try_from(raw / (1024 * 1024)).unwrap_or(u32::MAX)
 }
 
 /// Adds a file to a draft; the bytes travel beside the request, not in it.
@@ -186,6 +210,30 @@ fn by_extension(file_name: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_server_size_becomes_a_rounded_down_attachment_hint() {
+        // 26 MiB of MIME carries about 19 MiB of raw bytes before rounding.
+        assert_eq!(
+            AttachmentPolicy::with_server_size(Some(26 * 1024 * 1024)).server_limit_mb,
+            Some(18)
+        );
+        assert_eq!(
+            AttachmentPolicy::with_server_size(None).server_limit_mb,
+            None
+        );
+        assert_eq!(AttachmentPolicy::default().server_limit_mb, None);
+        // A tiny limit rounds down to 0 rather than claiming room that is not there.
+        assert_eq!(
+            AttachmentPolicy::with_server_size(Some(1024)).server_limit_mb,
+            Some(0)
+        );
+        // `SIZE 0` means the server stated no limit.
+        assert_eq!(
+            AttachmentPolicy::with_server_size(Some(0)).server_limit_mb,
+            None
+        );
+    }
 
     #[test]
     fn file_names_lose_paths_and_control_characters() {

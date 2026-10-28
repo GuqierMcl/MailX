@@ -87,7 +87,9 @@ pub struct RejectedRecipientInfo {
 #[serde(rename_all = "camelCase")]
 pub struct OutboxError {
     /// A fixed code such as `connect`, `authRejected`, `recipientsRejected`,
-    /// `rejectedAfterData`, `retryExhausted`, `accountChanged`, `unknown`.
+    /// `messageTooLarge` (the server named a size limit and refused, before the
+    /// body at `MAIL FROM` or in the final reply), `rejectedAfterData`,
+    /// `retryExhausted`, `accountChanged`, `unknown`.
     pub reason: String,
     #[ts(type = "number | null")]
     pub smtp_code: Option<u16>,

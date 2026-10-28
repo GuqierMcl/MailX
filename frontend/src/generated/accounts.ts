@@ -463,7 +463,14 @@ export type AttachmentPolicy = {
 /**
  * Sum of the raw attachment bytes of one draft.
  */
-maxTotalBytes: number, maxCount: number, };
+maxTotalBytes: number, maxCount: number,
+/**
+ * Raw attachment capacity, in whole MB, that the account's SMTP server
+ * advertised (`SIZE` / 1.37 for base64 and MIME overhead, rounded down).
+ * Only a hint for the composer; `maxTotalBytes` stays the enforced limit.
+ * `None` until a send has learned it.
+ */
+serverLimitMb: number | null, };
 
 export type OutboxState = "queued" | "sending" | "accepted" | "failed" | "unknown" | "canceled";
 
@@ -480,7 +487,9 @@ text: string, };
 export type OutboxError = {
 /**
  * A fixed code such as `connect`, `authRejected`, `recipientsRejected`,
- * `rejectedAfterData`, `retryExhausted`, `accountChanged`, `unknown`.
+ * `messageTooLarge` (the server named a size limit and refused, before the
+ * body at `MAIL FROM` or in the final reply), `rejectedAfterData`,
+ * `retryExhausted`, `accountChanged`, `unknown`.
  */
 reason: string, smtpCode: number | null, text: string | null, rejected: Array<RejectedRecipientInfo>, };
 

@@ -190,6 +190,35 @@ fn release_snapshots(tx: &rusqlite::Connection, draft_id: &str, now: &str) -> Re
     Ok(())
 }
 
+/// Header sync of a `sent` folder: every accepted item of the account whose
+/// Message-ID is among `message_ids` (as the parser reports them, without angle
+/// brackets) now has its server copy. Records that copy and lets go of the
+/// snapshot (sending.md section 16.7). Matches by Message-ID only, never by
+/// subject or time, and only items already settled as `accepted`: `queued`,
+/// `sending` and `unknown` keep their snapshot. Idempotent: an item with a
+/// recorded copy is not touched again, so nothing is released twice or revived.
+/// Returns how many items were matched.
+pub(super) fn release_matched_snapshots(
+    tx: &rusqlite::Connection,
+    account_id: &str,
+    message_ids: &[&str],
+    now: &str,
+) -> Result<usize, AppError> {
+    let mut statement = tx.prepare_cached(
+        "UPDATE outbox SET server_copy_message_id = message_id, snapshot_hash = NULL,
+             snapshot_size = NULL, snapshot_released_at = ?3
+         WHERE account_id = ?1 AND state = 'accepted'
+           AND trim(message_id, '<>') = ?2 AND server_copy_message_id IS NULL",
+    )?;
+    let mut matched = 0;
+    for message_id in message_ids {
+        // `message_ids` come without angle brackets; the outbox keeps the
+        // header as it was sent, with them.
+        matched += statement.execute(params![account_id, message_id, now])?;
+    }
+    Ok(matched)
+}
+
 impl Storage {
     /// Moves snapshots that predate migration 14 out of `outbox.mime` into the
     /// blob store. Idempotent: the blob is written (and synced) before the row

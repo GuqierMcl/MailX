@@ -361,6 +361,46 @@ async fn the_item_is_sent_when_the_undo_window_ends_and_then_cannot_be_canceled(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_advertised_size_is_kept_on_the_account_for_the_composer_hint() {
+    let fx = fixture();
+    // 26 MB of whole MIME is about 18 MB of attachments after the 1.37 factor.
+    let size = 26 * 1024 * 1024;
+    let (port, _seen) = fx.server(|s| s.size = Some(size)).await;
+    let account = fx.account("lin@example.com", port);
+    let before = fx.core.attachment_policy(&account.id).unwrap();
+    assert_eq!(before.server_limit_mb, None);
+    let draft = fx.draft(&account);
+    let item = fx.queue(&draft, 0);
+    fx.reaches(&item.id, OutboxState::Accepted).await;
+    fx.settle().await;
+    let after = fx.core.attachment_policy(&account.id).unwrap();
+    assert_eq!(after.server_limit_mb, Some(18));
+    // Only a hint: the enforced limits are unchanged.
+    assert_eq!(
+        (after.max_total_bytes, after.max_count),
+        (20 * 1024 * 1024, 20)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_without_size_leaves_the_policy_default() {
+    let fx = fixture();
+    let (port, _seen) = fx.server(|_| {}).await;
+    let account = fx.account("lin@example.com", port);
+    let draft = fx.draft(&account);
+    let item = fx.queue(&draft, 0);
+    fx.reaches(&item.id, OutboxState::Accepted).await;
+    fx.settle().await;
+    assert_eq!(
+        fx.core
+            .attachment_policy(&account.id)
+            .unwrap()
+            .server_limit_mb,
+        None
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
     let fx = fixture();
     let (port, seen) = fx.server(|_| {}).await;
@@ -421,7 +461,7 @@ async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
 #[tokio::test(flavor = "multi_thread")]
 async fn definite_failures_are_recorded_and_never_retried() {
     type Setup = fn(&mut Script);
-    let cases: [(&str, Setup, &str, Option<u16>); 4] = [
+    let cases: [(&str, Setup, &str, Option<u16>); 7] = [
         (
             "permanent",
             |s| {
@@ -443,6 +483,32 @@ async fn definite_failures_are_recorded_and_never_retried() {
             },
             "rejectedAfterData",
             Some(554),
+        ),
+        (
+            "too large at mail from",
+            |s| {
+                s.replies.insert(Stage::Mail, "552 5.3.4 message too big");
+            },
+            "messageTooLarge",
+            Some(552),
+        ),
+        (
+            "too large after data",
+            |s| {
+                s.replies
+                    .insert(Stage::Final, "552 5.2.3 message too large");
+            },
+            "messageTooLarge",
+            Some(552),
+        ),
+        (
+            "bare 552 after data",
+            |s| {
+                s.replies
+                    .insert(Stage::Final, "552 requested action aborted");
+            },
+            "rejectedAfterData",
+            Some(552),
         ),
         ("auth", |s| s.password = "other", "authRejected", Some(535)),
     ];
