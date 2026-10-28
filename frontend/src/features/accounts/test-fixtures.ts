@@ -103,7 +103,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     checkForUpdates: vi.fn<MailxClient['checkForUpdates']>().mockResolvedValue({ canInstall: true, phase: 'idle' }),
     downloadUpdate: vi.fn<MailxClient['downloadUpdate']>().mockResolvedValue({ canInstall: true, phase: 'idle' }),
     cancelUpdate: vi.fn<MailxClient['cancelUpdate']>().mockResolvedValue({ canInstall: true, phase: 'available', version: '0.2.0', current: '0.1.0', notes: null, date: null }),
-    restartToUpdate: vi.fn<MailxClient['restartToUpdate']>().mockResolvedValue({ canInstall: true, phase: 'ready', version: '0.2.0' }),
+    restartToUpdate: vi.fn<MailxClient['restartToUpdate']>().mockResolvedValue({ canInstall: true, phase: 'ready', version: '0.2.0', current: '0.1.0', notes: null, date: null }),
     openUpdateLink: vi.fn<MailxClient['openUpdateLink']>().mockResolvedValue(undefined),
     onUpdateState: vi.fn<MailxClient['onUpdateState']>().mockReturnValue(() => undefined),
   }

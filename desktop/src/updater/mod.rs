@@ -22,8 +22,8 @@ use crate::window_chrome::MAIN_WINDOW;
 mod policy;
 
 use policy::{
-    AutoCheck, CHECK_TIMEOUT, DOWNLOAD_TIMEOUT, FailureStage, Snapshot, UpdateState, auto_check,
-    cap_notes, is_newer, next_wait, progress_due,
+    AutoCheck, CHECK_TIMEOUT, DOWNLOAD_TIMEOUT, FailureStage, ReleaseDetails, Snapshot,
+    UpdateState, auto_check, cap_notes, is_newer, next_wait, progress_due,
 };
 
 pub(crate) const STATE_EVENT: &str = "mailx://updater-state";
@@ -84,6 +84,14 @@ fn emit(app: &AppHandle, state: &UpdateState) {
     );
 }
 
+fn release_details(update: &Update) -> ReleaseDetails {
+    ReleaseDetails {
+        current: update.current_version.clone(),
+        notes: cap_notes(update.body.clone()),
+        date: update.date.map(|date| date.unix_timestamp()),
+    }
+}
+
 /// Checks the release manifest. A failed automatic check stays silent; a
 /// failed manual one is reported to the user.
 async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> UpdateState {
@@ -109,9 +117,7 @@ async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> Updat
             update.timeout = Some(DOWNLOAD_TIMEOUT);
             let next = UpdateState::Available {
                 version: update.version.clone(),
-                current: update.current_version.clone(),
-                notes: cap_notes(update.body.clone()),
-                date: update.date.map(|date| date.unix_timestamp()),
+                details: release_details(&update),
             };
             state.lock().update = Some(update);
             next
@@ -120,6 +126,7 @@ async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> Updat
         Err(()) if manual => UpdateState::Failed {
             stage: FailureStage::Check,
             version: None,
+            details: None,
         },
         Err(()) => UpdateState::Idle,
     };
@@ -127,12 +134,19 @@ async fn run_check(app: &AppHandle, state: &UpdaterState, manual: bool) -> Updat
     next
 }
 
-async fn run_download(app: AppHandle, state: UpdaterState, update: Update, generation: u64) {
+async fn run_download(
+    app: AppHandle,
+    state: UpdaterState,
+    update: Update,
+    details: ReleaseDetails,
+    generation: u64,
+) {
     let version = update.version.clone();
     let progress = {
         let app = app.clone();
         let state = state.clone();
         let version = version.clone();
+        let details = details.clone();
         let mut downloaded = 0_u64;
         let mut last_emit: Option<Instant> = None;
         let mut last_percent: Option<u64> = None;
@@ -149,6 +163,7 @@ async fn run_download(app: AppHandle, state: UpdaterState, update: Update, gener
             last_percent = percent;
             let next = UpdateState::Downloading {
                 version: version.clone(),
+                details: details.clone(),
                 downloaded,
                 total,
             };
@@ -173,11 +188,12 @@ async fn run_download(app: AppHandle, state: UpdaterState, update: Update, gener
         match result {
             Ok(bytes) => {
                 inner.package = Some(Arc::new(bytes));
-                UpdateState::Ready { version }
+                UpdateState::Ready { version, details }
             }
             Err(_) => UpdateState::Failed {
                 stage: FailureStage::Download,
                 version: Some(version),
+                details: Some(details),
             },
         }
     };
@@ -193,8 +209,10 @@ fn start_download(app: &AppHandle, state: &UpdaterState) -> UpdateState {
     };
     inner.generation += 1;
     let generation = inner.generation;
+    let details = release_details(&update);
     let next = UpdateState::Downloading {
         version: update.version.clone(),
+        details: details.clone(),
         downloaded: 0,
         total: None,
     };
@@ -203,6 +221,7 @@ fn start_download(app: &AppHandle, state: &UpdaterState) -> UpdateState {
         app.clone(),
         state.clone(),
         update,
+        details,
         generation,
     )));
     drop(inner);
@@ -227,9 +246,7 @@ fn cancel_download(app: &AppHandle, state: &UpdaterState) -> UpdateState {
         .as_ref()
         .map(|update| UpdateState::Available {
             version: update.version.clone(),
-            current: update.current_version.clone(),
-            notes: cap_notes(update.body.clone()),
-            date: update.date.map(|date| date.unix_timestamp()),
+            details: release_details(update),
         })
         .unwrap_or(UpdateState::Idle);
     inner.state = Some(next.clone());

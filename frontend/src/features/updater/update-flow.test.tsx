@@ -7,6 +7,7 @@ import { withTitleBar } from '@/test/title-bar'
 import { UpdaterProvider } from './updater-provider'
 import { useUpdater } from './updater-context'
 import { UpdateIndicator } from './update-indicator'
+import { UpdateDialog } from './update-dialog'
 import type { UpdateSnapshot } from './types'
 
 const available: UpdateSnapshot = {
@@ -44,21 +45,35 @@ describe('the update flow', () => {
     await userEvent.click(screen.getByRole('button', { name: '下载更新' }))
     expect(client.downloadUpdate).toHaveBeenCalledOnce()
     // Progress comes from the host, not from the button.
-    emit({ canInstall: true, phase: 'downloading', version: '0.2.0', downloaded: 45, total: 100 })
+    emit({ ...available, phase: 'downloading', downloaded: 45, total: 100 })
     expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '45')
+    expect(screen.getByText('Faster')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0 → 0.2.0')).toBeInTheDocument()
+    expect(screen.getByText(/^发布于 /)).toBeInTheDocument()
+    expect(screen.queryByText('这个版本没有提供更新说明。')).not.toBeInTheDocument()
     // While it downloads, the title-bar button turns into a progress ring. The
     // modal hides the title bar from the accessibility tree, so read it directly.
     expect(titleBarLabel()).toBe('正在下载 0.2.0（45%）')
+    await userEvent.click(screen.getByRole('button', { name: '后台继续' }))
+    await userEvent.click(await screen.findByRole('button', { name: '正在下载 0.2.0（45%）' }))
+    expect(screen.getByText('Faster')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '取消下载' }))
     expect(client.cancelUpdate).toHaveBeenCalledOnce()
 
-    emit({ canInstall: true, phase: 'ready', version: '0.2.0' })
+    emit(available)
+    await userEvent.click(await screen.findByRole('button', { name: '下载更新' }))
+    expect(client.downloadUpdate).toHaveBeenCalledTimes(2)
+    emit({ ...available, phase: 'downloading', downloaded: 100, total: 100 })
+    emit({ ...available, phase: 'ready' })
+    expect(await screen.findByText('Faster')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0 → 0.2.0')).toBeInTheDocument()
+    expect(screen.queryByText('这个版本没有提供更新说明。')).not.toBeInTheDocument()
     await userEvent.click(await screen.findByRole('button', { name: '立即重启' }))
     expect(client.restartToUpdate).toHaveBeenCalledOnce()
   })
 
   it('refuses to restart while mail is being sent, with the reason', async () => {
-    const { client } = setup({ canInstall: true, phase: 'ready', version: '0.2.0' })
+    const { client } = setup({ ...available, phase: 'ready' })
     const { MailxClientError } = await import('@/lib/mailx-client')
     client.restartToUpdate.mockRejectedValueOnce(new MailxClientError({ code: 'alreadySending', message: '', field: null }))
     // The ready state is already the title-bar button; the modal follows a click.
@@ -72,11 +87,46 @@ describe('the update flow', () => {
   it('offers a retry when a download failed', async () => {
     const { client, emit } = setup(available)
     await userEvent.click(await screen.findByRole('button', { name: 'MailX 0.2.0 可用' }))
-    emit({ canInstall: true, phase: 'failed', stage: 'download', version: '0.2.0' })
+    emit({ ...available, phase: 'failed', stage: 'download' })
     expect(await screen.findByText('下载没有完成，请重试。')).toBeInTheDocument()
+    expect(screen.getByText('Faster')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0 → 0.2.0')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(client.downloadUpdate).toHaveBeenCalledOnce()
     expect(client.checkForUpdates).not.toHaveBeenCalled()
+    emit({ ...available, phase: 'downloading', downloaded: 0, total: null })
+    expect(await screen.findByRole('progressbar')).not.toHaveAttribute('aria-valuenow')
+    expect(screen.getByText('Faster')).toBeInTheDocument()
+    expect(screen.queryByText('这个版本没有提供更新说明。')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { ...available, phase: 'downloading', downloaded: 45, total: 100 },
+    { ...available, phase: 'ready' },
+    { ...available, phase: 'failed', stage: 'download' },
+  ] satisfies UpdateSnapshot[])('reads release details on the first mount in $phase', async (snapshot) => {
+    if (snapshot.phase === 'failed') {
+      render(<UpdateDialog client={testClient()} snapshot={snapshot} open onOpenChange={() => undefined} />)
+    } else {
+      setup(snapshot)
+      const label = snapshot.phase === 'downloading' ? '正在下载 0.2.0（45%）' : '重启以更新到 0.2.0'
+      await userEvent.click(await screen.findByRole('button', { name: label }))
+    }
+    expect(await screen.findByText('Faster')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0 → 0.2.0')).toBeInTheDocument()
+    expect(screen.getByText(/^发布于 /)).toBeInTheDocument()
+    expect(screen.queryByText('这个版本没有提供更新说明。')).not.toBeInTheDocument()
+  })
+
+  it('shows the fallback only when the target version has no release notes', async () => {
+    const { emit } = setup(available)
+    await userEvent.click(await screen.findByRole('button', { name: 'MailX 0.2.0 可用' }))
+    expect(screen.getByText('Faster')).toBeInTheDocument()
+    emit({ ...available, phase: 'downloading', version: '0.3.0', notes: null, date: null, downloaded: 0, total: null })
+    expect(await screen.findByText('这个版本没有提供更新说明。')).toBeInTheDocument()
+    expect(screen.queryByText('Faster')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^发布于 /)).not.toBeInTheDocument()
+    expect(screen.getByText('0.1.0 → 0.3.0')).toBeInTheDocument()
   })
 
   it('only explains how to get the release when the edition cannot install', async () => {

@@ -30,8 +30,17 @@ pub(crate) enum FailureStage {
     Download,
 }
 
-/// What the frontend may know. Failures carry the stage only: remote and
-/// system error text never reaches the UI or the logs.
+/// Release information stays available while its package is downloading or ready.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ReleaseDetails {
+    pub(crate) current: String,
+    pub(crate) notes: Option<String>,
+    /// Publication time, seconds since the Unix epoch.
+    pub(crate) date: Option<i64>,
+}
+
+/// What the frontend may know. Download failures retain the release details,
+/// while remote and system error text never reaches the UI or the logs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub(crate) enum UpdateState {
@@ -40,24 +49,28 @@ pub(crate) enum UpdateState {
     #[serde(rename_all = "camelCase")]
     Available {
         version: String,
-        current: String,
-        notes: Option<String>,
-        /// Publication time, seconds since the Unix epoch.
-        date: Option<i64>,
+        #[serde(flatten)]
+        details: ReleaseDetails,
     },
     #[serde(rename_all = "camelCase")]
     Downloading {
         version: String,
+        #[serde(flatten)]
+        details: ReleaseDetails,
         downloaded: u64,
         total: Option<u64>,
     },
     Ready {
         version: String,
+        #[serde(flatten)]
+        details: ReleaseDetails,
     },
     Failed {
         stage: FailureStage,
         /// The version whose download failed, so the modal can still name it.
         version: Option<String>,
+        #[serde(flatten)]
+        details: Option<ReleaseDetails>,
     },
 }
 
@@ -281,18 +294,25 @@ pub(crate) fn parse_manifest(text: &str) -> Option<Manifest> {
 mod tests {
     use super::*;
 
-    fn available() -> UpdateState {
-        UpdateState::Available {
-            version: "0.2.0".into(),
+    fn details() -> ReleaseDetails {
+        ReleaseDetails {
             current: "0.1.0".into(),
             notes: None,
             date: None,
         }
     }
 
+    fn available() -> UpdateState {
+        UpdateState::Available {
+            version: "0.2.0".into(),
+            details: details(),
+        }
+    }
+
     fn downloading() -> UpdateState {
         UpdateState::Downloading {
             version: "0.2.0".into(),
+            details: details(),
             downloaded: 0,
             total: None,
         }
@@ -301,6 +321,7 @@ mod tests {
     fn ready() -> UpdateState {
         UpdateState::Ready {
             version: "0.2.0".into(),
+            details: details(),
         }
     }
 
@@ -308,6 +329,7 @@ mod tests {
         UpdateState::Failed {
             stage,
             version: None,
+            details: None,
         }
     }
 
@@ -426,6 +448,76 @@ mod tests {
         assert_eq!(json["canInstall"], false);
         assert_eq!(json["phase"], "available");
         assert_eq!(json["version"], "0.2.0");
+    }
+
+    fn release_states(details: ReleaseDetails) -> [UpdateState; 5] {
+        [
+            UpdateState::Available {
+                version: "0.2.0".into(),
+                details: details.clone(),
+            },
+            UpdateState::Downloading {
+                version: "0.2.0".into(),
+                details: details.clone(),
+                downloaded: 0,
+                total: None,
+            },
+            UpdateState::Downloading {
+                version: "0.2.0".into(),
+                details: details.clone(),
+                downloaded: 45,
+                total: Some(100),
+            },
+            UpdateState::Ready {
+                version: "0.2.0".into(),
+                details: details.clone(),
+            },
+            UpdateState::Failed {
+                stage: FailureStage::Download,
+                version: Some("0.2.0".into()),
+                details: Some(details),
+            },
+        ]
+    }
+
+    #[test]
+    fn release_details_reach_the_frontend_in_every_download_phase() {
+        let details = ReleaseDetails {
+            current: "0.1.0".into(),
+            notes: Some("# Changes\n\n- Faster sync".into()),
+            date: Some(1767254400),
+        };
+        for state in release_states(details.clone()) {
+            let json = serde_json::to_value(Snapshot {
+                can_install: true,
+                state,
+            })
+            .unwrap();
+            assert_eq!(json["current"], details.current, "{json}");
+            assert_eq!(json["notes"], details.notes.as_deref().unwrap(), "{json}");
+            assert_eq!(json["date"], details.date.unwrap(), "{json}");
+            assert!(json.get("details").is_none(), "{json}");
+        }
+    }
+
+    #[test]
+    fn missing_release_notes_stay_null_and_quiet_states_expose_no_release() {
+        for state in release_states(details()) {
+            let json = serde_json::to_value(state).unwrap();
+            assert_eq!(json["current"], "0.1.0", "{json}");
+            assert_eq!(json.get("notes"), Some(&serde_json::Value::Null), "{json}");
+            assert_eq!(json.get("date"), Some(&serde_json::Value::Null), "{json}");
+        }
+        for state in [
+            UpdateState::Idle,
+            UpdateState::Checking,
+            failed(FailureStage::Check),
+        ] {
+            let json = serde_json::to_value(state).unwrap();
+            for field in ["current", "notes", "date"] {
+                assert!(json.get(field).is_none(), "{json}");
+            }
+        }
     }
 
     #[test]
