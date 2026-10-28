@@ -55,9 +55,8 @@ fn request(imap_port: u16, smtp_port: u16) -> VerifyDraftConnection {
 #[tokio::test]
 async fn probes_are_independent_and_do_not_access_the_service_or_secret_store() {
     let imap_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let smtp_closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let smtp_port = smtp_closed.local_addr().unwrap().port();
-    drop(smtp_closed);
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
     let (_directory, core, secrets) = setup();
     let attempt = request(imap_listener.local_addr().unwrap().port(), smtp_port);
     let id = attempt.verification_id.clone();
@@ -67,9 +66,15 @@ async fn probes_are_independent_and_do_not_access_the_service_or_secret_store() 
     let holder = std::thread::spawn(move || {
         let _lock = service.lock().unwrap();
         held.send(()).unwrap();
-        released.recv().unwrap();
+        let _ = released.recv();
     });
     acquired.await.unwrap();
+    let smtp_peer = tokio::spawn(async move {
+        // A controlled EOF produces the same network failure without relying on
+        // platform-specific connection-refusal timing or reusing a closed port.
+        let (stream, _) = smtp_listener.accept().await.unwrap();
+        drop(stream);
+    });
     let peer = tokio::spawn(async move {
         let (stream, _) = imap_listener.accept().await.unwrap();
         let mut peer = BufReader::new(stream);
@@ -86,16 +91,18 @@ async fn probes_are_independent_and_do_not_access_the_service_or_secret_store() 
         peer.read_to_end(&mut remaining).await.unwrap();
         assert!(remaining.is_empty(), "no authentication without TLS");
     });
-    let report = tokio::time::timeout(
-        Duration::from_secs(2),
+    // This is a deadlock watchdog, not a performance assertion. The service lock
+    // stays held until both probes finish, including on a busy CI runner.
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
         core.verify_draft_connection(attempt),
     )
-    .await
-    .unwrap()
-    .unwrap();
+    .await;
     release.send(()).unwrap();
     holder.join().unwrap();
+    let report = result.unwrap().unwrap();
     peer.await.unwrap();
+    smtp_peer.await.unwrap();
     assert_eq!(report.verification_id, id);
     assert_eq!(
         report.imap.code,
