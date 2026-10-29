@@ -74,6 +74,37 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const announceDraft = (change: DraftChanged) => draftListeners.forEach((listener) => listener(structuredClone(change)))
   const clone = <T,>(value: T) => structuredClone(value)
 
+  const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
+  const MOCK_ATTACHMENT_SAMPLES: [string, string, number][] = [
+    ['季度报表.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 86_000],
+    ['产品演示.pdf', 'application/pdf', 1_840_000],
+    ['现场照片.png', 'image/png', 8_500_000],
+    ['完整录屏.mp4', 'video/mp4', 12_000_000],
+  ]
+  let mockAttachmentCursor = 0
+
+  function mutableDraft(id: string, expectedRevision: number) {
+    const draft = requireDraft(id)
+    if (lockedDrafts.has(id)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
+    if (draft.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
+    return draft
+  }
+
+  function touchDraft(draft: Draft) {
+    draft.revision += 1
+    draft.updatedAt = new Date().toISOString()
+    announceDraft({ draftId: draft.id, accountId: draft.accountId, change: 'updated' })
+    return clone(draft)
+  }
+
+  function addMockAttachment(draft: Draft, [fileName, mediaType, size]: [string, string, number]) {
+    const total = draft.attachments.reduce((sum, a) => sum + a.size, 0)
+    if (draft.attachments.length >= 20) throw new MailxClientError({ code: 'tooManyAttachments', message: '附件最多 20 个。', field: null })
+    if (total + size > MOCK_ATTACHMENT_LIMIT) throw new MailxClientError({ code: 'attachmentTooLarge', message: '附件总大小超过 20 MB。', field: null })
+    draft.attachments.push({ id: crypto.randomUUID(), fileName, mediaType, size, origin: 'user' })
+    return touchDraft(draft)
+  }
+
   function requireDraft(id: string) {
     if (removedDrafts.has(id)) throw notFound()
     const draft = drafts.get(id) ?? adoptDraft(id)
@@ -343,12 +374,29 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       drafts.delete(draft.id)
       announceDraft({ draftId: draft.id, accountId: draft.accountId, change: 'deleted' })
     },
+    // The preview has no file system: each "pick" attaches the next sample file, cycling through a few sizes.
+    async addAttachments(draftId, expectedRevision) {
+      const draft = mutableDraft(draftId, expectedRevision)
+      const sample = MOCK_ATTACHMENT_SAMPLES[mockAttachmentCursor++ % MOCK_ATTACHMENT_SAMPLES.length]
+      return addMockAttachment(draft, sample)
+    },
+    async addDroppedAttachments() { return null },
+    async removeAttachment({ draftId, attachmentId, expectedRevision }) {
+      const draft = mutableDraft(draftId, expectedRevision)
+      if (!draft.attachments.some((a) => a.id === attachmentId)) throw notFound()
+      draft.attachments = draft.attachments.filter((a) => a.id !== attachmentId)
+      return touchDraft(draft)
+    },
+    async attachmentPolicy() { return { maxTotalBytes: MOCK_ATTACHMENT_LIMIT, maxCount: 20, serverLimitMb: 10 } },
+    onFilesDropped: () => () => undefined,
     async queueSend({ draftId, expectedRevision, clientMutationId }) {
       const draft = requireDraft(draftId)
       const again = outbox.byMutation(clientMutationId)
       if (again) return clone(again)
       if (lockedDrafts.has(draftId)) throw new MailxClientError({ code: 'draftLocked', message: '草稿已进入发送队列，不能修改。', field: null })
       if (draft.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
+      if (draft.attachments.reduce((sum, a) => sum + a.size, 0) > MOCK_ATTACHMENT_LIMIT) throw new MailxClientError({ code: 'attachmentTooLarge', message: '附件总大小超过 20 MB。', field: null })
+      if (draft.attachments.length > 20) throw new MailxClientError({ code: 'tooManyAttachments', message: '附件最多 20 个。', field: null })
       const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
       if (recipients.length === 0) throw new MailxClientError({ code: 'validation', message: '请至少填写一个收件人。', field: 'draft.recipients' })
       lockedDrafts.add(draftId)

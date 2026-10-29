@@ -599,7 +599,13 @@ pub(crate) fn watch_close(window: &WebviewWindow) {
             api.prevent_close();
             composer_close_requested(&app, &label);
         }
+        (WindowEvent::DragDrop(drop), WindowKind::Composer(_)) => {
+            crate::compose_files::on_drag_drop(&app, &label, drop);
+        }
         (WindowEvent::Destroyed, WindowKind::Composer(_)) => {
+            if let Some(dropped) = app.try_state::<crate::compose_files::DroppedFiles>() {
+                dropped.forget(&label);
+            }
             if let Some(lifecycle) = app.try_state::<Lifecycle>() {
                 lifecycle.finish(&label);
             }

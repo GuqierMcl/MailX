@@ -131,12 +131,22 @@ const BOTH: &[&str] = &[
 ];
 
 /// Commands only a composer window may call.
-const COMPOSER_ONLY: &[&str] = &["outbox_queue_send", "composer_close"];
+const COMPOSER_ONLY: &[&str] = &[
+    "outbox_queue_send",
+    "composer_close",
+    "attachments_add",
+    "attachments_add_dropped",
+    "attachments_remove",
+    "attachments_policy",
+];
 
 /// Commands that name a draft; a composer may only name its own.
 const DRAFT_SCOPED: &[&str] = &[
     "drafts_get",
     "drafts_update",
+    "attachments_add",
+    "attachments_add_dropped",
+    "attachments_remove",
     "drafts_delete",
     "outbox_queue_send",
 ];
@@ -333,6 +343,10 @@ mod tests {
             ("drafts_get", true, true),
             ("drafts_update", true, true),
             ("drafts_delete", true, true),
+            ("attachments_add", false, true),
+            ("attachments_add_dropped", false, true),
+            ("attachments_remove", false, true),
+            ("attachments_policy", false, true),
             ("outbox_queue_send", false, true),
             ("outbox_list", true, false),
             ("outbox_get", true, false),
@@ -377,6 +391,9 @@ mod tests {
         for command in [
             "drafts_get",
             "drafts_update",
+            "attachments_add",
+            "attachments_add_dropped",
+            "attachments_remove",
             "drafts_delete",
             "outbox_queue_send",
         ] {

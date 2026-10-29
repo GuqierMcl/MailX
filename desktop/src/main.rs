@@ -6,6 +6,7 @@ mod body_protocol;
 mod body_webview_test;
 mod commands;
 mod compose;
+mod compose_files;
 mod locale;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
@@ -165,6 +166,7 @@ fn main() {
                 let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
                 app.manage(compose::Lifecycle::default());
+                app.manage(compose_files::DroppedFiles::default());
                 app.manage(updater::UpdaterState::default());
                 updater::start_scheduler(app.handle());
                 // Prepare the data directory before exposing business commands;
@@ -218,6 +220,10 @@ fn main() {
             compose::drafts_list,
             compose::drafts_get,
             compose::drafts_update,
+            compose_files::attachments_add,
+            compose_files::attachments_add_dropped,
+            compose_files::attachments_remove,
+            compose_files::attachments_policy,
             compose::drafts_delete,
             compose::outbox_queue_send,
             compose::outbox_list,

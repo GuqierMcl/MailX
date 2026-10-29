@@ -10,6 +10,7 @@ import type {
   AppError,
   AppSettings,
   ApiResult,
+  AttachmentPolicy,
   AvatarImage,
   RemoteImageStatus,
   FlagWriteBack,
@@ -22,6 +23,7 @@ import type {
   OutboxChanged,
   OutboxItem,
   QueueSendRequest,
+  RemoveAttachmentRequest,
   ResolveUnknownRequest,
   UpdateDraftRequest,
   NotificationSound,
@@ -132,6 +134,20 @@ export interface MailxClient {
   /** Fails with `conflict` unless `expectedRevision` is current; `draftLocked` while a queue item holds the draft. */
   updateDraft(request: UpdateDraftRequest): Promise<Draft>
   deleteDraft(id: string): Promise<void>
+  /**
+   * Composer window, own draft only. The host opens the native picker and attaches the chosen files; no path
+   * reaches the page. Resolves `null` when the picker was cancelled. An error after some files were added leaves
+   * those attached, so reload the draft on failure.
+   */
+  addAttachments(draftId: string, expectedRevision: number): Promise<Draft | null>
+  /** Composer window. Attaches the files the OS dropped on this window since `onFilesDropped` fired; `null` if none. */
+  addDroppedAttachments(draftId: string, expectedRevision: number): Promise<Draft | null>
+  /** Composer window, own draft only. `draftLocked` once the draft is queued. */
+  removeAttachment(request: RemoveAttachmentRequest): Promise<Draft>
+  /** Limits for drafts of this account; `serverLimitMb` is only a hint, the core stays authoritative. */
+  attachmentPolicy(accountId: string): Promise<AttachmentPolicy>
+  /** Composer window. Fires when files are dropped on it (the paths stay in the host). */
+  onFilesDropped(listener: () => void): () => void
   /** Composer window only, own draft only. Queues the draft; the undo window comes from settings. */
   queueSend(request: QueueSendRequest): Promise<OutboxItem>
   listOutbox(options?: { accountId?: string | null; includeAll?: boolean }): Promise<OutboxItem[]>
@@ -179,6 +195,7 @@ export const HOST_EVENTS = {
   drafts: 'mailx://drafts',
   appClosing: 'mailx://app-closing',
   composerCloseRequested: 'mailx://composer-close-requested',
+  filesDropped: 'composer://files-dropped',
   settingsChanged: 'mailx://settings-changed',
   updater: 'mailx://updater-state',
 } as const
@@ -335,6 +352,12 @@ export function createDesktopClient(): MailxClient {
     getDraft: (id) => call<Draft>('drafts_get', { id }),
     updateDraft: (request) => call<Draft>('drafts_update', { request }),
     deleteDraft: (id) => call<void>('drafts_delete', { id }),
+    addAttachments: (draftId, expectedRevision) => call<Draft | null>('attachments_add', { request: { draftId, expectedRevision } }),
+    addDroppedAttachments: (draftId, expectedRevision) =>
+      call<Draft | null>('attachments_add_dropped', { request: { draftId, expectedRevision } }),
+    removeAttachment: (request) => call<Draft>('attachments_remove', { request }),
+    attachmentPolicy: (accountId) => call<AttachmentPolicy>('attachments_policy', { accountId }),
+    onFilesDropped: (listener) => subscribe<void>(HOST_EVENTS.filesDropped, () => listener()),
     queueSend: ({ draftId, expectedRevision, clientMutationId }) =>
       call<OutboxItem>('outbox_queue_send', { draftId, expectedRevision, clientMutationId }),
     listOutbox: ({ accountId = null, includeAll = false } = {}) => call<OutboxItem[]>('outbox_list', { accountId, includeAll }),

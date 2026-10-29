@@ -218,7 +218,8 @@
     "retryExhausted": "The message could not be sent after retries over 24 hours",
     "accountChanged": "The sending account’s address changed. This message will not be sent automatically.",
     "unknown": "The connection was interrupted while sending. The server may have received this message.",
-    "unspecified": "Unknown reason"
+    "unspecified": "Unknown reason",
+    "snapshotMissing": "The attachment copies for this message are gone. Recompose and send again."
   },
   "recipient": {
     "invalid": "Invalid address: {{address}}",
@@ -226,5 +227,18 @@
     "remove": "Remove {{address}}",
     "preview_other": "{{names}} and others ({{count}} recipients)",
     "preview_one": "{{names}} ({{count}} recipient)"
+  },
+  "attachment": {
+    "add": "Attach files",
+    "adding": "Adding attachments…",
+    "list": "Attachments",
+    "forwarded": "Original",
+    "remove": "Remove {{name}}",
+    "summary_one": "{{count}} attachment · {{size}}",
+    "summary_other": "{{count}} attachments · {{size}}",
+    "overSize": "Attachments exceed the {{limit}} total limit. Remove some before sending.",
+    "overCount_one": "Only {{count}} attachment is allowed. Remove some before sending.",
+    "overCount_other": "Up to {{count}} attachments are allowed. Remove some before sending.",
+    "serverHint": "The sending server may reject messages over about {{limit}} MB."
   }
 }
