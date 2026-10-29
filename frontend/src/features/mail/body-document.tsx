@@ -195,6 +195,7 @@ const IMAGE_FAILURES: Record<ImageFetchError, string> = {
   get proxy() { return t('mail:proxyConnectionFailed') },
   get tls() { return t('mail:imageCertificateFailed') },
   get httpStatus() { return t('mail:imageServerNoImage') },
+  get notFound() { return t('mail:imageServerNoImage') },
   get unsupportedType() { return t('mail:unsupportedImageFormat') },
   get invalidImage() { return t('mail:imageDecodeFailed') },
   get tooLarge() { return t('mail:imageTooLarge') },

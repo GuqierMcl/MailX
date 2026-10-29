@@ -37,6 +37,9 @@ pub enum ImageFetchError {
     Proxy,
     Tls,
     HttpStatus,
+    /// The server answered 404 or 410: the image does not exist. Unlike other
+    /// statuses (403/429 throttling, 5xx outages) this is a stable answer.
+    NotFound,
     UnsupportedType,
     InvalidImage,
     TooLarge,
@@ -165,6 +168,13 @@ async fn follow(route: &NetRoute, mut url: Url) -> Result<InlineImage, ImageFetc
     Err(ImageFetchError::TargetBlocked)
 }
 
+fn status_error(status: u16) -> ImageFetchError {
+    match status {
+        404 | 410 => ImageFetchError::NotFound,
+        _ => ImageFetchError::HttpStatus,
+    }
+}
+
 enum ImageReply {
     Redirect(Url),
     Image(InlineImage),
@@ -216,7 +226,7 @@ async fn exchange(stream: super::BoxedStream, url: &Url) -> Result<ImageReply, I
         return Ok(ImageReply::Redirect(next));
     }
     if response.status() != 200 {
-        return Err(ImageFetchError::HttpStatus);
+        return Err(status_error(response.status().as_u16()));
     }
     if response
         .headers()
@@ -361,6 +371,17 @@ fn decode_image(bytes: &[u8], _mime: &str) -> Result<InlineImage, ImageFetchErro
 mod tests {
     use super::*;
     use transport::resolved_targets;
+
+    #[test]
+    fn only_404_and_410_are_confirmed_missing() {
+        for status in [404, 410] {
+            assert_eq!(status_error(status), ImageFetchError::NotFound);
+        }
+        for status in [400, 401, 403, 408, 429, 500, 502, 503, 504] {
+            assert_eq!(status_error(status), ImageFetchError::HttpStatus);
+        }
+    }
+
     #[test]
     fn denies_local_metadata_reserved_and_transition_addresses() {
         for value in [

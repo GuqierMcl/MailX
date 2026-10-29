@@ -274,7 +274,7 @@ mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: Previe
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
-export type ImageFetchError = "targetBlocked" | "proxyPolicyRequired" | "dns" | "connect" | "proxy" | "tls" | "httpStatus" | "unsupportedType" | "invalidImage" | "tooLarge" | "timeout" | "cancelled";
+export type ImageFetchError = "targetBlocked" | "proxyPolicyRequired" | "dns" | "connect" | "proxy" | "tls" | "httpStatus" | "notFound" | "unsupportedType" | "invalidImage" | "tooLarge" | "timeout" | "cancelled";
 
 export type RemoteImageStatus = { index: number, loading: boolean, error: ImageFetchError | null, };
 

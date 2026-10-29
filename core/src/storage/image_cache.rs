@@ -23,6 +23,9 @@ const MAX_ENTRY_BYTES: usize = crate::mail::render::MAX_REMOTE_IMAGE_OUTPUT_BYTE
 /// Entries untouched for this long are removed whatever their size.
 const MAX_IDLE: Duration = Duration::from_secs(60 * 24 * 60 * 60);
 const MAGIC: &[u8] = b"MXIC1\n";
+/// Marks a confirmed "no image exists" answer; it carries no image bytes and
+/// is never returned by `get`.
+const MISS_MAGIC: &[u8] = b"MXIM1\n";
 const TEMP_PREFIX: &str = ".tmp-";
 
 pub(crate) struct ImageCache {
@@ -118,13 +121,45 @@ impl ImageCache {
         contents.extend_from_slice(image.mime_type.as_bytes());
         contents.push(b'\n');
         contents.extend_from_slice(&image.bytes);
+        self.write_entry(key, &contents);
+    }
+
+    /// Records that the source confirmed there is no image for `key`. Use a
+    /// key that is never also passed to `put`.
+    pub(crate) fn put_miss(&self, key: &str) {
+        self.write_entry(key, MISS_MAGIC);
+    }
+
+    /// Whether a miss recorded less than `max_age` ago exists for `key`.
+    /// Expired or unreadable markers are deleted; the age is measured from the
+    /// write and a lookup does not refresh it.
+    pub(crate) fn has_miss(&self, key: &str, max_age: Duration) -> bool {
+        let path = self.root.join(entry_name(key));
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            return false;
+        };
+        let marked = metadata.is_file()
+            && metadata.len() == MISS_MAGIC.len() as u64
+            && fs::read(&path).is_ok_and(|bytes| bytes == MISS_MAGIC);
+        let fresh = metadata
+            .modified()
+            .ok()
+            .and_then(|written| SystemTime::now().duration_since(written).ok())
+            .is_none_or(|age| age <= max_age);
+        if !(marked && fresh) {
+            let _ = fs::remove_file(&path);
+        }
+        marked && fresh
+    }
+
+    fn write_entry(&self, key: &str, contents: &[u8]) {
         let temporary = self.root.join(format!("{TEMP_PREFIX}{}", Uuid::new_v4()));
         let written = (|| {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temporary)?;
-            file.write_all(&contents)?;
+            file.write_all(contents)?;
             drop(file);
             fs::rename(&temporary, self.root.join(entry_name(key)))
         })();
@@ -320,6 +355,45 @@ mod tests {
         assert!(cache.get("k", Duration::from_secs(3600)).is_some() || !path.exists());
         assert!(cache.get("k", Duration::ZERO).is_none());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn misses_are_hashed_markers_that_expire_and_never_read_as_images() {
+        let (directory, cache) = cache();
+        assert!(!cache.has_miss("miss:a", Duration::MAX));
+        cache.put_miss("miss:a");
+        assert!(cache.has_miss("miss:a", Duration::from_secs(3600)));
+        assert!(cache.get("miss:a", Duration::MAX).is_none());
+        // `get` deleted the marker as it would any non-image entry.
+        assert!(!cache.has_miss("miss:a", Duration::MAX));
+        cache.put_miss("miss:b");
+        for name in names(&directory) {
+            assert!(is_entry_name(&name), "{name}");
+        }
+        let path = directory
+            .path()
+            .join("image-cache")
+            .join(entry_name("miss:b"));
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+        assert!(!cache.has_miss("miss:b", Duration::from_secs(3600)));
+        assert!(!path.exists());
+        cache.put_miss("miss:c");
+        fs::write(
+            directory
+                .path()
+                .join("image-cache")
+                .join(entry_name("miss:d")),
+            b"junk",
+        )
+        .unwrap();
+        assert!(!cache.has_miss("miss:d", Duration::MAX));
+        assert!(cache.clear() > 0);
+        assert!(!cache.has_miss("miss:c", Duration::MAX));
     }
 
     #[test]

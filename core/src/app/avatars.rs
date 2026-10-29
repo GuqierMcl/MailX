@@ -1,17 +1,20 @@
 //! Sender avatars from public sources, an opt-in privacy trade-off.
 //!
-//! Order for one sender: Gravatar by the SHA-256 of the address, then, unless
-//! the address belongs to a personal mailbox provider, the sender's domain icon
-//! from DuckDuckGo and then Google. Personal providers are skipped on purpose:
-//! every Gmail sender would otherwise get Google's logo. All requests use the
-//! owning account's route and explicit image proxy policy. A failed proxy never
-//! falls back to a direct request. Cache entries are isolated by account/source
-//! and connection revision.
+//! Order for one sender: anything already cached (the sender's picture, then,
+//! unless the address belongs to a personal mailbox provider, a cached site
+//! icon of its domain), so a restart never pays a network round trip for an
+//! avatar it already has. Only then Gravatar by the SHA-256 of the address and
+//! the sender's domain icon from DuckDuckGo and then Google. Personal providers
+//! are skipped on purpose: every Gmail sender would otherwise get Google's logo.
+//! All requests use the owning account's route and explicit image proxy policy.
+//! A failed proxy never falls back to a direct request. Cache entries are
+//! isolated by account/source and connection revision.
 //!
 //! Disclosure: Gravatar learns a hash of the address; the icon services learn
 //! the sender's domain in clear text. Found images persist in the shared image
-//! cache. Failed lookups are not cached, so a temporary network error does not
-//! hide avatars for an hour.
+//! cache. A lookup step is remembered as missing for `MISS_TTL` only when every
+//! URL it tried answered 404 or 410; timeouts, connection and proxy errors,
+//! throttling and 5xx are never remembered, so an outage does not hide avatars.
 use std::{
     collections::HashMap,
     future::Future,
@@ -34,6 +37,7 @@ use crate::{
 };
 
 const FOUND_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const MISS_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_ENTRIES: usize = 1024;
 
 /// A list can ask for a hundred senders at once. The shared download limit's
@@ -329,6 +333,7 @@ impl MailxCore {
             .to_owned();
         let core = self.clone();
         let saved = binding.clone();
+        let sender_domain = domain.clone();
         let (route, personal) = tokio::task::spawn_blocking(move || {
             let service = core.accounts()?;
             saved.check(&service)?;
@@ -345,10 +350,20 @@ impl MailxCore {
             let route = service
                 .image_route(&saved.account_id)
                 .map_err(|_| AppError::new(ErrorCode::NotFound))?;
-            Ok::<_, AppError>((route, is_personal(&domain, &own)))
+            Ok::<_, AppError>((route, is_personal(&sender_domain, &own)))
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))??;
+        // A cached icon wins over refreshing Gravatar, so nothing below runs
+        // for a sender whose icon survived a restart.
+        if !personal {
+            for candidate in icon_domains(&domain) {
+                let key = binding.key("icon", &candidate);
+                if let Some(cached) = self.cached_avatar(&binding, &key, AvatarKind::Icon).await? {
+                    return self.alias_sender(&binding, memory_key, Some(cached)).await;
+                }
+            }
+        }
         let _slot = LOOKUPS
             .acquire()
             .await
@@ -360,31 +375,72 @@ impl MailxCore {
         {
             return Ok(Some(cached));
         }
-        let fetched = fetch(&route, gravatar_url(&address)).await;
-        self.check_avatar(&binding).await?;
-        if let Ok(image) = fetched {
-            return self
-                .store_avatar(&binding, &memory_key, image, AvatarKind::Photo)
-                .await
-                .map(Some);
+        let miss_key = binding.key("photo-miss", &address);
+        if !self.is_miss(&binding, &miss_key).await? {
+            let fetched = fetch(&route, gravatar_url(&address)).await;
+            self.check_avatar(&binding).await?;
+            match fetched {
+                Ok(image) => {
+                    return self
+                        .store_avatar(&binding, &memory_key, image, AvatarKind::Photo)
+                        .await
+                        .map(Some);
+                }
+                Err(ImageFetchError::NotFound) => self.record_miss(&binding, &miss_key).await?,
+                Err(_) => {}
+            }
         }
         let found = if personal {
             None
         } else {
-            let domain = address.rsplit_once('@').map_or("", |(_, domain)| domain);
-            self.domain_icon(&binding, &route, domain, &fetch).await?
+            self.domain_icon(&binding, &route, &domain, &fetch).await?
         };
+        self.alias_sender(&binding, memory_key, found).await
+    }
+
+    /// Domain icons stay on disk under their icon key so their kind is
+    /// preserved across restarts; only memory also aliases the sender.
+    async fn alias_sender(
+        &self,
+        binding: &AvatarBinding,
+        memory_key: String,
+        found: Option<AvatarImage>,
+    ) -> Result<Option<AvatarImage>, AppError> {
         let core = self.clone();
         let saved = binding.clone();
         tokio::task::spawn_blocking(move || {
             let service = core.accounts()?;
             saved.check(&service)?;
             if let Some(image) = &found {
-                // Domain icons stay on disk under their icon key so their kind
-                // is preserved across restarts; only memory also aliases sender.
                 core.avatars.put(memory_key, image.clone());
             }
             Ok(found)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    async fn is_miss(&self, binding: &AvatarBinding, key: &str) -> Result<bool, AppError> {
+        let core = self.clone();
+        let binding = binding.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            binding.check(&*core.accounts()?)?;
+            Ok(core.images.has_miss(&key, MISS_TTL))
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    async fn record_miss(&self, binding: &AvatarBinding, key: &str) -> Result<(), AppError> {
+        let core = self.clone();
+        let binding = binding.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            binding.check(&*core.accounts()?)?;
+            core.images.put_miss(&key);
+            // A write racing a revision change must not outlive it.
+            binding.check(&*core.accounts()?)
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))?
@@ -464,24 +520,37 @@ impl MailxCore {
             if let Some(cached) = self.cached_avatar(binding, &key, AvatarKind::Icon).await? {
                 return Ok(Some(cached));
             }
+            let miss_key = binding.key("icon-miss", &candidate);
+            if self.is_miss(binding, &miss_key).await? {
+                continue;
+            }
+            let mut all_not_found = true;
             for url in icon_urls(&candidate) {
                 self.check_avatar(binding).await?;
                 let fetched = fetch(route, url).await;
                 self.check_avatar(binding).await?;
-                if let Ok(image) = fetched {
-                    return self
-                        .store_avatar(binding, &key, image, AvatarKind::Icon)
-                        .await
-                        .map(Some);
+                match fetched {
+                    Ok(image) => {
+                        return self
+                            .store_avatar(binding, &key, image, AvatarKind::Icon)
+                            .await
+                            .map(Some);
+                    }
+                    Err(ImageFetchError::NotFound) => {}
+                    Err(_) => all_not_found = false,
                 }
             }
+            if all_not_found {
+                self.record_miss(binding, &miss_key).await?;
+            }
         }
-        // No negative cache: HTTP status alone cannot distinguish a missing
-        // picture from an upstream outage, and network errors are recoverable.
+        // A miss is remembered only when every URL for the step answered 404 or
+        // 410. Other statuses cannot tell a missing picture from an outage or
+        // throttling, and network errors are recoverable.
         Ok(None)
     }
 
-    /// Deletes cached avatars and mail images, on disk and in memory.
+    /// Deletes cached avatars, remembered misses and mail images, on disk and in memory.
     pub fn clear_image_cache(&self) -> u64 {
         self.avatars.clear();
         self.images.clear()
@@ -684,6 +753,285 @@ mod tests {
             .unwrap()
             .is_some()
         );
+    }
+
+    const SENDER: &str = "news@notion.so";
+
+    async fn lookup(
+        core: &MailxCore,
+        account: &Account,
+        address: &str,
+        calls: &AtomicUsize,
+        outcome: impl Fn(&str) -> Result<InlineImage, ImageFetchError> + Send + Sync,
+    ) -> Option<AvatarImage> {
+        core.sender_avatar_with(account.id.clone(), address.into(), |_, url| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let result = outcome(&url);
+            Box::pin(async move { result })
+        })
+        .await
+        .unwrap()
+    }
+
+    fn icons_only(url: &str) -> Result<InlineImage, ImageFetchError> {
+        if url.contains("gravatar.com") {
+            Err(ImageFetchError::NotFound)
+        } else {
+            Ok(synthetic_image(70))
+        }
+    }
+
+    /// Backdates every miss marker (the only 6-byte entries) past `MISS_TTL`.
+    fn expire_misses(directory: &TempDir) {
+        for entry in std::fs::read_dir(directory.path().join("image-cache")).unwrap() {
+            let path = entry.unwrap().path();
+            if std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() == 6) {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_modified(std::time::SystemTime::now() - MISS_TTL - Duration::from_secs(60))
+                    .unwrap();
+            }
+        }
+    }
+
+    fn miss_count(directory: &TempDir) -> usize {
+        std::fs::read_dir(directory.path().join("image-cache"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.len() == 6)
+            })
+            .count()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cached_site_icon_is_returned_after_restart_without_any_request() {
+        let (_directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        let first = lookup(&core, &account, SENDER, &calls, icons_only)
+            .await
+            .unwrap();
+        assert_eq!(first.kind, AvatarKind::Icon);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "Gravatar, then the first icon URL"
+        );
+        core.avatars.clear();
+        let after = lookup(&core, &account, SENDER, &calls, |_| {
+            panic!("no request expected")
+        })
+        .await
+        .unwrap();
+        assert_eq!(after, first);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // The sender alias is back in memory for the rest of the session.
+        assert!(
+            core.avatars
+                .get(&{
+                    let binding =
+                        AvatarBinding::read(&core.accounts().unwrap(), account.id.clone()).unwrap();
+                    binding.key("photo", SENDER)
+                })
+                .is_some()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cached_photo_is_returned_after_restart_without_any_request() {
+        let (_directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        let first = lookup(&core, &account, SENDER, &calls, |_| Ok(synthetic_image(80)))
+            .await
+            .unwrap();
+        assert_eq!(first.kind, AvatarKind::Photo);
+        core.avatars.clear();
+        let after = lookup(&core, &account, SENDER, &calls, |_| {
+            panic!("no request expected")
+        })
+        .await
+        .unwrap();
+        assert_eq!(after, first);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nothing_cached_asks_gravatar_first_then_icons() {
+        let (_directory, core, account) = fixture();
+        let urls = std::sync::Mutex::new(Vec::new());
+        let calls = AtomicUsize::new(0);
+        lookup(&core, &account, "a@mail.notion.so", &calls, |url| {
+            urls.lock().unwrap().push(url.to_owned());
+            Err(ImageFetchError::Connect)
+        })
+        .await;
+        let urls = urls.into_inner().unwrap();
+        assert!(urls[0].contains("gravatar.com"));
+        assert!(urls[1].contains("icons.duckduckgo.com") && urls[1].contains("mail.notion.so"));
+        assert!(urls[2].contains("google.com/s2/favicons") && urls[2].contains("mail.notion.so"));
+        assert!(urls[3].contains("notion.so") && !urls[3].contains("mail."));
+        assert_eq!(urls.len(), 5);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn confirmed_misses_are_remembered_across_restart_until_they_expire() {
+        let (directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        let nothing = |_: &str| Err(ImageFetchError::NotFound);
+        assert!(
+            lookup(&core, &account, SENDER, &calls, nothing)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            3,
+            "Gravatar plus both icon URLs"
+        );
+        assert_eq!(miss_count(&directory), 2);
+        core.avatars.clear();
+        assert!(
+            lookup(&core, &account, SENDER, &calls, |_| panic!(
+                "misses are cached"
+            ))
+            .await
+            .is_none()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        // Misses are keyed per sender address but per candidate icon domain.
+        assert!(
+            lookup(&core, &account, "other@notion.so", &calls, nothing)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            4,
+            "only its own Gravatar lookup"
+        );
+        expire_misses(&directory);
+        assert!(
+            lookup(&core, &account, SENDER, &calls, nothing)
+                .await
+                .is_none()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 7);
+        assert_eq!(miss_count(&directory), 3);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn recoverable_failures_never_record_misses() {
+        let (directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        // Gravatar times out: no photo miss, and the icon step still runs.
+        let gravatar_timeout = |url: &str| {
+            if url.contains("gravatar.com") {
+                Err(ImageFetchError::Timeout)
+            } else {
+                Err(ImageFetchError::NotFound)
+            }
+        };
+        assert!(
+            lookup(&core, &account, SENDER, &calls, gravatar_timeout)
+                .await
+                .is_none()
+        );
+        assert_eq!(miss_count(&directory), 1, "only the icon domain miss");
+        assert!(
+            lookup(&core, &account, SENDER, &calls, gravatar_timeout)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            4,
+            "Gravatar retried, icon miss honoured"
+        );
+        // Any non-404 icon failure keeps the icon step retryable.
+        for failure in [
+            ImageFetchError::Connect,
+            ImageFetchError::Timeout,
+            ImageFetchError::HttpStatus,
+            ImageFetchError::Proxy,
+            ImageFetchError::InvalidImage,
+        ] {
+            let (directory, core, account) = fixture();
+            let calls = AtomicUsize::new(0);
+            let outcome = move |url: &str| {
+                if url.contains("duckduckgo.com") {
+                    Err(failure)
+                } else {
+                    Err(ImageFetchError::NotFound)
+                }
+            };
+            assert!(
+                lookup(&core, &account, SENDER, &calls, outcome)
+                    .await
+                    .is_none()
+            );
+            assert_eq!(
+                miss_count(&directory),
+                1,
+                "{failure:?}: only Gravatar's miss"
+            );
+            assert!(
+                lookup(&core, &account, SENDER, &calls, outcome)
+                    .await
+                    .is_none()
+            );
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                5,
+                "{failure:?}: icons retried"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn personal_mailbox_domains_get_no_site_icon_from_cache_or_network() {
+        let (_directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        let binding = AvatarBinding::read(&core.accounts().unwrap(), account.id.clone()).unwrap();
+        core.images
+            .put(&binding.key("icon", "qq.com"), &synthetic_image(90));
+        let urls = std::sync::Mutex::new(Vec::new());
+        assert!(
+            lookup(&core, &account, "someone@qq.com", &calls, |url| {
+                urls.lock().unwrap().push(url.to_owned());
+                Err(ImageFetchError::NotFound)
+            })
+            .await
+            .is_none()
+        );
+        let urls = urls.into_inner().unwrap();
+        assert_eq!(urls.len(), 1);
+        assert!(urls[0].contains("gravatar.com"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn clearing_the_image_cache_forgets_misses_and_revisions_isolate_them() {
+        let (directory, core, account) = fixture();
+        let calls = AtomicUsize::new(0);
+        let nothing = |_: &str| Err(ImageFetchError::NotFound);
+        lookup(&core, &account, SENDER, &calls, nothing).await;
+        assert_eq!(miss_count(&directory), 2);
+        update_route(&core, &account, json!({"kind":"inherit"}));
+        lookup(&core, &account, SENDER, &calls, nothing).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            6,
+            "a new revision starts over"
+        );
+        core.clear_image_cache();
+        assert_eq!(miss_count(&directory), 0);
+        core.avatars.clear();
+        lookup(&core, &account, SENDER, &calls, nothing).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 9);
     }
 
     #[test]
