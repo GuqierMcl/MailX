@@ -194,6 +194,8 @@ describe('saved connection verification', () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'help' })
     await client.openProviderHelp('qq')
     expect(invoke).toHaveBeenCalledWith('accounts_open_provider_help', { providerId: 'qq' })
+    await client.openProviderHelp('139')
+    expect(invoke).toHaveBeenLastCalledWith('accounts_open_provider_help', { providerId: '139' })
   })
 })
 

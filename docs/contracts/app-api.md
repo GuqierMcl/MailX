@@ -436,11 +436,13 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 QQ / Foxmail 使用 `providerId=qq`，网易 163 / 126 / yeah.net 分别使用 `netease163` / `netease126` / `neteaseYeah`，均复用既有 `password/shared` 认证。预设只为新账号填充端点：QQ 为 `imap.qq.com:993`、`smtp.qq.com:465`；网易分别为 `imap.163.com:993` / `smtp.163.com:465`、`imap.126.com:993` / `smtp.126.com:465`、`imap.yeah.net:993` / `smtp.yeah.net:465`，均为隐式 TLS。默认登录名为本次完整邮箱地址，授权码作为密码类秘密处理。已保存的端点、独立用户名、路由与凭证不会被预设覆盖；`providerId` 不授予新端点信任。原通用配置账号不自动迁移，VIP、企业及其他网易域名不套用这三个免费邮箱预设。
 
+139 邮箱使用 `providerId=139`，仅精确匹配 `139.com`，默认 `imap.139.com:993` / `smtp.139.com:465` 隐式 TLS，沿用同一认证、路由和诊断流程。用户名默认完整邮箱地址，可在高级设置分别改为手机号等明确登录名；不自动轮换身份。向导说明需要先开启 IMAP/SMTP、使用客户端授权码，新生成授权码有效期为 90 天且以官方页面日期为准，广电号码暂不能开启授权码。普通认证失败只提供到期、撤销、服务开关与登录名的排查引导，不声称已精确识别原因；不新增自动续期、认证类型、数据库迁移或协议特判。已有用户手测反馈，逐平台、登录名、收发场景及别名的完整兼容证据仍待补充，见[接入评估](../reference/139-mail-integration.md)。
+
 | MailxClient 方法 | Tauri 命令与参数 | 结果 |
 | --- | --- | --- |
 | `verifyAccountConnection(accountId, expectedRevision, signal?)` | `accounts_verify_connection`，`{ request: { accountId, expectedRevision, verificationId } }` | `AccountConnectionVerification` |
 | adapter 的 AbortSignal 处理 | `accounts_cancel_verification`，`{ request: { accountId, verificationId } }` | 无数据；只取消对应尝试 |
-| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；仅接受 `qq`、`netease163`、`netease126`、`neteaseYeah`，由系统浏览器打开对应固定官方授权码指引 |
+| `openProviderHelp(providerId)` | `accounts_open_provider_help`，`{ providerId }` | 无数据；仅接受 `qq`、`netease163`、`netease126`、`neteaseYeah`、`139`，由系统浏览器打开对应固定官方授权码指引 |
 
 上述命令只向受信主窗口开放，诊断和取消还要求核心 Ready；写信窗口和邮件正文不能调用。两个 ID 均为 UUID，verificationId 由 adapter 为每次尝试新建；未知顶层字段被拒绝。帮助命令不接受客户端 URL，未知 providerId 返回固定参数错误，不扩大任意外链打开权限。
 

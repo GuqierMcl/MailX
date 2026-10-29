@@ -282,6 +282,7 @@ struct ProviderHelpArgs {
 fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
     match provider_id {
         "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
+        "139" => Ok("https://help.mail.10086.cn/statichtml/22/Content/1234606.html"),
         "netease163" | "netease126" | "neteaseYeah" => Ok(
             "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
         ),
@@ -921,6 +922,10 @@ mod tests {
             provider_help_url("qq").unwrap(),
             "https://help.mail.qq.com/detail/0/1087"
         );
+        assert_eq!(
+            provider_help_url("139").unwrap(),
+            "https://help.mail.10086.cn/statichtml/22/Content/1234606.html"
+        );
         for provider in ["netease163", "netease126", "neteaseYeah"] {
             assert_eq!(
                 provider_help_url(provider).unwrap(),
@@ -936,6 +941,8 @@ mod tests {
             "netease163/../",
             "NETEASE126",
             "yeah",
+            "139.com",
+            "139/../",
         ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
@@ -944,7 +951,7 @@ mod tests {
         }
         assert!(
             parse::<ProviderHelpArgs>(&InvokeBody::Json(
-                json!({"providerId":"qq", "url":"https://attacker.invalid"})
+                json!({"providerId":"139", "url":"https://attacker.invalid"})
             ))
             .is_err()
         );
