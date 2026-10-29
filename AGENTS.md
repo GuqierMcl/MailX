@@ -23,7 +23,7 @@ MailX 是开发中的本地优先、AI 原生邮件工作台。仓库已建立 `
 - 文件使用 UTF-8 / LF；Rust 使用 Cargo，前端使用 Bun 工作区。根目录 `package.json` 维护命令与版本入口，`bun.lock` 是前端依赖锁文件。
 - 品牌图形的唯一源稿为 `branding/logo.svg`；更新后运行 `bun run icons:generate` 和 `bun run icons:check`，不手工修改桌面、网页和品牌目录中的生成副本。资源位置和选用规则见 `branding/README.md`。
 - 前端界面遵循 `docs/architecture/ui-design.md`：标题栏与导航同属画布，邮件列表与阅读区合成一个岛；岛内不加分割线和卡片边框；外壳用 `frontend/src/features/shell/` 的自有组件，不直接依赖 shadcn Sidebar。
-- 版本号只通过 `bun run version:bump` / `version:set` 修改，用户可见变更写进 `CHANGELOG.md` 的 `[Unreleased]`；发版由推送 `v*` 标签触发 `.github/workflows/release.yml`，生成未签名的草稿 Release，内含应用内更新使用的 `latest.json`（尚未做过真实发布，代码签名也未实现）。流程见 `docs/development/release.md`。
+- 版本号只通过 `bun run version:bump` / `version:set` 修改，用户可见变更写进 `CHANGELOG.md` 的 `[Unreleased]`；发版由推送 `v*` 标签触发 `.github/workflows/release.yml`，生成未签名的草稿 Release，内含应用内更新使用的 `latest.json`（已有多次真实发布，代码签名尚未实现）。流程见 `docs/development/release.md`。
 - 结构化代码查询优先使用可用的 CodeGraph 工具；文字与文档查找使用 `rg`。
 
 ## 检查

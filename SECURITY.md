@@ -2,11 +2,11 @@
 
 > English summary: please report vulnerabilities privately through GitHub's private vulnerability reporting (Security Advisories) and never in public issues; do not include real credentials or real mail content in reports.
 
-MailX 仍处于早期开发阶段，尚未发布任何版本。
+MailX 仍处于早期开发阶段，目前只发布过 `0.1.0` 的预发布版本（alpha / rc）。
 
 ## 受支持的版本
 
-目前没有已发布版本；只有 `main` 分支上的最新代码会被考虑修复。
+目前没有正式版本；只有 `main` 分支上的最新代码会被考虑修复。
 
 ## 如何报告漏洞
 
