@@ -28,5 +28,7 @@
   "timeout": "The connection timed out. Try again later.",
   "protocol": "The mail server returned an unrecognized response.",
   "storage": "Cannot access local data. Check available space and permissions.",
-  "accountNotFound": "This account no longer exists."
+  "accountNotFound": "This account no longer exists.",
+  "attachmentTooLarge": "Attachments exceed the total size limit.",
+  "tooManyAttachments": "Too many attachments."
 }

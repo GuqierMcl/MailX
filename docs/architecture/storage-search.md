@@ -65,8 +65,8 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
 | pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
 | drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at | unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
-| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type | 发送前校验完整性 |
-| outbox | id, draft_id, revision, account_id, client_mutation_id, payload_hash, mime_blob_id, state, attempt_stage, sent_copy_state | unique(account_id, client_mutation_id) |
+| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；核心已实现，宿主与界面未接） |
+| outbox | id, draft_id, revision, account_id, client_mutation_id, payload_hash, mime_blob_id, mime_size, state, attempt_stage, sent_copy_state, snapshot_released_at | unique(account_id, client_mutation_id)；当前实现仍把快照存在 `mime` 列，按发信设计第 16.6 节外迁为 blob，服务器副本对上后释放（第 16.7 节） |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |
 | mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 随时可撤销；不存邮箱凭证 |
 | audit_events | id, time, actor_id, account_id, action, resource_id, outcome, request_id | 不记录正文、地址列表、OTP、密钥 |
@@ -81,13 +81,13 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 - 网络、MIME 大文件解析和模型请求不能占用数据库事务；当前 `rusqlite` 调用隔离到宿主阻塞执行器，未来连接池与事务调度必须继续避免阻塞异步任务。
 - 当前 blob 先写临时文件、同步并原子重命名，文件持久化后短事务写入正文、parts、preview 与 ready；已存在哈希复用。启动持目录独占锁、后台任务开始前恢复 fetching 并清理未引用的严格哈希文件 / 本程序临时文件，不跟随符号链接。运行期 GC、配额与 LRU 尚未实现。
 - 后续正文与对应全文索引同事务更新，避免搜索结果指向不存在的内容；索引是派生数据，可以重建。
-- 后续 GC 不删除被草稿、outbox 或备份引用的 blob。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
+- 后续 GC 不删除被草稿、outbox 或备份引用的 blob；写信附件落地后，启动 GC 把 `draft_attachments` 与尚未释放的 outbox 快照算作存活引用。已发送快照在服务器对上后只清空引用，文件由下次启动 GC 回收。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
 
 ## 4. 缓存边界
 
 当前每轮从固定窗口内选 UID 最大的 1,000 封补齐头部，每批最多 200 封；之前已缓存的头部不会因为退出最新 1,000 封集合而淘汰，因此总缓存可能超过 1,000。删除对账检查窗口内完整 SEARCH 结果，flags 对账只检查当轮选定集合；窗口外旧缓存保留，不参与删除或 flags 对账，可能保留服务端后来删除的旧邮件。更早历史回填、显式清理与缓存设置尚未实现。
 
-后续正文和接收附件拟使用 LRU 配额，初始合计 2 GiB，可配置。草稿、待发送 MIME 与用户固定的离线内容不参与自动淘汰，单独显示占用。缓存被淘汰后 `bodyState=missing`，同步状态不能仍宣称可离线阅读。
+后续正文和接收附件拟使用 LRU 配额，初始合计 2 GiB，可配置。草稿（含写信附件）、待发送与尚未对上服务器的已发送 MIME 快照、用户固定的离线内容不参与自动淘汰，单独显示占用。缓存被淘汰后 `bodyState=missing`，同步状态不能仍宣称可离线阅读。
 
 当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。原始 MIME 的运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
 

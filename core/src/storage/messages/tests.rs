@@ -1925,3 +1925,152 @@ fn only_read_changes_in_that_folder_hold_the_number_and_a_star_never_does() {
     server_counts(&mut f, 7);
     assert_eq!(folder_counts(&f).0, 7);
 }
+
+// Sent-copy matching (sending.md section 16.7)
+
+fn outbox_row(f: &Fixture, account_id: &str, id: &str, message_id: &str, state: &str) {
+    f.db.execute(
+        "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+         snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+         state, accepted_at, not_before, first_queued_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, '{}', ?4, 'hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh', 10, '{}', 'hi', '[]', 1, ?5, CASE WHEN ?5 = 'accepted' THEN 't' END, 't', 't', 't', 't')",
+        rusqlite::params![
+            format!("{id:0>36}"),
+            account_id,
+            format!("m{id:0>35}"),
+            message_id,
+            state
+        ],
+    )
+    .unwrap();
+}
+
+fn snapshot_of(f: &Fixture, id: &str) -> (Option<String>, Option<i64>, bool, Option<String>) {
+    f.db.query_row(
+        "SELECT snapshot_hash, snapshot_size, snapshot_released_at IS NOT NULL,
+                server_copy_message_id FROM outbox WHERE id = ?1",
+        [format!("{id:0>36}")],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )
+    .unwrap()
+}
+
+fn sent_copy(message_id: &str, uid: u32) -> MessageRecord {
+    MessageRecord {
+        message_id_header: Some(message_id.into()),
+        ..record(uid)
+    }
+}
+
+fn put_sent(f: &mut Fixture, records: &[MessageRecord]) {
+    let sent = target_for(f, "Sent", 10);
+    f.service.ensure_generation(&sent, "2026-09-20").unwrap();
+    f.service
+        .store_message_batch(&sent, records, records.iter().map(|r| r.uid).max().unwrap())
+        .unwrap();
+}
+
+#[test]
+fn matching_sent_copy_releases_the_accepted_snapshot_exactly_once() {
+    let mut f = setup();
+    let account = f.account.id.clone();
+    outbox_row(&f, &account, "a", "<sent-a@mailx.test>", "accepted");
+    put_sent(&mut f, &[sent_copy("sent-a@mailx.test", 1)]);
+
+    let (hash, size, released, copy) = snapshot_of(&f, "a");
+    assert_eq!((hash, size, released), (None, None, true));
+    assert_eq!(copy.as_deref(), Some("<sent-a@mailx.test>"));
+    let stamp: String =
+        f.db.query_row(
+            "SELECT snapshot_released_at FROM outbox WHERE id = ?1",
+            [format!("{:0>36}", "a")],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    // A resync of the same copy (or a later batch) changes nothing, and a
+    // released snapshot is never given back.
+    put_sent(
+        &mut f,
+        &[
+            sent_copy("sent-a@mailx.test", 1),
+            sent_copy("other@mailx.test", 2),
+        ],
+    );
+    let again: String =
+        f.db.query_row(
+            "SELECT snapshot_released_at FROM outbox WHERE id = ?1",
+            [format!("{:0>36}", "a")],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(again, stamp);
+    assert_eq!(
+        snapshot_of(&f, "a").3.as_deref(),
+        Some("<sent-a@mailx.test>")
+    );
+}
+
+#[test]
+fn a_different_message_id_releases_nothing() {
+    let mut f = setup();
+    let account = f.account.id.clone();
+    outbox_row(&f, &account, "a", "<sent-a@mailx.test>", "accepted");
+    // Same subject and time as the outbox row cannot match; only the id does.
+    put_sent(&mut f, &[sent_copy("sent-b@mailx.test", 1)]);
+    assert_eq!(
+        snapshot_of(&f, "a"),
+        (Some("h".repeat(64)), Some(10), false, None)
+    );
+}
+
+#[test]
+fn only_accepted_rows_are_released() {
+    let mut f = setup();
+    let account = f.account.id.clone();
+    for (id, state) in [
+        ("q", "queued"),
+        ("s", "sending"),
+        ("u", "unknown"),
+        ("f", "failed"),
+    ] {
+        outbox_row(&f, &account, id, &format!("<{id}@mailx.test>"), state);
+    }
+    let copies: Vec<_> = ["q", "s", "u", "f"]
+        .iter()
+        .enumerate()
+        .map(|(i, id)| sent_copy(&format!("{id}@mailx.test"), i as u32 + 1))
+        .collect();
+    put_sent(&mut f, &copies);
+    for id in ["q", "s", "u", "f"] {
+        assert_eq!(
+            snapshot_of(&f, id),
+            (Some("h".repeat(64)), Some(10), false, None),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn copies_outside_the_sent_folder_release_nothing() {
+    let mut f = setup();
+    let account = f.account.id.clone();
+    outbox_row(&f, &account, "a", "<sent-a@mailx.test>", "accepted");
+    put(&mut f, &[sent_copy("sent-a@mailx.test", 1)]);
+    assert_eq!(snapshot_of(&f, "a").3, None);
+}
+
+#[test]
+fn matching_is_per_account() {
+    let mut f = setup();
+    let account = f.account.id.clone();
+    let other = add_account(&mut f.service).0;
+    outbox_row(&f, &other.id, "b", "<shared@mailx.test>", "accepted");
+    outbox_row(&f, &account, "a", "<shared@mailx.test>", "accepted");
+    put_sent(&mut f, &[sent_copy("shared@mailx.test", 1)]);
+    assert!(snapshot_of(&f, "a").2);
+    assert_eq!(
+        snapshot_of(&f, "b"),
+        (Some("h".repeat(64)), Some(10), false, None)
+    );
+}

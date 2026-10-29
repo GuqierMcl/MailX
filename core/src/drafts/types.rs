@@ -1,4 +1,5 @@
 //! Draft wire contract. Drafts are local only; nothing here reaches a server.
+use super::attachments::DraftAttachmentSummary;
 use crate::mail::MailAddress;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -60,6 +61,7 @@ pub struct Draft {
     /// Advances on every saved change; updates must present the one they saw.
     #[ts(type = "number")]
     pub revision: u32,
+    pub attachments: Vec<DraftAttachmentSummary>,
 }
 
 impl Draft {
@@ -71,6 +73,7 @@ impl Draft {
             && self.bcc.is_empty()
             && self.subject.trim().is_empty()
             && self.body_text.trim().is_empty()
+            && self.attachments.is_empty()
     }
 }
 

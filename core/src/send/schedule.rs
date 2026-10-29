@@ -5,7 +5,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use super::types::{OutboxError, RejectedRecipientInfo, ServerReplyInfo};
-use crate::smtp::{PreDataFailure, SmtpOutcome, UnknownReason};
+use crate::smtp::{PreDataFailure, SmtpOutcome, UnknownReason, names_size_limit};
 
 /// Pre-body failures are retried for this long after the item was queued.
 pub(crate) const RETRY_WINDOW: chrono::Duration = chrono::Duration::hours(24);
@@ -80,7 +80,15 @@ pub(crate) fn transition(
             text: reply.text,
         }),
         SmtpOutcome::RejectedAfterData(reply) => Transition::Fail(OutboxError {
-            reason: "rejectedAfterData".to_owned(),
+            // A definite refusal, never `unknown`: the server said no, so the
+            // message was not sent. Only an explicit size code (5.3.4 / 5.2.3)
+            // is told apart; a bare 552 stays the generic reason.
+            reason: if reply.code / 100 == 5 && names_size_limit(&reply.text) {
+                "messageTooLarge"
+            } else {
+                "rejectedAfterData"
+            }
+            .to_owned(),
             smtp_code: Some(reply.code),
             text: Some(reply.text),
             rejected: Vec::new(),

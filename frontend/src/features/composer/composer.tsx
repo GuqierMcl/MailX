@@ -1,11 +1,12 @@
 import { errorText } from '@/i18n/errors'
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { AlertCircleIcon, MailOpen01Icon } from '@hugeicons/core-free-icons'
-import type { Account } from '@/generated/accounts'
+import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon } from '@hugeicons/core-free-icons'
+import type { Account, AttachmentPolicy } from '@/generated/accounts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { IconButton } from '@/components/icon-button'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,7 +26,8 @@ import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 import { RecipientField } from './recipient-field'
 import { SendButton } from './send-button'
-import { fieldsAreEmpty, useDraftEditor, type SaveStatus } from './use-draft-editor'
+import { AttachmentBar } from './attachment-bar'
+import { DraftUnsavedError, fieldsAreEmpty, useDraftEditor, type SaveStatus } from './use-draft-editor'
 import { useMailBodyEditor } from './mail-body-editor-loader'
 
 /** What the window around the composer needs from it when closing. */
@@ -101,6 +103,28 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   const bccVisible = showBcc || (fields?.bcc.length ?? 0) > 0
 
   const account = useMemo(() => accounts.find((row) => row.id === fields?.accountId) ?? null, [accounts, fields?.accountId])
+  const accountId = fields?.accountId
+  const [policy, setPolicy] = useState<AttachmentPolicy | null>(null)
+  useEffect(() => {
+    if (!accountId) return
+    let current = true
+    client.attachmentPolicy(accountId).then((next) => current && setPolicy(next), () => current && setPolicy(null))
+    return () => { current = false }
+  }, [client, accountId])
+
+  // Every attachment command reports its failure in the bottom bar, like sending does.
+  const { addAttachments, addDroppedAttachments, removeAttachment } = editor
+  const runAttachment = useCallback(async (command: () => Promise<void>) => {
+    setError(null)
+    try {
+      await command()
+    } catch (cause) {
+      setError(cause instanceof DraftUnsavedError ? { key: 'composer:validation.unsaved' } : { cause })
+    }
+  }, [])
+  // The host tells the window when the OS dropped files on it; it keeps the paths itself.
+  useEffect(() => client.onFilesDropped(() => void runAttachment(addDroppedAttachments)), [client, runAttachment, addDroppedAttachments])
+
   const accountItems = useMemo(() => Object.fromEntries(accounts.map((row) => [row.id, accountLabel(row)])), [accounts])
 
   if (editor.gone) {
@@ -131,7 +155,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
 
   const readOnly = editor.readOnly
   const hasInvalid = [...fields.to, ...fields.cc, ...fields.bcc].some((item) => !item.valid)
-  const empty = fieldsAreEmpty(fields)
+  const empty = fieldsAreEmpty(fields) && editor.attachments.length === 0
 
   // First press of the send button: check, save, and hand back the saved revision.
   const prepare = async (): Promise<number | null> => {
@@ -279,7 +303,22 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       ) : (
         <div role="status" className="flex min-h-0 flex-1 items-center justify-center">{t('composer:editor.opening')}</div>
       )}
+      <AttachmentBar
+        attachments={editor.attachments}
+        policy={policy}
+        readOnly={readOnly}
+        busy={editor.attaching}
+        onRemove={(id) => void runAttachment(() => removeAttachment(id))}
+      />
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
+        <IconButton
+          type="button"
+          disabled={readOnly || busy || editor.attaching}
+          label={t('composer:attachment.add')}
+          onClick={() => void runAttachment(addAttachments)}
+        >
+          <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
+        </IconButton>
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           {/* The width and height are reserved so the status coming and going never moves the buttons. */}
           <span

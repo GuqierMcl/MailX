@@ -3,7 +3,10 @@ use tempfile::TempDir;
 use uuid::Uuid;
 
 use super::{compose::prefixed_subject, types::*};
-use crate::{AppError, ErrorCode, MailAddress, MailxCore};
+use crate::{
+    AddAttachmentRequest, AppError, AttachmentOrigin, ErrorCode, MailAddress, MailxCore,
+    RemoveAttachmentRequest,
+};
 
 const NONE: &str = "";
 
@@ -990,6 +993,7 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
         draft: &saved,
         message_id: "<test@example.com>",
         date: crate::smtp::message::local_now(),
+        attachments: &[],
     })
     .unwrap();
     assert!(built.mime.is_ascii());
@@ -1080,4 +1084,313 @@ async fn replies_and_forwards_reuse_cached_html_with_safe_links_and_simple_layou
     assert!(!forward.body_html.contains("<blockquote>"));
     assert!(forward.body_html.contains("<strong>Bold</strong>"));
     assert!(forward.body_html.contains("<h2>Heading</h2><h3>Small</h3>"));
+}
+
+fn add(f: &Fixture, draft: &Draft, file_name: &str, bytes: &[u8]) -> Result<Draft, AppError> {
+    f.core.add_attachment(
+        AddAttachmentRequest {
+            draft_id: draft.id.clone(),
+            expected_revision: draft.revision,
+            file_name: file_name.to_owned(),
+        },
+        bytes,
+    )
+}
+
+fn blob_files(directory: &std::path::Path) -> usize {
+    fn count(path: &std::path::Path) -> usize {
+        std::fs::read_dir(path).map_or(0, |entries| {
+            entries
+                .flatten()
+                .map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() { count(&path) } else { 1 }
+                })
+                .sum()
+        })
+    }
+    count(&directory.join("blobs"))
+}
+
+#[tokio::test]
+async fn attachments_add_list_and_remove_with_revisions() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    assert!(draft.attachments.is_empty());
+
+    let one = add(&f, &draft, "../dir/报告\n终稿.pdf", b"%PDF-1.7 hello").unwrap();
+    assert_eq!(one.revision, draft.revision + 1);
+    let [first] = &one.attachments[..] else {
+        panic!("one attachment expected")
+    };
+    assert_eq!(first.file_name, "报告终稿.pdf");
+    assert_eq!(first.media_type, "application/pdf");
+    assert_eq!(first.size, 14);
+    assert_eq!(first.origin, AttachmentOrigin::User);
+    // The draft read back carries the same list.
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), one);
+
+    // A stale revision is a conflict and changes nothing.
+    assert_eq!(code(add(&f, &draft, "b.txt", b"b")).0, ErrorCode::Conflict);
+    let two = add(&f, &one, "unknown.zzz", &[0, 1, 2]).unwrap();
+    assert_eq!(two.attachments[1].media_type, "application/octet-stream");
+
+    let id = two.attachments[0].id.clone();
+    let stale = f.core.remove_attachment(RemoveAttachmentRequest {
+        draft_id: draft.id.clone(),
+        attachment_id: id.clone(),
+        expected_revision: one.revision,
+    });
+    assert_eq!(code(stale).0, ErrorCode::Conflict);
+    let left = f
+        .core
+        .remove_attachment(RemoveAttachmentRequest {
+            draft_id: draft.id.clone(),
+            attachment_id: id.clone(),
+            expected_revision: two.revision,
+        })
+        .unwrap();
+    assert_eq!(left.revision, two.revision + 1);
+    assert_eq!(left.attachments.len(), 1);
+    let missing = f.core.remove_attachment(RemoveAttachmentRequest {
+        draft_id: draft.id.clone(),
+        attachment_id: id,
+        expected_revision: left.revision,
+    });
+    assert_eq!(code(missing).0, ErrorCode::NotFound);
+    assert_eq!(
+        code(add(&f, &left, "..", b"x")),
+        (ErrorCode::Validation, Some("fileName".to_owned()))
+    );
+
+    // Zero bytes and a repeated name are both fine; order is insertion order.
+    let zero = add(&f, &left, "empty.txt", b"").unwrap();
+    assert_eq!(zero.attachments.last().unwrap().size, 0);
+    let repeated = add(&f, &zero, "empty.txt", b"different").unwrap();
+    let names: Vec<&str> = repeated
+        .attachments
+        .iter()
+        .map(|a| a.file_name.as_str())
+        .collect();
+    assert_eq!(names, ["unknown.zzz", "empty.txt", "empty.txt"]);
+
+    // Deleting the draft takes its attachment rows along.
+    f.core.delete_draft(&draft.id).unwrap();
+    let rows: i64 =
+        f.db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+async fn attachments_respect_the_count_and_size_limits() {
+    let f = fixture(&[plain("x")]);
+    let mut draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let policy = f.core.attachment_policy(&draft.account_id).unwrap();
+    assert_eq!(policy.max_total_bytes, 20 * 1024 * 1024);
+    assert_eq!(policy.max_count, 20);
+    for index in 0..20 {
+        draft = add(
+            &f,
+            &draft,
+            &format!("{index}.txt"),
+            format!("{index}").as_bytes(),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        code(add(&f, &draft, "21.txt", b"x")).0,
+        ErrorCode::TooManyAttachments
+    );
+
+    let big = f.core.create_draft(f.blank(None), &id()).unwrap();
+    let mib = vec![7_u8; 2 * 1024 * 1024];
+    let mut big = big;
+    for index in 0..5 {
+        let mut bytes = mib.clone();
+        bytes[0] = index;
+        big = add(&f, &big, "chunk.bin", &bytes).unwrap();
+        big = add(&f, &big, "chunk.bin", &bytes[..bytes.len() - 1]).unwrap();
+    }
+    // 10 MiB + (10 MiB - 5 B) used; two more MiB tip it over.
+    assert_eq!(
+        code(add(&f, &big, "more.bin", &mib)).0,
+        ErrorCode::AttachmentTooLarge
+    );
+    assert_eq!(
+        code(add(&f, &big, "huge.bin", &vec![0; 21 * 1024 * 1024])).0,
+        ErrorCode::AttachmentTooLarge
+    );
+    // Refused adds leave the draft as it was.
+    assert_eq!(f.core.get_draft(&big.id).unwrap(), big);
+}
+
+#[tokio::test]
+async fn a_locked_draft_refuses_attachment_changes_before_the_blob_is_written() {
+    let f = fixture(&[plain("x")]);
+    let mut request = f.blank(None);
+    request.to = vec![who(None, "li@example.org")];
+    request.subject = "queued".into();
+    let draft = f.core.create_draft(request, NONE).unwrap();
+    let service = f.core.service_for_tests();
+    let queued = {
+        let mut service = service.lock().unwrap();
+        let (item, _) = service
+            .queue_send(
+                &crate::QueueSendRequest {
+                    draft_id: draft.id.clone(),
+                    expected_revision: draft.revision,
+                    client_mutation_id: id(),
+                },
+                30,
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        item
+    };
+    assert_eq!(
+        code(add(&f, &draft, "a.txt", b"bytes")).0,
+        ErrorCode::DraftLocked
+    );
+    let removal = f.core.remove_attachment(RemoveAttachmentRequest {
+        draft_id: draft.id.clone(),
+        attachment_id: id(),
+        expected_revision: draft.revision,
+    });
+    assert_eq!(code(removal).0, ErrorCode::DraftLocked);
+    service
+        .lock()
+        .unwrap()
+        .cancel_outbox(&queued.id, chrono::Utc::now())
+        .unwrap();
+    let added = add(&f, &draft, "a.txt", b"bytes").unwrap();
+    assert_eq!(added.attachments.len(), 1);
+}
+
+#[tokio::test]
+async fn identical_content_shares_one_blob_and_cleanup_keeps_referenced_ones() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let before = blob_files(f._directory.path());
+    let draft = add(&f, &draft, "a.txt", b"same bytes").unwrap();
+    let draft = add(&f, &draft, "b.txt", b"same bytes").unwrap();
+    assert_eq!(draft.attachments.len(), 2);
+    assert_eq!(blob_files(f._directory.path()), before + 1);
+
+    let orphan = f.core.create_draft(f.blank(None), &id()).unwrap();
+    let orphan = add(&f, &orphan, "o.txt", b"orphan bytes").unwrap();
+    assert_eq!(blob_files(f._directory.path()), before + 2);
+    f.core.delete_draft(&orphan.id).unwrap();
+
+    // Startup cleanup frees the unreferenced blob only.
+    let Fixture {
+        _directory: directory,
+        core,
+        ..
+    } = f;
+    drop(core);
+    let storage = crate::storage::Storage::open(directory.path()).unwrap();
+    assert_eq!(blob_files(directory.path()), before + 1);
+    let kept = storage.attachment_files(&draft.id).unwrap();
+    assert_eq!(storage.blobs.read(&kept[0].blob).unwrap(), b"same bytes");
+}
+
+fn mixed(parts: &[(&str, &str)]) -> Vec<u8> {
+    let mut raw = String::from(
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody\r\n",
+    );
+    for (headers, content) in parts {
+        raw.push_str(&format!("--b\r\n{headers}\r\n\r\n{content}\r\n"));
+    }
+    raw.push_str("--b--\r\n");
+    raw.into_bytes()
+}
+
+const PDF: &str = "Content-Type: application/pdf; name=\"a.pdf\"\r\nContent-Disposition: attachment; filename=\"a.pdf\"\r\nContent-Transfer-Encoding: base64";
+const PNG: &str = "Content-Type: image/png\r\nContent-ID: <logo@x>\r\nContent-Disposition: inline; filename=\"logo.png\"\r\nContent-Transfer-Encoding: base64";
+
+#[tokio::test]
+async fn forward_carries_non_inline_attachments_only_and_replays_add_nothing() {
+    // "%PDF-1.7 hi" and a PNG signature, base64-encoded.
+    let f = fixture(&[mixed(&[(PDF, "JVBERi0xLjcgaGk="), (PNG, "iVBORw0KGgo=")])]);
+    let request = CreateDraftFromRequest {
+        email_id: f.emails[0].clone(),
+        kind: DraftKind::Forward,
+        client_mutation_id: id(),
+    };
+    let draft = f.core.create_draft_from(request.clone()).unwrap();
+    let [file] = &draft.attachments[..] else {
+        panic!("only the PDF is carried")
+    };
+    assert_eq!(file.file_name, "a.pdf");
+    assert_eq!(file.media_type, "application/pdf");
+    assert_eq!(file.size, 11);
+    assert_eq!(file.origin, AttachmentOrigin::Forwarded);
+
+    let replay = f.core.create_draft_from(request).unwrap();
+    assert_eq!(replay.id, draft.id);
+    assert_eq!(replay.attachments.len(), 1);
+    let rows: i64 =
+        f.db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+async fn reply_does_not_carry_attachments() {
+    let f = fixture(&[mixed(&[(PDF, "JVBERi0xLjcgaGk=")])]);
+    let draft = f.derive(0, DraftKind::Reply).unwrap();
+    assert!(draft.attachments.is_empty());
+}
+
+#[tokio::test]
+async fn forward_without_attachments_has_an_empty_list() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.derive(0, DraftKind::Forward).unwrap();
+    assert!(draft.attachments.is_empty());
+}
+
+#[tokio::test]
+async fn forward_over_the_policy_still_creates_the_draft_and_blocks_sending() {
+    // 21 files exceed the default count limit of 20.
+    let parts: Vec<(&str, &str)> = (0..21).map(|_| (PDF, "JVBERi0xLjcgaGk=")).collect();
+    let f = fixture(&[mixed(&parts)]);
+    let draft = f.derive(0, DraftKind::Forward).unwrap();
+    assert_eq!(draft.attachments.len(), 21);
+    assert!(
+        draft
+            .attachments
+            .iter()
+            .all(|file| file.origin == AttachmentOrigin::Forwarded)
+    );
+    // The draft survives; queueing is where the policy is enforced again.
+    let request = crate::QueueSendRequest {
+        draft_id: draft.id.clone(),
+        expected_revision: draft.revision,
+        client_mutation_id: id(),
+    };
+    let service = f.core.service_for_tests();
+    let queued = service
+        .lock()
+        .unwrap()
+        .prepare_send(&request, 0)
+        .map(|_| ());
+    assert_eq!(code(queued).0, ErrorCode::TooManyAttachments);
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
+}
+
+#[tokio::test]
+async fn forward_of_an_uncached_body_is_still_body_not_cached() {
+    let f = fixture(&[plain("x")]);
+    f.db.execute(
+        "UPDATE messages SET body_state = 'missing' WHERE id = ?1",
+        [&f.emails[0]],
+    )
+    .unwrap();
+    let (error, _) = code(f.derive(0, DraftKind::Forward));
+    assert_eq!(error, ErrorCode::BodyNotCached);
 }

@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -432,7 +432,7 @@ references: string | null, createdAt: string, updatedAt: string,
 /**
  * Advances on every saved change; updates must present the one they saw.
  */
-revision: number, };
+revision: number, attachments: Array<DraftAttachmentSummary>, };
 
 export type DraftSummary = { id: string, accountId: string, kind: DraftKind, sourceEmailId: string | null, to: Array<MailAddress>, subject: string,
 /**
@@ -458,6 +458,31 @@ export type UpdateDraftRequest = { id: string, expectedRevision: number,
  */
 accountId: string | null, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string, bodyHtml: string, };
 
+export type AddAttachmentRequest = { draftId: string, expectedRevision: number,
+/**
+ * The name the host got from the user; the core cleans it up.
+ */
+fileName: string, };
+
+export type RemoveAttachmentRequest = { draftId: string, attachmentId: string, expectedRevision: number, };
+
+export type DraftAttachmentSummary = { id: string, fileName: string, mediaType: string, size: number, origin: AttachmentOrigin, };
+
+export type AttachmentOrigin = "user" | "forwarded";
+
+export type AttachmentPolicy = {
+/**
+ * Sum of the raw attachment bytes of one draft.
+ */
+maxTotalBytes: number, maxCount: number,
+/**
+ * Raw attachment capacity, in whole MB, that the account's SMTP server
+ * advertised (`SIZE` / 1.37 for base64 and MIME overhead, rounded down).
+ * Only a hint for the composer; `maxTotalBytes` stays the enforced limit.
+ * `None` until a send has learned it.
+ */
+serverLimitMb: number | null, };
+
 export type OutboxState = "queued" | "sending" | "accepted" | "failed" | "unknown" | "canceled";
 
 export type OutboxResolution = "markedSent" | "resent";
@@ -473,7 +498,9 @@ text: string, };
 export type OutboxError = {
 /**
  * A fixed code such as `connect`, `authRejected`, `recipientsRejected`,
- * `rejectedAfterData`, `retryExhausted`, `accountChanged`, `unknown`.
+ * `messageTooLarge` (the server named a size limit and refused, before the
+ * body at `MAIL FROM` or in the final reply), `rejectedAfterData`,
+ * `retryExhausted`, `accountChanged`, `unknown`.
  */
 reason: string, smtpCode: number | null, text: string | null, rejected: Array<RejectedRecipientInfo>, };
 

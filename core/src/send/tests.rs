@@ -9,6 +9,8 @@ use tempfile::TempDir;
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
+use mail_parser::MimeHeaders;
+
 use super::types::*;
 use super::{Clock, SendConfig};
 use crate::accounts::sync_plan::tests::{config, connection_update};
@@ -359,6 +361,46 @@ async fn the_item_is_sent_when_the_undo_window_ends_and_then_cannot_be_canceled(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_advertised_size_is_kept_on_the_account_for_the_composer_hint() {
+    let fx = fixture();
+    // 26 MB of whole MIME is about 18 MB of attachments after the 1.37 factor.
+    let size = 26 * 1024 * 1024;
+    let (port, _seen) = fx.server(|s| s.size = Some(size)).await;
+    let account = fx.account("lin@example.com", port);
+    let before = fx.core.attachment_policy(&account.id).unwrap();
+    assert_eq!(before.server_limit_mb, None);
+    let draft = fx.draft(&account);
+    let item = fx.queue(&draft, 0);
+    fx.reaches(&item.id, OutboxState::Accepted).await;
+    fx.settle().await;
+    let after = fx.core.attachment_policy(&account.id).unwrap();
+    assert_eq!(after.server_limit_mb, Some(18));
+    // Only a hint: the enforced limits are unchanged.
+    assert_eq!(
+        (after.max_total_bytes, after.max_count),
+        (20 * 1024 * 1024, 20)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_without_size_leaves_the_policy_default() {
+    let fx = fixture();
+    let (port, _seen) = fx.server(|_| {}).await;
+    let account = fx.account("lin@example.com", port);
+    let draft = fx.draft(&account);
+    let item = fx.queue(&draft, 0);
+    fx.reaches(&item.id, OutboxState::Accepted).await;
+    fx.settle().await;
+    assert_eq!(
+        fx.core
+            .attachment_policy(&account.id)
+            .unwrap()
+            .server_limit_mb,
+        None
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
     let fx = fixture();
     let (port, seen) = fx.server(|_| {}).await;
@@ -419,7 +461,7 @@ async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
 #[tokio::test(flavor = "multi_thread")]
 async fn definite_failures_are_recorded_and_never_retried() {
     type Setup = fn(&mut Script);
-    let cases: [(&str, Setup, &str, Option<u16>); 4] = [
+    let cases: [(&str, Setup, &str, Option<u16>); 7] = [
         (
             "permanent",
             |s| {
@@ -441,6 +483,32 @@ async fn definite_failures_are_recorded_and_never_retried() {
             },
             "rejectedAfterData",
             Some(554),
+        ),
+        (
+            "too large at mail from",
+            |s| {
+                s.replies.insert(Stage::Mail, "552 5.3.4 message too big");
+            },
+            "messageTooLarge",
+            Some(552),
+        ),
+        (
+            "too large after data",
+            |s| {
+                s.replies
+                    .insert(Stage::Final, "552 5.2.3 message too large");
+            },
+            "messageTooLarge",
+            Some(552),
+        ),
+        (
+            "bare 552 after data",
+            |s| {
+                s.replies
+                    .insert(Stage::Final, "552 requested action aborted");
+            },
+            "rejectedAfterData",
+            Some(552),
         ),
         ("auth", |s| s.password = "other", "authRejected", Some(535)),
     ];
@@ -943,4 +1011,215 @@ async fn opening_the_core_purges_blank_drafts_only() {
         ErrorCode::NotFound
     );
     assert!(core.get_draft(&kept.id).is_ok());
+}
+
+fn store_connection(fx: &Fx) -> rusqlite::Connection {
+    let db = rusqlite::Connection::open(fx.dir.path().join("mailx.sqlite3")).unwrap();
+    db.pragma_update(None, "foreign_keys", true).unwrap();
+    db
+}
+
+/// The blob file behind a snapshot hash, as the store lays it out.
+fn snapshot_path(fx: &Fx, hash: &str) -> std::path::PathBuf {
+    fx.dir.path().join("blobs").join(&hash[..2]).join(hash)
+}
+
+fn snapshot_of(fx: &Fx, item: &str) -> (Option<String>, Option<i64>) {
+    store_connection(fx)
+        .query_row(
+            "SELECT snapshot_hash, snapshot_size FROM outbox WHERE id = ?1",
+            [item],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+}
+
+fn attached(fx: &Fx, draft: &Draft, name: &str, bytes: &[u8]) -> Draft {
+    fx.core
+        .add_attachment(
+            crate::AddAttachmentRequest {
+                draft_id: draft.id.clone(),
+                expected_revision: draft.revision,
+                file_name: name.to_owned(),
+            },
+            bytes,
+        )
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attachments_are_sent_from_the_frozen_snapshot_after_the_draft_is_gone() {
+    let fx = fixture();
+    let (port, seen) = fx.server(|_| {}).await;
+    let account = fx.account("lin@example.com", port);
+    let payload = b"%PDF-1.7 synthetic attachment bytes".to_vec();
+    let draft = attached(&fx, &fx.draft(&account), "报告 终稿.pdf", &payload);
+    assert_eq!(draft.attachments.len(), 1);
+    let item = fx.queue(&draft, 30);
+    assert_eq!(item.state, OutboxState::Queued);
+
+    // Delete the draft out from under the queued item.
+    store_connection(&fx)
+        .execute("DELETE FROM drafts WHERE id = ?1", [&draft.id])
+        .unwrap();
+    let rows: i64 = store_connection(&fx)
+        .query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 0, "the attachment references go with the draft");
+
+    fx.clock.advance(Duration::from_secs(31));
+    let done = fx.reaches(&item.id, OutboxState::Accepted).await;
+    assert_eq!(done.draft_id, None);
+    let body = seen.lock().unwrap().body.clone();
+    let parsed = mail_parser::MessageParser::default().parse(&body).unwrap();
+    assert_eq!(parsed.attachment_count(), 1);
+    let part = parsed.attachment(0).unwrap();
+    assert_eq!(part.attachment_name(), Some("报告 终稿.pdf"));
+    assert_eq!(part.contents(), payload.as_slice());
+    assert_eq!(body, fx.core.outbox_mime_for_tests(&item.id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_send_the_identical_snapshot_bytes() {
+    let fx = fixture();
+    let port = dead_port().await;
+    let account = fx.account("lin@example.com", port);
+    let draft = attached(&fx, &fx.draft(&account), "a.bin", b"\x00\x01binary");
+    let item = fx.queue(&draft, 0);
+    let queued = fx
+        .until(&item.id, "first requeue", |i| {
+            i.state == OutboxState::Queued && i.error.is_some()
+        })
+        .await;
+    let (hash, size) = snapshot_of(&fx, &item.id);
+    let hash = hash.expect("a queued item always has its snapshot");
+    assert_eq!(
+        size,
+        Some(fx.core.outbox_mime_for_tests(&item.id).len() as i64)
+    );
+
+    // The server comes up where connections were refused.
+    let mut script = Script::new(Mode::Implicit(fx.tls.server.clone()));
+    script.password = PASSWORD;
+    let (_, seen) = fake_server::start_at(port, script).await;
+    fx.clock.advance(Duration::from_secs(31));
+    fx.reaches(&item.id, OutboxState::Accepted).await;
+    assert_eq!(queued.attempts, 1);
+    assert_eq!(snapshot_of(&fx, &item.id).0.as_deref(), Some(hash.as_str()));
+    assert_eq!(
+        seen.lock().unwrap().body,
+        fx.core.outbox_mime_for_tests(&item.id)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missing_or_corrupt_snapshot_fails_before_any_data_is_sent() {
+    for corrupt in [false, true] {
+        let fx = fixture();
+        let (port, seen) = fx.server(|_| {}).await;
+        let account = fx.account("lin@example.com", port);
+        let draft = attached(&fx, &fx.draft(&account), "a.bin", b"snapshot bytes");
+        // The undo window keeps the worker away until the blob is damaged.
+        let item = fx.queue(&draft, 30);
+        let (hash, _) = snapshot_of(&fx, &item.id);
+        let path = snapshot_path(&fx, hash.as_ref().unwrap());
+        if corrupt {
+            std::fs::write(&path, b"tampered").unwrap();
+        } else {
+            std::fs::remove_file(&path).unwrap();
+        }
+        fx.clock.advance(Duration::from_secs(31));
+
+        let failed = fx.reaches(&item.id, OutboxState::Failed).await;
+        assert_eq!(
+            failed.error.as_ref().unwrap().reason,
+            "snapshotMissing",
+            "corrupt: {corrupt}"
+        );
+        assert_eq!(
+            data_count(&seen),
+            0,
+            "no body may reach the server, corrupt: {corrupt}"
+        );
+        assert_eq!(
+            fx.core.get_outbox(&item.id).unwrap().state,
+            OutboxState::Failed,
+            "a lost snapshot is never retried or rebuilt"
+        );
+        // The draft is editable again: its own attachment bytes are intact.
+        assert_eq!(fx.core.get_draft(&draft.id).unwrap().attachments.len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_draft_aborts_the_freeze_and_leaves_no_queue_row() {
+    let fx = fixture();
+    let account = fx.account("lin@example.com", 9);
+    let draft = attached(&fx, &fx.draft(&account), "a.bin", b"bytes");
+    let request = Fx::request(&draft);
+    let service = fx.core.service_for_tests();
+
+    let plan = {
+        let service = service.lock().unwrap();
+        service.prepare_send(&request, 0).unwrap()
+    };
+    let crate::accounts::outbox::SendPlan::Build(build) = plan else {
+        panic!("a fresh draft is not a replay")
+    };
+    let frozen = build.freeze().unwrap();
+
+    // A body edit between the two phases moves the revision on.
+    fx.core
+        .update_draft(
+            serde_json::from_value(json!({
+                "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
+                "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],
+                "subject": "edited meanwhile", "bodyHtml": "x",
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let error = service
+        .lock()
+        .unwrap()
+        .commit_send(&request, 0, &build, frozen, t0())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Conflict);
+    assert!(fx.core.list_outbox(None, true).unwrap().is_empty());
+    assert!(!fx.core.get_draft(&draft.id).unwrap().attachments.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_requeue_releases_the_superseded_items_snapshot() {
+    let fx = fixture();
+    let (port, seen) = fx
+        .server(|script| {
+            script.replies.insert(Stage::Mail, "554 5.7.1 nope");
+        })
+        .await;
+    let account = fx.account("lin@example.com", port);
+    let draft = attached(&fx, &fx.draft(&account), "a.bin", b"bytes");
+    let first = fx.queue(&draft, 0);
+    fx.reaches(&first.id, OutboxState::Failed).await;
+    let (hash, _) = snapshot_of(&fx, &first.id);
+    assert!(
+        hash.is_some(),
+        "a failed item keeps its snapshot until replaced"
+    );
+
+    let editable = fx.core.get_draft(&draft.id).unwrap();
+    let second = fx.queue(&editable, 0);
+    let released: (Option<String>, Option<String>) = store_connection(&fx)
+        .query_row(
+            "SELECT snapshot_hash, snapshot_released_at FROM outbox WHERE id = ?1",
+            [&first.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(released.0, None);
+    assert!(released.1.is_some());
+    assert!(snapshot_of(&fx, &second.id).0.is_some());
+    assert!(seen.lock().unwrap().connections >= 1);
 }

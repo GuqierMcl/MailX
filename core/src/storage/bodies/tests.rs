@@ -635,3 +635,128 @@ fn a_failed_commit_leaves_the_estimate_alone() {
     assert!(!store.body_commit(&identity, &blob, &value).unwrap());
     assert!(has_attachment(&store));
 }
+
+#[test]
+fn queue_snapshots_move_into_blobs_once_and_the_move_can_rerun() {
+    use crate::storage::migrations::{MIGRATIONS, apply};
+
+    let draft = "d".repeat(36);
+    let row = "r".repeat(36);
+    let directory = TempDir::new().unwrap();
+    let mut db = Connection::open(directory.path().join("mailx.sqlite3")).unwrap();
+    db.pragma_update(None, "foreign_keys", true).unwrap();
+    apply(&mut db, &MIGRATIONS[..8]).unwrap();
+    seed(&db);
+    db.execute(
+        "INSERT INTO drafts(id, account_id, kind, to_addresses, cc_addresses, bcc_addresses,
+         subject, body_text, created_at, updated_at, client_mutation_id, create_canonical)
+         VALUES (?1, 'account', 'new', '[]', '[]', '[]', 'hi', 'body', 't', 't', ?2, '{}')",
+        rusqlite::params![draft, "m".repeat(36)],
+    )
+    .unwrap();
+    let mime = b"Content-Type: text/plain\r\n\r\nlegacy queue snapshot\r\n";
+    db.execute(
+        "INSERT INTO outbox(id, draft_id, account_id, client_mutation_id, queue_canonical,
+         message_id, mime, envelope, subject, recipients_preview, recipient_count, state,
+         not_before, accepted_at, first_queued_at, created_at, updated_at)
+         VALUES (?2, ?1, 'account', ?4, '{}', '<a@example.invalid>', ?3, '{}', 'hi',
+                 '[]', 1, 'accepted', 't', 't', 't', 't', 't')",
+        rusqlite::params![draft, row, mime.as_slice(), "c".repeat(36)],
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Storage::open(directory.path()).unwrap();
+    let (hash, size, stored): (String, i64, Option<Vec<u8>>) = store
+        .db
+        .query_row(
+            "SELECT snapshot_hash, snapshot_size, mime FROM outbox WHERE id = ?1",
+            [&row],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, None, "the column is cleared once the blob exists");
+    assert_eq!(size, mime.len() as i64);
+    let reference = crate::storage::bodies::StoredBlob {
+        sha256: hash.clone(),
+        size: size as u64,
+    };
+    assert_eq!(store.blobs.read(&reference).unwrap(), mime);
+    drop(store);
+
+    // Rerunning finds nothing to move and leaves the blob alone.
+    let store = Storage::open(directory.path()).unwrap();
+    let hash_again: String = store
+        .db
+        .query_row(
+            "SELECT snapshot_hash FROM outbox WHERE id = ?1",
+            [&row],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(hash_again, hash);
+    assert!(store.blobs.read(&reference).is_ok());
+}
+
+#[test]
+fn cleanup_keeps_draft_attachment_blobs_and_unreleased_snapshots() {
+    let draft = "d".repeat(36);
+    let kept_row = "k".repeat(36);
+    let old_row = "o".repeat(36);
+    let attachment = "a".repeat(36);
+    let directory = TempDir::new().unwrap();
+    let mut store = Storage::open(directory.path()).unwrap();
+    seed(&store.db);
+    store
+        .db
+        .execute(
+            "INSERT INTO drafts(id, account_id, kind, to_addresses, cc_addresses, bcc_addresses,
+             subject, body_text, created_at, updated_at, client_mutation_id, create_canonical)
+             VALUES (?1, 'account', 'new', '[]', '[]', '[]', 'hi', 'body', 't', 't', ?2, '{}')",
+            rusqlite::params![draft, "m".repeat(36)],
+        )
+        .unwrap();
+    let attached = store.blobs.put(b"attached").unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO draft_attachments(draft_id, id, file_name, media_type, size, blob_hash,
+             origin, created_at)
+             VALUES (?1, ?2, 'a.txt', 'text/plain', ?3, ?4, 'user', 't')",
+            rusqlite::params![draft, attachment, attached.size as i64, attached.sha256],
+        )
+        .unwrap();
+    let snapshot = store.blobs.put(b"snapshot").unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+             snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+             state, not_before, first_queued_at, created_at, updated_at)
+             VALUES (?1, 'account', ?4, '{}', '<a@example.invalid>', ?2, ?3, '{}', 'hi',
+                     '[]', 1, 'queued', 't', 't', 't', 't')",
+            rusqlite::params![
+                kept_row,
+                snapshot.sha256,
+                snapshot.size as i64,
+                "c".repeat(36)
+            ],
+        )
+        .unwrap();
+    let released = store.blobs.put(b"released").unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+             envelope, subject, recipients_preview, recipient_count, state, not_before,
+             first_queued_at, created_at, updated_at)
+             VALUES (?1, 'account', ?2, '{}', '<b@example.invalid>', '{}', 'hi', '[]', 1,
+                     'canceled', 't', 't', 't', 't')",
+            [&old_row, &"z".repeat(36)],
+        )
+        .unwrap();
+    store.recover_bodies().unwrap();
+    assert!(store.blobs.read(&attached).is_ok());
+    assert!(store.blobs.read(&snapshot).is_ok());
+    assert!(store.blobs.read(&released).is_err());
+}

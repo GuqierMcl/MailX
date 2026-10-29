@@ -72,6 +72,10 @@ impl Run {
     }
 
     async fn go(&self, hook: DataStarted) -> SmtpOutcome {
+        self.attempt(hook).await.outcome
+    }
+
+    async fn attempt(&self, hook: DataStarted) -> Attempt {
         send_with_tls(
             &self.route,
             &self.login,
@@ -626,6 +630,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         created_at: String::new(),
         updated_at: String::new(),
         revision: 1,
+        attachments: vec![],
     };
     let id = super::message::new_message_id("zhang@example.com").unwrap();
     let built = build(&OutgoingMessage {
@@ -634,6 +639,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         draft: &draft,
         message_id: &id,
         date: super::message::local_now(),
+        attachments: &[],
     })
     .unwrap();
     let (mut run, seen, _tls) = plain_via_starttls(|_| {}).await;
@@ -691,4 +697,127 @@ async fn verification_authenticates_and_quits_without_any_delivery_commands() {
         );
         assert!(seen.lock().unwrap().body.is_empty());
     }
+}
+
+// Size verdicts and the advertised SIZE (sending.md section 16.4)
+
+#[test]
+fn enhanced_codes_are_read_from_reply_text() {
+    for text in [
+        "5.3.4 message too big",
+        "message size exceeds limit 5.2.3.",
+        "(5.3.4)",
+    ] {
+        assert!(names_size_limit(text), "{text}");
+    }
+    for text in [
+        "mailbox full",
+        "5.2.2 mailbox full",
+        "5.3.5 x",
+        "15.3.4 x",
+        "5.3.4.1",
+    ] {
+        assert!(!names_size_limit(text), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn mail_from_size_rejection_is_message_too_large() {
+    let (run, seen, _tls) = plain_via_starttls(|s| {
+        *s = s
+            .clone()
+            .reply(Stage::Mail, "552 5.3.4 message size exceeds fixed limit")
+    })
+    .await;
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::MessageTooLarge));
+    assert!(!saw(&seen, "BODY"));
+}
+
+#[tokio::test]
+async fn mail_from_523_is_message_too_large_and_bare_552_is_not() {
+    let (run, seen, _tls) =
+        plain_via_starttls(|s| *s = s.clone().reply(Stage::Mail, "552 5.2.3 too large")).await;
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::MessageTooLarge));
+
+    let (run, seen, _tls) =
+        plain_via_starttls(|s| *s = s.clone().reply(Stage::Mail, "552 insufficient storage")).await;
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::Server));
+}
+
+#[tokio::test]
+async fn an_enhanced_size_code_on_a_4xx_stays_transient() {
+    let (run, seen, _tls) =
+        plain_via_starttls(|s| *s = s.clone().reply(Stage::Mail, "452 5.3.4 busy")).await;
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (true, FailureReason::Server));
+}
+
+#[tokio::test]
+async fn size_rejection_in_the_final_reply_is_a_definite_refusal() {
+    let (run, seen, _tls) =
+        plain_via_starttls(|s| *s = s.clone().reply(Stage::Final, "552 5.3.4 message too big"))
+            .await;
+    let outcome = run.go(hook(&seen)).await;
+    let SmtpOutcome::RejectedAfterData(reply) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(reply.code, 552);
+    assert!(names_size_limit(&reply.text));
+}
+
+#[tokio::test]
+async fn advertised_size_is_reported_with_the_outcome() {
+    let (run, seen, _tls) = plain_via_starttls(|s| s.size = Some(26_214_400)).await;
+    let attempt = run.attempt(hook(&seen)).await;
+    assert!(accepted(&attempt.outcome));
+    assert_eq!(attempt.advertised_size, Some(26_214_400));
+
+    let (run, seen, _tls) = plain_via_starttls(|_| {}).await;
+    assert_eq!(run.attempt(hook(&seen)).await.advertised_size, None);
+}
+
+#[tokio::test]
+async fn a_stalled_body_write_times_out_as_unknown_without_a_total_cap() {
+    let (mut run, seen, _tls) = plain_via_starttls(|s| s.stall_body = true).await;
+    run.mime = b"Subject: big\r\n\r\n"
+        .iter()
+        .copied()
+        .chain(
+            std::iter::repeat_n(b'a', 63)
+                .chain([b'\n'])
+                .cycle()
+                .take(32 << 20),
+        )
+        .collect();
+    run.timeouts.data_write = Duration::from_millis(300);
+    run.timeouts.final_reply = Duration::from_secs(30);
+    let started = std::time::Instant::now();
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(outcome, SmtpOutcome::Unknown(UnknownReason::Timeout));
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[tokio::test]
+async fn a_slow_but_moving_body_write_is_not_cut_off() {
+    // The idle budget restarts on every chunk: a transfer whose total time
+    // exceeds `data_write` many times over still goes through, because no
+    // single chunk stalled.
+    let (mut run, seen, _tls) = plain_via_starttls(|_| {}).await;
+    run.timeouts.data_write = Duration::from_millis(30);
+    run.timeouts.final_reply = Duration::from_secs(60);
+    run.mime = vec![b'a'; 16 << 20]
+        .chunks(70)
+        .flat_map(|c| c.iter().copied().chain([b'\n']))
+        .collect();
+    let started = std::time::Instant::now();
+    let outcome = run.go(hook(&seen)).await;
+    assert!(accepted(&outcome), "{outcome:?}");
+    assert!(
+        started.elapsed() > run.timeouts.data_write,
+        "the test payload must outlast one idle budget"
+    );
+    assert!(seen.lock().unwrap().body.len() > (16 << 20));
 }

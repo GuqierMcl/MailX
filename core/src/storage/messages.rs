@@ -261,6 +261,23 @@ impl Storage {
             ])?;
         }
         drop(statement);
+        let is_sent: bool = tx.query_row(
+            "SELECT role = 'sent' FROM folders WHERE id = ?1",
+            [&target.folder_id],
+            |row| row.get(0),
+        )?;
+        if is_sent {
+            let message_ids: Vec<&str> = records
+                .iter()
+                .filter_map(|record| record.message_id_header.as_deref())
+                .collect();
+            super::outbox::release_matched_snapshots(
+                &tx,
+                &target.account_id,
+                &message_ids,
+                &timestamp,
+            )?;
+        }
         tx.execute("UPDATE folder_sync_cursors SET highest_uid = MAX(highest_uid, ?1), updated_at = ?2 WHERE folder_id = ?3", params![highest_uid, timestamp, target.folder_id])?;
         tx.commit()?;
         // Sync only fetches UIDs that are not cached as present, so each record

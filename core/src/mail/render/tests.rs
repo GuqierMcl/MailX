@@ -166,6 +166,34 @@ fn alternative_preserves_real_plain_and_html_with_attachment_metadata() {
 }
 
 #[test]
+fn every_listed_attachment_is_decodable_in_one_pass() {
+    let raw = email(
+        "multipart/mixed; boundary=m",
+        &format!(
+            "--m\r\nContent-Type: multipart/alternative; boundary=a\r\n\r\n\
+        --a\r\nContent-Type: text/plain\r\n\r\nplain choice\r\n\
+        --a\r\nContent-Type: text/html\r\n\r\n<p>html choice<img src=\"cid:logo\"></p>\r\n--a--\r\n\
+        --m\r\nContent-Type: image/png\r\nContent-Disposition: inline; filename=logo.png\r\nContent-ID: <logo>\r\nContent-Transfer-Encoding: base64\r\n\r\n{PNG}\r\n\
+        --m\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=notes.pdf\r\nContent-Transfer-Encoding: base64\r\n\r\nUERG\r\n--m--\r\n"
+        ),
+    );
+    let files = attachment_contents(&raw).unwrap();
+    let [file] = &files[..] else {
+        panic!("only the PDF is an attachment")
+    };
+    assert_eq!(file.file_name.as_deref(), Some("notes.pdf"));
+    assert_eq!(file.mime_type, "application/pdf");
+    assert_eq!(file.bytes, b"PDF");
+    // The same parts, read one by one, agree.
+    let listed = render(&raw, "owner").unwrap();
+    let pdf = listed.parts.iter().find(|part| !part.is_inline).unwrap();
+    assert_eq!(
+        attachment_content(&raw, pdf.part_index).unwrap().bytes,
+        files[0].bytes
+    );
+}
+
+#[test]
 fn nested_message_entities_do_not_disappear_or_replace_outer_body() {
     let raw = email(
         "multipart/mixed; boundary=m",

@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+pub(crate) mod attachments;
 pub(crate) mod bodies;
 pub(crate) mod drafts;
 mod flag_changes;
@@ -66,6 +67,7 @@ impl Storage {
             blobs,
             _lock: lock,
         };
+        storage.migrate_outbox_snapshots()?;
         storage.recover_bodies()?;
         Ok(storage)
     }

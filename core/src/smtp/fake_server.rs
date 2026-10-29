@@ -47,6 +47,8 @@ pub(crate) struct Script {
     pub stall: Option<Stage>,
     /// Close without a reply once the body terminator arrived.
     pub drop_after_body: bool,
+    /// After the 354, never read the body: the client's writes back up.
+    pub stall_body: bool,
     /// Bytes written in the same segment as the `220` to STARTTLS.
     pub inject_after_starttls: Vec<u8>,
     pub final_reply: &'static str,
@@ -64,6 +66,7 @@ impl Script {
             reject_rcpt: Vec::new(),
             stall: None,
             drop_after_body: false,
+            stall_body: false,
             inject_after_starttls: Vec::new(),
             final_reply: "250 2.0.0 queued as 42",
         }
@@ -311,6 +314,9 @@ async fn run(socket: Box<dyn Duplex>, script: Script, seen: Seen) -> std::io::Re
                 continue;
             }
             say(&mut socket, "354 go ahead\r\n").await?;
+            if script.stall_body {
+                stall().await;
+            }
             let mut first = true;
             loop {
                 let mut raw = Vec::new();

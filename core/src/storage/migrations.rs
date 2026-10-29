@@ -99,6 +99,24 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["accounts"],
         sql: include_str!("migrations/0012_account_provider_icon.sql"),
     },
+    Migration {
+        version: 13,
+        description: "compose draft attachments",
+        required_tables: &["draft_attachments"],
+        sql: include_str!("migrations/0013_draft_attachments.sql"),
+    },
+    Migration {
+        version: 14,
+        description: "send queue snapshots stored as blobs",
+        required_tables: &["outbox"],
+        sql: include_str!("migrations/0014_outbox_snapshot_blob.sql"),
+    },
+    Migration {
+        version: 15,
+        description: "account SMTP size limit",
+        required_tables: &["accounts"],
+        sql: include_str!("migrations/0015_account_smtp_size_limit.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -503,7 +521,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 12);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 15);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -674,7 +692,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            12
+            15
         );
     }
 

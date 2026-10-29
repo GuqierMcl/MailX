@@ -167,15 +167,42 @@ pub fn attachment_content(raw: &[u8], part_index: usize) -> Result<AttachmentCon
     let entity = entities
         .into_iter()
         .find(|entity| entity.index == part_index)
-        .filter(|entity| {
-            !entity.is_body
-                && !is_inline(entity.part)
-                && !matches!(entity.part.body, PartType::Multipart(_))
-        })
+        .filter(listed_attachment)
         .ok_or(RenderError::MissingPart)?;
     Ok(AttachmentContent {
         bytes: part_bytes(entity.part).to_vec(),
     })
+}
+
+/// The parts `render` lists as attachments: not a body, inline resource or container.
+fn listed_attachment(entity: &Entity<'_>) -> bool {
+    !entity.is_body
+        && !is_inline(entity.part)
+        && !matches!(entity.part.body, PartType::Multipart(_))
+}
+
+/// One attachment decoded from a message: the same parts
+/// [`attachment_content`] accepts, read without an index.
+pub struct DecodedAttachment {
+    pub file_name: Option<String>,
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Every listed attachment of a message, in one parse, for a caller that wants
+/// them all (a forward carries them over). Inline resources and the body are
+/// left out, exactly as `render` lists a message's attachments.
+pub fn attachment_contents(raw: &[u8]) -> Result<Vec<DecodedAttachment>, RenderError> {
+    let message = parse(raw)?;
+    Ok(entities(&message)?
+        .into_iter()
+        .filter(listed_attachment)
+        .map(|entity| DecodedAttachment {
+            file_name: entity.part.attachment_name().map(str::to_owned),
+            mime_type: mime_type(entity.part),
+            bytes: part_bytes(entity.part).to_vec(),
+        })
+        .collect())
 }
 
 fn parse(raw: &[u8]) -> Result<Message<'_>, RenderError> {

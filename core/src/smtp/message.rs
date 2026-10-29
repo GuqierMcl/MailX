@@ -20,6 +20,7 @@ use lettre::message::{Mailbox, MultiPart, SinglePart};
 use lettre::{Address, Message};
 use uuid::Uuid;
 
+use super::attachment::{AttachmentData, part};
 use crate::AppError;
 use crate::drafts::body::email_document;
 use crate::drafts::types::Draft;
@@ -49,6 +50,8 @@ pub(crate) struct OutgoingMessage<'a> {
     /// With angle brackets; see [`new_message_id`].
     pub message_id: &'a str,
     pub date: DateTime<FixedOffset>,
+    /// Files to attach; empty keeps the plain `multipart/alternative` layout.
+    pub attachments: &'a [AttachmentData],
 }
 
 /// `<uuid@domain-of-the-sender-address>`.
@@ -199,6 +202,15 @@ pub(crate) fn build(message: &OutgoingMessage<'_>) -> Result<BuiltMessage, AppEr
                 .header(ContentType::TEXT_HTML)
                 .body(email_document(&draft.body_html)),
         );
+    let body = if message.attachments.is_empty() {
+        body
+    } else {
+        let mut mixed = MultiPart::mixed().multipart(body);
+        for attachment in message.attachments {
+            mixed = mixed.singlepart(part(attachment)?);
+        }
+        mixed
+    };
     let mut built = builder
         .multipart(body)
         .map_err(|_| AppError::validation("draft"))?;
@@ -223,7 +235,7 @@ pub(crate) fn build(message: &OutgoingMessage<'_>) -> Result<BuiltMessage, AppEr
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
-    use mail_parser::{HeaderValue as ParsedValue, MessageParser};
+    use mail_parser::{HeaderValue as ParsedValue, MessageParser, MimeHeaders};
 
     use super::*;
     use crate::drafts::types::DraftKind;
@@ -252,6 +264,7 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             revision: 1,
+            attachments: vec![],
         }
     }
 
@@ -270,6 +283,7 @@ mod tests {
             draft,
             message_id: &id,
             date: date(),
+            attachments: &[],
         })
     }
 
@@ -467,6 +481,7 @@ mod tests {
             draft: &ok,
             message_id: "<a@b>\r\nBcc: s@c",
             date: date(),
+            attachments: &[],
         })
         .unwrap_err();
         assert_eq!(error.field.as_deref(), Some("messageId"));
@@ -483,5 +498,105 @@ mod tests {
             draft.to = vec![who(None, address)];
             assert!(make(&draft, None).is_err(), "{address}");
         }
+    }
+
+    fn make_with(attachments: &[AttachmentData]) -> BuiltMessage {
+        let id = new_message_id("zhang@Mail.Example.com").unwrap();
+        build(&OutgoingMessage {
+            sender_address: "zhang@Mail.Example.com",
+            sender_name: None,
+            draft: &draft(),
+            message_id: &id,
+            date: date(),
+            attachments,
+        })
+        .unwrap()
+    }
+
+    fn file(name: &str, media_type: &str, bytes: Vec<u8>) -> AttachmentData {
+        AttachmentData {
+            file_name: name.into(),
+            media_type: media_type.into(),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn no_attachments_keeps_the_alternative_layout() {
+        let built = make_with(&[]);
+        let text = String::from_utf8(built.mime.clone()).unwrap();
+        assert!(text.contains("Content-Type: multipart/alternative"));
+        assert!(!text.contains("multipart/mixed"));
+        assert!(!text.contains("Content-Disposition"));
+        // Byte-for-byte what the plain builder produced before attachments existed.
+        let parsed = MessageParser::default().parse(&built.mime).unwrap();
+        assert_eq!(parsed.attachment_count(), 0);
+        assert!(text.contains("text/plain; charset=utf-8"));
+    }
+
+    #[test]
+    fn attachments_go_into_multipart_mixed_after_the_alternative() {
+        let payload: Vec<u8> = (0..=255).cycle().take(5000).collect();
+        let built = make_with(&[
+            file("report.pdf", "application/pdf", payload.clone()),
+            file("notes.txt", "text/plain", b"hello".to_vec()),
+        ]);
+        assert!(built.mime.is_ascii(), "the snapshot must stay pure ASCII");
+        let text = String::from_utf8(built.mime.clone()).unwrap();
+        assert!(text.contains("Content-Type: multipart/mixed"));
+        assert!(
+            text.find("multipart/alternative").unwrap() < text.find("report.pdf").unwrap(),
+            "the written body comes first, then the files"
+        );
+        assert!(text.lines().all(|line| line.len() <= 998));
+        // Base64 body lines stay within 76 columns.
+        assert!(
+            text.lines()
+                .filter(|line| !line.contains(':')
+                    && !line.starts_with("--")
+                    && !line.starts_with(' '))
+                .all(|line| line.len() <= 76)
+        );
+        let parsed = MessageParser::default().parse(&built.mime).unwrap();
+        assert_eq!(
+            parsed.body_text(0).unwrap().trim().replace("\r\n", "\n"),
+            "正文\n第二行"
+        );
+        assert_eq!(parsed.attachment_count(), 2);
+        let first = parsed.attachment(0).unwrap();
+        assert_eq!(first.attachment_name(), Some("report.pdf"));
+        assert_eq!(first.contents(), payload.as_slice());
+        let second = parsed.attachment(1).unwrap();
+        assert_eq!(second.attachment_name(), Some("notes.txt"));
+        assert_eq!(second.contents(), b"hello");
+        assert!(text.contains("Content-Disposition: attachment; filename=\"report.pdf\""));
+        assert!(text.contains("Content-Transfer-Encoding: base64"));
+    }
+
+    #[test]
+    fn chinese_and_very_long_file_names_use_rfc2231_and_rfc2047() {
+        let long = format!("{}.docx", "很长的文件名".repeat(30));
+        for name in ["季度报告 终稿.pdf", long.as_str(), "quote\"back\\slash.txt"] {
+            let built = make_with(&[file(name, "application/pdf", b"x".to_vec())]);
+            assert!(built.mime.is_ascii(), "{name}");
+            let text = String::from_utf8(built.mime.clone()).unwrap();
+            assert!(text.lines().all(|line| line.len() <= 998), "{name}");
+            let parsed = MessageParser::default().parse(&built.mime).unwrap();
+            let part = parsed.attachment(0).unwrap();
+            assert_eq!(part.attachment_name(), Some(name));
+            assert_eq!(part.contents(), b"x");
+            if !name.is_ascii() {
+                assert!(text.contains("filename*"), "{name}");
+                assert!(text.contains("name=\"=?utf-8?b?"), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_hostile_media_type_falls_back_to_octet_stream() {
+        let built = make_with(&[file("a.bin", "x/y\r\nBcc: evil@example.com", b"x".to_vec())]);
+        let text = String::from_utf8(built.mime).unwrap();
+        assert!(!text.contains("evil@example.com"));
+        assert!(text.contains("application/octet-stream; name=\"a.bin\""));
     }
 }

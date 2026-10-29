@@ -22,7 +22,7 @@ const account = exampleAccount({ senderName: '林薇' })
 function draft(overrides: Partial<Draft> = {}): Draft {
   return {
     id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
-    inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, ...overrides,
+    inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, attachments: [], ...overrides,
   }
 }
 
@@ -329,5 +329,97 @@ describe('save status', () => {
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(status()).toHaveTextContent('已保存'))
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+  })
+})
+
+describe('attachments', () => {
+  const file = { id: 'a1', fileName: '报表.pdf', mediaType: 'application/pdf', size: 2048, origin: 'user' as const }
+
+  it('attaches through the host picker at the saved revision and lists the file', async () => {
+    const { client } = setup()
+    await body()
+    client.addAttachments.mockResolvedValue(draft({ revision: 2, attachments: [file] }))
+    await userEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    expect(client.addAttachments).toHaveBeenCalledWith(DRAFT_ID, 1)
+    const list = await screen.findByRole('list', { name: '附件' })
+    expect(within(list).getByText('报表.pdf')).toBeInTheDocument()
+    expect(within(list).getByText('2 KB')).toBeInTheDocument()
+  })
+
+  it('writes pending text first and keeps it: only the revision advances after an attachment command', async () => {
+    const { client } = setup()
+    const text = await body()
+    fireEvent.change(text, { target: { value: '<p>新内容</p>' } })
+    client.addAttachments.mockResolvedValue(draft({ revision: 3, attachments: [file] }))
+    await userEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    expect(client.updateDraft).toHaveBeenCalled()
+    expect(client.addAttachments).toHaveBeenCalledWith(DRAFT_ID, 2)
+    expect(await body()).toHaveValue('<p>新内容</p>')
+    fireEvent.change(text, { target: { value: '<p>再改</p>' } })
+    await waitFor(() => expect(client.updateDraft).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    expect(client.updateDraft.mock.calls[1][0].expectedRevision).toBe(3)
+  })
+
+  it('removes an attachment by id', async () => {
+    const { client } = setup(draft({ attachments: [file] }))
+    await body()
+    client.removeAttachment.mockResolvedValue(draft({ revision: 2 }))
+    await userEvent.click(await screen.findByRole('button', { name: '移除 报表.pdf' }))
+    expect(client.removeAttachment).toHaveBeenCalledWith({ draftId: DRAFT_ID, attachmentId: 'a1', expectedRevision: 1 })
+    await waitFor(() => expect(screen.queryByText('报表.pdf')).not.toBeInTheDocument())
+  })
+
+  it('attaches the dropped files when the host reports a drop', async () => {
+    const { client } = setup()
+    await body()
+    const listener = client.onFilesDropped.mock.calls[0][0]
+    client.addDroppedAttachments.mockResolvedValue(draft({ revision: 2, attachments: [file] }))
+    act(() => listener())
+    await waitFor(() => expect(client.addDroppedAttachments).toHaveBeenCalledWith(DRAFT_ID, 1))
+    expect(await screen.findByText('报表.pdf')).toBeInTheDocument()
+  })
+
+  it('shows a typed core error and resyncs the list after a failed add', async () => {
+    const { client } = setup()
+    await body()
+    client.addAttachments.mockRejectedValue(new MailxClientError({ code: 'attachmentTooLarge', message: 'x', field: null }))
+    client.getDraft.mockResolvedValue(draft({ revision: 2, attachments: [file] }))
+    await userEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    expect(await screen.findByText('附件总大小超过上限。')).toBeInTheDocument()
+    expect(await screen.findByText('报表.pdf')).toBeInTheDocument()
+  })
+
+  it('shows attachments of a locked draft but offers no change', async () => {
+    const { client } = setup(draft({ attachments: [file] }))
+    const text = await body()
+    client.updateDraft.mockRejectedValueOnce(new MailxClientError({ code: 'draftLocked', message: 'x', field: null }))
+    fireEvent.change(text, { target: { value: 'late' } })
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' })).toBeDisabled(), { timeout: 3000 })
+    expect(screen.getByText('报表.pdf')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除 报表.pdf' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
+  })
+
+  it('marks an over-limit draft and still lets the core refuse the send', async () => {
+    const big = { ...file, size: 25 * 1024 * 1024 }
+    const { client } = setup(draft({ attachments: [big] }))
+    client.attachmentPolicy.mockResolvedValue({ maxTotalBytes: 20 * 1024 * 1024, maxCount: 20, serverLimitMb: null })
+    await body()
+    expect(await screen.findByText(/附件总大小超过 20\.0 MB 的上限/)).toBeInTheDocument()
+    client.queueSend.mockRejectedValue(new MailxClientError({ code: 'attachmentTooLarge', message: 'x', field: null }))
+    await userEvent.type(screen.getByRole('textbox', { name: '收件人' }), 'li@example.org{Enter}')
+    await userEvent.type(screen.getByRole('textbox', { name: '主题' }), '你好')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await screen.findByRole('button', { name: '确认发送' })
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    await userEvent.click(screen.getByRole('button', { name: '确认发送' }))
+    expect(await screen.findByText('附件总大小超过上限。')).toBeInTheDocument()
+  })
+
+  it('hints at a smaller server limit without blocking', async () => {
+    const { client } = setup(draft({ attachments: [{ ...file, size: 3 * 1024 * 1024 }] }))
+    client.attachmentPolicy.mockResolvedValue({ maxTotalBytes: 20 * 1024 * 1024, maxCount: 20, serverLimitMb: 2 })
+    await body()
+    expect(await screen.findByText(/约 2 MB/)).toBeInTheDocument()
   })
 })

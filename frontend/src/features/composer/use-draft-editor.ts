@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Draft, DraftKind } from '@/generated/accounts'
+import type { Draft, DraftAttachmentSummary, DraftKind } from '@/generated/accounts'
 import { clientFailure, clientFailureCode, type MailxClient, type ClientFailure } from '@/lib/mailx-client'
 import { recipientsFromAddresses, toMailAddresses, type Recipient } from './address-parse'
 import { draftHtmlIsEmpty } from './draft-html'
@@ -72,6 +72,11 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const [status, setStatus] = useState<SaveStatus>('idle')
   const [readOnly, setReadOnly] = useState(false)
   const [gone, setGone] = useState(false)
+  // Attachments change through their own commands (each bumps the revision), so they stay out of `EditorFields`
+  // and autosave: an add or remove must never overwrite text typed meanwhile.
+  const [attachments, setAttachments] = useState<DraftAttachmentSummary[]>([])
+  const attachmentCount = useRef(0)
+  const [attaching, setAttaching] = useState(false)
   // User edits and reloads withdraw send confirmation; an acknowledgement that
   // merely canonicalizes HTML must not invalidate the save it just confirmed.
   const [changeToken, setChangeToken] = useState(0)
@@ -89,6 +94,12 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const alive = useRef(true)
   const failed = useRef(false)
   const lockedRef = useRef(false)
+  // An attachment command in flight; saves wait for it so two writers never name the same revision.
+  const applyAttachments = useCallback((list: DraftAttachmentSummary[]) => {
+    attachmentCount.current = list.length
+    setAttachments(list)
+  }, [])
+  const mutating = useRef<Promise<unknown> | null>(null)
   const notice = useRef(onNotice)
   useEffect(() => { notice.current = onNotice })
 
@@ -99,10 +110,11 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     dirty.current = false
     failed.current = false
     setFields(next)
+    applyAttachments(draft.attachments)
     setChangeToken((value) => value + 1)
     setKind(draft.kind)
     setStatus('idle')
-  }, [])
+  }, [applyAttachments])
 
   const setLocked = useCallback((locked: boolean) => {
     lockedRef.current = locked
@@ -172,6 +184,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     if (saving.current) return saving.current
     const round = (async () => {
       try {
+        if (mutating.current) await mutating.current.catch(() => undefined)
         while (dirty.current && alive.current && !detached.current && !lockedRef.current) {
           const snapshot = latest.current
           if (!snapshot) return
@@ -275,6 +288,63 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     return { ok: !detached.current && alive.current && !dirty.current && !saving.current && !failed.current }
   }, [runSave])
 
+  /**
+   * Runs one attachment command against the saved revision. Pending text is written first, and only the
+   * revision and the attachment list are taken from the answer, never the text, so typing is not clobbered.
+   * A failure rethrows after resyncing (earlier files of a multi-file add may have gone through).
+   */
+  const mutateAttachments = useCallback(async (command: (expectedRevision: number) => Promise<Draft | null>) => {
+    if (detached.current || !alive.current || lockedRef.current || mutating.current) return
+    setAttaching(true)
+    const run = (async () => {
+      const { ok } = await flush()
+      if (!ok) throw new DraftUnsavedError()
+      try {
+        const draft = await command(revision.current)
+        if (!draft || !alive.current || detached.current) return
+        revision.current = draft.revision
+        applyAttachments(draft.attachments)
+      } catch (cause) {
+        if (!alive.current || detached.current) throw cause
+        const code = clientFailureCode(cause)
+        if (code === 'conflict') await reload()
+        else if (code === 'draftLocked') setLocked(true)
+        else {
+          try {
+            const current = await client.getDraft(draftId)
+            if (alive.current && !detached.current) {
+              revision.current = current.revision
+              applyAttachments(current.attachments)
+            }
+          } catch { /* the original failure is the one to show */ }
+        }
+        throw cause
+      }
+    })()
+    mutating.current = run
+    try {
+      await run
+    } finally {
+      mutating.current = null
+      if (alive.current) setAttaching(false)
+    }
+  }, [applyAttachments, client, draftId, flush, reload, setLocked])
+
+  /** Opens the host's file picker and attaches the choice. */
+  const addAttachments = useCallback(
+    () => mutateAttachments((expectedRevision) => client.addAttachments(draftId, expectedRevision)),
+    [client, draftId, mutateAttachments],
+  )
+  /** Attaches the files the OS dropped on the window. */
+  const addDroppedAttachments = useCallback(
+    () => mutateAttachments((expectedRevision) => client.addDroppedAttachments(draftId, expectedRevision)),
+    [client, draftId, mutateAttachments],
+  )
+  const removeAttachment = useCallback(
+    (attachmentId: string) => mutateAttachments((expectedRevision) => client.removeAttachment({ draftId, attachmentId, expectedRevision })),
+    [client, draftId, mutateAttachments],
+  )
+
   /** Retries a failed save now. */
   const retry = useCallback(() => {
     if (detached.current || !alive.current || !dirty.current) return
@@ -335,6 +405,11 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     status,
     readOnly,
     gone,
+    attachments,
+    attaching,
+    addAttachments,
+    addDroppedAttachments,
+    removeAttachment,
     changeToken,
     update,
     flush,
@@ -345,10 +420,13 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     restoreBaseline,
     markLocked: () => setLocked(true),
     revision: () => revision.current,
-    isEmpty: () => (latest.current ? fieldsAreEmpty(latest.current) : false),
+    isEmpty: () => (latest.current ? fieldsAreEmpty(latest.current) && attachmentCount.current === 0 : false),
     latest: () => latest.current,
     isAvailable: () => alive.current && !detached.current,
   }
 }
+
+/** Attachments were not changed because pending text could not be written first. */
+export class DraftUnsavedError extends Error {}
 
 export type DraftEditor = ReturnType<typeof useDraftEditor>

@@ -217,12 +217,24 @@
     "retryExhausted": "多次重试超过 24 小时仍未发出",
     "accountChanged": "发件账号的地址已更改，这封邮件不会自动发出",
     "unknown": "发送过程中连接中断，服务器可能已收到这封邮件",
-    "unspecified": "原因不明"
+    "unspecified": "原因不明",
+    "snapshotMissing": "这封邮件的附件副本已丢失，请重新编辑后再发送。"
   },
   "recipient": {
     "invalid": "地址无效：{{address}}",
     "editInvalid": "地址无效：{{address}}，点击修改",
     "remove": "移除 {{address}}",
     "preview_other": "{{names}} 等 {{count}} 位"
+  },
+  "attachment": {
+    "add": "添加附件",
+    "adding": "正在添加附件…",
+    "list": "附件",
+    "forwarded": "原邮件附件",
+    "remove": "移除 {{name}}",
+    "summary_other": "{{count}} 个附件 · {{size}}",
+    "overSize": "附件总大小超过 {{limit}} 的上限，请移除部分附件后再发送。",
+    "overCount_other": "最多只能添加 {{count}} 个附件，请移除部分后再发送。",
+    "serverHint": "发信服务器可能拒收超过约 {{limit}} MB 的邮件。"
   }
 }

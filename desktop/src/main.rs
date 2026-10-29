@@ -6,6 +6,7 @@ mod body_protocol;
 mod body_webview_test;
 mod commands;
 mod compose;
+mod compose_files;
 #[cfg_attr(feature = "body-webview-test", allow(dead_code))]
 mod lifecycle;
 mod locale;
@@ -171,6 +172,7 @@ fn main() {
                 let state = state::DesktopState::new(data_dir, secrets, events);
                 app.manage(state.clone());
                 app.manage(compose::Lifecycle::default());
+                app.manage(compose_files::DroppedFiles::default());
                 app.manage(lifecycle::LifecycleState::default());
                 app.manage(tray::TrayState::default());
                 app.manage(updater::UpdaterState::default());
@@ -233,6 +235,10 @@ fn main() {
             compose::drafts_list,
             compose::drafts_get,
             compose::drafts_update,
+            compose_files::attachments_add,
+            compose_files::attachments_add_dropped,
+            compose_files::attachments_remove,
+            compose_files::attachments_policy,
             compose::drafts_delete,
             compose::outbox_queue_send,
             compose::outbox_list,

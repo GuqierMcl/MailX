@@ -6,14 +6,19 @@ use chrono::{DateTime, Utc};
 
 use super::{AccountService, new_id, validate_uuid};
 use crate::{
-    AppError, ErrorCode,
+    AppError, Draft, ErrorCode,
     accounts::sync_plan::PlanError,
     send::types::*,
     smtp::{
         SmtpPlan,
-        message::{OutgoingMessage, build, local_now, new_message_id},
+        attachment::AttachmentData,
+        message::{BuiltMessage, OutgoingMessage, build, local_now, new_message_id},
     },
-    storage::outbox::{Changed, Claim, ClaimedJob, NewOutbox},
+    storage::{
+        attachments::AttachmentFile,
+        bodies::{BlobStore, StoredBlob},
+        outbox::{Changed, Claim, ClaimedJob, FrozenDraft, NewOutbox},
+    },
 };
 
 /// What the worker found when it looked at the queue.
@@ -44,15 +49,84 @@ fn canonical(request: &QueueSendRequest) -> Result<String, AppError> {
 
 pub(crate) const UNDO_CHOICES: [u32; 5] = [0, 5, 10, 20, 30];
 
+/// Phase one of queueing, read under the store lock.
+pub(crate) enum SendPlan {
+    /// The same request already queued an item.
+    Replay(Box<OutboxItem>),
+    Build(Box<SendBuild>),
+}
+
+/// Everything needed to build the snapshot without holding the store lock.
+pub(crate) struct SendBuild {
+    draft: Draft,
+    address: String,
+    name: Option<String>,
+    message_id: String,
+    canonical: String,
+    files: Vec<AttachmentFile>,
+    blobs: BlobStore,
+}
+
+/// Phase two: the MIME bytes, already written to the blob store.
+pub(crate) struct Frozen {
+    built: BuiltMessage,
+    snapshot: StoredBlob,
+}
+
+impl SendBuild {
+    /// Reads the attachment blobs (hash verified), builds the MIME and stores
+    /// it as a blob. Touches no database, so it runs outside the store lock.
+    pub(crate) fn freeze(&self) -> Result<Frozen, AppError> {
+        let attachments = self
+            .files
+            .iter()
+            .map(|file| {
+                Ok(AttachmentData {
+                    file_name: file.summary.file_name.clone(),
+                    media_type: file.summary.media_type.clone(),
+                    bytes: self.blobs.read(&file.blob)?,
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        let built = build(&OutgoingMessage {
+            sender_address: &self.address,
+            sender_name: self.name.as_deref(),
+            draft: &self.draft,
+            message_id: &self.message_id,
+            date: local_now(),
+            attachments: &attachments,
+        })?;
+        let snapshot = self.blobs.put(&built.mime)?;
+        Ok(Frozen { built, snapshot })
+    }
+}
+
 impl AccountService {
-    /// Snapshots the draft into the queue and locks it. Returns the item and
+    /// Snapshots the draft into the queue and locks it, as [`Core::queue_send`]
+    /// does in three phases. Returns the item and
     /// whether this call created it (a replay creates nothing).
+    #[cfg(test)]
     pub(crate) fn queue_send(
         &mut self,
         request: &QueueSendRequest,
         undo_send_seconds: u32,
         now: DateTime<Utc>,
     ) -> Result<(OutboxItem, Option<DraftChanged>), AppError> {
+        match self.prepare_send(request, undo_send_seconds)? {
+            SendPlan::Replay(item) => Ok((*item, None)),
+            SendPlan::Build(build) => {
+                let frozen = build.freeze()?;
+                self.commit_send(request, undo_send_seconds, &build, frozen, now)
+            }
+        }
+    }
+
+    /// Validates the request and gathers what the snapshot is built from.
+    pub(crate) fn prepare_send(
+        &self,
+        request: &QueueSendRequest,
+        undo_send_seconds: u32,
+    ) -> Result<SendPlan, AppError> {
         validate_uuid(&request.draft_id, "draftId")?;
         validate_uuid(&request.client_mutation_id, "clientMutationId")?;
         if !UNDO_CHOICES.contains(&undo_send_seconds) {
@@ -64,7 +138,7 @@ impl AccountService {
             .outbox_by_mutation(&request.client_mutation_id)?
         {
             return if saved == canonical {
-                Ok((item, None))
+                Ok(SendPlan::Replay(Box::new(item)))
             } else {
                 Err(AppError::new(ErrorCode::IdempotencyConflict))
             };
@@ -77,14 +151,44 @@ impl AccountService {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
         let (address, name) = self.storage.account_sender(&draft.account_id)?;
+        let files = self.storage.attachment_files(&draft.id)?;
+        // Adding an attachment is checked too, but a forward may prefill past
+        // the policy so the user can trim it rather than losing the draft
+        // (sending.md section 16.8). Queueing is the authoritative check.
+        let policy = self.attachment_policy(&draft.account_id)?;
+        if u32::try_from(files.len()).unwrap_or(u32::MAX) > policy.max_count {
+            return Err(AppError::new(ErrorCode::TooManyAttachments));
+        }
+        let total = files
+            .iter()
+            .fold(0_u64, |sum, file| sum.saturating_add(file.summary.size));
+        if total > policy.max_total_bytes {
+            return Err(AppError::new(ErrorCode::AttachmentTooLarge));
+        }
         let message_id = new_message_id(&address)?;
-        let built = build(&OutgoingMessage {
-            sender_address: &address,
-            sender_name: name.as_deref(),
-            draft: &draft,
-            message_id: &message_id,
-            date: local_now(),
-        })?;
+        Ok(SendPlan::Build(Box::new(SendBuild {
+            draft,
+            address,
+            name,
+            message_id,
+            canonical,
+            files,
+            blobs: self.storage.blobs.clone(),
+        })))
+    }
+
+    /// Inserts the queue item and locks the draft in one transaction, which
+    /// fails with `conflict` if the draft changed since [`Self::prepare_send`].
+    pub(crate) fn commit_send(
+        &mut self,
+        request: &QueueSendRequest,
+        undo_send_seconds: u32,
+        build: &SendBuild,
+        frozen: Frozen,
+        now: DateTime<Utc>,
+    ) -> Result<(OutboxItem, Option<DraftChanged>), AppError> {
+        let Frozen { built, snapshot } = frozen;
+        let draft = &build.draft;
         let preview: Vec<String> = built.envelope.recipients.iter().take(3).cloned().collect();
         let id = new_id();
         let item = self.storage.insert_outbox(&NewOutbox {
@@ -92,9 +196,13 @@ impl AccountService {
             draft_id: Some(&draft.id),
             account_id: &draft.account_id,
             client_mutation_id: &request.client_mutation_id,
-            canonical: &canonical,
+            canonical: &build.canonical,
             message_id: &built.message_id,
-            mime: &built.mime,
+            snapshot: &snapshot,
+            frozen: Some(&FrozenDraft {
+                revision: draft.revision,
+                attachment_ids: build.files.iter().map(|f| f.summary.id.clone()).collect(),
+            }),
             envelope: &built.envelope,
             subject: &draft.subject,
             recipients_preview: &preview,
@@ -102,7 +210,7 @@ impl AccountService {
             now,
         })?;
         let locked = DraftChanged {
-            draft_id: draft.id,
+            draft_id: draft.id.clone(),
             account_id: item.account_id.clone(),
             change: DraftChange::Locked,
         };
@@ -224,6 +332,16 @@ impl AccountService {
         Ok(Step { changed, next })
     }
 
+    /// Keeps the `SIZE` the server advertised on the last session. `None` (no
+    /// usable `EHLO`) changes nothing; `Some(0)` is the protocol's "no stated
+    /// limit" and stores nothing, so an older hint is cleared rather than kept.
+    pub(crate) fn record_smtp_size(&self, account_id: &str, size: Option<u64>) {
+        if let Some(size) = size {
+            // Best effort: a failed hint write must not disturb settling the send.
+            let _ = self.storage.set_smtp_size_limit(account_id, Some(size));
+        }
+    }
+
     pub(crate) fn outbox_data_started(&self, id: &str, now: DateTime<Utc>) -> Result<(), AppError> {
         self.storage.mark_data_started(id, now)
     }
@@ -299,13 +417,17 @@ impl AccountService {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn outbox_mime(&self, id: &str) -> Result<Vec<u8>, AppError> {
-        Ok(self
-            .storage
-            .db
-            .query_row("SELECT mime FROM outbox WHERE id = ?1", [id], |row| {
-                row.get(0)
-            })?)
+        let (hash, size): (String, i64) = self.storage.db.query_row(
+            "SELECT snapshot_hash, snapshot_size FROM outbox WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        self.storage.blobs.read(&StoredBlob {
+            sha256: hash,
+            size: u64::try_from(size).unwrap_or(0),
+        })
     }
 }
 

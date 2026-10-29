@@ -82,6 +82,26 @@ pub(crate) async fn read_reply<R: AsyncBufRead + Unpin>(reader: &mut R) -> Resul
     }
 }
 
+/// One word as an enhanced status code (RFC 3463), e.g. `5.3.4`. A trailing
+/// full stop or a surrounding bracket is ignored.
+pub(crate) fn enhanced_status(word: &str) -> Option<(u8, u8, u8)> {
+    let word = word.trim_matches(|c: char| !c.is_ascii_digit());
+    let mut parts = word.split('.');
+    let class = parts.next()?.parse::<u8>().ok()?;
+    let subject = parts.next()?.parse::<u8>().ok()?;
+    let detail = parts.next()?.parse::<u8>().ok()?;
+    (parts.next().is_none() && matches!(class, 2 | 4 | 5)).then_some((class, subject, detail))
+}
+
+/// Whether the reply text names the message size as the reason: enhanced status
+/// `5.3.4` (message too big) or `5.2.3` (administrative limit). Only those two
+/// codes; a bare `552` can also mean a full mailbox and stays a generic server
+/// failure (sending.md section 16.4).
+pub(crate) fn names_size_limit(text: &str) -> bool {
+    text.split_whitespace()
+        .any(|word| matches!(enhanced_status(word), Some((5, 3, 4) | (5, 2, 3))))
+}
+
 /// Server text for storage and logs: control characters (CR and LF included)
 /// become spaces, whitespace is collapsed, the account password is masked if
 /// the server echoes it, and the result has at most 200 characters.

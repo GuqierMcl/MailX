@@ -1,6 +1,6 @@
 # 应用数据库版本化迁移与启动
 
-状态：**Implemented（迁移与启动准入）**。应用启动时自动完成本地数据库准备，成功后才开放业务界面和账号操作；覆盖 v1 兼容、有序迁移、启动准入和失败重试。当前生产清单为 v1–v12：v2 文件夹、v3 邮件头、v4 正文缓存、v5 账号颜色、v6 待写回标记、v7 草稿 / 发件人名称、v8 发送队列、v9 草稿 HTML、v10 代理图片域名解析策略、v11 账号移除，以及 v12 服务商图标偏好。`0010_image_proxy_dns.sql` 为 `network_routes` 增加默认 0 的 `image_proxy_dns`，约束非 custom 路由不得启用；既有账号升级后保持受限策略。`0011_account_removal.sql` 新建删除收据、已移除创建请求与待清理凭证引用三表，不修改已有账号或凭证。`0012_account_provider_icon.sql` 为 `accounts` 增加 `use_provider_icon INTEGER NOT NULL DEFAULT 1 CHECK (use_provider_icon IN (0, 1))`，已有账号升级后默认启用服务商图标；此资料偏好不推进连接 `revision`，连接提交与 journal 恢复保留用户已保存的选择。历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
+状态：**Implemented（迁移与启动准入）**。应用启动时自动完成本地数据库准备，成功后才开放业务界面和账号操作；覆盖 v1 兼容、有序迁移、启动准入和失败重试。当前生产清单为 v1–v15：v2 文件夹、v3 邮件头、v4 正文缓存、v5 账号颜色、v6 待写回标记、v7 草稿 / 发件人名称、v8 发送队列、v9 草稿 HTML、v10 代理图片域名解析策略、v11 账号移除、v12 服务商图标偏好、v13 写信附件，v14 发送快照改存 blob，以及 v15 账号的 SMTP `SIZE` 记录。`0010_image_proxy_dns.sql` 为 `network_routes` 增加默认 0 的 `image_proxy_dns`，约束非 custom 路由不得启用；既有账号升级后保持受限策略。`0011_account_removal.sql` 新建删除收据、已移除创建请求与待清理凭证引用三表，不修改已有账号或凭证。`0012_account_provider_icon.sql` 为 `accounts` 增加 `use_provider_icon INTEGER NOT NULL DEFAULT 1 CHECK (use_provider_icon IN (0, 1))`，已有账号升级后默认启用服务商图标；此资料偏好不推进连接 `revision`，连接提交与 journal 恢复保留用户已保存的选择。`0013_draft_attachments.sql` 新建草稿附件表，草稿删除时级联删除。`0014_outbox_snapshot_blob.sql` 重建 `outbox`（SQLite 不能就地放宽 NOT NULL），新增快照哈希、字节数与释放时间三列，`mime` 改为可空；只搬结构，旧行的字节由 `Storage::open` 中的非 SQL 外迁步骤写成 blob 后再清空，见第 4.4 节。`0015_account_smtp_size_limit.sql` 为 `accounts` 增加可空的 `smtp_size_limit`（字节，CHECK 大于 0），保存服务器在 `EHLO` 声明的 `SIZE`，只用于写信窗口的上限提示。历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 1. 目标与范围
 
@@ -89,6 +89,18 @@ checksum 证明迁移文件与已记录历史一致，不代表已经检测出�
 迁移 SQL 只负责该版本的结构或数据变更，不得自行 `BEGIN` / `COMMIT` / `ROLLBACK`，不得自行改写迁移历史和 `user_version`，也不得关闭外键、执行不能纳入该事务的 `VACUUM` 等操作。v1 创建历史表是兼容现有数据库的明确特例。迁移不读写 SecretStore、不访问网络；未来涉及秘密格式变化时另行设计跨存储协议。
 
 发布后只追加迁移，不修改旧 SQL。后续若改变持久化 journal 的结构，还必须兼容或迁移旧 journal 内容，不能只改业务表后让启动恢复无法读取已有意图。
+
+### 4.4 非 SQL 的启动外迁
+
+有的数据变更无法在一段 SQL 里完成，因为它要把字节写进迁移事务之外的文件（内容寻址 blob 存储：临时文件、同步、原子重命名）。v14 起 `Storage::open` 在迁移之后、启动恢复和任何 worker 之前运行一个外迁步骤（`Storage::migrate_outbox_snapshots`），把 `outbox.mime` 里的旧快照写成 blob，再在短事务里写入哈希与大小并清空该列。
+
+规则：
+
+- 外迁是**幂等**的：字节先落盘并同步，之后才更新行；崩溃时这一行要么仍是旧行，要么已经是新行，下次启动继续，不会重复写或丢失。已经迁移过的行不再选中。
+- 外迁不清空、不改写迁移历史与 `user_version`，也不替迁移做结构变更；结构仍由编号 SQL 负责。
+- 外迁失败使启动进入 `Failed`（可重试），不开放业务；不会带着半迁移的数据继续发送。
+- 外迁必须排在启动 GC 之前：GC 把新写入的哈希当作存活引用，顺序颠倒会删掉刚外迁的 blob。
+- 新增这类步骤时，在本文档记录它的顺序、幂等依据与失败表现，并同步 `core/src/storage/mod.rs` 的 `open` 顺序。
 
 ## 5. 桌面启动与服务所有权
 

@@ -12,6 +12,7 @@
 //! addresses, so outcomes carry only the reply code plus a sanitized,
 //! length-limited text.
 
+pub(crate) mod attachment;
 #[cfg(test)]
 pub(crate) mod fake_server;
 pub(crate) mod message;
@@ -27,7 +28,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
 
 use crate::accounts::types::TlsMode;
@@ -35,6 +36,7 @@ use crate::net::{self, BoxedStream, NetError, NetRoute};
 use crate::secrets::SecretValue;
 use message::SmtpEnvelope;
 pub(crate) use plan::{SmtpPlan, plan_failure};
+pub(crate) use reply::names_size_limit;
 use reply::{IoFail, Reply, read_reply, sanitize};
 
 /// Greeting identity. An address literal avoids leaking the machine's host name.
@@ -59,6 +61,11 @@ pub(crate) struct Timeouts {
     pub command: Duration,
     /// From `DATA` to the 354 reply.
     pub data_initiation: Duration,
+    /// Longest the body may go without a single byte being accepted by the
+    /// server. It restarts on every byte written and is not a total cap: a slow
+    /// but moving transfer of any size may take as long as it needs
+    /// (sending.md section 16.6).
+    pub data_write: Duration,
     /// From the end of the body to the final reply.
     pub final_reply: Duration,
     /// Best-effort `QUIT`.
@@ -71,6 +78,7 @@ impl Default for Timeouts {
             greeting: Duration::from_secs(300),
             command: Duration::from_secs(300),
             data_initiation: Duration::from_secs(120),
+            data_write: Duration::from_secs(120),
             final_reply: Duration::from_secs(600),
             quit: Duration::from_secs(5),
         }
@@ -84,6 +92,7 @@ impl Timeouts {
             greeting: each,
             command: each,
             data_initiation: each,
+            data_write: each,
             final_reply: each,
             quit: each,
         }
@@ -202,6 +211,9 @@ pub(crate) enum SmtpOutcome {
     /// After the body: 2xx final reply.
     Accepted(ServerReply),
     /// After the body: explicit 4xx / 5xx final reply. Not retried automatically.
+    /// A 5xx whose text names a size limit is still this variant; the scheduler
+    /// reads it with `names_size_limit` and records `messageTooLarge`
+    /// (sending.md section 16.4).
     RejectedAfterData(ServerReply),
     /// After the body: no usable final reply. The server may have the message.
     Unknown(UnknownReason),
@@ -291,9 +303,9 @@ pub(crate) async fn send_with_tls(
     timeouts: &Timeouts,
     tls: &TlsSource,
     on_data_started: DataStarted,
-) -> SmtpOutcome {
+) -> Attempt {
     match session(route, login, envelope, mime, timeouts, tls, on_data_started).await {
-        Ok(outcome) | Err(outcome) => outcome,
+        Ok(attempt) | Err(attempt) => attempt,
     }
 }
 
@@ -360,8 +372,11 @@ fn io_outcome(error: IoFail) -> SmtpOutcome {
     })
 }
 
-/// A reply that is not the expected one, before the body started.
-fn unexpected(reply: &Reply, secret: &SecretValue) -> SmtpOutcome {
+/// A reply that is not the expected one, before the body started. A 5xx at the
+/// `MAIL FROM` or `DATA` stage whose text names a size limit becomes
+/// `messageTooLarge`; a bare `552` stays `server`, because it can also mean a
+/// full mailbox (sending.md section 16.4).
+fn refusal(reply: &Reply, secret: &SecretValue, size_verdict: bool) -> SmtpOutcome {
     let failure = PreDataFailure {
         reason: FailureReason::Server,
         code: Some(reply.code),
@@ -369,6 +384,12 @@ fn unexpected(reply: &Reply, secret: &SecretValue) -> SmtpOutcome {
     };
     match reply.code / 100 {
         4 => SmtpOutcome::Transient(failure),
+        5 if size_verdict && names_size_limit(&reply.text()) => {
+            SmtpOutcome::Permanent(PreDataFailure {
+                reason: FailureReason::MessageTooLarge,
+                ..failure
+            })
+        }
         5 => SmtpOutcome::Permanent(failure),
         // 2xx where 3xx was needed and similar: a server we cannot talk to.
         _ => SmtpOutcome::Permanent(PreDataFailure {
@@ -376,6 +397,21 @@ fn unexpected(reply: &Reply, secret: &SecretValue) -> SmtpOutcome {
             ..failure
         }),
     }
+}
+
+/// An unexpected reply at any other stage; the size vocabulary means nothing there.
+fn unexpected(reply: &Reply, secret: &SecretValue) -> SmtpOutcome {
+    refusal(reply, secret, false)
+}
+
+/// The last `EHLO`-advertised `SIZE` is recorded here so the account keeps it
+/// for the composer's hint (sending.md section 16.4).
+#[derive(Debug)]
+pub(crate) struct Attempt {
+    pub outcome: SmtpOutcome,
+    /// `SIZE` the server advertised on the encrypted connection; `None` when
+    /// the session ended before a usable `EHLO` or the server named no limit.
+    pub advertised_size: Option<u64>,
 }
 
 struct Capabilities {
@@ -599,6 +635,30 @@ pub(crate) fn data_payload(message: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Writes the body in chunks. Only a stall counts: `idle` runs without a single
+/// byte accepted ends the attempt, and there is no cap on the total time, so a
+/// slow link can still deliver a large message (sending.md section 16.6). The
+/// body may be partly on the wire by then, so the caller records `unknown`.
+async fn write_payload<W: AsyncWrite + Unpin>(
+    stream: &mut W,
+    payload: &[u8],
+    idle: Duration,
+) -> Result<(), UnknownReason> {
+    const CHUNK: usize = 16 * 1024;
+    for chunk in payload.chunks(CHUNK) {
+        match timeout(idle, stream.write_all(chunk)).await {
+            Err(_) => return Err(UnknownReason::Timeout),
+            Ok(Err(_)) => return Err(UnknownReason::ConnectionLost),
+            Ok(Ok(())) => {}
+        }
+    }
+    match timeout(idle, stream.flush()).await {
+        Err(_) => Err(UnknownReason::Timeout),
+        Ok(Err(_)) => Err(UnknownReason::ConnectionLost),
+        Ok(Ok(())) => Ok(()),
+    }
+}
+
 /// `Ok` carries a finished outcome too; `Err` is only a convenience for `?`.
 async fn session(
     route: &NetRoute,
@@ -608,15 +668,49 @@ async fn session(
     timeouts: &Timeouts,
     tls: &TlsSource,
     on_data_started: DataStarted,
-) -> Result<SmtpOutcome, SmtpOutcome> {
+) -> Result<Attempt, Attempt> {
+    let bare = |outcome| Attempt {
+        outcome,
+        advertised_size: None,
+    };
     if envelope.recipients.is_empty() || !mime.is_ascii() {
-        return Err(permanent(FailureReason::InvalidMessage));
+        return Err(bare(permanent(FailureReason::InvalidMessage)));
     }
     let secret = &login.password;
-    let (mut conn, caps) = authenticated_connection(route, login, timeouts, tls).await?;
+    let (mut conn, caps) = authenticated_connection(route, login, timeouts, tls)
+        .await
+        .map_err(bare)?;
+    let advertised_size = caps.size;
+    let with_size = |outcome| Attempt {
+        outcome,
+        advertised_size,
+    };
+    run_transaction(
+        &mut conn,
+        &caps,
+        envelope,
+        mime,
+        timeouts,
+        secret,
+        on_data_started,
+    )
+    .await
+    .map(with_size)
+    .map_err(with_size)
+}
 
+async fn run_transaction(
+    conn: &mut Conn,
+    caps: &Capabilities,
+    envelope: &SmtpEnvelope,
+    mime: &[u8],
+    timeouts: &Timeouts,
+    secret: &SecretValue,
+    on_data_started: DataStarted,
+) -> Result<SmtpOutcome, SmtpOutcome> {
     let payload = data_payload(mime);
-    if let Some(limit) = caps.size
+    // `SIZE 0` is the protocol's "no stated limit".
+    if let Some(limit) = caps.size.filter(|limit| *limit > 0)
         && (mime.len() as u64) > limit
     {
         conn.quit(timeouts.quit).await;
@@ -624,7 +718,7 @@ async fn session(
     }
 
     let mut mail = format!("MAIL FROM:<{}>", envelope.from);
-    if caps.size.is_some() {
+    if caps.size.is_some_and(|limit| limit > 0) {
         mail.push_str(&format!(" SIZE={}", mime.len()));
     }
     let reply = conn
@@ -632,7 +726,7 @@ async fn session(
         .await
         .map_err(io_outcome)?;
     if reply.code / 100 != 2 {
-        return Err(unexpected(&reply, secret));
+        return Err(refusal(&reply, secret, true));
     }
 
     let mut rejected = Vec::new();
@@ -660,7 +754,7 @@ async fn session(
         .await
         .map_err(io_outcome)?;
     if reply.code != 354 {
-        return Err(unexpected(&reply, secret));
+        return Err(refusal(&reply, secret, true));
     }
 
     // The server now waits for the body. Record the mark first; if that fails,
@@ -669,13 +763,8 @@ async fn session(
         return Err(transient(FailureReason::DataMarkFailed));
     }
 
-    let written = async {
-        let stream = conn.reader.get_mut();
-        stream.write_all(&payload).await?;
-        stream.flush().await
-    };
-    if written.await.is_err() {
-        return Ok(SmtpOutcome::Unknown(UnknownReason::ConnectionLost));
+    if let Err(reason) = write_payload(conn.reader.get_mut(), &payload, timeouts.data_write).await {
+        return Ok(SmtpOutcome::Unknown(reason));
     }
     let outcome = match timeout(timeouts.final_reply, read_reply(&mut conn.reader)).await {
         Err(_) => SmtpOutcome::Unknown(UnknownReason::Timeout),

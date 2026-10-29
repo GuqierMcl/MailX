@@ -1,7 +1,7 @@
 //! Draft rows. Content has been validated before it gets here.
 use rusqlite::{OptionalExtension, Row, params};
 
-use super::{Storage, decode, encode};
+use super::{Storage, attachments::NewAttachment, decode, encode};
 use crate::{
     AppError, ErrorCode,
     drafts::{
@@ -65,6 +65,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
             created_at: created,
             updated_at: updated,
             revision,
+            attachments: Vec::new(),
         })
     })())
 }
@@ -87,6 +88,33 @@ impl Storage {
         )?)
     }
 
+    /// Last `SIZE` the account's SMTP server advertised, in bytes of whole
+    /// MIME. `None` when nothing was learned or the server names no limit.
+    pub(crate) fn smtp_size_limit(&self, id: &str) -> Result<Option<u64>, AppError> {
+        let value: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT smtp_size_limit FROM accounts WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(value.and_then(|v| u64::try_from(v).ok()))
+    }
+
+    /// Remembers the advertised `SIZE`; `None` clears it (the server now names
+    /// no limit). A missing account is not an error: it may have been removed
+    /// while the send was in flight.
+    pub(crate) fn set_smtp_size_limit(&self, id: &str, size: Option<u64>) -> Result<(), AppError> {
+        let value = size.and_then(|v| i64::try_from(v).ok()).filter(|v| *v > 0);
+        self.db.execute(
+            "UPDATE accounts SET smtp_size_limit = ?2 WHERE id = ?1",
+            rusqlite::params![id, value],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn account_address(&self, id: &str) -> Result<String, AppError> {
         self.db
             .query_row(
@@ -98,8 +126,20 @@ impl Storage {
             .ok_or_else(|| AppError::new(ErrorCode::NotFound))
     }
 
-    pub(crate) fn insert_draft(&self, draft: &NewDraft<'_>) -> Result<Draft, AppError> {
-        self.db.execute(
+    pub(crate) fn insert_draft(&mut self, draft: &NewDraft<'_>) -> Result<Draft, AppError> {
+        self.insert_draft_with(draft, &[])
+    }
+
+    /// The draft row and its carried-over attachments in one transaction: a
+    /// failure leaves neither. Attachments do not bump the revision; the draft
+    /// is still the one the create request produced.
+    pub(crate) fn insert_draft_with(
+        &mut self,
+        draft: &NewDraft<'_>,
+        attachments: &[NewAttachment<'_>],
+    ) -> Result<Draft, AppError> {
+        let tx = self.db.transaction()?;
+        tx.execute(
             "INSERT INTO drafts (id, account_id, kind, source_email_id, to_addresses,
                 cc_addresses, bcc_addresses, subject, body_text, in_reply_to,
                 references_header, created_at, updated_at, revision, client_mutation_id,
@@ -123,6 +163,27 @@ impl Storage {
                 draft.content.body_html,
             ],
         )?;
+        for attachment in attachments {
+            let size = i64::try_from(attachment.blob.size)
+                .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+            tx.execute(
+                "INSERT INTO draft_attachments
+                    (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
+                     origin, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8)",
+                params![
+                    draft.id,
+                    attachment.id,
+                    attachment.file_name,
+                    attachment.media_type,
+                    size,
+                    attachment.blob.sha256,
+                    attachment.origin.as_str(),
+                    draft.now,
+                ],
+            )?;
+        }
+        tx.commit()?;
         self.get_draft(draft.id)
     }
 
@@ -143,19 +204,21 @@ impl Storage {
             )
             .optional()?;
         found
-            .map(|(draft, canonical)| Ok((draft?, canonical)))
+            .map(|(draft, canonical)| Ok((self.with_attachments(draft?)?, canonical)))
             .transpose()
     }
 
     pub(crate) fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
-        self.db
+        let draft = self
+            .db
             .query_row(
                 &format!("SELECT {COLUMNS} FROM drafts WHERE id = ?1"),
                 [id],
                 parse,
             )
             .optional()?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))??;
+        self.with_attachments(draft)
     }
 
     pub(crate) fn list_drafts(
@@ -170,6 +233,7 @@ impl Storage {
             .query_map([account_id], parse)?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
+            .map(|draft| draft.and_then(|draft| self.with_attachments(draft)))
             .filter(|draft| !matches!(draft, Ok(draft) if draft.is_blank()))
             .map(|draft| {
                 let draft = draft?;
@@ -195,7 +259,7 @@ impl Storage {
             .query_map([], parse)?
             .collect::<Result<Vec<_>, _>>()?;
         for draft in drafts {
-            let draft = draft?;
+            let draft = self.with_attachments(draft?)?;
             if draft.is_blank() && !self.draft_locked(&draft.id)? {
                 self.db
                     .execute("DELETE FROM drafts WHERE id = ?1", [&draft.id])?;
