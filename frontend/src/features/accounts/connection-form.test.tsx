@@ -6,7 +6,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import type { AccountDraft } from './account-draft'
 import { ConnectionForm } from './connection-form'
 import { exampleAccount } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
+import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
 
 type Submit = (connection: ConnectionInput, draft: AccountDraft) => Promise<void> | void
 
@@ -72,7 +72,7 @@ describe('connection form', () => {
     })
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
     const account = exampleAccount({
       providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}`,
       imap: { host: 'imap.custom.example', port: 1993, tls: 'implicit', username: 'receive-identity@qq.com' },
@@ -96,7 +96,7 @@ describe('connection form', () => {
     })
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
     const account = exampleAccount({ providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}` })
     renderForm(account, () => {
       throw new MailxClientError({ code: 'validation', field: 'imap.host', message: '服务器无效。' })
@@ -113,6 +113,24 @@ describe('connection form', () => {
       expect(host).toBeVisible()
       expect(host).toHaveAttribute('aria-invalid', 'true')
       expect(host).toHaveFocus()
+    })
+  })
+
+  it('lets a 139 user explicitly replace each login name without changing the mailbox address', async () => {
+    const { submit } = renderForm(null, vi.fn(), MAIL_139_PROVIDER)
+    expect(screen.getByText(MAIL_139_PROVIDER.setup!.emailHint)).toHaveTextContent('高级设置')
+    expect(screen.getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('90 天')
+    fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'synthetic@139.com' } })
+    fireEvent.change(screen.getByLabelText('授权码'), { target: { value: 'synthetic-code' } })
+    await userEvent.click(screen.getByText('高级设置'))
+    expect(screen.getByLabelText('IMAP 登录用户名')).toHaveValue('')
+    expect(screen.getByLabelText('SMTP 登录用户名')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('IMAP 登录用户名'), { target: { value: 'synthetic-phone-login' } })
+    fireEvent.change(screen.getByLabelText('SMTP 登录用户名'), { target: { value: 'synthetic-outgoing-login' } })
+    await userEvent.click(screen.getByRole('button', { name: '保存账号' }))
+    expect(submit.mock.calls[0][0]).toMatchObject({
+      emailAddress: 'synthetic@139.com', providerId: '139',
+      imap: { username: 'synthetic-phone-login' }, smtp: { username: 'synthetic-outgoing-login' },
     })
   })
 

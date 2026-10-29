@@ -1,7 +1,7 @@
 import { render, screen } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { filterProviders, GENERIC_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
+import { filterProviders, GENERIC_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
   it('labels a manually configured account as IMAP/SMTP', () => {
@@ -32,6 +32,27 @@ describe('mail providers', () => {
 
   it('finds all NetEase mailboxes by their shared name without including QQ or manual setup', () => {
     expect(filterProviders(PROVIDERS, '网易')).toEqual([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])
+  })
+
+  it.each(['139', '139.COM', '中国移动', '移动邮箱', 'China Mobile', 'CMCC'])('finds the personal 139 entry for %s', (query) => {
+    expect(filterProviders(PROVIDERS, query)).toEqual([MAIL_139_PROVIDER])
+    expect(providerOf('139')).toBe(MAIL_139_PROVIDER)
+  })
+
+  it('uses reviewed TLS endpoints and a bundled 139 mark', () => {
+    expect(MAIL_139_PROVIDER.preset).toEqual({
+      domains: ['139.com'],
+      imap: { host: 'imap.139.com', port: 993, tls: 'implicit' },
+      smtp: { host: 'smtp.139.com', port: 465, tls: 'implicit' },
+    })
+    const { container } = render(<><ProviderIcon provider={MAIL_139_PROVIDER} /><ProviderBadge providerId="139" /></>)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', MAIL_139_PROVIDER.logo)
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+    }
+    expect(screen.getByText('139 邮箱')).toBeInTheDocument()
   })
 
   it('gives 163, 126 and yeah.net distinct bundled logos in the provider list', () => {

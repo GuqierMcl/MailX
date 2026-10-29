@@ -17,9 +17,8 @@
 - 国际化适配：查看[中英文文本适配](architecture/internationalization.md)，首版已实现界面与错误文本、语言设置、多窗口同步及 Rust 通知 / 引用模板；三平台打包体验与原生通知待验，日期等区域格式化仍为 Planned。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 实现 AI / Agent：阅读 [AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
-- QQ / Foxmail 接入：阅读[调研与接入方案](reference/qq-foxmail-integration.md)，预设与登录诊断已有实现，真实收发矩阵待验。
-- 网易 163 / 126 / yeah.net 接入：阅读[调研与接入方案](reference/netease-163-126-integration.md)，三个预设、添加前测试登录、授权码引导与安全策略拒绝诊断已有实现，已有用户真实邮箱手测反馈，完整兼容矩阵待补充。
-- 审查选型：阅读 [ADR](adr/README.md)和[蓝图转化说明](reference/blueprint-review.md)。
+- 查阅调研与参考资料：阅读 [reference/](reference/README.md)，具体文档和状态由该目录入口维护。
+- 审查选型：阅读 [ADR](adr/README.md)。
 
 ## 目录职责
 
@@ -32,7 +31,7 @@
 | [development/](development/README.md) | 当前开发命令与后续验证计划 | 账号、邮件头与宿主检查可执行；平台及服务商证据单列 |
 | [adr/](adr/README.md) | 选型理由、代价与重新评估条件 | Accepted / Proposed |
 | [roadmap/](roadmap/README.md) | 已有基础、后续工作及验收标准 | 部分完成 / M0 未完成 |
-| [reference/](reference/blueprint-review.md) | 蓝图修订依据与外部资料 | Reference |
+| [reference/](reference/README.md) | 外部调研、接入评估与设计参考资料 | Reference |
 
 有可用客户端后再建立 `guides/` 用户手册；需要文档站时以它为唯一用户文档来源。本阶段不创建空站点或第二套 Markdown 副本。
 

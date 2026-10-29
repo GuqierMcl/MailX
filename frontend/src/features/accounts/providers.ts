@@ -5,6 +5,7 @@ import qqmailLogo from '@/assets/providers/qqmail.svg'
 import netease163Logo from '@/assets/providers/netease-163.svg'
 import netease126Logo from '@/assets/providers/netease-126.svg'
 import neteaseYeahLogo from '@/assets/providers/netease-yeah.svg'
+import mail139Logo from '@/assets/providers/mail-139.svg'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -125,7 +126,33 @@ export const NETEASE_163_PROVIDER = neteaseProvider('netease163', '163.com', net
 export const NETEASE_126_PROVIDER = neteaseProvider('netease126', '126.com', netease126Logo)
 export const NETEASE_YEAH_PROVIDER = neteaseProvider('neteaseYeah', 'yeah.net', neteaseYeahLogo)
 
-export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, GENERIC_PROVIDER]
+export const MAIL_139_PROVIDER: MailProvider = {
+  id: '139',
+  get name() { return t('accounts:mail139ProviderName') },
+  domain: '139.com',
+  get description() { return t('accounts:mail139ProviderDescription') },
+  searchAliases: ['139', '139邮箱', '中国移动', '移动邮箱', 'China Mobile', 'CMCC'],
+  logo: mail139Logo,
+  icon: Mail01Icon,
+  preset: {
+    domains: ['139.com'],
+    imap: { host: 'imap.139.com', port: 993, tls: 'implicit' },
+    smtp: { host: 'smtp.139.com', port: 465, tls: 'implicit' },
+  },
+  get setup() {
+    return {
+      title: t('accounts:mail139SetupTitle'),
+      description: t('accounts:mail139SetupDescription'),
+      emailHint: t('accounts:mail139EmailHint'),
+      emailPlaceholder: 'you@139.com',
+      emailRequired: t('accounts:providerEmailRequired', { domains: '@139.com' }),
+      authorizationCodeHint: t('accounts:mail139AuthorizationCodeHint'),
+      authenticationHelp: t('accounts:mail139AuthenticationHelp'),
+    }
+  },
+}
+
+export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
 
 /** Address errors use only the preset's reviewed domains and localized guidance. */
 export function providerEmailRequired(provider: MailProvider): string {

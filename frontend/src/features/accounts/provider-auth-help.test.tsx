@@ -2,11 +2,11 @@ import { render, screen } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ProviderAuthHelp } from './provider-auth-help'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER } from './providers'
+import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER } from './providers'
 import { testClient } from './test-fixtures'
 
 describe('provider authorization help', () => {
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('reports and recovers from opening $id help without exposing a transport error', async (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('reports and recovers from opening $id help without exposing a transport error', async (provider) => {
     const client = testClient()
     client.openProviderHelp.mockRejectedValueOnce(new Error('PRIVATE_SYNTHETIC_SERVER_RESPONSE'))
     render(<ProviderAuthHelp client={client} providerId={provider.id} />)

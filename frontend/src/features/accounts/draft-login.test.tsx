@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import { AddAccountDialog } from './add-account-dialog'
-import { GENERIC_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
+import { GENERIC_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
 import { testClient } from './test-fixtures'
 
 type Report = Awaited<ReturnType<MailxClient['verifyDraftConnection']>>
@@ -49,7 +49,7 @@ async function chooseOption(label: string, option: string) {
 }
 
 describe('testing a connection before saving an account', () => {
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, GENERIC_PROVIDER])('tests $name without creating an account and retains its credential for the final save', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER])('tests $name without creating an account and retains its credential for the final save', async (provider) => {
     const { client, onCreated } = setup()
     await select(provider)
     const emailAddress = fill(provider)

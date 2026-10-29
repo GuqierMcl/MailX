@@ -5,7 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
+import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -122,12 +122,18 @@ describe('add account wizard', () => {
     { provider: NETEASE_163_PROVIDER, emailAddress: 'Synthetic@163.COM', domain: '163.com' },
     { provider: NETEASE_126_PROVIDER, emailAddress: 'Synthetic@126.COM', domain: '126.com' },
     { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'Synthetic@YEAH.NET', domain: 'yeah.net' },
+    { provider: MAIL_139_PROVIDER, emailAddress: 'Synthetic@139.COM', domain: '139.com' },
   ])('adds $provider.id through the authorization-code flow and keeps the original login identity', async ({ provider, emailAddress, domain }) => {
     const { client, dialog, onCreated } = renderDialog()
     await chooseProvider(dialog, provider)
     expect(within(dialog).getByLabelText('邮箱地址')).toHaveAttribute('placeholder', `you@${domain}`)
     expect(within(dialog).getByText('高级设置')).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
+    if (provider === MAIL_139_PROVIDER) {
+      expect(within(dialog).getByText(provider.setup!.description)).toHaveTextContent('广电号码暂不支持')
+      expect(within(dialog).getByText(provider.setup!.authorizationCodeHint)).toHaveTextContent('90 天')
+      expect(within(dialog).getByText(provider.setup!.emailHint)).toHaveTextContent('分别修改 IMAP / SMTP 登录用户名')
+    }
     await userEvent.click(within(dialog).getByRole('button', { name: '如何获取授权码' }))
     expect(client.openProviderHelp).toHaveBeenCalledWith(provider.id)
     fillQqConnection(dialog, emailAddress)
@@ -156,7 +162,8 @@ describe('add account wizard', () => {
     { provider: NETEASE_163_PROVIDER, emailAddress: 'synthetic@126.com' },
     { provider: NETEASE_126_PROVIDER, emailAddress: 'synthetic@163.com' },
     { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'synthetic@163.com' },
-  ])('keeps the other NetEase domain out of $provider.id and clears its entered authorization code', async ({ provider, emailAddress }) => {
+    { provider: MAIL_139_PROVIDER, emailAddress: 'synthetic@sub.139.com' },
+  ])('keeps an unsupported domain out of $provider.id and clears its entered authorization code', async ({ provider, emailAddress }) => {
     const { client, dialog } = renderDialog()
     await chooseProvider(dialog, provider)
     fillQqConnection(dialog, emailAddress)
@@ -165,6 +172,23 @@ describe('add account wizard', () => {
     expect(within(dialog).getByLabelText('授权码')).toHaveValue('')
     expect(within(dialog).queryByLabelText('账号名称')).not.toBeInTheDocument()
     expect(client.createAccount).not.toHaveBeenCalled()
+  })
+
+  it('updates the 139 authorization-code guidance when switching languages', async () => {
+    const { dialog } = renderDialog()
+    await chooseProvider(dialog, MAIL_139_PROVIDER)
+    try {
+      await act(async () => { await i18n.changeLanguage('en') })
+      expect(within(dialog).getByText('Connect 139 Mail')).toBeInTheDocument()
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.description)).toHaveTextContent('China Broadnet numbers currently cannot enable authorization codes')
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('valid for 90 days')
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.emailHint)).toHaveTextContent('edit the IMAP and SMTP login usernames separately in Advanced settings')
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      expect(within(dialog).getByText('连接 139 邮箱')).toBeInTheDocument()
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('以网页显示的到期日为准')
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+    }
   })
 
   it('discards a NetEase authorization code and advanced overrides when choosing a different provider', async () => {
@@ -183,7 +207,7 @@ describe('add account wizard', () => {
     expect(client.createAccount).not.toHaveBeenCalled()
   })
 
-  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('returns a rejected $id credential to an empty field while preserving the address', async (provider) => {
+  it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('returns a rejected $id credential to an empty field while preserving the address', async (provider) => {
     const client = testClient()
     client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'sharedPassword', message: 'PRIVATE_SYNTHETIC_SERVER_RESPONSE' }))
     const { dialog } = renderDialog(client)

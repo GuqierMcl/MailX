@@ -5,7 +5,7 @@ import type { AccountConnectionVerification } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { ConnectionVerification } from './connection-verification'
 import { exampleAccount, testClient } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 function report(accountId: string, revision: number): AccountConnectionVerification {
   return {
@@ -31,7 +31,7 @@ describe('account connection verification', () => {
     expect(client.queueSend).not.toHaveBeenCalled()
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('keeps IMAP success distinct from SMTP authentication failure and offers $id authorization help', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('keeps IMAP success distinct from SMTP authentication failure and offers $id authorization help', async (provider) => {
     const account = exampleAccount({ providerId: provider.id })
     const client = testClient([account])
     client.verifyAccountConnection.mockResolvedValue({

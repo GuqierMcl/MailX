@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -81,6 +81,31 @@ describe.each([
       expect(cause).toBeInstanceOf(MailxClientError)
       expect((cause as MailxClientError).failure).toMatchObject({ code: 'validation', field: 'emailAddress' })
     }
+  })
+})
+
+describe('139 provider identity and domain boundary', () => {
+  it.each(['sub.139.com', '139.com.evil', 'evil139.com', '10086.cn', 'example.com'])('rejects %s before submitting a credential', (domain) => {
+    const draft = initialDraft(null, MAIL_139_PROVIDER)
+    draft.emailAddress = `synthetic@${domain}`
+    draft.sharedPassword.value = 'synthetic-code'
+    expect(() => draftToConnection(draft, null, MAIL_139_PROVIDER)).toThrow(MailxClientError)
+  })
+
+  it('defaults to the complete address and preserves a code without a fixed length rule', () => {
+    const draft = initialDraft(null, MAIL_139_PROVIDER)
+    draft.emailAddress = 'Synthetic@139.COM'
+    draft.sharedPassword.value = 'test-code'
+    expect(draftToConnection(draft, null, MAIL_139_PROVIDER)).toMatchObject({
+      providerId: '139', emailAddress: 'Synthetic@139.COM',
+      imap: { username: 'Synthetic@139.COM' }, smtp: { username: 'Synthetic@139.COM' },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'test-code' } },
+    })
+    draft.imap.username = 'synthetic-phone-login'
+    draft.smtp.username = 'different-synthetic-login'
+    expect(draftToConnection(draft, null, MAIL_139_PROVIDER)).toMatchObject({
+      emailAddress: 'Synthetic@139.COM', imap: { username: 'synthetic-phone-login' }, smtp: { username: 'different-synthetic-login' },
+    })
   })
 })
 

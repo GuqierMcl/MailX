@@ -189,9 +189,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     async openProviderHelp(providerId) {
       const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
-        : providerId === 'netease163' || providerId === 'netease126' || providerId === 'neteaseYeah'
-          ? 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
-          : null
+        : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
+          : providerId === 'netease163' || providerId === 'netease126' || providerId === 'neteaseYeah'
+            ? 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
+            : null
       if (!url) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
       window.open(url, '_blank', 'noopener,noreferrer')
     },
