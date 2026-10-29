@@ -40,6 +40,7 @@
 
 ### Fixed
 
+- 修复写信窗口中斜体不显示倾斜的问题：界面字体本身没有斜体字形，之前被禁止合成，现在只在正文里允许合成斜体。 ([#53](https://github.com/GuqierMcl/MailX/issues/53))
 - 退出时等待草稿保存和正在进行的发送，保存失败或等待超时会取消退出，避免强制关窗丢失未保存内容。 ([#48](https://github.com/GuqierMcl/MailX/pull/48))
 - 修复下载更新时更新说明被错误替换为“没有提供更新说明”的问题，下载完成和失败重试时也持续显示。 ([#46](https://github.com/GuqierMcl/MailX/pull/46))
 - 邮箱服务商明确以安全策略拒绝访问时显示独立原因，停止自动重试；处理后可手动同步恢复，保留本地缓存与待写标记。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
