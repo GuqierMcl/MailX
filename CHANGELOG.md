@@ -30,6 +30,7 @@
 
 ### Optimization
 
+- 重启后头像优先使用本地缓存，不再先联网查询；确认没有头像的发件人 24 小时内不再重复查找。 ([#60](https://github.com/GuqierMcl/MailX/pull/60))
 - 邮件列表改用虚拟滚动，邮件很多时滚动更流畅；滚动到接近列表末尾时自动加载更多，加载失败仍可点击“加载更多”重试；列表按“预览行数”设置为预览区预留固定高度，每行等高，滚动时不再跳动。 ([#58](https://github.com/GuqierMcl/MailX/pull/58))
 - 设置弹窗左下角显示 MailX 与当前版本号，切换设置页时始终可见。 ([#47](https://github.com/GuqierMcl/MailX/pull/47))
 - 标识颜色提供叉号“不标识”选项，选择后隐藏颜色圆环，服务商图标恢复完整大小。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
