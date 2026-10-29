@@ -68,6 +68,7 @@
   "newMailWillAppear": "新邮件同步后会显示在这里。",
   "messageList": "邮件列表",
   "loadingEllipsis": "正在加载…",
+  "previewLoading": "（加载中）",
   "loadMore": "加载更多",
   "starred": "已加星标",
   "hasAttachment": "有附件",

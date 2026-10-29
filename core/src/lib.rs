@@ -37,7 +37,9 @@ pub use drafts::attachments::{
 };
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
-pub use events::{CoreEvent, EventSink, Events, NewMail, NewMailMessage};
+pub use events::{
+    CoreEvent, EmailPreviewItem, EmailPreviews, EventSink, Events, NewMail, NewMailMessage,
+};
 pub use localization::{LanguagePreference, SupportedLocale};
 pub use mail::*;
 pub use net::images::ImageFetchError;

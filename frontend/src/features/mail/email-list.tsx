@@ -13,7 +13,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
 import { displayName, formatListTime } from './format'
+import { isGivenUp, useGaveUpVersion } from './preview-gave-up'
 import { SenderAvatar } from './sender-avatar'
+import { usePreviewRequests } from './use-preview-requests'
 
 export type ListFilter = 'all' | 'unread'
 
@@ -42,6 +44,8 @@ type EmailListProps = {
   selectedId: string | null
   /** Lines of body preview per row, from the appearance settings. */
   previewLines: PreviewLines
+  /** Asks for the previews of the listed rows; the complete wanted set every time. */
+  onRequestPreviews?: (emailIds: string[]) => void
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
@@ -68,7 +72,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -136,7 +140,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
   }
   return (
     <VirtualRows
-      emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines}
+      emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} onSelect={onSelect} onLoadMore={onLoadMore}
     />
@@ -166,6 +170,7 @@ type VirtualRowsProps = {
   stale: boolean
   selectedId: string | null
   previewLines: PreviewLines
+  onRequestPreviews?: (emailIds: string[]) => void
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
@@ -175,7 +180,7 @@ type VirtualRowsProps = {
   onLoadMore: () => void
 }
 
-function VirtualRows({ emails, accounts, stale, selectedId, previewLines, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // The selected and the focused row stay mounted however far they scroll away,
@@ -233,6 +238,12 @@ function VirtualRows({ emails, accounts, stale, selectedId, previewLines, hasMor
     if (hasMore && !loadingMore && !refreshing && !loadMoreError && lastVisible >= emails.length - LOAD_MORE_THRESHOLD) onLoadMore()
   }, [hasMore, loadingMore, refreshing, loadMoreError, lastVisible, emails.length, onLoadMore])
 
+  // Previews are fetched for the rows that are rendered (visible plus overscan).
+  const virtualItems = virtualizer.getVirtualItems()
+  const rendered = virtualItems.map((item) => emails[item.index])
+  usePreviewRequests(onRequestPreviews, rendered, previewLines)
+  useGaveUpVersion()
+
   return (
     <ScrollArea
       viewportRef={viewportRef}
@@ -255,7 +266,7 @@ function VirtualRows({ emails, accounts, stale, selectedId, previewLines, hasMor
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null)
         }}
       >
-        {virtualizer.getVirtualItems().map((item) => {
+        {virtualItems.map((item) => {
           const email = emails[item.index]
           return (
             <EmailRow
@@ -298,6 +309,17 @@ const PREVIEW_HEIGHT: Record<Exclude<PreviewLines, 'none'>, string> = {
   one: 'h-4',
   two: 'h-8',
   three: 'h-12',
+}
+
+/**
+ * What the preview slot shows. A row still waiting for its preview says so on the
+ * first line; failed rows and rows given up on stay blank. A downloaded body is
+ * always a ready preview.
+ */
+function previewText(email: EmailSummary) {
+  if (email.bodyState === 'ready' || email.previewState === 'ready') return email.preview
+  if (email.previewState === 'missing' && !isGivenUp(email.id)) return t('mail:previewLoading')
+  return ''
 }
 
 type EmailRowProps = {
@@ -369,7 +391,7 @@ function EmailRow({ email, account, selected, previewLines, index, count, style,
         </div>
         {/* The slot is always reserved, even without a preview, so every row has one height. */}
         {previewLines !== 'none' && (
-          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>{email.preview}</p>
+          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>{previewText(email)}</p>
         )}
       </div>
     </button>

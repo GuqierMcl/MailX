@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::mail::MailAddress;
+use crate::mail::{MailAddress, PreviewState};
 use crate::send::types::{DraftChanged, OutboxChanged};
 use crate::settings::NotificationSettings;
 use crate::sync::manager::{AccountSyncState, FlagWriteBack};
@@ -28,6 +28,8 @@ pub enum CoreEvent {
     Sync(AccountSyncState),
     /// A read / starred write-back round finished.
     FlagWriteBack(FlagWriteBack),
+    /// List previews arrived (or were given up on) for rows on screen.
+    Previews(EmailPreviews),
     /// Unread mail arrived in an inbox since the last completed sync round.
     NewMail(NewMail),
     /// A send queue item changed state (queued, sending, accepted, ...).
@@ -48,6 +50,24 @@ impl<F: Fn(&CoreEvent) + Send + Sync> EventSink for F {
 }
 
 pub type Events = Arc<dyn EventSink>;
+
+/// A batch of finished partial fetches. Not an authoritative record: the list
+/// merges it into rows it already shows, and a reload returns the same data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailPreviews {
+    pub items: Vec<EmailPreviewItem>,
+}
+
+/// One message's outcome: `ready` carries the excerpt, `failed` an empty text
+/// that will not be retried until the full body is downloaded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailPreviewItem {
+    pub email_id: String,
+    pub preview: String,
+    pub preview_state: PreviewState,
+}
 
 /// New unread mail in one account's inbox, found by one sync round. Mail that
 /// was already there (a first sync, a rebuilt folder, older mail filled in

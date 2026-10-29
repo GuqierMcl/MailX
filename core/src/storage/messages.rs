@@ -10,7 +10,7 @@ use crate::{
     events::NewMailMessage,
     mail::{
         AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail, EmailListQuery, EmailPage,
-        EmailSummary, MailAddress,
+        EmailSummary, MailAddress, PreviewState,
     },
     sync::headers::MessageRecord,
 };
@@ -527,10 +527,10 @@ impl Storage {
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(13)?,
                     row.get::<_, String>(14)?,
                     row.get::<_, String>(15)?,
-                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, String>(16)?,
+                    row.get::<_, Option<String>>(17)?,
                 ))
             })
             .optional()?;
@@ -586,7 +586,7 @@ impl Storage {
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending')";
+const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending'), m.preview_state";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
@@ -614,6 +614,12 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
         pending_changes: row.get(12)?,
+        preview_state: match row.get::<_, String>(13)?.as_str() {
+            "missing" => PreviewState::Missing,
+            "ready" => PreviewState::Ready,
+            "failed" => PreviewState::Failed,
+            _ => return Err(rusqlite::Error::InvalidQuery),
+        },
     })
 }
 

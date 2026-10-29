@@ -33,6 +33,7 @@ import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
+import { useEmailPreviews } from './use-email-previews'
 import { loadMailTree } from './mail-tree'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
@@ -270,6 +271,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
   const { setFlag } = useMessageFlags(client)
+  useEmailPreviews(client)
+  const requestPreviews = useCallback((ids: string[]) => { void client.requestPreviews(ids).catch(() => undefined) }, [client])
   // The mail is "opened" once its detail is on screen; a mail the user only
   // moved past stays unread.
   useMarkOpenedAsRead(
@@ -467,6 +470,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               />
             ) : (
             <EmailList
+              onRequestPreviews={requestPreviews}
               title={mailboxTitle(activeMailbox)}
               emails={emails}
               accounts={showAccountBadges ? accounts : null}

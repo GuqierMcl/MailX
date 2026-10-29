@@ -117,6 +117,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["accounts"],
         sql: include_str!("migrations/0015_account_smtp_size_limit.sql"),
     },
+    Migration {
+        version: 16,
+        description: "message list preview state",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0016_preview_state.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -521,7 +527,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 15);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 16);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -692,7 +698,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            15
+            16
         );
     }
 
@@ -760,6 +766,42 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn preview_state_migration_backfills_downloaded_bodies_and_constrains_values() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(15)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id,
+             created_at, updated_at) VALUES ('a', 1, 'Keep', 'local@example.test', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+             attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'INBOX', 'Inbox', 'inbox', 1, '[]', 0, 2, 't');",
+        )
+        .unwrap();
+        for (id, uid, body_state) in [("downloaded", 1, "ready"), ("pending", 2, "missing")] {
+            db.execute(
+                "INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+                 subject, from_address, to_addresses, cc_addresses, reply_to_addresses, received_at,
+                 is_read, is_flagged, flags, has_attachment, remote_state, updated_at, body_state)
+                 VALUES (?1, 'a', 'source', 'f', 1, ?2, 's', 'x@example.test', '[]', '[]', '[]', 't',
+                 0, 0, '[]', 0, 'present', 't', ?3)",
+                rusqlite::params![id, uid, body_state],
+            )
+            .unwrap();
+        }
+        apply(&mut db, MIGRATIONS).unwrap();
+        let state = |id: &str| -> String {
+            db.query_row(
+                "SELECT preview_state FROM messages WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(state("downloaded"), "ready");
+        assert_eq!(state("pending"), "missing");
     }
 
     #[test]

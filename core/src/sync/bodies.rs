@@ -498,4 +498,4 @@ fn imap_failure(error: ImapError) -> BodyFailureCode {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

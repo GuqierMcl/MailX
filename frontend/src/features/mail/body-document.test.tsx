@@ -228,7 +228,7 @@ describe('isolated body, inline links and image policy', () => {
     const { client, emit } = setup()
     const email: EmailDetail = {
       summary: { id: 'one', accountId: 'a', folderId: 'f', subject: 'Synthetic', from: { name: null, address: 'a@example.com' },
-        receivedAt: '2026-10-20T00:00:00Z', preview: '', bodyState: 'ready', isRead: false, isStarred: false, hasAttachment: true, pendingChanges: false },
+        receivedAt: '2026-10-20T00:00:00Z', preview: '', bodyState: 'ready', previewState: 'ready', isRead: false, isStarred: false, hasAttachment: true, pendingChanges: false },
       to: [], cc: [], replyTo: [], bodyFailure: null,
       body: { text: '<script>plain text</script>', hasHtml: true, truncated: true, remoteImagesBlocked: 3 },
       attachments: [{ id: 'part', filename: 'document.pdf', mimeType: 'application/pdf', size: 2048, isInline: false }],

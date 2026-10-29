@@ -23,7 +23,7 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
     id, accountId: account.id, folderId: inbox.id, subject: `邮件 ${id}`,
     from: { name: '发件人', address: 'sender@example.com' }, preview: '',
     receivedAt: '2026-10-18T08:00:00.000Z', isRead: false, isStarred: false,
-    hasAttachment: false, bodyState: 'missing', pendingChanges: false, ...overrides,
+    hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, ...overrides,
   }
 }
 
@@ -298,7 +298,7 @@ describe('synced inbox headers', () => {
   })
 
   it('shows a missing subject, reserves an empty preview slot and shows a controlled body download failure', async () => {
-    const { client } = setup([email('empty-fields', { subject: '', preview: '' })])
+    const { client } = setup([email('empty-fields', { subject: '', preview: '', previewState: 'ready' })])
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     expect(within(rows()[0]).getByText('（无主题）')).toBeInTheDocument()

@@ -68,6 +68,7 @@
   "newMailWillAppear": "New messages will appear here after syncing.",
   "messageList": "Message list",
   "loadingEllipsis": "Loading…",
+  "previewLoading": "(Loading…)",
   "loadMore": "Load more",
   "starred": "Starred",
   "hasAttachment": "Has attachment",

@@ -15,17 +15,18 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, timeout};
 
-struct Fixture {
-    _directory: TempDir,
-    service: Arc<Mutex<AccountService>>,
-    manager: Arc<BodyManager>,
-    account: Account,
-    target: SyncTarget,
-    messages: Vec<String>,
-    connections: mpsc::UnboundedReceiver<oneshot::Sender<Result<imap::Session, ImapError>>>,
+pub(crate) struct Fixture {
+    pub(crate) _directory: TempDir,
+    pub(crate) service: Arc<Mutex<AccountService>>,
+    pub(crate) manager: Arc<BodyManager>,
+    pub(crate) account: Account,
+    pub(crate) target: SyncTarget,
+    pub(crate) messages: Vec<String>,
+    pub(crate) connections:
+        mpsc::UnboundedReceiver<oneshot::Sender<Result<imap::Session, ImapError>>>,
 }
 
-fn create_account(service: &mut AccountService, label: &str) -> Account {
+pub(crate) fn create_account(service: &mut AccountService, label: &str) -> Account {
     let mut value = config(json!({"kind":"direct"}));
     value["emailAddress"] = json!(format!("{label}@example.test"));
     value["imap"]["username"] = json!(label);
@@ -39,7 +40,7 @@ fn create_account(service: &mut AccountService, label: &str) -> Account {
         .unwrap()
 }
 
-fn seed(
+pub(crate) fn seed(
     service: &mut AccountService,
     account: &Account,
     sizes: &[Option<u32>],
@@ -121,7 +122,7 @@ fn seed(
     (target, messages)
 }
 
-fn fixture(sizes: &[Option<u32>]) -> Fixture {
+pub(crate) fn fixture(sizes: &[Option<u32>]) -> Fixture {
     let directory = TempDir::new().unwrap();
     let mut service =
         AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
@@ -143,13 +144,13 @@ fn fixture(sizes: &[Option<u32>]) -> Fixture {
     }
 }
 
-fn fetch(fixture: &Fixture, index: usize) -> JoinHandle<Result<EmailDetail, AppError>> {
+pub(crate) fn fetch(fixture: &Fixture, index: usize) -> JoinHandle<Result<EmailDetail, AppError>> {
     let manager = fixture.manager.clone();
     let id = fixture.messages[index].clone();
     tokio::spawn(async move { manager.fetch(id).await })
 }
 
-async fn tagged_command(server: &mut BufReader<DuplexStream>, expected: &str) -> String {
+pub(crate) async fn tagged_command(server: &mut BufReader<DuplexStream>, expected: &str) -> String {
     let mut command = String::new();
     server.read_line(&mut command).await.unwrap();
     let (tag, value) = command.trim_end().split_once(' ').unwrap();
@@ -157,7 +158,7 @@ async fn tagged_command(server: &mut BufReader<DuplexStream>, expected: &str) ->
     tag.into()
 }
 
-async fn session(
+pub(crate) async fn session(
     uid: u32,
     validity: u32,
     raw: &'static [u8],
@@ -216,21 +217,23 @@ async fn session(
     (session, release, server)
 }
 
-const RAW: &[u8] =
+pub(crate) const RAW: &[u8] =
     b"From: fixture@example.test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsynthetic body";
 
 async fn finished(job: JoinHandle<Result<EmailDetail, AppError>>) -> Result<EmailDetail, AppError> {
     timeout(Duration::from_secs(3), job).await.unwrap().unwrap()
 }
 
-async fn connection(fixture: &mut Fixture) -> oneshot::Sender<Result<imap::Session, ImapError>> {
+pub(crate) async fn connection(
+    fixture: &mut Fixture,
+) -> oneshot::Sender<Result<imap::Session, ImapError>> {
     timeout(Duration::from_secs(3), fixture.connections.recv())
         .await
         .unwrap()
         .unwrap()
 }
 
-async fn wait_until(mut condition: impl FnMut() -> bool) {
+pub(crate) async fn wait_until(mut condition: impl FnMut() -> bool) {
     timeout(Duration::from_secs(3), async {
         while !condition() {
             tokio::task::yield_now().await;

@@ -9,6 +9,7 @@ import type {
   OutboxItem,
   OutboxState,
   EmailDetail,
+  EmailPreviews,
   EmailSummary,
   Folder,
   FolderRole,
@@ -66,6 +67,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const outbox = createMockOutbox(sendStepMs)
   const drafts = new Map<string, Draft>()
   const draftsByMutation = new Map<string, string>()
+  const previewListeners = new Set<(previews: EmailPreviews) => void>()
+  let previewRequest = 0
   const draftListeners = new Set<(change: DraftChanged) => void>()
   const lockedDrafts = new Set<string>()
   const removedDrafts = new Set<string>()
@@ -259,6 +262,25 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         })),
       })),
     onSyncState: () => () => undefined,
+    async requestPreviews(emailIds) {
+      const wanted = emails.filter((email) => emailIds.includes(email.summary.id) && email.summary.previewState === 'missing')
+      if (!wanted.length) return
+      // Like the host: answer later, and a newer request supersedes one that has not started.
+      const request = ++previewRequest
+      setTimeout(() => {
+        if (request !== previewRequest) return
+        const items = wanted.map((email) => {
+          email.summary.preview = (email.body?.text ?? '').replace(/\s+/g, ' ').slice(0, 120)
+          email.summary.previewState = 'ready'
+          return { emailId: email.summary.id, preview: email.summary.preview, previewState: 'ready' as const }
+        })
+        previewListeners.forEach((listener) => listener({ items }))
+      }, 600)
+    },
+    onEmailPreviews(listener) {
+      previewListeners.add(listener)
+      return () => { previewListeners.delete(listener) }
+    },
     async listEmails(query) {
       const text = query.text?.trim().toLowerCase()
       const items = emails
@@ -289,6 +311,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async fetchBody(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
+      // Like the core: a full body also settles the row's preview.
+      if (email.summary.bodyState !== 'ready') {
+        email.summary.bodyState = 'ready'
+        email.summary.preview = (email.body?.text ?? '').replace(/\s+/g, ' ').slice(0, 120)
+        email.summary.previewState = 'ready'
+      }
       return structuredClone(email)
     },
     async setFlag(emailId, flag, wanted) {
@@ -761,6 +789,8 @@ type MockDataset = {
   me: Record<string, MailAddress>
   /** Whether the first seed has an HTML body (the browser preview shows a fixed document for it). */
   htmlFirst: boolean
+  /** Whether some previews start unfetched, as for headers synced but not yet scrolled into view. */
+  lazyPreviews: boolean
 }
 
 const DEFAULT_DATASET: MockDataset = {
@@ -769,6 +799,7 @@ const DEFAULT_DATASET: MockDataset = {
   customFolders: DEFAULT_CUSTOM_FOLDERS,
   me: { [WORK]: ME_WORK, [PERSONAL]: ME_HOME },
   htmlFirst: true,
+  lazyPreviews: true,
 }
 
 /** Fictitious data for README screenshots, selected with `?seed=showcase`; see `mock-showcase.ts`. */
@@ -779,29 +810,33 @@ function showcaseDataset(): MockDataset {
     customFolders: SHOWCASE_DATASET.customFolders,
     me: SHOWCASE_DATASET.me,
     htmlFirst: false,
+    lazyPreviews: false,
   }
 }
 
 // Relative to load time so the list always looks recent.
 const BASE_TIME = Date.now()
 
-function buildEmails({ seeds, me: addresses, htmlFirst }: MockDataset): EmailDetail[] {
+function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockDataset): EmailDetail[] {
   return seeds.map((seed, index) => {
     const id = `mock-email-${index + 1}`
     const me = addresses[seed.account]
     const sent = seed.role === 'sent' || seed.role === 'drafts'
+    const lazy = lazyPreviews && index % 2 === 1
     const summary: EmailSummary = {
       id,
       accountId: seed.account,
       folderId: seed.folder ? `${seed.account}:${seed.folder}` : folderId(seed.account, seed.role ?? 'inbox'),
       subject: seed.subject,
       from: seed.from,
-      preview: seed.text.replace(/\s+/g, ' ').slice(0, 120),
+      preview: lazy ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
       receivedAt: new Date(BASE_TIME - seed.hoursAgo * 3_600_000).toISOString(),
       isRead: seed.read ?? false,
       isStarred: seed.starred ?? false,
       hasAttachment: (seed.attachments?.length ?? 0) > 0,
-      bodyState: 'ready',
+      // Lazy rows look like synced headers: no body or preview yet.
+      bodyState: lazy ? 'missing' : 'ready',
+      previewState: lazy ? 'missing' : 'ready',
       pendingChanges: false,
     }
     return {

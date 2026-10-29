@@ -21,7 +21,7 @@ use crate::{
     AppError, ErrorCode,
     mail::{
         BodyFailureCode,
-        render::{MAX_MESSAGE_BYTES, Rendered, RenderedPart, SANITIZER_VERSION},
+        render::{MAX_MESSAGE_BYTES, Rendered, RenderedPart, SANITIZER_VERSION, preview},
     },
 };
 
@@ -289,7 +289,10 @@ const BODY_IDENTITY: &str = "SELECT m.id, m.account_id, m.mailbox_source_id, a.r
     JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity
     WHERE m.remote_state = 'present' AND m.id = ?1";
 
-fn read_identity(db: &Connection, message_id: &str) -> Result<Option<BodyIdentity>, AppError> {
+pub(super) fn read_identity(
+    db: &Connection,
+    message_id: &str,
+) -> Result<Option<BodyIdentity>, AppError> {
     Ok(db
         .query_row(BODY_IDENTITY, [message_id], |row| {
             Ok(BodyIdentity {
@@ -318,7 +321,7 @@ fn unsigned<T: TryFrom<i64>>(row: &rusqlite::Row<'_>, column: usize) -> rusqlite
     T::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, value))
 }
 
-fn current(db: &Connection, identity: &BodyIdentity) -> Result<bool, AppError> {
+pub(super) fn current(db: &Connection, identity: &BodyIdentity) -> Result<bool, AppError> {
     Ok(read_identity(db, &identity.message_id)?
         .is_some_and(|current| current.same_message(identity)))
 }
@@ -627,13 +630,7 @@ impl Storage {
             return Err(storage_error());
         }
         let links = encode(&rendered.links)?;
-        let preview: String = rendered
-            .plain_text
-            .as_deref()
-            .unwrap_or_default()
-            .chars()
-            .take(200)
-            .collect();
+        let preview = preview(rendered.plain_text.as_deref());
         let tx = self.db.transaction()?;
         if !current(&tx, identity)? {
             return Ok(false);
@@ -695,7 +692,7 @@ impl Storage {
         // The header-based guess becomes the real answer: any listed non-inline part.
         let has_attachment = rendered.parts.iter().any(|part| !part.is_inline);
         tx.execute(
-            "UPDATE messages SET preview = ?2, body_state = 'ready', body_failure = NULL, has_attachment = ?3 WHERE id = ?1",
+            "UPDATE messages SET preview = ?2, preview_state = 'ready', body_state = 'ready', body_failure = NULL, has_attachment = ?3 WHERE id = ?1",
             params![identity.message_id, preview, has_attachment],
         )?;
         tx.commit()?;

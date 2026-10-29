@@ -2,10 +2,16 @@
 
 mod body;
 mod policy;
+mod preview;
 pub(crate) mod utf7;
 pub(crate) use body::open_body_session;
 #[cfg(test)]
 pub(crate) use body::test_body_session;
+#[cfg(test)]
+pub(crate) use preview::PREVIEW_BYTES;
+pub(crate) use preview::{
+    PREVIEW_BATCH, PREVIEW_BATCH_BYTES, PREVIEW_FALLBACK_BYTES, PartialFetch,
+};
 
 use std::fmt;
 use std::future::Future;
