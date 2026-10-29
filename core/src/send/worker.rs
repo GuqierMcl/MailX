@@ -45,9 +45,47 @@ pub(crate) struct Shared {
     service: Weak<Mutex<AccountService>>,
     events: Events,
     pub(crate) config: SendConfig,
+    gate: Arc<Mutex<SendGate>>,
+}
+
+/// Claims and shutdown share this lock, so a send is either already active or
+/// remains queued when shutdown begins. The guard lives through result storage.
+#[derive(Default)]
+struct SendGate {
+    paused: bool,
+    active: usize,
+}
+
+struct ActiveSend(Arc<Mutex<SendGate>>);
+
+impl Drop for ActiveSend {
+    fn drop(&mut self) {
+        let mut gate = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        gate.active -= 1;
+    }
 }
 
 impl Shared {
+    /// Runs a queue claim atomically with the shutdown gate. A successful claim
+    /// owns its guard until protocol work and durable result recording finish.
+    fn claim<T>(
+        &self,
+        take: impl FnOnce() -> Result<(T, bool), AppError>,
+    ) -> Result<Option<(T, Option<ActiveSend>)>, AppError> {
+        let mut gate = self.gate.lock().unwrap_or_else(|error| error.into_inner());
+        if gate.paused {
+            return Ok(None);
+        }
+        let (value, sending) = take()?;
+        let active = if sending {
+            gate.active += 1;
+            Some(ActiveSend(self.gate.clone()))
+        } else {
+            None
+        };
+        Ok(Some((value, active)))
+    }
+
     pub(crate) fn announce(&self, changed: Vec<Changed>) {
         for change in changed {
             self.events
@@ -81,10 +119,42 @@ impl OutboxManager {
                 service: Arc::downgrade(service),
                 events,
                 config,
+                gate: Arc::default(),
             }),
             runtime,
             retired: Mutex::new(HashSet::new()),
             workers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Stops new claims while an existing SMTP transaction and its result commit finish.
+    pub(crate) fn begin_shutdown(&self) {
+        self.shared
+            .gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .paused = true;
+    }
+
+    pub(crate) fn shutdown_idle(&self) -> bool {
+        self.shared
+            .gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            == 0
+    }
+
+    pub(crate) fn cancel_shutdown(&self) {
+        self.shared
+            .gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .paused = false;
+        if let Ok(workers) = self.workers.lock() {
+            for (_, wake) in workers.values() {
+                wake.notify_one();
+            }
         }
     }
 
@@ -186,9 +256,22 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
         };
         let id = account_id.clone();
         let now = clock.now();
-        let step = blocking(&service, move |service| service.outbox_step(&id, now)).await;
-        let step = match step {
-            Ok(step) => step,
+        let claiming = shared.clone();
+        let step = blocking(&service, move |service| {
+            claiming.claim(|| {
+                let step = service.outbox_step(&id, now)?;
+                let sending = matches!(&step.next, Next::Job { .. });
+                Ok((step, sending))
+            })
+        })
+        .await;
+        let (step, _active) = match step {
+            Ok(Some(step)) => step,
+            Ok(None) => {
+                drop(service);
+                wake.notified().await;
+                continue;
+            }
             Err(_) => {
                 // The store was busy or unavailable; try again shortly.
                 drop(service);
@@ -303,6 +386,78 @@ async fn record(
 mod removal_tests {
     use super::*;
     use crate::secrets::test_support::MemorySecrets;
+
+    #[tokio::test]
+    async fn shutdown_leaves_new_work_queued_and_waits_for_the_existing_claim() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let service = Arc::new(Mutex::new(
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap(),
+        ));
+        let manager = OutboxManager::new(
+            &service,
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+            SendConfig::default(),
+        );
+        let (_, active) = manager.shared.claim(|| Ok(((), true))).unwrap().unwrap();
+        manager.begin_shutdown();
+        assert!(
+            !manager.shutdown_idle(),
+            "a claimed transaction still owns its result commit"
+        );
+        assert!(
+            manager
+                .shared
+                .claim(|| -> Result<((), bool), AppError> {
+                    panic!("paused queue must not be inspected or claimed")
+                })
+                .unwrap()
+                .is_none()
+        );
+        drop(active);
+        assert!(manager.shutdown_idle());
+        manager.cancel_shutdown();
+        assert!(manager.shared.claim(|| Ok(((), false))).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_racing_a_claim_cannot_report_idle_before_the_claim_finishes() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let service = Arc::new(Mutex::new(
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap(),
+        ));
+        let manager = Arc::new(OutboxManager::new(
+            &service,
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+            SendConfig::default(),
+        ));
+        let (entered, entered_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let shared = manager.shared.clone();
+        let claimant = std::thread::spawn(move || {
+            shared
+                .claim(|| {
+                    entered.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                    Ok(((), true))
+                })
+                .unwrap()
+                .unwrap()
+                .1
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let stopping = manager.clone();
+        let stopper = std::thread::spawn(move || {
+            stopping.begin_shutdown();
+            stopping.shutdown_idle()
+        });
+        release.send(()).unwrap();
+        let active = claimant.join().unwrap();
+        assert!(!stopper.join().unwrap());
+        drop(active);
+        assert!(manager.shutdown_idle());
+    }
 
     #[tokio::test]
     async fn retired_outbox_rejects_delayed_start_and_wake() {

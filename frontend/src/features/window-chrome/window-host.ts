@@ -67,7 +67,7 @@ const PREVIEW_BUTTONS: Record<WindowPlatform, WindowButton[]> = {
 }
 
 /** Draws another platform's controls in the browser, e.g. `?titlebar=windows`. Gestures only flip local state. */
-export function createPreviewWindowHost(platform: WindowPlatform): WindowHost {
+export function createPreviewWindowHost(platform: WindowPlatform, onClose?: () => void): WindowHost {
   let state: WindowState = { maximized: false, fullscreen: false, focused: true }
   const listeners = new Set<(state: WindowState) => void>()
   return {
@@ -79,6 +79,7 @@ export function createPreviewWindowHost(platform: WindowPlatform): WindowHost {
       translucent: false,
     }),
     perform(action) {
+      if (action === 'close') { onClose?.(); return }
       if (action !== 'toggleMaximize' && action !== 'titleBarDoubleClick') return
       state = { ...state, maximized: !state.maximized }
       listeners.forEach((listener) => listener(state))

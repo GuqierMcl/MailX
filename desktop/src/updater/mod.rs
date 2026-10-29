@@ -288,6 +288,13 @@ pub(crate) fn on_exit(app: &AppHandle) {
     }
 }
 
+/// Cancelling an application quit also cancels an update-triggered relaunch.
+pub(crate) fn cancel_restart(app: &AppHandle) {
+    if let Some(state) = app.try_state::<UpdaterState>() {
+        state.lock().restart_after_install = false;
+    }
+}
+
 /// Spawns the periodic check: shortly after start, then every few hours,
 /// until a version has been found.
 pub(crate) fn start_scheduler(app: &AppHandle) {

@@ -485,6 +485,21 @@ impl MailxCore {
         Ok(item)
     }
 
+    /// Prevents new send attempts from being claimed. Already claimed SMTP
+    /// transactions continue through their result commit; hosts must wait for
+    /// `shutdown_idle` before exiting, or call `cancel_shutdown` to keep running.
+    pub fn begin_shutdown(&self) {
+        self.outbox.begin_shutdown();
+    }
+
+    pub fn shutdown_idle(&self) -> bool {
+        self.outbox.shutdown_idle()
+    }
+
+    pub fn cancel_shutdown(&self) {
+        self.outbox.cancel_shutdown();
+    }
+
     /// Tells the sync workers how the app is being used. While it is in front
     /// they check often; in the background they check less and less often when
     /// nothing arrives; while the computer sleeps they pause. Coming to the

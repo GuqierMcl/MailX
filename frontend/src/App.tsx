@@ -21,6 +21,8 @@ import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
 import { createQueryClient } from '@/lib/query-client'
 import { preloadMailBodyEditor } from '@/features/composer/mail-body-editor-loader'
 import { SettingsSync } from '@/i18n/settings-sync'
+import { createDesktopLifecycleClient, createPreviewLifecycleClient } from '@/features/lifecycle/lifecycle-client'
+import { LifecycleProvider } from '@/features/lifecycle/lifecycle-provider'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
 // `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
@@ -48,8 +50,13 @@ if (import.meta.env.DEV && !isTauri() && new URLSearchParams(window.location.sea
 const queryClient = createQueryClient()
 
 const previewPlatform = import.meta.env.DEV ? previewPlatformFromUrl(window.location.search) : null
-const windowHost = previewPlatform ? createPreviewWindowHost(previewPlatform) : createDesktopWindowHost()
 const role = windowRole()
+const previewLifecycle = role.kind === 'main' && previewPlatform && !isTauri()
+  ? createPreviewLifecycleClient(previewPlatform, client, previewPlatform === 'macos' || new URLSearchParams(window.location.search).get('tray') !== 'unavailable')
+  : null
+if (previewLifecycle && new URLSearchParams(window.location.search).get('close') === '1') void previewLifecycle.requestClose()
+const lifecycle = previewLifecycle ?? createDesktopLifecycleClient()
+const windowHost = previewPlatform ? createPreviewWindowHost(previewPlatform, () => { void previewLifecycle?.requestClose() }) : createDesktopWindowHost()
 // Start the editor in this WebView before rendering/reading the draft. The main
 // window still never imports the engine. Composer displays any load failure.
 if (role.kind === 'composer') void preloadMailBodyEditor().catch(() => undefined)
@@ -76,18 +83,20 @@ function App() {
       <AppearanceSync client={client} />
       {/* One global toast outlet; everything short that needs saying goes through `toast`. */}
       <Toaster />
-      <TitleBarSlotsProvider>
-        <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
-          <TitleBar host={windowHost} />
-          {/* Encloses the gate too: Settings → About reads the update state. */}
-          <UpdaterProvider client={client}>
-            <UpdaterTitleBar client={client} />
-            <div className="relative min-h-0 flex-1 overflow-auto">
-              <StartupGate client={client} />
-            </div>
-          </UpdaterProvider>
-        </div>
-      </TitleBarSlotsProvider>
+      <LifecycleProvider client={lifecycle}>
+        <TitleBarSlotsProvider>
+          <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
+            <TitleBar host={windowHost} />
+            {/* Encloses the gate too: Settings → About reads the update state. */}
+            <UpdaterProvider client={client}>
+              <UpdaterTitleBar client={client} />
+              <div className="relative min-h-0 flex-1 overflow-auto">
+                <StartupGate client={client} />
+              </div>
+            </UpdaterProvider>
+          </div>
+        </TitleBarSlotsProvider>
+      </LifecycleProvider>
     </QueryClientProvider>
   )
 }

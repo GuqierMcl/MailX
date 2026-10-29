@@ -822,25 +822,32 @@ pub(crate) async fn settings_update(
                 protocol.revoke_remote_images();
             }
             if let Ok(snapshot) = &result {
-                let change = mailx_core::SettingsChanged {
-                    revision: snapshot.revision,
-                };
-                for (label, target) in app.webview_windows() {
-                    if target.url().ok().is_some_and(|url| {
-                        window_access::check_kind(&label, &url, "settings_get").is_ok()
-                    }) {
-                        let _ = app.emit_to(
-                            EventTarget::webview_window(label),
-                            "mailx://settings-changed",
-                            change,
-                        );
-                    }
-                }
+                emit_settings_changed(&app, snapshot);
+                crate::lifecycle::settings_changed(&app, snapshot);
             }
             result
         }
         Err(error) => Err(error),
     }))
+}
+
+pub(crate) fn emit_settings_changed(app: &tauri::AppHandle, snapshot: &SettingsSnapshot) {
+    let change = mailx_core::SettingsChanged {
+        revision: snapshot.revision,
+    };
+    for (label, target) in app.webview_windows() {
+        if target
+            .url()
+            .ok()
+            .is_some_and(|url| window_access::check_kind(&label, &url, "settings_get").is_ok())
+        {
+            let _ = app.emit_to(
+                EventTarget::webview_window(label),
+                "mailx://settings-changed",
+                change,
+            );
+        }
+    }
 }
 
 // Window commands stay synchronous so they run on the main thread, which

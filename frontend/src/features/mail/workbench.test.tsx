@@ -5,6 +5,8 @@ import { createMockClient } from '@/lib/mock-client'
 import { testClient } from '@/features/accounts/test-fixtures'
 import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
+import { LifecycleProvider } from '@/features/lifecycle/lifecycle-provider'
+import { createPreviewLifecycleClient } from '@/features/lifecycle/lifecycle-client'
 import { Workbench } from './workbench'
 
 async function renderWorkbench() {
@@ -71,5 +73,23 @@ describe('workbench', () => {
     await userEvent.click(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ }))
     await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
     expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue('')
+  })
+
+  it('lets users change a remembered close choice before adding an account', async () => {
+    const client = testClient()
+    const current = await client.getSettings()
+    await client.updateSettings({ general: { ...current.settings.general, closeBehavior: 'background' } })
+    const lifecycle = createPreviewLifecycleClient('macos', client)
+    render(<LifecycleProvider client={lifecycle}>{withTitleBar(<Workbench client={client} />)}</LifecycleProvider>)
+
+    await screen.findByRole('button', { name: '添加邮箱账号' })
+    await userEvent.click(screen.getByRole('button', { name: '设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '设置' })
+    const select = await within(dialog).findByRole('combobox', { name: '关闭主窗口时' })
+    expect(select).toHaveTextContent('关闭窗口并继续运行')
+    expect(within(dialog).getByRole('switch', { name: '在菜单栏显示 MailX' })).not.toBeChecked()
+    await userEvent.click(select)
+    await userEvent.click(await screen.findByRole('option', { name: '每次询问' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { ...current.settings.general, closeBehavior: 'ask' } }))
   })
 })

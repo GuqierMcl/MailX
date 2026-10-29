@@ -39,10 +39,10 @@ pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, ComposeSettings, FontSize, GeneralSettings, LayoutSettings,
-    MailTheme, NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy,
-    SecuritySettings, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
-    mail_body_css,
+    AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings,
+    LayoutSettings, MailTheme, NotificationSettings, NotificationSound, PreviewLines,
+    RemoteImagePolicy, SecuritySettings, SettingsChanged, SettingsPatch, SettingsSnapshot,
+    SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

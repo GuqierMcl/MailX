@@ -71,6 +71,12 @@ pub(crate) fn url_allowed(url: &tauri::Url) -> bool {
 const MAIN_ONLY: &[&str] = &[
     "app_get_startup_status",
     "app_retry_startup",
+    "app_get_lifecycle",
+    "app_resolve_close",
+    "app_quit",
+    "app_cancel_quit",
+    "app_confirm_quit",
+    "app_desktop_ready",
     "accounts_get",
     "accounts_create",
     "accounts_remove",
@@ -131,7 +137,11 @@ const BOTH: &[&str] = &[
 ];
 
 /// Commands only a composer window may call.
-const COMPOSER_ONLY: &[&str] = &["outbox_queue_send", "composer_close"];
+const COMPOSER_ONLY: &[&str] = &[
+    "outbox_queue_send",
+    "composer_close",
+    "composer_cancel_close",
+];
 
 /// Commands that name a draft; a composer may only name its own.
 const DRAFT_SCOPED: &[&str] = &[
@@ -292,6 +302,12 @@ mod tests {
         // (command, main, composer)
         let table = [
             ("app_get_startup_status", true, false),
+            ("app_get_lifecycle", true, false),
+            ("app_resolve_close", true, false),
+            ("app_quit", true, false),
+            ("app_cancel_quit", true, false),
+            ("app_confirm_quit", true, false),
+            ("app_desktop_ready", true, false),
             ("accounts_list", true, true),
             ("accounts_get", true, false),
             ("accounts_create", true, false),
@@ -341,6 +357,7 @@ mod tests {
             ("outbox_resolve_unknown", true, false),
             ("composer_open", true, false),
             ("composer_close", false, true),
+            ("composer_cancel_close", false, true),
             ("updater_get_state", true, false),
             ("updater_check", true, false),
             ("updater_download", true, false),

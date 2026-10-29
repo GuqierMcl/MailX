@@ -9,11 +9,12 @@ use std::sync::Mutex;
 
 use mailx_core::Activity;
 use serde::{Deserialize, Serialize};
-use tauri::{
-    AppHandle, Emitter, EventTarget, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
-};
 #[cfg(not(feature = "body-webview-test"))]
-use tauri::{Runtime, plugin::TauriPlugin};
+use tauri::plugin::TauriPlugin;
+use tauri::{
+    AppHandle, Emitter, EventTarget, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 #[cfg(target_os = "macos")]
 use tauri::{
     utils::config::WindowEffectsConfig,
@@ -73,11 +74,12 @@ pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
 
 /// Brings the existing window forward when a second launch is attempted. Before
 /// the window exists (the first instance is still starting) there is nothing to do.
-#[cfg(not(feature = "body-webview-test"))]
 pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
@@ -283,6 +285,13 @@ fn app_activity(app: &AppHandle, current: &str, focused: Option<bool>) -> Activi
     }))
 }
 
+/// Explicit visibility changes may not emit a focus/resize event on every OS.
+pub(crate) fn refresh_activity(app: &AppHandle) {
+    if let Some(state) = app.try_state::<crate::state::DesktopState>() {
+        state.set_activity(app_activity(app, MAIN_WINDOW, None));
+    }
+}
+
 pub(crate) fn any_active(activities: impl IntoIterator<Item = Activity>) -> Activity {
     if activities
         .into_iter()
@@ -335,7 +344,7 @@ pub(crate) fn watch_state(window: &WebviewWindow) {
     });
 }
 
-fn current_platform() -> Platform {
+pub(crate) fn current_platform() -> Platform {
     if cfg!(target_os = "macos") {
         Platform::Macos
     } else if cfg!(target_os = "windows") {

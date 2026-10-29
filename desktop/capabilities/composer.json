@@ -3,5 +3,5 @@
   "identifier": "composer",
   "description": "Allow only a local composer window to read settings and accounts, read, save and delete its own draft, queue it for sending, close itself, and control its own title bar. No mail, body, link, image or account-management commands.",
   "windows": ["composer-*"],
-  "permissions": ["allow-accounts-list", "allow-settings-get", "allow-window-get-chrome", "allow-window-perform", "allow-window-set-theme", "allow-drafts-get", "allow-drafts-update", "allow-drafts-delete", "allow-outbox-queue-send", "allow-composer-close", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-accounts-list", "allow-settings-get", "allow-window-get-chrome", "allow-window-perform", "allow-window-set-theme", "allow-drafts-get", "allow-drafts-update", "allow-drafts-delete", "allow-outbox-queue-send", "allow-composer-close", "allow-composer-cancel-close", "core:event:allow-listen", "core:event:allow-unlisten"]
 }
