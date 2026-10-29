@@ -52,7 +52,14 @@
 .mail-body-content blockquote { margin: 0 0 0 0.8ex; padding-left: 1ex; border-left: 1px solid var(--muted-foreground); }
 .mail-body-content a { color: var(--primary); text-decoration: underline; cursor: pointer; }
 .mail-body-content strong { font-weight: bold; }
-.mail-body-content em { font-style: italic; }
+.mail-body-content em {
+  font-style: italic;
+  /* The interface fonts ship no italic face (Inter Variable, and the CJK
+     families in --app-font-sans), and the global `font-synthesis: none` keeps
+     the browser from slanting them, so italic text looked upright in the
+     editor. Allow synthesizing the style only; bold stays unsynthesized. */
+  font-synthesis: style;
+}
 .mail-body-content s { text-decoration: line-through; }
 .mail-body-content u { text-decoration: underline; }
 .mail-body-content .ProseMirror-hideselection *::selection { background: transparent; }
