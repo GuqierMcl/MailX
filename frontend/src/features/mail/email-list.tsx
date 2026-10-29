@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -133,26 +135,143 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
     )
   }
   return (
-    <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
+    <VirtualRows
+      emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines}
+      hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
+      windowCapped={syncStatus.windowCapped} onSelect={onSelect} onLoadMore={onLoadMore}
+    />
+  )
+}
+
+// Every row has the same height for a given preview setting (sender and subject are
+// single-line, the preview slot is reserved), so the virtualizer can be told exactly.
+// Row: py-3 (1.5rem) + sender line text-sm (1.25rem) + gap-1 (0.25rem) + subject
+// line text-xs (1rem) = 4rem; with a preview, gap-2 (0.5rem) + one 1rem per line.
+const PREVIEW_ROWS: Record<PreviewLines, number> = { none: 0, one: 1, two: 2, three: 3 }
+const ROW_GAP = 8
+const LIST_PADDING = 12
+const OVERSCAN = 8
+/** Ask for the next page once the last visible row is this close to the end. */
+const LOAD_MORE_THRESHOLD = 10
+
+function rowHeight(previewLines: PreviewLines) {
+  const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const rem = 4 + (previewLines === 'none' ? 0 : 0.5 + PREVIEW_ROWS[previewLines])
+  return rem * rootFontSize
+}
+
+type VirtualRowsProps = {
+  emails: EmailSummary[]
+  accounts: Account[] | null
+  stale: boolean
+  selectedId: string | null
+  previewLines: PreviewLines
+  hasMore: boolean
+  loadingMore: boolean
+  refreshing: boolean
+  loadMoreError: string | null
+  windowCapped: boolean
+  onSelect: (email: EmailSummary) => void
+  onLoadMore: () => void
+}
+
+function VirtualRows({ emails, accounts, stale, selectedId, previewLines, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  // The selected and the focused row stay mounted however far they scroll away,
+  // so the open message keeps its highlight and keyboard focus is never dropped.
+  const pinned = useMemo(() => {
+    const indexes: number[] = []
+    for (const id of [selectedId, focusedId]) {
+      const index = id === null ? -1 : emails.findIndex((email) => email.id === id)
+      if (index >= 0) indexes.push(index)
+    }
+    return indexes
+  }, [emails, selectedId, focusedId])
+  const rangeExtractor = useCallback(
+    (range: Range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
+    [pinned],
+  )
+  // The React Compiler cannot memoize the virtualizer, which is fine: nothing here relies on it.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: emails.length,
+    getScrollElement: () => viewportRef.current,
+    getItemKey: (index) => emails[index].id,
+    estimateSize: () => rowHeight(previewLines),
+    // A row that is not laid out (zero height) keeps the estimate instead of collapsing.
+    measureElement: (element) => element.getBoundingClientRect().height || rowHeight(previewLines),
+    gap: ROW_GAP,
+    paddingStart: LIST_PADDING,
+    paddingEnd: LIST_PADDING,
+    overscan: OVERSCAN,
+    rangeExtractor,
+  })
+
+  // Row heights follow the preview setting and the root font size (rem), so a change
+  // to either drops the cached sizes.
+  useEffect(() => {
+    virtualizer.measure()
+  }, [virtualizer, previewLines])
+  useEffect(() => {
+    let fontSize = getComputedStyle(document.documentElement).fontSize
+    const observer = new MutationObserver(() => {
+      const next = getComputedStyle(document.documentElement).fontSize
+      if (next !== fontSize) {
+        fontSize = next
+        virtualizer.measure()
+      }
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+    return () => observer.disconnect()
+  }, [virtualizer])
+
+  // Load the next page before the user reaches the end. A failed load is retried
+  // only by the button, never automatically.
+  const lastVisible = virtualizer.range?.endIndex ?? -1
+  useEffect(() => {
+    if (hasMore && !loadingMore && !refreshing && !loadMoreError && lastVisible >= emails.length - LOAD_MORE_THRESHOLD) onLoadMore()
+  }, [hasMore, loadingMore, refreshing, loadMoreError, lastVisible, emails.length, onLoadMore])
+
+  return (
+    <ScrollArea
+      viewportRef={viewportRef}
+      className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
+    >
       <div
         role="list"
         aria-label={t('mail:messageList')}
         aria-busy={stale || undefined}
+        style={{ height: virtualizer.getTotalSize() }}
         className={cn(
-          'flex animate-in flex-col gap-2 px-3 py-3 duration-150 fade-in-0 transition-opacity',
+          'relative animate-in px-3 duration-150 fade-in-0 transition-opacity',
           stale && 'pointer-events-none opacity-50',
         )}
+        onFocus={(event) => {
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
+          setFocusedId(row ? emails[Number(row.dataset.index)]?.id ?? null : null)
+        }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null)
+        }}
       >
-        {emails.map((email) => (
-          <EmailRow
-            key={email.id}
-            email={email}
-            account={accounts?.find((account) => account.id === email.accountId) ?? null}
-            selected={email.id === selectedId}
-            previewLines={previewLines}
-            onSelect={() => onSelect(email)}
-          />
-        ))}
+        {virtualizer.getVirtualItems().map((item) => {
+          const email = emails[item.index]
+          return (
+            <EmailRow
+              key={item.key}
+              ref={virtualizer.measureElement}
+              index={item.index}
+              count={emails.length}
+              style={{ transform: `translateY(${item.start}px)` }}
+              email={email}
+              account={accounts?.find((account) => account.id === email.accountId) ?? null}
+              selected={email.id === selectedId}
+              previewLines={previewLines}
+              onSelect={() => onSelect(email)}
+            />
+          )
+        })}
       </div>
       {hasMore && (
         <div className="flex flex-col items-center gap-2 px-3 pb-3">
@@ -162,7 +281,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
           </Button>
         </div>
       )}
-      {syncStatus.windowCapped && (
+      {windowCapped && (
         <p className="px-3 pb-3 text-center text-xs text-muted-foreground">{t('mail:syncCoverageLimited')}</p>
       )}
     </ScrollArea>
@@ -175,18 +294,39 @@ const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
   three: 'line-clamp-3',
 }
 
-type EmailRowProps = { email: EmailSummary; account: Account | null; selected: boolean; previewLines: PreviewLines; onSelect: () => void }
+const PREVIEW_HEIGHT: Record<Exclude<PreviewLines, 'none'>, string> = {
+  one: 'h-4',
+  two: 'h-8',
+  three: 'h-12',
+}
 
-function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRowProps) {
+type EmailRowProps = {
+  email: EmailSummary
+  account: Account | null
+  selected: boolean
+  previewLines: PreviewLines
+  index: number
+  count: number
+  style: React.CSSProperties
+  ref: React.Ref<HTMLButtonElement>
+  onSelect: () => void
+}
+
+function EmailRow({ email, account, selected, previewLines, index, count, style, ref, onSelect }: EmailRowProps) {
   useTranslation()
   return (
     <button
+      ref={ref}
       type="button"
       role="listitem"
+      aria-setsize={count}
+      aria-posinset={index + 1}
+      data-index={index}
+      style={style}
       aria-current={selected ? 'true' : undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-3 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5',
+        'absolute inset-x-3 flex items-center gap-3 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5',
         selected && 'bg-background shadow-xs hover:bg-background',
       )}
     >
@@ -227,8 +367,9 @@ function EmailRow({ email, account, selected, previewLines, onSelect }: EmailRow
             )}
           </div>
         </div>
-        {email.preview && previewLines !== 'none' && (
-          <p className={cn(PREVIEW_CLAMP[previewLines], 'text-xs text-muted-foreground')}>{email.preview}</p>
+        {/* The slot is always reserved, even without a preview, so every row has one height. */}
+        {previewLines !== 'none' && (
+          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>{email.preview}</p>
         )}
       </div>
     </button>

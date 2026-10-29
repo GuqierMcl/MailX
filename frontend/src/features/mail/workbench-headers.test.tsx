@@ -84,15 +84,14 @@ describe('synced inbox headers', () => {
     expect(client.fetchBody).toHaveBeenCalledExactlyOnceWith(item.id)
   })
 
-  it('requests 100 headers, appends the cursor page and hides load more at the end', async () => {
+  it('requests 100 headers, auto-loads the cursor page near the end and hides load more', async () => {
     const items = Array.from({ length: 103 }, (_, index) => email(String(index)))
     const { client } = setup(items)
     client.listEmails.mockImplementation(async (query) => query.cursor ? page(items.slice(100)) : page(items.slice(0, 100), 'page-two'))
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    expect(rows()).toHaveLength(100)
-    expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, cursor: null, folderRole: 'inbox' }))
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    expect(client.listEmails).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, cursor: null, folderRole: 'inbox' }))
+    // The rows fill the viewport, so the list asks for the next page without a click.
     await waitFor(() => expect(rows()).toHaveLength(103))
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, cursor: 'page-two', folderRole: 'inbox' }))
     expect(new Set(rows().map((row) => row.textContent)).size).toBe(103)
@@ -111,7 +110,6 @@ describe('synced inbox headers', () => {
     client.fetchBody.mockReturnValue(pending.promise)
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(2))
     await userEvent.click(rows()[1])
     await screen.findByRole('status', { name: '正在加载正文' })
@@ -213,13 +211,16 @@ describe('synced inbox headers', () => {
 
   it('ignores a pagination response that arrives after a sync refresh', async () => {
     const { client, idle } = setup([email('initial')])
-    client.listEmails.mockResolvedValue(page([email('initial')], 'old-cursor'))
     const pendingPage = deferred<EmailPage>()
+    let refreshed = false
+    client.listEmails.mockImplementation((query) => query.cursor
+      ? pendingPage.promise
+      : Promise.resolve(refreshed ? page([email('fresh')]) : page([email('initial')], 'old-cursor')))
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    client.listEmails.mockReturnValueOnce(pendingPage.promise)
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
-    client.listEmails.mockResolvedValueOnce(page([email('fresh')]))
+    // The near-end list requests the old cursor page by itself and leaves it pending.
+    await waitFor(() => expect(client.listEmails).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'old-cursor' })))
+    refreshed = true
     idle()
     await waitFor(() => expect(rows()[0]).toHaveTextContent('邮件 fresh'))
     await act(async () => pendingPage.resolve(page([email('stale')], 'stale-cursor')))
@@ -244,14 +245,21 @@ describe('synced inbox headers', () => {
 
   it('keeps existing rows and retries the same cursor after a pagination failure', async () => {
     const { client } = setup([email('first')])
-    client.listEmails.mockResolvedValue(page([email('first')], 'retry-cursor'))
+    let failing = true
+    client.listEmails.mockImplementation(async (query) => {
+      if (!query.cursor) return page([email('first')], 'retry-cursor')
+      if (failing) throw new Error('private transport detail')
+      return page([email('second')])
+    })
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    client.listEmails.mockRejectedValueOnce(new Error('private transport detail'))
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('操作未完成，请重试。')
     expect(rows()).toHaveLength(1)
-    client.listEmails.mockResolvedValueOnce(page([email('second')]))
+    // A failed load is retried only by the button, never automatically.
+    const calls = client.listEmails.mock.calls.length
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(client.listEmails).toHaveBeenCalledTimes(calls)
+    failing = false
     await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(2))
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'retry-cursor' }))
@@ -289,12 +297,13 @@ describe('synced inbox headers', () => {
     await act(async () => pending.resolve(page()))
   })
 
-  it('shows a missing subject, omits a missing preview and shows a controlled body download failure', async () => {
+  it('shows a missing subject, reserves an empty preview slot and shows a controlled body download failure', async () => {
     const { client } = setup([email('empty-fields', { subject: '', preview: '' })])
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     expect(within(rows()[0]).getByText('（无主题）')).toBeInTheDocument()
-    expect(rows()[0].querySelector('p')).toBeNull()
+    // The preview slot stays reserved (empty) so every row keeps one height.
+    expect(rows()[0].querySelector('p')).toBeEmptyDOMElement()
     await userEvent.click(rows()[0])
     expect(await screen.findByRole('heading', { name: '（无主题）' })).toBeInTheDocument()
     expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
@@ -303,7 +312,7 @@ describe('synced inbox headers', () => {
 
   it('starts a search with the first-page cursor and preserves the page limit', async () => {
     const { client } = setup([email('first')])
-    client.listEmails.mockResolvedValue(page([email('first')], 'unused-cursor'))
+    client.listEmails.mockImplementation(async (query) => query.cursor ? page() : page([email('first')], 'unused-cursor'))
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     client.listEmails.mockResolvedValueOnce(page())
@@ -321,7 +330,6 @@ describe('synced inbox headers', () => {
     await searchFor('邮件')
     await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '邮件' })))
     // The search starts a new query; its first page renders a notification tick after the call.
-    await userEvent.click(await screen.findByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(103))
     await userEvent.click(rows()[102])
     await screen.findByRole('heading', { name: items[102].subject })
@@ -340,7 +348,6 @@ describe('synced inbox headers', () => {
     client.listEmails.mockImplementation(async (query) => query.cursor ? page(items.slice(100)) : page(items.slice(0, 100), 'page-two'))
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
-    await userEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => expect(rows()).toHaveLength(103))
     await userEvent.click(rows()[102])
     await screen.findByRole('heading', { name: items[102].subject })
