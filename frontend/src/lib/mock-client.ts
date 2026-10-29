@@ -47,7 +47,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const accounts = dataset.accounts.map((account) => structuredClone(account))
   const emails = buildEmails(dataset)
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -418,9 +418,11 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       options.onOpenComposer?.(draft, fresh)
     },
     closeComposer: async () => undefined,
+    cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),
     onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
     onAppClosing: () => () => undefined,
+    onAppCloseCancelled: () => () => undefined,
     onComposerCloseRequested: () => () => undefined,
     // The browser preview has no updater: it announces a version but cannot install one.
     getUpdateState: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),

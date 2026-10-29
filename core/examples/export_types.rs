@@ -83,6 +83,7 @@ fn main() {
         ComposeSettings,
         LanguagePreference,
         SupportedLocale,
+        CloseBehavior,
         GeneralSettings,
         AppSettings,
         SettingsSnapshot,

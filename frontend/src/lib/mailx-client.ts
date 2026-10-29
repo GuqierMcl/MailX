@@ -160,15 +160,18 @@ export interface MailxClient {
   /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
   openComposer(draftId: string, fresh?: boolean): Promise<void>
   /** Composer window. Closes its own window; flush the draft first. */
-  closeComposer(force?: boolean): Promise<void>
+  closeComposer(force?: boolean, generation?: number): Promise<void>
+  /** Cancels the matching close or app quit attempt without discarding edits. */
+  cancelComposerClose(generation: number): Promise<void>
   /** Every queue state change, for the main window and the draft's composer. No addresses or subject. */
   onOutbox(listener: (change: OutboxChanged) => void): () => void
   /** A draft was created, edited, deleted, or locked / released by the queue. */
   onDrafts(listener: (change: DraftChanged) => void): () => void
-  /** Composer window. The main window is closing: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
-  onAppClosing(listener: () => void): () => void
-  /** Composer window. The system asked to close it: flush, then call `closeComposer`. The host closes anyway after about 3 s. */
-  onComposerCloseRequested(listener: () => void): () => void
+  /** Composer window. Explicit app quit: flush, then acknowledge the generation or cancel. */
+  onAppClosing(listener: (request: { generation: number }) => void): () => void
+  /** Composer window. Close this window after saving or the user's explicit discard. */
+  onComposerCloseRequested(listener: (request: { generation: number }) => void): () => void
+  onAppCloseCancelled(listener: (request: { generation: number }) => void): () => void
 
   // --- Updates (docs/architecture/updater.md). Main window only.
   /** The current update state, including whether this edition can install one. */
@@ -194,6 +197,7 @@ export const HOST_EVENTS = {
   outbox: 'mailx://outbox',
   drafts: 'mailx://drafts',
   appClosing: 'mailx://app-closing',
+  appCloseCancelled: 'mailx://app-close-cancelled',
   composerCloseRequested: 'mailx://composer-close-requested',
   filesDropped: 'composer://files-dropped',
   settingsChanged: 'mailx://settings-changed',
@@ -367,11 +371,13 @@ export function createDesktopClient(): MailxClient {
     resolveUnknown: ({ id, resolution, clientMutationId }) =>
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
     openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
-    closeComposer: (force = false) => call<void>('composer_close', { force }),
+    closeComposer: (force = false, generation) => call<void>('composer_close', { force, generation: generation ?? null }),
+    cancelComposerClose: (generation) => call<void>('composer_cancel_close', { generation }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
     onDrafts: (listener) => subscribe<DraftChanged>(HOST_EVENTS.drafts, listener),
-    onAppClosing: (listener) => subscribe<void>(HOST_EVENTS.appClosing, () => listener()),
-    onComposerCloseRequested: (listener) => subscribe<void>(HOST_EVENTS.composerCloseRequested, () => listener()),
+    onAppClosing: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.appClosing, listener),
+    onComposerCloseRequested: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.composerCloseRequested, listener),
+    onAppCloseCancelled: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.appCloseCancelled, listener),
     getUpdateState: () => call<UpdateSnapshot>('updater_get_state'),
     checkForUpdates: () => call<UpdateSnapshot>('updater_check'),
     downloadUpdate: () => call<UpdateSnapshot>('updater_download'),

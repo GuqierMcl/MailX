@@ -191,7 +191,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 回复 / 转发的语言由宿主读取设置后传给 `create_draft_from_localized`，请求不增加客户端可指定的 locale 字段。引用头标签、句子和图片替代文字的占位标签使用创建时的有效语言，并按现有路径转义；图片 alt 保留原值、不再次解析模板参数，整个占位计入既有 512 KiB 引用上限。原邮件、主题前缀识别、线程字段和日期格式沿用现状。引用内容创建后作为草稿内容固化，语言切换不重写已有草稿，也不改变草稿 revision、dirty 状态或发送确认进度；相同 mutation 重放保留首次创建的语言。
 
-事件：`mailx://outbox`（载荷 `OutboxChanged`）与 `mailx://drafts`（载荷 `DraftChanged`）发给 main，并发给受影响草稿的 `composer-{draftId}`（若该窗口存在）。`mailx://app-closing`（无载荷）在 main 关闭时发给每个写信窗口；`mailx://composer-close-requested`（无载荷）在系统要求关闭某写信窗口时发给它。收到后前端写出草稿并调用 `composer_close`；宿主 3 秒内未收到则直接关闭。
+事件：`mailx://outbox`（载荷 `OutboxChanged`）与 `mailx://drafts`（载荷 `DraftChanged`）发给 main，并发给受影响草稿的 `composer-{draftId}`（若该窗口存在）。`mailx://app-closing` 在明确退出应用时发给每个写信窗口；`mailx://composer-close-requested` 在系统要求关闭某写信窗口时发给它，两者载荷均为 `{ generation: number }`。保存或明确放弃后调用 `composer_close({ force: false, generation })`，取消时调用 composer 专属的 `composer_cancel_close({ generation })`。`mailx://app-close-cancelled` 的同形载荷撤销这一轮关闭；迟到确认不能关闭新一轮窗口。普通关闭不强制超时销毁；整应用等待最多 30 秒，未能安全完成时取消退出并显示主窗口，详见[后台运行与退出](../architecture/desktop-lifecycle.md)。
 
 ### 文件夹与同步状态
 
@@ -511,3 +511,23 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 提交后退休同步/写回、正文、空闲发信和诊断任务，撤销正文令牌、外链确认和远程图片权限。core 发 `AccountRemoved`，desktop 向可信 main/composer 窗口广播 `mailx://account-removed`，载荷为 `AccountRemoval`，随后发各实际删除草稿的 `mailx://drafts` Deleted 事件。前端 `onAccountRemoved` 清理查询与选择，写信窗口以 `draftIds` 判断自身是否应停止保存并直接关闭；不以打开窗口时的旧账号猜测。
 
 `credentialsPending=true` 表示本机移除已提交，但部分 SecretStore 删除尚未完成；提示待清理并允许应用后续重试，不能作为账号删除失败重试创建。缓存文件、共享引用和恢复边界见[账号配置](../architecture/account-configuration.md#6-操作与后台任务契约)。
+
+
+## 桌面主窗口关闭与后台运行
+
+已实现，平台真机验证范围见验证策略。仅 main 可调用下列命令，仍使用来源校验与 `ApiResult`；不向邮件正文或写信窗口开放应用退出控制。
+
+| 命令 | 参数 | 返回数据 |
+| --- | --- | --- |
+| `app_get_lifecycle` | 空对象 | `{ platform, backgroundAvailable, closeRequestId, quitting, quitRequestId, quitTimedOut, revision }` |
+| `app_resolve_close` | `{ requestId, action: "background" \| "quit" \| "cancel", remember: boolean }` | `null` |
+| `app_quit` | 空对象 | `null`；发起真正退出，不询问关窗偏好 |
+| `app_cancel_quit` | `{ generation?: number \| null }` | `null`；指定代际时仅取消该轮，否则取消当前尚未提交的退出 |
+| `app_confirm_quit` | `{ generation: number }` | `null`；主窗口确认该轮设置写入完成，不销毁主窗口 |
+| `app_desktop_ready` | `{ ready: boolean }` | `null`；工作台已注册托盘动作监听 |
+
+`mailx://lifecycle` 向 main 推送同形快照；先订阅再读快照，按 revision 丢弃旧结果。closeRequestId 为 null 或当前待处理请求的编号，重复关窗不建立第二个弹窗。过期或重复提交返回 conflict。后台不可用时不能选择 background；能力在保存期间消失也保留窗口。取消不写偏好；勾选记住后选择后台或退出才原子更新 `general.closeBehavior`，并发送既有 settings-changed 事件。保存失败保留弹窗，不隐藏也不退出。
+
+`general.closeBehavior` 为 `ask`（默认）、`background`、`quit`；`general.showMenuBarIcon` 默认 false，仅 macOS 使用。旧文件自动补默认值，设置仅影响下一次关窗。macOS 的 background 依靠 Dock 恢复，无须菜单栏图标；Windows/Linux 需要托盘入口，Linux 还检查当前桌面宿主。已记住 background 但当前不可用时重新询问，保留原偏好，不静默退出。
+
+托盘工作台动作 `mailx://desktop-action` 载荷为 `"settings"` 或 `"compose"`；只有工作台完成监听并报告 ready 后启用菜单项。打开窗口、立即同步和退出由 Rust 宿主执行。普通最小化保留平台原生行为，关窗隐藏不暂停收发任务。

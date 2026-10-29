@@ -233,6 +233,16 @@ impl ComposeSettings {
     }
 }
 
+/// What closing the main window does on platforms with a notification area.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum CloseBehavior {
+    #[default]
+    Ask,
+    Background,
+    Quit,
+}
+
 /// Language preference is validated on input; a string lets field validation
 /// report `general.language` rather than a generic deserialization error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -244,6 +254,11 @@ pub struct GeneralSettings {
     /// Check for a new version shortly after start and every few hours. Off,
     /// only the manual check in Settings → About runs.
     pub auto_check_updates: bool,
+    /// Ask until the user chooses whether closing should keep MailX running.
+    /// The desktop host applies platform and tray availability constraints.
+    pub close_behavior: CloseBehavior,
+    /// Optional macOS menu bar shortcut; the Dock remains available.
+    pub show_menu_bar_icon: bool,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -260,6 +275,8 @@ impl Default for GeneralSettings {
         Self {
             language: "system".into(),
             auto_check_updates: true,
+            close_behavior: CloseBehavior::Ask,
+            show_menu_bar_icon: false,
         }
     }
 }
@@ -395,8 +412,8 @@ impl AppSettings {
                 self.general
             } else {
                 GeneralSettings {
-                    auto_check_updates: self.general.auto_check_updates,
-                    ..GeneralSettings::default()
+                    language: GeneralSettings::default().language,
+                    ..self.general
                 }
             },
             security: self.security,
@@ -635,6 +652,25 @@ impl SettingsStore {
         Ok(state.snapshot(self.system_locale))
     }
 
+    /// Remembers the native close prompt's choice without replacing a general
+    /// settings section captured before another window's settings edit.
+    pub fn set_close_behavior(
+        &self,
+        close_behavior: CloseBehavior,
+    ) -> Result<SettingsSnapshot, AppError> {
+        let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let mut settings = state.settings.clone();
+        settings.general.close_behavior = close_behavior;
+        write_file(&self.directory, &settings)?;
+        *state = State {
+            revision: state.revision.saturating_add(1),
+            settings,
+            stored: true,
+            recovered: false,
+        };
+        Ok(state.snapshot(self.system_locale))
+    }
+
     /// Replaces all settings. The file is written atomically before the
     /// in-memory copy changes, so a failed write leaves both untouched.
     pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
@@ -682,13 +718,21 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 .to_owned();
                 // Only the language is normalized; other fields keep their
                 // stored value and fall back to their own default if invalid.
-                let auto_check = general
-                    .get("autoCheckUpdates")
-                    .filter(|value| value.is_boolean())
-                    .cloned();
-                *general = serde_json::json!({"language": value});
-                if let (Some(general), Some(auto_check)) = (general.as_object_mut(), auto_check) {
-                    general.insert("autoCheckUpdates".into(), auto_check);
+                if !general.is_object() {
+                    *general = serde_json::json!({});
+                }
+                if let Some(general) = general.as_object_mut() {
+                    general.insert("language".into(), value.into());
+                    for key in ["autoCheckUpdates", "showMenuBarIcon"] {
+                        if general.get(key).is_some_and(|value| !value.is_boolean()) {
+                            general.remove(key);
+                        }
+                    }
+                    if general.get("closeBehavior").is_some_and(|value| {
+                        serde_json::from_value::<CloseBehavior>(value.clone()).is_err()
+                    }) {
+                        general.remove("closeBehavior");
+                    }
                 }
             }
         }

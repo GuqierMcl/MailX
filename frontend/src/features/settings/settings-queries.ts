@@ -9,6 +9,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
 import { acceptSettingsSnapshot, beginSettingsEdit, committedSettings, finishSettingsEdit, latestSettingsSnapshot } from '@/lib/settings-cache'
 import { ensureSettingsWatch, retainSettingsWatch } from '@/i18n/settings-watch'
+import { registerPendingLayoutSave } from './pending-layout-saves'
 
 export function useSettings(client: MailxClient) {
   const queryClient = useQueryClient()
@@ -47,7 +48,7 @@ export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(cli
 export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
 export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
-export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoCheckUpdates: true }, false)
+export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */
 export const LAYOUT_SAVE_DELAY_MS = 500
@@ -60,15 +61,45 @@ export const LAYOUT_SAVE_DELAY_MS = 500
  * is written when the page goes away or the caller unmounts.
  */
 export function useDebouncedLayoutSave(client: MailxClient) {
-  const { mutate } = useUpdateLayout(client)
+  const { mutateAsync } = useUpdateLayout(client)
+  const queryClient = useQueryClient()
   const pending = useRef<Partial<LayoutSettings>>({})
-  const write = useCallback(() => {
-    const change = pending.current
-    if (Object.keys(change).length === 0) return
-    pending.current = {}
-    mutate(change)
-  }, [mutate])
-  const debounced = useDebouncedCallback(write, { wait: LAYOUT_SAVE_DELAY_MS, onUnmount: (debouncer) => debouncer.flush() })
+  const inFlight = useRef<Promise<void> | null>(null)
+  const flush = useCallback((): Promise<void> => {
+    if (inFlight.current) return inFlight.current
+    const saving = (async () => {
+      while (Object.keys(pending.current).length > 0) {
+        const change = pending.current
+        pending.current = {}
+        try { await mutateAsync(change) } catch (cause) {
+          // Newer edits win, but a failed value stays available for a later retry.
+          pending.current = { ...change, ...pending.current }
+          throw cause
+        }
+      }
+    })()
+    inFlight.current = saving
+    const settled = () => { if (inFlight.current === saving) inFlight.current = null }
+    void saving.then(settled, settled)
+    return saving
+  }, [mutateAsync])
+  // Timer / pagehide callbacks have no caller to receive a rejection. The
+  // pending values remain in the registry, where explicit quit can retry them.
+  const write = useCallback(() => { void flush().catch(() => undefined) }, [flush])
+  const debounced = useDebouncedCallback(write, { wait: LAYOUT_SAVE_DELAY_MS })
+  useEffect(() => {
+    let mounted = true
+    const registeredFlush = async () => {
+      await flush()
+      if (!mounted) unregister()
+    }
+    const unregister = registerPendingLayoutSave(queryClient, registeredFlush)
+    return () => {
+      mounted = false
+      // Keep a failed unmounted writer registered until its values are saved.
+      void registeredFlush().catch(() => undefined)
+    }
+  }, [flush, queryClient])
   useEffect(() => {
     // The window can close inside the delay; `pagehide` is the last chance to send it.
     window.addEventListener('pagehide', write)

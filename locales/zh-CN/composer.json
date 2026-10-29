@@ -71,6 +71,7 @@
     "saveDescription": "保存后可以在“草稿”中继续编辑。",
     "dontSave": "不保存",
     "save": "保存草稿",
+    "quitSaveFailed": "草稿未能保存，已取消退出 MailX。请重试保存或继续编辑。仍要关闭此窗口会丢失最新修改。",
     "unsavedTitle": "草稿尚未保存",
     "unsavedDescription": "最近的修改没有写入本机。现在关闭会丢失这些修改。",
     "closeAnyway": "仍要关闭（丢失未保存的修改）"

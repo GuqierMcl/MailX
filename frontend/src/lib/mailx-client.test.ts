@@ -132,7 +132,7 @@ describe('drafts and sending commands', () => {
       ['outbox_retry_now', { id: 'o' }],
       ['outbox_resolve_unknown', { id: 'o', choice: 'markSent', clientMutationId: 'c' }],
       ['composer_open', { draftId: 'd' }],
-      ['composer_close', { force: false }],
+      ['composer_close', { force: false, generation: null }],
     ])
   })
 
@@ -141,6 +141,17 @@ describe('drafts and sending commands', () => {
     const forged = { draftId: 'd', expectedRevision: 1, clientMutationId: 'q', caller: 'composer' }
     await createDesktopClient().queueSend(forged)
     expect(invoke).toHaveBeenCalledWith('outbox_queue_send', { draftId: 'd', expectedRevision: 1, clientMutationId: 'q' })
+  })
+
+  it('binds composer acknowledgements and cancellations to the host close generation', async () => {
+    vi.mocked(invoke).mockResolvedValue(ok(null))
+    const client = createDesktopClient()
+    await client.closeComposer(false, 17)
+    await client.cancelComposerClose(18)
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['composer_close', { force: false, generation: 17 }],
+      ['composer_cancel_close', { generation: 18 }],
+    ])
   })
 
   it('reports host-refused calls without raw details', async () => {

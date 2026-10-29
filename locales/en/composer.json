@@ -71,6 +71,7 @@
     "saveDescription": "You can continue editing it in Drafts after saving.",
     "dontSave": "Don’t save",
     "save": "Save draft",
+    "quitSaveFailed": "Quitting was cancelled because this draft could not be saved. Retry saving or keep editing. Closing this window anyway will lose your latest changes.",
     "unsavedTitle": "Draft not saved",
     "unsavedDescription": "Your latest changes have not been saved to this computer. Closing now will lose them.",
     "closeAnyway": "Close anyway (lose unsaved changes)"

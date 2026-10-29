@@ -39,6 +39,7 @@ import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
 import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
 import { clearRemovedAccount } from './account-removal'
+import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -306,6 +307,10 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
+  useDesktopActions((action) => {
+    if (action === 'settings') setSettings({ section: 'general' })
+    else if (action === 'compose') void composeNew()
+  })
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === 'n' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
@@ -351,7 +356,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   if (!treeLoading && !tree.isError && accounts.length === 0) {
     return (
       <>
-        <NoAccounts onAddAccount={() => setAddingAccount(true)} />
+        <NoAccounts onAddAccount={() => setAddingAccount(true)} onSettings={() => setSettings({ section: 'general' })} />
         {dialog}
       </>
     )
@@ -542,7 +547,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   )
 }
 
-function NoAccounts({ onAddAccount }: { onAddAccount: () => void }) {
+function NoAccounts({ onAddAccount, onSettings }: { onAddAccount: () => void; onSettings: () => void }) {
   useTranslation()
   return (
     <Empty className="h-full">
@@ -559,6 +564,7 @@ function NoAccounts({ onAddAccount }: { onAddAccount: () => void }) {
 
           {t('mail:addAccount')}
         </Button>
+        <Button variant="ghost" onClick={onSettings}>{t('settings:title')}</Button>
       </EmptyContent>
     </Empty>
   )

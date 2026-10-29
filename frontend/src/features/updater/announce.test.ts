@@ -4,7 +4,7 @@ import type { UpdateSnapshot } from './types'
 
 const idle: UpdateSnapshot = { canInstall: true, phase: 'idle' }
 const found: UpdateSnapshot = { canInstall: true, phase: 'available', version: '0.2.0', current: '0.1.0', notes: null, date: null }
-const ready: UpdateSnapshot = { canInstall: true, phase: 'ready', version: '0.2.0' }
+const ready: UpdateSnapshot = { ...found, phase: 'ready' }
 
 describe('what the user hears about', () => {
   it('announces a version once, not on every refetch of the same state', () => {
@@ -31,7 +31,7 @@ describe('what the user hears about', () => {
   })
 
   it('says nothing about idle, checking or failed states', () => {
-    expect(announcements(found, { canInstall: true, phase: 'failed', stage: 'download', version: '0.2.0' }, false)).toEqual([])
+    expect(announcements(found, { ...found, phase: 'failed', stage: 'download' }, false)).toEqual([])
     expect(announcements(null, { canInstall: true, phase: 'checking' }, false)).toEqual([])
   })
 })

@@ -483,8 +483,8 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - `composer_open` 打开新窗口：标题栏与 main 同样式（macOS 红绿灯位置正确，Windows / Linux 自绘按钮与 `gtk-decoration-layout` 一致）；尺寸约 760×680，不能缩到 520×420 以下；位置在主窗口右下错开，连开多个依次错开、靠近屏幕边缘时仍在显示器内；多显示器与高缩放下位置合理。
 - 对同一草稿再次 `composer_open`：聚焦已有窗口，不出现第二个；窗口最小化时被还原。
 - 写信窗口里 `window_perform` 的最小化 / 最大化 / 双击标题栏遵循系统偏好；`mailx://window-state` 只更新自己的窗口按钮，不影响 main。
-- 点红绿灯 / Alt+F4 / 自绘关闭按钮：收到 `mailx://composer-close-requested`，页面调用 `composer_close` 后窗口关闭；页面不响应时约 3 秒后仍关闭。
-- 关闭 main（红绿灯、Cmd+Q、Alt+F4）且有写信窗口：先收到 `mailx://app-closing`，写信窗口关闭后应用退出，最长约 3 秒；没有写信窗口时立即退出。重复点击关闭不重复触发。
+- 点红绿灯 / Alt+F4 / 自绘关闭按钮：收到带 generation 的 `mailx://composer-close-requested`，页面确认保存或明确放弃后关闭；取消允许再次关闭，页面不响应时保留窗口。
+- 关闭 main 默认询问；选择后台只隐藏 main。明确退出（含 Cmd+Q）触发带 generation 的 `mailx://app-closing`，写信窗口保存且发送事务结束后退出；30 秒未完成则取消退出，保留未关闭窗口并提示。重复请求不开始第二轮退出。
 - 写信窗口从开发者工具调用 main 专用命令（如 `emails_list`、`outbox_list`）、他人草稿的 `drafts_get`、`outbox_queue_send`（他人草稿）均被拒；main 调 `outbox_queue_send` 被拒。
 - 写信窗口里的页面导航（修改 `location`）被阻止；窗口不记忆大小位置（退出再开不恢复）。
 - 写信界面（4b，尚未执行；macOS、Windows、Linux 各一遍）：
@@ -687,3 +687,42 @@ Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸�
 6. 带附件发信到用户自己的测试邮箱，收件端附件与中文文件名显示正常。
 
 记录为用户手测反馈：反馈未注明发信所用服务商与收件端客户端，不能扩写为服务商兼容矩阵通过（第 12 节第 6 步仍待补）。Windows（含拖放与 WebView2 放置目标）与 Linux 未验证。v15 数据库无法被 `main` 上的旧版本打开，属预期的迁移行为。
+
+## 2026-10-29：主窗口关闭选择、后台驻留与安全退出
+
+实现见[桌面生命周期](../architecture/desktop-lifecycle.md)。三平台默认每次询问，记住选择与通用设置使用同一持久化偏好；关闭主窗口、普通最小化、关闭写信窗口、明确退出与更新重启分别处理。
+
+本轮最终本地检查：`bun run check`、workspace Clippy（`-D warnings`）、workspace tests 与 `git diff --check` 通过。前端 68 个文件、707 项测试通过；Rust core 517 项、账号集成 39 项、desktop 110 项通过，另有 3 项环境相关测试忽略。macOS debug `.app` 打包通过。
+
+自动验证覆盖旧设置补默认值、损坏字段恢复、原子保存关闭偏好、平台文案、取消不保存、无托盘降级、迟到快照、重复提交、托盘动作就绪、草稿保存失败/取消及 generation 隔离、关闭等待期间的编辑锁定、发送暂停与领取的竞争。主窗口退出确认覆盖防抖布局写入、进行中的 mutation、失败重试，以及设置弹窗已打开时仍可取消退出。独立子代理审查发现的空草稿迟到删除、退出取消入口被设置弹窗覆盖均已修复并补回归。
+
+macOS 用临时 `MAILX_DATA_DIR`、独立测试 bundle identifier 和关闭自动更新的空账号设置运行 debug `.app`，未接入真实邮箱或发送邮件。已确认原生主窗口关闭默认询问、复选框初始不勾选、取消后仍可继续使用和再次询问、记住后台后设置落盘、隐藏后进程仍存活、第二次启动恢复原窗口、记住后 Cmd+W 不再询问，以及 Cmd+Q 绕过后台偏好真正退出（进程退出码 0）。最终构建另确认无账号页面可进入设置，将已记住的后台行为改回“每次询问”后，Cmd+W 再次弹出选择，并能从对话框退出（进程退出码 0）；菜单栏开关可开启和关闭，图标外观仍待专门验收。构建仅临时关闭 updater 产物生成，未修改正式发布配置或验证代码签名。
+
+浏览器合成数据预览检查 Windows 关闭弹窗与通用设置、Linux 无托盘时只提供取消/退出、macOS Dock 文案与菜单栏开关；检查中文深色和英文浅色布局。浏览器预览不作为 Windows/Linux 原生证据。Linux D-Bus helper 另以同版本 zbus/tokio 依赖独立编译、单测及 Clippy 检查；不等于真实桌面可见性验证。
+
+仍需真机执行：
+
+- Windows 通知区域溢出区、Explorer 重启、托盘左键/右键与多屏恢复。
+- Linux KDE X11/Wayland、GNOME 有/无 AppIndicator 支持，运行中禁用扩展，锁屏期间丢失托盘宿主及解锁恢复；Wayland 请求激活是否被桌面允许。
+- 三平台实际写信窗口的保存失败提示、多窗口取消退出、长时间 SMTP 事务与退出超时、系统关机/注销，以及真实通知点击；测试发送只使用受控服务器或另行明确授权的邮箱。
+- macOS Dock/Finder 原生重开、菜单栏 template 在深浅系统外观下的表现、全屏/多桌面与睡眠恢复；本轮第二次启动的恢复证据不代替上述完整矩阵。
+
+### 2026-10-29：PR #48 的本机 Windows 验收
+
+验收对象为 [PR #48](https://github.com/GuqierMcl/MailX/pull/48) 的提交 `3509e969fb999d1b254b2999266690cf3a386653`。本机为 Windows x64，系统报告 DisplayVersion `26H2`、Build `26300.9711`。使用包含实际前端产物的 Tauri debug 构建、独立 identifier `com.mailxapp.desktop.traytest` 和临时 `MAILX_DATA_DIR`；空账号设置仅预置简体中文与关闭自动更新，关闭行为沿用默认值。没有连接真实邮箱或发送邮件。
+
+已实际操作并确认：
+
+- 主窗口的最小化按钮进入 Windows 原生最小化状态；进程保留，恢复后可继续操作。
+- 主窗口关闭按钮及 `Alt+F4` 默认弹出关闭选择，提供取消、最小化到系统托盘、退出应用；“记住我的选择”初始未勾选。取消后仍可继续使用，再次关闭会再次询问，取消不写入关闭偏好。
+- 勾选记住并选择后台后，主窗口从可见窗口列表消失、任务栏中的窗口入口消失，原进程继续运行；临时目录中的 `settings.json` 持久化 `closeBehavior: "background"`。
+- Windows 通知区域的隐藏图标区中能看到 MailX 图标；右键显示打开、写邮件、立即同步、设置与退出五个菜单入口。左键点击图标可恢复原主窗口，任务栏入口随之恢复。
+- 记住后台后再次 `Alt+F4` 直接隐藏主窗口。再次运行同一测试程序恢复原窗口，仍只有原 PID；第二次启动的进程退出码为 0。
+- 无账号页面可打开设置；通用设置显示已保存的后台策略，改回“每次询问”后设置落盘，下一次关闭重新弹出选择。退出再启动后仍会询问，证明此偏好跨进程恢复。
+- 从关闭选择中“退出应用”后测试进程结束。另在通用设置把策略设为后台，再点击设置中的“退出 MailX”，应用直接结束、退出码为 0，没有再次询问；设置弹窗打开时也能完成退出。
+
+本机工程检查：`bun install --frozen-lockfile`、`bun run typecheck`、`bun run lint`、`bun run build`、`cargo build -p mailx-desktop --locked` 与使用上述临时配置的 `bun run tauri build --debug --no-bundle --config <临时配置文件>` 通过。desktop 的 `lifecycle::tests` 两项与 `tray::tests` 一项通过。构建保留现有前端 chunk 大小提示；退出日志出现一次 WebView2 的 `Chrome_WidgetWin_0` 注销错误（Windows error 1412），本轮未观察到它阻止退出。
+
+前端默认并发全套检查两次均为 705 项通过、两项 5000 ms 超时：`App.test.tsx` 的 Settings → About 用例和 `mail-body-editor-loader.test.tsx` 的 StrictMode / pending draft IPC 用例。两文件定向复跑共五项通过；限制并发的 `bun run --cwd frontend test --maxWorkers=2` 全套 68 个文件、707 项通过，未修改测试或超时配置。不能把默认命令记录成全套通过。
+
+本轮未证明托盘各菜单项的触发结果：自动化工具会在向 MailX 菜单发送输入前激活其主窗口、收起原生菜单，不能把这一工具行为误报为产品失效，也不能用被激活的窗口反推“打开 MailX”菜单已通过。托盘右键菜单的展示与左键恢复已有原生证据；菜单项触发、Explorer 重启、多屏、锁屏/睡眠恢复、真实通知点击、写信多窗口与长时间 SMTP 退出仍按前述矩阵保留待验。本轮 debug 可执行文件验证不代替安装包或 release 构建验收。

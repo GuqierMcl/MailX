@@ -13,6 +13,7 @@
 ### Feature
 
 - 写信窗口可添加和移除附件：用回形针按钮选择文件，或把文件拖入窗口；附件栏显示文件名与大小，超出总大小或数量上限时给出提示，已进入发送队列的草稿只读。
+- 关闭主窗口时可选择后台运行或退出，默认每次询问，可记住选择并在通用设置修改；支持 Windows/Linux 系统托盘与可选的 macOS 菜单栏入口。 ([#48](https://github.com/GuqierMcl/MailX/pull/48))
 - 添加邮箱时可在保存前测试当前收信与发信登录，支持取消、修改后重测，也可跳过测试继续添加。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 新增网易 163 / 126 / yeah.net 邮箱添加入口，显示各自的服务商图标，预填加密收发服务器并提供客户端授权码指引。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - macOS 主窗口与写信窗口的侧栏与标题栏使用系统毛玻璃材质（跟随应用主题）。 ([#43](https://github.com/GuqierMcl/MailX/pull/43))
@@ -27,6 +28,7 @@
 
 ### Optimization
 
+- 设置弹窗左下角显示 MailX 与当前版本号，切换设置页时始终可见。 ([#47](https://github.com/GuqierMcl/MailX/pull/47))
 - 标识颜色提供叉号“不标识”选项，选择后隐藏颜色圆环，服务商图标恢复完整大小。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 账号管理的强调色添加按钮显示“添加账号”，不再因打开弹窗自动出现提示；使用服务商图标的账号头像保留透明背景，账号颜色仅显示为细圆环，并增加图标与圆环之间的留白。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - QQ 邮箱改用企鹅标识，163 / 126 / yeah.net 使用独立图标，所有邮箱服务商图标统一为经过压缩的 SVG。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
@@ -38,6 +40,8 @@
 
 ### Fixed
 
+- 退出时等待草稿保存和正在进行的发送，保存失败或等待超时会取消退出，避免强制关窗丢失未保存内容。 ([#48](https://github.com/GuqierMcl/MailX/pull/48))
+- 修复下载更新时更新说明被错误替换为“没有提供更新说明”的问题，下载完成和失败重试时也持续显示。 ([#46](https://github.com/GuqierMcl/MailX/pull/46))
 - 邮箱服务商明确以安全策略拒绝访问时显示独立原因，停止自动重试；处理后可手动同步恢复，保留本地缓存与待写标记。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - 没有文件名的附件在英文界面下也按所选语言显示占位名称，不再固定显示中文。([#32](https://github.com/GuqierMcl/MailX/pull/32))
 

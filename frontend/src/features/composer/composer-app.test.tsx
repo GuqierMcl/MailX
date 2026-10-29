@@ -35,9 +35,12 @@ function setup(initial: Draft = draft(), fresh = false, rows: Account[] = [accou
     current = { ...current, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, bodyHtml: request.bodyHtml, bodyText: request.bodyHtml.replace(/<[^>]+>/g, ''), revision: current.revision + 1 }
     return structuredClone(current)
   })
-  const handlers: { close: () => void; quit: () => void } = { close: () => undefined, quit: () => undefined }
-  client.onComposerCloseRequested.mockImplementation((listener) => { handlers.close = listener; return () => undefined })
-  client.onAppClosing.mockImplementation((listener) => { handlers.quit = listener; return () => undefined })
+  let generation = 0
+  const handlers = { close: () => undefined as void, quit: () => undefined as void, cancel: (value: number) => { void value } }
+  client.onComposerCloseRequested.mockImplementation((listener) => { handlers.close = () => listener({ generation: ++generation }); return () => undefined })
+  client.onAppClosing.mockImplementation((listener) => { handlers.quit = () => listener({ generation: ++generation }); return () => undefined })
+  client.onAppCloseCancelled.mockImplementation((listener) => { handlers.cancel = (value) => listener({ generation: value }); return () => undefined })
+  client.cancelComposerClose.mockImplementation(async (value) => { handlers.cancel(value) })
   const removalListeners = new Set<Parameters<MailxClient['onAccountRemoved']>[0]>()
   client.onAccountRemoved.mockImplementation((listener) => { removalListeners.add(listener); return () => { removalListeners.delete(listener) } })
   const removeAccount = (draftIds = [DRAFT_ID]) => act(() => {
@@ -103,6 +106,7 @@ describe('composer window', () => {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(client.closeComposer).not.toHaveBeenCalled()
+    expect(client.cancelComposerClose).toHaveBeenCalledWith(1)
 
     await act(async () => { handlers.close() })
     await userEvent.click(await screen.findByRole('button', { name: '保存草稿' }))
@@ -162,15 +166,55 @@ describe('composer window', () => {
     expect(discard.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('closes without asking when the whole app is quitting, even if the save failed', async () => {
+  it('cancels application quit on a failed save and lets the user retry safely', async () => {
     const { client, handlers } = setup()
     const text = await body()
     client.updateDraft.mockRejectedValue(new MailxClientError({ code: 'storageUnavailable', message: 'x', field: null }))
     fireEvent.change(text, { target: { value: 'x' } })
     await act(async () => { handlers.quit() })
-    await waitFor(() => expect(client.closeComposer).toHaveBeenCalled())
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(client.updateDraft).toHaveBeenCalled()
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('已取消退出 MailX')
+    expect(client.cancelComposerClose).toHaveBeenCalledWith(1)
+    expect(client.closeComposer).not.toHaveBeenCalled()
+    client.updateDraft.mockResolvedValue(draft({ bodyHtml: 'x', revision: 2 }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(client.closeComposer).toHaveBeenCalledWith(false, undefined))
+  })
+
+  it('ignores a late save acknowledgement after application quit was cancelled', async () => {
+    const { client, handlers } = setup()
+    fireEvent.change(await body(), { target: { value: 'x' } })
+    let resolveSave!: (saved: Draft) => void
+    client.updateDraft.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve }))
+    await act(async () => { handlers.quit() })
+    await waitFor(() => expect(client.updateDraft).toHaveBeenCalled())
+    act(() => { handlers.cancel(1) })
+    await act(async () => { resolveSave(draft({ bodyHtml: 'x', revision: 2 })) })
+    expect(client.closeComposer).not.toHaveBeenCalled()
+    await act(async () => { handlers.quit() })
+    await waitFor(() => expect(client.closeComposer).toHaveBeenCalledExactlyOnceWith(false, 2))
+  })
+
+  it('does not delete an emptied draft when its delayed quit save finishes after cancellation', async () => {
+    const { client, handlers } = setup(draft({ bodyHtml: 'original' }))
+    fireEvent.change(await body(), { target: { value: '' } })
+    let resolveSave!: (saved: Draft) => void
+    client.updateDraft.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve }))
+    await act(async () => { handlers.quit() })
+    await waitFor(() => expect(client.updateDraft).toHaveBeenCalled())
+    act(() => { handlers.cancel(1) })
+    await act(async () => { resolveSave(draft({ bodyHtml: '', revision: 2 })) })
+    expect(client.deleteDraft).not.toHaveBeenCalled()
+    expect(client.closeComposer).not.toHaveBeenCalled()
+    expect(await body()).toBeEnabled()
+  })
+
+  it('keeps an empty draft durable during cancellable application quit', async () => {
+    const { client, handlers } = setup()
+    await body()
+    await act(async () => { handlers.quit() })
+    await waitFor(() => expect(client.closeComposer).toHaveBeenCalledWith(false, 1))
+    expect(client.deleteDraft).not.toHaveBeenCalled()
   })
 
   it('closes right after the second send click succeeded', async () => {
