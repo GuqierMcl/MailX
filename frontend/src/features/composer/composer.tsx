@@ -6,6 +6,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AttachmentPolicy } from '@/generated/accounts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { IconButton } from '@/components/icon-button'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -310,17 +311,14 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         onRemove={(id) => void runAttachment(() => removeAttachment(id))}
       />
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
-        <Button
+        <IconButton
           type="button"
-          variant="ghost"
-          size="icon"
           disabled={readOnly || busy || editor.attaching}
-          aria-label={t('composer:attachment.add')}
-          title={t('composer:attachment.add')}
+          label={t('composer:attachment.add')}
           onClick={() => void runAttachment(addAttachments)}
         >
-          <HugeiconsIcon icon={Attachment01Icon} />
-        </Button>
+          <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
+        </IconButton>
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           {/* The width and height are reserved so the status coming and going never moves the buttons. */}
           <span

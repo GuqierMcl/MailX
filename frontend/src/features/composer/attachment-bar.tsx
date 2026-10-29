@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Alert02Icon, Attachment01Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
 import type { AttachmentPolicy, DraftAttachmentSummary } from '@/generated/accounts'
-import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/icon-button'
 import { Spinner } from '@/components/ui/spinner'
 import { formatSize } from '@/features/mail/format'
 import { cn } from '@/lib/utils'
@@ -47,21 +47,20 @@ export function AttachmentBar({ attachments, policy, readOnly, busy, onRemove }:
       {attachments.length > 0 && (
         <ul aria-label={t('attachment.list')} className="flex max-h-28 flex-col overflow-y-auto">
           {attachments.map((item) => (
-            <li key={item.id} className="group flex items-center gap-2 rounded-lg px-2 py-0.5 text-sm hover:bg-muted/40">
+            <li key={item.id} className="group flex items-center gap-2 rounded-lg px-2 py-0.5 text-sm hover:bg-foreground/5">
               <span className="min-w-0 flex-1 truncate" title={item.fileName}>{item.fileName}</span>
               {item.origin === 'forwarded' && <span className="shrink-0 text-xs text-muted-foreground">{t('attachment.forwarded')}</span>}
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatSize(item.size)}</span>
-              <Button
+              <IconButton
                 type="button"
-                variant="ghost"
                 size="icon-xs"
                 disabled={readOnly || busy}
-                aria-label={t('attachment.remove', { name: item.fileName })}
+                label={t('attachment.remove', { name: item.fileName })}
                 onClick={() => onRemove(item.id)}
                 className={cn('shrink-0', !readOnly && 'opacity-60 group-hover:opacity-100 focus-visible:opacity-100')}
               >
-                <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
-              </Button>
+                <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" aria-hidden="true" />
+              </IconButton>
             </li>
           ))}
         </ul>
