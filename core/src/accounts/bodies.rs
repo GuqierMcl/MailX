@@ -2,7 +2,10 @@
 use crate::{
     AppError,
     mail::{BodyFailureCode, render::Rendered},
-    storage::bodies::{BlobStore, BodyIdentity, CachedBody, StoredBlob},
+    storage::{
+        bodies::{BlobStore, BodyIdentity, CachedBody, StoredBlob},
+        previews::{PreviewOutcome, PreviewWritten},
+    },
 };
 
 use super::{AccountService, validate_uuid};
@@ -15,6 +18,17 @@ impl AccountService {
 
     pub(crate) fn body_current(&self, identity: &BodyIdentity) -> Result<bool, AppError> {
         self.storage.body_identity_current(identity)
+    }
+
+    pub(crate) fn preview_targets(&self, ids: &[String]) -> Result<Vec<BodyIdentity>, AppError> {
+        self.storage.preview_targets(ids)
+    }
+
+    pub(crate) fn preview_commit(
+        &mut self,
+        outcomes: &[PreviewOutcome],
+    ) -> Result<Vec<PreviewWritten>, AppError> {
+        self.storage.preview_commit(outcomes)
     }
 
     pub(crate) fn body_blobs(&self) -> BlobStore {

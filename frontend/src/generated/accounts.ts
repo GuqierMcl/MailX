@@ -172,6 +172,8 @@ export type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication" | "providerPolicy" | "protocol" | "storage";
 
+export type PreviewState = "missing" | "ready" | "failed";
+
 export type EmailSummary = { id: string, accountId: string, folderId: string, subject: string, from: MailAddress,
 /**
  * Short plain-text excerpt for list rows, never HTML.
@@ -180,7 +182,7 @@ preview: string,
 /**
  * RFC 3339 timestamp.
  */
-receivedAt: string, isRead: boolean, isStarred: boolean, hasAttachment: boolean, bodyState: BodyState,
+receivedAt: string, isRead: boolean, isStarred: boolean, hasAttachment: boolean, bodyState: BodyState, previewState: PreviewState,
 /**
  * Local changes (read, star, move) not yet confirmed by the server.
  */
@@ -398,6 +400,10 @@ count: number,
  * The newest few, newest first. Empty when previews are turned off.
  */
 messages: Array<NewMailMessage>, };
+
+export type EmailPreviewItem = { emailId: string, preview: string, previewState: PreviewState, };
+
+export type EmailPreviews = { items: Array<EmailPreviewItem>, };
 
 export type AvatarImage = { mimeType: string,
 /**

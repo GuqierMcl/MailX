@@ -208,6 +208,11 @@ fn commit_is_atomic_and_preview_counts_unicode_characters() {
         body_state(&store),
         ("ready".into(), None, "字🙂".repeat(100))
     );
+    let preview_state: String = store
+        .db
+        .query_row("SELECT preview_state FROM messages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(preview_state, "ready");
 
     let mut invalid = rendered("must roll back");
     invalid.parts.push(invalid.parts[0].clone());

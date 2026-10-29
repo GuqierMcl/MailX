@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub mod filename;
+pub mod preview;
 pub mod render;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -54,6 +55,16 @@ pub enum BodyState {
     Failed,
 }
 
+/// Whether the list excerpt has been fetched. A full body download always wins:
+/// `ready` can come from a partial fetch, `failed` means there was nothing to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewState {
+    Missing,
+    Ready,
+    Failed,
+}
+
 /// Controlled reasons only; server text and local paths are never persisted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +94,7 @@ pub struct EmailSummary {
     pub is_starred: bool,
     pub has_attachment: bool,
     pub body_state: BodyState,
+    pub preview_state: PreviewState,
     /// Local changes (read, star, move) not yet confirmed by the server.
     pub pending_changes: bool,
 }

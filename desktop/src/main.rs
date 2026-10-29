@@ -41,6 +41,10 @@ const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 #[cfg(not(feature = "body-webview-test"))]
 const FLAG_EVENT: &str = "mailx://flags";
 
+/// List previews fetched for rows the main window asked about.
+#[cfg(not(feature = "body-webview-test"))]
+const PREVIEWS_EVENT: &str = "mailx://email-previews";
+
 fn main() {
     #[cfg(feature = "body-webview-test")]
     body_webview_test::checkpoint("main entered");
@@ -120,6 +124,13 @@ fn main() {
                                 EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                                 FLAG_EVENT,
                                 written,
+                            );
+                        }
+                        mailx_core::CoreEvent::Previews(previews) => {
+                            let _ = handle.emit_to(
+                                EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                                PREVIEWS_EVENT,
+                                previews,
                             );
                         }
                         mailx_core::CoreEvent::Outbox(change) => {
@@ -210,6 +221,7 @@ fn main() {
             commands::emails_list,
             commands::emails_get,
             commands::emails_fetch_body,
+            commands::emails_request_previews,
             commands::emails_prepare_body,
             commands::emails_image_status,
             commands::emails_retry_images,

@@ -386,6 +386,28 @@ pub(crate) async fn emails_fetch_body(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RequestPreviewsArgs {
+    email_ids: Vec<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn emails_request_previews(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "emails_request_previews")
+        .and_then(|_| parse::<RequestPreviewsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => state
+            .core()
+            .map(|core| core.request_previews(args.email_ids)),
+        Err(error) => Err(error),
+    }))
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareBodyArgs {

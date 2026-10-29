@@ -81,7 +81,7 @@ type EmailPage = {
 };
 ```
 
-`EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、pendingChanges。`preview` 为缓存纯文本前 200 个 Unicode 字符，尚未下载时为空；`bodyState` 为 missing / fetching / ready / failed，`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
+`EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、previewState、pendingChanges。`preview` 为纯文本前 200 个 Unicode 字符，尚无时为空；`previewState` 为 missing / ready / failed：ready 表示 `preview` 已就绪（来自正文下载或列表预览的部分抓取，完整正文的摘要总是覆盖部分抓取的结果），failed 表示已取到邮件开头但没有可显示文字，不再自动重试，missing 表示尚未取过（含临时失败）；`bodyState` 为 missing / fetching / ready / failed，`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
 
 `coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
 
@@ -103,6 +103,8 @@ type EmailPage = {
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
 | `fetchBody(emailId)` | `emails_fetch_body`，`{ emailId }` | 最新 `EmailDetail` |
+| `requestPreviews(emailIds)` | `emails_request_previews`，`{ emailIds: string[] }`（仅 main 窗口） | null；立即返回，结果经 `mailx://email-previews` 推送 |
+| `onEmailPreviews(listener)` | `mailx://email-previews`，`{ items: [{ emailId, preview, previewState }] }` | 取消监听函数 |
 | `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
 | `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
 | `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, loading, error }`，无原始 URL |
@@ -289,13 +291,16 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 
 ### 当前：核心事件出口
 
-核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有五种（后两种见上文发件箱）：
+列表预览：`emails_request_previews` 的参数是列表当前需要预览的**完整**邮件 id 集合，新请求取代每个账号尚未开始的旧请求（已在进行的批次会完成），所以滚动时前端只需发最新可见行。已是 ready / failed、已不可见或已过期的 id 被忽略；账号被停用、缺凭证等不可用时不抓取。结果以 `mailx://email-previews` 推送给 main，`previewState` 为 ready（带 `preview`）、failed（`preview` 为空）或 missing（`preview` 为空）：missing 项表示“这一次尝试没有得到预览，之后可以再次请求”，由网络、认证、代理、超时或服务器错误（当前批次与该账号被放弃的剩余队列）、UIDVALIDITY 变化、服务器未返回对应 UID 触发，不写库，行保持 missing；仅因被新请求取代而丢弃的 id 不推送任何事件。前端应据此停止显示“加载中”，并自行限制对同一 id 的重试频率。事件只是提示，列表重新读取得到同样的数据。命令不返回错误详情，且不占用正文下载通道。
+
+核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有六种（`Outbox`、`DraftChanged` 见上文发件箱）：
 
 | 事件 | 含义 | 桌面宿主的去向 |
 | --- | --- | --- |
 | `Sync(AccountSyncState)` | 账号同步状态变化 | `mailx://sync-state`，前端据修订号重新读取 |
 | `FlagWriteBack(FlagWriteBack)` | 一轮已读 / 星标写回结束 | `mailx://flags` |
 | `NewMail(NewMail)` | 收件箱有新的未读邮件 | 系统通知（见文末“新邮件通知”） |
+| `Previews(EmailPreviews)` | 一批列表预览抓取完成 | `mailx://email-previews`，仅 main 窗口 |
 | `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
 | `DraftChanged(DraftChanged)` | 草稿创建 / 保存 / 删除，或被队列锁定 / 释放 | `mailx://drafts` |
 

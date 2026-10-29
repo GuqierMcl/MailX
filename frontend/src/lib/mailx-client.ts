@@ -28,6 +28,7 @@ import type {
   UpdateDraftRequest,
   NotificationSound,
   EmailDetail,
+  EmailPreviews,
   EmailListQuery,
   EmailPage,
   Folder,
@@ -102,6 +103,14 @@ export interface MailxClient {
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
   fetchBody(emailId: string): Promise<EmailDetail>
+  /**
+   * Asks for list previews of the rows now on screen. This is the complete set
+   * wanted: it replaces any earlier request that has not started. Returns at
+   * once; results arrive through `onEmailPreviews`. Rows that already have a
+   * preview are ignored.
+   */
+  requestPreviews(emailIds: string[]): Promise<void>
+  onEmailPreviews(listener: (previews: EmailPreviews) => void): () => void
   prepareBody(emailId: string, loadRemoteImages?: boolean): Promise<{ documentToken: string }>
   releaseBody(emailId: string, documentToken: string): Promise<void>
   imageStatus(emailId: string, documentToken: string): Promise<RemoteImageStatus[]>
@@ -317,6 +326,8 @@ export function createDesktopClient(): MailxClient {
     listEmails: (query) => call<EmailPage>('emails_list', { query }),
     getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),
+    requestPreviews: (emailIds) => call<void>('emails_request_previews', { emailIds }),
+    onEmailPreviews: (listener) => subscribe<EmailPreviews>('mailx://email-previews', listener),
     prepareBody: (emailId, loadRemoteImages = false) => call('emails_prepare_body', { emailId, loadRemoteImages }),
     releaseBody: (emailId, documentToken) => call('emails_release_body', { emailId, documentToken }),
     imageStatus: (emailId, documentToken) => call('emails_image_status', { emailId, documentToken }),

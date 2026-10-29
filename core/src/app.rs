@@ -30,6 +30,7 @@ use crate::send::{OutboxManager, SendConfig};
 use crate::storage::outbox::Changed;
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
+use crate::sync::previews::PreviewManager;
 
 mod attachments;
 mod avatars;
@@ -61,6 +62,7 @@ pub struct MailxCore {
     sync: Arc<SyncManager>,
     outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
+    previews: Arc<PreviewManager>,
     avatars: Arc<avatars::AvatarCache>,
     images: Arc<crate::storage::image_cache::ImageCache>,
     events: Events,
@@ -79,6 +81,7 @@ struct Closing {
     sync: Arc<SyncManager>,
     outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
+    previews: Arc<PreviewManager>,
 }
 
 impl Drop for Closing {
@@ -86,6 +89,7 @@ impl Drop for Closing {
         let mut stopped = self.sync.shutdown();
         stopped.extend(self.outbox.shutdown());
         stopped.extend(self.bodies.shutdown());
+        stopped.extend(self.previews.shutdown());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let pause = || std::thread::sleep(std::time::Duration::from_millis(5));
         while !stopped.iter().all(|task| task.is_finished()) && std::time::Instant::now() < deadline
@@ -128,6 +132,11 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
+        let previews = Arc::new(PreviewManager::new(
+            &service,
+            runtime.clone(),
+            events.clone(),
+        ));
         let sync = Arc::new(SyncManager::new(
             service.clone(),
             runtime.clone(),
@@ -159,11 +168,13 @@ impl MailxCore {
                 sync: sync.clone(),
                 outbox: outbox.clone(),
                 bodies: bodies.clone(),
+                previews: previews.clone(),
             }),
             service,
             sync,
             outbox,
             bodies,
+            previews,
             avatars: Arc::default(),
             images,
             events,
@@ -217,6 +228,7 @@ impl MailxCore {
             // The deletion has committed: retiring work must not report a
             // cleanup failure as though the account were still present.
             self.bodies.retire(&removed.account_id);
+            self.previews.retire(&removed.account_id);
             removed
         };
         self.sync.retire(&removed.account_id);
@@ -244,6 +256,7 @@ impl MailxCore {
             let mut service = self.accounts()?;
             let account = service.update_connection(request)?;
             let body_restart = self.bodies.restart(&account.id, &mut service);
+            self.previews.restart(&account.id);
             (account, body_restart)
         };
         // The configuration is committed even if resetting a body state fails.
@@ -281,6 +294,13 @@ impl MailxCore {
     /// waiter cancellation and always honors the account's configured route.
     pub async fn fetch_body(&self, email_id: String) -> Result<EmailDetail, AppError> {
         self.bodies.fetch(email_id).await
+    }
+
+    /// Asks for list previews of the rows a list is showing, replacing any
+    /// earlier request that has not started. Returns at once; results arrive as
+    /// [`CoreEvent::Previews`]. Never competes with explicit body downloads.
+    pub fn request_previews(&self, email_ids: Vec<String>) {
+        self.previews.request(email_ids);
     }
 
     /// Marks a message read or unread, or starred or not. The change shows at

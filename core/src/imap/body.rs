@@ -21,10 +21,10 @@ use crate::net::NetRoute;
 
 mod receive;
 pub(super) use receive::{PlaintextGate, ReceiveGuard};
-const MAX_CONTROL_BYTES: usize = 1024 * 1024;
-const MAX_LINE_BYTES: usize = 64 * 1024;
+pub(super) const MAX_CONTROL_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_LINE_BYTES: usize = 64 * 1024;
 const MAX_NESTING: usize = 32;
-const READ_CHUNK: usize = 8 * 1024;
+pub(super) const READ_CHUNK: usize = 8 * 1024;
 const MAX_BODY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// The dedicated body connection uses the same route, TLS, greeting and login
@@ -103,10 +103,10 @@ fn body_timeout(size: Option<u64>) -> Duration {
 }
 
 #[derive(Clone, Copy)]
-struct Limits {
-    payload: usize,
-    control: usize,
-    line: usize,
+pub(super) struct Limits {
+    pub(super) payload: usize,
+    pub(super) control: usize,
+    pub(super) line: usize,
 }
 
 impl Default for Limits {
@@ -120,7 +120,7 @@ impl Default for Limits {
 }
 
 #[derive(Default)]
-struct Budget {
+pub(super) struct Budget {
     declared: usize,
     received: usize,
     control: usize,
@@ -167,7 +167,7 @@ async fn fetch<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-async fn read_response<R: AsyncRead + Unpin>(
+pub(super) async fn read_response<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     budget: &mut Budget,
     limits: Limits,
@@ -403,7 +403,7 @@ fn classify_response(raw: &[u8], tag: &str, uid: u32) -> Result<Reply, ImapError
     }
 }
 
-fn unescape_quoted(bytes: &mut Vec<u8>) {
+pub(super) fn unescape_quoted(bytes: &mut Vec<u8>) {
     // imap-proto preserves quoted-string backslashes in its borrowed slice.
     // Its parser has already validated that each escape is a quote/backslash.
     let mut read = 0;
@@ -419,11 +419,11 @@ fn unescape_quoted(bytes: &mut Vec<u8>) {
     bytes.truncate(write);
 }
 
-fn protocol() -> ImapError {
+pub(super) fn protocol() -> ImapError {
     ImapError::Protocol("invalid or incomplete message response".into())
 }
 
-fn network() -> ImapError {
+pub(super) fn network() -> ImapError {
     ImapError::Net(crate::net::NetError::Connect(
         "message transfer failed".into(),
     ))

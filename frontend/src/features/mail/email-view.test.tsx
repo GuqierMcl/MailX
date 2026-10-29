@@ -75,7 +75,7 @@ describe('body failure guidance', () => {
       summary: {
         id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
         from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: false, isStarred: false, pendingChanges: false, hasAttachment: false, bodyState: 'failed', preview: '',
+        isRead: false, isStarred: false, pendingChanges: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
       },
       to: [], cc: [], replyTo: [], attachments: [], body: null, bodyFailure,
     }

@@ -124,6 +124,21 @@ pub fn render(raw: &[u8], message_id: &str) -> Result<Rendered, RenderError> {
     })
 }
 
+/// Text of a message cut off somewhere in its body: the first text part, else
+/// the sanitized HTML flattened to text, with whitespace collapsed. Empty when
+/// the visible text is empty. The cut may fall inside any encoded section.
+pub fn partial_text(raw: &[u8]) -> Result<String, RenderError> {
+    let message = parse(raw)?;
+    let mut truncated = false;
+    let text = match collect_body(&message, false, &mut truncated) {
+        Some(text) if !text.trim().is_empty() => text,
+        _ => collect_body(&message, true, &mut truncated)
+            .map(|body| html::plain_text(&html::sanitize(&body).html))
+            .unwrap_or_default(),
+    };
+    Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// A list excerpt, counted in Unicode scalar values rather than UTF-8 bytes.
 pub fn preview(text: Option<&str>) -> String {
     text.unwrap_or_default().chars().take(200).collect()
