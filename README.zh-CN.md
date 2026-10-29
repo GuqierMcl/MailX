@@ -8,6 +8,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
+[![Downloads](https://img.shields.io/github/downloads/GuqierMcl/MailX/total)](https://github.com/GuqierMcl/MailX/releases)
 ![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 [English](README.md) | 简体中文
@@ -30,7 +31,7 @@
 - **轻量**：基于 Tauri，使用系统自带的 WebView，不内置浏览器引擎。
 - **跨平台**：一套代码同时面向 Windows、macOS 和 Linux。
 - **多邮箱合一**：多个账号汇总到统一收件箱，面向标准 IMAP/SMTP 邮箱；每个账号可独立选择直连或通过 SOCKS5、HTTP CONNECT 代理，代理失败时不会悄悄回退为直连。
-- **富文本撰写**：独立的写信窗口里有轻量的 Tiptap 编辑器，支持标题、粗体 / 斜体 / 下划线 / 删除线、链接、列表、引用、对齐、固定色板的颜色，以及 Markdown 快捷输入。邮件同时带纯文本和 HTML 两个版本，核心会对你写的内容做净化；草稿保存在本地，发送可撤销，可能已被服务器接受的邮件不会自动重发。
+- **富文本撰写**：独立的写信窗口里有轻量的 Tiptap 编辑器，支持标题、粗体 / 斜体 / 下划线 / 删除线、链接、列表、引用、对齐、固定色板的颜色，以及 Markdown 快捷输入。邮件同时带纯文本和 HTML 两个版本，核心会对你写的内容做净化；点一下或拖入即可添加附件，转发时会保留原邮件的附件；草稿保存在本地，发送可撤销，可能已被服务器接受的邮件不会自动重发。
 - **本地优先，注重隐私**：邮件在本机存储与检索，不经过 MailX 云端中继；远程图片默认关闭，邮件正文在隔离沙箱中渲染。
 - **AI 原生**（规划中）：内置助手协助阅读、整理和撰写，可使用自带 Key 的云端模型或本地模型，并支持双向 MCP 互通；AI 不会自行发送邮件。
 - **可自托管**（规划中）：提供可用 Docker 部署的单用户 Web 版本。
@@ -40,8 +41,8 @@
 | 模块 | 状态 |
 | --- | --- |
 | 桌面端：收信、阅读、搜索、多账号 | 🚧 进行中 |
-| 桌面端：撰写与发送（富文本编辑、回复与转发、可靠发送队列） | 🚧 进行中 |
-| 写信附件与内嵌图片 | 🗓️ 规划中 |
+| 桌面端：撰写与发送（富文本编辑、回复与转发、附件、可靠发送队列） | 🚧 进行中 |
+| 写信内嵌图片 | 🗓️ 规划中 |
 | 全文搜索 | 🗓️ 规划中 |
 | OAuth 登录（Gmail、Outlook） | 🗓️ 规划中 |
 | AI 助手 | 🗓️ 规划中 |
@@ -52,9 +53,11 @@
 
 ## 快速开始
 
-### 从源码构建
+### 下载
 
-目前尚无预编译安装包。
+[Releases](https://github.com/GuqierMcl/MailX/releases) 页面提供 Windows、macOS 和 Linux 的早期构建。安装包尚未做代码签名，系统可能拦截首次启动，各版本发布说明里的安装说明介绍了打开方法。这些构建尚未在每个平台上逐一验证。
+
+### 从源码构建
 
 环境要求：
 
@@ -65,7 +68,7 @@
 ```sh
 bun install
 bun tauri dev       # 以开发模式运行桌面应用
-bun tauri build     # 构建 release 二进制（目前不生成安装包）
+bun tauri build     # 构建当前平台的 release 安装包（未签名）
 bun run check       # 运行版本、类型、Lint、测试、构建与 Rust 检查
 ```
 

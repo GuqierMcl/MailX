@@ -8,6 +8,7 @@ A fast, lightweight, local-first email client — built for every inbox, with AI
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
+[![Downloads](https://img.shields.io/github/downloads/GuqierMcl/MailX/total)](https://github.com/GuqierMcl/MailX/releases)
 ![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 English | [简体中文](README.zh-CN.md)
@@ -30,7 +31,7 @@ English | [简体中文](README.zh-CN.md)
 - **Lightweight** — Built on Tauri with the system WebView instead of bundling a browser engine.
 - **Cross-platform** — Windows, macOS and Linux from a single codebase.
 - **All in One** — Multiple accounts share one unified inbox. MailX is designed for standard IMAP/SMTP mailboxes, and each account can connect directly or through a SOCKS5 or HTTP CONNECT proxy, with no silent fallback to a direct connection.
-- **Rich-text composing** — A lightweight Tiptap editor in its own compose window: headings, bold/italic/underline/strikethrough, links, lists, quotes, alignment, a fixed color palette and Markdown shortcuts. Mail goes out as plain text plus HTML, and the core sanitizes everything you write. Drafts are saved locally, sends can be undone, and a message that may already have been accepted is never resent on its own.
+- **Rich-text composing** — A lightweight Tiptap editor in its own compose window: headings, bold/italic/underline/strikethrough, links, lists, quotes, alignment, a fixed color palette and Markdown shortcuts. Mail goes out as plain text plus HTML, and the core sanitizes everything you write. Attach files with a click or a drag, and forwards keep the original attachments. Drafts are saved locally, sends can be undone, and a message that may already have been accepted is never resent on its own.
 - **Local-first & private** — Mail is stored and searched on your machine, with no MailX cloud relay. Remote images are off by default, and message bodies render in an isolated sandbox.
 - **AI-native** *(planned)* — A built-in assistant for reading, organizing and writing, using your own cloud model key or a local model, plus two-way MCP integration. AI never sends mail on its own.
 - **Self-hostable** *(planned)* — A single-user web version you can deploy with Docker.
@@ -40,8 +41,8 @@ English | [简体中文](README.zh-CN.md)
 | Module | Status |
 | --- | --- |
 | Desktop app: receiving, reading, search, multiple accounts | 🚧 In progress |
-| Desktop app: composing and sending (rich-text editor, replies and forwards, reliable send queue) | 🚧 In progress |
-| Compose attachments and inline images | 🗓️ Planned |
+| Desktop app: composing and sending (rich-text editor, replies and forwards, attachments, reliable send queue) | 🚧 In progress |
+| Inline images when composing | 🗓️ Planned |
 | Full-text search | 🗓️ Planned |
 | OAuth sign-in (Gmail, Outlook) | 🗓️ Planned |
 | AI assistant | 🗓️ Planned |
@@ -52,9 +53,11 @@ The detailed roadmap is in [docs/roadmap/README.md](docs/roadmap/README.md) (wri
 
 ## Getting Started
 
-### Build from source
+### Download
 
-Prebuilt packages are not available yet.
+Early builds for Windows, macOS and Linux are published on the [Releases](https://github.com/GuqierMcl/MailX/releases) page. They are not code-signed, so your system may block the first launch; the install notes in each release explain how to open them. These builds have not been verified on every platform yet.
+
+### Build from source
 
 Prerequisites:
 
@@ -65,7 +68,7 @@ Prerequisites:
 ```sh
 bun install
 bun tauri dev       # run the desktop app in development mode
-bun tauri build     # build a release binary (no installer is produced yet)
+bun tauri build     # build release installers for the current platform (unsigned)
 bun run check       # run the version, type, lint, test, build and Rust checks
 ```
 
