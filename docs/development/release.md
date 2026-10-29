@@ -1,6 +1,6 @@
 # 发版流程
 
-状态：**脚本与工作流已就绪，尚未做过真实发布** · 本页记录当前约定；工作流在第一次真实发版时才算验证过，遇到问题直接修订本页。安装包目前**未做代码签名**；应用内自动更新已接入（[设计](../architecture/updater.md)），但还没有任何一次真实发版带过它。
+状态：**已多次真实发布**（`v0.1.0-alpha.1` 至 `v0.1.0-rc.1`，其中 `rc.1` 已是 Latest Release）· 本页记录当前约定，遇到问题直接修订本页。安装包目前**未做代码签名**；应用内自动更新已接入（[设计](../architecture/updater.md)），各平台的端到端实测范围以该文档为准。
 
 ## 1. 版本规则
 
@@ -78,7 +78,7 @@
 - **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64、Linux x64，都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。两个 macOS 架构的 `.app.tar.gz` 同名，收集时按架构改名为 `MailX_<版本>_aarch64.app.tar.gz` / `_x64`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
-首次真实运行前，建议先在 Actions 页对分支手动触发一次，确认四个平台都能出包；`macos-15-intel` 之类的 runner 标签若已下线需要改。
+改动工作流或 runner 标签（如 `macos-15-intel`）后，建议先在 Actions 页对分支手动触发一次，确认四个平台都能出包，再打标签；runner 标签若已下线需要改。
 
 ## 7. 出问题时
 
