@@ -16,7 +16,7 @@ function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {
   let emit: (state: AccountSyncState) => void = () => undefined
   client.listFolders.mockResolvedValue(folders)
   client.listSyncStates.mockResolvedValue(states)
-  client.listEmails.mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, syncedAfter: null, syncedBefore: null, windowCapped: false } })
+  client.listEmails.mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: false, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } })
   client.onSyncState.mockImplementation((listener) => {
     emit = listener
     return () => undefined

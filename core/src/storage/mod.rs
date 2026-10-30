@@ -22,6 +22,7 @@ mod migrations;
 pub(crate) mod outbox;
 pub(crate) mod previews;
 mod removal;
+pub(crate) mod search_index;
 
 pub(crate) struct Storage {
     pub db: Connection,
@@ -71,6 +72,7 @@ impl Storage {
         storage.migrate_outbox_snapshots()?;
         storage.backfill_outbox_list_fields()?;
         storage.recover_bodies()?;
+        storage.ensure_search_index_version()?;
         Ok(storage)
     }
 

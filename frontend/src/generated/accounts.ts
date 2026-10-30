@@ -200,7 +200,15 @@ pendingChanges: boolean,
 /**
  * A copy of an accepted send kept only on this device (`local-sent:` ids).
  */
-localOnly: boolean, };
+localOnly: boolean,
+/**
+ * Plain-text excerpt around a full-text hit in the body or attachment
+ * names; `None` when there is no text search or the hit is only in the
+ * subject or people.
+ */
+matchSnippet: Array<SnippetSegment> | null, };
+
+export type SnippetSegment = { text: string, hit: boolean, };
 
 export type EmailListQuery = {
 /**
@@ -216,7 +224,11 @@ export type Coverage = { headersComplete: boolean,
 /**
  * At least one matching selectable folder exceeded the per-round UID limit.
  */
-windowCapped: boolean, bodiesComplete: boolean, syncedAfter: string | null, syncedBefore: string | null, };
+windowCapped: boolean, bodiesComplete: boolean,
+/**
+ * Messages in scope whose body text is in the local search index.
+ */
+indexedBodies: number, syncedAfter: string | null, syncedBefore: string | null, };
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 

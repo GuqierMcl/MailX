@@ -796,6 +796,7 @@ impl Storage {
             "UPDATE messages SET preview = ?2, preview_state = 'ready', body_state = 'ready', body_failure = NULL, has_attachment = ?3 WHERE id = ?1",
             params![identity.message_id, preview, has_attachment],
         )?;
+        super::search_index::refresh_message(&tx, &identity.message_id)?;
         tx.commit()?;
         Ok(true)
     }

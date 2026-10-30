@@ -34,6 +34,9 @@ import { mailKeys } from '@/lib/query-client'
 import { displayName, emailQuery, formatListTime } from './format'
 import { folderLabel, type Mailbox } from './mailbox'
 
+/** The core rejects longer search text. */
+const SEARCH_MAX_CHARS = 256
+
 const RESULT_LIMIT = 8
 const SEARCH_DELAY_MS = 200
 const THEME_LABELS: Record<ThemeMode, string> = { get system() { return t('mail:systemTheme') }, get light() { return t('mail:lightTheme') }, get dark() { return t('mail:darkTheme') } }
@@ -172,7 +175,7 @@ function PaletteBody({
 
   return (
     <Command shouldFilter={false} loop label={t('mail:commandPalette')}>
-      <CommandInput value={text} onValueChange={setText} placeholder={t('mail:searchOrCommand', { scope })} />
+      <CommandInput maxLength={SEARCH_MAX_CHARS} value={text} onValueChange={setText} placeholder={t('mail:searchOrCommand', { scope })} />
       <CommandList>
         {trimmed && (
           <CommandGroup heading={t('mail:search')}>

@@ -36,6 +36,7 @@ export function MailSearch({ value, scope, onOpen, onClear }: MailSearchProps) {
       <button
         type="button"
         aria-label={t('mail:searchMail')}
+        title={t('mail:searchTooltip')}
         aria-haspopup="dialog"
         onClick={onOpen}
         className={cn(

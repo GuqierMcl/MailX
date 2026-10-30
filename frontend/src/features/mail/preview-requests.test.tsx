@@ -14,7 +14,7 @@ function email(index: number, overrides: Partial<EmailSummary> = {}): EmailSumma
   return {
     id: `m${index}`, accountId: 'work', folderId: 'inbox', subject: `主题 ${index}`,
     from: { name: 'GitHub', address: 'notifications@github.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
-    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
+    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
   }
 }
 
@@ -164,7 +164,7 @@ describe('preview display', () => {
 describe('preview results', () => {
   const page = (items: EmailSummary[]): EmailPage => ({
     items, nextCursor: null,
-    coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false },
+    coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false },
   })
 
   function setup() {

@@ -16,13 +16,13 @@ const folders: Folder[] = [
 const localCopy: EmailSummary = {
   id: 'local-sent:1', accountId: account.id, folderId: 'sent', subject: '周五评审安排', preview: '',
   from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T08:00:00.000Z',
-  isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false,
+  isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null,
   to: { addresses: [{ name: null, address: 'chen@example.com' }], total: 3 }, localOnly: true,
 }
 
 const page = (items: EmailSummary[]): EmailPage => ({
   items, nextCursor: null,
-  coverage: { headersComplete: true, bodiesComplete: false, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false },
+  coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false },
 })
 
 const detail = (summary: EmailSummary): EmailDetail => ({

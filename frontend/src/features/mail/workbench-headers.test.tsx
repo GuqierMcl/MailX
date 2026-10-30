@@ -23,7 +23,7 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
     id, accountId: account.id, folderId: inbox.id, subject: `邮件 ${id}`,
     from: { name: '发件人', address: 'sender@example.com' }, preview: '',
     receivedAt: '2026-10-18T08:00:00.000Z', isRead: false, isStarred: false,
-    hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
+    hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
   }
 }
 
@@ -34,7 +34,7 @@ function detail(summary: EmailSummary): EmailDetail {
 function page(items: EmailSummary[] = [], nextCursor: string | null = null, headersComplete = true): EmailPage {
   return {
     items, nextCursor,
-    coverage: { headersComplete, bodiesComplete: false, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false },
+    coverage: { headersComplete, bodiesComplete: false, indexedBodies: 0, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false },
   }
 }
 

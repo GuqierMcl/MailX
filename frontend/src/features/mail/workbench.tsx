@@ -504,6 +504,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               error={tree.isError ? errorText(tree.error) : firstPageError}
               filter={filter}
               search={search}
+              indexedBodies={pages?.at(-1)?.coverage.indexedBodies ?? 0}
               selectedId={highlighted}
               previewLines={previewLines}
               onFilterChange={setFilter}
