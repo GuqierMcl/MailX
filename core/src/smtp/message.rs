@@ -20,9 +20,9 @@ use lettre::message::{Mailbox, MultiPart, SinglePart};
 use lettre::{Address, Message};
 use uuid::Uuid;
 
-use super::attachment::{AttachmentData, part};
+use super::attachment::{AttachmentData, InlineImageData, inline_part, part};
 use crate::AppError;
-use crate::drafts::body::email_document;
+use crate::drafts::body::{email_document, referenced_cids};
 use crate::drafts::types::Draft;
 use crate::drafts::validate::valid_address;
 use crate::mail::MailAddress;
@@ -52,12 +52,22 @@ pub(crate) struct OutgoingMessage<'a> {
     pub date: DateTime<FixedOffset>,
     /// Files to attach; empty keeps the plain `multipart/alternative` layout.
     pub attachments: &'a [AttachmentData],
+    /// Inline pictures; only those the HTML references are sent, once each and
+    /// in order of first appearance. Empty keeps the layout without `related`.
+    pub inline_images: &'a [InlineImageData],
 }
 
 /// `<uuid@domain-of-the-sender-address>`.
 pub(crate) fn new_message_id(sender_address: &str) -> Result<String, AppError> {
     let address = checked_address(sender_address, "account.emailAddress")?;
     Ok(format!("<{}@{}>", Uuid::new_v4(), address.domain()))
+}
+
+/// A Content-ID for an inline image, without angle brackets: 32 lowercase hex
+/// digits at the sender's domain. `drafts::body::cid_of` accepts this shape only.
+pub(crate) fn new_content_id(sender_address: &str) -> Result<String, AppError> {
+    let address = checked_address(sender_address, "account.emailAddress")?;
+    Ok(format!("{}@{}", Uuid::new_v4().simple(), address.domain()))
 }
 
 /// The current time in the machine's local offset, for the `Date` header.
@@ -191,17 +201,27 @@ pub(crate) fn build(message: &OutgoingMessage<'_>) -> Result<BuiltMessage, AppEr
     if let Some(value) = &draft.references {
         builder = builder.references(value.clone());
     }
-    let body = MultiPart::alternative()
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
-                .body(draft.body_text.clone()),
-        )
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_HTML)
-                .body(email_document(&draft.body_html)),
-        );
+    let html = SinglePart::builder()
+        .header(ContentType::TEXT_HTML)
+        .body(email_document(&draft.body_html));
+    let mut images = Vec::new();
+    for cid in referenced_cids(&draft.body_html) {
+        if let Some(image) = message.inline_images.iter().find(|i| i.content_id == cid) {
+            images.push(inline_part(image)?);
+        }
+    }
+    let text = SinglePart::builder()
+        .header(ContentType::TEXT_PLAIN)
+        .body(draft.body_text.clone());
+    let body = if images.is_empty() {
+        MultiPart::alternative().singlepart(text).singlepart(html)
+    } else {
+        let mut related = MultiPart::related().singlepart(html);
+        for image in images {
+            related = related.singlepart(image);
+        }
+        MultiPart::alternative().singlepart(text).multipart(related)
+    };
     let body = if message.attachments.is_empty() {
         body
     } else {
@@ -284,6 +304,7 @@ mod tests {
             message_id: &id,
             date: date(),
             attachments: &[],
+            inline_images: &[],
         })
     }
 
@@ -482,6 +503,7 @@ mod tests {
             message_id: "<a@b>\r\nBcc: s@c",
             date: date(),
             attachments: &[],
+            inline_images: &[],
         })
         .unwrap_err();
         assert_eq!(error.field.as_deref(), Some("messageId"));
@@ -509,6 +531,7 @@ mod tests {
             message_id: &id,
             date: date(),
             attachments,
+            inline_images: &[],
         })
         .unwrap()
     }
@@ -598,5 +621,125 @@ mod tests {
         let text = String::from_utf8(built.mime).unwrap();
         assert!(!text.contains("evil@example.com"));
         assert!(text.contains("application/octet-stream; name=\"a.bin\""));
+    }
+
+    const A: &str = "0123456789abcdef0123456789abcdef@mail.example.com";
+    const B: &str = "fedcba9876543210fedcba9876543210@mail.example.com";
+
+    fn image(content_id: &str, name: &str) -> InlineImageData {
+        InlineImageData {
+            content_id: content_id.to_owned(),
+            file: AttachmentData {
+                file_name: name.to_owned(),
+                media_type: "image/png".into(),
+                bytes: vec![0x89, b'P', b'N', b'G', 1, 2, 3],
+            },
+        }
+    }
+
+    fn build_with(
+        draft: &Draft,
+        attachments: &[AttachmentData],
+        inline_images: &[InlineImageData],
+    ) -> String {
+        let id = new_message_id("zhang@Mail.Example.com").unwrap();
+        let built = build(&OutgoingMessage {
+            sender_address: "zhang@Mail.Example.com",
+            sender_name: None,
+            draft,
+            message_id: &id,
+            date: date(),
+            attachments,
+            inline_images,
+        })
+        .unwrap();
+        String::from_utf8(built.mime).unwrap()
+    }
+
+    /// Every `Content-Type` value in document order, a cheap outline of the tree.
+    fn outline(raw: &str) -> Vec<String> {
+        raw.lines()
+            .filter_map(|line| line.strip_prefix("Content-Type: "))
+            .map(|value| value.split(';').next().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn inline_images_use_related_inside_alternative() {
+        let mut draft = draft();
+        draft.body_html =
+            format!("<p><img src=\"cid:{B}\"><img src=\"cid:{A}\"><img src=\"cid:{B}\"></p>");
+        // `A` is declared first but appears second; unreferenced `C` is ignored.
+        let images = [
+            image(A, "a.png"),
+            image(B, "b.png"),
+            image("00000000000000000000000000000000@mail.example.com", "c.png"),
+        ];
+        let raw = build_with(&draft, &[], &images);
+        assert_eq!(
+            outline(&raw),
+            [
+                "multipart/alternative",
+                "text/plain",
+                "multipart/related",
+                "text/html",
+                "image/png",
+                "image/png"
+            ]
+        );
+        let parsed = MessageParser::default().parse(raw.as_bytes()).unwrap();
+        let ids: Vec<_> = parsed
+            .attachments()
+            .map(|part| part.content_id().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids, [B, A], "first appearance, each sent once");
+        let part = parsed.attachments().next().unwrap();
+        assert_eq!(part.attachment_name(), Some("b.png"));
+        assert!(raw.contains("Content-Disposition: inline; filename=\"b.png\""));
+        assert!(raw.contains(&format!("Content-ID: <{B}>")));
+        assert!(raw.contains("Content-Transfer-Encoding: base64"));
+    }
+
+    #[test]
+    fn inline_images_and_attachments_nest_related_inside_mixed() {
+        let mut draft = draft();
+        draft.body_html = format!("<p><img src=\"cid:{A}\"></p>");
+        let files = [AttachmentData {
+            file_name: "报告.pdf".into(),
+            media_type: "application/pdf".into(),
+            bytes: b"%PDF".to_vec(),
+        }];
+        let raw = build_with(&draft, &files, &[image(A, "图.png")]);
+        assert_eq!(
+            outline(&raw),
+            [
+                "multipart/mixed",
+                "multipart/alternative",
+                "text/plain",
+                "multipart/related",
+                "text/html",
+                "image/png",
+                "application/pdf"
+            ]
+        );
+        assert!(raw.is_ascii(), "non-ASCII file names are encoded");
+        let parsed = MessageParser::default().parse(raw.as_bytes()).unwrap();
+        let names: Vec<_> = parsed
+            .attachments()
+            .map(|part| part.attachment_name().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["图.png", "报告.pdf"]);
+    }
+
+    #[test]
+    fn without_sent_images_the_layout_is_unchanged() {
+        let plain = build_with(&draft(), &[], &[]);
+        assert_eq!(
+            outline(&plain),
+            ["multipart/alternative", "text/plain", "text/html"]
+        );
+        // An unreferenced inline image is not sent, so nothing becomes `related`.
+        let unreferenced = build_with(&draft(), &[], &[image(A, "a.png")]);
+        assert_eq!(outline(&unreferenced), outline(&plain));
     }
 }

@@ -30,5 +30,6 @@
   "storage": "Cannot access local data. Check available space and permissions.",
   "accountNotFound": "This account no longer exists.",
   "attachmentTooLarge": "Attachments exceed the total size limit.",
-  "tooManyAttachments": "Too many attachments."
+  "tooManyAttachments": "Too many attachments.",
+  "unsupportedImage": "This image can't be inserted inline. Add it as a regular attachment instead."
 }

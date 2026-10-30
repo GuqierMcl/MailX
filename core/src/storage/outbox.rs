@@ -51,6 +51,7 @@ pub(crate) struct NewOutbox<'a> {
 /// The draft state a snapshot was built from (sending.md section 16.6).
 pub(crate) struct FrozenDraft {
     pub revision: u32,
+    /// Every regular attachment and the inline images the body references.
     pub attachment_ids: Vec<String>,
 }
 
@@ -309,11 +310,18 @@ impl Storage {
                 .optional()?;
             let ids = {
                 let mut statement = tx.prepare(
-                    "SELECT id FROM draft_attachments WHERE draft_id = ?1 ORDER BY rowid",
+                    "SELECT id, inline FROM draft_attachments WHERE draft_id = ?1 ORDER BY rowid",
                 )?;
                 statement
-                    .query_map([draft_id], |row| row.get::<_, String>(0))?
+                    .query_map([draft_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                    })?
                     .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    // Inline images the body no longer shows were not frozen.
+                    .filter(|(id, inline)| !inline || frozen.attachment_ids.contains(id))
+                    .map(|(id, _)| id)
+                    .collect::<Vec<_>>()
             };
             // The snapshot is stale: the orphan blob is left for the next cleanup.
             if revision != Some(frozen.revision) || ids != frozen.attachment_ids {

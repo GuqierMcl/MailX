@@ -20,6 +20,7 @@ pub enum ErrorCode {
     AttachmentTooLarge,
     /// The draft already carries as many attachments as allowed.
     TooManyAttachments,
+    UnsupportedImage,
     Unsupported,
     StorageUnavailable,
     StorageIncompatible,
@@ -53,6 +54,7 @@ impl AppError {
             ErrorCode::BodyNotCached => "邮件正文尚未下载，请先打开这封邮件。",
             ErrorCode::AttachmentTooLarge => "附件总大小超过上限。",
             ErrorCode::TooManyAttachments => "附件数量已达上限。",
+            ErrorCode::UnsupportedImage => "不支持该图片，仅支持 PNG、JPEG、GIF 和 WebP 静态图片。",
             ErrorCode::Unsupported => "当前版本尚不支持此认证方式。",
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",

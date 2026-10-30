@@ -333,7 +333,7 @@ describe('save status', () => {
 })
 
 describe('attachments', () => {
-  const file = { id: 'a1', fileName: '报表.pdf', mediaType: 'application/pdf', size: 2048, origin: 'user' as const }
+  const file = { id: 'a1', fileName: '报表.pdf', mediaType: 'application/pdf', size: 2048, origin: 'user' as const, inline: false, contentId: null }
 
   it('attaches through the host picker at the saved revision and lists the file', async () => {
     const { client } = setup()

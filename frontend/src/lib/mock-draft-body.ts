@@ -1,7 +1,7 @@
 import { isMailColor, isMailHighlight, isMailTextAlign } from '@/features/composer/mail-body-format'
 
 const BLOCKS = new Set(['P', 'H1', 'H2', 'H3'])
-const ALLOWED = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'SPAN', 'MARK'])
+const ALLOWED = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'SPAN', 'MARK', 'IMG'])
 const DROP_CONTENT = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'TEMPLATE', 'SVG', 'MATH', 'NOSCRIPT', 'HEAD', 'TITLE'])
 
 function safeHref(value: string): string | null {
@@ -27,17 +27,21 @@ export function mockDraftBody(html: string): { bodyHtml: string; bodyText: strin
     const href = node.tagName === 'A' ? safeHref(node.getAttribute('href') ?? '') : null
     const start = node.tagName === 'OL' ? node.getAttribute('start') : null
     const align = BLOCKS.has(node.tagName) ? node.getAttribute('data-align') : null
+    const cid = node.tagName === 'IMG' && node.getAttribute('src')?.startsWith('cid:') ? node.getAttribute('src') : null
+    const alt = cid ? node.getAttribute('alt') : null
     const color = node.tagName === 'SPAN' ? node.getAttribute('data-color') : null
     const highlight = node.tagName === 'MARK' ? node.getAttribute('data-highlight') : null
     for (const attribute of Array.from(node.attributes)) {
       node.removeAttribute(attribute.name)
     }
     if (href) node.setAttribute('href', href)
+    if (cid) node.setAttribute('src', cid)
+    if (cid && alt) node.setAttribute('alt', alt)
     if (start && /^-?\d+$/.test(start) && Number.isSafeInteger(Number(start))) node.setAttribute('start', String(Number(start)))
     if (isMailTextAlign(align)) node.setAttribute('data-align', align)
     if (isMailColor(color)) node.setAttribute('data-color', color)
     if (isMailHighlight(highlight)) node.setAttribute('data-highlight', highlight)
-    if (!ALLOWED.has(node.tagName) || (node.tagName === 'SPAN' && !isMailColor(color)) || (node.tagName === 'MARK' && !isMailHighlight(highlight))) {
+    if (!ALLOWED.has(node.tagName) || (node.tagName === 'SPAN' && !isMailColor(color)) || (node.tagName === 'MARK' && !isMailHighlight(highlight)) || (node.tagName === 'IMG' && !cid)) {
       node.replaceWith(...node.childNodes)
     }
   }

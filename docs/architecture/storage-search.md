@@ -65,7 +65,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
 | pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
 | drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at | unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
-| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；核心已实现，宿主与界面未接） |
+| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，macOS 用户手测通过）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
 | outbox | id, draft_id, revision, account_id, client_mutation_id, payload_hash, mime_blob_id, mime_size, state, attempt_stage, sent_copy_state, snapshot_released_at | unique(account_id, client_mutation_id)；当前实现仍把快照存在 `mime` 列，按发信设计第 16.6 节外迁为 blob，服务器副本对上后释放（第 16.7 节） |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |
 | mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 随时可撤销；不存邮箱凭证 |
@@ -81,7 +81,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 - 网络、MIME 大文件解析和模型请求不能占用数据库事务；当前 `rusqlite` 调用隔离到宿主阻塞执行器，未来连接池与事务调度必须继续避免阻塞异步任务。
 - 当前 blob 先写临时文件、同步并原子重命名，文件持久化后短事务写入正文、parts、preview 与 ready；已存在哈希复用。启动持目录独占锁、后台任务开始前恢复 fetching 并清理未引用的严格哈希文件 / 本程序临时文件，不跟随符号链接。运行期 GC、配额与 LRU 尚未实现。
 - 后续正文与对应全文索引同事务更新，避免搜索结果指向不存在的内容；索引是派生数据，可以重建。
-- 后续 GC 不删除被草稿、outbox 或备份引用的 blob；写信附件落地后，启动 GC 把 `draft_attachments` 与尚未释放的 outbox 快照算作存活引用。已发送快照在服务器对上后只清空引用，文件由下次启动 GC 回收。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
+- 后续 GC 不删除被草稿、outbox 或备份引用的 blob；写信附件落地后，启动 GC 把 `draft_attachments` 与尚未释放的 outbox 快照算作存活引用（内嵌图片的记录同样算，包括暂未被正文引用、尚待清理的）。已发送快照在服务器对上后只清空引用，文件由下次启动 GC 回收。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
 
 ## 4. 缓存边界
 

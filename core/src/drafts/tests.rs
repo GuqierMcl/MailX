@@ -994,6 +994,7 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
         message_id: "<test@example.com>",
         date: crate::smtp::message::local_now(),
         attachments: &[],
+        inline_images: &[],
     })
     .unwrap();
     assert!(built.mime.is_ascii());
@@ -1393,4 +1394,411 @@ async fn forward_of_an_uncached_body_is_still_body_not_cached() {
     .unwrap();
     let (error, _) = code(f.derive(0, DraftKind::Forward));
     assert_eq!(error, ErrorCode::BodyNotCached);
+}
+
+fn picture(format: image::ImageFormat, width: u32, height: u32) -> Vec<u8> {
+    let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        width,
+        height,
+        image::Rgb([200, 30, 30]),
+    ));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut bytes, format).unwrap();
+    bytes.into_inner()
+}
+
+fn add_inline(f: &Fixture, draft: &Draft, name: &str, bytes: &[u8]) -> Result<Draft, AppError> {
+    f.core
+        .add_inline_images(
+            &draft.id,
+            draft.revision,
+            vec![(name.to_owned(), bytes.to_vec())],
+        )
+        .map(|(draft, _)| draft)
+}
+
+fn inline_of(draft: &Draft) -> Vec<&crate::DraftAttachmentSummary> {
+    draft.attachments.iter().filter(|a| a.inline).collect()
+}
+
+fn set_body(f: &Fixture, draft: &Draft, body_html: String) -> Draft {
+    f.core
+        .update_draft(UpdateDraftRequest {
+            id: draft.id.clone(),
+            expected_revision: draft.revision,
+            account_id: None,
+            to: draft.to.clone(),
+            cc: vec![],
+            bcc: vec![],
+            subject: draft.subject.clone(),
+            body_html,
+        })
+        .unwrap()
+}
+
+fn img(cid: &str) -> String {
+    format!("<p>x<img src=\"cid:{cid}\"></p>")
+}
+
+#[tokio::test]
+async fn inline_images_are_stored_with_a_content_id_and_a_sniffed_type() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    // The name says jpg; the bytes say PNG, and the bytes win.
+    let png = picture(image::ImageFormat::Png, 4, 3);
+    let draft = add_inline(&f, &draft, "photo.jpg", &png).unwrap();
+    let [image] = inline_of(&draft)[..] else {
+        panic!("one inline image expected");
+    };
+    assert_eq!(image.media_type, "image/png");
+    assert_eq!(image.file_name, "photo.jpg");
+    assert_eq!(image.size, png.len() as u64);
+    let cid = image.content_id.clone().unwrap();
+    assert_eq!(
+        super::body::cid_of(&format!("cid:{cid}")),
+        Some(cid.as_str())
+    );
+    assert!(cid.ends_with(&format!("@{}", "example.org")) || cid.contains('@'));
+    assert_eq!(draft.revision, 2);
+
+    let draft = add(&f, &draft, "a.txt", b"regular").unwrap();
+    assert!(
+        draft
+            .attachments
+            .iter()
+            .any(|a| !a.inline && a.content_id.is_none())
+    );
+    // Pairing: inline exactly when there is a Content-ID.
+    let broken: i64 =
+        f.db.query_row(
+            "SELECT COUNT(*) FROM draft_attachments WHERE (inline = 1) <> (content_id IS NOT NULL)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(broken, 0);
+}
+
+#[tokio::test]
+async fn inline_images_outside_the_whitelist_are_refused() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let mut apng = picture(image::ImageFormat::Png, 2, 2);
+    // An animation control chunk right after IHDR makes it an APNG.
+    let mut chunk = 8u32.to_be_bytes().to_vec();
+    chunk.extend_from_slice(b"acTL");
+    chunk.extend_from_slice(&[0, 0, 0, 2, 0, 0, 0, 0]);
+    chunk.extend_from_slice(&[0, 0, 0, 0]);
+    apng.splice(33..33, chunk);
+    let truncated = picture(image::ImageFormat::Png, 4, 4)[..40].to_vec();
+    for (name, bytes) in [
+        ("a.png", b"not an image".to_vec()),
+        (
+            "a.svg",
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec(),
+        ),
+        ("a.png", picture(image::ImageFormat::Bmp, 2, 2)),
+        ("a.png", picture(image::ImageFormat::Tiff, 2, 2)),
+        ("a.png", apng),
+        ("a.png", picture(image::ImageFormat::Png, 8193, 1)),
+        ("a.png", truncated),
+    ] {
+        assert_eq!(
+            code(add_inline(&f, &draft, name, &bytes)).0,
+            ErrorCode::UnsupportedImage,
+            "{name}"
+        );
+    }
+    // Refused adds leave the draft untouched.
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
+    for format in [image::ImageFormat::Jpeg, image::ImageFormat::Gif] {
+        let ok = add_inline(
+            &f,
+            &f.core.get_draft(&draft.id).unwrap(),
+            "p",
+            &picture(format, 3, 3),
+        );
+        assert!(ok.is_ok(), "{format:?}");
+    }
+}
+
+#[tokio::test]
+async fn inline_images_share_the_attachment_limits() {
+    let f = fixture(&[plain("x")]);
+    let mut draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    for _ in 0..19 {
+        draft = add_inline(&f, &draft, "p.png", &png).unwrap();
+        // Keep each one referenced so the add-time cleanup retains it.
+        let cid = inline_of(&draft)
+            .last()
+            .unwrap()
+            .content_id
+            .clone()
+            .unwrap();
+        let body = format!("{}{}", draft.body_html, img(&cid));
+        draft = set_body(&f, &draft, body);
+    }
+    draft = add(&f, &draft, "a.txt", b"x").unwrap();
+    assert_eq!(draft.attachments.len(), 20);
+    assert_eq!(
+        code(add_inline(&f, &draft, "p.png", &png)).0,
+        ErrorCode::TooManyAttachments
+    );
+    assert_eq!(
+        code(add(&f, &draft, "b.txt", b"x")).0,
+        ErrorCode::TooManyAttachments
+    );
+}
+
+#[tokio::test]
+async fn adding_a_file_drops_only_inline_rows_the_saved_body_does_not_show() {
+    let f = fixture(&[plain("x")]);
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = add_inline(&f, &draft, "kept.png", &png).unwrap();
+    let kept = inline_of(&draft)[0].content_id.clone().unwrap();
+    let draft = set_body(&f, &draft, img(&kept));
+    let draft = add_inline(&f, &draft, "stale.png", &png).unwrap();
+    assert_eq!(inline_of(&draft).len(), 2);
+
+    // Saving never deletes, even when the body stops showing the image.
+    let draft = set_body(&f, &draft, "<p>none</p>".into());
+    assert_eq!(inline_of(&draft).len(), 2);
+    let draft = set_body(&f, &draft, img(&kept));
+    assert_eq!(inline_of(&draft).len(), 2);
+
+    // The next add (regular file or inline image) cleans up in its transaction.
+    let draft = add(&f, &draft, "a.txt", b"x").unwrap();
+    let rest = inline_of(&draft);
+    assert_eq!(rest.len(), 1);
+    assert_eq!(rest[0].content_id.as_deref(), Some(kept.as_str()));
+    assert_eq!(draft.attachments.len(), 2);
+
+    let draft = set_body(&f, &draft, "<p>none</p>".into());
+    let draft = add_inline(&f, &draft, "new.png", &png).unwrap();
+    let rest = inline_of(&draft);
+    assert_eq!(rest.len(), 1);
+    assert_ne!(rest[0].content_id.as_deref(), Some(kept.as_str()));
+}
+
+#[tokio::test]
+async fn a_locked_draft_refuses_inline_images_and_stale_revisions() {
+    let f = fixture(&[plain("x")]);
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    let mut request = f.blank(None);
+    request.to = vec![who(None, "li@example.org")];
+    request.subject = "queued".into();
+    let draft = f.core.create_draft(request, NONE).unwrap();
+    let stale = draft.clone();
+    let draft = add_inline(&f, &draft, "p.png", &png).unwrap();
+    assert_eq!(
+        code(add_inline(&f, &stale, "q.png", &png)).0,
+        ErrorCode::Conflict
+    );
+    f.core
+        .service_for_tests()
+        .lock()
+        .unwrap()
+        .queue_send(
+            &crate::QueueSendRequest {
+                draft_id: draft.id.clone(),
+                expected_revision: draft.revision,
+                client_mutation_id: id(),
+            },
+            30,
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    let locked = f.core.get_draft(&draft.id).unwrap();
+    assert_eq!(
+        code(add_inline(&f, &locked, "q.png", &png)).0,
+        ErrorCode::DraftLocked
+    );
+}
+
+#[tokio::test]
+async fn inline_previews_are_the_validated_transcode_never_the_raw_bytes() {
+    let f = fixture(&[plain("x")]);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let gif = picture(image::ImageFormat::Gif, 5, 4);
+    let draft = add_inline(&f, &draft, "anim.gif", &gif).unwrap();
+    let id = inline_of(&draft)[0].id.clone();
+    let (media_type, bytes) = f.core.inline_image_preview(&draft.id, &id).unwrap();
+    assert_eq!(media_type, "image/png");
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert_ne!(bytes, gif);
+
+    let draft = add(&f, &draft, "a.txt", b"regular").unwrap();
+    let regular = draft.attachments.iter().find(|a| !a.inline).unwrap();
+    assert_eq!(
+        code(f.core.inline_image_preview(&draft.id, &regular.id)).0,
+        ErrorCode::NotFound
+    );
+}
+
+#[tokio::test]
+async fn migration_17_adds_the_partial_unique_content_id_index() {
+    let f = fixture(&[plain("x")]);
+    let version: i64 =
+        f.db.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+    assert!(version >= 17);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let insert = |_: &str, inline: bool, cid: Option<&str>| {
+        f.db.execute(
+            "INSERT INTO draft_attachments
+                 (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id, origin, created_at)
+             VALUES (?1, ?2, 'a', 'image/png', 1, ?5, ?3, ?4, 'user', '2026-01-01T00:00:00Z')",
+            params![draft.id, id(), inline, cid, "0".repeat(64)],
+        )
+    };
+    insert("a", true, Some("c@x")).unwrap();
+    assert!(insert("b", true, Some("c@x")).is_err());
+    // The index is partial: regular rows and other drafts are unaffected.
+    insert("c", false, Some("c@x")).unwrap();
+    insert("d", false, None).unwrap();
+    insert("e", false, None).unwrap();
+}
+
+fn queue_now(f: &Fixture, draft: &Draft) -> Result<(), AppError> {
+    f.core
+        .service_for_tests()
+        .lock()
+        .unwrap()
+        .queue_send(
+            &crate::QueueSendRequest {
+                draft_id: draft.id.clone(),
+                expected_revision: draft.revision,
+                client_mutation_id: id(),
+            },
+            30,
+            chrono::Utc::now(),
+        )
+        .map(|_| ())
+}
+
+/// A regular-looking or inline row cloned from `like`'s blob, appended at the
+/// end of the table so the test controls rowid order.
+fn raw_row(f: &Fixture, draft: &Draft, like: &str, inline_cid: Option<&str>) {
+    f.db.execute(
+        "INSERT INTO draft_attachments
+             (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id, origin, created_at)
+         SELECT draft_id, ?3, file_name, media_type, size, blob_hash, ?4, ?5, origin, created_at
+         FROM draft_attachments WHERE draft_id = ?1 AND id = ?2",
+        params![draft.id, like, id(), inline_cid.is_some(), inline_cid],
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn queueing_matches_frozen_ids_when_inline_rows_interleave_with_files() {
+    let f = fixture(&[plain("x")]);
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    let mut request = f.blank(None);
+    request.to = vec![who(None, "li@example.org")];
+    request.subject = "order".into();
+
+    // Referenced inline image inserted before a regular attachment.
+    let draft = f.core.create_draft(request.clone(), NONE).unwrap();
+    let (draft, images) = f
+        .core
+        .add_inline_images(
+            &draft.id,
+            draft.revision,
+            vec![("a.png".into(), png.clone())],
+        )
+        .unwrap();
+    let draft = set_body(&f, &draft, img(&images[0].content_id));
+    let draft = add(&f, &draft, "b.txt", b"x").unwrap();
+    assert!(draft.attachments[0].inline && !draft.attachments[1].inline);
+    queue_now(&f, &draft).unwrap();
+
+    // An unreferenced inline row between two regular rows.
+    request.client_mutation_id = id();
+    let draft = f.core.create_draft(request, NONE).unwrap();
+    let draft = add(&f, &draft, "a.txt", b"x").unwrap();
+    let first = draft.attachments[0].id.clone();
+    let (draft, _) = f
+        .core
+        .add_inline_images(&draft.id, draft.revision, vec![("u.png".into(), png)])
+        .unwrap();
+    raw_row(&f, &draft, &first, None);
+    let draft = f.core.get_draft(&draft.id).unwrap();
+    let order: Vec<_> = draft.attachments.iter().map(|a| a.inline).collect();
+    assert_eq!(order, [false, true, false]);
+    queue_now(&f, &draft).unwrap();
+}
+
+#[tokio::test]
+async fn queue_time_limits_count_only_what_will_be_sent() {
+    let f = fixture(&[plain("x")]);
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    let mut request = f.blank(None);
+    request.to = vec![who(None, "li@example.org")];
+    request.subject = "limit".into();
+    let mut draft = f.core.create_draft(request, NONE).unwrap();
+    for n in 0..20 {
+        draft = add(&f, &draft, &format!("{n}.txt"), b"x").unwrap();
+    }
+    assert_eq!(draft.attachments.len(), 20);
+    // A 21st row, an unreferenced inline image, only exists past the add-time
+    // limit; it must not block queueing since it is not sent.
+    let first = draft.attachments[0].id.clone();
+    let _ = png;
+    raw_row(
+        &f,
+        &draft,
+        &first,
+        Some("0123456789abcdef0123456789abcdef@example.org"),
+    );
+    let draft = f.core.get_draft(&draft.id).unwrap();
+    assert_eq!(draft.attachments.len(), 21);
+    queue_now(&f, &draft).unwrap();
+}
+
+#[tokio::test]
+async fn inline_batches_are_all_or_nothing_and_keep_their_own_members() {
+    let f = fixture(&[plain("x")]);
+    let png = picture(image::ImageFormat::Png, 2, 2);
+    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let (draft, images) = f
+        .core
+        .add_inline_images(
+            &draft.id,
+            draft.revision,
+            vec![
+                ("one.png".into(), png.clone()),
+                ("two.png".into(), png.clone()),
+            ],
+        )
+        .unwrap();
+    assert_eq!(draft.revision, 2);
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].file_name, "one.png");
+    assert_eq!(images[1].file_name, "two.png");
+    let rows: Vec<_> = draft.attachments.iter().map(|a| a.id.clone()).collect();
+    assert_eq!(
+        rows,
+        [
+            images[0].attachment_id.clone(),
+            images[1].attachment_id.clone()
+        ]
+    );
+    assert_eq!(
+        draft.attachments[1].content_id.as_deref(),
+        Some(images[1].content_id.as_str())
+    );
+
+    // One bad file stores nothing, and nothing is cleaned up either.
+    let bad = f.core.add_inline_images(
+        &draft.id,
+        draft.revision,
+        vec![
+            ("three.png".into(), png),
+            ("x.png".into(), b"nope".to_vec()),
+        ],
+    );
+    assert_eq!(code(bad).0, ErrorCode::UnsupportedImage);
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
 }

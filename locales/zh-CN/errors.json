@@ -30,5 +30,6 @@
   "storage": "无法读写本地数据，请检查可用空间与访问权限。",
   "accountNotFound": "账号不存在。",
   "attachmentTooLarge": "附件总大小超过上限。",
-  "tooManyAttachments": "附件数量超过上限。"
+  "tooManyAttachments": "附件数量超过上限。",
+  "unsupportedImage": "无法作为内嵌图片插入，请改为添加为普通附件。"
 }

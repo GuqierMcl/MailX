@@ -145,6 +145,9 @@ const COMPOSER_ONLY: &[&str] = &[
     "attachments_add_dropped",
     "attachments_remove",
     "attachments_policy",
+    "inline_images_add",
+    "inline_images_add_bytes",
+    "inline_image_preview",
     "composer_cancel_close",
 ];
 
@@ -155,6 +158,9 @@ const DRAFT_SCOPED: &[&str] = &[
     "attachments_add",
     "attachments_add_dropped",
     "attachments_remove",
+    "inline_images_add",
+    "inline_images_add_bytes",
+    "inline_image_preview",
     "drafts_delete",
     "outbox_queue_send",
 ];
@@ -362,6 +368,9 @@ mod tests {
             ("attachments_add_dropped", false, true),
             ("attachments_remove", false, true),
             ("attachments_policy", false, true),
+            ("inline_images_add", false, true),
+            ("inline_images_add_bytes", false, true),
+            ("inline_image_preview", false, true),
             ("outbox_queue_send", false, true),
             ("outbox_list", true, false),
             ("outbox_get", true, false),
@@ -410,6 +419,9 @@ mod tests {
             "attachments_add",
             "attachments_add_dropped",
             "attachments_remove",
+            "inline_images_add",
+            "inline_images_add_bytes",
+            "inline_image_preview",
             "drafts_delete",
             "outbox_queue_send",
         ] {

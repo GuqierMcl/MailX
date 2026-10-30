@@ -34,19 +34,21 @@ function attachmentStatus(attachments: DraftAttachmentSummary[], policy: Attachm
  */
 export function AttachmentBar({ attachments, policy, readOnly, busy, onRemove }: AttachmentBarProps) {
   const { t } = useTranslation('composer')
-  if (attachments.length === 0 && !busy) return null
+  // Inline images live in the body, not in this list, but the core counts them toward the limits: totals use all of them.
+  const files = attachments.filter((item) => !item.inline)
   const status = attachmentStatus(attachments, policy)
   const over = status.tooLarge || status.tooMany
+  if (files.length === 0 && !busy && !over) return null
   return (
     <div data-slot="composer-attachments" data-over-limit={over || undefined} className="flex shrink-0 flex-col gap-1 px-4 pb-1">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <HugeiconsIcon icon={Attachment01Icon} className="size-3.5 shrink-0" />
-        <span>{t('attachment.summary', { count: attachments.length, size: formatSize(status.total) })}</span>
+        <span>{t('attachment.summary', { count: files.length, size: formatSize(status.total) })}</span>
         {busy && <Spinner className="size-3" aria-label={t('attachment.adding')} />}
       </div>
-      {attachments.length > 0 && (
+      {files.length > 0 && (
         <ul aria-label={t('attachment.list')} className="flex max-h-28 flex-col overflow-y-auto">
-          {attachments.map((item) => (
+          {files.map((item) => (
             <li key={item.id} className="group flex items-center gap-2 rounded-lg px-2 py-0.5 text-sm hover:bg-foreground/5">
               <span className="min-w-0 flex-1 truncate" title={item.fileName}>{item.fileName}</span>
               {item.origin === 'forwarded' && <span className="shrink-0 text-xs text-muted-foreground">{t('attachment.forwarded')}</span>}

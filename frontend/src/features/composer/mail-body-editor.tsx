@@ -10,11 +10,13 @@ import {
   LeftToRightListBulletIcon, LeftToRightListNumberIcon, Link01Icon, MoreHorizontalIcon,
   QuoteDownIcon, RedoIcon, TextBoldIcon, TextClearIcon, TextItalicIcon,
   TextStrikethroughIcon, TextUnderlineIcon, UndoIcon, ArrowDown01Icon,
-  TextAlignLeftIcon, TextAlignCenterIcon, TextAlignRightIcon, TextColorIcon, PaintBoardIcon, Tick02Icon,
+  Image01Icon, TextAlignLeftIcon, TextAlignCenterIcon, TextAlignRightIcon, TextColorIcon, PaintBoardIcon, Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import type { DraftAttachmentSummary, InlineImage } from '@/generated/accounts'
+import { InlineImageController } from './inline-image'
 import { allowedMailLink, mailEditorOptions } from './mail-body-editor-schema'
 import { MAIL_COLORS, MAIL_HIGHLIGHTS, type MailColor, type MailHighlight, type MailTextAlign } from './mail-body-format'
 import './mail-body-editor.css'
@@ -24,6 +26,8 @@ export type MailBodyEditorHandle = {
   focus: (position?: 'start' | 'end') => void
   getSelection: () => MailBodySelection | null
   setSelection: (selection: MailBodySelection) => void
+  /** Inserts the images at the cursor, in order, and leaves the cursor after the last one. */
+  insertInlineImages: (images: readonly InlineImage[]) => void
 }
 
 type MailBodyEditorProps = {
@@ -32,6 +36,12 @@ type MailBodyEditorProps = {
   onChange: (html: string) => void
   readOnly?: boolean
   editorRef?: Ref<MailBodyEditorHandle>
+  /** The draft's attachments, to resolve `cid:` references, and the host call that renders one. */
+  inlineImages?: { attachments: readonly DraftAttachmentSummary[]; loadPreview: (attachmentId: string) => Promise<ArrayBuffer> }
+  /** Shows the image button when set. */
+  onInsertImage?: () => void
+  /** Image files found on the clipboard; the host stores them and inserts the nodes. */
+  onPasteImages?: (files: File[]) => void
 }
 
 type LinkPopup = MailBodySelection & { href: string }
@@ -77,7 +87,7 @@ const blockActions: FormatAction[] = [
 ]
 
 /** A host-independent editor. Draft revisions, saving and sending live outside. */
-export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef }: MailBodyEditorProps) {
+export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef, inlineImages, onInsertImage, onPasteImages }: MailBodyEditorProps) {
   const { i18n } = useTranslation('composer')
   const [linkPopup, setLinkPopup] = useState<LinkPopup | null>(null)
   const [linkError, setLinkError] = useState(false)
@@ -88,7 +98,17 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
   const popup = useRef<HTMLDivElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
   const linkComposing = useRef(false)
-  const options = mailEditorOptions()
+  const pasteImages = useRef(onPasteImages)
+  useEffect(() => { pasteImages.current = onPasteImages }, [onPasteImages])
+  const [images] = useState(() => new InlineImageController())
+  if (inlineImages) images.setLoader(inlineImages.loadPreview)
+  // Synchronous so the first paint already knows which images exist.
+  images.update(inlineImages?.attachments ?? [])
+  useEffect(() => {
+    images.attach()
+    return () => images.detach()
+  }, [images])
+  const options = mailEditorOptions(images)
   const editor = useEditor({
     ...options,
     content: value,
@@ -103,6 +123,13 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     },
     editorProps: {
       ...options.editorProps,
+      handlePaste(view, event) {
+        const files = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'))
+        if (!view.editable || files.length === 0 || !pasteImages.current) return false
+        event.preventDefault()
+        pasteImages.current(files)
+        return true
+      },
       handleKeyDown(view, event) {
         if (event.isComposing || !view.editable) return false
         if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
@@ -156,6 +183,10 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     },
     getSelection: () => editor && !editor.isDestroyed ? { from: editor.state.selection.from, to: editor.state.selection.to } : null,
     setSelection: (selection) => { if (editor && !editor.isDestroyed) editor.commands.setTextSelection(selection) },
+    insertInlineImages: (inserted) => {
+      if (!editor || editor.isDestroyed || !editor.isEditable || inserted.length === 0) return
+      editor.chain().focus().insertContent(inserted.map((image) => ({ type: 'inlineImage', attrs: { cid: image.contentId, alt: image.fileName } }))).run()
+    },
   }), [editor])
 
   useEffect(() => {
@@ -378,6 +409,12 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
             className="mail-format-button" onMouseDown={(event) => event.preventDefault()} onClick={openLink}>
             <HugeiconsIcon icon={Link01Icon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
+          {onInsertImage && (
+            <IconButton label={t('composer:toolbar.insertImage')} size="icon-sm" disabled={readOnly || !editor}
+              className="mail-format-button" onMouseDown={(event) => event.preventDefault()} onClick={onInsertImage}>
+              <HugeiconsIcon icon={Image01Icon} strokeWidth={1.8} aria-hidden="true" />
+            </IconButton>
+          )}
         </div>
         <div className="mail-format-group mail-format-secondary">{alignButtons()}</div>
         <div className="mail-format-group">{blockActions.slice(0, 2).map((action) => actionButton(action))}</div>

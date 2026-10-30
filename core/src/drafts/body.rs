@@ -35,7 +35,10 @@ const TAGS: &[&str] = &[
     "h3",
     "span",
     "mark",
+    "img",
 ];
+const MAX_ALT_CHARS: usize = 256;
+const MAX_IMAGE_EDGE: u32 = 10_000;
 const DROP_CONTENT: &[&str] = &[
     "script", "style", "iframe", "object", "embed", "template", "svg", "math", "noscript", "head",
     "title",
@@ -71,6 +74,86 @@ fn alignment(value: &str) -> Option<&str> {
     matches!(value, "center" | "right").then_some(value)
 }
 
+/// Returns the Content-ID (without angle brackets) when `src` is a `cid:`
+/// reference in the exact format core generates: 32 lowercase hex digits, `@`,
+/// then a domain. Anything else, including other `cid:` shapes, is rejected.
+pub(crate) fn cid_of(src: &str) -> Option<&str> {
+    let id = src.strip_prefix("cid:")?;
+    let (local, domain) = id.split_once('@')?;
+    let domain_ok = !domain.is_empty()
+        && domain.len() <= 253
+        && domain
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
+    (local.len() == 32
+        && local
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && domain_ok)
+        .then_some(id)
+}
+
+fn image_alt(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_ALT_CHARS)
+        .collect()
+}
+
+fn image_edge(value: &str) -> Option<u32> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|n| (1..=MAX_IMAGE_EDGE).contains(n))
+}
+
+/// Content-IDs referenced by `<img src="cid:…">` in already normalized
+/// draft HTML, in order of first appearance and without duplicates.
+pub(crate) fn referenced_cids(html: &str) -> Vec<String> {
+    let document = Html::parse_fragment(html);
+    let mut seen = HashSet::new();
+    let mut found = Vec::new();
+    for node in document.tree.nodes() {
+        let Some(element) = ElementRef::wrap(node) else {
+            continue;
+        };
+        if element.value().name() != "img" {
+            continue;
+        }
+        if let Some(cid) = element.value().attr("src").and_then(cid_of)
+            && seen.insert(cid)
+        {
+            found.push(cid.to_owned());
+        }
+    }
+    found
+}
+
+/// Final HTML and text for sending: `<img>` elements whose Content-ID has no
+/// stored image are removed, and the text writes `[alt]` or `[file name]`.
+/// `images` maps Content-IDs to file names for every row that will be sent.
+pub(crate) fn outgoing_body(
+    html: &str,
+    images: &[(String, String)],
+) -> Result<NormalizedBody, AppError> {
+    let known: HashSet<&str> = images.iter().map(|(cid, _)| cid.as_str()).collect();
+    let document = Html::parse_fragment(html);
+    let html = serialize(&document, Mode::Draft, None, usize::MAX, Some(&known));
+    let document = Html::parse_fragment(&html);
+    let names = |cid: &str| {
+        images
+            .iter()
+            .find_map(|(id, name)| (id == cid).then(|| name.clone()))
+    };
+    let text = plain_text(&document, &names)?;
+    Ok(NormalizedBody { html, text })
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct NormalizedBody {
     pub html: String,
@@ -84,11 +167,11 @@ pub(crate) fn normalize(html: &str) -> Result<NormalizedBody, AppError> {
     let clean = sanitize(html);
     // Canonical aliases keep a save/reopen cycle stable with the editor schema.
     let document = Html::parse_fragment(&clean);
-    let html = serialize(&document, Mode::Draft, None, usize::MAX);
+    let html = serialize(&document, Mode::Draft, None, usize::MAX, None);
     if html.len() > MAX_HTML_BYTES {
         return Err(AppError::validation("draft.bodyHtml"));
     }
-    let text = plain_text(&document)?;
+    let text = plain_text(&document, &|_| None)?;
     Ok(NormalizedBody { html, text })
 }
 
@@ -106,12 +189,13 @@ fn sanitize(html: &str) -> String {
                 ("h3", HashSet::from(["data-align"])),
                 ("span", HashSet::from(["data-color"])),
                 ("mark", HashSet::from(["data-highlight"])),
+                ("img", HashSet::from(["src", "alt", "width", "height"])),
             ]
             .into_iter()
             .collect(),
         )
         .clean_content_tags(DROP_CONTENT.iter().copied().collect())
-        .url_schemes(HashSet::from(["http", "https", "mailto"]))
+        .url_schemes(HashSet::from(["http", "https", "mailto", "cid"]))
         .url_relative(UrlRelative::Deny)
         .link_rel(None)
         .attribute_filter(|tag, attribute, value| match (tag, attribute) {
@@ -128,6 +212,9 @@ fn sanitize(html: &str) -> String {
             ("mark", "data-highlight") if palette_color(HIGHLIGHT_COLORS, value).is_some() => {
                 Some(Cow::Borrowed(value))
             }
+            ("img", "src") => cid_of(value).map(|_| Cow::Borrowed(value)),
+            ("img", "alt") => Some(Cow::Owned(image_alt(value))),
+            ("img", "width" | "height") => image_edge(value).map(|n| Cow::Owned(n.to_string())),
             _ => None,
         })
         .clean(html)
@@ -201,7 +288,13 @@ fn quote(
     let document = Html::parse_fragment(truncate(html, crate::mail::render::MAX_BODY_BYTES));
     let mut budget = MAX_QUOTE_BYTES;
     loop {
-        let output = sanitize(&serialize(&document, Mode::Quote(locale), links, budget));
+        let output = sanitize(&serialize(
+            &document,
+            Mode::Quote(locale),
+            links,
+            budget,
+            None,
+        ));
         if output.len() <= MAX_QUOTE_BYTES {
             return output;
         }
@@ -215,7 +308,7 @@ fn quote(
 /// constants and never inherited from draft HTML or an original email.
 pub(crate) fn email_document(fragment: &str) -> String {
     let document = Html::parse_fragment(fragment);
-    let body = serialize(&document, Mode::Email, None, usize::MAX);
+    let body = serialize(&document, Mode::Email, None, usize::MAX, None);
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap\">{body}</div></body></html>"
     )
@@ -298,7 +391,15 @@ fn layout_whitespace(
 
 /// Iterative traversal also bounds attacker-controlled nesting. Reserving all
 /// open closing tags lets quoted source stop at a strict serialized byte limit.
-fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize) -> String {
+///
+/// With `known`, an `<img>` whose Content-ID is not in the set is dropped.
+fn serialize(
+    document: &Html,
+    mode: Mode,
+    links: Option<&[String]>,
+    limit: usize,
+    known: Option<&HashSet<&str>>,
+) -> String {
     let quoting = matches!(mode, Mode::Quote(_));
     let mut output = String::new();
     let mut reserved = 0usize;
@@ -347,6 +448,14 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                     );
                 }
                 continue;
+            }
+            if original == "img" {
+                // Only reachable outside quoting; a missing or foreign `src`
+                // removes the whole element rather than leaving a stub.
+                let cid = element.value().attr("src").and_then(cid_of);
+                if cid.is_none_or(|cid| known.is_some_and(|known| !known.contains(cid))) {
+                    continue;
+                }
             }
             let tag = if quoting && matches!(original, "h4" | "h5" | "h6") {
                 "h3"
@@ -410,6 +519,25 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                 {
                     open.push_str(&format!(" start=\"{start}\""));
                 }
+                if tag == "img" {
+                    open.push_str(" src=\"");
+                    escape_into(
+                        element.value().attr("src").unwrap_or_default(),
+                        &mut open,
+                        usize::MAX,
+                    );
+                    open.push('"');
+                    if let Some(alt) = element.value().attr("alt") {
+                        open.push_str(" alt=\"");
+                        escape_into(&image_alt(alt), &mut open, usize::MAX);
+                        open.push('"');
+                    }
+                    for attribute in ["width", "height"] {
+                        if let Some(n) = element.value().attr(attribute).and_then(image_edge) {
+                            open.push_str(&format!(" {attribute}=\"{n}\""));
+                        }
+                    }
+                }
                 if mode == Mode::Draft {
                     for (attribute, value) in [
                         ("data-align", align),
@@ -431,6 +559,7 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                             "margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex"
                         }
                         "ul" | "ol" => "margin-top:0;margin-bottom:0",
+                        "img" => "max-width: 100%; height: auto",
                         _ => "",
                     }
                     .to_owned();
@@ -458,7 +587,7 @@ fn serialize(document: &Html, mode: Mode, links: Option<&[String]>, limit: usize
                     // clients, unlike the editor's visible empty paragraph.
                     open.push_str("<br>");
                 }
-                if tag != "br" {
+                if !matches!(tag, "br" | "img") {
                     close = format!("</{tag}>");
                 }
             }
@@ -589,7 +718,10 @@ impl TextWriter {
     }
 }
 
-fn plain_text(document: &Html) -> Result<String, AppError> {
+fn plain_text(
+    document: &Html,
+    image_name: &dyn Fn(&str) -> Option<String>,
+) -> Result<String, AppError> {
     let mut writer = TextWriter::default();
     let mut pending = vec![(document.tree.root(), false)];
     while let Some((node, exiting)) = pending.pop() {
@@ -642,6 +774,21 @@ fn plain_text(document: &Html) -> Result<String, AppError> {
         match tag {
             "p" | "h1" | "h2" | "h3" => writer.flush(false)?,
             "br" => writer.flush(true)?,
+            "img" if element.value().attr("src").and_then(cid_of).is_some() => {
+                let alt = element
+                    .value()
+                    .attr("alt")
+                    .map(str::trim)
+                    .filter(|alt| !alt.is_empty());
+                let label = alt.map(str::to_owned).or_else(|| {
+                    element
+                        .value()
+                        .attr("src")
+                        .and_then(cid_of)
+                        .and_then(image_name)
+                });
+                writer.text(&format!("[{}]", label.as_deref().unwrap_or("image")))?;
+            }
             "blockquote" => {
                 writer.flush(false)?;
                 writer.quote_depth += 1;
@@ -1068,5 +1215,107 @@ mod tests {
             "One\nTwo\nThree\nFour\nFive\nSix\nFormatted"
         );
         assert!(!html.contains("data-") && !html.contains("style") && !html.contains("align"));
+    }
+
+    const CID: &str = "cid:0123456789abcdef0123456789abcdef@mail.example.com";
+
+    #[test]
+    fn inline_images_keep_only_core_content_ids() {
+        let body = normalize(&format!(
+            "<p>a<img src=\"{CID}\" alt=\"pic\" width=\"120\" height=\"80\" onerror=\"x()\" style=\"color:red\"></p>"
+        ))
+        .unwrap();
+        assert_eq!(
+            body.html,
+            format!("<p>a<img src=\"{CID}\" alt=\"pic\" width=\"120\" height=\"80\"></p>")
+        );
+        assert_eq!(body.text, "a[pic]");
+        assert_eq!(normalize(&body.html).unwrap(), body);
+        for src in [
+            "data:image/png;base64,AAAA",
+            "https://example.com/a.png",
+            "http://example.com/a.png",
+            "file:///etc/passwd",
+            "cid:short@example.com",
+            "cid:0123456789ABCDEF0123456789abcdef@example.com",
+            "cid:0123456789abcdef0123456789abcdef",
+            "cid:0123456789abcdef0123456789abcdef@",
+            "cid:0123456789abcdef0123456789abcdef@bad domain",
+            "cid:0123456789abcdef0123456789abcdef0@example.com",
+            "cid:my-logo",
+            "",
+        ] {
+            let body = normalize(&format!("<p>x<img src=\"{src}\" alt=\"a\"></p>")).unwrap();
+            assert_eq!(body.html, "<p>x</p>", "{src:?}");
+        }
+        assert_eq!(
+            normalize("<p>x<img alt=\"a\"></p>").unwrap().html,
+            "<p>x</p>"
+        );
+    }
+
+    #[test]
+    fn inline_image_attributes_are_bounded() {
+        let long = "字".repeat(300);
+        let body = normalize(&format!("<img src=\"{CID}\" alt=\"{long}\">")).unwrap();
+        assert!(body.html.contains(&format!("alt=\"{}\"", "字".repeat(256))));
+        for value in ["0", "10001", "-5", "1.5", "12px", "auto", "99999999999", ""] {
+            let body = normalize(&format!(
+                "<img src=\"{CID}\" width=\"{value}\" height=\"{value}\">"
+            ))
+            .unwrap();
+            assert!(
+                !body.html.contains("width") && !body.html.contains("height"),
+                "{value:?}"
+            );
+        }
+        let body = normalize(&format!("<img src=\"{CID}\" width=\"1\" height=\"10000\">")).unwrap();
+        assert!(body.html.contains("width=\"1\" height=\"10000\""));
+    }
+
+    #[test]
+    fn email_images_get_responsive_style_and_quoting_still_drops_them() {
+        let body = normalize(&format!("<p><img src=\"{CID}\"></p>")).unwrap();
+        assert!(email_document(&body.html).contains(&format!(
+            "<img src=\"{CID}\" style=\"max-width: 100%; height: auto\">"
+        )));
+        let quoted = quote_source(
+            Some(&format!("<p>t</p><img src=\"{CID}\" alt=\"gone\">")),
+            "",
+        );
+        assert!(!quoted.contains("<img") && !quoted.contains("cid:"));
+    }
+
+    #[test]
+    fn referenced_cids_are_ordered_and_deduplicated() {
+        let a = "0123456789abcdef0123456789abcdef@x.io";
+        let b = "fedcba9876543210fedcba9876543210@x.io";
+        let html = format!(
+            "<p><img src=\"cid:{b}\"><img src=\"cid:{a}\"><img src=\"cid:{b}\"><img src=\"https://x/y.png\"></p>"
+        );
+        assert_eq!(referenced_cids(&html), [b, a]);
+    }
+
+    #[test]
+    fn outgoing_body_removes_dangling_images_and_names_the_rest() {
+        let a = "0123456789abcdef0123456789abcdef@x.io";
+        let b = "fedcba9876543210fedcba9876543210@x.io";
+        let c = "00000000000000000000000000000000@x.io";
+        let html = normalize(&format!(
+            "<p>hi<img src=\"cid:{a}\"><img src=\"cid:{b}\" alt=\"alt text\"><img src=\"cid:{c}\" alt=\"dangling\"></p>"
+        ))
+        .unwrap()
+        .html;
+        let out = outgoing_body(
+            &html,
+            &[
+                (a.to_owned(), "cat.png".to_owned()),
+                (b.to_owned(), "dog.png".to_owned()),
+            ],
+        )
+        .unwrap();
+        assert!(!out.html.contains(c));
+        assert!(out.html.contains(a) && out.html.contains(b));
+        assert_eq!(out.text, "hi[cat.png][alt text]");
     }
 }

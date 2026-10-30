@@ -9,11 +9,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use mailx_core::InlineImage;
 use mailx_core::{
     AddAttachmentRequest, ApiResult, AppError, AttachmentPolicy, Draft, ErrorCode, MailxCore,
     RemoveAttachmentRequest,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use tauri::http::HeaderMap;
+use tauri::ipc::{InvokeBody, Response};
 use tauri::{AppHandle, DragDropEvent, Emitter, EventTarget, Manager, State, WebviewWindow};
 
 use crate::commands::{authorize, parse, respond};
@@ -207,6 +210,182 @@ pub(crate) async fn attachments_policy(
     }))
 }
 
+// ------------------------------------------------------------ inline images
+
+/// Header names of `inline_images_add_bytes`; the body is the image itself.
+const DRAFT_HEADER: &str = "x-mailx-draft-id";
+const REVISION_HEADER: &str = "x-mailx-expected-revision";
+const FILE_NAME_HEADER: &str = "x-mailx-file-name";
+
+/// The draft after the images were stored, and the `cid:` handles to insert.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InlineImagesAdded {
+    draft: Draft,
+    inserted: Vec<InlineImage>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PreviewArgs {
+    draft_id: String,
+    attachment_id: String,
+}
+
+/// Opens the native image picker and stores the chosen pictures as inline
+/// images in one step. `None` means the picker was cancelled.
+#[tauri::command]
+pub(crate) async fn inline_images_add(
+    window: WebviewWindow,
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Option<InlineImagesAdded>>, ()> {
+    use tauri_plugin_dialog::DialogExt;
+    let args = authorize(&window, "inline_images_add").and_then(|kind| {
+        let args = parse::<RequestArgs<AddFilesRequest>>(request.body())?;
+        crate::window_access::check_draft(kind, "inline_images_add", &args.request.draft_id)?;
+        Ok(args)
+    });
+    let result = async {
+        let args = args?.request;
+        let core = state.core()?;
+        let (reply, answer) = std::sync::mpsc::sync_channel(1);
+        app.dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("插入图片")
+            .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp"])
+            .pick_files(move |paths| {
+                let _ = reply.send(paths);
+            });
+        let picked = tauri::async_runtime::spawn_blocking(move || answer.recv().ok().flatten())
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let paths = picked
+            .into_iter()
+            .take(MAX_PATHS)
+            .map(|path| path.into_path())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
+        let added =
+            tauri::async_runtime::spawn_blocking(move || insert_from_paths(&core, args, &paths))
+                .await
+                .map_err(|_| AppError::new(ErrorCode::Internal))??;
+        Ok(Some(added))
+    }
+    .await;
+    Ok(respond(result))
+}
+
+/// Stores one image whose bytes the page holds (paste, or a file it already
+/// read). The request body is the raw image; see the header constants.
+#[tauri::command]
+pub(crate) async fn inline_images_add_bytes(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<InlineImagesAdded>, ()> {
+    let args = authorize(&window, "inline_images_add_bytes").and_then(|kind| {
+        let (args, file_name) = raw_request(request.headers())?;
+        crate::window_access::check_draft(kind, "inline_images_add_bytes", &args.draft_id)?;
+        let InvokeBody::Raw(bytes) = request.body() else {
+            return Err(AppError::validation("request"));
+        };
+        Ok((args, file_name, bytes.clone()))
+    });
+    Ok(respond(match args {
+        Ok((args, file_name, bytes)) => {
+            state
+                .run(move |core| {
+                    let draft = core.get_draft(&args.draft_id)?;
+                    let limit = core.attachment_policy(&draft.account_id)?.max_total_bytes;
+                    if bytes.len() as u64 > limit {
+                        return Err(AppError::new(ErrorCode::AttachmentTooLarge));
+                    }
+                    add_inline(core, &args, vec![(file_name, bytes)])
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+/// The transcoded preview of an inline image, as raw bytes. A failure rejects
+/// the call with the serialized `AppError`.
+#[tauri::command]
+pub(crate) async fn inline_image_preview(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Response, AppError> {
+    let kind = authorize(&window, "inline_image_preview")?;
+    let args = parse::<PreviewArgs>(request.body())?;
+    crate::window_access::check_draft(kind, "inline_image_preview", &args.draft_id)?;
+    let (_media_type, bytes) = state
+        .run(move |core| core.inline_image_preview(&args.draft_id, &args.attachment_id))
+        .await?;
+    Ok(Response::new(bytes))
+}
+
+/// Reads the draft, revision and file name the page put in the headers.
+fn raw_request(headers: &HeaderMap) -> Result<(AddFilesRequest, String), AppError> {
+    let text = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| AppError::validation("request"))
+    };
+    let draft_id = text(DRAFT_HEADER)?.to_owned();
+    let expected_revision = text(REVISION_HEADER)?
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("request"))?;
+    let file_name = percent_encoding::percent_decode_str(text(FILE_NAME_HEADER)?)
+        .decode_utf8()
+        .map_err(|_| AppError::validation("request"))?
+        .into_owned();
+    if file_name.is_empty() {
+        return Err(AppError::validation("request"));
+    }
+    Ok((
+        AddFilesRequest {
+            draft_id,
+            expected_revision,
+        },
+        file_name,
+    ))
+}
+
+fn insert_from_paths(
+    core: &MailxCore,
+    request: AddFilesRequest,
+    paths: &[PathBuf],
+) -> Result<InlineImagesAdded, AppError> {
+    if paths.is_empty() {
+        return Err(AppError::validation("files"));
+    }
+    let draft = core.get_draft(&request.draft_id)?;
+    let limit = core.attachment_policy(&draft.account_id)?.max_total_bytes;
+    let files = paths
+        .iter()
+        .map(|path| read_file(path, limit))
+        .collect::<Result<Vec<_>, _>>()?;
+    add_inline(core, &request, files)
+}
+
+fn add_inline(
+    core: &MailxCore,
+    request: &AddFilesRequest,
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<InlineImagesAdded, AppError> {
+    let (draft, inserted) =
+        core.add_inline_images(&request.draft_id, request.expected_revision, files)?;
+    Ok(InlineImagesAdded { draft, inserted })
+}
+
 async fn attach_files(
     core: MailxCore,
     request: AddFilesRequest,
@@ -281,6 +460,55 @@ mod tests {
         assert!(dropped.take("composer-a").is_empty());
         dropped.forget("composer-b");
         assert!(dropped.take("composer-b").is_empty());
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                tauri::http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn raw_inline_headers_are_decoded_and_bad_ones_refused() {
+        let ok = headers(&[
+            (DRAFT_HEADER, "d1"),
+            (REVISION_HEADER, "7"),
+            (FILE_NAME_HEADER, "%E5%9B%BE%20a.png"),
+        ]);
+        let (request, name) = raw_request(&ok).unwrap();
+        assert_eq!(
+            (
+                request.draft_id.as_str(),
+                request.expected_revision,
+                name.as_str()
+            ),
+            ("d1", 7, "图 a.png")
+        );
+        let missing = headers(&[(DRAFT_HEADER, "d1"), (REVISION_HEADER, "7")]);
+        assert!(raw_request(&missing).is_err());
+        let bad_revision = headers(&[
+            (DRAFT_HEADER, "d1"),
+            (REVISION_HEADER, "-1"),
+            (FILE_NAME_HEADER, "a.png"),
+        ]);
+        assert!(raw_request(&bad_revision).is_err());
+        let bad_utf8 = headers(&[
+            (DRAFT_HEADER, "d1"),
+            (REVISION_HEADER, "1"),
+            (FILE_NAME_HEADER, "%FF"),
+        ]);
+        assert!(raw_request(&bad_utf8).is_err());
+        let empty_name = headers(&[
+            (DRAFT_HEADER, "d1"),
+            (REVISION_HEADER, "1"),
+            (FILE_NAME_HEADER, ""),
+        ]);
+        assert!(raw_request(&empty_name).is_err());
     }
 
     #[test]

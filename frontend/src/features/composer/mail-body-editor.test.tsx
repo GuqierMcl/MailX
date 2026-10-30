@@ -50,7 +50,7 @@ describe('mail editor schema and clipboard', () => {
     expect(html).toContain('<ol start="3"><li><p>third</p></li></ol>')
     expect(html).toContain('<a href="https://example.com">safe</a>')
     expect(html).not.toMatch(/style=|onclick=|class=|target=|rel=|title=|javascript:|img|secret|SVG|iframe/)
-    expect(Object.keys(editor.schema.nodes).sort()).toEqual(['blockquote', 'bulletList', 'doc', 'hardBreak', 'heading', 'listItem', 'orderedList', 'paragraph', 'text'].sort())
+    expect(Object.keys(editor.schema.nodes).sort()).toEqual(['blockquote', 'bulletList', 'doc', 'hardBreak', 'heading', 'inlineImage', 'listItem', 'orderedList', 'paragraph', 'text'].sort())
   })
 
   it('explicitly pastes as plain text with separate paragraphs and no Markdown formatting', () => {

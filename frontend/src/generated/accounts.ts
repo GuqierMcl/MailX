@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -472,7 +472,22 @@ fileName: string, };
 
 export type RemoveAttachmentRequest = { draftId: string, attachmentId: string, expectedRevision: number, };
 
-export type DraftAttachmentSummary = { id: string, fileName: string, mediaType: string, size: number, origin: AttachmentOrigin, };
+export type DraftAttachmentSummary = { id: string, fileName: string, mediaType: string, size: number, origin: AttachmentOrigin,
+/**
+ * An image shown inside the body through `cid:`; not listed as a file.
+ */
+inline: boolean,
+/**
+ * The Content-ID, without angle brackets, that the body's `<img>` uses.
+ * Set exactly when `inline` is true.
+ */
+contentId: string | null, };
+
+export type InlineImage = { attachmentId: string,
+/**
+ * Without angle brackets.
+ */
+contentId: string, fileName: string, };
 
 export type AttachmentOrigin = "user" | "forwarded";
 

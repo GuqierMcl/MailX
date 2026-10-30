@@ -640,6 +640,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         message_id: &id,
         date: super::message::local_now(),
         attachments: &[],
+        inline_images: &[],
     })
     .unwrap();
     let (mut run, seen, _tls) = plain_via_starttls(|_| {}).await;

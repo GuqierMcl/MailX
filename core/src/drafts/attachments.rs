@@ -37,6 +37,17 @@ impl AttachmentOrigin {
     }
 }
 
+/// An inline image just stored for a draft: what the body's
+/// `<img src="cid:…">` needs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineImage {
+    pub attachment_id: String,
+    /// Without angle brackets.
+    pub content_id: String,
+    pub file_name: String,
+}
+
 /// One file attached to a draft; the bytes stay in the core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +58,11 @@ pub struct DraftAttachmentSummary {
     #[ts(type = "number")]
     pub size: u64,
     pub origin: AttachmentOrigin,
+    /// An image shown inside the body through `cid:`; not listed as a file.
+    pub inline: bool,
+    /// The Content-ID, without angle brackets, that the body's `<img>` uses.
+    /// Set exactly when `inline` is true.
+    pub content_id: Option<String>,
 }
 
 /// What a draft may carry, resolved per account.

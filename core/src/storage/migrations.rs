@@ -123,6 +123,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["messages"],
         sql: include_str!("migrations/0016_preview_state.sql"),
     },
+    Migration {
+        version: 17,
+        description: "inline image content ids",
+        required_tables: &["draft_attachments"],
+        sql: include_str!("migrations/0017_inline_image_content_id.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -527,7 +533,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 16);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 17);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -698,7 +704,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            16
+            17
         );
     }
 

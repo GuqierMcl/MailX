@@ -242,6 +242,7 @@ impl AccountService {
             .zip(&ids)
             .map(|(file, id)| NewAttachment {
                 id,
+                content_id: None,
                 file_name: &file.file_name,
                 media_type: &file.media_type,
                 blob: &file.blob,

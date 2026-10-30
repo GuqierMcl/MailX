@@ -15,6 +15,7 @@
     "failed": "保存失败"
   },
   "notice": {
+    "missingImages_other": "有 {{count}} 张图片已丢失，将不会发出",
     "conflict": "草稿已在别处修改，已加载最新版本",
     "conflictDescription": "你刚才未保存的改动没有被应用。",
     "locked": "这封邮件已进入发送队列，不能再编辑",
@@ -77,6 +78,7 @@
     "closeAnyway": "仍要关闭（丢失未保存的修改）"
   },
   "toolbar": {
+    "insertImage": "插入图片",
     "alignLeft": "左对齐",
     "alignCenter": "居中对齐",
     "alignRight": "右对齐",
@@ -225,6 +227,9 @@
     "editInvalid": "地址无效：{{address}}，点击修改",
     "remove": "移除 {{address}}",
     "preview_other": "{{names}} 等 {{count}} 位"
+  },
+  "inlineImage": {
+    "missing": "图片已丢失"
   },
   "attachment": {
     "add": "添加附件",

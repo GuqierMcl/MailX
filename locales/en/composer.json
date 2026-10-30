@@ -15,6 +15,8 @@
     "failed": "Save failed"
   },
   "notice": {
+    "missingImages_one": "{{count}} image is missing and will not be sent",
+    "missingImages_other": "{{count}} images are missing and will not be sent",
     "conflict": "This draft changed elsewhere. The latest version has been loaded.",
     "conflictDescription": "Your unsaved changes were not applied.",
     "locked": "This message is queued for sending and can no longer be edited.",
@@ -77,6 +79,7 @@
     "closeAnyway": "Close anyway (lose unsaved changes)"
   },
   "toolbar": {
+    "insertImage": "Insert image",
     "alignLeft": "Align left",
     "alignCenter": "Align center",
     "alignRight": "Align right",
@@ -228,6 +231,9 @@
     "remove": "Remove {{address}}",
     "preview_other": "{{names}} and others ({{count}} recipients)",
     "preview_one": "{{names}} ({{count}} recipient)"
+  },
+  "inlineImage": {
+    "missing": "Image missing"
   },
   "attachment": {
     "add": "Attach files",

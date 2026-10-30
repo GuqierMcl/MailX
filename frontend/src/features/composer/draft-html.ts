@@ -2,5 +2,5 @@
 export function draftHtmlIsEmpty(html: string): boolean {
   const template = document.createElement('template')
   template.innerHTML = html
-  return !template.content.textContent?.trim() && !template.content.querySelector('a[href]')
+  return !template.content.textContent?.trim() && !template.content.querySelector('a[href], img[src^="cid:"]')
 }

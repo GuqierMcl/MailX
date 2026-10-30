@@ -20,6 +20,16 @@ pub(crate) struct AttachmentData {
     pub bytes: Vec<u8>,
 }
 
+/// An inline picture the HTML body shows through `cid:`.
+pub(crate) struct InlineImageData {
+    /// Without angle brackets.
+    pub content_id: String,
+    pub file: AttachmentData,
+}
+
+#[derive(Clone)]
+struct PartContentId(String);
+
 #[derive(Clone)]
 struct PartType(String);
 
@@ -47,8 +57,23 @@ macro_rules! raw_header {
 
 raw_header!(PartType, "Content-Type");
 raw_header!(PartDisposition, "Content-Disposition");
+raw_header!(PartContentId, "Content-ID");
 
 pub(crate) fn part(attachment: &AttachmentData) -> Result<SinglePart, AppError> {
+    build(attachment, "attachment", None)
+}
+
+/// Same name encoding as a regular attachment, with `Content-Disposition:
+/// inline` and a `Content-ID` so `cid:` links resolve.
+pub(crate) fn inline_part(image: &InlineImageData) -> Result<SinglePart, AppError> {
+    build(&image.file, "inline", Some(&image.content_id))
+}
+
+fn build(
+    attachment: &AttachmentData,
+    disposition_type: &str,
+    content_id: Option<&str>,
+) -> Result<SinglePart, AppError> {
     let media_type = if token_pair(&attachment.media_type) {
         attachment.media_type.as_str()
     } else {
@@ -59,13 +84,13 @@ pub(crate) fn part(attachment: &AttachmentData) -> Result<SinglePart, AppError> 
         let quoted = quote(name);
         (
             format!("{media_type}; name={quoted}"),
-            format!("attachment; filename={quoted}"),
+            format!("{disposition_type}; filename={quoted}"),
         )
     } else {
         (
             format!("{media_type}; name=\"{}\"", encoded_words(name)),
             format!(
-                "attachment; {}; filename=\"{}\"",
+                "{disposition_type}; {}; filename=\"{}\"",
                 rfc2231("filename", name),
                 encoded_words(name)
             ),
@@ -73,10 +98,13 @@ pub(crate) fn part(attachment: &AttachmentData) -> Result<SinglePart, AppError> 
     };
     let body = Body::new_with_encoding(attachment.bytes.clone(), ContentTransferEncoding::Base64)
         .map_err(|_| AppError::validation("attachments"))?;
-    Ok(SinglePart::builder()
+    let builder = SinglePart::builder()
         .header(PartType(content_type))
-        .header(PartDisposition(disposition))
-        .body(body))
+        .header(PartDisposition(disposition));
+    Ok(match content_id {
+        Some(id) => builder.header(PartContentId(format!("<{id}>"))).body(body),
+        None => builder.body(body),
+    })
 }
 
 /// `type/subtype` made of RFC 2045 token characters only.
