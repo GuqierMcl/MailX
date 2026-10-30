@@ -83,6 +83,8 @@ type EmailPage = {
 
 `EmailSummary` 包含 id、accountId、folderId、subject、from、preview、receivedAt、isRead、isStarred、hasAttachment、bodyState、previewState、pendingChanges。`preview` 为纯文本前 200 个 Unicode 字符，尚无时为空；`previewState` 为 missing / ready / failed：ready 表示 `preview` 已就绪（来自正文下载或列表预览的部分抓取，完整正文的摘要总是覆盖部分抓取的结果），failed 表示已取到邮件开头但没有可显示文字，不再自动重试，missing 表示尚未取过（含临时失败）；`bodyState` 为 missing / fetching / ready / failed，`pendingChanges=false`，`isRead` / `isStarred` 来自服务器的 Seen / Flagged；附件标志来自 MIME 结构，不表示附件内容已缓存。缺主题保持空字符串，由 UI 显示“（无主题）”。
 
+规划（发信设计第 9 节，未实现）：`EmailSummary` 新增 `to`（`{ addresses, total }`，最多 3 个地址与总数；已发送角色文件夹的列表行据此显示“致：收件人”）与 `localOnly`（本机已发送副本为 true）。本机副本的 `id` 为 `local-sent:<outbox id>`，恒为已读、无星标、`bodyState=ready`、`pendingChanges=false`；`emails_get`、正文准备、附件保存、回复与转发按 ID 前缀改从快照读取；`emails_fetch_body` 直接返回已就绪，`emails_request_previews` 忽略本机副本，`emails_set_flag` 对其返回 `validation`。新增 `outbox_remove_local_copy { emailId }`（主窗口可用）：写入 `deleted_locally_at` 并释放快照，不影响服务器。
+
 `coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
 
 - 至少有一个匹配文件夹，且每个都存在游标、`backfill_done=1`、`window_capped=0` 时，`headersComplete=true`。任一文件夹尚未同步、抓取未完成或窗口超过 1,000 封上限时为 false；不存在匹配文件夹时同样为 false。
@@ -295,7 +297,7 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 **发件箱核心、桌面 IPC 与界面已实现；HTTP / MCP 未开放**（`core/src/send/`）。`MailxCore` 方法：
 
 - `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 必须是 `Caller::Composer`（宿主提供的枚举，`MainWindow` / `Mcp` / `Model` 一律 `forbidden`，不依赖 UI）；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
-- `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`serverCopyMessageId`（已对上的服务器副本，按 Message-ID 匹配后写入；本步只写入，列表合并尚未做）、`resolution`、`supersededBy`。
+- `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`serverCopyMessageId`（已对上的服务器副本，按 Message-ID 匹配后写入；列表合并尚未实现，方案见发信设计第 9 节）、`resolution`、`supersededBy`。
 - `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：接受 `Caller::Composer` 与 `Caller::MainWindow`（两者都是交互 UI；`Mcp` / `Model` 为 `forbidden`），只对未处理的 `unknown` 生效，`resend` 返回新项。
 - 新错误码：`draftLocked`、`forbidden`、`alreadySending`（均已生成到 `ErrorCode`）。`unknown` 永不自动重发。
 - `error.reason` 中 `messageTooLarge` 表示服务器明确以 `5.3.4` / `5.2.3` 拒绝（`MAIL FROM` 或正文之后的最终回复）；只有 `552`、没有增强状态码时仍是 `server`（正文前）或 `rejectedAfterData`（正文后）。后两者以及 `messageTooLarge` 都是确定失败（`failed`），不会变成 `unknown`。服务器最近一次在 `EHLO` 声明的 `SIZE` 记在账号上，经附件的 `AttachmentPolicy.serverLimitMb` 提供撰写提示。
