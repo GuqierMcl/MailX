@@ -37,7 +37,7 @@
 
 以下服务商内置预设：选择服务商，填写邮箱地址和服务商为客户端提供的密码或授权码，服务器设置会自动填好。
 
-| <img src="frontend/src/assets/providers/qqmail.svg" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.svg" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.svg" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.svg" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.svg" alt="139 邮箱" height="32"> |
+| <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> |
 | :---: | :---: | :---: | :---: | :---: |
 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
 
