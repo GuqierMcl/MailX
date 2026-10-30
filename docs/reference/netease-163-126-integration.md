@@ -6,7 +6,7 @@
 
 ## 1. 推荐方案与范围
 
-使用 **IMAP + SMTP + 客户端授权码**，复用 MailX 现有账号、SecretStore、账号路由、同步和发送队列。服务商选择器提供“网易 163 邮箱”、“网易 126 邮箱”和“网易 yeah.net 邮箱”三项，分别保存服务商 ID（`netease163` / `netease126` / `neteaseYeah`）。三项共用授权码表单，使用各自的数字或字样 SVG 标识，名称与描述明确区分地址后缀。
+使用 **IMAP + SMTP + 客户端授权码**，复用 MailX 现有账号、SecretStore、账号路由、同步和发送队列。服务商选择器提供“网易 163 邮箱”、“网易 126 邮箱”和“网易 yeah.net 邮箱”三项，分别保存服务商 ID（`netease163` / `netease126` / `neteaseYeah`）。三项共用授权码表单，使用各自的官方 PNG 标识，名称与描述明确区分地址后缀。
 
 | 入口 | 预设接受的地址域名 | IMAP 默认 | SMTP 默认 |
 | --- | --- | --- | --- |
@@ -54,7 +54,7 @@
 | 范围 | 当前代码与行为 |
 | --- | --- |
 | 服务商注册 | `frontend/src/features/accounts/providers.ts` 的 `ProviderPreset` 每项只有一组端点。已新增三项固定预设，分别配置域名与主机；搜索包含 163、126、yeah.net、网易、NetEase。独立入口可直接复用现有结构，无需先做按域名切换端点的统一“网易邮箱”流程。 |
-| 图标 | `AccountAvatar` / `ProfileFields` 已根据 provider 的本地 `logo` 和账号 `useProviderIcon` 工作。已从三个官方登录页的页眉素材提取各自的数字/字样主体并转换为 SVG 路径，替换共用 favicon；处理方式和来源见[图标说明](../../frontend/src/assets/providers/README.md)。不在运行时下载图标。 |
+| 图标 | `AccountAvatar` / `ProfileFields` 已根据 provider 的本地 `logo` 和账号 `useProviderIcon` 工作。已采用三个服务商各自的官方原始 PNG，保留完整图形、配色和比例；处理方式和来源见[图标说明](../../frontend/src/assets/providers/README.md)。不在运行时下载图标。 |
 | 授权码表单 | `ConnectionForm`、`AddAccountDialog` 根据可选的 `MailProvider.setup` 元数据展示地址与授权码引导，`ProviderAuthHelp` 共用故障提示组件，保留 QQ 和网易各自的独立文案。 |
 | 域名错误 | `account-draft.ts::draftToConnection` 对新账号做精确域名校验；`frontend/src/i18n/errors.ts` 使用服务商上下文展示允许域名。编辑已有账号保留当前连接。 |
 | 官方帮助 | `desktop/src/commands.rs::provider_help_url` 接受 `qq`、`netease163`、`netease126`、`neteaseYeah`；三个网易 ID 映射到同一固定官方开通/授权码页面，后端白名单打开，不接受前端任意 URL。浏览器模拟客户端使用相同白名单。 |
@@ -113,7 +113,7 @@ SMTP 已支持本轮服务器公告的 LOGIN/PLAIN；本轮 agent 未执行真�
 
 | 工作包 | 内容与完成条件 |
 | --- | --- |
-| A：预设与向导 | 三个入口、各自的本地 SVG 标识、准确域名/端点、服务商元数据与中英文授权码引导、固定帮助链接；复用按账号默认开启的图标偏好。编辑既有配置不被预设覆盖，返回步骤保留输入，关闭/提交清理秘密。 |
+| A：预设与向导 | 三个入口、各自的官方本地 PNG 标识、准确域名/端点、服务商元数据与中英文授权码引导、固定帮助链接；复用按账号默认开启的图标偏好。编辑既有配置不被预设覆盖，返回步骤保留输入，关闭/提交清理秘密。 |
 | B：错误体验 | 有界识别 Unsafe Login 并映射固定原因；同步与诊断给出一致提示，避免盲目自动重试；既有 QQ 与通用服务器保持兼容。没有证据时不改变 ID 时机或认证机制。 |
 | C：真实兼容 | 163、126 和 yeah.net 各有独立证据，先验默认端点、直连与实际测试平台；新增路由和平台分别记录，不由预设存在或 CI 通过推定兼容。 |
 
@@ -142,6 +142,6 @@ A、B 已实现并有自动回归与浏览器预览证据，详见[本轮验证]
 - **[S7] [Oauth2.0 授权码超过限制怎么办？](https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2b0e7da41ebeef5ce)**：确认 Outlook 等客户端存在 OAuth 2.0 路径，不等于已经获得 MailX 应用注册资格。
 - **[S8] [客户端网络连接失败](https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2805b28cd2f014c3c)**：使用完整邮箱账号、客户端授权密码及各产品对应主机。本方案仅引用配置说明，不采用其 ping 延迟阈值作为收发健康判据。
 - **[S9] [邮箱为什么会有流量限制呢？](https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac272bbf40591ec5574)**：存在流量限制、通常最迟 24 小时解除的排查说明，以及会员不能提升第三方客户端流量上限；不据此保证具体账号一定在 24 小时恢复。
-- **[S10] [163 官方登录页](https://mail.163.com/) / [126 官方登录页](https://mail.126.com/) / [yeah.net 官方登录页](https://mail.yeah.net/)**：各登录页的样式包含独立页眉标识。本地 SVG 从对应素材提取品牌主体并转换为路径，具体样式地址、裁切范围和处理方式见[图标说明](../../frontend/src/assets/providers/README.md)。
+- **[S10] [网易邮箱总入口](https://email.163.com/?from=dashi)**：服务商切换器使用三张独立的圆形 PNG。2026-10-30 起本地标识直接采用这些原图，来源与文件核验信息见[图标说明](../../frontend/src/assets/providers/README.md)。
 
 源码已有实现、公开能力探测和真实账号验收分别表达；官方没有明确的规则不做推断，未完成的账号组合保持待验状态。

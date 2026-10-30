@@ -21,7 +21,8 @@ MailX 是开发中的本地优先、AI 原生邮件工作台。仓库已建立 `
 - 凭证由后端 SecretStore 管理，禁止返回读取凭证的接口；AI 不能自行批准发信。
 - 初始方案可直接修订；已有实现的发送、权限、同步或持久化行为发生变化时，同步更新接口说明和相关验证。
 - 文件使用 UTF-8 / LF；Rust 使用 Cargo，前端使用 Bun 工作区。根目录 `package.json` 维护命令与版本入口，`bun.lock` 是前端依赖锁文件。
-- 品牌图形的唯一源稿为 `branding/logo.svg`；更新后运行 `bun run icons:generate` 和 `bun run icons:check`，不手工修改桌面、网页和品牌目录中的生成副本。资源位置和选用规则见 `branding/README.md`。
+- MailX 自有品牌图形的唯一源稿为 `branding/logo.svg`；更新后运行 `bun run icons:generate` 和 `bun run icons:check`，不手工修改桌面、网页和品牌目录中的生成副本。这套生成流程仅适用于 MailX 自有品牌，资源位置和选用规则见 `branding/README.md`。
+- 邮箱服务商图标使用可验证的官方原件并本地打包，PNG 可直接使用，不要求转为 SVG。禁止描摹、重画、裁掉品牌元素、去背景、改色、变形或用 AI 生成近似 Logo；没有合适官方素材时使用通用图标配服务商名称。新增或替换时同步记录来源、尺寸、哈希，并验证小尺寸下的浅深主题显示；权威细则见[服务商图标维护规范](frontend/src/assets/providers/README.md)。
 - 前端界面遵循 `docs/architecture/ui-design.md`：标题栏与导航同属画布，邮件列表与阅读区合成一个岛；岛内不加分割线和卡片边框；外壳用 `frontend/src/features/shell/` 的自有组件，不直接依赖 shadcn Sidebar。
 - 版本号只通过 `bun run version:bump` / `version:set` 修改，用户可见变更写进 `CHANGELOG.md` 的 `[Unreleased]`；发版由推送 `v*` 标签触发 `.github/workflows/release.yml`，生成未签名的草稿 Release，内含应用内更新使用的 `latest.json`（已有多次真实发布，代码签名尚未实现）。流程见 `docs/development/release.md`。
 - 结构化代码查询优先使用可用的 CodeGraph 工具；文字与文档查找使用 `rg`。

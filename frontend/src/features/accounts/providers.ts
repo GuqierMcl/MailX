@@ -1,11 +1,11 @@
 import { t } from '@/i18n'
 import type { IconSvgElement } from '@hugeicons/react'
 import { Mail01Icon } from '@hugeicons/core-free-icons'
-import qqmailLogo from '@/assets/providers/qqmail.svg'
-import netease163Logo from '@/assets/providers/netease-163.svg'
-import netease126Logo from '@/assets/providers/netease-126.svg'
-import neteaseYeahLogo from '@/assets/providers/netease-yeah.svg'
-import mail139Logo from '@/assets/providers/mail-139.svg'
+import qqmailLogo from '@/assets/providers/qqmail.png'
+import netease163Logo from '@/assets/providers/netease-163.png'
+import netease126Logo from '@/assets/providers/netease-126.png'
+import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
+import mail139Logo from '@/assets/providers/mail-139.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -42,7 +42,7 @@ export type MailProvider = {
   description: string
   /** Alternate names and terms people may search for. */
   searchAliases?: readonly string[]
-  /** A bundled logo URL, e.g. an imported local SVG; `icon` is the fallback. */
+  /** A bundled logo URL, e.g. an imported local PNG; `icon` is the fallback. */
   logo?: string
   /** The provider's mark; the generic mail icon stands in until it has one. */
   icon: IconSvgElement

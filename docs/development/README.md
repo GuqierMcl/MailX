@@ -94,7 +94,7 @@ git diff --check
 
 ## 3. 包边界
 
-Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run icons:generate`，会同步品牌素材、桌面图标和网页图标；`bun run icons:check` 验证派生资源与源稿一致。该工具只在设计资源变更时运行，无需加入每次应用构建。详见[品牌资源说明](../../branding/README.md)。
+MailX 自有 Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run icons:generate`，会同步品牌素材、桌面图标和网页图标；`bun run icons:check` 验证派生资源与源稿一致。这套工具仅适用于 MailX 自有品牌，在其设计资源变更时运行，无需加入每次应用构建。详见[品牌资源说明](../../branding/README.md)。
 
 - **core**：已实现账号、认证与路由配置、SQLite 存储及凭证更新恢复；之后按功能加入同步、发件队列、连接器和搜索。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
 - **desktop**：Tauri 生命周期、窗口、受限 IPC、user-data-dir 和系统凭据库装配，在阻塞线程串行调用同步核心。IPC 负责适配核心调用，不承载邮件业务。
@@ -114,6 +114,8 @@ Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run 
 ## 5. 增加邮箱预设
 
 候选格式包含 providerId、匹配域名、IMAP / SMTP 主机端口、TLS 模式、认证方法、用户名模板、开通说明、官方来源、核验日期和已验证能力。没有来源或测试证据时标记 experimental。
+
+服务商图标使用可验证的官方原件并随前端本地打包，PNG 可直接使用，不要求转为 SVG；禁止自行描摹、重画或改动品牌元素，没有合适官方素材时使用通用图标配名称。新增或替换图标时，按[服务商图标维护规范](../../frontend/src/assets/providers/README.md)同步记录来源、尺寸、哈希，并验证小尺寸下的浅深主题显示。
 
 读取可信内置预设后允许用户查看、修改并测试，不能仅凭邮箱域名自动连接任意远程发现结果。测试覆盖收信与发信两个方向、失败提示和网络路由。连接配置、OAuth 注册信息和账号授权在不同层管理，真实凭证不得放进资源文件。
 
