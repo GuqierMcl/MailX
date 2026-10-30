@@ -32,7 +32,7 @@
 
 ### Optimization
 
-- 通过 QQ、网易和 139 等服务商入口添加邮箱时默认不设置标识颜色，手动 IMAP/SMTP 仍自动分配颜色，各入口均可自行选色。
+- 通过 QQ、网易和 139 等服务商入口添加邮箱时默认不设置标识颜色，手动 IMAP/SMTP 仍自动分配颜色，各入口均可自行选色。 ([#66](https://github.com/GuqierMcl/MailX/pull/66))
 - 邮箱服务商图标改用官方原始素材，保留完整图形与原有配色，QQ 邮箱使用专属邮箱图标。 ([#64](https://github.com/GuqierMcl/MailX/pull/64))
 - 重启后头像优先使用本地缓存，不再先联网查询；确认没有头像的发件人 24 小时内不再重复查找。 ([#60](https://github.com/GuqierMcl/MailX/pull/60))
 - 邮件列表改用虚拟滚动，邮件很多时滚动更流畅；滚动到接近列表末尾时自动加载更多，加载失败仍可点击“加载更多”重试；列表按“预览行数”设置为预览区预留固定高度，每行等高，滚动时不再跳动。 ([#58](https://github.com/GuqierMcl/MailX/pull/58))
