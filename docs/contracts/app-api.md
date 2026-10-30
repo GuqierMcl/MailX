@@ -189,7 +189,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 返回值与错误沿用 `ApiResult`；错误码 `bodyNotCached`、`draftLocked`、`forbidden`、`alreadySending`、`conflict`、`idempotencyConflict` 原样透传。核心调用都在阻塞线程上执行。
 
-内嵌图片（已实现，尚未手测；设计见[发信设计 16.11](../architecture/sending.md#1611-第二批内嵌图片2026-10-30-确认首批已实现尚未手测)）的命令如下，权限与上表的附件命令相同（main 为 `validation`，composer 仅自己的草稿）：
+内嵌图片（已实现，macOS 用户手测通过；设计见[发信设计 16.11](../architecture/sending.md#1611-第二批内嵌图片2026-10-30-确认首批已实现macos-用户手测通过)）的命令如下，权限与上表的附件命令相同（main 为 `validation`，composer 仅自己的草稿）：
 
 | 命令 | 说明 |
 | --- | --- |

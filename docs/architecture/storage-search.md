@@ -65,7 +65,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
 | pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
 | drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at | unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
-| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，尚未手测）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
+| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，macOS 用户手测通过）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
 | outbox | id, draft_id, revision, account_id, client_mutation_id, payload_hash, mime_blob_id, mime_size, state, attempt_stage, sent_copy_state, snapshot_released_at | unique(account_id, client_mutation_id)；当前实现仍把快照存在 `mime` 列，按发信设计第 16.6 节外迁为 blob，服务器副本对上后释放（第 16.7 节） |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |
 | mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 随时可撤销；不存邮箱凭证 |
