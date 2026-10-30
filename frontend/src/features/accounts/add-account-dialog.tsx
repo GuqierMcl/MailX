@@ -53,7 +53,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [direction, setDirection] = useState<'forward' | 'back'>('forward')
   const [displayName, setDisplayName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
-  const [color, setColor] = useState<string | null>(null)
+  // Undefined follows the selected method's default; null is an explicit opt-out.
+  const [colorChoice, setColorChoice] = useState<string | null | undefined>(undefined)
   const [senderName, setSenderName] = useState('')
   const [useProviderIcon, setUseProviderIcon] = useState(true)
   const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
@@ -73,7 +74,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
       setDirection('forward')
       setDisplayName('')
       setNameTouched(false)
-      setColor(nextAccountColor(accounts))
+      setColorChoice(undefined)
       setNameError(null)
       setSenderName('')
       setUseProviderIcon(true)
@@ -89,6 +90,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const stepNumber = step.kind === 'method' ? 1 : step.kind === 'connection' ? 2 : 3
   const selectedMethod = step.kind === 'method' && step.selected && filterProviders([step.selected], providerQuery).length > 0
     ? step.selected : null
+  const color = colorChoice !== undefined ? colorChoice
+    : step.kind !== 'method' && step.method.id === null ? nextAccountColor(accounts) : null
 
   const showConnection = (method: MailProvider, resume?: AccountDraft, error?: ClientFailure, way: 'forward' | 'back' = 'forward') => {
     setDirection(way)
@@ -234,7 +237,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                       setNameTouched(true)
                       setNameError(null)
                     }}
-                    onColorChange={setColor}
+                    onColorChange={setColorChoice}
                   />
                 </SettingsPage>
               </div>

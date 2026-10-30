@@ -47,11 +47,23 @@ async function chooseProvider(dialog: HTMLElement, provider: MailProvider) {
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
 }
 
-async function toProfile(dialog: HTMLElement) {
-  await chooseImap(dialog)
-  fillConnection(dialog)
+async function toProfile(dialog: HTMLElement, method: 'manual' | 'qq' = 'manual') {
+  if (method === 'manual') {
+    await chooseImap(dialog)
+    fillConnection(dialog)
+  } else {
+    await chooseQq(dialog)
+    fillQqConnection(dialog)
+  }
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
   return within(dialog).findByText('最后，给这个邮箱起个名字')
+}
+
+async function backToProviders(dialog: HTMLElement) {
+  await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+  await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+  await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '放弃修改' }))
+  fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: '' } })
 }
 
 describe('add account wizard', () => {
@@ -106,11 +118,12 @@ describe('add account wizard', () => {
     fillQqConnection(dialog, emailAddress)
     await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
     expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
+    expect(within(dialog).getByRole('radio', { name: '不标识' })).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     expect(client.createAccount).toHaveBeenCalledOnce()
     expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
-      emailAddress, providerId: 'qq', useProviderIcon: true,
+      emailAddress, providerId: 'qq', color: null, useProviderIcon: true,
       imap: { host: 'imap.qq.com', port: 993, tls: 'implicit', username: emailAddress },
       smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit', username: emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
@@ -140,7 +153,9 @@ describe('add account wizard', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
     const preference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
     expect(preference).toBeChecked()
+    expect(within(dialog).getByRole('radio', { name: '不标识' })).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(preference)
+    expect(within(dialog).getByRole('radio', { name: '不标识' })).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
     expect(within(dialog).getByLabelText('邮箱地址')).toHaveValue(emailAddress)
     expect(within(dialog).getByLabelText('授权码')).toHaveValue('syntheticcodeabc')
@@ -150,7 +165,7 @@ describe('add account wizard', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     expect(client.createAccount).toHaveBeenCalledOnce()
     expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
-      emailAddress, providerId: provider.id, useProviderIcon: false,
+      emailAddress, providerId: provider.id, color: null, useProviderIcon: false,
       imap: { host: `imap.${domain}`, port: 993, tls: 'implicit', username: emailAddress },
       smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit', username: emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'syntheticcodeabc' } },
@@ -237,7 +252,56 @@ describe('add account wizard', () => {
     expect(await within(dialog).findByRole('switch', { name: '使用服务商图标' })).not.toBeChecked()
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
-    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ providerId: 'qq', useProviderIcon: false })
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ providerId: 'qq', color: null, useProviderIcon: false })
+  })
+
+  it.each([
+    { initial: 'manual' as const, initialColor: '绿', next: 'qq' as const, nextColor: '不标识', expectedColor: null },
+    { initial: 'qq' as const, initialColor: '不标识', next: 'manual' as const, nextColor: '绿', expectedColor: '#16a34a' },
+  ])('updates the untouched color default when switching from $initial to $next', async ({ initial, initialColor, next, nextColor, expectedColor }) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await toProfile(dialog, initial)
+    expect(within(dialog).getByRole('radio', { name: initialColor })).toHaveAttribute('aria-checked', 'true')
+    await backToProviders(dialog)
+    await toProfile(dialog, next)
+    expect(within(dialog).getByRole('radio', { name: nextColor })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config.color).toBe(expectedColor)
+  })
+
+  it.each([
+    { initial: 'qq' as const, next: 'manual' as const, choice: '紫', expectedColor: '#7c3aed' },
+    { initial: 'qq' as const, next: 'manual' as const, choice: '不标识', expectedColor: null },
+    { initial: 'manual' as const, next: 'qq' as const, choice: '不标识', expectedColor: null },
+  ])('keeps an explicit $choice choice across connection steps and a switch from $initial to $next', async ({ initial, next, choice, expectedColor }) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await toProfile(dialog, initial)
+    await userEvent.click(within(dialog).getByRole('radio', { name: choice }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByRole('radio', { name: choice })).toHaveAttribute('aria-checked', 'true')
+    await backToProviders(dialog)
+    await toProfile(dialog, next)
+    expect(within(dialog).getByRole('radio', { name: choice })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config.color).toBe(expectedColor)
+  })
+
+  it.each([
+    { method: 'qq' as const, choice: '紫', defaultColor: '不标识' },
+    { method: 'manual' as const, choice: '不标识', defaultColor: '绿' },
+  ])('resets an explicit $choice choice on a fresh $method opening', async ({ method, choice, defaultColor }) => {
+    const props = { client: testClient(), accounts: [exampleAccount({ color: '#2563eb' })], onClose: vi.fn(), onCreated: vi.fn() }
+    const { rerender } = render(<AddAccountDialog {...props} open />)
+    await toProfile(screen.getByRole('dialog'), method)
+    await userEvent.click(screen.getByRole('radio', { name: choice }))
+    rerender(<AddAccountDialog {...props} open={false} />)
+    rerender(<AddAccountDialog {...props} open />)
+    await toProfile(screen.getByRole('dialog'), method)
+    expect(screen.getByRole('radio', { name: defaultColor })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: choice })).toHaveAttribute('aria-checked', 'false')
   })
 
   it('retains the QQ address and authorization code when returning from the profile', async () => {
@@ -315,16 +379,20 @@ describe('add account wizard', () => {
     expect(within(dialog).getByLabelText('收发密码')).toHaveValue('synthetic-secret')
   })
 
-  it('returns to the connection step when the server rejects it', async () => {
+  it.each(['紫', '不标识'])('returns to a rejected connection without losing an explicit %s choice', async (choice) => {
     const client = testClient()
     client.createAccount.mockRejectedValue(new MailxClientError({ code: 'validation', field: 'imap.host', message: '无法使用这个主机。' }))
     const { dialog } = renderDialog(client)
     await toProfile(dialog)
+    await userEvent.click(within(dialog).getByRole('radio', { name: choice }))
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
     expect(await within(dialog).findByText('请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('IMAP 主机')).toHaveAttribute('aria-invalid', 'true')
     // The password went out with the failed request and must be entered again.
     expect(within(dialog).getByLabelText('收发密码')).toHaveValue('')
+    fillConnection(dialog)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByRole('radio', { name: choice })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('requires a name before finishing', async () => {
