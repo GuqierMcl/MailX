@@ -84,10 +84,11 @@ export function ProfileFields({ displayName, color, providerId, useProviderIcon 
         <div role="radiogroup" aria-labelledby="account-color-label" className="flex flex-wrap gap-2">
           {choices.map((choice) => {
             const checked = choice.value === color
+            // A pick confirms even the current default as the user's own choice.
             return (
               <button key={choice.value ?? 'none'} type="button" role="radio" aria-checked={checked} aria-label={choice.name} title={choice.name}
                 disabled={disabled}
-                onClick={() => !checked && onColorChange(choice.value)}
+                onClick={() => onColorChange(choice.value)}
                 style={choice.value ? { backgroundColor: choice.value } : undefined}
                 className={cn(
                   'flex size-7 items-center justify-center rounded-full outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50',
