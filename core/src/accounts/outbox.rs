@@ -8,10 +8,11 @@ use super::{AccountService, new_id, validate_uuid};
 use crate::{
     AppError, Draft, ErrorCode,
     accounts::sync_plan::PlanError,
+    drafts::body::{outgoing_body, referenced_cids},
     send::types::*,
     smtp::{
         SmtpPlan,
-        attachment::AttachmentData,
+        attachment::{AttachmentData, InlineImageData},
         message::{BuiltMessage, OutgoingMessage, build, local_now, new_message_id},
     },
     storage::{
@@ -77,9 +78,10 @@ impl SendBuild {
     /// Reads the attachment blobs (hash verified), builds the MIME and stores
     /// it as a blob. Touches no database, so it runs outside the store lock.
     pub(crate) fn freeze(&self) -> Result<Frozen, AppError> {
-        let attachments = self
-            .files
-            .iter()
+        let (inline, regular): (Vec<_>, Vec<_>) =
+            self.files.iter().partition(|file| file.summary.inline);
+        let attachments = regular
+            .into_iter()
             .map(|file| {
                 Ok(AttachmentData {
                     file_name: file.summary.file_name.clone(),
@@ -88,13 +90,39 @@ impl SendBuild {
                 })
             })
             .collect::<Result<Vec<_>, AppError>>()?;
+        let inline_images = inline
+            .into_iter()
+            .filter_map(|file| {
+                let content_id = file.summary.content_id.clone()?;
+                Some(self.blobs.read(&file.blob).map(|bytes| InlineImageData {
+                    content_id,
+                    file: AttachmentData {
+                        file_name: file.summary.file_name.clone(),
+                        media_type: file.summary.media_type.clone(),
+                        bytes,
+                    },
+                }))
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        // Dangling `cid:` references lose their `<img>`; text names the files.
+        let names: Vec<(String, String)> = inline_images
+            .iter()
+            .map(|image| (image.content_id.clone(), image.file.file_name.clone()))
+            .collect();
+        let mut draft = self.draft.clone();
+        if !referenced_cids(&draft.body_html).is_empty() {
+            let body = outgoing_body(&draft.body_html, &names)?;
+            draft.body_html = body.html;
+            draft.body_text = body.text;
+        }
         let built = build(&OutgoingMessage {
             sender_address: &self.address,
             sender_name: self.name.as_deref(),
-            draft: &self.draft,
+            draft: &draft,
             message_id: &self.message_id,
             date: local_now(),
             attachments: &attachments,
+            inline_images: &inline_images,
         })?;
         let snapshot = self.blobs.put(&built.mime)?;
         Ok(Frozen { built, snapshot })
@@ -151,7 +179,19 @@ impl AccountService {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
         let (address, name) = self.storage.account_sender(&draft.account_id)?;
-        let files = self.storage.attachment_files(&draft.id)?;
+        // Only what will be sent counts: regular attachments and the inline
+        // images the body references. A reference without a row is dropped
+        // from the sent body in `freeze`.
+        let referenced = referenced_cids(&draft.body_html);
+        let files: Vec<AttachmentFile> = self
+            .storage
+            .attachment_files(&draft.id)?
+            .into_iter()
+            .filter(|file| match &file.summary.content_id {
+                Some(cid) if file.summary.inline => referenced.contains(cid),
+                _ => true,
+            })
+            .collect();
         // Adding an attachment is checked too, but a forward may prefill past
         // the policy so the user can trim it rather than losing the draft
         // (sending.md section 16.8). Queueing is the authoritative check.

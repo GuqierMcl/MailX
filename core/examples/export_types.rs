@@ -105,6 +105,7 @@ fn main() {
         AddAttachmentRequest,
         RemoveAttachmentRequest,
         DraftAttachmentSummary,
+        InlineImage,
         AttachmentOrigin,
         AttachmentPolicy,
         OutboxState,

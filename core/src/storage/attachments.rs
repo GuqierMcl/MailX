@@ -6,14 +6,17 @@
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::{Storage, bodies::StoredBlob, outbox::live_for_draft};
+use crate::drafts::body::referenced_cids;
 use crate::{
     AppError, AttachmentOrigin, AttachmentPolicy, Draft, DraftAttachmentSummary, ErrorCode,
 };
 
-const COLUMNS: &str = "id, file_name, media_type, size, blob_hash, origin";
+const COLUMNS: &str = "id, file_name, media_type, size, blob_hash, origin, inline, content_id";
 
 pub(crate) struct NewAttachment<'a> {
     pub id: &'a str,
+    /// `Some` makes the row an inline image addressed by this Content-ID.
+    pub content_id: Option<&'a str>,
     pub file_name: &'a str,
     pub media_type: &'a str,
     pub blob: &'a StoredBlob,
@@ -36,6 +39,8 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<AttachmentFile> {
             media_type: row.get(2)?,
             size,
             origin: AttachmentOrigin::parse(&origin).ok_or(rusqlite::Error::InvalidQuery)?,
+            inline: row.get(6)?,
+            content_id: row.get(7)?,
         },
         blob: StoredBlob {
             sha256: row.get(4)?,
@@ -87,6 +92,37 @@ fn begin_change(
     Ok(())
 }
 
+/// Frees the quota of inline images the saved body no longer shows. Runs only
+/// when a file is added; saving a body never deletes a row, so an image the
+/// user removed and then undid is still there.
+fn drop_unreferenced_inline(tx: &Connection, draft_id: &str) -> Result<(), AppError> {
+    let html: String = tx.query_row(
+        "SELECT body_html FROM drafts WHERE id = ?1",
+        [draft_id],
+        |row| row.get(0),
+    )?;
+    let referenced = referenced_cids(&html);
+    let mut statement = tx.prepare(
+        "SELECT id, content_id FROM draft_attachments WHERE draft_id = ?1 AND inline = 1",
+    )?;
+    let stale = statement
+        .query_map([draft_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|(_, cid)| cid.as_ref().is_none_or(|cid| !referenced.contains(cid)))
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    for id in stale {
+        tx.execute(
+            "DELETE FROM draft_attachments WHERE draft_id = ?1 AND id = ?2",
+            params![draft_id, id],
+        )?;
+    }
+    Ok(())
+}
+
 impl Storage {
     pub(crate) fn attachment_files(&self, draft_id: &str) -> Result<Vec<AttachmentFile>, AppError> {
         files_of(&self.db, draft_id)
@@ -108,37 +144,69 @@ impl Storage {
         policy: AttachmentPolicy,
         now: &str,
     ) -> Result<Draft, AppError> {
+        self.add_attachments(
+            draft_id,
+            expected_revision,
+            std::slice::from_ref(attachment),
+            policy,
+            now,
+        )
+    }
+
+    /// Adds every row in one revision step: the stale inline images are
+    /// dropped once before inserting, and the limits apply to the total after
+    /// the whole batch. Any failure stores nothing.
+    pub(crate) fn add_attachments(
+        &mut self,
+        draft_id: &str,
+        expected_revision: u32,
+        attachments: &[NewAttachment<'_>],
+        policy: AttachmentPolicy,
+        now: &str,
+    ) -> Result<Draft, AppError> {
         let tx = self.db.transaction()?;
         begin_change(&tx, draft_id, expected_revision, now)?;
+        drop_unreferenced_inline(&tx, draft_id)?;
         let (count, total): (i64, i64) = tx.query_row(
             "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM draft_attachments WHERE draft_id = ?1",
             [draft_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        if count >= i64::from(policy.max_count) {
+        let added = i64::try_from(attachments.len()).unwrap_or(i64::MAX);
+        if count.saturating_add(added) > i64::from(policy.max_count) {
             return Err(AppError::new(ErrorCode::TooManyAttachments));
         }
-        let size = i64::try_from(attachment.blob.size)
-            .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
-        if u64::try_from(total.saturating_add(size)).unwrap_or(u64::MAX) > policy.max_total_bytes {
+        let mut sizes = Vec::with_capacity(attachments.len());
+        let mut sum = total;
+        for attachment in attachments {
+            let size = i64::try_from(attachment.blob.size)
+                .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+            sum = sum.saturating_add(size);
+            sizes.push(size);
+        }
+        if u64::try_from(sum).unwrap_or(u64::MAX) > policy.max_total_bytes {
             return Err(AppError::new(ErrorCode::AttachmentTooLarge));
         }
-        tx.execute(
-            "INSERT INTO draft_attachments
-                (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
-                 origin, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8)",
-            params![
-                draft_id,
-                attachment.id,
-                attachment.file_name,
-                attachment.media_type,
-                size,
-                attachment.blob.sha256,
-                attachment.origin.as_str(),
-                now,
-            ],
-        )?;
+        for (attachment, size) in attachments.iter().zip(sizes) {
+            tx.execute(
+                "INSERT INTO draft_attachments
+                    (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
+                     origin, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    draft_id,
+                    attachment.id,
+                    attachment.file_name,
+                    attachment.media_type,
+                    size,
+                    attachment.blob.sha256,
+                    attachment.content_id.is_some(),
+                    attachment.content_id,
+                    attachment.origin.as_str(),
+                    now,
+                ],
+            )?;
+        }
         tx.commit()?;
         self.get_draft(draft_id)
     }

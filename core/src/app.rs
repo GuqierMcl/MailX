@@ -14,7 +14,9 @@ use crate::accounts::types::{
     Account, AccountRemoval, CreateAccountRequest, RemoveAccountRequest, UpdateConnectionRequest,
     UpdateProfileRequest,
 };
-use crate::drafts::attachments::{AddAttachmentRequest, AttachmentPolicy, RemoveAttachmentRequest};
+use crate::drafts::attachments::{
+    AddAttachmentRequest, AttachmentPolicy, InlineImage, RemoveAttachmentRequest,
+};
 use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
 };
@@ -428,6 +430,34 @@ impl MailxCore {
         let draft = self.accounts()?.add_attachment(request, bytes)?;
         self.announce_draft(&draft, DraftChange::Updated);
         Ok(draft)
+    }
+
+    /// Stores several pictures as inline images of a draft, all or nothing,
+    /// in one revision step and with one draft-updated event. The body is not
+    /// changed; the host inserts `<img src="cid:{contentId}">` for each
+    /// returned image (input order) and saves the draft. A file that is not a
+    /// supported image fails the whole batch with `unsupportedImage`.
+    pub fn add_inline_images(
+        &self,
+        draft_id: &str,
+        expected_revision: u32,
+        files: Vec<(String, Vec<u8>)>,
+    ) -> Result<(Draft, Vec<InlineImage>), AppError> {
+        let (draft, images) =
+            self.accounts()?
+                .add_inline_images(draft_id, expected_revision, files)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok((draft, images))
+    }
+
+    /// Media type and bytes the editor may show for an inline image.
+    pub fn inline_image_preview(
+        &self,
+        draft_id: &str,
+        attachment_id: &str,
+    ) -> Result<(String, Vec<u8>), AppError> {
+        self.accounts()?
+            .inline_image_preview(draft_id, attachment_id)
     }
 
     pub fn remove_attachment(&self, request: RemoveAttachmentRequest) -> Result<Draft, AppError> {

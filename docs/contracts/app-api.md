@@ -189,17 +189,18 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 返回值与错误沿用 `ApiResult`；错误码 `bodyNotCached`、`draftLocked`、`forbidden`、`alreadySending`、`conflict`、`idempotencyConflict` 原样透传。核心调用都在阻塞线程上执行。
 
-内嵌图片（规划，未实现；设计见[发信设计 16.11](../architecture/sending.md#1611-第二批内嵌图片规划2026-10-30-确认未实现)）将新增下列命令，权限与上表的附件命令相同（main 为 `validation`，composer 仅自己的草稿）：
+内嵌图片（已实现，尚未手测；设计见[发信设计 16.11](../architecture/sending.md#1611-第二批内嵌图片2026-10-30-确认首批已实现尚未手测)）的命令如下，权限与上表的附件命令相同（main 为 `validation`，composer 仅自己的草稿）：
 
 | 命令 | 说明 |
 | --- | --- |
-| `inline_images_add { request: { draftId, expectedRevision } }` | 宿主打开只列图片的系统对话框，取消返回 `null`；成功返回 `{ draft, inserted: InlineImage[] }`，`InlineImage { attachmentId, contentId, fileName }`，前端据此在光标处插入 `cid:` 图片 |
-| `inline_images_add_bytes` | 粘贴用。请求体为原始字节，`draftId`、`expectedRevision` 与文件名经请求头传入；返回同上 |
-| `inline_image_preview { draftId, attachmentId }` | 只读，返回原始字节响应：核心校验并转码后的预览图（GIF / WebP 为静态 PNG），不返回发出用的原始字节 |
+| `inline_images_add { request: { draftId, expectedRevision } }` | 宿主打开只列 PNG / JPEG / GIF / WebP 的系统对话框（可多选），取消返回 `null`；成功返回 `{ draft, inserted: InlineImage[] }`，`InlineImage { attachmentId, contentId, fileName }` 按选择顺序排列，前端据此在光标处插入 `cid:` 图片。整批在一个事务内写入，任一文件不合格则整批不存 |
+| `inline_images_add_bytes` | 粘贴用。请求体为一张图片的原始字节；请求头 `x-mailx-draft-id`、`x-mailx-expected-revision`（十进制）、`x-mailx-file-name`（百分号编码的 UTF-8）。返回同上（`inserted` 只有一项）；缺少或无效请求头、JSON 请求体返回 `validation`（字段 `request`） |
+| `inline_image_preview { draftId, attachmentId }` | 只读，直接返回原始字节响应（不走 `ApiResult` 包装）：核心校验并转码后的预览图（GIF / WebP 为静态 PNG），不返回发出用的原始字节；失败时以序列化的 `AppError` 拒绝，找不到或不是内嵌图片为 `notFound` |
 
-- 只接受 PNG、JPEG、GIF、WebP（按文件头判断），其余及校验失败返回新错误码 `unsupportedImage`；修订号、锁定与超限沿用 `conflict`、`draftLocked`、`attachmentTooLarge` / `tooManyAttachments`。
-- `DraftAttachmentSummary` 增加 `inline: boolean`（普通附件为 `false`）；附件栏只列 `inline: false` 的项。
-- 草稿 `bodyHtml` 白名单放行 `<img src="cid:…" alt width height>`，`src` 只认本草稿 Content-ID 的格式，其他图片仍被去掉。
+- 只接受 PNG、JPEG、GIF、WebP（按文件头判断），其余格式、APNG、边长超过 8192 像素与解码失败返回 `unsupportedImage`；修订号、锁定与超限沿用 `conflict`、`draftLocked`、`attachmentTooLarge` / `tooManyAttachments`。
+- `DraftAttachmentSummary` 增加 `inline: boolean` 与 `contentId: string | null`（内嵌图片的 Content-ID，不带尖括号；普通附件为 `false` / `null`）；附件栏只列 `inline: false` 的项，合计大小仍包含内嵌图片。
+- 新增附件或内嵌图片时，核心在同一事务里删除已保存正文未引用的内嵌图片；前端在每次新增前先保存正文。
+- 草稿 `bodyHtml` 白名单放行 `<img src="cid:…" alt width height>`，`src` 只认 `<32 位小写十六进制>@<域名>` 的 Content-ID 格式，其他图片仍被去掉。
 - 应用 CSP 的 `img-src` 增加 `blob:`，供编辑器显示预览。
 
 前端用法（4b）：主窗口创建草稿时，`drafts_create` 的 `accountId` 在浏览单个账号的文件夹时传该账号，在统一收件箱 / 草稿 / 发件箱视图传 `null`（由宿主按 `compose.defaultAccountId` 解析）；`drafts_create_from` 遇 `bodyNotCached` 时先调用 `emails_fetch_body`，成功后用**同一个** `clientMutationId` 重试一次；写信窗口的每次保存都带上次保存的 `expectedRevision`，`conflict` 后重新 `drafts_get`，不静默合并。`mailx://notification-open` 的载荷可带 `outboxId`，主窗口据此选中发件箱项。

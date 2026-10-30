@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { useCallback, useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AttachmentPolicy } from '@/generated/accounts'
@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils'
 import { RecipientField } from './recipient-field'
 import { SendButton } from './send-button'
 import { AttachmentBar } from './attachment-bar'
+import type { MailBodyEditorHandle } from './mail-body-editor'
 import { DraftUnsavedError, fieldsAreEmpty, useDraftEditor, type SaveStatus } from './use-draft-editor'
 import { useMailBodyEditor } from './mail-body-editor-loader'
 
@@ -113,8 +114,8 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   }, [client, accountId])
 
   // Every attachment command reports its failure in the bottom bar, like sending does.
-  const { addAttachments, addDroppedAttachments, removeAttachment } = editor
-  const runAttachment = useCallback(async (command: () => Promise<void>) => {
+  const { addAttachments, addDroppedAttachments, addInlineImages, addInlineImageBytes, removeAttachment } = editor
+  const runAttachment = useCallback(async (command: () => Promise<unknown>) => {
     setError(null)
     try {
       await command()
@@ -124,6 +125,21 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   }, [])
   // The host tells the window when the OS dropped files on it; it keeps the paths itself.
   useEffect(() => client.onFilesDropped(() => void runAttachment(addDroppedAttachments)), [client, runAttachment, addDroppedAttachments])
+  const bodyRef = useRef<MailBodyEditorHandle | null>(null)
+  const [missingImages, setMissingImages] = useState(0)
+  // Each stored image is inserted where the cursor is once the host has given it a Content-ID.
+  const insertPicked = useCallback(
+    () => void runAttachment(async () => { bodyRef.current?.insertInlineImages(await addInlineImages()) }),
+    [addInlineImages, runAttachment],
+  )
+  // One image at a time: every add flushes the body first, so the previous node is saved (and referenced) by then.
+  const pasteImages = useCallback(
+    (files: File[]) => void runAttachment(async () => {
+      for (const file of files) bodyRef.current?.insertInlineImages(await addInlineImageBytes(file))
+    }),
+    [addInlineImageBytes, runAttachment],
+  )
+  const loadPreview = useCallback((attachmentId: string) => client.inlineImagePreview(draftId, attachmentId), [client, draftId])
 
   const accountItems = useMemo(() => Object.fromEntries(accounts.map((row) => [row.id, accountLabel(row)])), [accounts])
 
@@ -163,6 +179,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
     setError(null)
     const latest = editor.latest()
     if (!latest) return null
+    setMissingImages(0)
     const all = [...latest.to, ...latest.cc, ...latest.bcc]
     if (all.length === 0) {
       setError({ key: 'composer:validation.recipientsRequired' })
@@ -187,6 +204,10 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       setError({ key: 'composer:validation.unsaved' })
       return null
     }
+    // Pictures whose attachment is gone are left out of the sent mail; say so, but let the send go on.
+    const present = new Set(editor.attachments.filter((item) => item.inline).map((item) => item.contentId))
+    const referenced = new DOMParser().parseFromString(latest.bodyHtml, 'text/html').querySelectorAll('img[src^="cid:"]')
+    setMissingImages([...referenced].filter((image) => !present.has((image.getAttribute('src') ?? '').slice('cid:'.length))).length)
     return editor.revision()
   }
 
@@ -294,7 +315,15 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
         </div>
       </div>
       {MailBodyEditor ? (
-        <MailBodyEditor value={fields.bodyHtml} readOnly={readOnly} onChange={(bodyHtml) => editor.update({ bodyHtml })} />
+        <MailBodyEditor
+          value={fields.bodyHtml}
+          readOnly={readOnly}
+          onChange={(bodyHtml) => editor.update({ bodyHtml })}
+          editorRef={bodyRef}
+          inlineImages={{ attachments: editor.attachments, loadPreview }}
+          onInsertImage={insertPicked}
+          onPasteImages={pasteImages}
+        />
       ) : editorLoadFailed ? (
         <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">
           <p>{t('composer:editor.loadFailed')}</p>
@@ -332,6 +361,9 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
             </span>
           </span>
           {failedSave && !readOnly && <Button type="button" variant="ghost" size="xs" onClick={editor.retry}>{t('composer:action.retry')}</Button>}
+          {missingImages > 0 && !error && !hasInvalid && (
+            <span role="status" className="truncate text-muted-foreground">{t('composer:notice.missingImages', { count: missingImages })}</span>
+          )}
           {(error || hasInvalid) && (
             <span role="alert" className="flex min-w-0 items-center gap-1 text-destructive">
               <HugeiconsIcon icon={AlertCircleIcon} className="size-3.5 shrink-0" />

@@ -1081,6 +1081,75 @@ async fn attachments_are_sent_from_the_frozen_snapshot_after_the_draft_is_gone()
     assert_eq!(body, fx.core.outbox_mime_for_tests(&item.id));
 }
 
+fn inline_attached(fx: &Fx, draft: &Draft, name: &str) -> (Draft, String) {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(3, 3, image::Rgb([9, 9, 9])))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let (draft, images) = fx
+        .core
+        .add_inline_images(
+            &draft.id,
+            draft.revision,
+            vec![(name.to_owned(), png.get_ref().clone())],
+        )
+        .unwrap();
+    (draft, images[0].content_id.clone())
+}
+
+fn with_body(fx: &Fx, draft: &Draft, body_html: String) -> Draft {
+    fx.core
+        .update_draft(crate::UpdateDraftRequest {
+            id: draft.id.clone(),
+            expected_revision: draft.revision,
+            account_id: None,
+            to: draft.to.clone(),
+            cc: vec![],
+            bcc: vec![],
+            subject: draft.subject.clone(),
+            body_html,
+        })
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn freezing_sends_only_referenced_inline_images_and_drops_dangling_references() {
+    let fx = fixture();
+    let port = dead_port().await;
+    let account = fx.account("lin@example.com", port);
+    let draft = attached(&fx, &fx.draft(&account), "a.pdf", b"%PDF-1.7");
+    let (draft, used) = inline_attached(&fx, &draft, "used.png");
+    // Adding the next file would otherwise drop `used`, which the saved body
+    // does not show yet.
+    let draft = with_body(&fx, &draft, format!("<p><img src=\"cid:{used}\"></p>"));
+    let (draft, unused) = inline_attached(&fx, &draft, "unused.png");
+    let dangling = "00000000000000000000000000000000@example.com";
+    let body = format!(
+        "<p>hi<img src=\"cid:{used}\"><img src=\"cid:{dangling}\" alt=\"ghost\"><img src=\"cid:{used}\"></p>"
+    );
+    let draft = with_body(&fx, &draft, body);
+    let item = fx.queue(&draft, 30);
+    let raw = fx.core.outbox_mime_for_tests(&item.id);
+    let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    assert!(text.contains("Content-Type: multipart/mixed"));
+    assert!(text.contains("Content-Type: multipart/related"));
+    let sent: Vec<_> = parsed
+        .attachments()
+        .map(|part| part.attachment_name().unwrap().to_owned())
+        .collect();
+    assert_eq!(sent, ["used.png", "a.pdf"], "unused.png is not sent");
+    assert_eq!(text.matches(&format!("Content-ID: <{used}>")).count(), 1);
+    assert!(!text.contains(&unused));
+    assert!(!text.contains(dangling), "the dangling <img> is removed");
+    let html = parsed.body_html(0).unwrap();
+    assert!(html.contains(&format!("cid:{used}")));
+    let plain = parsed.body_text(0).unwrap();
+    assert!(!plain.contains("ghost"));
+    assert!(plain.contains("[used.png]"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn retries_send_the_identical_snapshot_bytes() {
     let fx = fixture();

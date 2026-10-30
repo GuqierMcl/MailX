@@ -19,6 +19,7 @@ import type {
   CreateDraftRequest,
   Draft,
   DraftChanged,
+  InlineImage,
   DraftSummary,
   OutboxChanged,
   OutboxItem,
@@ -151,6 +152,15 @@ export interface MailxClient {
   addAttachments(draftId: string, expectedRevision: number): Promise<Draft | null>
   /** Composer window. Attaches the files the OS dropped on this window since `onFilesDropped` fired; `null` if none. */
   addDroppedAttachments(draftId: string, expectedRevision: number): Promise<Draft | null>
+  /**
+   * Composer window, own draft only. Opens the host's image picker and adds the chosen images as inline images
+   * (each gets a Content-ID the body references as `cid:`). `null` when the picker was cancelled.
+   */
+  addInlineImages(draftId: string, expectedRevision: number): Promise<{ draft: Draft; inserted: InlineImage[] } | null>
+  /** Composer window. Adds one pasted or dropped image from its bytes; fails with `unsupportedImage` for other formats. */
+  addInlineImageBytes(draftId: string, expectedRevision: number, fileName: string, bytes: Uint8Array): Promise<{ draft: Draft; inserted: InlineImage[] }>
+  /** Composer window. A displayable copy of an inline image (PNG / JPEG ...); `notFound` when the attachment is gone. */
+  inlineImagePreview(draftId: string, attachmentId: string): Promise<ArrayBuffer>
   /** Composer window, own draft only. `draftLocked` once the draft is queued. */
   removeAttachment(request: RemoveAttachmentRequest): Promise<Draft>
   /** Limits for drafts of this account; `serverLimitMb` is only a hint, the core stays authoritative. */
@@ -228,6 +238,19 @@ export function clientFailure(error: unknown): ClientFailure {
 /** The machine-readable code of a failure, for deciding what to do rather than what to say. */
 export function clientFailureCode(error: unknown): ClientFailure['code'] {
   return clientFailure(error).code
+}
+
+function isApiResult(value: unknown): value is ApiResult<unknown> {
+  return typeof value === 'object' && value !== null && 'ok' in value && typeof (value as { ok: unknown }).ok === 'boolean'
+}
+
+/** Raw-body commands reject with the host's `AppError`; anything else is a transport failure. */
+function rawFailure(cause: unknown): ClientFailure {
+  if (typeof cause === 'object' && cause !== null && typeof (cause as { code?: unknown }).code === 'string') {
+    const { code, message, field } = cause as { code: AppError['code']; message?: string; field?: string | null }
+    return { code, message: message ?? '', field: field ?? null }
+  }
+  return clientFailure(null)
 }
 
 export function createDesktopClient(): MailxClient {
@@ -370,6 +393,35 @@ export function createDesktopClient(): MailxClient {
     addAttachments: (draftId, expectedRevision) => call<Draft | null>('attachments_add', { request: { draftId, expectedRevision } }),
     addDroppedAttachments: (draftId, expectedRevision) =>
       call<Draft | null>('attachments_add_dropped', { request: { draftId, expectedRevision } }),
+    addInlineImages: (draftId, expectedRevision) =>
+      call<{ draft: Draft; inserted: InlineImage[] } | null>('inline_images_add', { request: { draftId, expectedRevision } }),
+    async addInlineImageBytes(draftId, expectedRevision, fileName, bytes) {
+      if (!available) throw new MailxClientError({ code: 'hostUnavailable', message: '请在 MailX 桌面应用中管理账号。', field: null })
+      const headers = {
+        'x-mailx-draft-id': draftId,
+        'x-mailx-expected-revision': String(expectedRevision),
+        'x-mailx-file-name': encodeURIComponent(fileName),
+      }
+      let result: unknown
+      try {
+        result = await invoke<unknown>('inline_images_add_bytes', bytes, { headers })
+      } catch (cause) {
+        throw new MailxClientError(rawFailure(cause))
+      }
+      if (isApiResult(result)) {
+        if (result.ok === false) throw new MailxClientError(result.error)
+        return result.data as { draft: Draft; inserted: InlineImage[] }
+      }
+      return result as { draft: Draft; inserted: InlineImage[] }
+    },
+    async inlineImagePreview(draftId, attachmentId) {
+      if (!available) throw new MailxClientError({ code: 'hostUnavailable', message: '请在 MailX 桌面应用中管理账号。', field: null })
+      try {
+        return await invoke<ArrayBuffer>('inline_image_preview', { draftId, attachmentId })
+      } catch (cause) {
+        throw new MailxClientError(rawFailure(cause))
+      }
+    },
     removeAttachment: (request) => call<Draft>('attachments_remove', { request }),
     attachmentPolicy: (accountId) => call<AttachmentPolicy>('attachments_policy', { accountId }),
     onFilesDropped: (listener) => subscribe<void>(HOST_EVENTS.filesDropped, () => listener()),

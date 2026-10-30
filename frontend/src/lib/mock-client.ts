@@ -3,6 +3,7 @@ import type {
   AccountRemoval,
   AccountConfigInput,
   Draft,
+  InlineImage,
   DraftChanged,
   DraftSummary,
   OutboxChanged,
@@ -104,8 +105,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const total = draft.attachments.reduce((sum, a) => sum + a.size, 0)
     if (draft.attachments.length >= 20) throw new MailxClientError({ code: 'tooManyAttachments', message: '附件最多 20 个。', field: null })
     if (total + size > MOCK_ATTACHMENT_LIMIT) throw new MailxClientError({ code: 'attachmentTooLarge', message: '附件总大小超过 20 MB。', field: null })
-    draft.attachments.push({ id: crypto.randomUUID(), fileName, mediaType, size, origin: 'user' })
+    draft.attachments.push({ id: crypto.randomUUID(), fileName, mediaType, size, origin: 'user', inline: false, contentId: null })
     return touchDraft(draft)
+  }
+
+  // Inline images keep their bytes so the preview can hand them back.
+  const inlineBytes = new Map<string, Uint8Array>()
+  const MOCK_PIXEL = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))
+  function addMockInline(draft: Draft, fileName: string, bytes: Uint8Array) {
+    const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+    const image: InlineImage = { attachmentId: crypto.randomUUID(), contentId: `${hex}@example.com`, fileName }
+    draft.attachments.push({ id: image.attachmentId, fileName, mediaType: 'image/png', size: bytes.byteLength, origin: 'user', inline: true, contentId: image.contentId })
+    inlineBytes.set(image.attachmentId, bytes)
+    return image
   }
 
   function requireDraft(id: string) {
@@ -410,6 +422,21 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return addMockAttachment(draft, sample)
     },
     async addDroppedAttachments() { return null },
+    async addInlineImages(draftId, expectedRevision) {
+      const draft = mutableDraft(draftId, expectedRevision)
+      const inserted = [addMockInline(draft, 'image.png', MOCK_PIXEL)]
+      return { draft: touchDraft(draft), inserted }
+    },
+    async addInlineImageBytes(draftId, expectedRevision, fileName, bytes) {
+      const draft = mutableDraft(draftId, expectedRevision)
+      const inserted = [addMockInline(draft, fileName || 'image.png', bytes)]
+      return { draft: touchDraft(draft), inserted }
+    },
+    async inlineImagePreview(_draftId, attachmentId) {
+      const bytes = inlineBytes.get(attachmentId)
+      if (!bytes) throw notFound()
+      return bytes.slice().buffer
+    },
     async removeAttachment({ draftId, attachmentId, expectedRevision }) {
       const draft = mutableDraft(draftId, expectedRevision)
       if (!draft.attachments.some((a) => a.id === attachmentId)) throw notFound()

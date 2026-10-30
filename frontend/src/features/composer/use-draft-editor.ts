@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Draft, DraftAttachmentSummary, DraftKind } from '@/generated/accounts'
+import type { Draft, DraftAttachmentSummary, DraftKind, InlineImage } from '@/generated/accounts'
 import { clientFailure, clientFailureCode, type MailxClient, type ClientFailure } from '@/lib/mailx-client'
 import { recipientsFromAddresses, toMailAddresses, type Recipient } from './address-parse'
 import { draftHtmlIsEmpty } from './draft-html'
@@ -293,17 +293,19 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
    * revision and the attachment list are taken from the answer, never the text, so typing is not clobbered.
    * A failure rethrows after resyncing (earlier files of a multi-file add may have gone through).
    */
-  const mutateAttachments = useCallback(async (command: (expectedRevision: number) => Promise<Draft | null>) => {
-    if (detached.current || !alive.current || lockedRef.current || mutating.current) return
+  const mutateAttachments = useCallback(async (command: (expectedRevision: number) => Promise<Draft | null | { draft: Draft; inserted: InlineImage[] }>): Promise<InlineImage[]> => {
+    if (detached.current || !alive.current || lockedRef.current || mutating.current) return []
     setAttaching(true)
-    const run = (async () => {
+    const run = (async (): Promise<InlineImage[]> => {
       const { ok } = await flush()
       if (!ok) throw new DraftUnsavedError()
       try {
-        const draft = await command(revision.current)
-        if (!draft || !alive.current || detached.current) return
+        const result = await command(revision.current)
+        if (!result || !alive.current || detached.current) return []
+        const draft = 'draft' in result ? result.draft : result
         revision.current = draft.revision
         applyAttachments(draft.attachments)
+        return 'draft' in result ? result.inserted : []
       } catch (cause) {
         if (!alive.current || detached.current) throw cause
         const code = clientFailureCode(cause)
@@ -323,7 +325,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     })()
     mutating.current = run
     try {
-      await run
+      return await run
     } finally {
       mutating.current = null
       if (alive.current) setAttaching(false)
@@ -338,6 +340,16 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   /** Attaches the files the OS dropped on the window. */
   const addDroppedAttachments = useCallback(
     () => mutateAttachments((expectedRevision) => client.addDroppedAttachments(draftId, expectedRevision)),
+    [client, draftId, mutateAttachments],
+  )
+  /** Opens the host's image picker; resolves with the images added (empty when cancelled). */
+  const addInlineImages = useCallback(
+    () => mutateAttachments((expectedRevision) => client.addInlineImages(draftId, expectedRevision)),
+    [client, draftId, mutateAttachments],
+  )
+  /** Adds one pasted or dropped image. The body is flushed first, so earlier images stay referenced. */
+  const addInlineImageBytes = useCallback(
+    (file: File) => file.arrayBuffer().then((bytes) => mutateAttachments((expectedRevision) => client.addInlineImageBytes(draftId, expectedRevision, file.name, new Uint8Array(bytes)))),
     [client, draftId, mutateAttachments],
   )
   const removeAttachment = useCallback(
@@ -409,6 +421,8 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     attaching,
     addAttachments,
     addDroppedAttachments,
+    addInlineImages,
+    addInlineImageBytes,
     removeAttachment,
     changeToken,
     update,

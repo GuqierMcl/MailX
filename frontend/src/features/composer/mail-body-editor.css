@@ -153,3 +153,19 @@
 .mail-body-editor [data-highlight="yellow"], .mail-body-editor [data-swatch-highlight="yellow"] { background: var(--mail-highlight-yellow); }
 .mail-body-editor [data-highlight="green"], .mail-body-editor [data-swatch-highlight="green"] { background: var(--mail-highlight-green); }
 .mail-body-editor [data-highlight="blue"], .mail-body-editor [data-swatch-highlight="blue"] { background: var(--mail-highlight-blue); }
+
+.mail-body-editor .mail-inline-image img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: bottom;
+}
+
+.mail-body-editor .mail-inline-image-missing {
+  color: var(--muted-foreground);
+  font-size: 0.875em;
+}
+
+.mail-body-editor .mail-inline-image .ProseMirror-selectednode,
+.mail-body-editor .mail-inline-image:has(+ .ProseMirror-separator) {
+  outline: none;
+}

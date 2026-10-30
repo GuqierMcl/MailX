@@ -32,7 +32,7 @@ pub use app::{
     ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
-    AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary,
+    AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
     RemoveAttachmentRequest,
 };
 pub use drafts::types::*;

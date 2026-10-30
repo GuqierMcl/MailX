@@ -6,6 +6,7 @@ import { Markdown } from '@tiptap/markdown'
 import { DOMParser, Fragment, Slice } from '@tiptap/pm/model'
 import { Plugin } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
+import { InlineImageNode, type InlineImageController } from './inline-image'
 import { isMailTextAlign } from './mail-body-format'
 import { MailTextAlignment, MailTextColor, MailTextHighlight } from './mail-body-format-extensions'
 
@@ -99,7 +100,7 @@ const MailMarkdown = Markdown.extend({
   },
 })
 
-export function mailEditorOptions(): Partial<EditorOptions> {
+export function mailEditorOptions(images: InlineImageController | null = null): Partial<EditorOptions> {
   return {
     injectCSS: false,
     // Saved mail uses pre-wrap, so indentation, repeated spaces and tabs are
@@ -121,6 +122,7 @@ export function mailEditorOptions(): Partial<EditorOptions> {
       }),
       MailHardBreak,
       MailLink,
+      InlineImageNode.configure({ controller: images }),
       MailMarkdown,
       MailTextAlignment,
       MailTextColor,
