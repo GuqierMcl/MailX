@@ -10,7 +10,7 @@ use crate::{
     events::NewMailMessage,
     mail::{
         AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail, EmailListQuery, EmailPage,
-        EmailSummary, MailAddress, PreviewState,
+        EmailRecipients, EmailSummary, LOCAL_SENT_PREFIX, MailAddress, PreviewState,
     },
     sync::headers::MessageRecord,
 };
@@ -436,11 +436,22 @@ impl Storage {
     ) -> Result<EmailPage, AppError> {
         let query = &validated.query;
         let mut filter = ScopeFilter::new(query)?;
+        // Local Sent copies (sending.md section 9.1) join the same page; the
+        // sent-role folder join keeps them out of every other scope.
+        let mut local = ScopeFilter::new(query)?;
         if let Some(unread) = query.unread {
             filter.add("m.is_read = ?", i64::from(!unread));
+            if unread {
+                // Local copies are always read.
+                local.clauses.push("0 = 1".into());
+            }
         }
         if let Some(attachment) = query.has_attachment {
             filter.add("m.has_attachment = ?", i64::from(attachment));
+            local.add(
+                "(COALESCE(o.attachment_count, 0) > 0) = ?",
+                i64::from(attachment),
+            );
         }
         if let Some(text) = &query.text {
             let escaped = text
@@ -452,29 +463,49 @@ impl Storage {
             filter.values.extend([
                 pattern.clone().into(),
                 pattern.clone().into(),
-                pattern.into(),
+                pattern.clone().into(),
             ]);
+            local.clauses.push(
+                "(o.subject LIKE ? ESCAPE '\\' OR o.recipients_preview LIKE ? ESCAPE '\\')".into(),
+            );
+            local
+                .values
+                .extend([pattern.clone().into(), pattern.into()]);
         }
         if let Some(after) = &query.received_after {
             filter.add("m.received_at >= ?", after.clone());
+            local.add("o.accepted_at >= ?", after.clone());
         }
         if let Some(before) = &query.received_before {
             filter.add("m.received_at < ?", before.clone());
+            local.add("o.accepted_at < ?", before.clone());
         }
         if let Some(cursor) = &validated.cursor {
             filter.clauses.push("(m.received_at, m.id) < (?, ?)".into());
             filter
                 .values
                 .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+            local
+                .clauses
+                .push("(o.accepted_at, 'local-sent:' || o.id) < (?, ?)".into());
+            local
+                .values
+                .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
         }
-        filter.values.push((i64::from(validated.limit) + 1).into());
+        let mut values = filter.values.clone();
+        values.extend(local.values.iter().cloned());
+        values.push((i64::from(validated.limit) + 1).into());
         let sql = format!(
-            "SELECT {SUMMARY_COLUMNS} {VISIBLE_MESSAGES} AND {} ORDER BY m.received_at DESC, m.id DESC LIMIT ?",
-            filter.sql()
+            "SELECT {SUMMARY_COLUMNS} {VISIBLE_MESSAGES} AND {}
+             UNION ALL
+             SELECT {LOCAL_SUMMARY_COLUMNS} {LOCAL_COPIES} AND {}
+             ORDER BY 7 DESC, 1 DESC LIMIT ?",
+            filter.sql(),
+            local.sql()
         );
         let mut statement = self.db.prepare(&sql)?;
         let mut items = statement
-            .query_map(params_from_iter(filter.values), summary)?
+            .query_map(params_from_iter(values), summary)?
             .collect::<Result<Vec<_>, _>>()?;
         let next_cursor = if items.len() > validated.limit as usize {
             items.truncate(validated.limit as usize);
@@ -519,6 +550,9 @@ impl Storage {
     }
 
     pub(crate) fn get_email(&self, id: &str) -> Result<EmailDetail, AppError> {
+        if let Some(outbox_id) = id.strip_prefix(LOCAL_SENT_PREFIX) {
+            return self.local_email(outbox_id);
+        }
         let sql = format!(
             "SELECT {SUMMARY_COLUMNS}, m.to_addresses, m.cc_addresses, m.reply_to_addresses, m.body_failure {VISIBLE_MESSAGES} AND m.id = ?1"
         );
@@ -527,10 +561,10 @@ impl Storage {
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(14)?,
-                    row.get::<_, String>(15)?,
-                    row.get::<_, String>(16)?,
-                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, String>(17)?,
+                    row.get::<_, String>(18)?,
+                    row.get::<_, String>(19)?,
+                    row.get::<_, Option<String>>(20)?,
                 ))
             })
             .optional()?;
@@ -586,7 +620,83 @@ impl Storage {
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending'), m.preview_state";
+impl Storage {
+    /// Detail of a local Sent copy, read from its frozen snapshot
+    /// (sending.md section 9.3). A snapshot that is gone, unreadable or not
+    /// parseable is `notFound`, the same as an item that no longer qualifies.
+    fn local_email(&self, outbox_id: &str) -> Result<EmailDetail, AppError> {
+        let not_found = || AppError::new(ErrorCode::NotFound);
+        let id = format!("{LOCAL_SENT_PREFIX}{outbox_id}");
+        let summary = self
+            .db
+            .query_row(
+                &format!("SELECT {LOCAL_SUMMARY_COLUMNS} {LOCAL_COPIES} AND o.id = ?1"),
+                [outbox_id],
+                summary,
+            )
+            .optional()?
+            .ok_or_else(not_found)?;
+        let identity = super::bodies::read_identity(&self.db, &id)?.ok_or_else(not_found)?;
+        let (_, rendered) = self.local_rendered(&identity)?;
+        let raw = self
+            .blobs
+            .read(&self.local_snapshot(&identity)?)
+            .map_err(|_| not_found())?;
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw)
+            .ok_or_else(not_found)?;
+        let addresses = |address: Option<&mail_parser::Address<'_>>| -> Vec<MailAddress> {
+            address
+                .into_iter()
+                .flat_map(|address| address.iter())
+                .filter_map(|addr| {
+                    Some(MailAddress {
+                        name: addr.name().map(str::to_owned),
+                        address: addr.address()?.to_owned(),
+                    })
+                })
+                .collect()
+        };
+        let attachments = rendered
+            .parts
+            .iter()
+            .filter(|part| !part.is_inline)
+            .map(|part| AttachmentSummary {
+                id: format!("{id}:{}", part.part_index),
+                filename: part.filename.clone().unwrap_or_default(),
+                mime_type: part.mime_type.clone(),
+                size: part.size,
+                is_inline: false,
+            })
+            .collect();
+        Ok(EmailDetail {
+            summary,
+            to: addresses(parsed.to()),
+            cc: addresses(parsed.cc()),
+            reply_to: addresses(parsed.reply_to()),
+            body: Some(EmailBody {
+                text: rendered.plain_text,
+                has_html: rendered.sanitized_html.is_some(),
+                truncated: rendered.truncated,
+                remote_images_blocked: rendered.remote_images_blocked,
+            }),
+            body_failure: None,
+            attachments,
+        })
+    }
+}
+
+const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending'), m.preview_state, m.to_addresses, json_array_length(m.to_addresses), 0";
+/// Same 17 columns for a local Sent copy; `to` is the stored recipient preview
+/// (plain addresses) and the id carries the `local-sent:` prefix.
+const LOCAL_SUMMARY_COLUMNS: &str = "'local-sent:' || o.id, o.account_id, f.id, o.subject, a.display_name, a.email_address, o.accepted_at, 1, 0, COALESCE(o.attachment_count, 0) > 0, COALESCE(o.preview, ''), 'ready', 0, 'ready', o.recipients_preview, o.recipient_count, 1";
+/// Outbox items that are Sent-folder rows: accepted, no server copy found, not
+/// removed, snapshot still held. Joined to the account's single sent-role folder.
+pub(super) const LOCAL_COPIES: &str = "FROM outbox o JOIN accounts a ON a.id = o.account_id
+ JOIN folders f ON f.account_id = o.account_id AND f.mailbox_source_id = a.mailbox_source_id AND f.role = 'sent' AND f.selectable = 1
+   AND f.id = (SELECT MIN(s.id) FROM folders s WHERE s.account_id = o.account_id AND s.mailbox_source_id = a.mailbox_source_id AND s.role = 'sent' AND s.selectable = 1)
+ WHERE o.state = 'accepted' AND o.server_copy_message_id IS NULL AND o.deleted_locally_at IS NULL
+   AND o.snapshot_released_at IS NULL AND o.snapshot_hash IS NOT NULL";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
@@ -601,6 +711,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             name: row.get(4)?,
             address: row.get(5)?,
         },
+        to: recipients(row)?,
         received_at: row.get(6)?,
         is_read: row.get(7)?,
         is_starred: row.get(8)?,
@@ -620,6 +731,32 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             "failed" => PreviewState::Failed,
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
+        local_only: row.get(16)?,
+    })
+}
+
+/// Columns 14 to 16 of a summary row: stored recipients, their count, and
+/// whether the row is a local Sent copy (plain addresses instead of objects).
+fn recipients(row: &Row<'_>) -> rusqlite::Result<EmailRecipients> {
+    let json: String = row.get(14)?;
+    let total: i64 = row.get(15)?;
+    let invalid = |_| rusqlite::Error::InvalidQuery;
+    let mut addresses = if row.get::<_, bool>(16)? {
+        serde_json::from_str::<Vec<String>>(&json)
+            .map_err(invalid)?
+            .into_iter()
+            .map(|address| MailAddress {
+                name: None,
+                address,
+            })
+            .collect()
+    } else {
+        serde_json::from_str::<Vec<MailAddress>>(&json).map_err(invalid)?
+    };
+    addresses.truncate(3);
+    Ok(EmailRecipients {
+        addresses,
+        total: u32::try_from(total).unwrap_or(u32::MAX),
     })
 }
 

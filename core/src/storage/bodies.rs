@@ -16,11 +16,11 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{Storage, decode, encode};
+use super::{Storage, decode, encode, messages::LOCAL_COPIES};
 use crate::{
     AppError, ErrorCode,
     mail::{
-        BodyFailureCode,
+        BodyFailureCode, LOCAL_SENT_PREFIX,
         render::{MAX_MESSAGE_BYTES, Rendered, RenderedPart, SANITIZER_VERSION, preview},
     },
 };
@@ -289,10 +289,42 @@ const BODY_IDENTITY: &str = "SELECT m.id, m.account_id, m.mailbox_source_id, a.r
     JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity
     WHERE m.remote_state = 'present' AND m.id = ?1";
 
+/// Identity of a local Sent copy (sending.md section 9.3). It has no UID:
+/// the snapshot, not the server, is the raw message.
+fn read_local_identity(db: &Connection, outbox_id: &str) -> Result<Option<BodyIdentity>, AppError> {
+    Ok(db
+        .query_row(
+            &format!(
+                "SELECT o.account_id, a.mailbox_source_id, a.revision, f.id, f.remote_name, o.snapshot_size
+                 {LOCAL_COPIES} AND o.id = ?1"
+            ),
+            [outbox_id],
+            |row| {
+                Ok(BodyIdentity {
+                    message_id: format!("{LOCAL_SENT_PREFIX}{outbox_id}"),
+                    account_id: row.get(0)?,
+                    mailbox_source_id: row.get(1)?,
+                    account_revision: row.get(2)?,
+                    folder_id: row.get(3)?,
+                    remote_name: row.get(4)?,
+                    uid_validity: 0,
+                    uid: 0,
+                    size: row
+                        .get::<_, Option<i64>>(5)?
+                        .and_then(|value| u64::try_from(value).ok()),
+                })
+            },
+        )
+        .optional()?)
+}
+
 pub(super) fn read_identity(
     db: &Connection,
     message_id: &str,
 ) -> Result<Option<BodyIdentity>, AppError> {
+    if let Some(outbox_id) = message_id.strip_prefix(LOCAL_SENT_PREFIX) {
+        return read_local_identity(db, outbox_id);
+    }
     Ok(db
         .query_row(BODY_IDENTITY, [message_id], |row| {
             Ok(BodyIdentity {
@@ -339,6 +371,45 @@ fn failure_value(failure: BodyFailureCode) -> &'static str {
 }
 
 impl Storage {
+    /// The frozen snapshot of a local Sent copy, rendered on demand: the
+    /// snapshot is the raw message and no body cache row exists for it.
+    pub(super) fn local_snapshot(&self, identity: &BodyIdentity) -> Result<StoredBlob, AppError> {
+        let outbox_id = identity
+            .message_id
+            .strip_prefix(LOCAL_SENT_PREFIX)
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        let (sha256, size): (String, i64) = self
+            .db
+            .query_row(
+                "SELECT snapshot_hash, snapshot_size FROM outbox
+                 WHERE id = ?1 AND snapshot_hash IS NOT NULL AND snapshot_released_at IS NULL",
+                [outbox_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        let size = u64::try_from(size).map_err(|_| AppError::new(ErrorCode::NotFound))?;
+        if !valid_hash(&sha256) || size > MAX_MESSAGE_BYTES as u64 {
+            return Err(AppError::new(ErrorCode::NotFound));
+        }
+        Ok(StoredBlob { sha256, size })
+    }
+
+    pub(super) fn local_rendered(
+        &self,
+        identity: &BodyIdentity,
+    ) -> Result<(StoredBlob, Rendered), AppError> {
+        let blob = self.local_snapshot(identity)?;
+        // A missing or corrupt snapshot file is a clean not-found, never a panic.
+        let raw = self
+            .blobs
+            .read(&blob)
+            .map_err(|_| AppError::new(ErrorCode::NotFound))?;
+        let rendered = crate::mail::render::render(&raw, &identity.message_id)
+            .map_err(|_| AppError::new(ErrorCode::NotFound))?;
+        Ok((blob, rendered))
+    }
+
     pub(crate) fn body_identity(&self, message_id: &str) -> Result<BodyIdentity, AppError> {
         read_identity(&self.db, message_id)?.ok_or_else(|| AppError::new(ErrorCode::NotFound))
     }
@@ -417,6 +488,14 @@ impl Storage {
     ) -> Result<Option<CachedBody>, AppError> {
         if !current(&self.db, identity)? {
             return Err(AppError::new(ErrorCode::NotFound));
+        }
+        if identity.message_id.starts_with(LOCAL_SENT_PREFIX) {
+            let (raw, rendered) = self.local_rendered(identity)?;
+            return Ok(Some(CachedBody {
+                raw,
+                rendered,
+                sanitizer_version: SANITIZER_VERSION,
+            }));
         }
         let result = self
             .db
@@ -499,6 +578,9 @@ impl Storage {
         if !current(&self.db, identity)? {
             return Err(AppError::new(ErrorCode::NotFound));
         }
+        if identity.message_id.starts_with(LOCAL_SENT_PREFIX) {
+            return Ok(Some((self.local_snapshot(identity)?, SANITIZER_VERSION)));
+        }
         let raw = self
             .db
             .query_row(
@@ -533,6 +615,14 @@ impl Storage {
         identity: &BodyIdentity,
         part_index: usize,
     ) -> Result<Option<(StoredBlob, RenderedPart)>, AppError> {
+        if identity.message_id.starts_with(LOCAL_SENT_PREFIX) {
+            let (raw, rendered) = self.local_rendered(identity)?;
+            return Ok(rendered
+                .parts
+                .into_iter()
+                .find(|part| part.part_index == part_index && !part.is_inline)
+                .map(|part| (raw, part)));
+        }
         let Some(raw) = self.body_raw(identity)? else {
             return Ok(None);
         };
@@ -563,6 +653,14 @@ impl Storage {
         identity: &BodyIdentity,
         content_id: &str,
     ) -> Result<Option<(StoredBlob, RenderedPart)>, AppError> {
+        if identity.message_id.starts_with(LOCAL_SENT_PREFIX) {
+            let (raw, rendered) = self.local_rendered(identity)?;
+            return Ok(rendered
+                .parts
+                .into_iter()
+                .find(|part| part.is_inline && part.content_id.as_deref() == Some(content_id))
+                .map(|part| (raw, part)));
+        }
         let Some(raw) = self.body_raw(identity)? else {
             return Ok(None);
         };
@@ -605,6 +703,9 @@ impl Storage {
     ) -> Result<Option<Vec<String>>, AppError> {
         if !current(&self.db, identity)? {
             return Err(AppError::new(ErrorCode::NotFound));
+        }
+        if identity.message_id.starts_with(LOCAL_SENT_PREFIX) {
+            return Ok(Some(self.local_rendered(identity)?.1.links));
         }
         let links = self
             .db

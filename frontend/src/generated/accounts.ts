@@ -168,6 +168,12 @@ countsKnown: boolean, unreadCount: number, totalCount: number, };
 
 export type MailAddress = { name: string | null, address: string, };
 
+export type EmailRecipients = {
+/**
+ * At most three addresses.
+ */
+addresses: Array<MailAddress>, total: number, };
+
 export type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication" | "providerPolicy" | "protocol" | "storage";
@@ -175,6 +181,10 @@ export type BodyFailureCode = "tooLarge" | "stale" | "network" | "authentication
 export type PreviewState = "missing" | "ready" | "failed";
 
 export type EmailSummary = { id: string, accountId: string, folderId: string, subject: string, from: MailAddress,
+/**
+ * Leading recipients for Sent-style rows (at most three) and the total.
+ */
+to: EmailRecipients,
 /**
  * Short plain-text excerpt for list rows, never HTML.
  */
@@ -186,7 +196,11 @@ receivedAt: string, isRead: boolean, isStarred: boolean, hasAttachment: boolean,
 /**
  * Local changes (read, star, move) not yet confirmed by the server.
  */
-pendingChanges: boolean, };
+pendingChanges: boolean,
+/**
+ * A copy of an accepted send kept only on this device (`local-sent:` ids).
+ */
+localOnly: boolean, };
 
 export type EmailListQuery = {
 /**
@@ -404,6 +418,8 @@ messages: Array<NewMailMessage>, };
 export type EmailPreviewItem = { emailId: string, preview: string, previewState: PreviewState, };
 
 export type EmailPreviews = { items: Array<EmailPreviewItem>, };
+
+export type SentCopiesChanged = { accountId: string, };
 
 export type AvatarImage = { mimeType: string,
 /**

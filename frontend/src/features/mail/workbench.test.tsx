@@ -37,7 +37,7 @@ describe('workbench', () => {
     const sent = screen.getAllByRole('button', { name: '已发送' })[0]
     await userEvent.click(sent)
     expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
-    await waitFor(() => expect(rows()).toHaveLength(1))
+    await waitFor(() => expect(rows()).toHaveLength(2)) // one server copy plus the mock's local-only copy
 
     await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))

@@ -36,6 +36,16 @@ pub enum CoreEvent {
     Outbox(OutboxChanged),
     /// A draft was locked, unlocked or deleted by the send queue.
     DraftChanged(DraftChanged),
+    /// An account's local sent copies changed (a copy was removed from this
+    /// device); lists showing its Sent folder refetch.
+    SentCopies(SentCopiesChanged),
+}
+
+/// Which account's local sent copies changed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SentCopiesChanged {
+    pub account_id: String,
 }
 
 /// Receives every event. Called on the core's worker threads.

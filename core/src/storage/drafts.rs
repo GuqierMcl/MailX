@@ -321,6 +321,16 @@ impl Storage {
 
     /// The `Message-ID` header of a message, without angle brackets.
     pub(crate) fn message_id_header(&self, message_id: &str) -> Result<Option<String>, AppError> {
+        if let Some(outbox_id) = message_id.strip_prefix(crate::mail::LOCAL_SENT_PREFIX) {
+            return Ok(self
+                .db
+                .query_row(
+                    "SELECT message_id FROM outbox WHERE id = ?1",
+                    [outbox_id],
+                    |r| r.get(0),
+                )
+                .optional()?);
+        }
         Ok(self
             .db
             .query_row(

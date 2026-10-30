@@ -69,6 +69,7 @@ impl Storage {
             _lock: lock,
         };
         storage.migrate_outbox_snapshots()?;
+        storage.backfill_outbox_list_fields()?;
         storage.recover_bodies()?;
         Ok(storage)
     }

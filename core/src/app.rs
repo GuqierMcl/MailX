@@ -53,6 +53,10 @@ pub use verification::{
     VerifyDraftConnection,
 };
 
+/// How long after an accepted send the account's sync is woken once to pick
+/// up the server's Sent copy (sending.md section 9.6).
+const SENT_SYNC_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
 /// inside an async task without `spawn_blocking`.
@@ -147,7 +151,26 @@ impl MailxCore {
         for account in &accounts {
             sync.restart(&account.id);
         }
-        let outbox = Arc::new(OutboxManager::new(&service, runtime, events.clone(), send));
+        let outbox = Arc::new(OutboxManager::new(
+            &service,
+            runtime.clone(),
+            events.clone(),
+            send,
+        ));
+        // sending.md section 9.6: shortly after a send is accepted, wake the
+        // account's sync once so the server's Sent copy replaces the local
+        // one. Nothing is retried or reported when it does not help.
+        let weak_sync = Arc::downgrade(&sync);
+        let handle = runtime.clone();
+        outbox.on_accepted(move |account_id| {
+            let (weak_sync, account_id) = (weak_sync.clone(), account_id.to_owned());
+            handle.spawn(async move {
+                tokio::time::sleep(SENT_SYNC_DELAY).await;
+                if let Some(sync) = weak_sync.upgrade() {
+                    sync.wake(&account_id);
+                }
+            });
+        });
         // Items interrupted by the last shutdown are settled before any worker
         // looks at the queue: no body start mark means nothing reached the
         // server, so the item is queued again; with the mark it is `unknown`.
@@ -539,6 +562,23 @@ impl MailxCore {
         self.outbox.shared.announce(vec![changed]);
         self.outbox.wake(&item.account_id);
         Ok(item)
+    }
+
+    /// Deletes a local Sent copy (`local-sent:` id) from this device: the item
+    /// leaves the Sent list and its snapshot is released. Idempotent; `notFound`
+    /// when the id is not a qualifying local copy. Emits `SentCopies` for the
+    /// account so lists showing its Sent folder refetch.
+    pub fn remove_local_copy(&self, email_id: &str) -> Result<(), AppError> {
+        if let Some(changed) = self
+            .accounts()?
+            .remove_local_copy(email_id, self.outbox.now())?
+        {
+            self.events
+                .emit(&CoreEvent::SentCopies(crate::events::SentCopiesChanged {
+                    account_id: changed.item.account_id,
+                }));
+        }
+        Ok(())
     }
 
     /// Skips the backoff wait of a `queued` item.

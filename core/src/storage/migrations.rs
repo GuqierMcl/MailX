@@ -129,6 +129,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["draft_attachments"],
         sql: include_str!("migrations/0017_inline_image_content_id.sql"),
     },
+    Migration {
+        version: 18,
+        description: "outbox sent copy list fields",
+        required_tables: &["outbox"],
+        sql: include_str!("migrations/0018_outbox_sent_copy_list.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -533,7 +539,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 17);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 18);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -660,6 +666,24 @@ mod tests {
     }
 
     #[test]
+    fn sent_copy_list_fields_are_nullable_and_the_migration_reruns() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(17)).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        for column in ["preview", "attachment_count"] {
+            let notnull: i64 = db
+                .query_row(
+                    "SELECT \"notnull\" FROM pragma_table_info('outbox') WHERE name = ?1",
+                    [column],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(notnull, 0, "{column}");
+        }
+    }
+
+    #[test]
     fn rich_drafts_migration_preserves_legacy_text_and_queued_mime() {
         let (_directory, mut db) = open_db();
         apply(&mut db, &manifest_up_to(8)).unwrap();
@@ -704,7 +728,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            17
+            18
         );
     }
 

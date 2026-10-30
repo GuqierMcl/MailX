@@ -75,7 +75,7 @@ describe('body failure guidance', () => {
       summary: {
         id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
         from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: false, isStarred: false, pendingChanges: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
+        isRead: false, isStarred: false, pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
       },
       to: [], cc: [], replyTo: [], attachments: [], body: null, bodyFailure,
     }
@@ -96,5 +96,52 @@ describe('body failure guidance', () => {
     }
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(onDownload).toHaveBeenCalledOnce()
+  })
+})
+
+describe('local-only sent copy', () => {
+  function localEmail(localOnly: boolean): EmailDetail {
+    return {
+      summary: {
+        id: localOnly ? 'local-sent:1' : 'sent-1', accountId: 'a', folderId: 'sent', subject: 'Sent copy',
+        from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
+        isRead: true, isStarred: false, pendingChanges: false, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly,
+        hasAttachment: false, bodyState: 'ready', previewState: 'ready', preview: '',
+      },
+      to: [{ name: null, address: 'you@example.com' }], cc: [], replyTo: [], attachments: [], body: { kind: 'text', text: 'hi' } as never, bodyFailure: null,
+    }
+  }
+  function mount(email: EmailDetail, extra: { onRemoveLocal?: (e: EmailDetail['summary']) => void, onRespond?: () => void } = {}) {
+    render(<TooltipProvider><EmailView client={testClient([exampleAccount()])} email={email} providerId={null} loading={false} error={null} downloading={false}
+      onDownload={vi.fn()} onFlag={vi.fn()} onClose={vi.fn()} onRespond={extra.onRespond ?? vi.fn()} onRemoveLocal={extra.onRemoveLocal} /></TooltipProvider>)
+  }
+
+  it('hides read and star actions, shows the marker, keeps reply actions', () => {
+    mount(localEmail(true), { onRemoveLocal: vi.fn() })
+    expect(screen.queryByRole('button', { name: /标为(已读|未读)/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /星标/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '仅在本机' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '回复' })).toBeInTheDocument()
+  })
+
+  it('keeps flag actions and no marker for a server message', () => {
+    mount(localEmail(false), { onRemoveLocal: vi.fn() })
+    expect(screen.getByRole('button', { name: /标为未读/ })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: '仅在本机' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '从本机移除' })).not.toBeInTheDocument()
+  })
+
+  it('removes only after the confirm dialog is accepted', async () => {
+    const onRemoveLocal = vi.fn()
+    mount(localEmail(true), { onRemoveLocal })
+    await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
+    expect(await screen.findByText(/不影响服务器，且无法撤销/)).toBeInTheDocument()
+    expect(onRemoveLocal).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onRemoveLocal).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(await screen.findByRole('button', { name: '移除' }))
+    expect(onRemoveLocal).toHaveBeenCalledWith(expect.objectContaining({ id: 'local-sent:1' }))
   })
 })

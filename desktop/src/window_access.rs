@@ -32,6 +32,19 @@ pub(crate) fn parse_draft_id(id: &str) -> Option<Uuid> {
     (parsed.hyphenated().to_string() == id).then_some(parsed)
 }
 
+/// The outbox item behind a local Sent copy id: exactly `local-sent:` and a
+/// canonical lowercase hyphenated uuid.
+pub(crate) fn local_copy_outbox_id(email_id: &str) -> Option<&str> {
+    let outbox = email_id.strip_prefix(mailx_core::LOCAL_SENT_PREFIX)?;
+    parse_draft_id(outbox).map(|_| outbox)
+}
+
+/// An email id this host hands out: a canonical uuid (synced message) or a
+/// local Sent copy id. Anything else is not an id the host created.
+pub(crate) fn valid_email_id(id: &str) -> bool {
+    parse_draft_id(id).is_some() || local_copy_outbox_id(id).is_some()
+}
+
 impl WindowKind {
     pub(crate) fn parse(label: &str) -> Option<Self> {
         if label == MAIN_WINDOW {
@@ -116,6 +129,7 @@ const MAIN_ONLY: &[&str] = &[
     "outbox_cancel",
     "outbox_retry_now",
     "outbox_resolve_unknown",
+    "outbox_remove_local_copy",
     "composer_open",
     "updater_get_state",
     "updater_check",
@@ -266,6 +280,34 @@ mod tests {
     }
 
     #[test]
+    fn email_ids_are_uuids_or_exact_local_copies() {
+        let uuid = id().hyphenated().to_string();
+        let local = format!("local-sent:{uuid}");
+        assert!(valid_email_id(&uuid));
+        assert!(valid_email_id(&local));
+        assert_eq!(local_copy_outbox_id(&local), Some(uuid.as_str()));
+        assert_eq!(local_copy_outbox_id(&uuid), None);
+        for bad in [
+            "".to_owned(),
+            "local-sent:".to_owned(),
+            "local-sent:x".to_owned(),
+            format!("local-sent:{}", uuid.to_uppercase()),
+            format!("local-sent:{}", id().simple()),
+            format!("local-sent:{{{uuid}}}"),
+            format!("local-sent:{uuid}/extra"),
+            format!("local-sent:{uuid} "),
+            format!(" local-sent:{uuid}"),
+            format!("Local-Sent:{uuid}"),
+            format!("local-sent{uuid}"),
+            format!("local-sent:local-sent:{uuid}"),
+            format!("local-sent:../{uuid}"),
+        ] {
+            assert!(!valid_email_id(&bad), "{bad}");
+            assert_eq!(local_copy_outbox_id(&bad), None, "{bad}");
+        }
+    }
+
+    #[test]
     fn window_kinds_map_to_core_callers() {
         assert_eq!(WindowKind::Main.caller(), Caller::MainWindow);
         assert_eq!(WindowKind::Composer(id()).caller(), Caller::Composer);
@@ -377,6 +419,7 @@ mod tests {
             ("outbox_cancel", true, false),
             ("outbox_retry_now", true, false),
             ("outbox_resolve_unknown", true, false),
+            ("outbox_remove_local_copy", true, false),
             ("composer_open", true, false),
             ("composer_close", false, true),
             ("composer_cancel_close", false, true),

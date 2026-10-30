@@ -2,7 +2,7 @@
 use chrono::{FixedOffset, Local, Offset};
 use uuid::Uuid;
 
-use super::{AccountService, new_id, now, validate_uuid};
+use super::{AccountService, new_id, now, validate_email_id, validate_uuid};
 use crate::{
     AppError, AttachmentOrigin, ErrorCode,
     drafts::{
@@ -150,7 +150,7 @@ impl AccountService {
         request: &CreateDraftFromRequest,
     ) -> Result<DraftSource, AppError> {
         validate_uuid(&request.client_mutation_id, "clientMutationId")?;
-        validate_uuid(&request.email_id, "emailId")?;
+        validate_email_id(&request.email_id)?;
         if request.kind == DraftKind::New {
             return Err(AppError::validation("kind"));
         }
@@ -254,7 +254,9 @@ impl AccountService {
                 id: &id,
                 account_id: &detail.summary.account_id,
                 kind: request.kind,
-                source_email_id: Some(&request.email_id),
+                // A local Sent copy is no `messages` row to point at.
+                source_email_id: Some(request.email_id.as_str())
+                    .filter(|id| !id.starts_with(crate::mail::LOCAL_SENT_PREFIX)),
                 content: &content,
                 in_reply_to: in_reply_to.as_deref(),
                 references: references.as_deref(),

@@ -62,6 +62,7 @@ fn main() {
             "outbox_cancel",
             "outbox_retry_now",
             "outbox_resolve_unknown",
+            "outbox_remove_local_copy",
             "composer_open",
             "composer_close",
             "composer_cancel_close",

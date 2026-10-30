@@ -33,6 +33,21 @@ impl MailxCore {
         runtime: Handle,
         raws: &[&[u8]],
     ) -> Result<(Self, Vec<String>), AppError> {
+        Self::body_test_fixture_with_events(
+            path,
+            runtime,
+            raws,
+            Arc::new(|_: &crate::events::CoreEvent| {}),
+        )
+    }
+
+    /// As [`Self::body_test_fixture`], delivering core events to `events`.
+    pub fn body_test_fixture_with_events(
+        path: &Path,
+        runtime: Handle,
+        raws: &[&[u8]],
+        events: crate::events::Events,
+    ) -> Result<(Self, Vec<String>), AppError> {
         match std::fs::symlink_metadata(path) {
             Ok(metadata) => {
                 if !metadata.is_dir()
@@ -48,12 +63,7 @@ impl MailxCore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(AppError::new(ErrorCode::StorageUnavailable)),
         }
-        let core = Self::open(
-            path,
-            Arc::new(NoSecrets),
-            runtime,
-            Arc::new(|_: &crate::events::CoreEvent| {}),
-        )?;
+        let core = Self::open(path, Arc::new(NoSecrets), runtime, events)?;
         let identities = core
             .accounts()?
             .body_fixture_seed(&raws.iter().map(|raw| raw.len()).collect::<Vec<_>>())?;

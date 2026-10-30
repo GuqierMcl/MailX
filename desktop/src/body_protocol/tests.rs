@@ -176,6 +176,41 @@ fn only_documents_accept_the_dark_scheme_hint() {
 }
 
 #[test]
+fn local_sent_copy_ids_are_routable_but_only_in_exact_form() {
+    let outbox = Uuid::new_v4().to_string();
+    let id = format!("local-sent:{outbox}");
+    let token = Uuid::new_v4().to_string();
+    assert_eq!(
+        parse_route(&format!(
+            "mailx-body://localhost/document/{id}?token={token}"
+        )),
+        Some((
+            Route::Document {
+                id: id.clone(),
+                token: token.clone(),
+                dark: false
+            },
+            BODY_ORIGIN.into()
+        ))
+    );
+    for bad in [
+        "local-sent:".to_owned(),
+        "local-sent:nope".to_owned(),
+        format!("local-sent:{}", outbox.to_uppercase()),
+        format!("other:{outbox}"),
+        format!("local-sent:local-sent:{outbox}"),
+    ] {
+        assert!(
+            parse_route(&format!(
+                "mailx-body://localhost/document/{bad}?token={token}"
+            ))
+            .is_none(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
 fn malformed_routes_cannot_create_an_authorized_resource() {
     let id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();

@@ -270,7 +270,7 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
         .map(decode_segment)
         .collect::<Option<Vec<_>>>()?;
     let id = segments.get(1)?;
-    if Uuid::parse_str(id).ok()?.to_string() != *id {
+    if !crate::window_access::valid_email_id(id) {
         return None;
     }
     let pairs: Vec<_> = url.query_pairs().collect();

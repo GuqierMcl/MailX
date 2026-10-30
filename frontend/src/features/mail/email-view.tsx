@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
@@ -14,6 +15,16 @@ import {
 } from '@hugeicons/core-free-icons'
 import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { IconButton } from '@/components/icon-button'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -24,6 +35,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { AttachmentList } from './attachment-list'
 import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime } from './format'
+import { LocalOnlyMarker } from './local-only-marker'
 import { SenderAvatar } from './sender-avatar'
 import { useCloseOnEscape } from './use-close-on-escape'
 import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
@@ -45,9 +57,11 @@ type EmailViewProps = {
   hidden?: boolean
   /** Starts a reply, reply-all or forward of the open message (opens the composer window). */
   onRespond: (kind: 'reply' | 'replyAll' | 'forward') => void
+  /** Drops a local-only sent copy from this device after the user confirmed; the server is untouched. */
+  onRemoveLocal?: (email: EmailSummary) => void
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, hidden = false }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, hidden = false }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -56,7 +70,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   useCloseOnEscape(open && !hidden, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
@@ -102,12 +116,21 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond'] }) {
+function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal'] }) {
   useTranslation()
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
+  // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
+  const localOnly = summary?.localOnly === true
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label={t('mail:messageActions')}>
       <div className="flex items-center gap-1 not-first:ml-3">
-        {PLACEHOLDER_ACTIONS.map(([key, icon]) => (
+        {localOnly ? (
+          onRemoveLocal && (
+            <IconButton label={t('mail:removeLocalCopy')} onClick={() => setConfirmingRemove(true)}>
+              <HugeiconsIcon icon={Delete02Icon} />
+            </IconButton>
+          )
+        ) : PLACEHOLDER_ACTIONS.map(([key, icon]) => (
           <IconButton key={key} label={t(key)} tip={t('mail:notImplemented', { label: t(key) })} disabled>
             <HugeiconsIcon icon={icon} />
           </IconButton>
@@ -120,7 +143,7 @@ function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummar
           </IconButton>
         ))}
       </div>
-      <div className="flex items-center gap-1 not-first:ml-3">
+      {!localOnly && <div className="flex items-center gap-1 not-first:ml-3">
         <IconButton
           disabled={!summary}
           label={summary?.isRead === false ? t('mail:markRead') : t('mail:markUnread')}
@@ -137,10 +160,24 @@ function Toolbar({ summary, onFlag, onClose, onRespond }: { summary: EmailSummar
         >
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </IconButton>
-      </div>
+      </div>}
       <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
       </IconButton>
+      {summary && onRemoveLocal && (
+        <AlertDialog open={confirmingRemove} onOpenChange={setConfirmingRemove}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('mail:removeLocalCopyTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>{t('mail:removeLocalCopyDescription')}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('mail:cancel')}</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={() => onRemoveLocal(summary)}>{t('mail:removeLocalCopyConfirm')}</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }
@@ -169,6 +206,7 @@ function EmailContent({ email, ...props }: ContentProps) {
               {email.to.length > 0 && <div className="truncate text-xs text-muted-foreground">{t('mail:toLabel')}{addressList(email.to)}</div>}
               {email.cc.length > 0 && <div className="truncate text-xs text-muted-foreground">{t('mail:ccLabel')}{addressList(email.cc)}</div>}
             </div>
+            {summary.localOnly && <LocalOnlyMarker />}
             <time dateTime={summary.receivedAt} className="shrink-0 text-xs text-muted-foreground">
               {formatFullTime(summary.receivedAt)}
             </time>

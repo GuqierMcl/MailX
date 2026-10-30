@@ -22,6 +22,7 @@ import type {
   InlineImage,
   DraftSummary,
   OutboxChanged,
+  SentCopiesChanged,
   OutboxItem,
   QueueSendRequest,
   RemoveAttachmentRequest,
@@ -174,6 +175,8 @@ export interface MailxClient {
   /** Undo send; only while still `queued` (`alreadySending` otherwise). */
   cancelOutbox(id: string): Promise<OutboxItem>
   retryOutboxNow(id: string): Promise<OutboxItem>
+  /** Main window. Removes a local-only sent copy (`local-sent:` id) from this device; the server is untouched. */
+  removeLocalCopy(emailId: string): Promise<void>
   /** Settles an `unknown` item; `resend` is an explicit new attempt and returns the new item. */
   resolveUnknown(request: ResolveUnknownRequest): Promise<OutboxItem>
   /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
@@ -184,6 +187,8 @@ export interface MailxClient {
   cancelComposerClose(generation: number): Promise<void>
   /** Every queue state change, for the main window and the draft's composer. No addresses or subject. */
   onOutbox(listener: (change: OutboxChanged) => void): () => void
+  /** An account's local sent copies changed (one was removed from this device); lists showing its Sent folder refetch. */
+  onSentCopiesChanged(listener: (change: SentCopiesChanged) => void): () => void
   /** A draft was created, edited, deleted, or locked / released by the queue. */
   onDrafts(listener: (change: DraftChanged) => void): () => void
   /** Composer window. Explicit app quit: flush, then acknowledge the generation or cancel. */
@@ -214,6 +219,7 @@ export type NotificationOpen = { accountId: string; emailId: string | null; outb
 /** Host events (`mailx://...`) that the clients subscribe to. */
 export const HOST_EVENTS = {
   outbox: 'mailx://outbox',
+  sentCopies: 'mailx://sent-copies',
   drafts: 'mailx://drafts',
   appClosing: 'mailx://app-closing',
   appCloseCancelled: 'mailx://app-close-cancelled',
@@ -431,12 +437,14 @@ export function createDesktopClient(): MailxClient {
     getOutbox: (id) => call<OutboxItem>('outbox_get', { id }),
     cancelOutbox: (id) => call<OutboxItem>('outbox_cancel', { id }),
     retryOutboxNow: (id) => call<OutboxItem>('outbox_retry_now', { id }),
+    removeLocalCopy: (emailId) => call<void>('outbox_remove_local_copy', { emailId }),
     resolveUnknown: ({ id, resolution, clientMutationId }) =>
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
     openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
     closeComposer: (force = false, generation) => call<void>('composer_close', { force, generation: generation ?? null }),
     cancelComposerClose: (generation) => call<void>('composer_cancel_close', { generation }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
+    onSentCopiesChanged: (listener) => subscribe<SentCopiesChanged>(HOST_EVENTS.sentCopies, listener),
     onDrafts: (listener) => subscribe<DraftChanged>(HOST_EVENTS.drafts, listener),
     onAppClosing: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.appClosing, listener),
     onComposerCloseRequested: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.composerCloseRequested, listener),

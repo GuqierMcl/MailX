@@ -80,6 +80,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
             CoreEvent::FlagWriteBack(_)
             | CoreEvent::Outbox(_)
             | CoreEvent::DraftChanged(_)
+            | CoreEvent::SentCopies(_)
             | CoreEvent::Previews(_)
             | CoreEvent::AccountRemoved(_) => {}
         }),

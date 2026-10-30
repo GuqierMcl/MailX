@@ -86,6 +86,8 @@ pub struct EmailSummary {
     pub folder_id: String,
     pub subject: String,
     pub from: MailAddress,
+    /// Leading recipients for Sent-style rows (at most three) and the total.
+    pub to: EmailRecipients,
     /// Short plain-text excerpt for list rows, never HTML.
     pub preview: String,
     /// RFC 3339 timestamp.
@@ -97,7 +99,22 @@ pub struct EmailSummary {
     pub preview_state: PreviewState,
     /// Local changes (read, star, move) not yet confirmed by the server.
     pub pending_changes: bool,
+    /// A copy of an accepted send kept only on this device (`local-sent:` ids).
+    pub local_only: bool,
 }
+
+/// First recipients of a message and how many there are in total.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailRecipients {
+    /// At most three addresses.
+    pub addresses: Vec<MailAddress>,
+    #[ts(type = "number")]
+    pub total: u32,
+}
+
+/// Prefix of the ids of local Sent copies (sending.md section 9.2).
+pub const LOCAL_SENT_PREFIX: &str = "local-sent:";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]

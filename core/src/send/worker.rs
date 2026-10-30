@@ -5,7 +5,7 @@
 //! result in a short transaction. The route and credentials are those of the
 //! moment the attempt starts; the snapshot only fixes the content.
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -20,6 +20,7 @@ use super::types::{OutboxChanged, OutboxError};
 use crate::accounts::{AccountService, Next};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
+use crate::send::types::OutboxState;
 use crate::smtp::{self, DataStarted, SmtpOutcome, Timeouts, TlsSource, plan_failure};
 use crate::storage::outbox::{Changed, ClaimedJob};
 
@@ -46,7 +47,11 @@ pub(crate) struct Shared {
     events: Events,
     pub(crate) config: SendConfig,
     gate: Arc<Mutex<SendGate>>,
+    /// Called with the account id when an SMTP server accepts a message.
+    on_accepted: OnceLock<AcceptedHook>,
 }
+
+type AcceptedHook = Box<dyn Fn(&str) + Send + Sync>;
 
 /// Claims and shutdown share this lock, so a send is either already active or
 /// remains queued when shutdown begins. The guard lives through result storage.
@@ -120,11 +125,18 @@ impl OutboxManager {
                 events,
                 config,
                 gate: Arc::default(),
+                on_accepted: OnceLock::new(),
             }),
             runtime,
             retired: Mutex::new(HashSet::new()),
             workers: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Registers the host-side reaction to an accepted send (post-accept Sent
+    /// sync, sending.md section 9.6). Set once; a later call is ignored.
+    pub(crate) fn on_accepted(&self, hook: impl Fn(&str) + Send + Sync + 'static) {
+        let _ = self.shared.on_accepted.set(Box::new(hook));
     }
 
     /// Stops new claims while an existing SMTP transaction and its result commit finish.
@@ -391,7 +403,13 @@ async fn record(
     // If this write fails the item stays `sending`; startup recovery settles
     // it (queued or unknown by the body-start mark), never a silent resend.
     if let Ok(Some(changed)) = result {
+        let accepted = (changed.item.state == OutboxState::Accepted
+            && changed.item.resolution.is_none())
+        .then(|| changed.item.account_id.clone());
         shared.announce(vec![changed]);
+        if let (Some(account_id), Some(hook)) = (accepted, shared.on_accepted.get()) {
+            hook(&account_id);
+        }
     }
 }
 

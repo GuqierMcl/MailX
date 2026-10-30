@@ -2074,3 +2074,292 @@ fn matching_is_per_account() {
         (Some("h".repeat(64)), Some(10), false, None)
     );
 }
+
+// Local Sent copies in the list (sending.md section 9).
+
+fn sent_mime(subject: &str, attachments: usize) -> Vec<u8> {
+    let mut raw = format!(
+        "From: me@example.test\r\nTo: a@example.test, b@example.test\r\nSubject: {subject}\r\n\
+         Message-ID: <local@mailx.test>\r\nMIME-Version: 1.0\r\n\
+         Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\n\
+         Content-Type: text/plain; charset=utf-8\r\n\r\nLocal body text\r\n"
+    );
+    for index in 0..attachments {
+        raw.push_str(&format!(
+            "--b\r\nContent-Type: application/octet-stream; name=\"f{index}.bin\"\r\n\
+             Content-Disposition: attachment; filename=\"f{index}.bin\"\r\n\
+             Content-Transfer-Encoding: base64\r\n\r\nQUJD\r\n"
+        ));
+    }
+    raw.push_str("--b--\r\n");
+    raw.into_bytes()
+}
+
+fn local_id(n: u32) -> String {
+    format!("00000000-0000-4000-8000-{n:012}")
+}
+
+/// Inserts an accepted outbox item with a real snapshot; returns its list id.
+fn local_copy(f: &Fixture, n: u32, accepted_at: &str, subject: &str, attachments: u32) -> String {
+    let raw = sent_mime(subject, attachments as usize);
+    let blob = f.service.body_blobs().put(&raw).unwrap();
+    f.db.execute(
+        "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+         snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+         state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
+         attachment_count)
+         VALUES (?1, ?2, ?3, '{}', ?4, ?5, ?6, '{}', ?7, '[\"a@example.test\",\"b@example.test\"]',
+                 2, 'accepted', ?8, 't', 't', 't', 't', 'Local body text', ?9)",
+        rusqlite::params![
+            local_id(n),
+            f.account.id,
+            format!("m{n:0>35}"),
+            format!("<local-{n}@mailx.test>"),
+            blob.sha256,
+            i64::try_from(blob.size).unwrap(),
+            subject,
+            accepted_at,
+            attachments,
+        ],
+    )
+    .unwrap();
+    format!("local-sent:{}", local_id(n))
+}
+
+fn sent_query(f: &Fixture) -> EmailListQuery {
+    EmailListQuery {
+        folder_role: Some(FolderRole::Sent),
+        account_ids: Some(vec![f.account.id.clone()]),
+        ..EmailListQuery::default()
+    }
+}
+
+fn listed(f: &Fixture, query: &EmailListQuery) -> Vec<String> {
+    f.service
+        .list_emails(query)
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|item| item.id)
+        .collect()
+}
+
+fn server_sent(uid: u32, received_at: &str) -> MessageRecord {
+    MessageRecord {
+        received_at: received_at.into(),
+        ..record(uid)
+    }
+}
+
+#[test]
+fn local_copies_merge_into_the_sent_scope_with_one_continuous_cursor() {
+    let mut f = setup();
+    put_sent(
+        &mut f,
+        &[
+            server_sent(1, "2026-10-18T09:00:00.000Z"),
+            server_sent(2, "2026-10-18T11:00:00.000Z"),
+            server_sent(3, "2026-10-18T13:00:00.000Z"),
+        ],
+    );
+    let ids = [
+        local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "one", 0),
+        local_copy(&f, 2, "2026-10-18T11:00:00.000Z", "tie", 0),
+        local_copy(&f, 3, "2026-10-18T12:00:00.000Z", "three", 0),
+        local_copy(&f, 4, "2026-10-18T14:00:00.000Z", "four", 0),
+    ];
+    let everything = f
+        .service
+        .list_emails(&EmailListQuery {
+            limit: Some(100),
+            ..sent_query(&f)
+        })
+        .unwrap();
+    let key = |item: &EmailSummary| (item.received_at.clone(), item.id.clone());
+    let mut expected: Vec<_> = everything.items.iter().map(key).collect();
+    expected.sort_by(|a, b| b.cmp(a));
+    assert_eq!(
+        everything.items.iter().map(key).collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(everything.items.len(), 7);
+    assert!(
+        ids.iter()
+            .all(|id| everything.items.iter().any(|i| &i.id == id))
+    );
+
+    // Pages of two never skip or repeat a row across the two sources.
+    let mut paged = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = f
+            .service
+            .list_emails(&EmailListQuery {
+                limit: Some(2),
+                cursor: cursor.clone(),
+                ..sent_query(&f)
+            })
+            .unwrap();
+        paged.extend(page.items.iter().map(|item| item.id.clone()));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(
+        paged,
+        everything
+            .items
+            .iter()
+            .map(|i| i.id.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn local_copies_project_summary_fields_and_stay_out_of_other_scopes() {
+    let mut f = setup();
+    put_sent(&mut f, &[server_sent(1, "2026-10-18T09:00:00.000Z")]);
+    let id = local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "Mine", 2);
+    let page = f.service.list_emails(&sent_query(&f)).unwrap();
+    let local = page.items.iter().find(|i| i.id == id).unwrap();
+    assert!(local.local_only && local.is_read && !local.is_starred && !local.pending_changes);
+    assert!(local.has_attachment);
+    assert_eq!(local.body_state, BodyState::Ready);
+    assert_eq!(local.preview, "Local body text");
+    assert_eq!(local.from.address, f.account.email_address);
+    assert_eq!(local.to.total, 2);
+    assert_eq!(
+        local
+            .to
+            .addresses
+            .iter()
+            .map(|a| a.address.as_str())
+            .collect::<Vec<_>>(),
+        ["a@example.test", "b@example.test"]
+    );
+    let server = page.items.iter().find(|i| !i.local_only).unwrap();
+    assert_eq!(server.to.total, 1);
+    assert_eq!(server.to.addresses[0].address, "recipient@example.test");
+
+    // Folder scope of the sent folder includes it; inbox and other scopes do not.
+    let sent_folder = local.folder_id.clone();
+    let by_folder = EmailListQuery {
+        folder_id: Some(sent_folder),
+        ..Default::default()
+    };
+    assert!(listed(&f, &by_folder).contains(&id));
+    assert!(!listed(&f, &inbox_query()).contains(&id));
+    // Account-wide scope without a sent role still excludes them from the inbox only.
+    assert!(
+        !listed(&f, &inbox_query())
+            .iter()
+            .any(|i| i.starts_with("local-sent:"))
+    );
+}
+
+#[test]
+fn local_copy_filters_follow_the_server_rules() {
+    let mut f = setup();
+    put_sent(&mut f, &[server_sent(1, "2026-10-18T09:00:00.000Z")]);
+    let plain = local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "plain 100%_x", 0);
+    let attached = local_copy(&f, 2, "2026-10-18T11:00:00.000Z", "attached", 1);
+    let with = |change: fn(&mut EmailListQuery)| {
+        let mut query = sent_query(&f);
+        change(&mut query);
+        listed(&f, &query)
+    };
+    // Local copies are read: the unread filter excludes them, read keeps them.
+    let unread = with(|q| q.unread = Some(true));
+    assert!(!unread.contains(&plain) && !unread.contains(&attached));
+    let read = with(|q| q.unread = Some(false));
+    assert!(read.contains(&plain) && read.contains(&attached));
+    // Attachments come from the stored count.
+    let has = with(|q| q.has_attachment = Some(true));
+    assert_eq!(has, vec![attached.clone()]);
+    let none = with(|q| q.has_attachment = Some(false));
+    assert!(none.contains(&plain) && !none.contains(&attached));
+    // Search covers subject and recipients, with LIKE wildcards escaped.
+    assert_eq!(
+        with(|q| q.text = Some("attach".into())),
+        vec![attached.clone()]
+    );
+    assert_eq!(with(|q| q.text = Some("b@example".into())).len(), 2);
+    assert_eq!(with(|q| q.text = Some("100%_".into())), vec![plain.clone()]);
+    assert!(with(|q| q.text = Some("%".into())) == vec![plain.clone()]);
+    assert!(with(|q| q.text = Some("p_ain".into())).is_empty());
+    // Time bounds use the acceptance time.
+    let late = with(|q| q.received_after = Some("2026-10-18T10:30:00.000Z".into()));
+    assert_eq!(late, vec![attached]);
+}
+
+#[test]
+fn only_accepted_unmatched_unremoved_unreleased_items_are_listed() {
+    let mut f = setup();
+    put_sent(&mut f, &[server_sent(1, "2026-10-18T09:00:00.000Z")]);
+    let shown = local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "shown", 0);
+    let mut hidden = Vec::new();
+    for (n, change) in [
+        (2, "state = 'queued'"),
+        (3, "state = 'unknown'"),
+        (4, "state = 'failed'"),
+        (5, "state = 'canceled'"),
+        (6, "server_copy_message_id = '<x@y>'"),
+        (7, "deleted_locally_at = 't'"),
+        (
+            8,
+            "snapshot_released_at = 't', snapshot_hash = NULL, snapshot_size = NULL",
+        ),
+    ] {
+        hidden.push(local_copy(&f, n, "2026-10-18T10:00:00.000Z", "hidden", 0));
+        // Some states need companion columns; failures here are the test's own.
+        let _ = f.db.execute(
+            &format!("UPDATE outbox SET {change} WHERE id = ?1"),
+            [local_id(n)],
+        );
+    }
+    f.db.execute(
+        "UPDATE outbox SET resolution = 'markedSent', resolution_mutation_id = ?2 WHERE id = ?1",
+        [local_id(1), "r".repeat(36)],
+    )
+    .unwrap();
+    let ids = listed(&f, &sent_query(&f));
+    assert!(ids.contains(&shown), "markedSent items stay listed");
+    for id in hidden {
+        assert!(!ids.contains(&id), "{id}");
+    }
+}
+
+#[test]
+fn startup_backfill_fills_accepted_rows_once_and_skips_released_snapshots() {
+    let f = setup();
+    let kept = local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "kept", 2);
+    let released = local_copy(&f, 2, "2026-10-18T10:00:00.000Z", "released", 1);
+    f.db.execute(
+        "UPDATE outbox SET preview = NULL, attachment_count = NULL",
+        [],
+    )
+    .unwrap();
+    f.db.execute(
+        "UPDATE outbox SET snapshot_released_at = 't', snapshot_hash = NULL, snapshot_size = NULL,
+         server_copy_message_id = '<s@x>' WHERE id = ?1",
+        [local_id(2)],
+    )
+    .unwrap();
+    let directory = f.directory.path().to_path_buf();
+    drop(f.service);
+    let read = |n: u32| -> (Option<String>, Option<i64>) {
+        f.db.query_row(
+            "SELECT preview, attachment_count FROM outbox WHERE id = ?1",
+            [local_id(n)],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    for _ in 0..2 {
+        drop(AccountService::open(&directory, f.secrets.clone()).unwrap());
+        assert_eq!(read(1), (Some("Local body text".into()), Some(2)));
+        assert_eq!(read(2), (None, None));
+    }
+    let _ = (kept, released);
+}

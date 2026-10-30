@@ -48,6 +48,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const dataset = options.seed === 'showcase' ? showcaseDataset() : DEFAULT_DATASET
   const accounts = dataset.accounts.map((account) => structuredClone(account))
   const emails = buildEmails(dataset)
+  const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
 
@@ -334,6 +335,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async setFlag(emailId, flag, wanted) {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
+      if (email.summary.localOnly) throw new MailxClientError({ code: 'validation', message: '本机副本不能更改标记。', field: null })
       const key = flag === 'read' ? 'isRead' : 'isStarred'
       if (email.summary[key] === wanted) return 'unchanged' as const
       email.summary[key] = wanted
@@ -467,6 +469,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     listOutbox: async ({ accountId = null, includeAll = false } = {}) => clone(outbox.list(accountId, includeAll)),
     async getOutbox(id) { return clone(outbox.require(id)) },
     async cancelOutbox(id) { return clone(outbox.cancel(id)) },
+    async removeLocalCopy(emailId) {
+      const index = emails.findIndex((row) => row.summary.id === emailId)
+      if (index < 0) throw notFound()
+      if (!emails[index].summary.localOnly) throw new MailxClientError({ code: 'validation', message: '只能移除仅在本机的副本。', field: null })
+      const [{ summary }] = emails.splice(index, 1)
+      sentCopiesListeners.forEach((listener) => listener({ accountId: summary.accountId }))
+    },
     async retryOutboxNow(id) { return clone(outbox.retryNow(id)) },
     async resolveUnknown(request) { return clone(outbox.resolve(request.id, request.resolution)) },
     async openComposer(draftId, fresh = false) {
@@ -476,6 +485,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     closeComposer: async () => undefined,
     cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),
+    onSentCopiesChanged(listener) { sentCopiesListeners.add(listener); return () => { sentCopiesListeners.delete(listener) } },
     onDrafts(listener) { draftListeners.add(listener); return () => { draftListeners.delete(listener) } },
     onAppClosing: () => () => undefined,
     onAppCloseCancelled: () => () => undefined,
@@ -667,6 +677,10 @@ export type Seed = {
   subject: string
   text: string
   hoursAgo: number
+  /** A sent copy kept only on this device (`local-sent:` id), like the core's pending server copy. */
+  localOnly?: boolean
+  /** Recipients of a sent row; defaults to the team address. */
+  to?: MailAddress[]
   read?: boolean
   starred?: boolean
   attachments?: [string, string, number][]
@@ -738,6 +752,17 @@ const DEFAULT_SEEDS: Seed[] = [
     text: '谢谢大家，复盘纪要已经整理到共享文档，行动项负责人请在周五前更新进度。',
     hoursAgo: 75,
     read: true,
+  },
+  {
+    account: WORK,
+    role: 'sent',
+    from: ME_WORK,
+    to: [{ name: null, address: 'chen.yu@example.com' }, { name: null, address: 'zhao@example.com' }, { name: null, address: 'qian@example.com' }],
+    subject: '周五评审安排',
+    text: '各位好，周五下午三点评审，会议室已订好，请提前阅读附上的方案。',
+    hoursAgo: 0.2,
+    read: true,
+    localOnly: true,
   },
   {
     account: WORK,
@@ -850,12 +875,15 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
     const me = addresses[seed.account]
     const sent = seed.role === 'sent' || seed.role === 'drafts'
     const lazy = lazyPreviews && index % 2 === 1
+    const recipients = seed.to ?? (sent ? [{ name: '团队', address: 'team@example.com' }] : [me])
     const summary: EmailSummary = {
-      id,
+      id: seed.localOnly ? `local-sent:${id}` : id,
       accountId: seed.account,
       folderId: seed.folder ? `${seed.account}:${seed.folder}` : folderId(seed.account, seed.role ?? 'inbox'),
       subject: seed.subject,
       from: seed.from,
+      to: { addresses: recipients.slice(0, 3), total: recipients.length },
+      localOnly: seed.localOnly ?? false,
       preview: lazy ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
       receivedAt: new Date(BASE_TIME - seed.hoursAgo * 3_600_000).toISOString(),
       isRead: seed.read ?? false,
@@ -868,7 +896,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
     }
     return {
       summary,
-      to: sent ? [{ name: '团队', address: 'team@example.com' }] : [me],
+      to: recipients,
       cc: [],
       replyTo: [],
       body: { text: seed.text, hasHtml: htmlFirst && index === 0, truncated: false, remoteImagesBlocked: htmlFirst && index === 0 ? 1 : 0 },
