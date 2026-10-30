@@ -23,7 +23,7 @@ function email(accountId: string): EmailSummary {
   return {
     id: `${accountId}-mail`, accountId, folderId: folder(accountId).id, subject: accountId === account.id ? 'Removed message' : 'Surviving message',
     from: { name: 'Sender', address: 'sender@example.com' }, preview: 'Preview', receivedAt: '2026-10-18T08:00:00Z',
-    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false,
+    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false,
   }
 }
 function page(items: EmailSummary[]): EmailPage {

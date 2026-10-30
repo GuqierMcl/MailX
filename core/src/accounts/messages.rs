@@ -2,7 +2,7 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use super::{AccountService, validate_uuid};
+use super::{AccountService, validate_email_id, validate_uuid};
 pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
 use crate::{
     AppError,
@@ -17,7 +17,7 @@ impl AccountService {
     }
 
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
-        validate_uuid(email_id, "emailId")?;
+        validate_email_id(email_id)?;
         self.storage.get_email(email_id)
     }
 
@@ -164,7 +164,7 @@ fn validate_query(query: &EmailListQuery) -> Result<ValidatedEmailQuery, AppErro
                 .map_err(|_| AppError::validation("cursor"))?;
             let mut cursor: PageCursor =
                 serde_json::from_slice(&bytes).map_err(|_| AppError::validation("cursor"))?;
-            validate_uuid(&cursor.i, "cursor")?;
+            validate_email_id(&cursor.i).map_err(|_| AppError::validation("cursor"))?;
             cursor.r = normalized_time(&cursor.r, "cursor")?;
             Ok(cursor)
         })
@@ -183,7 +183,11 @@ impl AccountService {
         flag: crate::storage::Flag,
         wanted: bool,
     ) -> Result<crate::storage::LocalChange, AppError> {
-        validate_uuid(message_id, "emailId")?;
+        validate_email_id(message_id)?;
+        // A local Sent copy has no server message to flag (sending.md section 9.4).
+        if message_id.starts_with(crate::mail::LOCAL_SENT_PREFIX) {
+            return Err(AppError::validation("emailId"));
+        }
         self.storage.set_message_flag(message_id, flag, wanted)
     }
 

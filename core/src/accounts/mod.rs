@@ -568,6 +568,16 @@ pub(crate) fn validate_uuid(value: &str, field: &str) -> Result<(), AppError> {
         .map(|_| ())
         .map_err(|_| AppError::validation(field))
 }
+/// A message id: a synced message's UUID or a local Sent copy's
+/// `local-sent:<outbox id>` (sending.md section 9.2).
+pub(crate) fn validate_email_id(value: &str) -> Result<(), AppError> {
+    validate_uuid(
+        value
+            .strip_prefix(crate::mail::LOCAL_SENT_PREFIX)
+            .unwrap_or(value),
+        "emailId",
+    )
+}
 fn valid_text(value: &str, maximum: usize) -> bool {
     !value.trim().is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
 }

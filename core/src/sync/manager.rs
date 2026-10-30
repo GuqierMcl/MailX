@@ -464,6 +464,20 @@ impl SyncManager {
         }
     }
 
+    /// Wakes a running worker for one more round. Unlike `refresh` it never
+    /// restarts anything, so a worker stopped by policy or a login failure
+    /// stays stopped.
+    pub(crate) fn wake(&self, account_id: &str) {
+        if let Some(wake) = self
+            .wakers
+            .lock()
+            .ok()
+            .and_then(|wakers| wakers.get(account_id).cloned())
+        {
+            wake.notify_one();
+        }
+    }
+
     /// Starts, or restarts with fresh settings, the worker for an account.
     /// An old connection is never reused after the account changes.
     pub(crate) fn restart(&self, account_id: &str) {

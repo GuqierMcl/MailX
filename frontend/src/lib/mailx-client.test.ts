@@ -165,6 +165,7 @@ describe('drafts and sending commands', () => {
     vi.mocked(isTauri).mockReturnValue(false)
     const client = createDesktopClient()
     expect(client.onOutbox(() => undefined)).toBeTypeOf('function')
+    expect(client.onSentCopiesChanged(() => undefined)).toBeTypeOf('function')
     expect(client.onAppClosing(() => undefined)).toBeTypeOf('function')
     await expect(client.openComposer('d')).rejects.toMatchObject({ failure: { code: 'hostUnavailable' } })
   })

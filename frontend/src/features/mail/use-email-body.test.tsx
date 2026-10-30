@@ -14,7 +14,7 @@ const state = exampleSyncState()
 function mail(id = 'one', ready = false): EmailDetail {
   return {
     summary: { id, accountId: account.id, folderId: 'inbox', subject: id, from: { name: null, address: 'test@example.com' },
-      receivedAt: '2026-10-20T00:00:00Z', isRead: false, isStarred: false, pendingChanges: false, hasAttachment: false,
+      receivedAt: '2026-10-20T00:00:00Z', isRead: false, isStarred: false, pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, hasAttachment: false,
       bodyState: ready ? 'ready' : 'missing', previewState: ready ? 'ready' : 'missing', preview: ready ? 'cached preview' : '' },
     to: [], cc: [], replyTo: [], attachments: [], bodyFailure: null,
     body: ready ? { text: 'cached text', hasHtml: false, truncated: false, remoteImagesBlocked: 0 } : null,

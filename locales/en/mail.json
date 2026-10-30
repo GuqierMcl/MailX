@@ -153,5 +153,16 @@
   "attachmentCount_other": "{{count}} attachments",
   "imageFailureCount_other": "{{count}} images could not load",
   "attachmentCount_one": "{{count}} attachment",
-  "imageFailureCount_one": "{{count}} image could not load"
+  "imageFailureCount_one": "{{count}} image could not load",
+  "noRecipients": "(no recipients)",
+  "toRecipient": "To: {{name}}",
+  "toRecipientsMany_one": "To: {{name}}",
+  "toRecipientsMany_other": "To: {{name}} and {{count}} others",
+  "localOnly": "On this device only",
+  "localOnlyTip": "Only on this device — no copy found on the server yet",
+  "removeLocalCopy": "Remove from this device",
+  "removeLocalCopyTitle": "Remove this message from this device?",
+  "removeLocalCopyDescription": "This only removes the sent copy stored on this device. It does not affect the server and cannot be undone.",
+  "removeLocalCopyConfirm": "Remove",
+  "cancel": "Cancel"
 }

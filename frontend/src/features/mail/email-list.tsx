@@ -12,7 +12,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { displayName, formatListTime } from './format'
+import { displayName, formatListTime, recipientsLabel } from './format'
+import { LocalOnlyMarker } from './local-only-marker'
 import { isGivenUp, useGaveUpVersion } from './preview-gave-up'
 import { SenderAvatar } from './sender-avatar'
 import { usePreviewRequests } from './use-preview-requests'
@@ -27,6 +28,8 @@ export type ListSyncStatus = {
 
 type EmailListProps = {
   title: string
+  /** A sent-role view (a Sent folder or the unified Sent): rows name the recipients, not the sender. */
+  sentView?: boolean
   emails: EmailSummary[]
   /** When the list spans several accounts, each row names its owning mailbox (by name, not address) after the sender. */
   accounts: Account[] | null
@@ -72,7 +75,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -140,7 +143,7 @@ function EmailRows({ emails, accounts, loading, syncStatus, error, filter, searc
   }
   return (
     <VirtualRows
-      emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
+      sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} onSelect={onSelect} onLoadMore={onLoadMore}
     />
@@ -165,6 +168,7 @@ function rowHeight(previewLines: PreviewLines) {
 }
 
 type VirtualRowsProps = {
+  sentView: boolean
   emails: EmailSummary[]
   accounts: Account[] | null
   stale: boolean
@@ -180,7 +184,7 @@ type VirtualRowsProps = {
   onLoadMore: () => void
 }
 
-function VirtualRows({ emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // The selected and the focused row stay mounted however far they scroll away,
@@ -276,6 +280,7 @@ function VirtualRows({ emails, accounts, stale, selectedId, previewLines, onRequ
               count={emails.length}
               style={{ transform: `translateY(${item.start}px)` }}
               email={email}
+              sentView={sentView}
               account={accounts?.find((account) => account.id === email.accountId) ?? null}
               selected={email.id === selectedId}
               previewLines={previewLines}
@@ -324,6 +329,7 @@ function previewText(email: EmailSummary) {
 
 type EmailRowProps = {
   email: EmailSummary
+  sentView: boolean
   account: Account | null
   selected: boolean
   previewLines: PreviewLines
@@ -334,8 +340,11 @@ type EmailRowProps = {
   onSelect: () => void
 }
 
-function EmailRow({ email, account, selected, previewLines, index, count, style, ref, onSelect }: EmailRowProps) {
+function EmailRow({ email, sentView, account, selected, previewLines, index, count, style, ref, onSelect }: EmailRowProps) {
   useTranslation()
+  // In a sent view the row is about who the mail went to. The avatar follows
+  // the same person, so it never shows the account owner on every row.
+  const counterpart = sentView ? email.to.addresses[0] ?? email.from : email.from
   return (
     <button
       ref={ref}
@@ -359,14 +368,14 @@ function EmailRow({ email, account, selected, previewLines, index, count, style,
       <span className="-mr-1.5 flex w-2 shrink-0 justify-center">
         {!email.isRead && <span aria-label={t('mail:unread')} className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
       </span>
-      <SenderAvatar sender={email.from} accountId={email.accountId} />
+      <SenderAvatar sender={counterpart} accountId={email.accountId} />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
         <div className="flex w-full flex-col gap-1">
           <div className="flex items-center gap-2">
             {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
                 muted, and gives way to the sender before the time ever does. */}
             <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className={cn('truncate', email.isRead ? 'font-normal' : 'font-semibold')}>{displayName(email.from)}</span>
+              <span className={cn('truncate', email.isRead ? 'font-normal' : 'font-semibold')}>{sentView ? recipientsLabel(email.to) : displayName(email.from)}</span>
               {account && (
                 <>
                   <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
@@ -374,7 +383,8 @@ function EmailRow({ email, account, selected, previewLines, index, count, style,
                 </>
               )}
             </span>
-            <span className={cn('ml-auto shrink-0 text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
+            {email.localOnly && <LocalOnlyMarker className="ml-auto" />}
+            <span className={cn(email.localOnly ? 'shrink-0' : 'ml-auto shrink-0', 'text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
               {formatListTime(email.receivedAt)}
             </span>
           </div>

@@ -124,7 +124,17 @@ export function Workbench({ client }: { client: MailxClient }) {
     setOutboxChoice(outboxId)
     setMailbox({ kind: 'outbox' })
   }, [])
-  useComposeEvents(client, selectOutboxItem)
+  // An outbox change can add, drop or swap a local sent copy (a matched server
+  // copy replaces it), so lists that include Sent scopes are refetched. If the
+  // opened message was such a copy, its detail refetch reports notFound and the
+  // reader closes through the usual "message ceased to exist" path.
+  const refetchSentLists = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
+    void queryClient.invalidateQueries({ queryKey: [...mailKeys.all, 'email'] })
+  }, [queryClient])
+  useComposeEvents(client, selectOutboxItem, { onChange: refetchSentLists })
+  // A copy removed from this device: the same refetch, without a send result.
+  useEffect(() => client.onSentCopiesChanged(refetchSentLists), [client, refetchSentLists])
 
   // One sync round can change many folders; reload the tree once for the burst.
   // The timer outlives the subscription effect below: snapshots are already
@@ -210,6 +220,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     const state = syncStates[account.id]
     return state?.mailboxSourceId === account.mailboxSourceId ? [[account.id, state]] : []
   }))
+  const sentView = mailView && (folderRole === 'sent' || (activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'sent'))
   const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId : folder.role === folderRole))
   const scopeRevision = JSON.stringify(scopedFolders.map((folder) => [
     folder.id,
@@ -286,6 +297,14 @@ export function Workbench({ client }: { client: MailxClient }) {
   // so the subscription does not restart on every tree change.
   const latestTree = useRef({ accounts, folders })
   useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
+  const [removeError, setRemoveError] = useState<string | null>(null)
+  const removeLocalCopy = useCallback((email: { id: string }) => {
+    setRemoveError(null)
+    client.removeLocalCopy(email.id).then(() => {
+      setOpened((current) => current?.id === email.id ? null : current)
+      void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
+    }).catch((error: unknown) => setRemoveError(errorText(error)))
+  }, [client, queryClient])
   useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
     if (outboxId) {
       setOutboxChoice(outboxId)
@@ -472,6 +491,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             <EmailList
               onRequestPreviews={requestPreviews}
               title={mailboxTitle(activeMailbox)}
+              sentView={sentView}
               emails={emails}
               accounts={showAccountBadges ? accounts : null}
               loading={treeLoading || list.isPending}
@@ -534,10 +554,11 @@ export function Workbench({ client }: { client: MailxClient }) {
               email={opened ? body.email : null}
               providerId={accounts.find((account) => account.id === opened?.accountId)?.providerId ?? null}
               loading={opened !== null && body.detail.isPending}
-              error={opened && body.detail.isError ? errorText(body.detail.error) : null}
+              error={opened && body.detail.isError ? errorText(body.detail.error) : removeError}
               downloading={body.pending}
               onDownload={body.download}
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
+              onRemoveLocal={removeLocalCopy}
             />
             )}
           </ResizablePanel>

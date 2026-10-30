@@ -31,15 +31,24 @@ struct Fixture {
     db: Connection,
     emails: Vec<String>,
     account: String,
+    events: std::sync::Arc<std::sync::Mutex<Vec<crate::CoreEvent>>>,
 }
 
 /// One synthetic account (`OWN`) with one cached message per raw MIME.
 fn fixture(raws: &[Vec<u8>]) -> Fixture {
     let directory = TempDir::new().unwrap();
     let refs: Vec<&[u8]> = raws.iter().map(Vec::as_slice).collect();
-    let (core, emails) =
-        MailxCore::body_test_fixture(directory.path(), tokio::runtime::Handle::current(), &refs)
-            .unwrap();
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let (core, emails) = MailxCore::body_test_fixture_with_events(
+        directory.path(),
+        tokio::runtime::Handle::current(),
+        &refs,
+        std::sync::Arc::new(move |event: &crate::CoreEvent| {
+            sink.lock().unwrap().push(event.clone())
+        }),
+    )
+    .unwrap();
     let db = Connection::open(directory.path().join("mailx.sqlite3")).unwrap();
     db.pragma_update(None, "foreign_keys", true).unwrap();
     let account = db
@@ -51,6 +60,7 @@ fn fixture(raws: &[Vec<u8>]) -> Fixture {
         db,
         emails,
         account,
+        events,
     }
 }
 
@@ -1801,4 +1811,214 @@ async fn inline_batches_are_all_or_nothing_and_keep_their_own_members() {
     );
     assert_eq!(code(bad).0, ErrorCode::UnsupportedImage);
     assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
+}
+
+// Local Sent copies (sending.md section 9.3, 9.4).
+
+fn sent_raw(attachment: bool) -> Vec<u8> {
+    let mut raw = String::from(
+        "From: Me <own@example.com>\r\nTo: Ann <ann@example.com>\r\nCc: cc@example.com\r\n\
+         Subject: Sent subject\r\nDate: Tue, 20 Oct 2026 08:30:00 +0000\r\n\
+         Message-ID: <sent-1@example.com>\r\nMIME-Version: 1.0\r\n\
+         Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\n\
+         Content-Type: text/plain; charset=utf-8\r\n\r\nSent body\r\n",
+    );
+    if attachment {
+        raw.push_str(
+            "--b\r\nContent-Type: text/plain; name=\"note.txt\"\r\n\
+             Content-Disposition: attachment; filename=\"note.txt\"\r\n\r\nhello\r\n",
+        );
+    }
+    raw.push_str("--b--\r\n");
+    raw.into_bytes()
+}
+
+/// Makes the fixture's folder the Sent folder and adds an accepted outbox item
+/// whose snapshot is `raw`; returns the `local-sent:` id and the outbox id.
+fn local_sent(f: &Fixture, raw: &[u8]) -> (String, String) {
+    f.db.execute("UPDATE folders SET role = 'sent', selectable = 1", [])
+        .unwrap();
+    let blob = crate::storage::bodies::BlobStore::open(f._directory.path())
+        .unwrap()
+        .put(raw)
+        .unwrap();
+    let outbox = id();
+    f.db.execute(
+        "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+         snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+         state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
+         attachment_count)
+         VALUES (?1, ?2, ?3, '{}', '<sent-1@example.com>', ?4, ?5, '{}', 'Sent subject',
+                 '[\"ann@example.com\"]', 1, 'accepted', '2026-10-20T08:31:00.000Z', 't', 't',
+                 't', 't', 'Sent body', 1)",
+        params![outbox, f.account, id(), blob.sha256, blob.size as i64],
+    )
+    .unwrap();
+    (format!("local-sent:{outbox}"), outbox)
+}
+
+#[tokio::test]
+async fn local_sent_copy_detail_body_and_attachment_come_from_the_snapshot() {
+    let f = fixture(&[plain("x")]);
+    let (email, _) = local_sent(&f, &sent_raw(true));
+    let detail = f.core.get_email(&email).unwrap();
+    assert!(detail.summary.local_only);
+    assert_eq!(detail.summary.id, email);
+    assert_eq!(detail.summary.subject, "Sent subject");
+    assert_eq!(detail.to[0].address, "ann@example.com");
+    assert_eq!(detail.cc[0].address, "cc@example.com");
+    assert_eq!(
+        detail.body.as_ref().unwrap().text.as_deref().map(str::trim),
+        Some("Sent body")
+    );
+    assert_eq!(detail.attachments.len(), 1);
+    assert_eq!(detail.attachments[0].filename, "note.txt");
+    // Fetching is a no-op: the body is already ready.
+    let fetched = f.core.fetch_body(email.clone()).await.unwrap();
+    assert!(fetched.body.is_some());
+    let info = f
+        .core
+        .attachment_info(email.clone(), detail.attachments[0].id.clone())
+        .await
+        .unwrap();
+    assert_eq!(info.file_name, "note.txt");
+    let file = f
+        .core
+        .attachment_content(email.clone(), detail.attachments[0].id.clone())
+        .await
+        .unwrap();
+    assert_eq!(file.bytes, b"hello");
+    // The reader document renders from the snapshot too.
+    assert!(f.core.body_document(email).await.is_ok());
+}
+
+#[tokio::test]
+async fn local_sent_copy_can_be_replied_to_and_forwarded() {
+    let f = fixture(&[plain("x")]);
+    let (email, _) = local_sent(&f, &sent_raw(true));
+    let derive = |kind| {
+        f.core.create_draft_from(CreateDraftFromRequest {
+            email_id: email.clone(),
+            kind,
+            client_mutation_id: id(),
+        })
+    };
+    let reply = derive(DraftKind::Reply).unwrap();
+    assert_eq!(reply.subject, "Re: Sent subject");
+    assert_eq!(reply.to[0].address, "ann@example.com");
+    assert_eq!(reply.in_reply_to.as_deref(), Some("<sent-1@example.com>"));
+    let all = derive(DraftKind::ReplyAll).unwrap();
+    assert!(all.cc.iter().any(|a| a.address == "cc@example.com"));
+    let forward = derive(DraftKind::Forward).unwrap();
+    assert_eq!(forward.subject, "Fwd: Sent subject");
+    assert!(forward.body_text.contains("Sent body"));
+    let attachments = forward.attachments.clone();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].file_name, "note.txt");
+}
+
+#[tokio::test]
+async fn local_sent_copy_rejects_flags_and_is_removed_idempotently() {
+    let f = fixture(&[plain("x")]);
+    let (email, outbox) = local_sent(&f, &sent_raw(false));
+    let flag = f
+        .core
+        .set_message_flag(&email, crate::MessageFlag::Starred, true);
+    assert_eq!(code(flag).0, ErrorCode::Validation);
+    f.core.remove_local_copy(&email).unwrap();
+    // Removing again changes nothing, so it announces nothing.
+    f.core.remove_local_copy(&email).unwrap();
+    let events = f.events.lock().unwrap().clone();
+    let copies: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            crate::CoreEvent::SentCopies(changed) => Some(changed.account_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copies, std::slice::from_ref(&f.account));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, crate::CoreEvent::Outbox(_)))
+    );
+    let (released, deleted, hash): (Option<String>, Option<String>, Option<String>) = f
+        .db
+        .query_row(
+            "SELECT snapshot_released_at, deleted_locally_at, snapshot_hash FROM outbox WHERE id = ?1",
+            [&outbox],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert!(released.is_some() && deleted.is_some() && hash.is_none());
+    assert_eq!(code(f.core.get_email(&email)).0, ErrorCode::NotFound);
+    // An unknown or malformed id is not a local copy.
+    let unknown = format!("local-sent:{}", id());
+    assert_eq!(
+        code(f.core.remove_local_copy(&unknown)).0,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        code(f.core.remove_local_copy("local-sent:nope")).0,
+        ErrorCode::Validation
+    );
+    assert_eq!(
+        code(f.core.remove_local_copy(&f.emails[0])).0,
+        ErrorCode::Validation
+    );
+}
+
+#[tokio::test]
+async fn local_sent_copy_with_a_missing_or_corrupt_snapshot_is_a_clean_error() {
+    let f = fixture(&[plain("x")]);
+    let (email, outbox) = local_sent(&f, &sent_raw(false));
+    let hash: String =
+        f.db.query_row(
+            "SELECT snapshot_hash FROM outbox WHERE id = ?1",
+            [&outbox],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let path = std::fs::read_dir(f._directory.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir() && walk(p).iter().any(|f| f.to_string_lossy().contains(&hash)));
+    let blob_file = walk(&path.expect("blob directory"))
+        .into_iter()
+        .find(|f| f.to_string_lossy().contains(&hash))
+        .unwrap();
+    std::fs::write(&blob_file, b"not the snapshot").unwrap();
+    assert_eq!(code(f.core.get_email(&email)).0, ErrorCode::NotFound);
+    std::fs::remove_file(&blob_file).unwrap();
+    assert_eq!(code(f.core.get_email(&email)).0, ErrorCode::NotFound);
+    assert_eq!(
+        code(f.core.fetch_body(email.clone()).await).0,
+        ErrorCode::NotFound
+    );
+    assert!(
+        f.core
+            .attachment_info(email.clone(), format!("{email}:0"))
+            .await
+            .is_err()
+    );
+    let reply = f.core.create_draft_from(CreateDraftFromRequest {
+        email_id: email,
+        kind: DraftKind::Reply,
+        client_mutation_id: id(),
+    });
+    assert!(reply.is_err());
+}
+
+fn walk(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(path).into_iter().flatten().flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
 }

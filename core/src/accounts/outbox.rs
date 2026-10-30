@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 
 use super::{AccountService, new_id, validate_uuid};
+use crate::mail::render::{preview, render};
 use crate::{
     AppError, Draft, ErrorCode,
     accounts::sync_plan::PlanError,
@@ -72,6 +73,10 @@ pub(crate) struct SendBuild {
 pub(crate) struct Frozen {
     built: BuiltMessage,
     snapshot: StoredBlob,
+    /// Plain-text excerpt of the frozen message (sending.md section 9.2).
+    preview: String,
+    /// Regular (non-inline) attachments frozen into the snapshot.
+    attachment_count: u32,
 }
 
 impl SendBuild {
@@ -125,7 +130,23 @@ impl SendBuild {
             inline_images: &inline_images,
         })?;
         let snapshot = self.blobs.put(&built.mime)?;
-        Ok(Frozen { built, snapshot })
+        // Same rule as a downloaded message's list preview.
+        let rendered = render(&built.mime, &self.message_id).ok();
+        let preview = preview(
+            rendered
+                .as_ref()
+                .map_or(Some(draft.body_text.as_str()), |r| r.plain_text.as_deref()),
+        );
+        let attachment_count = u32::try_from(rendered.as_ref().map_or(attachments.len(), |r| {
+            r.parts.iter().filter(|part| !part.is_inline).count()
+        }))
+        .unwrap_or(u32::MAX);
+        Ok(Frozen {
+            built,
+            snapshot,
+            preview,
+            attachment_count,
+        })
     }
 }
 
@@ -227,9 +248,15 @@ impl AccountService {
         frozen: Frozen,
         now: DateTime<Utc>,
     ) -> Result<(OutboxItem, Option<DraftChanged>), AppError> {
-        let Frozen { built, snapshot } = frozen;
+        let Frozen {
+            built,
+            snapshot,
+            preview,
+            attachment_count,
+        } = frozen;
         let draft = &build.draft;
-        let preview: Vec<String> = built.envelope.recipients.iter().take(3).cloned().collect();
+        let recipients_preview: Vec<String> =
+            built.envelope.recipients.iter().take(3).cloned().collect();
         let id = new_id();
         let item = self.storage.insert_outbox(&NewOutbox {
             id: &id,
@@ -245,7 +272,9 @@ impl AccountService {
             }),
             envelope: &built.envelope,
             subject: &draft.subject,
-            recipients_preview: &preview,
+            recipients_preview: &recipients_preview,
+            preview: &preview,
+            attachment_count,
             not_before: now + chrono::Duration::seconds(i64::from(undo_send_seconds)),
             now,
         })?;
@@ -276,6 +305,19 @@ impl AccountService {
     pub(crate) fn cancel_outbox(&self, id: &str, now: DateTime<Utc>) -> Result<Changed, AppError> {
         validate_uuid(id, "outboxId")?;
         self.storage.cancel_queued(id, now)
+    }
+
+    /// Removes a local Sent copy; `email_id` is its `local-sent:` id.
+    pub(crate) fn remove_local_copy(
+        &self,
+        email_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Changed>, AppError> {
+        let outbox_id = email_id
+            .strip_prefix(crate::mail::LOCAL_SENT_PREFIX)
+            .ok_or_else(|| AppError::validation("emailId"))?;
+        validate_uuid(outbox_id, "emailId")?;
+        self.storage.remove_local_copy(outbox_id, now)
     }
 
     pub(crate) fn retry_outbox_now(

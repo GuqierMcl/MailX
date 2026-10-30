@@ -44,6 +44,10 @@ pub(crate) struct NewOutbox<'a> {
     pub envelope: &'a SmtpEnvelope,
     pub subject: &'a str,
     pub recipients_preview: &'a [String],
+    /// Plain-text excerpt for the local Sent copy row (sending.md section 9.2).
+    pub preview: &'a str,
+    /// Regular (non-inline) attachments frozen into the snapshot.
+    pub attachment_count: u32,
     pub not_before: DateTime<Utc>,
     pub now: DateTime<Utc>,
 }
@@ -251,6 +255,51 @@ impl Storage {
         }
     }
 
+    /// Fills the Sent-list fields of accepted items queued before migration 18
+    /// from their snapshot (sending.md section 9.2). Rows whose snapshot is
+    /// released are left alone: they are not shown. A snapshot that cannot be
+    /// read or parsed gets an empty excerpt so it is not retried at every
+    /// start. Idempotent: only rows still missing a field are visited.
+    pub(crate) fn backfill_outbox_list_fields(&mut self) -> Result<(), AppError> {
+        let pending: Vec<(String, String, i64, String)> = self
+            .db
+            .prepare(
+                "SELECT id, snapshot_hash, snapshot_size, message_id FROM outbox
+                 WHERE state = 'accepted' AND snapshot_hash IS NOT NULL
+                   AND snapshot_released_at IS NULL
+                   AND (preview IS NULL OR attachment_count IS NULL)
+                 ORDER BY created_at, id",
+            )?
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        for (id, sha256, size, message_id) in pending {
+            let blob = StoredBlob {
+                sha256,
+                size: u64::try_from(size).unwrap_or(u64::MAX),
+            };
+            let (preview, count) = self
+                .blobs
+                .read(&blob)
+                .ok()
+                .and_then(|raw| crate::mail::render::render(&raw, &message_id).ok())
+                .map(|rendered| {
+                    (
+                        crate::mail::render::preview(rendered.plain_text.as_deref()),
+                        rendered.parts.iter().filter(|part| !part.is_inline).count(),
+                    )
+                })
+                .unwrap_or_default();
+            self.db.execute(
+                "UPDATE outbox SET preview = ?2, attachment_count = ?3
+                 WHERE id = ?1 AND (preview IS NULL OR attachment_count IS NULL)",
+                params![id, preview, i64::try_from(count).unwrap_or(i64::MAX)],
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn draft_locked(&self, draft_id: &str) -> Result<bool, AppError> {
         live_for_draft(&self.db, draft_id)
     }
@@ -333,8 +382,9 @@ impl Storage {
             "INSERT INTO outbox (id, draft_id, account_id, client_mutation_id, queue_canonical,
                 message_id, snapshot_hash, snapshot_size, envelope, subject, recipients_preview,
                 recipient_count, state, not_before, attempts, first_queued_at, created_at,
-                updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?14, ?8, ?9, ?10, ?11, 'queued', ?12, 0, ?13, ?13, ?13)",
+                updated_at, preview, attachment_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?14, ?8, ?9, ?10, ?11, 'queued', ?12, 0, ?13, ?13, ?13,
+                ?15, ?16)",
             params![
                 new.id,
                 new.draft_id,
@@ -350,6 +400,8 @@ impl Storage {
                 stamp(new.not_before),
                 now,
                 i64::try_from(new.snapshot.size).unwrap_or(i64::MAX),
+                new.preview,
+                i64::from(new.attachment_count),
             ],
         )?;
         if let Some(draft_id) = new.draft_id {
@@ -615,6 +667,45 @@ impl Storage {
             draft: unlocked(&item),
             item,
         })
+    }
+
+    /// "Delete" on a local Sent copy (sending.md section 9.4): hides the item
+    /// and releases its snapshot like a server match does, but keeps
+    /// `server_copy_message_id` empty. `None` when it was already removed;
+    /// `notFound` when the item is not an accepted, unmatched local copy.
+    pub(crate) fn remove_local_copy(
+        &self,
+        id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Changed>, AppError> {
+        let tx = self.db.unchecked_transaction()?;
+        let stamped = stamp(now);
+        let rows = tx.execute(
+            "UPDATE outbox SET deleted_locally_at = ?2, snapshot_hash = NULL, snapshot_size = NULL,
+                    snapshot_released_at = ?2, updated_at = ?2
+             WHERE id = ?1 AND state = 'accepted' AND server_copy_message_id IS NULL
+               AND deleted_locally_at IS NULL AND snapshot_released_at IS NULL",
+            params![id, stamped],
+        )?;
+        if rows == 0 {
+            let removed: Option<bool> = tx
+                .query_row(
+                    "SELECT state = 'accepted' AND server_copy_message_id IS NULL
+                            AND deleted_locally_at IS NOT NULL
+                     FROM outbox WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            return if removed == Some(true) {
+                Ok(None)
+            } else {
+                Err(AppError::new(ErrorCode::NotFound))
+            };
+        }
+        let item = item_in(&tx, id)?;
+        tx.commit()?;
+        Ok(Some(Changed { item, draft: None }))
     }
 
     /// Clears the backoff wait of a queued item.

@@ -45,6 +45,10 @@ const FLAG_EVENT: &str = "mailx://flags";
 #[cfg(not(feature = "body-webview-test"))]
 const PREVIEWS_EVENT: &str = "mailx://email-previews";
 
+/// An account's local sent copies changed; Sent lists refetch.
+#[cfg(not(feature = "body-webview-test"))]
+const SENT_COPIES_EVENT: &str = "mailx://sent-copies";
+
 fn main() {
     #[cfg(feature = "body-webview-test")]
     body_webview_test::checkpoint("main entered");
@@ -131,6 +135,13 @@ fn main() {
                                 EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                                 PREVIEWS_EVENT,
                                 previews,
+                            );
+                        }
+                        mailx_core::CoreEvent::SentCopies(changed) => {
+                            let _ = handle.emit_to(
+                                EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                                SENT_COPIES_EVENT,
+                                changed,
                             );
                         }
                         mailx_core::CoreEvent::Outbox(change) => {
@@ -261,6 +272,7 @@ fn main() {
             compose::outbox_cancel,
             compose::outbox_retry_now,
             compose::outbox_resolve_unknown,
+            compose::outbox_remove_local_copy,
             compose::composer_open,
             compose::composer_close,
             compose::composer_cancel_close,

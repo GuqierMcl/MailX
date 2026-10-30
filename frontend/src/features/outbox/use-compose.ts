@@ -76,10 +76,17 @@ export function useComposeActions(client: MailxClient, accounts: Account[], cont
  * Keeps the drafts and outbox queries live and tells the user what happened to a
  * send (sending.md section 6). `onOpenOutbox` selects an item in the outbox view.
  */
-export function useComposeEvents(client: MailxClient, onOpenOutbox: (outboxId: string) => void) {
+export function useComposeEvents(
+  client: MailxClient,
+  onOpenOutbox: (outboxId: string) => void,
+  /** `onChange` sees every outbox event. */
+  opts: { onChange?: (change: OutboxChanged) => void } = {},
+) {
   const queryClient = useQueryClient()
   const open = useRef(onOpenOutbox)
   useEffect(() => { open.current = onOpenOutbox })
+  const changed = useRef(opts.onChange)
+  useEffect(() => { changed.current = opts.onChange })
   const undoToasts = useRef(new Map<string, string>())
 
   useEffect(() => {
@@ -94,6 +101,7 @@ export function useComposeEvents(client: MailxClient, onOpenOutbox: (outboxId: s
     const offOutbox = client.onOutbox((change: OutboxChanged) => {
       void queryClient.invalidateQueries({ queryKey: composeKeys.outbox() })
       void queryClient.invalidateQueries({ queryKey: composeKeys.drafts() })
+      changed.current?.(change)
       if (change.state === 'queued' && change.attempts === 0) {
         // Just queued: say when it goes out, with a way back.
         void client.getOutbox(change.outboxId).then((item) => {

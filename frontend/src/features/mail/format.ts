@@ -1,5 +1,5 @@
 import { t } from '@/i18n'
-import type { EmailListQuery, MailAddress } from '@/generated/accounts'
+import type { EmailListQuery, EmailRecipients, MailAddress } from '@/generated/accounts'
 
 export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
   return {
@@ -19,6 +19,14 @@ export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
 
 export function displayName(address: MailAddress) {
   return address.name?.trim() || address.address
+}
+
+/** The sent-row line: "致：first", plus "等 N 人" once more than one recipient was addressed. */
+export function recipientsLabel(to: EmailRecipients) {
+  const first = to.addresses[0]
+  if (!first) return t('mail:noRecipients')
+  const name = displayName(first)
+  return to.total > 1 ? t('mail:toRecipientsMany', { name, count: to.total }) : t('mail:toRecipient', { name })
 }
 
 export function initials(address: MailAddress) {

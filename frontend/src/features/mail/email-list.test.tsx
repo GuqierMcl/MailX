@@ -12,14 +12,14 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
   return {
     id, accountId: work.id, folderId: 'inbox', subject: `主题 ${id}`,
     from: { name: 'GitHub', address: 'notifications@github.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
-    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, ...overrides,
+    isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
   }
 }
 
-function renderList(emails: EmailSummary[], accounts: Account[] | null, previewLines: PreviewLines = 'one') {
+function renderList(emails: EmailSummary[], accounts: Account[] | null, previewLines: PreviewLines = 'one', sentView = false) {
   render(
     <EmailList
-      title="全部收件箱" emails={emails} accounts={accounts} loading={false}
+      title="全部收件箱" sentView={sentView} emails={emails} accounts={accounts} loading={false}
       syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
       hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
       filter="all" search="" selectedId={null} previewLines={previewLines}
@@ -98,5 +98,35 @@ describe('body preview lines', () => {
     const [row] = renderList([long], null, 'none')
     expect(within(row).queryByText(long.preview)).not.toBeInTheDocument()
     expect(within(row).getByText(long.subject)).toBeInTheDocument()
+  })
+})
+
+describe('rows in a sent view', () => {
+  const addr = (name: string | null, address: string) => ({ name, address })
+
+  it('name the first recipient and the total instead of the sender', () => {
+    const [row] = renderList([email('a', { to: { addresses: [addr('陈宇', 'chen@example.com'), addr(null, 'zhao@example.com')], total: 5 } })], null, 'one', true)
+    expect(within(row).getByText('致：陈宇 等 5 人')).toBeInTheDocument()
+    expect(within(row).queryByText('GitHub')).not.toBeInTheDocument()
+  })
+
+  it('name a single recipient without a count', () => {
+    const [row] = renderList([email('a', { to: { addresses: [addr(null, 'chen@example.com')], total: 1 } })], null, 'one', true)
+    expect(within(row).getByText('致：chen@example.com')).toBeInTheDocument()
+  })
+
+  it('leave other mailboxes showing the sender', () => {
+    const [row] = renderList([email('a', { to: { addresses: [addr('陈宇', 'chen@example.com')], total: 1 } })], null)
+    expect(within(row).getByText('GitHub')).toBeInTheDocument()
+    expect(within(row).queryByText(/致：/)).not.toBeInTheDocument()
+  })
+
+  it('mark a local-only copy with a tooltip, and nothing else', async () => {
+    const rows = renderList([email('local-sent:1', { localOnly: true, to: { addresses: [addr(null, 'a@b.c')], total: 1 } }), email('b')], null, 'one', true)
+    const marker = within(rows[0]).getByRole('img', { name: '仅在本机' })
+    expect(within(rows[1]).queryByRole('img', { name: '仅在本机' })).not.toBeInTheDocument()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.hover(marker)
+    expect(await screen.findByText('仅在本机，服务器上暂未找到副本', { selector: '[data-slot="tooltip-content"]' })).toBeInTheDocument()
   })
 })

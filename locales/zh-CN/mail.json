@@ -149,5 +149,15 @@
   "addAccountHint": "添加一个邮箱后，邮件会显示在这里。",
   "searchTermInScope": "在 {{scope}} 中搜索「{{query}}」",
   "attachmentCount_other": "{{count}} 个附件",
-  "imageFailureCount_other": "{{count}} 张图片未能加载"
+  "imageFailureCount_other": "{{count}} 张图片未能加载",
+  "noRecipients": "（无收件人）",
+  "toRecipient": "致：{{name}}",
+  "toRecipientsMany_other": "致：{{name}} 等 {{count}} 人",
+  "localOnly": "仅在本机",
+  "localOnlyTip": "仅在本机，服务器上暂未找到副本",
+  "removeLocalCopy": "从本机移除",
+  "removeLocalCopyTitle": "从本机移除这封邮件？",
+  "removeLocalCopyDescription": "只会移除本机上的这份已发送副本，不影响服务器，且无法撤销。",
+  "removeLocalCopyConfirm": "移除",
+  "cancel": "取消"
 }

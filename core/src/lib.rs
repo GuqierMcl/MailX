@@ -39,6 +39,7 @@ pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{
     CoreEvent, EmailPreviewItem, EmailPreviews, EventSink, Events, NewMail, NewMailMessage,
+    SentCopiesChanged,
 };
 pub use localization::{LanguagePreference, SupportedLocale};
 pub use mail::*;

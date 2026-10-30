@@ -8,11 +8,11 @@ use crate::{
     },
 };
 
-use super::{AccountService, validate_uuid};
+use super::{AccountService, validate_email_id};
 
 impl AccountService {
     pub(crate) fn body_identity(&self, id: &str) -> Result<BodyIdentity, AppError> {
-        validate_uuid(id, "emailId")?;
+        validate_email_id(id)?;
         self.storage.body_identity(id)
     }
 

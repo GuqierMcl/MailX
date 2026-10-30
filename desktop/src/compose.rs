@@ -528,6 +528,37 @@ pub(crate) async fn outbox_resolve_unknown(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveLocalCopyArgs {
+    email_id: String,
+}
+
+/// Deletes a local Sent copy (`local-sent:<outbox uuid>`) from this device.
+/// Main window only; the server is not touched. Idempotent. The core announces
+/// the change on the sent-copies event so Sent lists refetch.
+#[tauri::command]
+pub(crate) async fn outbox_remove_local_copy(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "outbox_remove_local_copy").and_then(|_| {
+        let args = parse::<RemoveLocalCopyArgs>(request.body())?;
+        window_access::local_copy_outbox_id(&args.email_id)
+            .ok_or_else(|| AppError::validation("emailId"))?;
+        Ok(args)
+    });
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.remove_local_copy(&args.email_id))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 /// Opens the composer window of an existing draft, or focuses it. Async on
 /// purpose: building a window from a synchronous command can deadlock on
 /// Windows.
