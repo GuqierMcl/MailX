@@ -70,6 +70,7 @@ impl Storage {
                 rusqlite::params![outcome.identity.message_id, preview, value],
             )?;
             if changed > 0 {
+                super::search_index::refresh_message(&tx, &outcome.identity.message_id)?;
                 written.push(PreviewWritten {
                     message_id: outcome.identity.message_id.clone(),
                     preview: preview.to_owned(),

@@ -2123,6 +2123,8 @@ fn local_copy(f: &Fixture, n: u32, accepted_at: &str, subject: &str, attachments
         ],
     )
     .unwrap();
+    // Production indexes the copy in the accepting transaction.
+    crate::storage::search_index::refresh_local(&f.db, &local_id(n)).unwrap();
     format!("local-sent:{}", local_id(n))
 }
 
@@ -2363,3 +2365,5 @@ fn startup_backfill_fills_accepted_rows_once_and_skips_released_snapshots() {
     }
     let _ = (kept, released);
 }
+
+mod search;

@@ -219,7 +219,21 @@ pub(super) fn release_matched_snapshots(
     for message_id in message_ids {
         // `message_ids` come without angle brackets; the outbox keeps the
         // header as it was sent, with them.
+        let ids = {
+            let mut select = tx.prepare_cached(
+                "SELECT id FROM outbox WHERE account_id = ?1 AND state = 'accepted'
+                   AND trim(message_id, '<>') = ?2 AND server_copy_message_id IS NULL",
+            )?;
+            select
+                .query_map(params![account_id, message_id], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
         matched += statement.execute(params![account_id, message_id, now])?;
+        for id in ids {
+            super::search_index::remove_local(tx, &id)?;
+        }
     }
     Ok(matched)
 }
@@ -296,6 +310,7 @@ impl Storage {
                  WHERE id = ?1 AND (preview IS NULL OR attachment_count IS NULL)",
                 params![id, preview, i64::try_from(count).unwrap_or(i64::MAX)],
             )?;
+            super::search_index::refresh_local(&self.db, &id)?;
         }
         Ok(())
     }
@@ -687,6 +702,9 @@ impl Storage {
                AND deleted_locally_at IS NULL AND snapshot_released_at IS NULL",
             params![id, stamped],
         )?;
+        if rows > 0 {
+            super::search_index::remove_local(&tx, id)?;
+        }
         if rows == 0 {
             let removed: Option<bool> = tx
                 .query_row(
@@ -864,6 +882,7 @@ fn accept_in(
     if rows == 0 {
         return Ok(None);
     }
+    super::search_index::refresh_local(tx, id)?;
     let mut draft = None;
     if let Some(draft_id) = &before.draft_id
         && tx.execute("DELETE FROM drafts WHERE id = ?1", [draft_id])? == 1

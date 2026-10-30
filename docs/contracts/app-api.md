@@ -58,7 +58,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 - `accountIds` 为 null 或省略时查询所有本地账号，空数组返回空结果；数组元素必须为有效 UUID。当前只有受信本地 UI 入口，未来 HTTP / MCP 再与宿主授权账号范围取交集。
 - `folderId` 指定本地文件夹 UUID；`folderRole` 在选定账号间按角色匹配，`inbox` 即统一收件箱。二者不能同时给出，否则返回 `validation`。
 - `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。星标是返回字段，本阶段没有星标筛选参数或标记写回。
-- `text` 去掉首尾空白后，对 subject、from.name、from.address 进行 LIKE 字面子串匹配，`%`、`_` 和反斜杠均转义；空白文本视为不限。当前不搜索正文，没有三字符最短限制，不接受全文 MATCH 表达式。规划（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索规划未实现)，未实现）：改为本地全文搜索，按空白拆词（全部命中）、支持双引号整体匹配，最多 16 个词、256 个字符；检索主题、人员、预览、已缓存正文与附件名；少于 3 个字符的词退回 LIKE；`EmailSummary` 增加命中片段（纯文本分段，无 HTML），`coverage` 增加作用域内已索引正文数；不调用服务商搜索。
+- `text` 为本地全文搜索（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索第一批已实现尚未手测)）：按 Unicode 空白拆词，所有词都须命中，双引号括起的部分作为整体；最多 16 个词、256 个字符，超出返回 `validation`（字段 `text`）；空白文本视为不限。检索主题、人员（发件人、收件人、抄送的名字与地址）、预览、已缓存正文（每封最多 64 KiB）与附件名，全角 ASCII 与半角互相匹配；不少于 3 个字符的词用 FTS5 trigram，少于 3 个字符的词退回参数化 LIKE；用户文本不作为 SQL 或 FTS 表达式执行，不调用服务商搜索。`EmailSummary.matchSnippet` 为命中片段 `SnippetSegment[] | null`（`{ text, hit }` 纯文本分段，无 HTML，仅在正文或附件名命中时给出），`coverage.indexedBodies` 为作用域内已收进索引的正文数。
 - `receivedAfter` / `receivedBefore` 为 RFC 3339 时间，规范化为 UTC 毫秒格式后按左闭右开区间过滤；无效时间返回 `validation`。
 - `limit` 为 null 或省略时默认 50，有效范围 1–200；工作台请求 100。越界返回 `validation`。
 - `cursor` 为 null 时从第一页开始，否则原样传回服务端提供的游标。更改查询条件后须清空游标重新开始；游标不是权限凭据。

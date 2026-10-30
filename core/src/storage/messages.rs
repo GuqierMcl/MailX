@@ -180,6 +180,7 @@ impl Storage {
             return Ok(Some(cursor));
         }
         let timestamp = now();
+        super::search_index::remove_folder(&tx, &target.folder_id)?;
         tx.execute("UPDATE messages SET remote_state = 'stale', updated_at = ?1 WHERE folder_id = ?2 AND remote_state = 'present'", params![timestamp, target.folder_id])?;
         tx.execute(
             "INSERT INTO folder_sync_cursors (folder_id, uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at)
@@ -261,6 +262,14 @@ impl Storage {
             ])?;
         }
         drop(statement);
+        for record in records {
+            super::search_index::refresh_by_uid(
+                &tx,
+                &target.folder_id,
+                target.uid_validity,
+                record.uid,
+            )?;
+        }
         let is_sent: bool = tx.query_row(
             "SELECT role = 'sent' FROM folders WHERE id = ?1",
             [&target.folder_id],
@@ -379,6 +388,9 @@ impl Storage {
             ])?;
         }
         drop(statement);
+        for uid in uids {
+            super::search_index::refresh_by_uid(&tx, &target.folder_id, target.uid_validity, *uid)?;
+        }
         tx.commit()?;
         Ok(Some(changed))
     }
@@ -453,24 +465,18 @@ impl Storage {
                 i64::from(attachment),
             );
         }
-        if let Some(text) = &query.text {
-            let escaped = text
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
-            let pattern = format!("%{escaped}%");
-            filter.clauses.push("(m.subject LIKE ? ESCAPE '\\' OR m.from_name LIKE ? ESCAPE '\\' OR m.from_address LIKE ? ESCAPE '\\')".into());
-            filter.values.extend([
-                pattern.clone().into(),
-                pattern.clone().into(),
-                pattern.clone().into(),
-            ]);
-            local.clauses.push(
-                "(o.subject LIKE ? ESCAPE '\\' OR o.recipients_preview LIKE ? ESCAPE '\\')".into(),
-            );
+        let terms = match &query.text {
+            Some(text) => super::search_index::parse_query(text)?,
+            None => None,
+        };
+        if let Some(terms) = &terms {
+            let (subquery, values) = terms.email_ids_subquery();
+            filter.clauses.push(format!("m.id IN ({subquery})"));
+            filter.values.extend(values.iter().cloned());
             local
-                .values
-                .extend([pattern.clone().into(), pattern.into()]);
+                .clauses
+                .push(format!("('local-sent:' || o.id) IN ({subquery})"));
+            local.values.extend(values);
         }
         if let Some(after) = &query.received_after {
             filter.add("m.received_at >= ?", after.clone());
@@ -507,6 +513,7 @@ impl Storage {
         let mut items = statement
             .query_map(params_from_iter(values), summary)?
             .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
         let next_cursor = if items.len() > validated.limit as usize {
             items.truncate(validated.limit as usize);
             items
@@ -522,6 +529,13 @@ impl Storage {
         } else {
             None
         };
+        if let Some(terms) = &terms {
+            let ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
+            let mut snippets = self.search_snippets(terms, &ids)?;
+            for item in &mut items {
+                item.match_snippet = snippets.remove(&item.id);
+            }
+        }
         Ok(EmailPage {
             items,
             next_cursor,
@@ -540,10 +554,21 @@ impl Storage {
             .query_row(&sql, params_from_iter(filter.values), |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?;
+        let indexed_filter = ScopeFilter::new(query)?;
+        let indexed_bodies: i64 = self.db.query_row(
+            &format!(
+                "SELECT COUNT(*) {VISIBLE_MESSAGES} AND {}
+                 AND m.id IN (SELECT email_id FROM search_docs WHERE has_body = 1)",
+                indexed_filter.sql()
+            ),
+            params_from_iter(indexed_filter.values),
+            |row| row.get(0),
+        )?;
         Ok(Coverage {
             headers_complete: total > 0 && total == complete,
             window_capped,
             bodies_complete: false,
+            indexed_bodies: u64::try_from(indexed_bodies).unwrap_or(0),
             synced_after,
             synced_before: None,
         })
@@ -732,6 +757,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
         local_only: row.get(16)?,
+        match_snippet: None,
     })
 }
 

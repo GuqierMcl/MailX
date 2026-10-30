@@ -19,6 +19,7 @@ import type {
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
+import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
@@ -295,17 +296,21 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return () => { previewListeners.delete(listener) }
     },
     async listEmails(query) {
-      const text = query.text?.trim().toLowerCase()
-      const items = emails
-        .map((email) => email.summary)
-        .filter((email) =>
-          (!query.accountIds || query.accountIds.includes(email.accountId)) &&
-          (!query.folderId || email.folderId === query.folderId) &&
-          (!query.folderRole || folders.some((folder) => folder.id === email.folderId && folder.role === query.folderRole)) &&
-          (query.unread == null || email.isRead === !query.unread) &&
-          (query.hasAttachment == null || email.hasAttachment === query.hasAttachment) &&
-          (!text || [email.subject, email.preview, email.from.name ?? '', email.from.address].some((field) => field.toLowerCase().includes(text))),
-        )
+      const terms = query.text?.trim() ? parseSearchTerms(query.text) : []
+      if (!terms) throw new MailxClientError({ code: 'validation', message: '搜索词过多或过长。', field: 'text' })
+      const inScope = emails.filter((email) =>
+        (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
+        (!query.folderId || email.summary.folderId === query.folderId) &&
+        (!query.folderRole || folders.some((folder) => folder.id === email.summary.folderId && folder.role === query.folderRole)) &&
+        (query.unread == null || email.summary.isRead === !query.unread) &&
+        (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment),
+      )
+      const items = inScope
+        .flatMap((email) => {
+          if (terms.length === 0) return [{ ...email.summary, matchSnippet: null }]
+          const { matched, snippet } = matchEmail(email, terms)
+          return matched ? [{ ...email.summary, matchSnippet: snippet }] : []
+        })
         .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
       const offset = query.cursor ? Number(query.cursor) : 0
       const limit = query.limit ?? 50
@@ -313,7 +318,11 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return {
         items: structuredClone(page),
         nextCursor: offset + limit < items.length ? String(offset + limit) : null,
-        coverage: { headersComplete: true, bodiesComplete: false, syncedAfter: null, syncedBefore: null, windowCapped: false },
+        coverage: {
+          headersComplete: true, bodiesComplete: false,
+          indexedBodies: inScope.filter((email) => email.summary.bodyState === 'ready').length,
+          syncedAfter: null, syncedBefore: null, windowCapped: false,
+        },
       }
     },
     async getEmail(emailId) {
@@ -893,6 +902,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       bodyState: lazy ? 'missing' : 'ready',
       previewState: lazy ? 'missing' : 'ready',
       pendingChanges: false,
+      matchSnippet: null,
     }
     return {
       summary,

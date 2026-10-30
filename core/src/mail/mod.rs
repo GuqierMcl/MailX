@@ -101,6 +101,18 @@ pub struct EmailSummary {
     pub pending_changes: bool,
     /// A copy of an accepted send kept only on this device (`local-sent:` ids).
     pub local_only: bool,
+    /// Plain-text excerpt around a full-text hit in the body or attachment
+    /// names; `None` when there is no text search or the hit is only in the
+    /// subject or people.
+    pub match_snippet: Option<Vec<SnippetSegment>>,
+}
+
+/// One run of a search snippet; `hit` marks the matched text. Plain text only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SnippetSegment {
+    pub text: String,
+    pub hit: bool,
 }
 
 /// First recipients of a message and how many there are in total.
@@ -143,6 +155,9 @@ pub struct Coverage {
     /// At least one matching selectable folder exceeded the per-round UID limit.
     pub window_capped: bool,
     pub bodies_complete: bool,
+    /// Messages in scope whose body text is in the local search index.
+    #[ts(type = "number")]
+    pub indexed_bodies: u64,
     pub synced_after: Option<String>,
     pub synced_before: Option<String>,
 }

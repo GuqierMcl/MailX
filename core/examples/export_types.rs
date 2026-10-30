@@ -58,6 +58,7 @@ fn main() {
         BodyFailureCode,
         PreviewState,
         EmailSummary,
+        SnippetSegment,
         EmailListQuery,
         Coverage,
         EmailPage,

@@ -4,7 +4,7 @@ import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
+import type { Account, EmailSummary, PreviewLines, SnippetSegment } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -44,6 +44,8 @@ type EmailListProps = {
   error: string | null
   filter: ListFilter
   search: string
+  /** Messages in scope whose body is in the local search index; shown as a hint while searching. */
+  indexedBodies?: number
   selectedId: string | null
   /** Lines of body preview per row, from the appearance settings. */
   previewLines: PreviewLines
@@ -75,7 +77,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -145,7 +147,7 @@ function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, er
     <VirtualRows
       sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
-      windowCapped={syncStatus.windowCapped} onSelect={onSelect} onLoadMore={onLoadMore}
+      windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
     />
   )
 }
@@ -180,11 +182,13 @@ type VirtualRowsProps = {
   refreshing: boolean
   loadMoreError: string | null
   windowCapped: boolean
+  /** What a search covered, muted at the top of the results; null when not searching. */
+  searchHint: string | null
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
 }
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // The selected and the focused row stay mounted however far they scroll away,
@@ -253,6 +257,11 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
       viewportRef={viewportRef}
       className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
     >
+      {searchHint && (
+        <p className="px-4 pt-3 text-xs text-muted-foreground">
+          {windowCapped ? `${searchHint} ${t('mail:syncCoverageLimited')}` : searchHint}
+        </p>
+      )}
       <div
         role="list"
         aria-label={t('mail:messageList')}
@@ -297,7 +306,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
           </Button>
         </div>
       )}
-      {windowCapped && (
+      {windowCapped && !searchHint && (
         <p className="px-3 pb-3 text-center text-xs text-muted-foreground">{t('mail:syncCoverageLimited')}</p>
       )}
     </ScrollArea>
@@ -325,6 +334,13 @@ function previewText(email: EmailSummary) {
   if (email.bodyState === 'ready' || email.previewState === 'ready') return email.preview
   if (email.previewState === 'missing' && !isGivenUp(email.id)) return t('mail:previewLoading')
   return ''
+}
+
+/** Hits are marked with a faint wash and a stronger text color, never a border; segments are plain text. */
+function SnippetText({ segments }: { segments: SnippetSegment[] }) {
+  return segments.map((segment, index) => segment.hit
+    ? <mark key={index} className="rounded-xs bg-foreground/10 text-foreground">{segment.text}</mark>
+    : <span key={index}>{segment.text}</span>)
 }
 
 type EmailRowProps = {
@@ -401,7 +417,9 @@ function EmailRow({ email, sentView, account, selected, previewLines, index, cou
         </div>
         {/* The slot is always reserved, even without a preview, so every row has one height. */}
         {previewLines !== 'none' && (
-          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>{previewText(email)}</p>
+          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>
+            {email.matchSnippet ? <SnippetText segments={email.matchSnippet} /> : previewText(email)}
+          </p>
         )}
       </div>
     </button>

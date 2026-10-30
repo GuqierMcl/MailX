@@ -14,7 +14,7 @@ function email(overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
     id: 'mail-1', accountId: 'account-1', folderId: 'inbox', subject: 'Hello',
     from: { name: 'Lin', address: 'lin@example.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
-    isRead: false, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
+    isRead: false, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
   }
 }
 
@@ -33,7 +33,7 @@ function setup(initial: EmailSummary = email(), configure?: (client: ReturnType<
   configure?.(client)
   const queryClient: QueryClient = createQueryClient()
   queryClient.setQueryData<InfiniteData<EmailPage>>(KEY, {
-    pages: [{ items: [initial], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, syncedAfter: null, syncedBefore: null, windowCapped: false } }],
+    pages: [{ items: [initial], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }],
     pageParams: [null],
   })
   const wrapper = ({ children }: { children: ReactNode }) => (

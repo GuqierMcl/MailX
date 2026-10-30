@@ -137,6 +137,7 @@ impl MailxCore {
         let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
+        crate::accounts::messages::spawn_search_backfill(&service, &runtime);
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
         let previews = Arc::new(PreviewManager::new(
             &service,

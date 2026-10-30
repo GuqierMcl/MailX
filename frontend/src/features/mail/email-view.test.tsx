@@ -75,7 +75,7 @@ describe('body failure guidance', () => {
       summary: {
         id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
         from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: false, isStarred: false, pendingChanges: false, to: { addresses: [], total: 0 }, localOnly: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
+        isRead: false, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
       },
       to: [], cc: [], replyTo: [], attachments: [], body: null, bodyFailure,
     }
@@ -105,7 +105,7 @@ describe('local-only sent copy', () => {
       summary: {
         id: localOnly ? 'local-sent:1' : 'sent-1', accountId: 'a', folderId: 'sent', subject: 'Sent copy',
         from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: true, isStarred: false, pendingChanges: false, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly,
+        isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly,
         hasAttachment: false, bodyState: 'ready', previewState: 'ready', preview: '',
       },
       to: [{ name: null, address: 'you@example.com' }], cc: [], replyTo: [], attachments: [], body: { kind: 'text', text: 'hi' } as never, bodyFailure: null,

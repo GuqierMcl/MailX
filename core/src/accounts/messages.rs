@@ -11,7 +11,42 @@ use crate::{
     sync::headers::MessageRecord,
 };
 
+/// Fills the local search index for data that predates it, one short
+/// transaction per batch with the service lock released in between, so
+/// searches and writes interleave. Resumes from the stored progress and stops
+/// when the service is dropped.
+pub(crate) fn spawn_search_backfill(
+    service: &std::sync::Arc<std::sync::Mutex<AccountService>>,
+    runtime: &tokio::runtime::Handle,
+) {
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(20);
+    let weak = std::sync::Arc::downgrade(service);
+    runtime.spawn(async move {
+        loop {
+            let Some(service) = weak.upgrade() else {
+                return;
+            };
+            let step = tokio::task::spawn_blocking(move || {
+                let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+                service.search_index_backfill_step()
+            })
+            .await;
+            match step {
+                Ok(Ok(false)) => tokio::time::sleep(PAUSE).await,
+                // Finished, failed or panicked: the version check retries at
+                // the next start, and writers keep the index current anyway.
+                _ => return,
+            }
+        }
+    });
+}
+
 impl AccountService {
+    pub(crate) fn search_index_backfill_step(&mut self) -> Result<bool, AppError> {
+        self.storage
+            .search_index_backfill_step(crate::storage::search_index::BACKFILL_BATCH)
+    }
+
     pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
         self.storage.list_emails(&validate_query(query)?)
     }

@@ -17,6 +17,7 @@ export function errorText(error: unknown, context?: ErrorContext): string {
         ? context.emailAddress : t('accounts:invalidEmail')
       if (field === 'proxyUsername') return t('accounts:proxyUsernameRequired')
       if (/Password$|^sharedPassword$/.test(field)) return t('accounts:passwordRequired')
+      if (field === 'text') return t('mail:searchTextInvalid')
       if (field === 'displayName') return t('accounts:accountNameRequired')
     }
     if (context === 'account' && code === 'notFound') return t('errors:accountNotFound')

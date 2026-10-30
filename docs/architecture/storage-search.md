@@ -1,6 +1,6 @@
 # 存储、搜索与备份
 
-状态：**账号、文件夹与邮件头、正文缓存和头部查询已有实现 / 全文索引与备份为 Initial draft** · 2026-10-20。当前使用 `rusqlite`，编号 schema 位于 `core/src/storage/migrations/`：v1 为账号和凭证恢复，v2 为文件夹，v3 为邮件头与同步游标，v4 为正文与 MIME 部分。真实服务商和平台运行证据见[验证策略](../development/validation.md)。
+状态：**账号、文件夹与邮件头、正文缓存和本地全文搜索已有实现（全文搜索尚未手测）/ 备份为 Initial draft** · 2026-10-20。当前使用 `rusqlite`，编号 schema 位于 `core/src/storage/migrations/`：v1 为账号和凭证恢复，v2 为文件夹，v3 为邮件头与同步游标，v4 为正文与 MIME 部分。真实服务商和平台运行证据见[验证策略](../development/validation.md)。
 
 ## 1. 所有权与目录
 
@@ -91,21 +91,21 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。原始 MIME 的运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
 
-## 5. 当前头部查询与后续全文搜索
+## 5. 邮件查询与本地全文搜索
 
 `emails_list` 搜索**已缓存且当前可见的头部**，查询由 `AccountService` 校验后交给 Storage；账号与文件夹作用域在 SQL 中限定，不先跨账号搜索再在界面隐藏。当前支持 `accountIds`、`folderId` 或 `folderRole`、`unread`、`hasAttachment`、`text`、`receivedAfter` / `receivedBefore`。统一收件箱使用 `folderRole=inbox`，详情用 `emails_get`；完整参数和错误见[应用 API](../contracts/app-api.md#2-当前邮件分页与查询)。
 
-`text` 去除首尾空白，对主题、发件人显示名和邮箱地址做参数化 LIKE 子串匹配；转义 `%`、`_` 和反斜杠，用户文本不作为 SQL 或搜索表达式。当前没有 FTS 索引，不搜索正文，也没有三字符最短限制（全文搜索规划见 5.1）。时间范围左闭右开，RFC 3339 参数先转为 UTC 毫秒格式。查询默认每页 50 条，上限 200；前端请求 100 条，按 `(receivedAt DESC, id DESC)` 游标分页并防抖搜索，丢弃过期响应。
+`text` 走本地全文搜索（5.1）：检索主题、人员、预览、已缓存正文与附件名，用户文本不作为 SQL 或 FTS 表达式执行。时间范围左闭右开，RFC 3339 参数先转为 UTC 毫秒格式。查询默认每页 50 条，上限 200；前端请求 100 条，按 `(receivedAt DESC, id DESC)` 游标分页并防抖搜索，丢弃过期响应。
 
-已实现（发信设计第 9.3 节）：查询范围包含已发送角色文件夹时，在同一查询里 `UNION ALL` 合并 outbox 中尚未对上服务器的 `accepted` 行，排序时间取 `accepted_at`，ID 为 `local-sent:<outbox id>`，沿用同一游标；文本搜索对其主题与 `recipients_preview` 做同样的参数化 LIKE。
+已实现（发信设计第 9.3 节）：查询范围包含已发送角色文件夹时，在同一查询里 `UNION ALL` 合并 outbox 中尚未对上服务器的 `accepted` 行，排序时间取 `accepted_at`，ID 为 `local-sent:<outbox id>`，沿用同一游标；本机副本同样进入全文索引（正文取快照纯文本），文本搜索与服务器邮件一致。
 
-返回 `coverage { headersComplete, windowCapped, bodiesComplete, syncedAfter, syncedBefore }`：对账号 / 文件夹作用域内的全部当前可选文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。`windowCapped=true` 表示至少一个匹配目录的窗口超过本轮选取上限；coverage 不表达当前任务是否正在运行。
+返回 `coverage { headersComplete, windowCapped, bodiesComplete, indexedBodies, syncedAfter, syncedBefore }`（`indexedBodies` 见 5.1）：对账号 / 文件夹作用域内的全部当前可选文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。`windowCapped=true` 表示至少一个匹配目录的窗口超过本轮选取上限；coverage 不表达当前任务是否正在运行。
 
-完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要的 preview / bodyState 来自 v4 缓存列，pendingChanges=false。详情返回缓存纯文本、HTML 存在标志、截断和远程图片计数，以及非内联附件元数据；没有全文搜索。
+完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要的 preview / bodyState 来自 v4 缓存列，pendingChanges=false。详情返回缓存纯文本、HTML 存在标志、截断和远程图片计数，以及非内联附件元数据。
 
-全文搜索的方案见 5.1（2026-10-30 确认，未实现）。向量索引、云端 embedding 和自然语言转 SQL 不在本阶段范围内。
+全文搜索见 5.1（2026-10-30 确认，第一批已实现，尚未手测）。向量索引、云端 embedding 和自然语言转 SQL 不在本阶段范围内。
 
-### 5.1 本地全文搜索（规划，未实现）
+### 5.1 本地全文搜索（第一批已实现，尚未手测）
 
 只做**本地**搜索：索引与查询都在本机 SQLite 里完成，不调用服务商的 IMAP `SEARCH`，搜不到本地没有的邮件。仓库锁定的 `libsqlite3-sys` 0.37 打包 SQLite 3.51.3 并开启 FTS5，trigram 分词器（3.34 起内置）可直接使用，不引入新依赖。参考 [SQLite FTS5 文档](https://www.sqlite.org/fts5.html)。
 
@@ -152,6 +152,14 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 | F2 | 查询：拆词与引号、转义、短词退回、筛选与游标组合、命中片段、覆盖计数 | 注入与特殊字符、两字中文词、混合词、分页连续 |
 | F3 | 宿主与前端：命中片段高亮、覆盖提示、文案 | 高亮不经 HTML、覆盖提示随范围变化 |
 | F4 | 测试与文档 | 自动检查；真实邮箱上的中文搜索手测 |
+
+**实现情况**（F1–F3 已实现，自动测试通过，尚未在真实窗口与邮箱上手测）
+
+- 迁移 v19：`search_fts`（FTS5，上述五列与分词参数）、`search_docs(rowid, email_id UNIQUE, has_body)` 映射表、`search_index_state`（版本、补建游标与本机副本补建标志）。`messages` 与 `outbox` 上的 `AFTER DELETE` 触发器删除对应索引行，文件夹与账号的级联删除也不会留下残行。
+- 同事务维护：头部入库与更新、远端删除、来源代际切换（过期文件夹）、预览写入、正文缓存写入（含附件名与人员）；本机已发送副本在接受时按 `LOCAL_COPIES` 同一规则写入，对上服务器、从本机移除或快照释放时删除。只改已读 / 星标的写入不涉及索引文本，不更新。
+- 后台补建：应用启动后在请求路径之外分批运行，记录游标、可续做；版本不符时清空后经同一补建重建。
+- 查询错误：超过 16 个词或 256 个字符返回 `validation`（字段 `text`）。命中片段只对当前页计算，短词命中由 Rust 在正文首次出现处前后约 40 个字符取片段；私用区标记字符 U+E000 / U+E001 在写入索引前去掉。
+- 界面：命中片段替代列表行的预览，命中段用淡色底的 `<mark>`，只以文本节点渲染；搜索时结果上方一行说明已索引正文数，与"同步范围受限"的提示合并为一行；搜索框最多 256 个字符，超限错误给出明确文案。
 
 ## 6. 迁移与恢复
 
