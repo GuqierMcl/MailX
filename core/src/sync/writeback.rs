@@ -1,4 +1,5 @@
-//! Writes the user's read and starred changes back to the server.
+//! Writes the user's read and starred changes, and the deletions they asked
+//! for, back to the server.
 //!
 //! It runs beside the header sync on its own connection, never on the sync
 //! connection: sync opens folders read-only (`EXAMINE`) and that guarantee is
@@ -10,11 +11,13 @@ use std::{
     time::Duration,
 };
 
+use chrono::Utc;
+
 use crate::{
     AppError, ErrorCode,
     accounts::{AccountService, sync_plan::PlanError},
     imap::{self, ImapError, Session},
-    storage::{Flag, PendingChange},
+    storage::{Flag, PendingChange, deletions::PendingDeletion},
 };
 
 /// Changes taken from the queue per round, so one huge backlog cannot hold the
@@ -35,8 +38,16 @@ pub struct WriteBackReport {
     /// Starred changes moved to "this device only" because their folder cannot
     /// keep the flag. Hosts show a notice when this is non-zero.
     pub local_only_stars: usize,
-    /// Changes that stay queued and will be tried again.
+    /// Changes and deletions that stay queued and will be tried again.
     pub waiting: usize,
+    /// Messages the server deleted (moved to Trash or expunged).
+    pub deleted: usize,
+    /// Deletions that could not be done and whose messages show again. Hosts
+    /// tell the user when this is non-zero.
+    pub deletions_given_back: usize,
+    /// When the next scheduled deletion falls due, counted from the end of
+    /// this round. The worker wakes for it without a new user action.
+    pub next_deletion_in: Option<Duration>,
 }
 
 /// How a round ended, for the retry schedule.
@@ -175,6 +186,142 @@ impl Queue for Mutex<AccountService> {
     }
 }
 
+impl WriteBackReport {
+    /// Whether the host has anything to hear about this round.
+    pub(crate) fn has_news(&self) -> bool {
+        self.sent > 0
+            || self.local_only_stars > 0
+            || self.deleted > 0
+            || self.deletions_given_back > 0
+    }
+}
+
+/// The store operations deleting needs, split from [`Queue`] the same way.
+pub(crate) trait DeletionQueue: Send + Sync {
+    /// The server confirmed; the messages become tombstones.
+    fn deleted(&self, message_ids: &[String]) -> Result<(), AppError>;
+    /// The server refused this time. Returns how many were given back for
+    /// having failed too often.
+    fn deletion_failed(&self, message_ids: &[String]) -> Result<u32, AppError>;
+    /// The server can never do it; give the messages back now.
+    fn deletion_impossible(&self, message_ids: &[String]) -> Result<(), AppError>;
+}
+
+impl DeletionQueue for Mutex<AccountService> {
+    fn deleted(&self, message_ids: &[String]) -> Result<(), AppError> {
+        self.lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .finish_deletions(message_ids)
+    }
+
+    fn deletion_failed(&self, message_ids: &[String]) -> Result<u32, AppError> {
+        self.lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .deletion_attempt_failed(message_ids)
+    }
+
+    fn deletion_impossible(&self, message_ids: &[String]) -> Result<(), AppError> {
+        self.lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+            .abandon_deletions(message_ids)
+    }
+}
+
+fn deletion_refused(queue: &dyn DeletionQueue, ids: &[String], report: &mut WriteBackReport) {
+    // A store error leaves the rows claimed; the next round tries again.
+    let given_back = queue.deletion_failed(ids).unwrap_or(0) as usize;
+    report.deletions_given_back += given_back;
+    report.waiting += ids.len().saturating_sub(given_back);
+}
+
+fn deletion_impossible(queue: &dyn DeletionQueue, ids: &[String], report: &mut WriteBackReport) {
+    match queue.deletion_impossible(ids) {
+        Ok(()) => report.deletions_given_back += ids.len(),
+        Err(_) => report.waiting += ids.len(),
+    }
+}
+
+/// Carries out `deletions` over `session`, one source folder and target at a
+/// time.
+///
+/// Moving to Trash uses `UID MOVE` when the server has it, otherwise `UID COPY`,
+/// `\Deleted` and `UID EXPUNGE`. Deleting for good is `\Deleted` plus
+/// `UID EXPUNGE`. A plain `EXPUNGE` is never sent: it would also remove what
+/// other clients marked `\Deleted`, so a server without `UIDPLUS` (and, for
+/// Trash, without `MOVE`) gets the messages given back instead.
+pub(crate) async fn push_deletions(
+    session: &mut Session,
+    queue: &dyn DeletionQueue,
+    deletions: Vec<PendingDeletion>,
+) -> Result<WriteBackReport, ImapError> {
+    let mut report = WriteBackReport::default();
+    let moves = session.supports("MOVE");
+    let expunges = session.supports("UIDPLUS");
+    type Group = (String, u32, Option<String>);
+    let mut groups: BTreeMap<Group, Vec<PendingDeletion>> = BTreeMap::new();
+    for deletion in deletions {
+        groups
+            .entry((
+                deletion.folder_remote_name.clone(),
+                deletion.uid_validity,
+                deletion.target_remote_name.clone(),
+            ))
+            .or_default()
+            .push(deletion);
+    }
+    for ((remote_name, uid_validity, target), group) in groups {
+        let ids: Vec<String> = group.iter().map(|d| d.message_id.clone()).collect();
+        let uids: Vec<u32> = group.iter().map(|d| d.uid).collect();
+        if !(expunges || moves && target.is_some()) {
+            deletion_impossible(queue, &ids, &mut report);
+            continue;
+        }
+        let mailbox = match session.select(&remote_name).await {
+            Ok(mailbox) => mailbox,
+            Err(error) if error.session_usable() => {
+                deletion_refused(queue, &ids, &mut report);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        if mailbox.uid_validity != uid_validity {
+            // The UIDs belong to an older generation of this folder; acting on
+            // them could hit different messages.
+            deletion_impossible(queue, &ids, &mut report);
+            continue;
+        }
+        if mailbox.read_only {
+            deletion_refused(queue, &ids, &mut report);
+            continue;
+        }
+        let result = match &target {
+            Some(trash) if moves => session.uid_move(&uids, trash).await,
+            Some(trash) => match session.uid_copy(&uids, trash).await {
+                Ok(()) => match session.mark_deleted(&uids).await {
+                    Ok(()) => session.uid_expunge(&uids).await,
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            },
+            None => match session.mark_deleted(&uids).await {
+                Ok(()) => session.uid_expunge(&uids).await,
+                Err(error) => Err(error),
+            },
+        };
+        match result {
+            Ok(()) => match queue.deleted(&ids) {
+                Ok(()) => report.deleted += ids.len(),
+                // The server is done; a later round finds the UIDs gone and
+                // the header sync turns them into tombstones anyway.
+                Err(_) => report.waiting += ids.len(),
+            },
+            Err(error) if error.session_usable() => deletion_refused(queue, &ids, &mut report),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(report)
+}
+
 fn failed_round(error: ImapError, waiting: usize) -> RoundEnd {
     match error {
         ImapError::ProviderPolicy => RoundEnd::ProviderPolicy,
@@ -191,7 +338,7 @@ pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: 
     let id = account_id.to_owned();
     let service_for_read = service.clone();
     let prepared = tokio::task::spawn_blocking(move || {
-        let service = service_for_read
+        let mut service = service_for_read
             .lock()
             .map_err(|_| AppError::new(ErrorCode::Internal))?;
         let changes: Vec<PendingChange> = service
@@ -199,38 +346,77 @@ pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: 
             .into_iter()
             .filter(|change| change.attempts < MAX_ATTEMPTS)
             .collect();
-        if changes.is_empty() {
-            return Ok(None);
-        }
-        Ok::<_, AppError>(Some((changes, service.sync_plan(&id))))
+        let (deletions, given_back) = service.claim_due_deletions(&id, Utc::now())?;
+        let plan = (!changes.is_empty() || !deletions.is_empty()).then(|| service.sync_plan(&id));
+        Ok::<_, AppError>((changes, deletions, given_back, plan))
     })
     .await;
-    let (changes, plan) = match prepared {
-        Ok(Ok(Some(prepared))) => prepared,
-        Ok(Ok(None)) => return RoundEnd::Done(WriteBackReport::default()),
+    let (changes, deletions, given_back, plan) = match prepared {
+        Ok(Ok(prepared)) => prepared,
         Ok(Err(error)) if error.code == ErrorCode::NotFound => return RoundEnd::Blocked,
         _ => return RoundEnd::Retry(WriteBackReport::default()),
+    };
+    let mut report = WriteBackReport {
+        deletions_given_back: given_back as usize,
+        ..WriteBackReport::default()
+    };
+    let Some(plan) = plan else {
+        report.next_deletion_in = next_deletion_in(service, account_id).await;
+        return RoundEnd::Done(report);
     };
     let plan = match plan {
         Ok(plan) => plan,
         // Credentials are not trusted, missing or the account is gone: waiting
         // does not help, and retrying could lock the account.
         Err(PlanError::Account(error)) if error.code != ErrorCode::NotFound => {
-            return RoundEnd::Retry(WriteBackReport::default());
+            return RoundEnd::Retry(report);
         }
         Err(_) => return RoundEnd::Blocked,
     };
+    let queued = changes.len() + deletions.len();
     let mut session = match imap::open_session(&plan.route, &plan.login).await {
         Ok(session) => session,
-        Err(error) => return failed_round(error, changes.len()),
+        Err(error) => return failed_round(error, queued),
     };
-    let result = push_changes(&mut session, service.as_ref(), changes).await;
+    // Flags first: a message about to leave its folder should still get the
+    // read state the user gave it, since Trash keeps it.
+    let result = match push_changes(&mut session, service.as_ref(), changes).await {
+        Ok(flags) => push_deletions(&mut session, service.as_ref(), deletions)
+            .await
+            .map(|deleted| (flags, deleted)),
+        Err(error) => Err(error),
+    };
     let _ = session.logout().await;
     match result {
-        Ok(report) if report.waiting > 0 => RoundEnd::Retry(report),
-        Ok(report) => RoundEnd::Done(report),
+        Ok((flags, deleted)) => {
+            report.sent = flags.sent;
+            report.local_only_stars = flags.local_only_stars;
+            report.waiting = flags.waiting + deleted.waiting;
+            report.deleted = deleted.deleted;
+            report.deletions_given_back += deleted.deletions_given_back;
+            report.next_deletion_in = next_deletion_in(service, account_id).await;
+            if report.waiting > 0 {
+                RoundEnd::Retry(report)
+            } else {
+                RoundEnd::Done(report)
+            }
+        }
         Err(error) => failed_round(error, 0),
     }
+}
+
+/// How long until the account's next not-yet-started deletion is due.
+async fn next_deletion_in(
+    service: &Arc<Mutex<AccountService>>,
+    account_id: &str,
+) -> Option<Duration> {
+    let service = service.clone();
+    let id = account_id.to_owned();
+    let due =
+        tokio::task::spawn_blocking(move || service.lock().ok()?.next_deletion_due(&id).ok()?)
+            .await
+            .ok()??;
+    Some((due - Utc::now()).to_std().unwrap_or(Duration::ZERO))
 }
 
 pub(crate) fn retry_delay(failures: u32) -> Duration {
@@ -240,7 +426,7 @@ pub(crate) fn retry_delay(failures: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imap::{ImapError, test_writable_session};
+    use crate::imap::{ImapError, test_writable_session, test_writable_session_with};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -349,7 +535,8 @@ mod tests {
             WriteBackReport {
                 sent: 2,
                 local_only_stars: 0,
-                waiting: 0
+                waiting: 0,
+                ..WriteBackReport::default()
             }
         );
         assert_eq!(
@@ -383,7 +570,8 @@ mod tests {
             WriteBackReport {
                 sent: 1,
                 local_only_stars: 1,
-                waiting: 0
+                waiting: 0,
+                ..WriteBackReport::default()
             }
         );
         // No STORE was scripted for the star: sending one would have failed the script.
@@ -406,7 +594,8 @@ mod tests {
             WriteBackReport {
                 sent: 0,
                 local_only_stars: 0,
-                waiting: 1
+                waiting: 1,
+                ..WriteBackReport::default()
             }
         );
         assert_eq!(queue.calls(), ["retry 1 Seen"]);
@@ -452,7 +641,8 @@ mod tests {
             WriteBackReport {
                 sent: 1,
                 local_only_stars: 0,
-                waiting: 2
+                waiting: 2,
+                ..WriteBackReport::default()
             }
         );
         assert_eq!(
@@ -537,5 +727,202 @@ mod tests {
             failed_round(ImapError::Rejected, 1),
             RoundEnd::Retry(_)
         ));
+    }
+
+    #[derive(Default)]
+    struct Deletions {
+        calls: Mutex<Vec<String>>,
+        give_back_on_failure: u32,
+    }
+
+    impl Deletions {
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+        fn record(&self, verb: &str, ids: &[String]) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{verb} {}", ids.join(",")));
+        }
+    }
+
+    impl DeletionQueue for Deletions {
+        fn deleted(&self, message_ids: &[String]) -> Result<(), AppError> {
+            self.record("deleted", message_ids);
+            Ok(())
+        }
+        fn deletion_failed(&self, message_ids: &[String]) -> Result<u32, AppError> {
+            self.record("failed", message_ids);
+            Ok(self.give_back_on_failure)
+        }
+        fn deletion_impossible(&self, message_ids: &[String]) -> Result<(), AppError> {
+            self.record("impossible", message_ids);
+            Ok(())
+        }
+    }
+
+    fn deletion(uid: u32, trash: Option<&str>) -> PendingDeletion {
+        PendingDeletion {
+            message_id: format!("message-{uid}"),
+            folder_id: "folder".into(),
+            folder_remote_name: "INBOX".into(),
+            uid_validity: 9,
+            uid,
+            target_remote_name: trash.map(str::to_owned),
+            attempts: 0,
+        }
+    }
+
+    fn ok(command: &str) -> (String, String) {
+        (command.into(), "{tag} OK done\r\n".into())
+    }
+
+    #[tokio::test]
+    async fn a_server_with_move_gets_one_uid_move_into_trash() {
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 MOVE UIDPLUS",
+            vec![
+                select("\\Deleted \\Seen \\*", 9, "READ-WRITE"),
+                ok("UID MOVE 4,7 \"Trash\""),
+            ],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(
+            &mut session,
+            &queue,
+            vec![deletion(7, Some("Trash")), deletion(4, Some("Trash"))],
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.deleted, 2);
+        assert_eq!(report.waiting, 0);
+        assert_eq!(queue.calls(), ["deleted message-7,message-4"]);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn without_move_trash_is_a_copy_then_an_expunge_of_exactly_those_uids() {
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 UIDPLUS",
+            vec![
+                select("\\Deleted \\Seen \\*", 9, "READ-WRITE"),
+                ok("UID COPY 4 \"Trash\""),
+                ok("UID STORE 4 +FLAGS.SILENT (\\Deleted)"),
+                ok("UID EXPUNGE 4"),
+            ],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(&mut session, &queue, vec![deletion(4, Some("Trash"))])
+            .await
+            .unwrap();
+        assert_eq!(report.deleted, 1);
+        assert_eq!(queue.calls(), ["deleted message-4"]);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_for_good_marks_and_expunges_only_the_chosen_uids() {
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 MOVE UIDPLUS",
+            vec![
+                select("\\Deleted \\Seen \\*", 9, "READ-WRITE"),
+                ok("UID STORE 5 +FLAGS.SILENT (\\Deleted)"),
+                ok("UID EXPUNGE 5"),
+            ],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(&mut session, &queue, vec![deletion(5, None)])
+            .await
+            .unwrap();
+        assert_eq!(report.deleted, 1);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn without_uidplus_nothing_is_expunged_and_the_messages_come_back() {
+        // MOVE alone still covers Trash; deleting for good would need a plain
+        // EXPUNGE, which could take other clients' \Deleted messages with it.
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 MOVE",
+            vec![
+                select("\\Deleted \\Seen \\*", 9, "READ-WRITE"),
+                ok("UID MOVE 2 \"Trash\""),
+            ],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(
+            &mut session,
+            &queue,
+            vec![deletion(1, None), deletion(2, Some("Trash"))],
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.deleted, 1);
+        assert_eq!(report.deletions_given_back, 1);
+        assert_eq!(queue.calls(), ["impossible message-1", "deleted message-2"]);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_server_with_neither_move_nor_uidplus_is_never_touched() {
+        let (mut session, server) = test_writable_session_with("IMAP4rev1", vec![]).await;
+        let queue = Deletions::default();
+        let report = push_deletions(&mut session, &queue, vec![deletion(3, Some("Trash"))])
+            .await
+            .unwrap();
+        assert_eq!(report.deletions_given_back, 1);
+        assert_eq!(queue.calls(), ["impossible message-3"]);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_new_uid_generation_gives_the_deletion_back_without_acting() {
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 MOVE UIDPLUS",
+            vec![select("\\Deleted \\Seen \\*", 10, "READ-WRITE")],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(&mut session, &queue, vec![deletion(3, Some("Trash"))])
+            .await
+            .unwrap();
+        assert_eq!(report.deletions_given_back, 1);
+        assert_eq!(queue.calls(), ["impossible message-3"]);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_refused_move_stays_queued_until_it_has_failed_too_often() {
+        let (mut session, server) = test_writable_session_with(
+            "IMAP4rev1 MOVE UIDPLUS",
+            vec![
+                select("\\Deleted \\Seen \\*", 9, "READ-WRITE"),
+                (
+                    "UID MOVE 3 \"Trash\"".into(),
+                    "{tag} NO [TRYCREATE] no such mailbox\r\n".into(),
+                ),
+            ],
+        )
+        .await;
+        let queue = Deletions::default();
+        let report = push_deletions(&mut session, &queue, vec![deletion(3, Some("Trash"))])
+            .await
+            .unwrap();
+        assert_eq!(report.waiting, 1);
+        assert_eq!(report.deleted, 0);
+        assert_eq!(queue.calls(), ["failed message-3"]);
+        drop(session);
+        server.await.unwrap();
     }
 }

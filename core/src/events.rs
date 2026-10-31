@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::mail::{MailAddress, PreviewState};
 use crate::send::types::{DraftChanged, OutboxChanged};
 use crate::settings::NotificationSettings;
-use crate::sync::manager::{AccountSyncState, FlagWriteBack};
+use crate::sync::manager::{AccountSyncState, FlagWriteBack, MessagesDeleted};
 
 /// Messages described one by one; the rest of a batch is only counted.
 pub const NEW_MAIL_DETAILS: usize = 3;
@@ -28,6 +28,9 @@ pub enum CoreEvent {
     Sync(AccountSyncState),
     /// A read / starred write-back round finished.
     FlagWriteBack(FlagWriteBack),
+    /// A write-back round deleted messages on the server or gave deletions
+    /// back; lists of the account refetch.
+    Deletions(MessagesDeleted),
     /// List previews arrived (or were given up on) for rows on screen.
     Previews(EmailPreviews),
     /// Unread mail arrived in an inbox since the last completed sync round.

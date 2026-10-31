@@ -168,5 +168,15 @@
   "removeLocalCopyTitle": "Remove this message from this device?",
   "removeLocalCopyDescription": "This only removes the sent copy stored on this device. It does not affect the server and cannot be undone.",
   "removeLocalCopyConfirm": "Remove",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "movedToTrash": "Moved to Trash",
+  "deletedForGood": "Deleted forever",
+  "undo": "Undo",
+  "deleteFailed": "Couldn’t delete",
+  "undoDeleteFailed": "Couldn’t undo the delete",
+  "deleteGivenBack_one": "{{count}} message couldn’t be deleted on the server and is showing again",
+  "deleteGivenBack_other": "{{count}} messages couldn’t be deleted on the server and are showing again",
+  "deleteForGoodTitle": "Delete this message forever?",
+  "deleteForGoodDescription": "It is already in Trash, or this account has no Trash. The server keeps no copy; you can undo only until the notice goes away.",
+  "deleteForGoodConfirm": "Delete forever"
 }

@@ -33,6 +33,8 @@ fn main() {
             "sync_states",
             "sync_refresh",
             "emails_set_flag",
+            "emails_delete",
+            "emails_undo_delete",
             "attachments_save",
             "avatars_get",
             "image_cache_clear",

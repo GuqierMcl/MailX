@@ -22,7 +22,7 @@ use crate::drafts::types::{
 };
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
-use crate::mail::{EmailDetail, EmailListQuery, EmailPage, Folder};
+use crate::mail::{EmailDeletion, EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::send::types::{
     Caller, DraftChange, DraftChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
@@ -56,6 +56,10 @@ pub use verification::{
 /// How long after an accepted send the account's sync is woken once to pick
 /// up the server's Sent copy (sending.md section 9.6).
 const SENT_SYNC_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long a deletion waits, hidden, before it reaches the server. Hosts
+/// keep their undo prompt open for the same time.
+pub const DELETE_UNDO_WINDOW: chrono::Duration = chrono::Duration::seconds(5);
 
 /// Cheap to clone; every clone shares the same store and workers. Methods
 /// block on the store for a short transaction and must not be called from
@@ -353,6 +357,44 @@ impl MailxCore {
             crate::storage::LocalChange::Queued => FlagChange::Queued,
             crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
         })
+    }
+
+    /// Hides the emails and deletes them on the server once the undo window
+    /// passes: into the account's Trash, or for good when they already are in
+    /// Trash or the account has none. Deleting for good is refused with
+    /// `confirmationRequired` unless `confirmed_permanent` says the user agreed.
+    pub fn delete_emails(
+        &self,
+        email_ids: &[String],
+        confirmed_permanent: bool,
+    ) -> Result<EmailDeletion, AppError> {
+        let scheduled = self.accounts()?.schedule_deletion(
+            email_ids,
+            confirmed_permanent,
+            chrono::Utc::now(),
+            DELETE_UNDO_WINDOW,
+        )?;
+        // The worker learns the due time and sleeps until then.
+        for account_id in &scheduled.account_ids {
+            self.sync.changes_waiting(account_id);
+        }
+        Ok(EmailDeletion {
+            batch_id: scheduled.batch_id,
+            undo_until: scheduled
+                .due_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            permanent: scheduled.permanent,
+        })
+    }
+
+    /// Takes back a deletion from [`MailxCore::delete_emails`] and shows its
+    /// emails again. Refused with `alreadyDeleting` once the server work began.
+    pub fn undo_delete(&self, batch_id: &str) -> Result<(), AppError> {
+        let account_ids = self.accounts()?.cancel_deletion(batch_id)?;
+        for account_id in &account_ids {
+            self.sync.changes_waiting(account_id);
+        }
+        Ok(())
     }
 
     /// Creates a blank or pre-filled draft. `default_account_id` is the

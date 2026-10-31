@@ -35,6 +35,8 @@ import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 import { useEmailPreviews } from './use-email-previews'
 import { loadMailTree } from './mail-tree'
+import { DeleteForGoodDialog } from './delete-for-good-dialog'
+import { useDeleteEmail } from './use-delete-email'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
@@ -305,6 +307,9 @@ export function Workbench({ client }: { client: MailxClient }) {
       void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     }).catch((error: unknown) => setRemoveError(errorText(error)))
   }, [client, queryClient])
+  const deleteEmail = useDeleteEmail(client, folders, useCallback((email: { id: string }) => {
+    setOpened((current) => current?.id === email.id ? null : current)
+  }, []))
   useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
     if (outboxId) {
       setOutboxChoice(outboxId)
@@ -560,6 +565,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onDownload={body.download}
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
               onRemoveLocal={removeLocalCopy}
+              onDelete={deleteEmail.request}
             />
             )}
           </ResizablePanel>
@@ -569,6 +575,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}
+      <DeleteForGoodDialog {...deleteEmail.confirmation} />
     </TooltipProvider>
   )
 }

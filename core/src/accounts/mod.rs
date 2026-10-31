@@ -1,5 +1,6 @@
 mod attachments;
 pub(crate) mod bodies;
+mod deletions;
 pub(crate) mod draft_connection;
 mod drafts;
 pub(crate) mod outbox;

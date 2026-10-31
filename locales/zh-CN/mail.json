@@ -162,5 +162,14 @@
   "removeLocalCopyTitle": "从本机移除这封邮件？",
   "removeLocalCopyDescription": "只会移除本机上的这份已发送副本，不影响服务器，且无法撤销。",
   "removeLocalCopyConfirm": "移除",
-  "cancel": "取消"
+  "cancel": "取消",
+  "movedToTrash": "已移到“已删除”",
+  "deletedForGood": "已永久删除",
+  "undo": "撤销",
+  "deleteFailed": "删除失败",
+  "undoDeleteFailed": "撤销删除失败",
+  "deleteGivenBack_other": "{{count}} 封邮件未能在服务器上删除，已恢复显示",
+  "deleteForGoodTitle": "永久删除这封邮件？",
+  "deleteForGoodDescription": "这封邮件已在“已删除”中，或这个账号没有“已删除”文件夹。删除后服务器上不会保留副本；撤销只在提示消失前有效。",
+  "deleteForGoodConfirm": "永久删除"
 }

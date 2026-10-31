@@ -59,9 +59,11 @@ type EmailViewProps = {
   onRespond: (kind: 'reply' | 'replyAll' | 'forward') => void
   /** Drops a local-only sent copy from this device after the user confirmed; the server is untouched. */
   onRemoveLocal?: (email: EmailSummary) => void
+  /** Deletes a server email (to Trash, or for good after confirming), with undo. */
+  onDelete?: (email: EmailSummary) => void
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, hidden = false }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, hidden = false }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -70,7 +72,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   useCloseOnEscape(open && !hidden, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
@@ -103,12 +105,6 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   )
 }
 
-// Archive and delete need mailbox moves; until then those buttons only show
-// where the actions will live.
-const PLACEHOLDER_ACTIONS = [
-  ['mail:archive', Archive02Icon],
-  ['mail:delete', Delete02Icon],
-] as const satisfies readonly (readonly [string, IconSvgElement])[]
 
 const RESPOND_ACTIONS = [
   ['reply', 'mail:reply', MailReply01Icon],
@@ -116,7 +112,7 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal'] }) {
+function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
@@ -130,11 +126,17 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal }: { summa
               <HugeiconsIcon icon={Delete02Icon} />
             </IconButton>
           )
-        ) : PLACEHOLDER_ACTIONS.map(([key, icon]) => (
-          <IconButton key={key} label={t(key)} tip={t('mail:notImplemented', { label: t(key) })} disabled>
-            <HugeiconsIcon icon={icon} />
-          </IconButton>
-        ))}
+        ) : (
+          <>
+            {/* Archiving needs mailbox moves; until then the button only shows where it will live. */}
+            <IconButton label={t('mail:archive')} tip={t('mail:notImplemented', { label: t('mail:archive') })} disabled>
+              <HugeiconsIcon icon={Archive02Icon} />
+            </IconButton>
+            <IconButton label={t('mail:delete')} disabled={!summary || !onDelete} onClick={() => summary && onDelete?.(summary)}>
+              <HugeiconsIcon icon={Delete02Icon} />
+            </IconButton>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-1 not-first:ml-3">
         {RESPOND_ACTIONS.map(([kind, key, icon]) => (

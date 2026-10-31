@@ -14,6 +14,10 @@ pub enum ErrorCode {
     Forbidden,
     /// Sending already started; it can no longer be canceled.
     AlreadySending,
+    /// Deleting for good needs the user's explicit confirmation first.
+    ConfirmationRequired,
+    /// The deletion already reached the server; it can no longer be undone.
+    AlreadyDeleting,
     /// The message body is not downloaded yet; fetch it, then retry.
     BodyNotCached,
     /// The draft's attachments would exceed the total size allowed.
@@ -51,6 +55,8 @@ impl AppError {
             ErrorCode::DraftLocked => "这封邮件已在发送队列中，不能修改。",
             ErrorCode::Forbidden => "当前调用方无权执行此操作。",
             ErrorCode::AlreadySending => "已开始发送，无法撤销。",
+            ErrorCode::ConfirmationRequired => "永久删除前需要确认。",
+            ErrorCode::AlreadyDeleting => "已开始删除，无法撤销。",
             ErrorCode::BodyNotCached => "邮件正文尚未下载，请先打开这封邮件。",
             ErrorCode::AttachmentTooLarge => "附件总大小超过上限。",
             ErrorCode::TooManyAttachments => "附件数量已达上限。",
