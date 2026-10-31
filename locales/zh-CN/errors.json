@@ -31,5 +31,7 @@
   "accountNotFound": "账号不存在。",
   "attachmentTooLarge": "附件总大小超过上限。",
   "tooManyAttachments": "附件数量超过上限。",
-  "unsupportedImage": "无法作为内嵌图片插入，请改为添加为普通附件。"
+  "unsupportedImage": "无法作为内嵌图片插入，请改为添加为普通附件。",
+  "confirmationRequired": "永久删除前需要确认。",
+  "alreadyDeleting": "已开始删除，无法撤销。"
 }

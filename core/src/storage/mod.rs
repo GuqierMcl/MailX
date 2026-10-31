@@ -12,6 +12,7 @@ use std::{
 
 pub(crate) mod attachments;
 pub(crate) mod bodies;
+pub(crate) mod deletions;
 pub(crate) mod drafts;
 mod flag_changes;
 mod folders;

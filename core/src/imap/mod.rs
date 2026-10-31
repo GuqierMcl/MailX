@@ -168,6 +168,8 @@ pub(crate) struct Session {
     /// The `[CODE]` of the tagged OK that ended the last checked command, e.g.
     /// `READ-ONLY` or `READ-WRITE`. Only SELECT reads it.
     completion: Option<ResponseCodeKind>,
+    /// Capability atoms the server announced after login, upper-cased.
+    capabilities: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,6 +295,15 @@ pub(crate) async fn test_writable_session(
     tests::writable_session(commands).await
 }
 
+/// Like [`test_writable_session`], for a server announcing `capabilities`.
+#[cfg(test)]
+pub(crate) async fn test_writable_session_with(
+    capabilities: &str,
+    commands: Vec<(String, String)>,
+) -> (Session, tokio::task::JoinHandle<()>) {
+    tests::writable_session_with(capabilities, commands).await
+}
+
 /// Compatibility wrapper for callers that only need a folder snapshot.
 #[expect(
     dead_code,
@@ -349,19 +360,28 @@ async fn authenticate(
         inner,
         body_guard: None,
         completion: None,
+        capabilities: Vec::new(),
     };
     // The library collector drops tagged NO/BAD. Use the same checked
     // completion boundary as mailbox commands so policy refusals cannot vanish.
     let capabilities = session
         .checked_command("CAPABILITY", |response, _| {
             Ok(match response {
-            Response::Capabilities(values) => Some(values.iter().any(|value|
-                matches!(value, Capability::Atom(name) if name.eq_ignore_ascii_case("ID")))),
-            _ => None,
-        })
+                Response::Capabilities(values) => Some(
+                    values
+                        .iter()
+                        .filter_map(|value| match value {
+                            Capability::Atom(name) => Some(name.to_ascii_uppercase()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
         })
         .await?;
-    if capabilities.into_iter().any(|has_id| has_id) {
+    session.capabilities = capabilities.into_iter().flatten().collect();
+    if session.supports("ID") {
         // Identification is optional, but timeout/EOF cannot leave a partially
         // consumed response on the connection used for mailbox commands.
         let command = format!(
@@ -380,6 +400,60 @@ async fn authenticate(
 }
 
 impl Session {
+    /// Whether the server announced a capability atom such as `MOVE`.
+    pub(crate) fn supports(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(capability))
+    }
+
+    /// Moves messages of the selected folder into `target` (RFC 6851). Only
+    /// call this when the server announced `MOVE`.
+    pub(crate) async fn uid_move(&mut self, uids: &[u32], target: &str) -> Result<(), ImapError> {
+        let command = format!(
+            "UID MOVE {} {}",
+            nonempty_uid_set(uids)?,
+            quoted_mailbox(target)?
+        );
+        self.checked_command::<()>(&command, |_, _| Ok(None))
+            .await?;
+        Ok(())
+    }
+
+    /// Copies messages of the selected folder into `target`.
+    pub(crate) async fn uid_copy(&mut self, uids: &[u32], target: &str) -> Result<(), ImapError> {
+        let command = format!(
+            "UID COPY {} {}",
+            nonempty_uid_set(uids)?,
+            quoted_mailbox(target)?
+        );
+        self.checked_command::<()>(&command, |_, _| Ok(None))
+            .await?;
+        Ok(())
+    }
+
+    /// Marks messages of the selected folder `\Deleted`. They stay until an
+    /// expunge, so pair this with [`Session::uid_expunge`].
+    pub(crate) async fn mark_deleted(&mut self, uids: &[u32]) -> Result<(), ImapError> {
+        let command = format!(
+            "UID STORE {} +FLAGS.SILENT (\\Deleted)",
+            nonempty_uid_set(uids)?
+        );
+        self.checked_command::<()>(&command, |_, _| Ok(None))
+            .await?;
+        Ok(())
+    }
+
+    /// Expunges exactly these UIDs (RFC 4315). A plain EXPUNGE would also
+    /// remove anything another client marked `\Deleted`, so only call this
+    /// when the server announced `UIDPLUS`.
+    pub(crate) async fn uid_expunge(&mut self, uids: &[u32]) -> Result<(), ImapError> {
+        let command = format!("UID EXPUNGE {}", nonempty_uid_set(uids)?);
+        self.checked_command::<()>(&command, |_, _| Ok(None))
+            .await?;
+        Ok(())
+    }
+
     /// Authentication diagnostics never select a mailbox or fetch message data.
     pub(crate) async fn verify_noop(&mut self) -> Result<(), ImapError> {
         self.checked_command::<()>("NOOP", |_, _| Ok(None)).await?;
@@ -894,6 +968,14 @@ fn validate_uids(uids: &[u32]) -> Result<(), ImapError> {
     }
 }
 
+fn nonempty_uid_set(uids: &[u32]) -> Result<String, ImapError> {
+    validate_uids(uids)?;
+    if uids.is_empty() {
+        return Err(ImapError::Protocol("no UIDs given".into()));
+    }
+    Ok(uid_set(uids))
+}
+
 fn uid_set(uids: &[u32]) -> String {
     let mut uids = uids.to_vec();
     uids.sort_unstable();
@@ -1069,7 +1151,10 @@ mod tests {
                 command.starts_with(&expected),
                 "expected {expected:?}, got {command:?}"
             );
-            assert!(!command.starts_with("EXPUNGE") && !command.starts_with("UID EXPUNGE"));
+            // A bare EXPUNGE would also remove what other clients marked
+            // \Deleted; MailX may only expunge UIDs a test explicitly expects.
+            assert!(!command.starts_with("EXPUNGE"));
+            assert!(!command.starts_with("UID EXPUNGE") || expected.starts_with("UID EXPUNGE"));
             assert!(!command.contains("BODY["));
             server
                 .get_mut()
@@ -1082,12 +1167,19 @@ mod tests {
     pub(super) async fn writable_session(
         commands: Vec<(String, String)>,
     ) -> (Session, tokio::task::JoinHandle<()>) {
+        writable_session_with("IMAP4rev1", commands).await
+    }
+
+    pub(super) async fn writable_session_with(
+        capabilities: &str,
+        commands: Vec<(String, String)>,
+    ) -> (Session, tokio::task::JoinHandle<()>) {
         let (client, server) = tokio::io::duplex(64 * 1024);
         let mut script = vec![
             ("LOGIN".into(), "{tag} OK\r\n".into()),
             (
                 "CAPABILITY".into(),
-                "* CAPABILITY IMAP4rev1\r\n{tag} OK\r\n".into(),
+                format!("* CAPABILITY {capabilities}\r\n{{tag}} OK\r\n"),
             ),
         ];
         script.extend(commands);

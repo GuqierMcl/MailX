@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -410,6 +410,19 @@ sent: number,
  * the flag.
  */
 localOnlyStars: number, };
+
+export type MessagesDeleted = { accountId: string, deleted: number, givenBack: number, };
+
+export type EmailDeletion = { batchId: string,
+/**
+ * RFC 3339, UTC.
+ */
+undoUntil: string,
+/**
+ * `true` when the messages are expunged for good instead of going to
+ * Trash (they were in Trash, or the account has none).
+ */
+permanent: boolean, };
 
 export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
 /**

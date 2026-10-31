@@ -38,6 +38,20 @@ pub struct Folder {
     pub total_count: u32,
 }
 
+/// A deletion MailX has accepted but not yet carried out on the server. The
+/// messages are hidden already; until `undo_until` passes the user can take
+/// it back with the batch id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailDeletion {
+    pub batch_id: String,
+    /// RFC 3339, UTC.
+    pub undo_until: String,
+    /// `true` when the messages are expunged for good instead of going to
+    /// Trash (they were in Trash, or the account has none).
+    pub permanent: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct MailAddress {

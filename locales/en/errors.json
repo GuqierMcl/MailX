@@ -31,5 +31,7 @@
   "accountNotFound": "This account no longer exists.",
   "attachmentTooLarge": "Attachments exceed the total size limit.",
   "tooManyAttachments": "Too many attachments.",
-  "unsupportedImage": "This image can't be inserted inline. Add it as a regular attachment instead."
+  "unsupportedImage": "This image can't be inserted inline. Add it as a regular attachment instead.",
+  "confirmationRequired": "Deleting forever needs your confirmation first.",
+  "alreadyDeleting": "Deleting has started and can no longer be undone."
 }

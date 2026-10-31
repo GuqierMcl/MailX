@@ -428,6 +428,18 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 **自动已读。** 前端在邮件详情显示出来之后才把它标为已读，只经过列表而没打开的邮件保持未读；已读、有待同步变更的邮件不处理。已读、星标仅作用于当前打开的邮件，批量操作尚未实现。
 
+### 删除
+
+`deleteEmails(emailIds, confirmedPermanent)` 对应 `emails_delete`，`{ emailIds, confirmedPermanent }`，返回 `EmailDeletion { batchId, undoUntil, permanent }`；`undoDelete(batchId)` 对应 `emails_undo_delete`，`{ batchId }`。两者只开放给主窗口。
+
+- **先隐藏、后执行。** 调用成功时邮件已从列表、计数、搜索和详情中消失（详情返回 `notFound`），服务器操作在 `undoUntil`（RFC 3339，UTC，当前为调用后 5 秒）之后才由写回任务执行。前端的撤销 Toast 应在 `undoUntil` 时关闭。
+- **去向。** 不在“已删除”中、且账号有可选的 Trash 文件夹 → 移到 Trash，`permanent=false`；已在 Trash 中或账号没有 Trash → 永久删除，`permanent=true`。永久删除必须传 `confirmedPermanent: true`，否则整批拒绝并返回 `confirmationRequired`，不隐藏任何邮件；前端应在删除前弹出确认框，收到该错误时同样补问。
+- **撤销。** 写回任务开始执行前可以整批撤销，邮件原样恢复；开始后返回 `alreadyDeleting`；批次已完成或已退回返回 `notFound`。
+- **输入。** `emailIds` 去重后为 1 到 500 个，否则 `validation`；任一邮件不可见、已在删除中或来自旧的 UID 世代，整批返回 `notFound`。本机已发送副本不是服务器邮件，仍用 `outbox_remove_local_copy`。
+- **结果事件。** 写回任务每轮有删除完成或退回时，主窗口收到 `mailx://deletions`：`MessagesDeleted { accountId, deleted, givenBack }`。前端据此刷新列表；`givenBack > 0` 表示有邮件未能在服务器上删除（服务器缺少 `UIDPLUS` / `MOVE`、UIDVALIDITY 变化、Trash 消失或多次被拒），已恢复显示，需要提示用户。
+- 未读数：隐藏的未读邮件立即从所在文件夹的 `unread_count` 中扣除，撤销或退回时加回；期间头部同步不以服务器计数覆盖。
+- 服务器命令、降级规则与已知限制见[邮件同步](../architecture/mail-sync.md#已实现删除邮件自动测试覆盖尚未经真实服务商手测)。
+
 ### 全局提示（Toast）
 
 所有短提示都经由 `@/components/ui/toast` 的 `toast.info / success / error`，可在 React 之外调用，唯一的出口 `Toaster` 挂在应用根部、启动闸门之外，核心启动失败时也能提示。位置只有一处常量（`VIEWPORT_POSITION`），默认右下角。普通提示自动消失（信息 5 秒、成功 3 秒、错误 8 秒），最多同时显示 4 条；错误以 `role="alert"` 立即播报，其余走礼貌的 live region。关闭按钮在鼠标悬停或键盘聚焦进入提示后才对辅助技术可见，这是 Base UI 的设计。

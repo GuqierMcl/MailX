@@ -40,6 +40,7 @@ const SYNC_STATE_EVENT: &str = "mailx://sync-state";
 /// telling the user a star stayed on this device.
 #[cfg(not(feature = "body-webview-test"))]
 const FLAG_EVENT: &str = "mailx://flags";
+const DELETIONS_EVENT: &str = "mailx://deletions";
 
 /// List previews fetched for rows the main window asked about.
 #[cfg(not(feature = "body-webview-test"))]
@@ -128,6 +129,13 @@ fn main() {
                                 EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                                 FLAG_EVENT,
                                 written,
+                            );
+                        }
+                        mailx_core::CoreEvent::Deletions(deleted) => {
+                            let _ = handle.emit_to(
+                                EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                                DELETIONS_EVENT,
+                                deleted,
                             );
                         }
                         mailx_core::CoreEvent::Previews(previews) => {
@@ -243,6 +251,8 @@ fn main() {
             commands::sync_states,
             commands::sync_refresh,
             commands::emails_set_flag,
+            commands::emails_delete,
+            commands::emails_undo_delete,
             commands::attachments_save,
             commands::avatars_get,
             commands::image_cache_clear,

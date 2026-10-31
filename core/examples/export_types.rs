@@ -93,6 +93,8 @@ fn main() {
         SettingsChanged,
         AvatarKind,
         FlagWriteBack,
+        MessagesDeleted,
+        EmailDeletion,
         NewMailMessage,
         NewMail,
         EmailPreviewItem,

@@ -128,6 +128,19 @@ pub struct FlagWriteBack {
     pub local_only_stars: u32,
 }
 
+/// Scheduled deletions a write-back round carried out or gave back. Lists of
+/// the account refetch; a non-zero `given_back` means messages the user
+/// deleted are showing again and the host should say so.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagesDeleted {
+    pub account_id: String,
+    #[ts(type = "number")]
+    pub deleted: u32,
+    #[ts(type = "number")]
+    pub given_back: u32,
+}
+
 #[derive(Clone)]
 pub(super) struct WorkerToken {
     pub(super) account_id: String,
@@ -220,11 +233,21 @@ impl Shared {
                 .get(&token.account_id)
                 .is_some_and(|state| Self::active(state, token))
         });
-        if still_current {
+        if !still_current {
+            return;
+        }
+        if report.sent > 0 || report.local_only_stars > 0 {
             self.events.emit(&CoreEvent::FlagWriteBack(FlagWriteBack {
                 account_id: token.account_id.clone(),
                 sent: report.sent as u32,
                 local_only_stars: report.local_only_stars as u32,
+            }));
+        }
+        if report.deleted > 0 || report.deletions_given_back > 0 {
+            self.events.emit(&CoreEvent::Deletions(MessagesDeleted {
+                account_id: token.account_id.clone(),
+                deleted: report.deleted as u32,
+                given_back: report.deletions_given_back as u32,
             }));
         }
     }
@@ -300,7 +323,7 @@ pub(crate) struct SyncManager {
     retired: Mutex<HashSet<String>>,
     workers: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Ends the wait between rounds early when the user asks for a refresh.
-    wakers: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    wakers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>>,
     /// One write-back worker per account, beside its sync worker.
     writers: Mutex<HashMap<String, Writer>>,
     /// How the app is being used, as the host last said. Every worker watches
@@ -326,7 +349,7 @@ impl SyncManager {
             runtime,
             retired: Mutex::new(HashSet::new()),
             workers: Mutex::new(HashMap::new()),
-            wakers: Mutex::new(HashMap::new()),
+            wakers: Arc::new(Mutex::new(HashMap::new())),
             writers: Mutex::new(HashMap::new()),
             activity: tokio::sync::watch::channel(Activity::default()).0,
         }
@@ -377,6 +400,7 @@ impl SyncManager {
         wake.notify_one();
         let service = self.shared.service.clone();
         let shared = self.shared.clone();
+        let sync_wakers = self.wakers.clone();
         let account = account_id.to_owned();
         let signal = wake.clone();
         let handle = self.runtime.spawn(async move {
@@ -396,18 +420,38 @@ impl SyncManager {
                     if !live || shared.policy_blocked(&token) {
                         return;
                     }
-                    match writeback::run_round(&service, &account).await {
+                    let end = writeback::run_round(&service, &account).await;
+                    if let writeback::RoundEnd::Done(report) | writeback::RoundEnd::Retry(report) =
+                        &end
+                    {
+                        if report.has_news() {
+                            shared.writeback_done(&token, report);
+                        }
+                        // The messages land in Trash and folder counts move;
+                        // let the header sync pick that up now.
+                        if report.deleted > 0
+                            && let Some(sync) = sync_wakers
+                                .lock()
+                                .ok()
+                                .and_then(|wakers| wakers.get(&account).cloned())
+                        {
+                            sync.notify_one();
+                        }
+                    }
+                    match end {
                         writeback::RoundEnd::Done(report) => {
                             failures = 0;
-                            if report.sent > 0 || report.local_only_stars > 0 {
-                                shared.writeback_done(&token, &report);
+                            // A deletion still in its undo window wakes the
+                            // worker when it falls due.
+                            let Some(due) = report.next_deletion_in else {
+                                break;
+                            };
+                            tokio::select! {
+                                () = tokio::time::sleep(due) => {}
+                                () = signal.notified() => {}
                             }
-                            break;
                         }
-                        writeback::RoundEnd::Retry(report) => {
-                            if report.sent > 0 || report.local_only_stars > 0 {
-                                shared.writeback_done(&token, &report);
-                            }
+                        writeback::RoundEnd::Retry(_) => {
                             let wait = writeback::retry_delay(failures);
                             failures = failures.saturating_add(1);
                             // A new change ends the wait early.

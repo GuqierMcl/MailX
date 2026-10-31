@@ -712,6 +712,59 @@ pub(crate) async fn emails_set_flag(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeleteEmailsArgs {
+    email_ids: Vec<String>,
+    /// The user confirmed deleting for good; see `MailxCore::delete_emails`.
+    confirmed_permanent: bool,
+}
+
+/// Hides the emails at once and deletes them on the server after the undo
+/// window.
+#[tauri::command]
+pub(crate) async fn emails_delete(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::EmailDeletion>, ()> {
+    let args =
+        authorize(&window, "emails_delete").and_then(|_| parse::<DeleteEmailsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.delete_emails(&args.email_ids, args.confirmed_permanent))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UndoDeleteArgs {
+    batch_id: String,
+}
+
+/// Takes back a deletion that has not reached the server yet.
+#[tauri::command]
+pub(crate) async fn emails_undo_delete(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "emails_undo_delete")
+        .and_then(|_| parse::<UndoDeleteArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.undo_delete(&args.batch_id))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[tauri::command]
 pub(crate) async fn sync_refresh(
     window: WebviewWindow,

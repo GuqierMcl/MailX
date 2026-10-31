@@ -78,6 +78,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
             CoreEvent::Sync(state) => observed.lock().unwrap().push(state.clone()),
             CoreEvent::NewMail(mail) => arrived.lock().unwrap().push(mail.clone()),
             CoreEvent::FlagWriteBack(_)
+            | CoreEvent::Deletions(_)
             | CoreEvent::Outbox(_)
             | CoreEvent::DraftChanged(_)
             | CoreEvent::SentCopies(_)

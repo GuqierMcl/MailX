@@ -79,6 +79,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const removalListeners = new Set<(removal: AccountRemoval) => void>()
   const announceDraft = (change: DraftChanged) => draftListeners.forEach((listener) => listener(structuredClone(change)))
   const clone = <T,>(value: T) => structuredClone(value)
+  const MOCK_DELETE_UNDO_MS = 5000
+  const pendingDeletions = new Map<string, { timer: ReturnType<typeof setTimeout>; emails: typeof emails }>()
 
   const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
   const MOCK_ATTACHMENT_SAMPLES: [string, string, number][] = [
@@ -359,6 +361,42 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return 'queued' as const
     },
     onFlagWriteBack: () => () => undefined,
+    async deleteEmails(emailIds, confirmedPermanent) {
+      const picked = [...new Set(emailIds)].map((id) => emails.find((row) => row.summary.id === id && !row.summary.localOnly))
+      if (picked.length === 0) throw new MailxClientError({ code: 'validation', message: '没有要删除的邮件。', field: null })
+      // Like the core: outside Trash a message moves there; in Trash, or in an
+      // account without one, it goes for good and needs the user's yes.
+      const plans = picked.map((email) => {
+        if (!email) throw notFound()
+        const source = folders.find((folder) => folder.id === email.summary.folderId)
+        const trash = source?.role === 'trash'
+          ? undefined
+          : folders.find((folder) => folder.accountId === email.summary.accountId && folder.role === 'trash')
+        return { email, trash }
+      })
+      const permanent = plans.some((plan) => !plan.trash)
+      if (permanent && !confirmedPermanent) throw new MailxClientError({ code: 'confirmationRequired', message: '永久删除前需要确认。', field: null })
+      for (const { email } of plans) emails.splice(emails.indexOf(email), 1)
+      const batchId = crypto.randomUUID()
+      const timer = setTimeout(() => {
+        pendingDeletions.delete(batchId)
+        for (const { email, trash } of plans) {
+          if (!trash) continue
+          email.summary.folderId = trash.id
+          emails.push(email)
+        }
+      }, MOCK_DELETE_UNDO_MS)
+      pendingDeletions.set(batchId, { timer, emails: plans.map((plan) => plan.email) })
+      return { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent }
+    },
+    async undoDelete(batchId) {
+      const pending = pendingDeletions.get(batchId)
+      if (!pending) throw notFound()
+      clearTimeout(pending.timer)
+      pendingDeletions.delete(batchId)
+      emails.push(...pending.emails)
+    },
+    onDeletions: () => () => undefined,
     refreshSync: async () => undefined,
     getAvatar: async () => null,
     saveAttachment: async () => 'saved' as const,

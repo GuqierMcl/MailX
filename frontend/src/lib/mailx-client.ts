@@ -14,6 +14,8 @@ import type {
   AvatarImage,
   RemoteImageStatus,
   FlagWriteBack,
+  EmailDeletion,
+  MessagesDeleted,
   CreateAccountRequest,
   CreateDraftFromRequest,
   CreateDraftRequest,
@@ -89,6 +91,17 @@ export interface MailxClient {
   setFlag(emailId: string, flag: 'read' | 'starred', wanted: boolean): Promise<'unchanged' | 'queued' | 'localOnly'>
   /** Hears each finished write-back round: what was confirmed, and stars kept local. */
   onFlagWriteBack(listener: (written: FlagWriteBack) => void): () => void
+  /**
+   * Hides the emails at once and deletes them on the server once `undoUntil`
+   * passes: into Trash, or for good when they already are in Trash or the
+   * account has none. Deleting for good fails with `confirmationRequired`
+   * unless `confirmedPermanent` says the user agreed.
+   */
+  deleteEmails(emailIds: string[], confirmedPermanent: boolean): Promise<EmailDeletion>
+  /** Takes a deletion back before it reaches the server; `alreadyDeleting` after. */
+  undoDelete(batchId: string): Promise<void>
+  /** Hears when deletions reached the server or came back (`givenBack`). */
+  onDeletions(listener: (deleted: MessagesDeleted) => void): () => void
   /** Asks the account's sync worker to run its next round now. */
   refreshSync(accountId: string): Promise<void>
   /** `null` unless the user enabled sender avatars and the sender has one. */
@@ -333,6 +346,17 @@ export function createDesktopClient(): MailxClient {
       let unlisten: (() => void) | undefined
       getCurrentWebviewWindow()
         .listen<FlagWriteBack>('mailx://flags', (event) => { if (!disposed) listener(event.payload) })
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => { disposed = true; unlisten?.() }
+    },
+    deleteEmails: (emailIds, confirmedPermanent) => call<EmailDeletion>('emails_delete', { emailIds, confirmedPermanent }),
+    undoDelete: (batchId) => call<void>('emails_undo_delete', { batchId }),
+    onDeletions(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<MessagesDeleted>('mailx://deletions', (event) => { if (!disposed) listener(event.payload) })
         .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
       return () => { disposed = true; unlisten?.() }
     },

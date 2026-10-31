@@ -143,10 +143,13 @@ impl Storage {
         // While a read / unread change in this folder has not reached the server, its
         // STATUS number still counts the old state, and taking it would make the
         // sidebar jump back. The local number stays until those changes are sent;
-        // the next round then reads the server's own.
+        // the next round then reads the server's own. An unread message waiting
+        // to be deleted is the same case: hidden here, still counted there.
         let waiting: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM flag_changes c JOIN messages m ON m.id = c.message_id
-                           WHERE m.folder_id = ?1 AND c.flag = 'seen' AND c.state = 'pending')",
+                           WHERE m.folder_id = ?1 AND c.flag = 'seen' AND c.state = 'pending')
+                 OR EXISTS(SELECT 1 FROM message_deletions d JOIN messages m ON m.id = d.message_id
+                           WHERE d.folder_id = ?1 AND m.is_read = 0)",
             [folder_id],
             |row| row.get(0),
         )?;
@@ -724,7 +727,8 @@ pub(super) const LOCAL_COPIES: &str = "FROM outbox o JOIN accounts a ON a.id = o
    AND o.snapshot_released_at IS NULL AND o.snapshot_hash IS NOT NULL";
 const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
- JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1";
+ JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1
+ AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)";
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
     Ok(EmailSummary {

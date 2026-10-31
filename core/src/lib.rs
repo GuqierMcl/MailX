@@ -53,8 +53,8 @@ pub use settings::{
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
-    AccountSyncState, FlagWriteBack, FolderSyncPhase, FolderSyncState, SyncFailure,
-    SyncFailureCode, SyncPhase,
+    AccountSyncState, FlagWriteBack, FolderSyncPhase, FolderSyncState, MessagesDeleted,
+    SyncFailure, SyncFailureCode, SyncPhase,
 };
 
 /// The core crate version, available without initializing storage or networking.

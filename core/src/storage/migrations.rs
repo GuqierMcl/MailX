@@ -141,6 +141,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["search_fts", "search_docs", "search_index_state"],
         sql: include_str!("migrations/0019_search_index.sql"),
     },
+    Migration {
+        version: 20,
+        description: "scheduled message deletions",
+        required_tables: &["message_deletions"],
+        sql: include_str!("migrations/0020_message_deletions.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -545,7 +551,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 19);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 20);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -734,7 +740,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            19
+            20
         );
     }
 
