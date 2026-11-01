@@ -343,7 +343,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "previewLines": "one"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256, "listWidth": 420, "readerCollapsed": false },
+                "layout": { "navWidth": 256, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },
                 "notifications": {
                     "enabled": true,
                     "showPreview": true,
@@ -451,9 +451,9 @@ fn nav_width_defaults_persists_and_is_validated() {
 
     let saved = store
         .patch(SettingsPatch {
-            layout: Some(LayoutSettings {
-                nav_width: 300,
-                ..LayoutSettings::default()
+            layout: Some(LayoutSettingsPatch {
+                nav_width: Some(300),
+                ..LayoutSettingsPatch::default()
             }),
             ..SettingsPatch::default()
         })
@@ -474,9 +474,9 @@ fn nav_width_defaults_persists_and_is_validated() {
     for width in [0, 219, 421] {
         let error = store
             .patch(SettingsPatch {
-                layout: Some(LayoutSettings {
-                    nav_width: width,
-                    ..LayoutSettings::default()
+                layout: Some(LayoutSettingsPatch {
+                    nav_width: Some(width),
+                    ..LayoutSettingsPatch::default()
                 }),
                 ..SettingsPatch::default()
             })
@@ -550,10 +550,11 @@ fn list_width_defaults_persists_alongside_nav_width_and_is_validated() {
 
     store
         .patch(SettingsPatch {
-            layout: Some(LayoutSettings {
-                nav_width: 280,
-                list_width: 520,
-                reader_collapsed: true,
+            layout: Some(LayoutSettingsPatch {
+                nav_width: Some(280),
+                list_width: Some(520),
+                reader_collapsed: Some(true),
+                ..LayoutSettingsPatch::default()
             }),
             ..SettingsPatch::default()
         })
@@ -572,10 +573,11 @@ fn list_width_defaults_persists_alongside_nav_width_and_is_validated() {
     for width in [0, 299, 2001] {
         let error = store
             .patch(SettingsPatch {
-                layout: Some(LayoutSettings {
-                    nav_width: 280,
-                    list_width: width,
-                    reader_collapsed: true,
+                layout: Some(LayoutSettingsPatch {
+                    nav_width: Some(280),
+                    list_width: Some(width),
+                    reader_collapsed: Some(true),
+                    ..LayoutSettingsPatch::default()
                 }),
                 ..SettingsPatch::default()
             })
@@ -602,6 +604,7 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
     assert_eq!((layout.nav_width, layout.list_width), (300, 420));
     // Settings from before the option existed start with the reader shown.
     assert!(!layout.reader_collapsed);
+    assert!(layout.account_order.is_empty());
 
     fs::write(
         directory.path().join(SETTINGS_FILE_NAME),
@@ -610,6 +613,199 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.list_width, 2000);
+}
+
+#[test]
+fn account_order_persists_canonical_ids_without_sorting() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let first = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let second = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let patch = serde_json::from_value(serde_json::json!({
+        "layout": { "accountOrder": [format!("  {}  ", first.to_uppercase()), second, first] }
+    }))
+    .unwrap();
+    let saved = store.patch(patch).unwrap();
+    assert_eq!(saved.settings.layout.account_order, [first, second]);
+    assert_eq!(saved.settings.layout.nav_width, NAV_WIDTH_DEFAULT);
+    let reloaded = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(reloaded.settings, saved.settings);
+    assert!(file_text(&directory, SETTINGS_FILE_NAME).contains("\"accountOrder\": ["));
+
+    // An empty array intentionally restores the underlying account-list order.
+    let cleared = store
+        .patch(
+            serde_json::from_value(serde_json::json!({ "layout": { "accountOrder": [] } }))
+                .unwrap(),
+        )
+        .unwrap();
+    assert!(cleared.settings.layout.account_order.is_empty());
+}
+
+#[test]
+fn invalid_account_order_reports_its_field_without_changing_settings_or_disk() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let before = store
+        .patch(
+            serde_json::from_value(serde_json::json!({ "layout": { "accountOrder": [id] } }))
+                .unwrap(),
+        )
+        .unwrap();
+    let before_text = file_text(&directory, SETTINGS_FILE_NAME);
+    for invalid in [
+        serde_json::json!(["not-a-uuid"]),
+        serde_json::json!(["  "]),
+        serde_json::json!([id, 17]),
+        serde_json::json!("not-an-array"),
+        serde_json::json!({}),
+        serde_json::Value::Null,
+        serde_json::json!(vec![id; MAX_ACCOUNT_ORDER + 1]),
+    ] {
+        let patch = serde_json::from_value(serde_json::json!({
+            "layout": { "accountOrder": invalid, "navWidth": 300 }
+        }))
+        .unwrap();
+        let error = store.patch(patch).unwrap_err();
+        assert_eq!(error.code, ErrorCode::Validation);
+        assert_eq!(error.field.as_deref(), Some("layout.accountOrder"));
+        assert_eq!(store.get().unwrap(), before);
+        assert_eq!(file_text(&directory, SETTINGS_FILE_NAME), before_text);
+    }
+}
+
+#[test]
+fn malformed_saved_account_order_recovers_only_that_field() {
+    for invalid in [
+        serde_json::json!(["invalid"]),
+        serde_json::json!(17),
+        serde_json::json!(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 17]),
+        serde_json::Value::Null,
+        serde_json::json!(vec![
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+            MAX_ACCOUNT_ORDER + 1
+        ]),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let value = serde_json::json!({
+            "version": 1,
+            "settings": {
+                "layout": { "navWidth": 300, "listWidth": 530, "readerCollapsed": true, "accountOrder": invalid },
+                "appearance": { "theme": "dark" }
+            }
+        });
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.recovered);
+        assert!(snapshot.stored);
+        assert!(snapshot.settings.layout.account_order.is_empty());
+        assert_eq!(snapshot.settings.layout.nav_width, 300);
+        assert_eq!(snapshot.settings.layout.list_width, 530);
+        assert!(snapshot.settings.layout.reader_collapsed);
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+    }
+}
+
+#[test]
+fn maximum_account_order_fits_the_settings_file_and_reloads() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let ids: Vec<String> = (0..MAX_ACCOUNT_ORDER)
+        .map(|_| Uuid::new_v4().to_string())
+        .collect();
+    let saved = store
+        .patch(SettingsPatch {
+            layout: Some(LayoutSettingsPatch {
+                account_order: Some(ids.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.layout.account_order, ids);
+    assert!((file_text(&directory, SETTINGS_FILE_NAME).len() as u64) < MAX_FILE_BYTES);
+    assert_eq!(
+        SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .settings,
+        saved.settings
+    );
+}
+
+#[test]
+fn concurrent_layout_fields_merge_and_full_layout_input_still_works() {
+    use std::sync::{Arc, Barrier};
+
+    let directory = TempDir::new().unwrap();
+    let store = Arc::new(SettingsStore::open(directory.path()).unwrap());
+    let barrier = Arc::new(Barrier::new(2));
+    let id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    std::thread::scope(|scope| {
+        let widths_store = Arc::clone(&store);
+        let widths_barrier = Arc::clone(&barrier);
+        scope.spawn(move || {
+            widths_barrier.wait();
+            widths_store
+                .patch(
+                    serde_json::from_value(serde_json::json!({
+                        "layout": { "navWidth": 300, "listWidth": 530, "readerCollapsed": true }
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+        });
+        barrier.wait();
+        store
+            .patch(
+                serde_json::from_value(serde_json::json!({
+                    "layout": { "accountOrder": [id] }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+    });
+    let merged = store.get().unwrap();
+    assert_eq!(merged.revision, 2);
+    assert_eq!(merged.settings.layout.nav_width, 300);
+    assert_eq!(merged.settings.layout.list_width, 530);
+    assert!(merged.settings.layout.reader_collapsed);
+    assert_eq!(merged.settings.layout.account_order, [id]);
+
+    let full = LayoutSettings {
+        nav_width: 280,
+        list_width: 600,
+        ..Default::default()
+    };
+    let replaced = store
+        .patch(SettingsPatch {
+            layout: Some(full.clone().into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(replaced.settings.layout, full);
+}
+
+#[test]
+fn failed_disk_commit_does_not_publish_account_order_or_other_layout_fields() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let before = store.get().unwrap();
+    fs::create_dir(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
+    let patch = serde_json::from_value(serde_json::json!({
+        "layout": { "accountOrder": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"], "navWidth": 300 }
+    }))
+    .unwrap();
+    assert!(store.patch(patch).is_err());
+    assert_eq!(store.get().unwrap(), before);
 }
 
 #[test]
@@ -649,7 +845,7 @@ fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
 
     store
         .patch(SettingsPatch {
-            layout: Some(LayoutSettings::default()),
+            layout: Some(LayoutSettings::default().into()),
             ..Default::default()
         })
         .unwrap();

@@ -16,6 +16,21 @@ async function renderWorkbench() {
 }
 
 describe('workbench', () => {
+  it('uses the saved sidebar order while a new draft still resolves its original default account', async () => {
+    const opened: string[] = []
+    const client = createMockClient({ onOpenComposer: (draft) => { opened.push(draft.accountId) } })
+    const accounts = await client.listAccounts()
+    const reverse = [...accounts].reverse()
+    await client.updateSettings({ layout: { accountOrder: reverse.map((account) => account.id) } })
+    render(withTitleBar(<Workbench client={client} />))
+    const sidebar = within(await screen.findByRole('navigation', { name: '邮箱导航' }))
+    await sidebar.findByRole('button', { name: accounts[0].displayName })
+    const accountButtons = sidebar.getAllByRole('button').filter((button) => accounts.some((account) => button.title === account.emailAddress))
+    expect(accountButtons.map((button) => button.title)).toEqual(reverse.map((account) => account.emailAddress))
+    await userEvent.click(sidebar.getByRole('button', { name: '写邮件' }))
+    await waitFor(() => expect(opened).toEqual([accounts[0].id]))
+  })
+
   it('opens on the unified inbox across accounts and shows the selected message', async () => {
     const { list } = await renderWorkbench()
     expect(screen.getByRole('heading', { name: '全部收件箱' })).toBeInTheDocument()

@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
+import { useOrderedAccounts } from '@/features/accounts/account-order'
 import { Island } from '@/features/shell/island'
 import { TitleBar } from '@/features/window-chrome/title-bar'
 import type { WindowHost } from '@/features/window-chrome/window-host'
@@ -57,6 +58,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
     queryKey: ['composer', 'accounts'],
     queryFn: async () => (await client.listAccounts()).filter((account) => !removedAccounts.current.has(account.id)),
   })
+  const orderedAccounts = useOrderedAccounts(client, accounts.data ?? [])
 
   const title = subject.trim() || t('composer:window.newMail')
   useEffect(() => {
@@ -218,7 +220,7 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
           {!draftRemoved && <Composer
             client={client}
             draftId={draftId}
-            accounts={accounts.data ?? []}
+            accounts={orderedAccounts}
             controllerRef={controller}
             onSubjectChange={setSubject}
             onSent={closeWindow}

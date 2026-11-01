@@ -8,7 +8,7 @@ export const LIST_DEFAULT = 420
 /** The reader never gets narrower than this; the window gives way before it does. */
 export const READER_MIN = 360
 
-export const DEFAULT_LAYOUT: LayoutSettings = { navWidth: NAV_DEFAULT, listWidth: LIST_DEFAULT, readerCollapsed: false }
+export const DEFAULT_LAYOUT: LayoutSettings = { navWidth: NAV_DEFAULT, listWidth: LIST_DEFAULT, readerCollapsed: false, accountOrder: [] }
 
 export function clampListWidth(width: number) {
   return Math.min(LIST_MAX, Math.max(LIST_MIN, Math.round(width)))

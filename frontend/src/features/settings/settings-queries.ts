@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppSettings, LayoutSettings } from '@/generated/accounts'
+import type { AppSettings, LayoutSettings, SettingsPatch } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { DEFAULT_APPEARANCE, applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
@@ -31,8 +31,11 @@ function useSettingsSection<K extends keyof AppSettings>(client: MailxClient, se
   return useMutation({
     scope: { id: `settings-${section}` },
     mutationFn: (change: Partial<AppSettings[K]>) => {
+      // Layout is shared by account ordering and independent width writers in
+      // multiple windows. Let the core merge only the fields actually edited.
+      if (section === 'layout') return client.updateSettings({ layout: change as Partial<LayoutSettings> })
       const current = committedSettings(queryClient)?.[section]
-      return client.updateSettings({ [section]: { ...defaults, ...current, ...change } } as Partial<AppSettings>)
+      return client.updateSettings({ [section]: { ...defaults, ...current, ...change } } as SettingsPatch)
     },
     onMutate: async (change) => {
       await queryClient.cancelQueries({ queryKey: settingsKeys.all })

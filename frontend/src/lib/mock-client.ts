@@ -26,6 +26,19 @@ import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
+function normalizedAccountOrder(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 256) return null
+  const order = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'string') return null
+    const id = entry.trim().replace(/^urn:uuid:/, '').replace(/^\{(.*)\}$/, '$1')
+    if (!/^(?:[\da-f]{32}|[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})$/i.test(id)) return null
+    const hex = id.replaceAll('-', '').toLowerCase()
+    order.add(`${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`)
+  }
+  return [...order]
+}
+
 /**
  * In-memory client for designing the UI in a plain browser (`bun run dev`).
  * Data is synthetic and lost on reload; nothing touches the network or disk.
@@ -60,7 +73,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['system', 'zh-CN', 'en'].includes(value.settings?.general?.language) &&
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
-            typeof value.settings[key as keyof typeof value.settings] === 'object')) settings = value
+            typeof value.settings[key as keyof typeof value.settings] === 'object')) {
+        settings = { ...value, settings: { ...value.settings, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+          accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
+      }
     } catch { /* The browser preview cache is optional. */ }
   }
   readStoredSettings()
@@ -608,9 +624,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
       const mailFont = parseFontFamilies(appearance.mailFont).join(', ')
       const general = next.general ?? settings.settings.general
+      const layout = { ...settings.settings.layout, ...next.layout }
+      const order = normalizedAccountOrder(layout.accountOrder)
+      if (!order) throw new MailxClientError({ code: 'validation', field: 'layout.accountOrder', message: '配置参数无效。' })
+      layout.accountOrder = order
       settings = { revision: settings.revision + 1,
         effectiveLocale: general.language === 'system' ? systemLocale() : general.language,
-        settings: { ...settings.settings, ...next, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
+        settings: { ...settings.settings, ...next, layout, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
       try { localStorage.setItem('mailx.mock.settings', JSON.stringify(settings)) } catch { /* Optional preview cache. */ }
       window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
       return structuredClone(settings)

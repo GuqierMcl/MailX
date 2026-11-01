@@ -18,6 +18,16 @@ const lastNotifications = (client: ReturnType<typeof testClient>) =>
   client.updateSettings.mock.lastCall?.[0].notifications
 
 describe('notification settings', () => {
+  it('lists account notification controls in the saved display order', async () => {
+    const client = testClient([work, home])
+    await client.updateSettings({ layout: { accountOrder: [home.id, work.id] } })
+    const { dialog } = renderPane(client)
+    const homeControl = await within(dialog).findByRole('switch', { name: home.displayName })
+    const workControl = within(dialog).getByRole('switch', { name: work.displayName })
+    const switches = within(dialog).getAllByRole('switch').filter((element) => element === homeControl || element === workControl)
+    expect(switches).toEqual([homeControl, workControl])
+  })
+
   it('starts on, with previews, quiet while in front and the system sound', async () => {
     const { dialog } = renderPane()
     expect(await within(dialog).findByRole('switch', { name: '收到新邮件时提醒我' })).toBeChecked()

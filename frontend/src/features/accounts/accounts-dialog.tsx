@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountRemoval, AccountSyncState, RouteConfig } from '@/generated/accounts'
@@ -16,21 +16,19 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SettingsGroup, SettingsPage, SettingsRow } from '@/features/settings/settings-layout'
+import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { AccountAvatar } from './account-avatar'
+import { sortAccountsForDisplay } from './account-order'
+import { SortableAccountList } from './sortable-account-list'
 import { ConnectionVerification } from './connection-verification'
 import { ProviderAuthHelp } from './provider-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
 import { ProviderBadge } from './provider-badge'
-import { providerOf } from './providers'
 import { useAccount } from './use-account'
 import { RemoveAccountDialog } from './remove-account-dialog'
 
@@ -62,6 +60,10 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set())
   const [removingId, setRemovingId] = useState<string | null>(null)
   const removing = removingId !== null
+  const settings = useSettings(client)
+  const order = useUpdateLayout(client)
+  const accountOrder = settings.data?.settings.layout.accountOrder
+  const orderedAccounts = useMemo(() => sortAccountsForDisplay(accounts, accountOrder ?? []), [accounts, accountOrder])
 
   // Reset the view whenever the dialog is opened with a new target.
   const [openedFor, setOpenedFor] = useState<AccountsTarget | null>(null)
@@ -70,26 +72,33 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
     if (target) setSelectedId(target.accountId ?? null)
   }
 
-  const visibleAccounts = accounts.filter((account) => !removedIds.has(account.id))
+  const visibleAccounts = orderedAccounts.filter((account) => !removedIds.has(account.id))
   const activeId = visibleAccounts.some((account) => account.id === selectedId) ? selectedId : visibleAccounts[0]?.id ?? null
+  // Once loaded, pin the implicit first selection by identity so changing the
+  // display order never replaces the profile being edited.
+  if (target === openedFor && target && settings.data && activeId !== selectedId) setSelectedId(activeId)
   const removed = useCallback((result: AccountRemoval) => {
     setRemovedIds((previous) => new Set(previous).add(result.accountId))
     setRemovingId((current) => current === result.accountId ? null : current)
     setEditingConnection((current) => current === result.accountId ? null : current)
     setSelectedId((current) => {
-      const effectiveId = current ?? accounts.find((account) => !removedIds.has(account.id))?.id ?? null
+      const effectiveId = current ?? orderedAccounts.find((account) => !removedIds.has(account.id))?.id ?? null
       if (effectiveId && effectiveId !== result.accountId) return effectiveId
-      const index = accounts.findIndex((account) => account.id === result.accountId)
-      return [...accounts.slice(index + 1), ...accounts.slice(0, index).reverse()]
+      const index = orderedAccounts.findIndex((account) => account.id === result.accountId)
+      return [...orderedAccounts.slice(index + 1), ...orderedAccounts.slice(0, index).reverse()]
         .find((account) => account.id !== result.accountId && !removedIds.has(account.id))?.id ?? null
     })
     onAccountsChanged()
-  }, [accounts, removedIds, onAccountsChanged])
+  }, [orderedAccounts, removedIds, onAccountsChanged])
   useEffect(() => client.onAccountRemoved(removed), [client, removed])
 
   return (
     <>
-      <Dialog open={target !== null} onOpenChange={(open) => !open && !removing && onClose()}>
+      <Dialog open={target !== null} onOpenChange={(open, details) => {
+        // dnd-kit's keyboard sensor consumes the first Escape to cancel a drag.
+        if (details.reason === 'escape-key' && details.event.defaultPrevented) return
+        if (!open && !removing) onClose()
+      }}>
         <DialogContent showCloseButton={!removing} className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
           <DialogDescription className="sr-only">{t('accounts:accountsDescription')}</DialogDescription>
           {/* Narrow windows turn the account list into a top strip instead of hiding it. */}
@@ -106,16 +115,13 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
               <SidebarContent>
                 <SidebarGroup className="py-2 md:p-2">
                   <SidebarGroupContent>
-                    <SidebarMenu className="flex-row overflow-x-auto md:flex-col md:overflow-visible" aria-label={t('accounts:emailAccountList')}>
-                      {visibleAccounts.map((row) => (
-                        <SidebarMenuItem key={row.id} className="shrink-0">
-                          <SidebarMenuButton disabled={removing} isActive={row.id === activeId} title={`${row.emailAddress} · ${providerOf(row.providerId).name}`} onClick={() => setSelectedId(row.id)}>
-                            <AccountAvatar displayName={row.displayName} color={row.color} providerId={row.providerId} useProviderIcon={row.useProviderIcon} className="size-5 text-[10px]" />
-                            <span>{row.displayName}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
-                    </SidebarMenu>
+                    <SortableAccountList accounts={visibleAccounts} activeId={activeId} disabled={removing}
+                      reorderDisabled={removing || order.isPending || !settings.data}
+                      onSelect={setSelectedId} onReorder={(accountOrder) => order.mutateAsync({ accountOrder })} />
+                    {order.isError && <Alert variant="destructive" className="mt-2">
+                      <AlertTitle>{t('accounts:accountOrderNotSaved')}</AlertTitle>
+                      <AlertDescription>{errorText(order.error)}</AlertDescription>
+                    </Alert>}
                   </SidebarGroupContent>
                 </SidebarGroup>
               </SidebarContent>

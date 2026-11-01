@@ -5,8 +5,7 @@ import { createMockClient } from '@/lib/mock-client'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
-async function openPalette() {
-  const client = createMockClient()
+async function openPalette(client = createMockClient()) {
   render(withTitleBar(<Workbench client={client} />))
   await screen.findByRole('list', { name: '邮件列表' })
   await userEvent.click(screen.getByRole('button', { name: '搜索邮件' }))
@@ -15,6 +14,17 @@ async function openPalette() {
 }
 
 describe('command palette', () => {
+  it('groups mailbox jumps by the saved account display order', async () => {
+    const client = createMockClient()
+    const [work, home] = await client.listAccounts()
+    await client.updateSettings({ layout: { accountOrder: [home.id, work.id] } })
+    const { palette } = await openPalette(client)
+    const jumps = within(palette).getAllByRole('option').map((option) => option.textContent ?? '')
+      .filter((label) => label.includes(' · '))
+    expect(jumps[0]).toBe('个人邮箱 · 收件箱')
+    expect(jumps.indexOf('工作邮箱 · 收件箱')).toBeGreaterThan(jumps.indexOf('个人邮箱 · 旅行'))
+  })
+
   it('opens from the title bar with jump targets and commands, and closes on Escape', async () => {
     const { palette } = await openPalette()
     expect(within(palette).getByText('跳转')).toBeInTheDocument()

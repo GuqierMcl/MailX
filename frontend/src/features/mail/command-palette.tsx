@@ -112,9 +112,12 @@ function PaletteBody({
     run()
   }
 
+  const accountPosition = new Map(accounts.map((account, index) => [account.id, index]))
+  const orderedFolders = [...folders].sort((left, right) =>
+    (accountPosition.get(left.accountId) ?? accounts.length) - (accountPosition.get(right.accountId) ?? accounts.length))
   const jumps: Entry[] = [
     { id: 'jump:unified', title: t('mail:allInboxes'), icon: InboxIcon, run: () => onSelectMailbox({ kind: 'unified', role: 'inbox' }) },
-    ...folders.filter((folder) => folder.selectable).map((folder): Entry => {
+    ...orderedFolders.filter((folder) => folder.selectable).map((folder): Entry => {
       const account = accounts.find((item) => item.id === folder.accountId)
       return {
         id: `jump:${folder.id}`,
