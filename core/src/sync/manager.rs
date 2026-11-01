@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use ts_rs::TS;
 
 use super::cadence::{Activity, Cadence, FRONT_WAKE_MIN_GAP};
+use super::idle::{self, IdleControl, IdleHealth};
 use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
@@ -326,6 +327,9 @@ pub(crate) struct SyncManager {
     wakers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>>,
     /// One write-back worker per account, beside its sync worker.
     writers: Mutex<HashMap<String, Writer>>,
+    /// IDLE watchers, shared with the sleep ticker.
+    watchers: Arc<Mutex<HashMap<String, Watcher>>>,
+    sleep_watch: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// How the app is being used, as the host last said. Every worker watches
     /// it: coming to the front starts a round at once.
     activity: tokio::sync::watch::Sender<Activity>,
@@ -333,6 +337,30 @@ pub(crate) struct SyncManager {
 
 /// An account's write-back task and the signal that wakes it.
 type Writer = (JoinHandle<()>, Arc<tokio::sync::Notify>);
+
+/// An account's IDLE watcher task and the handle to signal it.
+type Watcher = (JoinHandle<()>, Arc<IdleControl>);
+
+/// How long a stopping watcher gets for DONE + LOGOUT before it is aborted.
+const WATCHER_GRACE: Duration = Duration::from_secs(5);
+
+/// The machine slept: every connection is probably dead and the polls it
+/// interrupted are overdue. Reconnect IDLE at once and run a sync round.
+fn wake_after_sleep(
+    watchers: &Mutex<HashMap<String, Watcher>>,
+    wakers: &Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+) {
+    if let Ok(watchers) = watchers.lock() {
+        for (_, control) in watchers.values() {
+            control.reconnect.notify_one();
+        }
+    }
+    if let Ok(wakers) = wakers.lock() {
+        for wake in wakers.values() {
+            wake.notify_one();
+        }
+    }
+}
 
 impl SyncManager {
     pub(crate) fn new(
@@ -351,7 +379,26 @@ impl SyncManager {
             workers: Mutex::new(HashMap::new()),
             wakers: Arc::new(Mutex::new(HashMap::new())),
             writers: Mutex::new(HashMap::new()),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+            sleep_watch: Mutex::new(None),
             activity: tokio::sync::watch::channel(Activity::default()).0,
+        }
+    }
+
+    /// Starts the one ticker that notices the machine sleeping. Separate from
+    /// `new` so the clocks stay injectable and tests do not run a ticker.
+    pub(crate) fn watch_for_sleep(&self) {
+        let watchers = self.watchers.clone();
+        let wakers = self.wakers.clone();
+        let ticker = self.runtime.spawn(idle::sleep_ticker(
+            SystemTime::now,
+            Instant::now,
+            move || wake_after_sleep(&watchers, &wakers),
+        ));
+        if let Ok(mut slot) = self.sleep_watch.lock()
+            && let Some(old) = slot.replace(ticker)
+        {
+            old.abort();
         }
     }
 
@@ -581,13 +628,63 @@ impl SyncManager {
             wakers.insert(account_id.to_owned(), wake.clone());
         }
         let writer_token = token.clone();
+        let watcher_token = token.clone();
+        let watcher_wake = wake.clone();
+        let (health, health_receiver) = tokio::sync::watch::channel(IdleHealth::Starting);
+        let health = Arc::new(health);
         workers.insert(
             account_id.to_owned(),
-            self.runtime
-                .spawn(run(shared, token, wake, self.activity.subscribe())),
+            self.runtime.spawn(run(
+                shared,
+                token,
+                wake,
+                self.activity.subscribe(),
+                health_receiver,
+            )),
         );
         drop(workers);
         self.start_writer(account_id, writer_token);
+        self.start_watcher(account_id, watcher_token, watcher_wake, health);
+    }
+
+    /// Starts the IDLE watcher next to the sync worker, on the same lifecycle:
+    /// whatever restarts or retires the worker does the same to the watcher.
+    fn start_watcher(
+        &self,
+        account_id: &str,
+        token: WorkerToken,
+        sync_wake: Arc<tokio::sync::Notify>,
+        health: Arc<tokio::sync::watch::Sender<IdleHealth>>,
+    ) {
+        let Ok(mut watchers) = self.watchers.lock() else {
+            return;
+        };
+        if let Some(old) = watchers.remove(account_id) {
+            self.stop_watcher(old);
+        }
+        let control = Arc::new(IdleControl::default());
+        let context = idle::WatchContext {
+            health,
+            sync_wake,
+            control: control.clone(),
+            timing: idle::Timing::default(),
+        };
+        let shared = self.shared.clone();
+        let task = self.runtime.spawn(idle::run(shared, token, context));
+        watchers.insert(account_id.to_owned(), (task, control));
+    }
+
+    /// Asks a watcher to leave the connection cleanly (DONE, LOGOUT); aborts
+    /// it if that takes too long. Returns the handle for callers that wait.
+    fn stop_watcher(&self, (task, control): Watcher) -> tokio::task::AbortHandle {
+        control.stop.notify_one();
+        let handle = task.abort_handle();
+        let backstop = task.abort_handle();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(WATCHER_GRACE).await;
+            backstop.abort();
+        });
+        handle
     }
 
     /// Called after releasing the service lock: restart takes workers before
@@ -614,6 +711,14 @@ impl SyncManager {
         {
             worker.abort();
         }
+        let watcher = self
+            .watchers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(account_id);
+        if let Some(watcher) = watcher {
+            self.stop_watcher(watcher);
+        }
         self.wakers
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -635,7 +740,8 @@ impl SyncManager {
 }
 
 impl SyncManager {
-    /// Stops every sync and write-back task; the core is closing. Returns the
+    /// Stops every sync, write-back and IDLE task; the core is closing. IDLE
+    /// watchers get a short grace period to say DONE and LOGOUT. Returns the
     /// stopped tasks so the caller can wait for them to finish.
     pub(crate) fn shutdown(&self) -> Vec<tokio::task::AbortHandle> {
         let mut stopped = Vec::new();
@@ -650,6 +756,20 @@ impl SyncManager {
                 worker.abort();
                 stopped.push(worker.abort_handle());
             }
+        }
+        let watchers: Vec<Watcher> = self
+            .watchers
+            .lock()
+            .map(|mut watchers| watchers.drain().map(|(_, watcher)| watcher).collect())
+            .unwrap_or_default();
+        for watcher in watchers {
+            stopped.push(self.stop_watcher(watcher));
+        }
+        if let Ok(mut slot) = self.sleep_watch.lock()
+            && let Some(ticker) = slot.take()
+        {
+            ticker.abort();
+            stopped.push(ticker.abort_handle());
         }
         stopped
     }
@@ -714,6 +834,7 @@ async fn run(
     token: WorkerToken,
     wake: Arc<tokio::sync::Notify>,
     mut activity: tokio::sync::watch::Receiver<Activity>,
+    mut idle_health: tokio::sync::watch::Receiver<IdleHealth>,
 ) {
     let mut failures = 0u32;
     let mut last_folder_refresh = None;
@@ -775,7 +896,8 @@ async fn run(
                 return;
             }
         };
-        if !wait_for_next_round(&pause, &mut cadence, &wake, &mut activity).await {
+        if !wait_for_next_round(&pause, &mut cadence, &wake, &mut activity, &mut idle_health).await
+        {
             return;
         }
     }
@@ -791,20 +913,28 @@ async fn wait_for_next_round(
     cadence: &mut Cadence,
     wake: &tokio::sync::Notify,
     activity: &mut tokio::sync::watch::Receiver<Activity>,
+    idle_health: &mut tokio::sync::watch::Receiver<IdleHealth>,
 ) -> bool {
     let ended = Instant::now();
+    let mut health_open = true;
     loop {
         let current = *activity.borrow_and_update();
+        let idle_live = *idle_health.borrow_and_update() == IdleHealth::Live;
         // A failed round retries on its own backoff whatever the app is doing.
         let wait = match pause {
             Pause::Backoff(wait) => *wait,
-            Pause::Cadence => cadence.wait(current),
+            Pause::Cadence => cadence.wait_with(current, idle_live),
         };
         tokio::select! {
             () = tokio::time::sleep_until(ended + wait) => return true,
             () = wake.notified() => {
                 cadence.reset();
                 return true;
+            }
+            // IDLE coming up or going down changes the poll interval; a lost
+            // IDLE must not leave this wait sitting on the long one.
+            changed = idle_health.changed(), if health_open => {
+                health_open = changed.is_ok();
             }
             changed = activity.changed() => {
                 if changed.is_err() {
@@ -1289,6 +1419,7 @@ mod tests {
             old.clone(),
             wake,
             manager.activity.subscribe(),
+            IdleHealth::watch_closed(),
         )
         .await;
         assert!(manager.shared.policy_blocked(&old));
@@ -1402,22 +1533,41 @@ mod tests {
         started: Instant,
         activity: tokio::sync::watch::Sender<Activity>,
         wake: Arc<tokio::sync::Notify>,
+        health: tokio::sync::watch::Sender<IdleHealth>,
     }
 
     impl Waiting {
-        fn start(pause: Pause, mut cadence: Cadence, activity: Activity) -> Self {
+        fn start(pause: Pause, cadence: Cadence, activity: Activity) -> Self {
+            Self::start_with_idle(pause, cadence, activity, IdleHealth::Starting)
+        }
+
+        fn start_with_idle(
+            pause: Pause,
+            mut cadence: Cadence,
+            activity: Activity,
+            idle: IdleHealth,
+        ) -> Self {
             let (sender, mut receiver) = tokio::sync::watch::channel(activity);
+            let (health, mut health_receiver) = tokio::sync::watch::channel(idle);
             let wake = Arc::new(tokio::sync::Notify::new());
             let task_wake = wake.clone();
             let started = Instant::now();
             let done = tokio::spawn(async move {
-                wait_for_next_round(&pause, &mut cadence, &task_wake, &mut receiver).await
+                wait_for_next_round(
+                    &pause,
+                    &mut cadence,
+                    &task_wake,
+                    &mut receiver,
+                    &mut health_receiver,
+                )
+                .await
             });
             Self {
                 done,
                 started,
                 activity: sender,
                 wake,
+                health,
             }
         }
 
@@ -1444,6 +1594,67 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn in_front_the_next_round_comes_after_twenty_seconds() {
         let mut waiting = Waiting::start(Pause::Cadence, Cadence::default(), Activity::Active);
+        let waited = waiting.finished_within(Duration::from_secs(60)).await;
+        assert_eq!(waited, Some(Duration::from_secs(20)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn with_live_idle_the_front_polls_every_three_minutes() {
+        let mut waiting = Waiting::start_with_idle(
+            Pause::Cadence,
+            Cadence::default(),
+            Activity::Active,
+            IdleHealth::Live,
+        );
+        let waited = waiting.finished_within(Duration::from_secs(600)).await;
+        assert_eq!(waited, Some(Duration::from_secs(180)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn losing_idle_shortens_the_wait_that_is_already_running() {
+        let mut waiting = Waiting::start_with_idle(
+            Pause::Cadence,
+            Cadence::default(),
+            Activity::Active,
+            IdleHealth::Live,
+        );
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        waiting.health.send(IdleHealth::Reconnecting).unwrap();
+        // The deadline counts from the end of the round: 20 s in all, not 3 minutes.
+        let waited = waiting.finished_within(Duration::from_secs(60)).await;
+        assert_eq!(waited, Some(Duration::from_secs(20)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn any_state_but_live_keeps_the_plain_polling_rhythm() {
+        for health in [
+            IdleHealth::Starting,
+            IdleHealth::Reconnecting,
+            IdleHealth::Unsupported,
+            IdleHealth::Disabled,
+        ] {
+            let mut waiting = Waiting::start_with_idle(
+                Pause::Cadence,
+                Cadence::default(),
+                Activity::Active,
+                health,
+            );
+            let waited = waiting.finished_within(Duration::from_secs(60)).await;
+            assert_eq!(waited, Some(Duration::from_secs(20)), "{health:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_watcher_that_ended_does_not_stop_the_wait_from_finishing() {
+        let mut waiting = Waiting::start_with_idle(
+            Pause::Cadence,
+            Cadence::default(),
+            Activity::Active,
+            IdleHealth::Disabled,
+        );
+        // Dropping the sender is what a watcher that ended for good looks like.
+        let (placeholder, _) = tokio::sync::watch::channel(IdleHealth::Disabled);
+        drop(std::mem::replace(&mut waiting.health, placeholder));
         let waited = waiting.finished_within(Duration::from_secs(60)).await;
         assert_eq!(waited, Some(Duration::from_secs(20)));
     }
@@ -1537,9 +1748,16 @@ mod tests {
         );
         let (sender, mut receiver) = tokio::sync::watch::channel(Activity::Background);
         let wake = tokio::sync::Notify::new();
+        let (_health, mut health_receiver) = tokio::sync::watch::channel(IdleHealth::Starting);
         // The pinned future borrows the cadence; the block ends that borrow before it is read again.
         {
-            let round = wait_for_next_round(&Pause::Cadence, &mut cadence, &wake, &mut receiver);
+            let round = wait_for_next_round(
+                &Pause::Cadence,
+                &mut cadence,
+                &wake,
+                &mut receiver,
+                &mut health_receiver,
+            );
             tokio::pin!(round);
             tokio::select! {
                 _ = &mut round => panic!("the background wait is minutes long"),

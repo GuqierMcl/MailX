@@ -1,12 +1,18 @@
 //! Read-only IMAP operations for folder/header synchronization and body loading.
 
 mod body;
+mod idle;
+#[cfg(test)]
+mod peer;
 mod policy;
 mod preview;
 pub(crate) mod utf7;
 pub(crate) use body::open_body_session;
 #[cfg(test)]
 pub(crate) use body::test_body_session;
+pub(crate) use idle::{IdleSession, IdleWake};
+#[cfg(test)]
+pub(crate) use peer::{TestPeer, scripted_session};
 #[cfg(test)]
 pub(crate) use preview::PREVIEW_BYTES;
 pub(crate) use preview::{

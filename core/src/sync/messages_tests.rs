@@ -1112,6 +1112,7 @@ async fn new_round_connection_and_credential_failures_do_not_keep_previous_idle_
             fixture.token.clone(),
             Default::default(),
             activity,
+            crate::sync::idle::IdleHealth::watch_closed(),
         ));
         let failed = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -1339,6 +1340,7 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
         fixture.token.clone(),
         wake.clone(),
         activity,
+        crate::sync::idle::IdleHealth::watch_closed(),
     ));
     let sequence =
         |fixture: &Fixture| fixture.shared.states.lock().unwrap()[&fixture.account_id].clone();
