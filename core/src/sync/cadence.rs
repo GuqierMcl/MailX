@@ -18,6 +18,10 @@ pub(crate) const ACTIVE_INTERVAL: Duration = Duration::from_secs(20);
 pub(crate) const BACKGROUND_BASE: Duration = Duration::from_secs(3 * 60);
 /// The background wait never grows past this, however quiet the mailbox is.
 pub(crate) const BACKGROUND_CAP: Duration = Duration::from_secs(10 * 60);
+/// Wait between rounds while the app is in front and IDLE is watching the
+/// inbox. New inbox mail wakes the worker directly, so the poll only has to
+/// catch the folders IDLE does not cover and a missed push.
+pub(crate) const ACTIVE_INTERVAL_WITH_IDLE: Duration = Duration::from_secs(3 * 60);
 /// Coming to the front starts a round at once, but never sooner than this after
 /// the previous one ended: every round logs in again, and flicking between
 /// windows must not turn into a stream of logins.
@@ -59,9 +63,18 @@ impl Cadence {
         self.quiet_rounds = 0;
     }
 
-    /// Wait before the next round.
+    /// Wait before the next round, without IDLE.
+    #[cfg(test)]
     pub(crate) fn wait(&self, activity: Activity) -> Duration {
+        self.wait_with(activity, false)
+    }
+
+    /// Wait before the next round. `idle_live` is true only while the account's
+    /// IDLE connection is established; in every other state the wait is the
+    /// plain polling one, so a broken IDLE never makes mail later than before.
+    pub(crate) fn wait_with(&self, activity: Activity, idle_live: bool) -> Duration {
         match activity {
+            Activity::Active if idle_live => ACTIVE_INTERVAL_WITH_IDLE,
             Activity::Active => ACTIVE_INTERVAL,
             Activity::Background => {
                 // Doubling per quiet round beyond the first few, up to the cap.
@@ -123,6 +136,24 @@ mod tests {
         for rounds in 0..20 {
             let background = quiet(rounds).wait(Activity::Background);
             assert!(background > ACTIVE_INTERVAL);
+        }
+    }
+
+    #[test]
+    fn with_live_idle_the_front_polls_every_three_minutes_and_the_background_is_unchanged() {
+        for rounds in [0, 5, 50] {
+            let cadence = quiet(rounds);
+            assert_eq!(
+                cadence.wait_with(Activity::Active, true),
+                Duration::from_secs(180)
+            );
+            for activity in [Activity::Active, Activity::Background] {
+                assert_eq!(cadence.wait_with(activity, false), cadence.wait(activity));
+            }
+            assert_eq!(
+                cadence.wait_with(Activity::Background, true),
+                cadence.wait(Activity::Background)
+            );
         }
     }
 

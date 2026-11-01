@@ -4,6 +4,7 @@ pub(crate) mod bodies;
 pub(crate) mod cadence;
 pub(crate) mod folders;
 pub(crate) mod headers;
+pub(crate) mod idle;
 pub(crate) mod manager;
 pub(crate) mod messages;
 pub(crate) mod previews;

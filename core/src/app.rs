@@ -153,6 +153,7 @@ impl MailxCore {
             runtime.clone(),
             events.clone(),
         ));
+        sync.watch_for_sleep();
         for account in &accounts {
             sync.restart(&account.id);
         }

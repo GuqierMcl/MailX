@@ -438,7 +438,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 - **输入。** `emailIds` 去重后为 1 到 500 个，否则 `validation`；任一邮件不可见、已在删除中或来自旧的 UID 世代，整批返回 `notFound`。本机已发送副本不是服务器邮件，仍用 `outbox_remove_local_copy`。
 - **结果事件。** 写回任务每轮有删除完成或退回时，主窗口收到 `mailx://deletions`：`MessagesDeleted { accountId, deleted, givenBack }`。前端据此刷新列表；`givenBack > 0` 表示有邮件未能在服务器上删除（服务器缺少 `UIDPLUS` / `MOVE`、UIDVALIDITY 变化、Trash 消失或多次被拒），已恢复显示，需要提示用户。
 - 未读数：隐藏的未读邮件立即从所在文件夹的 `unread_count` 中扣除，撤销或退回时加回；期间头部同步不以服务器计数覆盖。
-- 服务器命令、降级规则与已知限制见[邮件同步](../architecture/mail-sync.md#已实现删除邮件自动测试覆盖尚未经真实服务商手测)。
+- 服务器命令、降级规则与已知限制见[邮件同步](../architecture/mail-sync.md#已实现删除邮件自动测试覆盖经-macos-用户手测)。
 
 ### 全局提示（Toast）
 
