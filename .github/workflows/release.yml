@@ -87,7 +87,9 @@ jobs:
           # Intel runner label: confirm it still exists when the matrix changes.
           - { name: macos-x64, os: macos-15-intel }
           - { name: windows-x64, os: windows-2025 }
-          - { name: linux-x64, os: ubuntu-24.04 }
+          # Build on the oldest supported Ubuntu LTS so the app and bundled
+          # libraries do not require a newer glibc than Ubuntu 22.04 provides.
+          - { name: linux-x64, os: ubuntu-22.04 }
     runs-on: ${{ matrix.os }}
     # The updater signing key lives in this environment's secrets; a fork or a
     # pull request never reaches it.
@@ -124,6 +126,9 @@ jobs:
       # rustup reads rust-toolchain.toml and installs the pinned toolchain.
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The default cache key does not distinguish Ubuntu releases.
+          key: ${{ matrix.os }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

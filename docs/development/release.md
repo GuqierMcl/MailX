@@ -73,6 +73,8 @@
 
 `.github/workflows/release.yml`：
 
+Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 glibc 基线兼容该系统；升级构建环境前需验证最老支持系统的实际启动。
+
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
 - **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先。含 `-` 的版本标为预发布。
 - **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64、Linux x64，都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。两个 macOS 架构的 `.app.tar.gz` 同名，收集时按架构改名为 `MailX_<版本>_aarch64.app.tar.gz` / `_x64`。任一平台失败即整体失败。
