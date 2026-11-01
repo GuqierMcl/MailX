@@ -8,6 +8,7 @@ import { Delayed } from '@/components/ui/delayed'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { loadMailTree } from '@/features/mail/mail-tree'
+import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
@@ -38,7 +39,7 @@ export function ComposePane({ client }: { client: MailxClient }) {
   </SettingsPage>
 
   const compose = settings.data.settings.compose
-  const list = accounts.data ?? []
+  const list = sortAccountsForDisplay(accounts.data ?? [], settings.data.settings.layout.accountOrder)
   // An account that was deleted since reads as "follow"; the core also falls back to the first account.
   const accountValue = list.some((account) => account.id === compose.defaultAccountId) ? compose.defaultAccountId : FOLLOW
   const accountItems: Record<string, string> = { [FOLLOW]: t('settings:followMailbox'), ...Object.fromEntries(list.map((account) => [account.id, `${account.displayName}（${account.emailAddress}）`])) }

@@ -717,7 +717,7 @@ describe('the folded reader survives a restart', () => {
     await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '展开邮件内容'))
     expect(client.updateSettings).not.toHaveBeenCalled()
     await waitFor(() => expect(client.updateSettings).toHaveBeenCalledOnce(), { timeout: 2000 })
-    expect(client.updateSettings).toHaveBeenCalledWith({ layout: { ...DEFAULT_LAYOUT, readerCollapsed: true } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ layout: { readerCollapsed: true } })
   })
 
   it('opening a message unfolds the reader and saves that too', async () => {
@@ -728,6 +728,6 @@ describe('the folded reader survives a restart', () => {
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
     await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { ...DEFAULT_LAYOUT, readerCollapsed: false } }), { timeout: 2000 })
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { readerCollapsed: false } }), { timeout: 2000 })
   })
 })

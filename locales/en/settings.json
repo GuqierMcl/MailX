@@ -76,7 +76,7 @@
   "followMailbox": "Follow current mailbox",
   "write": "Writing",
   "senderAccount": "Default sender account",
-  "senderAccountDescription": "When writing from a mailbox folder, use that account. From All inboxes, use the account selected here, or the first account when following the current mailbox. Replies and forwards always use the original message’s account.",
+  "senderAccountDescription": "When writing from a mailbox folder, use that account. From All inboxes, use the account selected here, or the first account added when following the current mailbox. Replies and forwards always use the original message’s account.",
   "send": "Sending",
   "undo": "Undo send",
   "undoDescription": "After confirming send, the message waits for this period. Undo from the notification to return to the composer. Turn this off to send immediately.",

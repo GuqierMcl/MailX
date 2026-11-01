@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import type { NotificationSound } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
@@ -49,6 +50,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   </SettingsPage>
 
   const notifications = settings.data.settings.notifications
+  const orderedAccounts = sortAccountsForDisplay(accounts.data ?? [], settings.data.settings.layout.accountOrder)
   const off = !notifications.enabled
   const muted = new Set(notifications.mutedAccounts)
   const setMuted = (accountId: string, mute: boolean) => {
@@ -95,9 +97,9 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
         <TestNotification client={client} disabled={off} />
       </SettingsRow>
     </SettingsGroup>
-    {accounts.data && accounts.data.length > 0 && (
+    {orderedAccounts.length > 0 && (
       <SettingsGroup title={t('settings:byAccount')}>
-        {accounts.data.map((account) => (
+        {orderedAccounts.map((account) => (
           <SettingsRow key={account.id} htmlFor={`notifications.account.${account.id}`}
             label={<span className="flex min-w-0 items-center gap-2">
               <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />

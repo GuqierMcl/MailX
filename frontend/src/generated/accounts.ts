@@ -346,7 +346,13 @@ listWidth: number,
  * The reader beside the message list is folded away. Unlike the sidebar,
  * this survives a restart: the window comes back as it was left.
  */
-readerCollapsed: boolean, };
+readerCollapsed: boolean,
+/**
+ * Display order only; unknown account ids are ignored by the UI.
+ */
+accountOrder: Array<string>, };
+
+export type LayoutSettingsPatch = { navWidth?: number, listWidth?: number, readerCollapsed?: boolean, accountOrder?: Array<string>, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 
@@ -401,6 +407,8 @@ closeBehavior: CloseBehavior,
 showMenuBarIcon: boolean, };
 
 export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
+
+export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**

@@ -25,6 +25,7 @@ import { ShellLayout } from '@/features/shell/shell-layout'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
 import { AccountsDialog, type AccountsTarget } from '@/features/accounts/accounts-dialog'
 import { AddAccountDialog } from '@/features/accounts/add-account-dialog'
+import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import { useDebouncedLayoutSave, useSettings } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
@@ -114,6 +115,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [readerChoice, saveLayout])
   const treeLoading = tree.isPending
   const accounts = useMemo(() => tree.data?.accounts ?? [], [tree.data])
+  const accountOrder = settingsQuery.data?.settings.layout.accountOrder
+  const displayAccounts = useMemo(() => sortAccountsForDisplay(accounts, accountOrder ?? []), [accounts, accountOrder])
   const folders = useMemo(() => tree.data?.folders ?? [], [tree.data])
 
   const drafts = useDrafts(client)
@@ -437,7 +440,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         onNavWidthChange={(width) => saveLayout({ navWidth: width })}
         nav={(
           <MailSidebar
-            accounts={accounts}
+            accounts={displayAccounts}
             folders={folders}
             loading={treeLoading}
             syncStates={currentSyncStates}
@@ -464,7 +467,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           folderId={folderId}
           folderRole={mailView ? folderRole : 'inbox'}
           sourceIdentity={sourceIdentity}
-          accounts={accounts}
+          accounts={displayAccounts}
           folders={folders}
           onApplySearch={(text) => {
             leaveLocalView()

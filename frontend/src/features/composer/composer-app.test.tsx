@@ -55,6 +55,31 @@ const body = () => screen.findByRole('textbox', { name: '正文' })
 afterEach(() => { document.title = '' })
 
 describe('composer window', () => {
+  it('follows changed account menu order without changing the draft sender', async () => {
+    const other = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人', emailAddress: 'home@example.com' })
+    const client = testClient([account, other])
+    client.getDraft.mockResolvedValue(draft())
+    let changed = () => undefined as void
+    client.onSettingsChanged.mockImplementation(async (listener) => {
+      changed = () => listener({ revision: 1 })
+      return () => undefined
+    })
+    render(<TitleBarSlotsProvider><ComposerApp client={client} draftId={DRAFT_ID} host={null} /></TitleBarSlotsProvider>)
+    await body()
+    const sender = screen.getByRole('combobox', { name: '发件人' })
+    expect(sender).toHaveTextContent(account.emailAddress)
+
+    await act(async () => {
+      await client.updateSettings({ layout: { accountOrder: [other.id, account.id] } })
+      changed()
+    })
+    await userEvent.click(sender)
+    await waitFor(() => expect(screen.getAllByRole('option')[0]).toHaveTextContent(other.emailAddress))
+    expect(screen.getAllByRole('option')[1]).toHaveTextContent(account.emailAddress)
+    expect(sender).toHaveTextContent(account.emailAddress)
+    expect(client.updateDraft).not.toHaveBeenCalled()
+  })
+
   it('titles the window with the subject, or 新邮件 while it is empty', async () => {
     setup()
     await body()

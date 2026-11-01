@@ -133,6 +133,7 @@ pub enum NotificationSound {
 
 const MAX_MUTED_ACCOUNTS: usize = 256;
 const MAX_ACCOUNT_ID_CHARS: usize = 128;
+const MAX_ACCOUNT_ORDER: usize = 256;
 
 /// New-mail notifications. Every host applies `enabled`, `muted_accounts` and
 /// `show_preview` the same way (see `NewMail::for_delivery`); the sound and
@@ -183,7 +184,7 @@ impl NotificationSettings {
     }
 }
 
-/// Window layout preferences, in CSS pixels.
+/// Window layout and account display preferences.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LayoutSettings {
@@ -196,6 +197,9 @@ pub struct LayoutSettings {
     /// The reader beside the message list is folded away. Unlike the sidebar,
     /// this survives a restart: the window comes back as it was left.
     pub reader_collapsed: bool,
+    /// Display order only; unknown account ids are ignored by the UI.
+    #[serde(deserialize_with = "deserialize_account_order")]
+    pub account_order: Vec<String>,
 }
 
 impl Default for LayoutSettings {
@@ -204,6 +208,79 @@ impl Default for LayoutSettings {
             nav_width: NAV_WIDTH_DEFAULT,
             list_width: LIST_WIDTH_DEFAULT,
             reader_collapsed: false,
+            account_order: Vec::new(),
+        }
+    }
+}
+
+impl LayoutSettings {
+    fn normalized_order(&self) -> Option<Vec<String>> {
+        if self.account_order.len() > MAX_ACCOUNT_ORDER {
+            return None;
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut order = Vec::with_capacity(self.account_order.len());
+        for id in &self.account_order {
+            let id = Uuid::parse_str(id.trim()).ok()?.to_string();
+            if seen.insert(id.clone()) {
+                order.push(id);
+            }
+        }
+        Some(order)
+    }
+}
+
+// Route malformed values through field validation; file loading then
+// recovers just this preference instead of discarding all other settings.
+fn deserialize_account_order<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_else(|_| vec![String::new()]))
+}
+
+fn deserialize_order_patch<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error> {
+    deserialize_account_order(deserializer).map(Some)
+}
+
+/// Layout fields merge under the settings-store lock. Omitted fields preserve
+/// concurrent edits from the other layout controls and windows.
+#[derive(Clone, Debug, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LayoutSettingsPatch {
+    #[ts(optional)]
+    pub nav_width: Option<u32>,
+    #[ts(optional)]
+    pub list_width: Option<u32>,
+    #[ts(optional)]
+    pub reader_collapsed: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_order_patch")]
+    #[ts(optional)]
+    pub account_order: Option<Vec<String>>,
+}
+
+impl LayoutSettingsPatch {
+    fn merge(self, current: &LayoutSettings) -> LayoutSettings {
+        LayoutSettings {
+            nav_width: self.nav_width.unwrap_or(current.nav_width),
+            list_width: self.list_width.unwrap_or(current.list_width),
+            reader_collapsed: self.reader_collapsed.unwrap_or(current.reader_collapsed),
+            account_order: self
+                .account_order
+                .unwrap_or_else(|| current.account_order.clone()),
+        }
+    }
+}
+
+impl From<LayoutSettings> for LayoutSettingsPatch {
+    fn from(settings: LayoutSettings) -> Self {
+        Self {
+            nav_width: Some(settings.nav_width),
+            list_width: Some(settings.list_width),
+            reader_collapsed: Some(settings.reader_collapsed),
+            account_order: Some(settings.account_order),
         }
     }
 }
@@ -290,11 +367,17 @@ fn valid_language(value: &str) -> bool {
 #[derive(Clone, Debug, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    #[ts(optional)]
     pub general: Option<GeneralSettings>,
+    #[ts(optional)]
     pub appearance: Option<AppearanceSettings>,
+    #[ts(optional)]
     pub security: Option<SecuritySettings>,
-    pub layout: Option<LayoutSettings>,
+    #[ts(optional)]
+    pub layout: Option<LayoutSettingsPatch>,
+    #[ts(optional)]
     pub notifications: Option<NotificationSettings>,
+    #[ts(optional)]
     pub compose: Option<ComposeSettings>,
 }
 
@@ -356,6 +439,13 @@ impl AppSettings {
         if !(LIST_WIDTH_MIN..=LIST_WIDTH_MAX).contains(&self.layout.list_width) {
             return Err(AppError::validation("layout.listWidth"));
         }
+        let layout = LayoutSettings {
+            account_order: self
+                .layout
+                .normalized_order()
+                .ok_or_else(|| AppError::validation("layout.accountOrder"))?,
+            ..self.layout
+        };
         let notifications = NotificationSettings {
             muted_accounts: self
                 .notifications
@@ -376,7 +466,7 @@ impl AppSettings {
         Ok(Self {
             general: self.general,
             security: self.security,
-            layout: self.layout,
+            layout,
             notifications,
             compose,
             appearance: AppearanceSettings {
@@ -423,6 +513,7 @@ impl AppSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
                 list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
                 reader_collapsed: self.layout.reader_collapsed,
+                account_order: self.layout.normalized_order().unwrap_or_default(),
             },
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
@@ -633,6 +724,7 @@ impl SettingsStore {
                 .unwrap_or_else(|| state.settings.security.clone()),
             layout: patch
                 .layout
+                .map(|layout| layout.merge(&state.settings.layout))
                 .unwrap_or_else(|| state.settings.layout.clone()),
             notifications: patch
                 .notifications

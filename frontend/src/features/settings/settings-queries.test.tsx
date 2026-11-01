@@ -74,7 +74,7 @@ describe('useDebouncedLayoutSave', () => {
     expect(client.updateSettings).not.toHaveBeenCalled()
     await wait(LAYOUT_SAVE_DELAY_MS)
     expect(client.updateSettings).toHaveBeenCalledOnce()
-    expect(client.updateSettings).toHaveBeenCalledWith({ layout: { ...DEFAULT_LAYOUT, navWidth: 300 } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ layout: { navWidth: 300 } })
   })
 
   it('merges changes to different parts of the layout instead of losing one', async () => {
@@ -98,7 +98,7 @@ describe('useDebouncedLayoutSave', () => {
     save({ navWidth: 320 })
     await wait(LAYOUT_SAVE_DELAY_MS)
     expect(client.updateSettings).toHaveBeenCalledTimes(2)
-    expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { ...DEFAULT_LAYOUT, navWidth: 320 } })
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { navWidth: 320 } })
   })
 
   it('writes what is waiting when the page is closed or the view goes away', async () => {
@@ -108,7 +108,7 @@ describe('useDebouncedLayoutSave', () => {
     // The mutation starts on the next tick; nothing waits for the debounce delay.
     await closing.wait(0)
     expect(closing.client.updateSettings).toHaveBeenCalledOnce()
-    expect(closing.client.updateSettings).toHaveBeenCalledWith({ layout: { ...DEFAULT_LAYOUT, listWidth: 600 } })
+    expect(closing.client.updateSettings).toHaveBeenCalledWith({ layout: { listWidth: 600 } })
     await closing.wait(LAYOUT_SAVE_DELAY_MS * 2)
     expect(closing.client.updateSettings).toHaveBeenCalledOnce()
     closing.view.unmount()
@@ -119,6 +119,6 @@ describe('useDebouncedLayoutSave', () => {
     leaving.view.unmount()
     await leaving.wait(0)
     expect(leaving.client.updateSettings).toHaveBeenCalledOnce()
-    expect(leaving.client.updateSettings).toHaveBeenCalledWith({ layout: { ...DEFAULT_LAYOUT, navWidth: 310 } })
+    expect(leaving.client.updateSettings).toHaveBeenCalledWith({ layout: { navWidth: 310 } })
   })
 })

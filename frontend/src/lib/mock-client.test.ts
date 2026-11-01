@@ -1,7 +1,47 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { emailQuery } from '@/features/mail/format'
 import { createMockClient } from './mock-client'
 import type { ConnectionInput } from '@/generated/accounts'
+
+describe('mock account display preferences', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => localStorage.clear())
+
+  it('merges account order and width saves from separate clients while preserving sender resolution', async () => {
+    const main = createMockClient()
+    const otherWindow = createMockClient()
+    const accounts = await main.listAccounts()
+    const ids = accounts.map((account) => account.id)
+    await main.updateSettings({ layout: { navWidth: 310, listWidth: 550, readerCollapsed: true } })
+    await otherWindow.updateSettings({ layout: { accountOrder: [ids[1].toUpperCase(), ` ${ids[0]} `, ids[1]] } })
+    const snapshot = await main.updateSettings({ layout: { listWidth: 600 } })
+    expect(snapshot.settings.layout).toEqual({ navWidth: 310, listWidth: 600, readerCollapsed: true, accountOrder: [ids[1], ids[0]] })
+    expect(await main.listAccounts()).toEqual(accounts)
+
+    const content = { to: [], cc: [], bcc: [], subject: '', bodyHtml: '' }
+    const draft = await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-fallback' })
+    expect(draft.accountId).toBe(ids[0])
+    await main.updateSettings({ compose: { defaultAccountId: ids[1], undoSendSeconds: 0 }, layout: { accountOrder: ids } })
+    expect((await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-default' })).accountId).toBe(ids[1])
+    expect((await main.getDraft(draft.id)).accountId).toBe(ids[0])
+  })
+
+  it('rejects invalid or oversized orders without persisting a partial update', async () => {
+    const client = createMockClient()
+    const before = await client.getSettings()
+    for (const accountOrder of [['not-a-uuid'], Array.from({ length: 257 }, () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')]) {
+      await expect(client.updateSettings({ layout: { navWidth: 330, accountOrder } })).rejects.toMatchObject({ failure: { code: 'validation', field: 'layout.accountOrder' } })
+      expect(await client.getSettings()).toEqual(before)
+    }
+  })
+
+  it('loads a pre-order preview cache with the saved widths and an empty order', async () => {
+    const snapshot = await createMockClient().getSettings()
+    localStorage.setItem('mailx.mock.settings', JSON.stringify({ ...snapshot, settings: { ...snapshot.settings,
+      layout: { navWidth: 330, listWidth: 560, readerCollapsed: true } } }))
+    expect((await createMockClient().getSettings()).settings.layout).toEqual({ navWidth: 330, listWidth: 560, readerCollapsed: true, accountOrder: [] })
+  })
+})
 
 describe('mock provider help', () => {
   it('opens only the fixed official URL for each supported provider', async () => {

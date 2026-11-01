@@ -8,7 +8,6 @@ import type {
   DraftConnectionVerification,
   AccountSyncState,
   AppError,
-  AppSettings,
   ApiResult,
   AttachmentPolicy,
   AvatarImage,
@@ -37,6 +36,7 @@ import type {
   EmailPage,
   Folder,
   SettingsSnapshot,
+  SettingsPatch,
   UpdateConnectionRequest,
   UpdateProfileRequest,
   RemoveAccountRequest,
@@ -143,8 +143,8 @@ export interface MailxClient {
   onLinkRequest(listener: (request: BodyLinkRequest) => void): () => void
   /** App preferences from the core's `settings.json`; available even when startup failed. */
   getSettings(): Promise<SettingsSnapshot>
-  /** Updates the supplied preference sections; the core validates them and returns the canonical form. */
-  updateSettings(settings: Partial<AppSettings>): Promise<SettingsSnapshot>
+  /** Updates preference sections (layout fields merge individually) and returns the canonical form. */
+  updateSettings(settings: SettingsPatch): Promise<SettingsSnapshot>
   /** Resolves once the host event listener is registered. */
   onSettingsChanged(listener: (change: { revision: number }) => void): Promise<() => void>
   /** Shows a sample notification with the saved notification settings. */

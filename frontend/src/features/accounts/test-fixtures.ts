@@ -83,7 +83,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     openLink: vi.fn<MailxClient['openLink']>().mockResolvedValue(undefined),
     onLinkRequest: vi.fn<MailxClient['onLinkRequest']>().mockReturnValue(() => undefined),
     getSettings: vi.fn<MailxClient['getSettings']>().mockImplementation(async () => settingsSnapshot()),
-    updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch }; settingsRevision += 1; return settingsSnapshot() }),
+    updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch, layout: { ...preferences.layout, ...patch.layout } }; settingsRevision += 1; return settingsSnapshot() }),
     onSettingsChanged: vi.fn<MailxClient['onSettingsChanged']>().mockImplementation(async () => () => undefined),
     testNotification: vi.fn<MailxClient['testNotification']>().mockResolvedValue(undefined),
     previewSound: vi.fn<MailxClient['previewSound']>().mockResolvedValue(undefined),
