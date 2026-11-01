@@ -17,6 +17,10 @@ session_check() {
   [[ ! -e $data_dir ]] || fail "The smoke profile must be new: $data_dir"
   export MAILX_DATA_DIR="$data_dir"
   export APPIMAGE_EXTRACT_AND_RUN=1
+  # Xvfb has no GPU. Match the AppImageHub test's software rendering settings;
+  # these are rendering switches and leave WebKit's sandbox enabled.
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
+  export WEBKIT_DISABLE_COMPOSITING_MODE=1
   if [[ $scenario == without-tray ]]; then
     export APPDIR="$appdir"
   fi
@@ -39,6 +43,11 @@ session_check() {
     fail "$scenario: no visible MailX window within 30 seconds."
   }
   window_pid=$(xdotool getwindowpid "$window_id")
+  tr '\0' '\n' < "/proc/$window_pid/environ" \
+    | grep -E '^(MAILX_DATA_DIR|WEBKIT_[A-Z_]+)=' > "$evidence/process-environment.txt"
+  if grep -q '^WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=' "$evidence/process-environment.txt"; then
+    fail "$scenario: the application disabled WebKit's sandbox."
+  fi
   xwininfo -id "$window_id" > "$evidence/window.txt"
   # Observe startup long enough to catch the former tray-initialization panic.
   for ((attempt=0; attempt<10; attempt++)); do
