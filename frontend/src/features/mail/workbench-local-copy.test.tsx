@@ -9,15 +9,15 @@ import { Workbench } from './workbench'
 
 const account = exampleAccount()
 const folders: Folder[] = [
-  { id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0 },
-  { id: 'sent', accountId: account.id, parentId: null, name: 'Sent', role: 'sent', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0 },
+  { id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0 },
+  { id: 'sent', accountId: account.id, parentId: null, name: 'Sent', role: 'sent', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0 },
 ]
 
 const localCopy: EmailSummary = {
   id: 'local-sent:1', accountId: account.id, folderId: 'sent', subject: '周五评审安排', preview: '',
   from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T08:00:00.000Z',
   isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null,
-  to: { addresses: [{ name: null, address: 'chen@example.com' }], total: 3 }, localOnly: true,
+  to: { addresses: [{ name: null, address: 'chen@example.com' }], total: 3 }, localOnly: true, archived: false,
 }
 
 const page = (items: EmailSummary[]): EmailPage => ({

@@ -1,11 +1,12 @@
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { errorText } from '@/i18n/errors'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Alert02Icon,
   Archive02Icon,
+  Archive03Icon,
   ArrowRight01Icon,
   AtSignIcon,
   Delete02Icon,
@@ -109,6 +110,8 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
   const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
   const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
   const unifiedCountsKnown = inboxes.every((folder) => folder.countsKnown)
+  // Locally archived inbox mail (not the server's archive folder), counted apart from the inbox number.
+  const archivedUnread = inboxes.reduce((total, folder) => total + folder.archivedUnreadCount, 0)
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
   const hasSyncFailure = accounts.some((account) => syncStates[account.id]?.failure)
 
@@ -137,6 +140,16 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                   <span>{t('mail:allInboxes')}</span>
                 </SidebarMenuButton>
                 {!unifiedCountsKnown ? <SidebarMenuBadge aria-label={t('mail:unreadCountUnknown')}>—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={mailbox.kind === 'archived' && !mailbox.accountId}
+                  onClick={() => onSelect({ kind: 'archived', accountId: null })}
+                >
+                  <HugeiconsIcon icon={Archive03Icon} />
+                  <span>{t('mail:allArchived')}</span>
+                </SidebarMenuButton>
+                {archivedUnread > 0 && <SidebarMenuBadge>{archivedUnread}</SidebarMenuBadge>}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}>
@@ -212,14 +225,27 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                           </SidebarMenuItem>
                         )}
                         {tree.map((node) => (
-                          <FolderItem
-                            key={node.folder.id}
-                            node={node}
-                            selectedId={selectedId}
-                            collapsed={collapsed}
-                            onToggle={toggle}
-                            onSelect={(folder) => onSelect({ kind: 'folder', folder })}
-                          />
+                          <Fragment key={node.folder.id}>
+                            <FolderItem
+                              node={node}
+                              selectedId={selectedId}
+                              collapsed={collapsed}
+                              onToggle={toggle}
+                              onSelect={(folder) => onSelect({ kind: 'folder', folder })}
+                            />
+                            {node.folder.role === 'inbox' && node.folder.selectable && (
+                              <SidebarMenuItem>
+                                <SidebarMenuButton
+                                  isActive={mailbox.kind === 'archived' && mailbox.accountId === account.id}
+                                  onClick={() => onSelect({ kind: 'archived', accountId: account.id })}
+                                >
+                                  <HugeiconsIcon icon={Archive03Icon} />
+                                  <span>{t('mail:archivedFolder')}</span>
+                                </SidebarMenuButton>
+                                {node.folder.archivedUnreadCount > 0 && <SidebarMenuBadge>{node.folder.archivedUnreadCount}</SidebarMenuBadge>}
+                              </SidebarMenuItem>
+                            )}
+                          </Fragment>
                         ))}
                       </SidebarMenuSub>
                     </CollapsibleContent>

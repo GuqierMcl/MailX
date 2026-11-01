@@ -2,12 +2,15 @@ import { t } from '@/i18n'
 import type { Folder, FolderRole } from '@/generated/accounts'
 
 /**
- * What the island shows: one account folder, a role across all accounts, or the two
- * local views that hold unfinished mail (sending.md section 7).
+ * What the island shows: one account folder, a role across all accounts, the two
+ * local views that hold unfinished mail (sending.md section 7), or the locally
+ * archived inbox mail of one account (or of all). `archived` is the local archive,
+ * not the server's `archive` folder, which is an ordinary `folder`.
  */
 export type Mailbox =
   | { kind: 'unified'; role: FolderRole }
   | { kind: 'folder'; folder: Folder }
+  | { kind: 'archived'; accountId: string | null }
   | { kind: 'drafts' }
   | { kind: 'outbox' }
 
@@ -40,10 +43,11 @@ export function mailboxTitle(mailbox: Mailbox) {
   switch (mailbox.kind) {
     case 'unified': return UNIFIED_TITLES[mailbox.role]
     case 'folder': return folderLabel(mailbox.folder)
+    case 'archived': return t('mail:allArchived')
     case 'drafts': return t('mail:drafts')
     case 'outbox': return t('mail:outbox')
   }
 }
 
 /** Whether the island shows mail (list and reader) rather than a local view. */
-export const isMailView = (mailbox: Mailbox) => mailbox.kind === 'unified' || mailbox.kind === 'folder'
+export const isMailView = (mailbox: Mailbox) => mailbox.kind === 'unified' || mailbox.kind === 'folder' || mailbox.kind === 'archived'

@@ -95,6 +95,7 @@ fn main() {
         FlagWriteBack,
         MessagesDeleted,
         EmailDeletion,
+        ArchiveScope,
         NewMailMessage,
         NewMail,
         EmailPreviewItem,

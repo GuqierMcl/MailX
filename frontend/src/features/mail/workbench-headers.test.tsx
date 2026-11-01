@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteIma
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',
-  selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0,
+  selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0,
 }
 
 function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary {
@@ -23,7 +23,7 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
     id, accountId: account.id, folderId: inbox.id, subject: `邮件 ${id}`,
     from: { name: '发件人', address: 'sender@example.com' }, preview: '',
     receivedAt: '2026-10-18T08:00:00.000Z', isRead: false, isStarred: false,
-    hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
+    hasAttachment: false, bodyState: 'missing', previewState: 'missing', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, ...overrides,
   }
 }
 

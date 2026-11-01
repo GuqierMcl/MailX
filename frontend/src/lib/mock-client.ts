@@ -171,6 +171,26 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   // A failed send leaves the draft editable again; `unknown` keeps it locked.
   outbox.onFailed = unlock
 
+  // Local archive: only inbox mail, all or nothing; the server is not involved.
+  function changeArchive(emailIds: string[], archived: boolean) {
+    const ids = [...new Set(emailIds)]
+    if (ids.length === 0 || ids.length > 500) throw new MailxClientError({ code: 'validation', message: '一次只能处理 1 到 500 封邮件。', field: null })
+    const picked = ids.map((id) => emails.find((row) => row.summary.id === id && !row.summary.localOnly && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox'))
+    if (picked.some((email) => !email)) throw notFound()
+    for (const email of picked) {
+      if (!email || email.summary.archived === archived) continue
+      email.summary.archived = archived
+      const folder = folders.find((row) => row.id === email.summary.folderId)
+      if (!folder) continue
+      const sign = archived ? 1 : -1
+      folder.archivedCount += sign
+      if (!email.summary.isRead) {
+        folder.archivedUnreadCount += sign
+        folder.unreadCount = Math.max(0, folder.unreadCount - sign)
+      }
+    }
+  }
+
   return {
     available: true,
     getStartupStatus: async () => ({ state: 'ready', revision: 1 }),
@@ -300,10 +320,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     async listEmails(query) {
       const terms = query.text?.trim() ? parseSearchTerms(query.text) : []
       if (!terms) throw new MailxClientError({ code: 'validation', message: '搜索词过多或过长。', field: 'text' })
+      const archiveScope = query.archive ?? (terms.length > 0 ? 'include' : 'exclude')
       const inScope = emails.filter((email) =>
         (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
         (!query.folderId || email.summary.folderId === query.folderId) &&
         (!query.folderRole || folders.some((folder) => folder.id === email.summary.folderId && folder.role === query.folderRole)) &&
+        // Like the core: archived mail only shows in the archived views and in searches.
+        (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
         (query.unread == null || email.summary.isRead === !query.unread) &&
         (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment),
       )
@@ -354,7 +377,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       // step, and only the folder tree is where a client reads that number from.
       if (flag === 'read') {
         const folder = folders.find((row) => row.id === email.summary.folderId)
-        if (folder?.countsKnown) folder.unreadCount = Math.max(0, folder.unreadCount + (wanted ? -1 : 1))
+        if (email.summary.archived && folder) {
+          // Archived unread mail counts in the archived views, not in the inbox number.
+          folder.archivedUnreadCount = Math.max(0, folder.archivedUnreadCount + (wanted ? -1 : 1))
+        } else if (folder?.countsKnown) folder.unreadCount = Math.max(0, folder.unreadCount + (wanted ? -1 : 1))
       }
       // The second account stands in for a server that cannot keep stars.
       if (flag === 'starred' && email.summary.accountId === accounts[1]?.id) return 'localOnly' as const
@@ -395,6 +421,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       clearTimeout(pending.timer)
       pendingDeletions.delete(batchId)
       emails.push(...pending.emails)
+    },
+    async archiveEmails(emailIds) {
+      changeArchive(emailIds, true)
+    },
+    async unarchiveEmails(emailIds) {
+      changeArchive(emailIds, false)
     },
     onDeletions: () => () => undefined,
     refreshSync: async () => undefined,
@@ -707,8 +739,10 @@ function buildFolders(accountId: string, emails: EmailDetail[], customFolders: C
       role,
       selectable,
       countsKnown: true,
-      unreadCount: inFolder.filter((email) => !email.summary.isRead).length,
+      unreadCount: inFolder.filter((email) => !email.summary.isRead && !email.summary.archived).length,
       totalCount: inFolder.length,
+      archivedCount: inFolder.filter((email) => email.summary.archived).length,
+      archivedUnreadCount: inFolder.filter((email) => email.summary.archived && !email.summary.isRead).length,
     }
   })
 }
@@ -931,6 +965,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       from: seed.from,
       to: { addresses: recipients.slice(0, 3), total: recipients.length },
       localOnly: seed.localOnly ?? false,
+      archived: false,
       preview: lazy ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
       receivedAt: new Date(BASE_TIME - seed.hoursAgo * 3_600_000).toISOString(),
       isRead: seed.read ?? false,

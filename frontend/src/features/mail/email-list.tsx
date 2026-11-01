@@ -400,7 +400,8 @@ function EmailRow({ email, sentView, account, selected, previewLines, index, cou
               )}
             </span>
             {email.localOnly && <LocalOnlyMarker className="ml-auto" />}
-            <span className={cn(email.localOnly ? 'shrink-0' : 'ml-auto shrink-0', 'text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
+            {email.archived && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t('mail:archivedMarker')}</span>}
+            <span className={cn(email.localOnly || email.archived ? 'shrink-0' : 'ml-auto shrink-0', 'text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
               {formatListTime(email.receivedAt)}
             </span>
           </div>

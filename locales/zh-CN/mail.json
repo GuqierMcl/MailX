@@ -171,5 +171,14 @@
   "deleteGivenBack_other": "{{count}} 封邮件未能在服务器上删除，已恢复显示",
   "deleteForGoodTitle": "永久删除这封邮件？",
   "deleteForGoodDescription": "这封邮件已在“已删除”中，或这个账号没有“已删除”文件夹。删除后服务器上不会保留副本；撤销只在提示消失前有效。",
-  "deleteForGoodConfirm": "永久删除"
+  "deleteForGoodConfirm": "永久删除",
+  "unarchive": "移回收件箱",
+  "archiveInboxOnly": "只有收件箱中的邮件可以归档",
+  "archived": "已归档",
+  "movedBackToInbox": "已移回收件箱",
+  "archiveFailed": "归档失败",
+  "unarchiveFailed": "移回收件箱失败",
+  "allArchived": "全部已归档",
+  "archivedFolder": "已归档",
+  "archivedMarker": "已归档"
 }

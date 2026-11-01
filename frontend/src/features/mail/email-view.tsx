@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
+  ArchiveRestoreIcon,
   Cancel01Icon,
   Delete02Icon,
   Forward01Icon,
@@ -61,9 +62,11 @@ type EmailViewProps = {
   onRemoveLocal?: (email: EmailSummary) => void
   /** Deletes a server email (to Trash, or for good after confirming), with undo. */
   onDelete?: (email: EmailSummary) => void
+  /** Archives (or, with `false`, restores) the email locally; set only where the email is in an inbox. */
+  onArchive?: (email: EmailSummary, archive: boolean) => void
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, hidden = false }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -72,7 +75,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   useCloseOnEscape(open && !hidden, onClose)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} />}
       {loading || showSkeleton ? (
         showSkeleton ? (
           <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
@@ -112,7 +115,7 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete'] }) {
+function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
@@ -128,9 +131,14 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete 
           )
         ) : (
           <>
-            {/* Archiving needs mailbox moves; until then the button only shows where it will live. */}
-            <IconButton label={t('mail:archive')} tip={t('mail:notImplemented', { label: t('mail:archive') })} disabled>
-              <HugeiconsIcon icon={Archive02Icon} />
+            {/* Local archive: only inbox mail has `onArchive`; the server is not touched. */}
+            <IconButton
+              label={summary?.archived ? t('mail:unarchive') : t('mail:archive')}
+              tip={summary && !onArchive ? t('mail:archiveInboxOnly') : undefined}
+              disabled={!summary || !onArchive}
+              onClick={() => summary && onArchive?.(summary, !summary.archived)}
+            >
+              <HugeiconsIcon icon={summary?.archived ? ArchiveRestoreIcon : Archive02Icon} />
             </IconButton>
             <IconButton label={t('mail:delete')} disabled={!summary || !onDelete} onClick={() => summary && onDelete?.(summary)}>
               <HugeiconsIcon icon={Delete02Icon} />

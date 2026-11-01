@@ -8,7 +8,7 @@ import { Workbench } from './workbench'
 const account = exampleAccount()
 
 function folder(id: string, overrides: Partial<Folder> = {}): Folder {
-  return { id, accountId: account.id, parentId: null, name: id, role: 'other', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, ...overrides }
+  return { id, accountId: account.id, parentId: null, name: id, role: 'other', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0, ...overrides }
 }
 
 function desktopLike(folders: Folder[] = [], states: AccountSyncState[] = []) {

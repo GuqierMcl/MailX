@@ -388,6 +388,19 @@ impl MailxCore {
         })
     }
 
+    /// Archives inbox emails on this device only; nothing is sent to the
+    /// server. Every id must be a visible inbox message, or none is archived
+    /// (`notFound`); 1 to 500 distinct ids (`validation`).
+    pub fn archive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
+        self.accounts()?.archive_messages(email_ids)
+    }
+
+    /// Takes emails back into the inbox; the same rules as
+    /// [`MailxCore::archive_emails`].
+    pub fn unarchive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
+        self.accounts()?.unarchive_messages(email_ids)
+    }
+
     /// Takes back a deletion from [`MailxCore::delete_emails`] and shows its
     /// emails again. Refused with `alreadyDeleting` once the server work began.
     pub fn undo_delete(&self, batch_id: &str) -> Result<(), AppError> {

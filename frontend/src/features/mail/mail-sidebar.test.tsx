@@ -77,4 +77,24 @@ describe('sidebar unread numbers follow read changes', () => {
     await waitFor(() => expect(numberIn(workInbox())).toBe(before.folder))
     expect(accountNumber()).toBe(before.account)
   })
+  it('lists the locally archived mail under both new entries and keeps it out of the inbox', async () => {
+    await renderSidebar()
+    expect(screen.getByRole('button', { name: '全部已归档' })).toBeInTheDocument()
+    expect(within(work()).getByRole('button', { name: '已归档' })).toBeInTheDocument()
+
+    await userEvent.click(within(work()).getByRole('button', { name: '收件箱' }))
+    const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
+    const before = rows().length
+    await userEvent.click(rows()[0])
+    // The sidebar can also hold a server folder named 归档; the reader's button comes last.
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '归档' }).at(-1)).toBeEnabled())
+    await userEvent.click(screen.getAllByRole('button', { name: '归档' }).at(-1)!)
+    await waitFor(() => expect(rows()).toHaveLength(before - 1))
+
+    await userEvent.click(within(work()).getByRole('button', { name: '已归档' }))
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(within(rows()[0]).getByText('已归档')).toBeInTheDocument()
+    await userEvent.click(rows()[0])
+    expect(await screen.findByRole('button', { name: '移回收件箱' })).toBeInTheDocument()
+  })
 })

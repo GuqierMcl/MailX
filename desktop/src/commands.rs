@@ -765,6 +765,50 @@ pub(crate) async fn emails_undo_delete(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArchiveEmailsArgs {
+    email_ids: Vec<String>,
+}
+
+/// Archives inbox emails on this device only; the server is not touched.
+#[tauri::command]
+pub(crate) async fn emails_archive(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "emails_archive")
+        .and_then(|_| parse::<ArchiveEmailsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.archive_emails(&args.email_ids))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+/// Moves locally archived emails back to the inbox.
+#[tauri::command]
+pub(crate) async fn emails_unarchive(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "emails_unarchive")
+        .and_then(|_| parse::<ArchiveEmailsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.unarchive_emails(&args.email_ids))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[tauri::command]
 pub(crate) async fn sync_refresh(
     window: WebviewWindow,

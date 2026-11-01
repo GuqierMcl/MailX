@@ -4,7 +4,7 @@ import { exampleAccount, exampleFolderSyncState, exampleSyncState } from '@/feat
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 
 const account = exampleAccount()
-const sent: Folder = { id: 'sent', accountId: account.id, name: 'Sent', role: 'sent', parentId: null, selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0 }
+const sent: Folder = { id: 'sent', accountId: account.id, name: 'Sent', role: 'sent', parentId: null, selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0 }
 
 describe('folder sync state snapshots', () => {
   it('rejects another source and snapshots from older tasks or sequences', () => {

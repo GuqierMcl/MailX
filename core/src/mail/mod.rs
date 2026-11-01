@@ -32,10 +32,17 @@ pub struct Folder {
     pub selectable: bool,
     /// Whether a successful STATUS has supplied these counts. Unknown is not zero.
     pub counts_known: bool,
+    /// Server unread count; for an inbox minus the locally archived unread mail.
     #[ts(type = "number")]
     pub unread_count: u32,
     #[ts(type = "number")]
     pub total_count: u32,
+    /// Locally archived messages of this inbox (0 for other folders).
+    #[ts(type = "number")]
+    pub archived_count: u32,
+    /// Locally archived unread messages of this inbox (0 for other folders).
+    #[ts(type = "number")]
+    pub archived_unread_count: u32,
 }
 
 /// A deletion MailX has accepted but not yet carried out on the server. The
@@ -115,6 +122,8 @@ pub struct EmailSummary {
     pub pending_changes: bool,
     /// A copy of an accepted send kept only on this device (`local-sent:` ids).
     pub local_only: bool,
+    /// Archived on this device only (inbox messages; the server still has it in INBOX).
+    pub archived: bool,
     /// Plain-text excerpt around a full-text hit in the body or attachment
     /// names; `None` when there is no text search or the hit is only in the
     /// subject or people.
@@ -142,6 +151,19 @@ pub struct EmailRecipients {
 /// Prefix of the ids of local Sent copies (sending.md section 9.2).
 pub const LOCAL_SENT_PREFIX: &str = "local-sent:";
 
+/// Which locally archived inbox messages a list contains. This is the local
+/// archive, not the server's `FolderRole::Archive` folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ArchiveScope {
+    /// Hide archived messages (inbox views).
+    Exclude,
+    /// Only archived messages (the archived views).
+    Only,
+    /// Both; archived rows carry `archived: true`.
+    Include,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct EmailListQuery {
@@ -150,6 +172,8 @@ pub struct EmailListQuery {
     pub folder_id: Option<String>,
     /// Matches folders with this role in every selected account, e.g. a unified inbox.
     pub folder_role: Option<FolderRole>,
+    /// `None` hides archived messages, except in a text search, which finds them.
+    pub archive: Option<ArchiveScope>,
     pub text: Option<String>,
     pub unread: Option<bool>,
     pub has_attachment: Option<bool>,

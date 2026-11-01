@@ -253,6 +253,8 @@ fn main() {
             commands::emails_set_flag,
             commands::emails_delete,
             commands::emails_undo_delete,
+            commands::emails_archive,
+            commands::emails_unarchive,
             commands::attachments_save,
             commands::avatars_get,
             commands::image_cache_clear,
