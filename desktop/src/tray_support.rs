@@ -2,13 +2,41 @@
 //! AppIndicator object succeeded. A registered host can still hide an icon at
 //! the user's request; this probe cannot establish pixel-level visibility.
 
-use std::time::Duration;
+use std::{
+    panic::{UnwindSafe, catch_unwind},
+    sync::OnceLock,
+    time::Duration,
+};
 
 const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 // Match the namespace used by libayatana-appindicator / libappindicator.
 // A host advertising only another protocol cannot display this backend's icon.
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
+
+/// The tray backend dynamically loads AppIndicator and panics if every library
+/// candidate fails. Initialize its exact shared loader before creating any GTK
+/// tray objects, so a missing library cannot terminate the whole application.
+pub(crate) fn appindicator_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    initialize_appindicator(&AVAILABLE, || {
+        let _library = &*libappindicator_sys::LIB;
+    })
+}
+
+fn initialize_appindicator(available: &OnceLock<bool>, load: impl FnOnce() + UnwindSafe) -> bool {
+    *available.get_or_init(|| {
+        let loaded = catch_unwind(load).is_ok();
+        if !loaded {
+            // The backend's Lazy is poisoned after failure. Cache the result so
+            // later settings or host changes never attempt to use it again.
+            eprintln!(
+                "AppIndicator runtime unavailable; Linux tray and background hiding disabled."
+            );
+        }
+        loaded
+    })
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct DesktopStatus {
@@ -108,6 +136,29 @@ fn unsupported_api(error: &zbus::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn a_missing_appindicator_library_does_not_escape_or_retry_the_poisoned_loader() {
+        let available = OnceLock::new();
+        let attempts = AtomicUsize::new(0);
+        for _ in 0..4 {
+            assert!(!initialize_appindicator(&available, || {
+                attempts.fetch_add(1, Ordering::Relaxed);
+                panic!("missing AppIndicator runtime")
+            }));
+        }
+        assert_eq!(attempts.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn an_initialized_appindicator_loader_is_kept_for_later_tray_refreshes() {
+        let available = OnceLock::new();
+        assert!(initialize_appindicator(&available, || {}));
+        assert!(initialize_appindicator(&available, || {
+            panic!("must not reopen an initialized AppIndicator loader")
+        }));
+    }
 
     #[test]
     fn unsupported_lock_api_is_distinct_from_a_temporary_bus_failure() {

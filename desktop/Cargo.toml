@@ -39,6 +39,9 @@ keyring = { version = "3.6.3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
+# Share tray-icon's loader so missing runtime libraries can disable the tray
+# before GTK objects are created. Keep this version aligned with tray-icon.
+libappindicator-sys = "=0.9.0"
 # Already pulled in by Tauri; used to read GtkSettings title bar preferences.
 gtk = "0.18.2"
 zbus = { version = "5", default-features = false, features = ["tokio"] }

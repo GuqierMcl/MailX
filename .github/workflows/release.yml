@@ -135,7 +135,13 @@ jobs:
       - run: bun install --frozen-lockfile
       # bundle.targets in desktop/tauri.conf.json lists every format; each runner
       # builds the ones it supports (dmg, nsis, deb + rpm + appimage).
+      - name: Build Linux installers
+        if: runner.os == 'Linux'
+        run: |
+          bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"
+          bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"
       - run: bun run tauri build
+        if: runner.os != 'Linux'
       - name: Collect and rename installers
         shell: bash
         run: |

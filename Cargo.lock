@@ -2898,6 +2898,7 @@ version = "0.1.0-rc.4"
 dependencies = [
  "gtk",
  "keyring",
+ "libappindicator-sys",
  "mailx-core",
  "objc2-foundation",
  "percent-encoding",
