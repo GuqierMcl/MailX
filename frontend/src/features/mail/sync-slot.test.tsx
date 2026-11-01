@@ -9,7 +9,7 @@ import { MailSidebar } from './mail-sidebar'
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',
-  selectable: true, countsKnown: true, unreadCount: 3, totalCount: 9,
+  selectable: true, countsKnown: true, unreadCount: 3, totalCount: 9, archivedCount: 0, archivedUnreadCount: 0,
 }
 
 function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRefresh: (accountId: string) => void }) {
@@ -89,7 +89,7 @@ describe('account sync indicator', () => {
 })
 
 describe('junk folder badge', () => {
-  const junk: Folder = { ...inbox, id: 'junk', name: 'Junk', role: 'junk', unreadCount: 6, totalCount: 9 }
+  const junk: Folder = { ...inbox, id: 'junk', name: 'Junk', role: 'junk', unreadCount: 6, totalCount: 9, archivedCount: 0, archivedUnreadCount: 0 }
 
   function renderWith(folders: Folder[], mailbox: Parameters<typeof MailSidebar>[0]['mailbox'] = { kind: 'unified', role: 'inbox' }) {
     render(

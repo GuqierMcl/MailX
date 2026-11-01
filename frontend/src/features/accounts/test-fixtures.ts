@@ -61,6 +61,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     onFlagWriteBack: vi.fn<MailxClient['onFlagWriteBack']>().mockReturnValue(() => undefined),
     deleteEmails: vi.fn<MailxClient['deleteEmails']>().mockResolvedValue({ batchId: 'batch-1', undoUntil: '2099-01-01T00:00:00.000Z', permanent: false }),
     undoDelete: vi.fn<MailxClient['undoDelete']>().mockResolvedValue(undefined),
+    archiveEmails: vi.fn<MailxClient['archiveEmails']>().mockResolvedValue(undefined),
+    unarchiveEmails: vi.fn<MailxClient['unarchiveEmails']>().mockResolvedValue(undefined),
     onDeletions: vi.fn<MailxClient['onDeletions']>().mockReturnValue(() => undefined),
     refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),
     getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),

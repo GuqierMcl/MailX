@@ -178,5 +178,14 @@
   "deleteGivenBack_other": "{{count}} messages couldn’t be deleted on the server and are showing again",
   "deleteForGoodTitle": "Delete this message forever?",
   "deleteForGoodDescription": "It is already in Trash, or this account has no Trash. The server keeps no copy; you can undo only until the notice goes away.",
-  "deleteForGoodConfirm": "Delete forever"
+  "deleteForGoodConfirm": "Delete forever",
+  "unarchive": "Move back to inbox",
+  "archiveInboxOnly": "Only inbox messages can be archived",
+  "archived": "Archived",
+  "movedBackToInbox": "Moved back to inbox",
+  "archiveFailed": "Couldn’t archive",
+  "unarchiveFailed": "Couldn’t move back to inbox",
+  "allArchived": "All archived",
+  "archivedFolder": "Archived",
+  "archivedMarker": "Archived"
 }

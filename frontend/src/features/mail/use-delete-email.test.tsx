@@ -15,12 +15,12 @@ function email(overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
     id: 'mail-1', accountId: 'account-1', folderId: 'inbox', subject: 'Hello',
     from: { name: 'Lin', address: 'lin@example.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
-    isRead: false, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, ...overrides,
+    isRead: false, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, ...overrides,
   }
 }
 
 function folder(id: string, role: Folder['role'], accountId = 'account-1'): Folder {
-  return { id, accountId, parentId: null, name: id, role, selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0 }
+  return { id, accountId, parentId: null, name: id, role, selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0 }
 }
 
 const WITH_TRASH = [folder('inbox', 'inbox'), folder('trash', 'trash')]

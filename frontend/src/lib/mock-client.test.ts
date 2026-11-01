@@ -301,3 +301,35 @@ describe('showcase seed', () => {
     expect(accounts).toHaveLength(2)
   })
 })
+
+describe('mock local archive', () => {
+  const inboxQuery = (archive: 'only' | null) => emailQuery({ folderRole: 'inbox', archive, limit: 50 })
+
+  it('moves unread mail out of the inbox view and its number into the archived counts', async () => {
+    const client = createMockClient()
+    const [account] = await client.listAccounts()
+    const inboxOf = async () => (await client.listFolders(account.id)).find((folder) => folder.role === 'inbox')!
+    const before = await inboxOf()
+    const unread = (await client.listEmails(emailQuery({ folderRole: 'inbox', unread: true, accountIds: [account.id], limit: 50 }))).items[0]
+
+    await client.archiveEmails([unread.id, unread.id])
+    const after = await inboxOf()
+    expect(after.unreadCount).toBe(before.unreadCount - 1)
+    expect([after.archivedCount, after.archivedUnreadCount]).toEqual([1, 1])
+    expect((await client.listEmails(inboxQuery(null))).items.some((item) => item.id === unread.id)).toBe(false)
+    const archived = (await client.listEmails(inboxQuery('only'))).items
+    expect(archived.map((item) => item.id)).toEqual([unread.id])
+    expect(archived[0].archived).toBe(true)
+
+    await client.unarchiveEmails([unread.id])
+    expect(await inboxOf()).toMatchObject({ unreadCount: before.unreadCount, archivedCount: 0 })
+  })
+
+  it('refuses the whole batch unless every email is an inbox email', async () => {
+    const client = createMockClient()
+    const [inbox] = (await client.listEmails(inboxQuery(null))).items
+    await expect(client.archiveEmails([inbox.id, 'missing'])).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    await expect(client.archiveEmails([])).rejects.toMatchObject({ failure: { code: 'validation' } })
+    expect((await client.listEmails(inboxQuery('only'))).items).toHaveLength(0)
+  })
+})

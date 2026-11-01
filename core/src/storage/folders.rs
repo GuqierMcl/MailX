@@ -144,12 +144,23 @@ impl Storage {
     pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
         let mut query = self.db.prepare(
             "SELECT f.id, f.parent_id, f.name, f.role, f.selectable, f.unread_count, f.total_count,
-             (f.selectable = 1 AND f.synced_at <> '')
+             (f.selectable = 1 AND f.synced_at <> ''),
+             (SELECT COUNT(*) FROM messages m WHERE m.folder_id = f.id AND f.role = 'inbox'
+                AND m.remote_state = 'present' AND {archived} {live}),
+             (SELECT COUNT(*) FROM messages m WHERE m.folder_id = f.id AND f.role = 'inbox'
+                AND m.remote_state = 'present' AND m.is_read = 0 AND {archived} {live})
              FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
-             WHERE f.account_id = ?1",
+             WHERE f.account_id = ?1"
+                .replace("{archived}", super::messages::archived_sql!())
+                .replace(
+                    "{live}",
+                    "AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)",
+                )
+                .as_str(),
         )?;
         let folders = query
             .query_map([account_id], |row| {
+                let archived_unread: u32 = row.get(9)?;
                 Ok(Folder {
                     id: row.get(0)?,
                     account_id: account_id.to_owned(),
@@ -157,9 +168,12 @@ impl Storage {
                     name: row.get(2)?,
                     role: role_from_text(&row.get::<_, String>(3)?),
                     selectable: row.get(4)?,
-                    unread_count: row.get(5)?,
+                    // The server's unread number still counts mail archived here.
+                    unread_count: row.get::<_, u32>(5)?.saturating_sub(archived_unread),
                     total_count: row.get(6)?,
                     counts_known: row.get(7)?,
+                    archived_count: row.get(8)?,
+                    archived_unread_count: archived_unread,
                 })
             })?
             .collect::<Result<_, _>>()?;

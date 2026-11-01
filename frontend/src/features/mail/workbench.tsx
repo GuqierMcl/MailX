@@ -36,6 +36,7 @@ import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 import { useEmailPreviews } from './use-email-previews'
 import { loadMailTree } from './mail-tree'
 import { DeleteForGoodDialog } from './delete-for-good-dialog'
+import { canArchive, useArchiveEmail } from './use-archive-email'
 import { useDeleteEmail } from './use-delete-email'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
@@ -210,11 +211,14 @@ export function Workbench({ client }: { client: MailxClient }) {
     ? { kind: 'unified', role: 'inbox' }
     : mailbox.kind === 'folder' && !treeLoading
       ? currentFolder ? { kind: 'folder', folder: currentFolder } : { kind: 'unified', role: 'inbox' }
-      : mailbox
+      : mailbox.kind === 'archived' && !treeLoading && mailbox.accountId && !accounts.some((account) => account.id === mailbox.accountId)
+        ? { kind: 'unified', role: 'inbox' }
+        : mailbox
   const mailView = isMailView(activeMailbox)
   const folderId = activeMailbox.kind === 'folder' ? activeMailbox.folder.id : null
-  const folderRole = activeMailbox.kind === 'unified' ? activeMailbox.role : null
-  const selectedAccountId = activeMailbox.kind === 'folder' ? activeMailbox.folder.accountId : null
+  const archivedView = activeMailbox.kind === 'archived'
+  const folderRole = activeMailbox.kind === 'unified' ? activeMailbox.role : archivedView ? 'inbox' : null
+  const selectedAccountId = activeMailbox.kind === 'folder' ? activeMailbox.folder.accountId : activeMailbox.kind === 'archived' ? activeMailbox.accountId : null
   const compose = useComposeActions(client, accounts, selectedAccountId)
   const sourceIdentity = JSON.stringify(accounts.filter((account) => !selectedAccountId || account.id === selectedAccountId)
     .map((account) => [account.id, account.mailboxSourceId]).sort())
@@ -223,7 +227,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     return state?.mailboxSourceId === account.mailboxSourceId ? [[account.id, state]] : []
   }))
   const sentView = mailView && (folderRole === 'sent' || (activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'sent'))
-  const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId : folder.role === folderRole))
+  const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId : folder.role === folderRole && (!archivedView || !selectedAccountId || folder.accountId === selectedAccountId)))
   const scopeRevision = JSON.stringify(scopedFolders.map((folder) => [
     folder.id,
     accounts.find((account) => account.id === folder.accountId)?.mailboxSourceId,
@@ -233,10 +237,12 @@ export function Workbench({ client }: { client: MailxClient }) {
   const listQuery = useMemo(() => emailQuery({
     folderId,
     folderRole,
+    accountIds: archivedView && selectedAccountId ? [selectedAccountId] : null,
+    archive: archivedView ? 'only' : null,
     unread: filter === 'unread' ? true : null,
     text: query || null,
     limit: PAGE_SIZE,
-  }), [folderId, folderRole, filter, query])
+  }), [folderId, folderRole, archivedView, selectedAccountId, filter, query])
   const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
 
   const list = useInfiniteQuery({
@@ -308,6 +314,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     }).catch((error: unknown) => setRemoveError(errorText(error)))
   }, [client, queryClient])
   const deleteEmail = useDeleteEmail(client, folders, useCallback((email: { id: string }) => {
+    setOpened((current) => current?.id === email.id ? null : current)
+  }, []))
+  const archiveEmail = useArchiveEmail(client, useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
   }, []))
   useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
@@ -388,11 +397,13 @@ export function Workbench({ client }: { client: MailxClient }) {
       </>
     )
   }
-  const showAccountBadges = activeMailbox.kind === 'unified' && accounts.length > 1
+  const showAccountBadges = (activeMailbox.kind === 'unified' || (activeMailbox.kind === 'archived' && !activeMailbox.accountId)) && accounts.length > 1
   // Drafts and outbox are not searched; the title-bar search then speaks for the inbox.
   const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : activeMailbox.kind === 'folder'
     ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
-    : mailboxTitle(activeMailbox)
+    : activeMailbox.kind === 'archived' && activeMailbox.accountId
+      ? `${accounts.find((account) => account.id === activeMailbox.accountId)?.displayName ?? ''} · ${mailboxTitle(activeMailbox)}`
+      : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? errorText(list.error) : null
 
   const selectMailbox = (next: Mailbox) => setMailbox(next)
@@ -566,6 +577,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
               onRemoveLocal={removeLocalCopy}
               onDelete={deleteEmail.request}
+              onArchive={body.email && canArchive(body.email.summary, folders) ? (email, archive) => void archiveEmail(email, archive) : undefined}
             />
             )}
           </ResizablePanel>

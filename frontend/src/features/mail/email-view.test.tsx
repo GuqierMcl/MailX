@@ -49,12 +49,6 @@ describe('reader toolbar tooltips', () => {
     }
   })
 
-  it('explains a not-yet-implemented (disabled) button on focus', async () => {
-    setup()
-    await focus('归档')
-    expect(await screen.findByText('归档（尚未实现）')).toBeInTheDocument()
-  })
-
   it('shows the Esc shortcut on the close button', async () => {
     setup()
     await focus('关闭邮件')
@@ -75,7 +69,7 @@ describe('body failure guidance', () => {
       summary: {
         id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
         from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: false, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
+        isRead: false, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
       },
       to: [], cc: [], replyTo: [], attachments: [], body: null, bodyFailure,
     }
@@ -105,7 +99,7 @@ describe('local-only sent copy', () => {
       summary: {
         id: localOnly ? 'local-sent:1' : 'sent-1', accountId: 'a', folderId: 'sent', subject: 'Sent copy',
         from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
-        isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly,
+        isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly, archived: false,
         hasAttachment: false, bodyState: 'ready', previewState: 'ready', preview: '',
       },
       to: [{ name: null, address: 'you@example.com' }], cc: [], replyTo: [], attachments: [], body: { kind: 'text', text: 'hi' } as never, bodyFailure: null,
@@ -143,5 +137,45 @@ describe('local-only sent copy', () => {
     await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
     await userEvent.click(await screen.findByRole('button', { name: '移除' }))
     expect(onRemoveLocal).toHaveBeenCalledWith(expect.objectContaining({ id: 'local-sent:1' }))
+  })
+})
+
+describe('local archive button', () => {
+  function detail(archived: boolean, folderId = 'inbox'): EmailDetail {
+    return {
+      summary: {
+        id: 'mail-1', accountId: 'a', folderId, subject: 'Hi',
+        from: { name: null, address: 'lin@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
+        isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived,
+        hasAttachment: false, bodyState: 'ready', previewState: 'ready', preview: '',
+      },
+      to: [], cc: [], replyTo: [], attachments: [], body: { kind: 'text', text: 'hi' } as never, bodyFailure: null,
+    }
+  }
+  function mount(email: EmailDetail, onArchive?: () => void) {
+    render(<TooltipProvider><EmailView client={testClient([exampleAccount()])} email={email} providerId={null} loading={false} error={null} downloading={false}
+      onDownload={vi.fn()} onFlag={vi.fn()} onClose={vi.fn()} onRespond={vi.fn()} onArchive={onArchive} /></TooltipProvider>)
+  }
+
+  it('archives an inbox message', async () => {
+    const onArchive = vi.fn()
+    mount(detail(false), onArchive)
+    await userEvent.click(screen.getByRole('button', { name: '归档' }))
+    expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: 'mail-1' }), true)
+  })
+
+  it('moves an archived message back to the inbox', async () => {
+    const onArchive = vi.fn()
+    mount(detail(true), onArchive)
+    expect(screen.queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '移回收件箱' }))
+    expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: 'mail-1' }), false)
+  })
+
+  it('is disabled with an explanation outside the inbox', async () => {
+    mount(detail(false, 'trash'))
+    expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
+    await focus('归档')
+    expect(await screen.findByText('只有收件箱中的邮件可以归档')).toBeInTheDocument()
   })
 })

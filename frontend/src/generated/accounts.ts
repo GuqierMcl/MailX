@@ -164,7 +164,19 @@ selectable: boolean,
 /**
  * Whether a successful STATUS has supplied these counts. Unknown is not zero.
  */
-countsKnown: boolean, unreadCount: number, totalCount: number, };
+countsKnown: boolean,
+/**
+ * Server unread count; for an inbox minus the locally archived unread mail.
+ */
+unreadCount: number, totalCount: number,
+/**
+ * Locally archived messages of this inbox (0 for other folders).
+ */
+archivedCount: number,
+/**
+ * Locally archived unread messages of this inbox (0 for other folders).
+ */
+archivedUnreadCount: number, };
 
 export type MailAddress = { name: string | null, address: string, };
 
@@ -202,6 +214,10 @@ pendingChanges: boolean,
  */
 localOnly: boolean,
 /**
+ * Archived on this device only (inbox messages; the server still has it in INBOX).
+ */
+archived: boolean,
+/**
  * Plain-text excerpt around a full-text hit in the body or attachment
  * names; `None` when there is no text search or the hit is only in the
  * subject or people.
@@ -218,7 +234,11 @@ accountIds: Array<string> | null, folderId: string | null,
 /**
  * Matches folders with this role in every selected account, e.g. a unified inbox.
  */
-folderRole: FolderRole | null, text: string | null, unread: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
+folderRole: FolderRole | null,
+/**
+ * `None` hides archived messages, except in a text search, which finds them.
+ */
+archive: ArchiveScope | null, text: string | null, unread: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
 
 export type Coverage = { headersComplete: boolean,
 /**
@@ -423,6 +443,8 @@ undoUntil: string,
  * Trash (they were in Trash, or the account has none).
  */
 permanent: boolean, };
+
+export type ArchiveScope = "exclude" | "only" | "include";
 
 export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
 /**

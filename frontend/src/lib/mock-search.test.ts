@@ -8,7 +8,7 @@ function detail(overrides: { subject?: string; preview?: string; body?: string |
     summary: {
       id: 'm', accountId: 'a', folderId: 'f', subject: overrides.subject ?? '周报', from: { name: '林巍', address: 'lin@example.com' },
       preview: overrides.preview ?? '本周进展', receivedAt: '2026-10-20T00:00:00Z', isRead: true, isStarred: false, hasAttachment: false,
-      bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false,
+      bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false,
     },
     to: [{ name: null, address: 'me@example.com' }], cc: [], replyTo: [],
     body: overrides.body === null ? null : { text: overrides.body ?? '合同已经签署，请查收附件。' },

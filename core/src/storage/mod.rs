@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+pub(crate) mod archives;
 pub(crate) mod attachments;
 pub(crate) mod bodies;
 pub(crate) mod deletions;

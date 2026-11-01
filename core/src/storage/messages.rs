@@ -9,8 +9,9 @@ use crate::{
     AppError, ErrorCode,
     events::NewMailMessage,
     mail::{
-        AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail, EmailListQuery, EmailPage,
-        EmailRecipients, EmailSummary, LOCAL_SENT_PREFIX, MailAddress, PreviewState,
+        ArchiveScope, AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail,
+        EmailListQuery, EmailPage, EmailRecipients, EmailSummary, LOCAL_SENT_PREFIX, MailAddress,
+        PreviewState,
     },
     sync::headers::MessageRecord,
 };
@@ -472,6 +473,19 @@ impl Storage {
             Some(text) => super::search_index::parse_query(text)?,
             None => None,
         };
+        // Local Sent copies are never archived.
+        match query.archive.unwrap_or(if terms.is_some() {
+            ArchiveScope::Include
+        } else {
+            ArchiveScope::Exclude
+        }) {
+            ArchiveScope::Include => {}
+            ArchiveScope::Exclude => filter.clauses.push(format!("NOT {}", archived_sql!())),
+            ArchiveScope::Only => {
+                filter.clauses.push(archived_sql!().into());
+                local.clauses.push("0 = 1".into());
+            }
+        }
         if let Some(terms) = &terms {
             let (subquery, values) = terms.email_ids_subquery();
             filter.clauses.push(format!("m.id IN ({subquery})"));
@@ -589,10 +603,10 @@ impl Storage {
             .query_row(&sql, [id], |row| {
                 Ok((
                     summary(row)?,
-                    row.get::<_, String>(17)?,
                     row.get::<_, String>(18)?,
                     row.get::<_, String>(19)?,
-                    row.get::<_, Option<String>>(20)?,
+                    row.get::<_, String>(20)?,
+                    row.get::<_, Option<String>>(21)?,
                 ))
             })
             .optional()?;
@@ -714,10 +728,23 @@ impl Storage {
     }
 }
 
-const SUMMARY_COLUMNS: &str = "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending'), m.preview_state, m.to_addresses, json_array_length(m.to_addresses), 0";
-/// Same 17 columns for a local Sent copy; `to` is the stored recipient preview
+/// An inbox message is archived locally when `message_archives` holds its
+/// Message-ID (or, without one, its local id) for the account's current source.
+/// Only inbox-role folders count, so a copy elsewhere is never archived.
+macro_rules! archived_sql {
+    () => {
+        "(f.role = 'inbox' AND EXISTS (SELECT 1 FROM message_archives r WHERE r.account_id = m.account_id AND r.mailbox_source_id = m.mailbox_source_id AND r.archive_key = CASE WHEN COALESCE(m.message_id_header, '') <> '' THEN 'm:' || m.message_id_header ELSE 'i:' || m.id END))"
+    };
+}
+pub(super) use archived_sql;
+
+const SUMMARY_COLUMNS: &str = concat!(
+    "m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address, m.received_at, m.is_read, m.is_flagged, m.has_attachment, m.preview, m.body_state, EXISTS (SELECT 1 FROM flag_changes c WHERE c.message_id = m.id AND c.state = 'pending'), m.preview_state, m.to_addresses, json_array_length(m.to_addresses), 0, ",
+    archived_sql!()
+);
+/// Same 18 columns for a local Sent copy; `to` is the stored recipient preview
 /// (plain addresses) and the id carries the `local-sent:` prefix.
-const LOCAL_SUMMARY_COLUMNS: &str = "'local-sent:' || o.id, o.account_id, f.id, o.subject, a.display_name, a.email_address, o.accepted_at, 1, 0, COALESCE(o.attachment_count, 0) > 0, COALESCE(o.preview, ''), 'ready', 0, 'ready', o.recipients_preview, o.recipient_count, 1";
+const LOCAL_SUMMARY_COLUMNS: &str = "'local-sent:' || o.id, o.account_id, f.id, o.subject, a.display_name, a.email_address, o.accepted_at, 1, 0, COALESCE(o.attachment_count, 0) > 0, COALESCE(o.preview, ''), 'ready', 0, 'ready', o.recipients_preview, o.recipient_count, 1, 0";
 /// Outbox items that are Sent-folder rows: accepted, no server copy found, not
 /// removed, snapshot still held. Joined to the account's single sent-role folder.
 pub(super) const LOCAL_COPIES: &str = "FROM outbox o JOIN accounts a ON a.id = o.account_id
@@ -761,6 +788,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
         local_only: row.get(16)?,
+        archived: row.get(17)?,
         match_snippet: None,
     })
 }

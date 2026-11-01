@@ -1,3 +1,4 @@
+mod archives;
 mod attachments;
 pub(crate) mod bodies;
 mod deletions;

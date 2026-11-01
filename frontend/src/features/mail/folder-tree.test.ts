@@ -12,7 +12,7 @@ function folder(id: string, overrides: Partial<Folder> = {}): Folder {
     selectable: true,
     countsKnown: true,
     unreadCount: 0,
-    totalCount: 0,
+    totalCount: 0, archivedCount: 0, archivedUnreadCount: 0,
     ...overrides,
   }
 }
