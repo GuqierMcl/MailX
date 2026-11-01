@@ -1,0 +1,98 @@
+name: Linux AppImage
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-appimage.yml'
+      - '.github/workflows/release.yml'
+      - 'scripts/prepare-linux-appimage.mjs'
+      - 'scripts/check-linux-appimage.sh'
+      - 'scripts/smoke-linux-appimage.sh'
+      - 'scripts/tauri.mjs'
+      - 'desktop/**'
+      - 'core/**'
+      - 'frontend/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'package.json'
+      - 'bun.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-appimage-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  startup:
+    name: Ubuntu 22.04 startup and tray fallback
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux build dependencies
+        timeout-minutes: 8
+        run: |
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
+            fi
+          done
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update --error-on=any
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev \
+            pkg-config patchelf
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-22.04
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Prepare Linux tray dependencies
+        run: bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"
+      # PR checks never use the release environment or signing credentials.
+      - name: Build unsigned AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          bun run tauri build \
+            --config "$RUNNER_TEMP/tauri-linux-appimage.json" \
+            --bundles appimage \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Check clean runtime and missing-tray fallback
+        run: |
+          shopt -s nullglob
+          appimages=(target/release/bundle/appimage/*.AppImage)
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            echo 'Expected exactly one built AppImage.' >&2
+            exit 1
+          fi
+          bash scripts/smoke-linux-appimage.sh "${appimages[0]}"
+      - name: Preserve AppImage for diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: warn
+          retention-days: 1
+      - name: Preserve Linux AppImage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage-evidence
+          path: target/linux-appimage-evidence
+          if-no-files-found: warn

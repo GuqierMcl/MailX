@@ -96,6 +96,8 @@ fn refresh_on_main(app: &AppHandle) {
     let quitting = crate::compose::is_quitting(app);
     let labels = labels(locale);
     let wanted = !cfg!(target_os = "macos") || show_menu_bar;
+    #[cfg(target_os = "linux")]
+    let wanted = wanted && crate::tray_support::appindicator_available();
     let mut slot = state.menu.lock().unwrap_or_else(|error| error.into_inner());
     if wanted && slot.is_none() {
         *slot = create(app, &labels).ok();

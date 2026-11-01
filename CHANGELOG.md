@@ -53,6 +53,7 @@
 
 ### Fixed
 
+- 修复 Linux AppImage 缺少托盘运行库导致启动退出的问题；托盘运行库不可用时保留主窗口并禁用后台隐藏。 ([#74](https://github.com/GuqierMcl/MailX/pull/74))
 - 退出时停止后台搜索索引建立，避免退出后继续占用本地数据库。 ([258e825](https://github.com/GuqierMcl/MailX/commit/258e825af4ea4b36128709ea6dfa6c5b759aa034))
 - 修复 Linux 安装包依赖过新的系统库，导致 Ubuntu 22.04 上无法启动的问题。 ([#73](https://github.com/GuqierMcl/MailX/pull/73))
 - 修复写信窗口中斜体不显示倾斜的问题：界面字体本身没有斜体字形，之前被禁止合成，现在只在正文里允许合成斜体。 ([#53](https://github.com/GuqierMcl/MailX/issues/53))

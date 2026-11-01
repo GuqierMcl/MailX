@@ -102,6 +102,10 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
+`.github/workflows/linux-appimage.yml` 在 Linux 打包相关 PR 中运行，也支持手动触发。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 运行环境验证：所有包内 ELF 与 AppImage runtime 的 glibc 版本需求不高于 2.35；包内五个托盘运行库的 SONAME、依赖解析与实际动态加载；正常 AppImage 和移除 AppIndicator 后的降级启动均须出现可见主窗口、持续存活并建立隔离的空数据库，日志也须符合是否发生降级的预期。运行应用时使用非 root 用户与 `--network none`，保留 WebKit 沙箱；为允许其创建嵌套命名空间，测试容器放开外层 seccomp/AppArmor，同时移除所有 capabilities。日志、依赖与窗口/数据库证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现；这项启动检查不代替真实桌面托盘菜单、GNOME/Wayland 或邮件收发验证。
+
+2026-11-02，[PR #74](https://github.com/GuqierMcl/MailX/pull/74) 的代码提交 `9c501b8` 已通过[三平台 CI](https://github.com/GuqierMcl/MailX/actions/runs/41324929231) 与 [Linux AppImage 启动检查](https://github.com/GuqierMcl/MailX/actions/runs/41324929243)。实际检查 180 个 ELF（含 AppImage runtime），最高 glibc 需求为 2.35；五个托盘库依赖解析与动态加载成功。正常场景无降级日志；删除 AppIndicator 后仅记录一次降级，窗口仍可见且进程存活。两个独立空数据库均通过完整性检查，schema 与迁移版本均为 21。运行环境为 Ubuntu 22.04.5、非 root、无网络；该证据未覆盖 AppImageHub 的 Firejail 环境或真实桌面托盘交互。
+
 MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.yml`，仅由 `workflow_dispatch` 手动触发，不再随每个 PR 或 main 推送自动运行。测试代码、平台矩阵与证据上传保留；在 GitHub Actions 的 `Body WebView` 工作流中选择目标分支运行。工作流合入默认分支后才会提供手动入口。
 
 修改正文渲染、CSP、资源协议、链接拦截或升级 Tauri / Wry 时，建议按受影响行为补跑；发布前再进行三平台检查。该检查使用隔离数据目录和合成 MIME，在真实 WKWebView、WebView2、WebKitGTK 中检查正文协议、沙箱与外链路径，并上传 `body-webview-<os>` 证据。仅测试构建入口与桥接能力仍不能进入正式应用。常规前端与 Rust 测试继续覆盖净化、协议和权限相关回归。
