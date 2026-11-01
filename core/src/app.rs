@@ -88,6 +88,7 @@ pub struct MailxCore {
 /// have ended no new reference can appear. Both waits are bounded.
 struct Closing {
     service: std::sync::Weak<Mutex<AccountService>>,
+    search_backfill: tokio::task::AbortHandle,
     sync: Arc<SyncManager>,
     outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
@@ -96,7 +97,9 @@ struct Closing {
 
 impl Drop for Closing {
     fn drop(&mut self) {
-        let mut stopped = self.sync.shutdown();
+        let mut stopped = vec![self.search_backfill.clone()];
+        self.search_backfill.abort();
+        stopped.extend(self.sync.shutdown());
         stopped.extend(self.outbox.shutdown());
         stopped.extend(self.bodies.shutdown());
         stopped.extend(self.previews.shutdown());
@@ -141,7 +144,7 @@ impl MailxCore {
         let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
-        crate::accounts::messages::spawn_search_backfill(&service, &runtime);
+        let search_backfill = crate::accounts::messages::spawn_search_backfill(&service, &runtime);
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
         let previews = Arc::new(PreviewManager::new(
             &service,
@@ -196,6 +199,7 @@ impl MailxCore {
         Ok(Self {
             _closing: Arc::new(Closing {
                 service: Arc::downgrade(&service),
+                search_backfill,
                 sync: sync.clone(),
                 outbox: outbox.clone(),
                 bodies: bodies.clone(),

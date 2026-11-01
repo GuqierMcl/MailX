@@ -18,10 +18,10 @@ use crate::{
 pub(crate) fn spawn_search_backfill(
     service: &std::sync::Arc<std::sync::Mutex<AccountService>>,
     runtime: &tokio::runtime::Handle,
-) {
+) -> tokio::task::AbortHandle {
     const PAUSE: std::time::Duration = std::time::Duration::from_millis(20);
     let weak = std::sync::Arc::downgrade(service);
-    runtime.spawn(async move {
+    let task = runtime.spawn(async move {
         loop {
             let Some(service) = weak.upgrade() else {
                 return;
@@ -39,6 +39,7 @@ pub(crate) fn spawn_search_backfill(
             }
         }
     });
+    task.abort_handle()
 }
 
 impl AccountService {
