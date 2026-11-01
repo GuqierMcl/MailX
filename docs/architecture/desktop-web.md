@@ -67,7 +67,7 @@ Axum 托管同一工作台的构建产物，提供 `/api/v1` 与 `/api/v1/events
 
 避免“错 5 次锁 IP 1 小时”成为共享出口用户的拒绝服务入口。限速阈值、闲置 / 绝对会话时限、TOTP 失败预算和恢复流程在 M5 再具体设计并验证；认证未完成前不对公网发布。
 
-Web 登录 Session 与 MCP 授权是两类凭据，不能拿浏览器 Cookie 或邮箱 token 当作通用 MCP token。远程 MCP 不属于 Web 首次上线的必要条件，按[独立契约](../contracts/mcp.md)推进。
+Web 登录 Session 与 MCP 授权是两类凭据，不能拿浏览器 Cookie 或邮箱 token 当作通用 MCP token。远程 MCP 不属于 Web 首次上线的必要条件，按[独立契约](../contracts/mcp.md)推进；开放时由服务进程托管与桌面相同的 MCP 适配层和[工具层](agent-tools.md)，不包装 stdio bridge。
 
 ## 5. 分发与可观测性
 
