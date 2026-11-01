@@ -774,17 +774,16 @@ mod tests {
         }
     }
 
-    fn create(core: &MailxCore, port: u16) -> Account {
+    fn create_request(port: u16) -> CreateAccountRequest {
         let mut value = config(json!({"kind":"direct"}));
         value["imap"]["host"] = json!("127.0.0.1");
         value["imap"]["port"] = json!(port);
-        core.create_account(
-            serde_json::from_value(
-                json!({"requestId": Uuid::new_v4().to_string(), "config": value}),
-            )
-            .unwrap(),
-        )
-        .unwrap()
+        serde_json::from_value(json!({"requestId": Uuid::new_v4().to_string(), "config": value}))
+            .unwrap()
+    }
+
+    fn create(core: &MailxCore, port: u16) -> Account {
+        core.create_account(create_request(port)).unwrap()
     }
 
     #[test]
@@ -951,10 +950,11 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let directory = TempDir::new().unwrap();
         let account = {
-            let (core, states) = open(&directory, &runtime);
-            let account = create(&core, closed_port());
-            next_failure(&states);
-            account
+            // Seed the stored account without starting background tasks. Immediate
+            // reopen after core shutdown has its own test below.
+            let mut service =
+                AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
+            service.create(create_request(closed_port())).unwrap()
         };
         let (_core, states) = open(&directory, &runtime);
         assert_eq!(next_failure(&states).account_id, account.id);
