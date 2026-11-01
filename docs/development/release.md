@@ -80,7 +80,7 @@ Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 gl
 - **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64、Linux x64，都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。两个 macOS 架构的 `.app.tar.gz` 同名，收集时按架构改名为 `MailX_<版本>_aarch64.app.tar.gz` / `_x64`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
-改动工作流或 runner 标签（如 `macos-15-intel`）后，建议先在 Actions 页对分支手动触发一次，确认四个平台都能出包，再打标签；runner 标签若已下线需要改。
+改动工作流或 runner 标签（如 `macos-15-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。
 
 ## 7. 出问题时
 
@@ -93,7 +93,7 @@ Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 gl
 - 密钥是 Tauri 的 minisign 密钥对。公钥（ID `B0DE08C9ED9EA8E9`）写在 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey`，随应用发布。
 - 私钥与密码只放在 GitHub **`release` 环境**的 secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥由维护者离线保管。
 - 手动触发（`Run workflow`）的构建同样会进入 `release` 环境并拿到私钥：打开 `createUpdaterArtifacts` 后，没有私钥的构建会失败，所以试跑也离不开这个环境。
-- 建议在仓库的环境设置里把 `release` 的部署分支 / 标签规则限制为 **`v*` 标签和 `main` 分支**。这样从 `main` 手动试跑可以照常进行，从其他分支触发则会被环境拒绝。这是 GitHub 网页上的设置，工作流文件里不配置；本仓库目前尚未设置。
+- 仓库的 `release` 环境已将部署分支 / 标签限制为 **`v*` 标签和 `main` 分支**。从 `main` 手动试跑可以照常进行，其他分支触发会被环境拒绝。这是 GitHub 环境设置，工作流文件里不配置。
 - 第一次接入时先用手动触发（`Run workflow`）跑一遍，确认各平台的 `.sig` 都生成；手动触发只构建并上传本次运行的产物，不建 Release（`latest.json` 在 release 作业里生成，只有标签触发才会运行）。
 - 私钥或密码丢失：已安装用户无法再自动更新，只能手动安装一个内置新公钥的版本。更换公钥同理，需要过渡版本。
 
