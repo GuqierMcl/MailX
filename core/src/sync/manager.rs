@@ -1473,15 +1473,24 @@ mod tests {
             .states()
             .pop()
             .expect("worker created from metadata");
-        // On this current-thread runtime the worker has not yet been polled.
-        // Stop it before yielding so the test performs no credential or network work.
-        manager
-            .workers
+        // On this current-thread runtime none of the background tasks have been polled.
+        // Abort all three before yielding so background credential/network work cannot
+        // affect the identity guard assertions below.
+        let worker = manager.workers.lock().unwrap().remove(&account.id).unwrap();
+        let (writer, _) = manager.writers.lock().unwrap().remove(&account.id).unwrap();
+        let (watcher, _) = manager
+            .watchers
             .lock()
             .unwrap()
             .remove(&account.id)
-            .unwrap()
-            .abort();
+            .unwrap();
+        let tasks = [worker, writer, watcher];
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            assert!(task.await.unwrap_err().is_cancelled());
+        }
         let token = WorkerToken {
             account_id: account.id.clone(),
             source: account.mailbox_source_id.clone(),
