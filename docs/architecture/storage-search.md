@@ -68,7 +68,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，macOS 用户手测通过）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
 | outbox | id, draft_id, account_id, client_mutation_id, message_id, snapshot_hash, snapshot_size, snapshot_released_at, subject, recipients_preview, recipient_count, state, accepted_at, server_copy_message_id, deleted_locally_at, resolution 等；v18 加 preview, attachment_count | unique(account_id, client_mutation_id)；快照存为 blob（发信设计第 16.6 节），服务器副本对上后释放（第 16.7 节）。尚未对上的 `accepted` 行在已发送角色文件夹的列表中作为本机副本出现（已实现，见发信设计第 9 节） |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |
-| mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 随时可撤销；不存邮箱凭证 |
+| mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 后续逐客户端授权时启用，首版本地 MCP 只用开关与统一授权；随时可撤销；不存邮箱凭证 |
 | audit_events | id, time, actor_id, account_id, action, resource_id, outcome, request_id | 不记录正文、地址列表、OTP、密钥 |
 
 Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未来多租户预建租户系统。模型提供商配置由 `AiService` 管理，配置与密钥引用保存，凭证本身交给 `SecretStore`。

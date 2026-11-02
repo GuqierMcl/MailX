@@ -78,11 +78,11 @@
 
 依赖 M2 的阅读、草稿和权限服务。AI 与 MCP 共用[工具层](../architecture/agent-tools.md)，工具层与 `RequestContext` 先于任一入口落地。
 
-- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。
+- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。本地 MCP 先于内置 AI 落地，见[实施顺序](../architecture/agent-tools.md#7-实施顺序)。
 
 - [ ] 云端兼容接口与 Ollama、提供商配置、内容披露与取消。
 - [ ] 摘要、待办建议、拟信与改写；Run 快照和输入 revision 检查。
-- [ ] MCP 配对、账号 / 工具范围、撤销和本地 bridge 生命周期。
+- [ ] 本地 MCP 开关、统一授权（只读加新建草稿）、发现文件与 token 握手、随 MailX 进程的生命周期；设置中的 MCP 页与标题栏运行状态图标。逐客户端配对与范围留作后续。
 - [ ] MCP 适配层托管于桌面核心，bridge 只做握手与转发；list / search / read / create-draft 工具，至少两个目标 MCP 客户端联调。
 - [ ] 注入样本、跨账号访问、失败流、进程中断验证。
 
