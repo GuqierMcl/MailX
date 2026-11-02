@@ -878,3 +878,92 @@ async fn app_errors_map_to_stable_safe_codes() {
     let json = serde_json::to_value(ToolError::new(ToolErrorCode::BodyNotCached)).unwrap();
     assert_eq!(json["code"], "bodyNotCached");
 }
+
+/// Moves message 1 into a trash folder and message 2 into a junk folder;
+/// message 0 stays in the inbox.
+fn file_into_trash_and_junk(f: &Fx) {
+    for (role, index) in [("trash", 1), ("junk", 2)] {
+        let folder = Uuid::new_v4().to_string();
+        f.db.execute(
+            "INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, parent_id, name, delimiter, role, selectable, attributes, unread_count, total_count, uid_next, uid_validity, synced_at)
+             SELECT ?1, account_id, mailbox_source_id, ?2, NULL, ?2, delimiter, ?2, 1, attributes, 0, 0, uid_next, uid_validity, synced_at
+             FROM folders WHERE role = 'inbox'",
+            params![folder, role],
+        )
+        .unwrap();
+        f.db.execute(
+            "INSERT INTO folder_sync_cursors(folder_id, uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at)
+             SELECT ?1, uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at
+             FROM folder_sync_cursors WHERE folder_id = (SELECT id FROM folders WHERE role = 'inbox')",
+            params![folder],
+        )
+        .unwrap();
+        f.db.execute(
+            "UPDATE messages SET folder_id = ?1 WHERE id = ?2",
+            params![folder, f.emails[index]],
+        )
+        .unwrap();
+    }
+}
+
+fn hit_ids(out: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = out["emails"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn search_excludes_trash_and_junk_unless_a_folder_role_is_given() {
+    let f = fx();
+    file_into_trash_and_junk(&f);
+    let sorted = |ids: &[&String]| {
+        let mut ids: Vec<String> = ids.iter().map(|id| (*id).clone()).collect();
+        ids.sort();
+        ids
+    };
+    for ctx in both() {
+        let search = |input: Value| hit_ids(&f.call(&ctx, "search_emails", input).unwrap());
+        assert_eq!(search(json!({})), sorted(&[&f.emails[0]]));
+        assert_eq!(search(json!({ "query": "hello" })), sorted(&[&f.emails[0]]));
+        assert!(search(json!({ "query": "abcdefghij" })).is_empty());
+        assert_eq!(
+            search(json!({ "folderRole": "trash" })),
+            sorted(&[&f.emails[1]])
+        );
+        assert_eq!(
+            search(json!({ "folderRole": "junk" })),
+            sorted(&[&f.emails[2]])
+        );
+        assert_eq!(
+            search(json!({ "folderRole": "trash", "query": "abcdefghij" })),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            search(json!({ "folderRole": "junk", "query": "abcdefghij" })),
+            sorted(&[&f.emails[2]])
+        );
+        assert_eq!(
+            search(json!({ "folderRole": "inbox" })),
+            sorted(&[&f.emails[0]])
+        );
+        assert!(search(json!({ "folderRole": "sent" })).is_empty());
+    }
+}
+
+#[tokio::test]
+async fn search_rejects_unknown_folder_roles() {
+    let f = fx();
+    for ctx in both() {
+        for role in [json!("Trash"), json!("spam"), json!(""), json!(3)] {
+            assert_eq!(
+                code(f.call(&ctx, "search_emails", json!({ "folderRole": role }))),
+                ToolErrorCode::InvalidInput
+            );
+        }
+    }
+}

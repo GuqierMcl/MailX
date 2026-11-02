@@ -2367,3 +2367,82 @@ fn startup_backfill_fills_accepted_rows_once_and_skips_released_snapshots() {
 }
 
 mod search;
+
+#[test]
+fn excluded_folder_roles_never_appear_but_an_explicit_role_still_wins() {
+    let mut f = setup();
+    f.service
+        .store_folders(
+            &f.account.id,
+            &f.account.mailbox_source_id,
+            &[
+                folder("INBOX", FolderRole::Inbox),
+                folder("Sent", FolderRole::Sent),
+                folder("Trash", FolderRole::Trash),
+                folder("Junk", FolderRole::Junk),
+            ],
+        )
+        .unwrap();
+    f.service
+        .sync_folders(&f.account.id, &f.account.mailbox_source_id)
+        .unwrap();
+    put(&mut f, &[record(1)]);
+    for (name, uid) in [("Trash", 2), ("Junk", 3)] {
+        let folder_id: String =
+            f.db.query_row(
+                "SELECT id FROM folders WHERE account_id = ?1 AND remote_name = ?2",
+                [&f.account.id, name],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let target = SyncTarget {
+            folder_id,
+            ..f.target.clone()
+        };
+        f.service
+            .ensure_generation(&target, "2026-09-18")
+            .unwrap()
+            .unwrap();
+        f.service
+            .store_message_batch(&target, &[record(uid)], uid)
+            .unwrap()
+            .unwrap();
+    }
+    let subjects = |query: EmailListQuery| {
+        let mut subjects = f
+            .service
+            .list_emails(&query)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| item.subject)
+            .collect::<Vec<_>>();
+        subjects.sort();
+        subjects
+    };
+    let excluded = |text: Option<&str>| EmailListQuery {
+        text: text.map(str::to_owned),
+        exclude_folder_roles: vec![FolderRole::Trash, FolderRole::Junk],
+        ..Default::default()
+    };
+    assert_eq!(subjects(EmailListQuery::default()).len(), 3);
+    assert_eq!(subjects(excluded(None)), ["Subject 1"]);
+    // The text-search path (which also unions local Sent copies) honours it too.
+    assert_eq!(subjects(excluded(Some("Subject"))), ["Subject 1"]);
+    for (role, expected) in [
+        (FolderRole::Trash, "Subject 2"),
+        (FolderRole::Junk, "Subject 3"),
+    ] {
+        assert_eq!(
+            subjects(EmailListQuery {
+                folder_role: Some(role),
+                ..Default::default()
+            }),
+            [expected]
+        );
+    }
+    // The exclusion is not part of the IPC shape.
+    let query: EmailListQuery =
+        serde_json::from_value(json!({ "excludeFolderRoles": ["inbox"] })).unwrap();
+    assert!(query.exclude_folder_roles.is_empty());
+}

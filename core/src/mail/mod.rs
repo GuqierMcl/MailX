@@ -172,6 +172,11 @@ pub struct EmailListQuery {
     pub folder_id: Option<String>,
     /// Matches folders with this role in every selected account, e.g. a unified inbox.
     pub folder_role: Option<FolderRole>,
+    /// Folders with these roles are left out. Set only by the tool layer, never
+    /// by the frontend IPC; an explicit `folder_role` is not affected by it.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub exclude_folder_roles: Vec<FolderRole>,
     /// `None` hides archived messages, except in a text search, which finds them.
     pub archive: Option<ArchiveScope>,
     pub text: Option<String>,

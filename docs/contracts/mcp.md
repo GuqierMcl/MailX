@@ -47,11 +47,11 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
 | `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, status`（`status` 目前只有 `unverified`），范围内账号（首版为全部账号） | `accounts:read` |
-| `mailx_search_emails` | `query?, accountIds?, receivedAfter?, receivedBefore?, unread?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, subject, from{name?,address}, receivedAt, preview, isRead, hasAttachment, bodyCached`；`nextCursor` | `mail:read` |
+| `mailx_search_emails` | `query?, accountIds?, folderRole?, receivedAfter?, receivedBefore?, unread?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, subject, from{name?,address}, receivedAt, preview, isRead, hasAttachment, bodyCached`；`nextCursor` | `mail:read` |
 | `mailx_read_email` | `emailId, offset?, maxChars?` | `id, accountId, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾为 null）, totalChars, bodyTruncated` | `mail:read` |
 | `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
 
-状态：四个工具已在 core 工具层实现（`core/src/tools/`，进程内测试），MCP 适配层尚未实现，以上是适配层要暴露的形状；输入输出 JSON Schema 由工具层的 `ToolDescriptor` 提供，如有出入以其为准。适配层在工具层 id 前加 `mailx_` 前缀。`accountIds` 与授权范围取交集，范围外账号被忽略。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
+状态：四个工具已在 core 工具层实现（`core/src/tools/`，进程内测试），MCP 适配层尚未实现，以上是适配层要暴露的形状；输入输出 JSON Schema 由工具层的 `ToolDescriptor` 提供，如有出入以其为准。适配层在工具层 id 前加 `mailx_` 前缀。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。按文件夹 id 过滤要等将来的 `list_folders` 工具。本机归档（仅本机、不动服务器）的规则不变：不带 query 时隐藏，带 query 的文本搜索会找到它们。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
 
 限制（已实现于工具层，两个入口各自一份策略值，目前相同）：搜索默认 20 条、上限 100；`accountIds` 最多 20 个；正文默认 8,000 字符、单次上限 32,000；query 最长 256 字符；`cursor` 最长 1,024 字符。正文分页按 Unicode 字符（标量值）计数，`offset` 超过总长度报 `invalidInput`，不会切断编码。读取不自动标记已读。正文未缓存报 `bodyNotCached` 并引导在 UI 获取，首版不让 MCP 隐式触发下载。
 

@@ -76,7 +76,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
 | `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、状态 |
-| `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标 |
+| `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；按文件夹 id 过滤待将来的 `list_folders` |
 | `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页 |
 | `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |
 | `get_ui_context` | ✓ | | 当前选中的邮件或正在编辑的草稿引用 |
