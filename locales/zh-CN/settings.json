@@ -159,7 +159,6 @@
     "tokenUnavailable": "无法生成安全令牌",
     "acceptFailed": "监听在运行中中断"
   },
-  "mcpLastClient": "最近连接的客户端：{{name}}（由客户端自行报告，未经验证）",
   "mcpCapabilities": "它能做什么",
   "mcpCan": "可以：读取所有账号的本地邮件（列表、正文、搜索）并创建草稿。",
   "mcpCannot": "不可以：发送、删除、标记邮件，也不能修改账号或设置。草稿需要你自己审阅后发送。",
@@ -181,7 +180,11 @@
   "mcpConfirmOff": "你可以随时在这里关闭。",
   "mcpConfirmCancel": "取消",
   "mcpConfirmEnable": "开启",
-  "mcpTitleLabel": "MCP 服务器",
-  "mcpTitleClients": "最近客户端：{{name}}（自行报告）",
-  "mcpTitleOpen": "打开 MCP 设置"
+  "mcpTitleLabel": "MCP 服务器：{{status}}",
+  "mcpStatusRunningNone": "运行中，暂无客户端连接",
+  "mcpClientUnknown": "未知客户端",
+  "mcpClientGroup": "{{label}} ×{{count}}",
+  "mcpClientSeparator": "、",
+  "mcpClientsConnected": "已连接的客户端",
+  "mcpTitleConnected": "已连接：{{names}}"
 }

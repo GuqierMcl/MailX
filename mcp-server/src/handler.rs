@@ -29,6 +29,7 @@ pub(crate) struct MailxMcp {
     catalog: Arc<Vec<Tool>>,
     shared: Arc<Shared>,
     connection_id: String,
+    session: u64,
 }
 
 impl MailxMcp {
@@ -37,12 +38,14 @@ impl MailxMcp {
         catalog: Arc<Vec<Tool>>,
         shared: Arc<Shared>,
         connection_id: String,
+        session: u64,
     ) -> Self {
         Self {
             tools,
             catalog,
             shared,
             connection_id,
+            session,
         }
     }
 }
@@ -96,17 +99,17 @@ impl ServerHandler for MailxMcp {
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
         if let Some(info) = context.peer.peer_info() {
-            let name = sanitize_label(&info.client_info.name, MAX_CLIENT_NAME_CHARS);
-            self.shared.note_client(&name);
+            self.note_label(&info.client_info);
         }
     }
 
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RmcpContext<RoleServer>,
+        context: RmcpContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         self.ensure_enabled()?;
+        self.resolve_client_name(&context);
         Ok(ListToolsResult {
             tools: self.catalog.as_ref().clone(),
             ..Default::default()
@@ -128,10 +131,7 @@ impl ServerHandler for MailxMcp {
             ));
         };
         let tool_id = tool_id.to_owned();
-        let client_name = context
-            .peer
-            .peer_info()
-            .map(|info| sanitize_label(&info.client_info.name, MAX_CLIENT_NAME_CHARS));
+        let client_name = self.resolve_client_name(&context);
         let request_context = RequestContext::new(
             Principal::LocalMcp {
                 connection_id: self.connection_id.clone(),
@@ -160,6 +160,26 @@ impl ServerHandler for MailxMcp {
 }
 
 impl MailxMcp {
+    /// Self-reported client name for this request, also recorded in the status.
+    ///
+    /// Session clients (`initialize`) are read from `peer_info()`; stateless
+    /// 2026-07-28 clients send no `initialize` and carry
+    /// `_meta["io.modelcontextprotocol/clientInfo"]` on every request.
+    /// rmcp's `client_info()` covers both. The audit log gets the stable
+    /// identifier `name`; the status shows `title` (see [`client_label`]).
+    fn resolve_client_name(&self, context: &RmcpContext<RoleServer>) -> Option<String> {
+        let info = context.client_info()?;
+        self.note_label(&info);
+        let name = sanitize_label(&info.name, MAX_CLIENT_NAME_CHARS);
+        (!name.is_empty()).then_some(name)
+    }
+
+    fn note_label(&self, info: &Implementation) {
+        if let Some(label) = client_label(info) {
+            self.shared.note_client(self.session, &label);
+        }
+    }
+
     fn ensure_enabled(&self) -> Result<(), McpError> {
         if self.shared.is_enabled() {
             Ok(())
@@ -169,5 +189,49 @@ impl MailxMcp {
                 None,
             ))
         }
+    }
+}
+
+/// Display label: the client's `title` when it has a non-empty one, else its
+/// `name`; sanitized and capped.
+pub(crate) fn client_label(info: &Implementation) -> Option<String> {
+    [info.title.as_deref(), Some(info.name.as_str())]
+        .into_iter()
+        .flatten()
+        .map(|raw| sanitize_label(raw, MAX_CLIENT_NAME_CHARS))
+        .find(|label| !label.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(name: &str, title: Option<&str>) -> Implementation {
+        let mut info = Implementation::new(name, "1");
+        info.title = title.map(str::to_owned);
+        info
+    }
+
+    #[test]
+    fn label_prefers_title_then_name_and_is_sanitized() {
+        assert_eq!(
+            client_label(&info("claude-code", Some("Claude Code"))).as_deref(),
+            Some("Claude Code")
+        );
+        assert_eq!(
+            client_label(&info("cursor", None)).as_deref(),
+            Some("cursor")
+        );
+        assert_eq!(
+            client_label(&info("cursor", Some(" \n "))).as_deref(),
+            Some("cursor")
+        );
+        assert_eq!(client_label(&info("", None)), None);
+        assert_eq!(
+            client_label(&info("n", Some(&"x".repeat(100))))
+                .unwrap()
+                .len(),
+            MAX_CLIENT_NAME_CHARS
+        );
     }
 }

@@ -8,7 +8,7 @@ MailX 提供 MCP Server，外部 Agent 是 Client。MCP 只是工具层的一种
 
 MCP 服务实现驻留在核心所在进程：桌面版由桌面核心托管，服务端版由服务进程托管同一份实现，两者只在传输与认证上不同。
 
-传输以 stdio 与后续 Streamable HTTP 为方向，后者替代早期独立 HTTP+SSE 传输。初次联调以官方 `2025-11-25` 规范作为可复现参考，实际支持版本由 SDK 与目标客户端共同验证并在 initialize 中协商，不把该参考版本称为永远最新。M0 原型中 `rmcp` 3.8 对 `2025-11-25`、`2025-06-18`、`2024-11-05` 按请求版本应答，对无状态的 `2026-07-28` 或未知版本回落为 `2025-11-25`；采用 `2026-07-28` 的客户端需要另行验证。[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
+传输以 stdio 与后续 Streamable HTTP 为方向，后者替代早期独立 HTTP+SSE 传输。初次联调以官方 `2025-11-25` 规范作为可复现参考，实际支持版本由 SDK 与目标客户端共同验证并在 initialize 中协商，不把该参考版本称为永远最新。M0 原型中 `rmcp` 3.8 对 `2025-11-25`、`2025-06-18`、`2024-11-05` 按请求版本应答，对无状态的 `2026-07-28` 或未知版本回落为 `2025-11-25`；Claude Code 2.1.316 实测使用无状态的 `2026-07-28`（见第 9 节“协议版本与客户端联调”）。[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
 
 ## 2. 桌面连接与授权
 
@@ -40,7 +40,7 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 
 ### 状态
 
-核心向宿主报告 MCP 状态：已关闭、运行中（当前连接数与最近连接的客户端自报名称）、启动失败（稳定错误码，例如端点被占用或无法写出发现文件）。设置页与标题栏状态图标都读取这一状态，界面规则见 [UI 设计](../architecture/ui-design.md)。
+核心向宿主报告 MCP 状态：已关闭、运行中（当前已连接的各会话及其客户端自报标签，按连接先后排列）、启动失败（稳定错误码，例如端点被占用或无法写出发现文件）。设置页与标题栏状态图标都读取这一状态，界面规则见 [UI 设计](../architecture/ui-design.md)。
 
 工具映射：MCP 工具名为工具层 ID 加 `mailx_` 前缀；不带前缀的名称返回 JSON-RPC `-32602`。成功结果同时给 `structuredContent` 与 JSON 文本兜底；`ToolError` 返回 `isError: true`，错误 JSON 只放文本内容、不放 `structuredContent`，以免严格客户端按 `outputSchema` 校验失败。`readOnly` 映射为 `readOnlyHint`；所需动作与限制在 MCP 中没有对应字段，放入 `_meta`。客户端自报名称取自 initialize 的 `clientInfo`。
 
@@ -54,9 +54,9 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
-| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, status`（`status` 目前只有 `unverified`），范围内账号（首版为全部账号） | `accounts:read` |
+| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
 | `mailx_search_emails` | `query?, accountIds?, folderRole?, receivedAfter?, receivedBefore?, unread?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, subject, from{name?,address}, receivedAt, preview, isRead, hasAttachment, bodyCached`；`nextCursor` | `mail:read` |
-| `mailx_read_email` | `emailId, offset?, maxChars?` | `id, accountId, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾为 null）, totalChars, bodyTruncated` | `mail:read` |
+| `mailx_read_email` | `emailId, offset?, maxChars?` | `id, accountId, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾省略）, totalChars, bodyTruncated` | `mail:read` |
 | `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
 
 状态：四个工具已在 core 工具层实现（`core/src/tools/`，进程内测试），MCP 适配层尚未实现，以上是适配层要暴露的形状；输入输出 JSON Schema 由工具层的 `ToolDescriptor` 提供，如有出入以其为准。适配层在工具层 id 前加 `mailx_` 前缀。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。按文件夹 id 过滤要等将来的 `list_folders` 工具。本机归档（仅本机、不动服务器）的规则不变：不带 query 时隐藏，带 query 的文本搜索会找到它们。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
@@ -111,7 +111,7 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 - **SDK**：`rmcp` ~3.8（固定次版本），`default-features = false, features = ["server"]`。在 core 之上只新增约 7 个包，不引入 axum、hyper、reqwest、tower；类型多为 `#[non_exhaustive]`，需用构造器，跨小版本时有 API 变化，应锁定小版本。
 - **crate 布局**：core 不依赖 `rmcp`，只保留工具层。新增 MCP 适配 crate（适配层、IPC 监听、发现文件、握手，自带 lint 配置以容纳 Windows 的 `unsafe`），由桌面宿主链接；新增 bridge 可执行 crate，只依赖异步运行时与 JSON 解析。crate 名称尚未决定。
 - **Windows**：tokio named pipe 支持 `first_pipe_instance`、`reject_remote_clients` 与自定义安全属性，配合 `windows-sys` 可把 DACL 限定为当前用户 SID。只查了 API，未编译、未运行。
-- **未验证**：Windows 与 Linux 运行、崩溃后的过期发现文件清理、并发连接上限、真实 MCP 客户端（Claude、Cursor 等）联调。
+- **未验证**：Windows 与 Linux 运行、崩溃后的过期发现文件清理、并发连接上限、其他 MCP 客户端（Cursor、Claude Desktop 等）联调（M0 时的结论；macOS 上 Inspector CLI 与 Claude Code 的联调见第 9 节）。
 
 ## 9. 后端实现状态（2026-11-02）
 
@@ -135,10 +135,19 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 - 单条 MCP 消息 ≤1 MiB。超限的请求**得不到 JSON-RPC 错误**：未解析就不知道 `id`，而 `rmcp` 3.8 只丢弃不回错。服务端在 `rmcp` 之前加了读取包装，超限即结束该会话，客户端看到连接关闭（而不是无限等待）。
 - 并发会话上限 8（`MAX_CONNECTIONS`）：握手通过但已满时回 `{"ok":false}` 并关闭；握手前同时在途的连接上限 32。
 - 每次工具列出与调用都重新检查服务器是否仍启用；停止时先使 token 作废（删除发现文件），再断开全部会话、移除 socket，`stop()` 等待完成。
-- 工具映射按第 2 节：`mailx_` 前缀、`outputSchema` 透传、`readOnlyHint`、`_meta` 中的 `mailx/requiredActions`、`mailx/limits`、`mailx/writesLocalData`；`call_tool` 经 `spawn_blocking(Tools::call)`；`Principal::LocalMcp` 的连接 id 每连接新生成，客户端名取 `clientInfo.name`（去控制字符、截断 64 字符）。授权为 `Grant::mcp_read_and_draft()`。
+- 工具映射按第 2 节：`mailx_` 前缀、`outputSchema` 透传、`readOnlyHint`、`_meta` 中的 `mailx/requiredActions`、`mailx/limits`、`mailx/writesLocalData`；`call_tool` 经 `spawn_blocking(Tools::call)`；`Principal::LocalMcp` 的连接 id 每连接新生成，客户端名取自 `RequestContext::client_info()`：会话式客户端为 `initialize` 的 `clientInfo.name`，无状态客户端为每个请求 `params._meta["io.modelcontextprotocol/clientInfo"].name`；审计取 `name` 而不是展示用的 `title`（稳定标识，审计更易检索）；状态里的展示标签则优先取非空 `title`、否则取 `name`（二者都去控制字符、截断 64 字符），二者都是客户端自报、不可信，只用于展示与审计、绝不作身份依据；界面直接显示名称，不加“自行报告”之类的限定语（面向非技术用户的措辞决定，安全规则不变）；`initialize` 完成、`list_tools` 与 `call_tool` 都会把本会话的标签写入状态；会话结束即从状态中移除，未自报身份的会话标签为 `null`（界面显示“未知客户端”）。界面显示当前已连接的客户端，不再保留“最近连接”。授权为 `Grant::mcp_read_and_draft()`。
 - 审计：`StderrAudit` 每次调用向 stderr 写一行（工具 id、主体、客户端名、请求 id、资源个数、结果），不含参数与内容。桌面宿主目前只有 stderr 这一种日志通道。
 
-**状态码**（`McpFailureCode`，camelCase）：`endpointInUse`、`endpointCreateFailed`、`permissionDenied`、`discoveryWriteFailed`、`tokenUnavailable`、`acceptFailed`。`McpStatus` 序列化为 `{"state":"off"}`、`{"state":"running","connections":n,"lastClientName":…}`、`{"state":"failed","code":…}`。
+**协议版本与客户端联调（2026-11-02）**
+
+- Claude Code 2.1.316 使用无状态协议 `2026-07-28`：先发 `server/discover`，**不发** `initialize`，并在每个请求的 `params._meta` 带 `io.modelcontextprotocol/protocolVersion` 与 `io.modelcontextprotocol/clientInfo`（`name`、`title`、`version` 等）。经 bridge 可用，bridge 只转发字节，无需改动。
+- `server/discover`：`rmcp` 3.8 的 `ServerHandler` 有默认的 `discover` 实现，`_meta` 带 `protocolVersion` 与 `clientCapabilities` 时正常应答（`supportedVersions` 含 `2026-07-28`，服务端信息在 `result._meta["io.modelcontextprotocol/serverInfo"]`）。缺这些 `_meta` 的 `server/discover` 由 `rmcp` 内部的统一入口（blanket `Service` 实现，先于任何 handler 方法）校验并回 `-32602`；`ServerHandler` 无法覆盖这一步，要改只能自己包一层 `Service`，我们没有这么做。实测 Claude Code 容忍这个错误，并继续用 `_meta` 调用 `tools/list` 与 `tools/call`。
+- 测试 `stateless_client_without_initialize_gets_its_name_from_request_meta` 覆盖：带 `_meta` 的 discover 成功、不带的回 `-32602`、不 initialize 直接 `tools/list` / `tools/call` 成功且状态里出现客户端名、无 `clientInfo` 时匿名调用仍成功。
+- 联调结果（仅 macOS）：MCP Inspector CLI 与 Claude Code 2.1.316 各自成功调用了四个工具。Windows、Linux 与其他客户端（Cursor、Claude Desktop 等）未测试。
+- 重启与断线（Claude Code 实测）：MailX 重启或关闭 MCP 开关时，bridge 按设计退出；Claude Code 随即把该服务器标为断开，旧连接上进行中的调用以“Connection closed”失败，用户需用 `/mcp` 重新连接。
+- 并发（Claude Code 实测）：在同一条存活连接上，经 bridge 并行发起 4 个 `tools/call` 均成功。
+
+**状态码**（`McpFailureCode`，camelCase）：`endpointInUse`、`endpointCreateFailed`、`permissionDenied`、`discoveryWriteFailed`、`tokenUnavailable`、`acceptFailed`。`McpStatus` 序列化为 `{"state":"off"}`、`{"state":"running","clients":[{"label":"Claude Code"},{"label":null}]}`、`{"state":"failed","code":…}`。
 
 **桌面生命周期**：单实例插件最先注册，第二个实例在到达 `setup` 前就退出，因此只有持锁进程会启动服务。服务在 core 就绪后（就绪回调）按 `mcp.enabled` 启动；开关切换后即时启停；`RunEvent::Exit` 时停止（先于更新器的收尾），后台模式下关窗不影响服务。崩溃遗留的 socket 与发现文件由下一次启动清理，bridge 连接被拒时按核心不可用处理。`Tools` 的默认账号来自写信设置里的默认账号。
 

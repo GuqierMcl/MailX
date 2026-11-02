@@ -599,7 +599,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     // The browser preview has no host: the switch only changes an in-memory status.
     getMcpStatus: async () => structuredClone(mcpStatus),
     async setMcpEnabled(enabled) {
-      mcpStatus = enabled ? { state: 'running', connections: 0, lastClientName: null } : { state: 'off' }
+      mcpStatus = enabled ? { state: 'running', clients: [] } : { state: 'off' }
       for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
       return structuredClone(mcpStatus)
     },

@@ -11,9 +11,12 @@ export type McpFailureCode =
   | 'tokenUnavailable'
   | 'acceptFailed'
 
+/** One open session; `label` is self-reported (title, else name), null until it identifies itself. */
+export type McpClient = { label: string | null }
+
 export type McpStatus =
   | { state: 'off' }
-  | { state: 'running'; connections: number; lastClientName: string | null }
+  | { state: 'running'; clients: McpClient[] }
   | { state: 'failed'; code: McpFailureCode }
 
 /**

@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toast'
-import { mcpStatusText } from '@/features/mcp/mcp-status-text'
+import { mcpClientGroups, mcpStatusText } from '@/features/mcp/mcp-status-text'
 import { useMcpStatus } from '@/features/mcp/use-mcp-status'
 import type { MailxClient } from '@/lib/mailx-client'
 import { settingsKeys } from '@/lib/query-client'
@@ -52,7 +52,7 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
       toast.error(t('mcpCopyFailed'), { description: errorText(cause) })
     }
   }
-  const running = status?.state === 'running' ? status : null
+  const clients = status?.state === 'running' ? mcpClientGroups(status.clients) : []
 
   return <SettingsPage>
     {(settings.isError || error !== null) && <Alert variant="destructive">
@@ -67,9 +67,9 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
       <SettingsRow label={t('mcpStatus')}>
         <span role="status" className="text-sm text-muted-foreground">{mcpStatusText(status, enabled)}</span>
       </SettingsRow>
-      {running?.lastClientName && <p className="text-xs text-muted-foreground">
-        {t('mcpLastClient', { name: running.lastClientName })}
-      </p>}
+      {clients.length > 0 && <ul aria-label={t('mcpClientsConnected')} className="space-y-0.5 text-xs text-muted-foreground">
+        {clients.map((name) => <li key={name}>{name}</li>)}
+      </ul>}
     </SettingsGroup>
     <SettingsGroup title={t('mcpCapabilities')}>
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">

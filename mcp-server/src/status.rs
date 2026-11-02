@@ -56,6 +56,14 @@ impl fmt::Display for McpStartError {
 
 impl std::error::Error for McpStartError {}
 
+/// One open session. The label is self-reported by the client.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct McpClient {
+    /// `clientInfo.title` if present, else `clientInfo.name`, sanitized.
+    /// `None` until the client identifies itself.
+    pub label: Option<String>,
+}
+
 /// What the settings page shows. Serializes as `{"state":"running",...}`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -64,10 +72,8 @@ pub enum McpStatus {
     Off,
     #[serde(rename_all = "camelCase")]
     Running {
-        /// Authenticated sessions currently open.
-        connections: u32,
-        /// `clientInfo.name` of the most recent initialize, sanitized.
-        last_client_name: Option<String>,
+        /// Authenticated sessions currently open, in connection order.
+        clients: Vec<McpClient>,
     },
     #[serde(rename_all = "camelCase")]
     Failed { code: McpFailureCode },
@@ -87,11 +93,15 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(McpStatus::Running {
-                connections: 2,
-                last_client_name: Some("x".into())
+                clients: vec![
+                    McpClient {
+                        label: Some("x".into())
+                    },
+                    McpClient { label: None }
+                ]
             })
             .unwrap(),
-            json!({"state": "running", "connections": 2, "lastClientName": "x"})
+            json!({"state": "running", "clients": [{"label": "x"}, {"label": null}]})
         );
         assert_eq!(
             serde_json::to_value(McpStatus::Failed {

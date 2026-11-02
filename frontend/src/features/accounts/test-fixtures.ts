@@ -128,7 +128,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     setMcpEnabled: vi.fn<MailxClient['setMcpEnabled']>().mockImplementation(async (enabled) => {
       preferences = { ...preferences, mcp: { enabled } }
       settingsRevision += 1
-      return enabled ? { state: 'running', connections: 0, lastClientName: null } : { state: 'off' }
+      return enabled ? { state: 'running', clients: [] } : { state: 'off' }
     }),
     getMcpClientConfig: vi.fn<MailxClient['getMcpClientConfig']>().mockResolvedValue({ command: '/opt/MailX/mailx-mcp', args: ['--discovery', '/data/mcp-discovery.json'] }),
     onMcpStatus: vi.fn<MailxClient['onMcpStatus']>().mockReturnValue(() => undefined),

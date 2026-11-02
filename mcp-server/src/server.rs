@@ -17,7 +17,7 @@ use crate::handler::{MailxMcp, build_catalog};
 use crate::handshake::{HandshakeError, server_handshake};
 use crate::ipc::{Listener, Stream};
 use crate::limited::{LimitedRead, MAX_MESSAGE_BYTES};
-use crate::status::{McpFailureCode, McpStartError, McpStatus};
+use crate::status::{McpClient, McpFailureCode, McpStartError, McpStatus};
 use crate::token::random_token;
 
 /// Authenticated sessions allowed at once. Further connections are refused
@@ -75,8 +75,7 @@ impl McpServer {
         }
 
         let (status_tx, status_rx) = watch::channel(McpStatus::Running {
-            connections: 0,
-            last_client_name: None,
+            clients: Vec::new(),
         });
         let shared = Arc::new(Shared::new(status_tx));
         let (stop_tx, stop_rx) = watch::channel(false);
@@ -152,8 +151,9 @@ pub(crate) struct Shared {
 
 struct SharedInner {
     enabled: bool,
-    connections: u32,
-    last_client_name: Option<String>,
+    next_session: u64,
+    /// Open sessions in connection order.
+    sessions: Vec<(u64, Option<String>)>,
 }
 
 impl Shared {
@@ -161,8 +161,8 @@ impl Shared {
         Self {
             inner: Mutex::new(SharedInner {
                 enabled: true,
-                connections: 0,
-                last_client_name: None,
+                next_session: 0,
+                sessions: Vec::new(),
             }),
             status,
         }
@@ -172,9 +172,16 @@ impl Shared {
         self.inner.lock().is_ok_and(|inner| inner.enabled)
     }
 
-    pub(crate) fn note_client(&self, name: &str) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.last_client_name = (!name.is_empty()).then(|| name.to_owned());
+    /// Records the label a session's client reported; publishes on change.
+    pub(crate) fn note_client(&self, session: u64, label: &str) {
+        if label.is_empty() {
+            return;
+        }
+        if let Ok(mut inner) = self.inner.lock()
+            && let Some(entry) = inner.sessions.iter_mut().find(|(id, _)| *id == session)
+            && entry.1.as_deref() != Some(label)
+        {
+            entry.1 = Some(label.to_owned());
             self.publish(&inner);
         }
     }
@@ -182,7 +189,7 @@ impl Shared {
     fn disable(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.enabled = false;
-            inner.connections = 0;
+            inner.sessions.clear();
             self.status.send_replace(McpStatus::Off);
         }
     }
@@ -190,39 +197,52 @@ impl Shared {
     fn fail(&self, code: McpFailureCode) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.enabled = false;
-            inner.connections = 0;
+            inner.sessions.clear();
             self.status.send_replace(McpStatus::Failed { code });
         }
     }
 
     fn try_admit(self: &Arc<Self>) -> Option<SessionGuard> {
         let mut inner = self.inner.lock().ok()?;
-        if !inner.enabled || inner.connections as usize >= MAX_CONNECTIONS {
+        if !inner.enabled || inner.sessions.len() >= MAX_CONNECTIONS {
             return None;
         }
-        inner.connections += 1;
+        let id = inner.next_session;
+        inner.next_session += 1;
+        inner.sessions.push((id, None));
         self.publish(&inner);
-        Some(SessionGuard(Arc::clone(self)))
+        Some(SessionGuard {
+            shared: Arc::clone(self),
+            id,
+        })
     }
 
     fn publish(&self, inner: &SharedInner) {
         if inner.enabled {
             self.status.send_replace(McpStatus::Running {
-                connections: inner.connections,
-                last_client_name: inner.last_client_name.clone(),
+                clients: inner
+                    .sessions
+                    .iter()
+                    .map(|(_, label)| McpClient {
+                        label: label.clone(),
+                    })
+                    .collect(),
             });
         }
     }
 }
 
 /// Counts one authenticated session for as long as it lives.
-struct SessionGuard(Arc<Shared>);
+struct SessionGuard {
+    shared: Arc<Shared>,
+    id: u64,
+}
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.0.inner.lock() {
-            inner.connections = inner.connections.saturating_sub(1);
-            self.0.publish(&inner);
+        if let Ok(mut inner) = self.shared.inner.lock() {
+            inner.sessions.retain(|(id, _)| *id != self.id);
+            self.shared.publish(&inner);
         }
     }
 }
@@ -298,7 +318,7 @@ async fn run_connection(
         Err(_) => return,
     };
     let connection_id = uuid::Uuid::new_v4().simple().to_string();
-    let handler = MailxMcp::new(tools, catalog, shared, connection_id);
+    let handler = MailxMcp::new(tools, catalog, shared, connection_id, guard.id);
     serve_stream(handler, stream).await;
     drop(guard);
 }

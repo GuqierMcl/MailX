@@ -2,7 +2,9 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use schemars::JsonSchema;
+use schemars::generate::SchemaSettings;
+use schemars::transform::{Transform, transform_subschemas};
+use schemars::{JsonSchema, Schema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -105,8 +107,56 @@ impl ToolSpec {
     }
 }
 
+/// The JSON Schema advertised for a tool input or output.
+///
+/// Optional values are omittable, never nullable: schemars renders
+/// `Option<T>` as `"type": ["string", "null"]`, which not every MCP client
+/// accepts. Optional fields are not `required` and carry a single type; an
+/// output field whose absence means "none" must skip serialization when empty.
 fn schema_of<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).unwrap_or(Value::Null)
+    let generator = SchemaSettings::draft2020_12()
+        .with_transform(DropNull)
+        .into_generator();
+    serde_json::to_value(generator.into_root_schema_for::<T>()).unwrap_or(Value::Null)
+}
+
+/// Removes the `null` alternative that schemars adds for `Option<T>`, whether
+/// it is a `type` array, an `anyOf`/`oneOf` branch, or an `enum` value.
+#[derive(Clone)]
+struct DropNull;
+
+impl Transform for DropNull {
+    fn transform(&mut self, schema: &mut Schema) {
+        transform_subschemas(self, schema);
+        let Some(object) = schema.as_object_mut() else {
+            return;
+        };
+        if let Some(Value::Array(types)) = object.get_mut("type") {
+            types.retain(|t| t != "null");
+            if types.len() == 1 {
+                let only = types.remove(0);
+                object.insert("type".into(), only);
+            }
+        }
+        if let Some(Value::Array(values)) = object.get_mut("enum") {
+            values.retain(|v| !v.is_null());
+        }
+        for key in ["anyOf", "oneOf"] {
+            let Some(Value::Array(branches)) = object.get_mut(key) else {
+                continue;
+            };
+            branches.retain(|b| b.get("type") != Some(&Value::from("null")));
+            if branches.len() == 1 {
+                let Value::Object(inner) = branches.remove(0) else {
+                    continue;
+                };
+                object.remove(key);
+                for (k, v) in inner {
+                    object.entry(k).or_insert(v);
+                }
+            }
+        }
+    }
 }
 
 /// What a transport advertises for one tool.

@@ -16,7 +16,7 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-pub use accounts::{AccountInfo, AccountStatus, ListAccountsInput, ListAccountsOutput};
+pub use accounts::{AccountInfo, ListAccountsInput, ListAccountsOutput, SyncStatus};
 pub use audit::{NoAudit, ToolAudit, ToolCallRecord};
 pub use context::{AccountScope, Action, Audience, Grant, Principal, RequestContext};
 pub use drafts::{CreateDraftInput, CreateDraftOutput};

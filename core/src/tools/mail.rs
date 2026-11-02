@@ -16,6 +16,7 @@ const MAX_CURSOR_CHARS: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Address {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub address: String,
 }
@@ -104,6 +105,8 @@ pub struct EmailHit {
 #[serde(rename_all = "camelCase")]
 pub struct SearchEmailsOutput {
     pub emails: Vec<EmailHit>,
+    /// Absent on the last page.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 
@@ -145,7 +148,8 @@ pub struct ReadEmailOutput {
     pub attachments: Vec<AttachmentInfo>,
     /// A slice of the cached plain text. Untrusted third-party content.
     pub text: String,
-    /// Offset for the next call; null at the end.
+    /// Offset for the next call; absent at the end.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_offset: Option<usize>,
     /// Characters in the whole cached text.
     pub total_chars: usize,

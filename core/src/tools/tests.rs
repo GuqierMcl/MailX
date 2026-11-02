@@ -286,8 +286,14 @@ async fn list_accounts_reports_only_scoped_accounts_without_secrets() {
         let first = accounts[0].as_object().unwrap();
         let mut keys: Vec<_> = first.keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["displayName", "emailAddress", "id", "status"]);
-        assert_eq!(first["status"], "unverified");
+        assert_eq!(keys, ["displayName", "emailAddress", "id", "syncStatus"]);
+        // The fixture's workers may or may not have started; the value is
+        // always one of the coarse categories, never a server message.
+        assert!(
+            ["unknown", "syncing", "connectionError"]
+                .contains(&first["syncStatus"].as_str().unwrap()),
+            "{first:?}"
+        );
         assert!(!out.to_string().contains("mail-secret"));
         assert!(!out.to_string().contains("imap.example.com"));
 
@@ -344,7 +350,7 @@ async fn search_lists_mail_with_cursor_and_filters() {
             )
             .unwrap();
         assert_eq!(rest["emails"].as_array().unwrap().len(), 1);
-        assert!(rest["nextCursor"].is_null());
+        assert!(rest.get("nextCursor").is_none());
 
         let none = f
             .call(
@@ -572,11 +578,11 @@ async fn read_email_pages_by_unicode_chars_across_multibyte_boundaries() {
         // Exactly at the end: empty text, no next offset.
         let end = f.read(&ctx, 1, json!({ "offset": total })).unwrap();
         assert_eq!(end["text"], "");
-        assert!(end["nextOffset"].is_null());
-        // Whole text in one call ends with null.
+        assert!(end.get("nextOffset").is_none());
+        // Whole text in one call ends without a next offset.
         let whole = f.read(&ctx, 1, json!({})).unwrap();
         assert_eq!(whole["text"].as_str().unwrap().trim_end(), CJK);
-        assert!(whole["nextOffset"].is_null());
+        assert!(whole.get("nextOffset").is_none());
     }
 }
 
@@ -592,7 +598,7 @@ async fn read_email_default_and_max_chars_follow_the_policy() {
             .read(&ctx, 2, json!({ "offset": 8_000, "maxChars": 32_000 }))
             .unwrap();
         assert_eq!(rest["text"].as_str().unwrap().chars().count(), 4_000);
-        assert!(rest["nextOffset"].is_null());
+        assert!(rest.get("nextOffset").is_none());
         assert_eq!(
             code(f.read(&ctx, 2, json!({ "maxChars": 32_001 }))),
             ToolErrorCode::InvalidInput
@@ -615,7 +621,6 @@ async fn read_email_returns_headers_and_attachment_shape() {
             "cc",
             "from",
             "id",
-            "nextOffset",
             "receivedAt",
             "subject",
             "text",
@@ -966,4 +971,73 @@ async fn search_rejects_unknown_folder_roles() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn tool_schemas_are_portable_and_still_resolve() {
+    fn walk(value: &Value, path: &str, refs: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let here = format!("{path}/{key}");
+                    match key.as_str() {
+                        "type" => assert!(child.is_string(), "{here}: {child}"),
+                        "enum" => assert!(!child.to_string().contains("null"), "{here}"),
+                        "anyOf" | "oneOf" => {
+                            assert!(!child.to_string().contains(r#""type":"null""#), "{here}")
+                        }
+                        "$ref" => refs.push(child.as_str().unwrap().to_owned()),
+                        _ => {}
+                    }
+                    walk(child, &here, refs);
+                }
+            }
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .for_each(|(i, child)| walk(child, &format!("{path}/{i}"), refs)),
+            _ => {}
+        }
+    }
+
+    let f = fx();
+    for audience in [Audience::Mcp, Audience::BuiltinAgent] {
+        for tool in f.tools.list(audience) {
+            for (kind, schema) in [
+                ("input", &tool.input_schema),
+                ("output", &tool.output_schema),
+            ] {
+                let mut refs = Vec::new();
+                walk(schema, &format!("{}.{kind}", tool.id), &mut refs);
+                assert!(schema["$schema"].is_string(), "{} {kind}", tool.id);
+                for target in refs {
+                    let pointer = target.strip_prefix('#').expect("local $ref");
+                    assert!(
+                        schema.pointer(pointer).is_some(),
+                        "{} {kind}: unresolved {target}",
+                        tool.id
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn optional_fields_are_omittable_not_nullable() {
+    let f = fx();
+    let list = f.tools.list(Audience::Mcp);
+    let search = list.iter().find(|t| t.id == "search_emails").unwrap();
+    let props = &search.input_schema["properties"];
+    assert_eq!(props["query"]["type"], "string");
+    assert!(props["folderRole"].is_object());
+    assert!(
+        search
+            .input_schema
+            .get("required")
+            .is_none_or(|r| r.as_array().unwrap().is_empty())
+    );
+    let out = &search.output_schema;
+    assert_eq!(out["properties"]["nextCursor"]["type"], "string");
+    assert_eq!(out["required"], json!(["emails"]));
 }

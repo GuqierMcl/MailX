@@ -46,6 +46,7 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 - 调用是同步、会阻塞存储的，与 `MailxCore` 一致；异步宿主必须用 `spawn_blocking`。
 - 每次 `call` 依次：工具对该入口不可见或不存在 → `unknownTool`（不泄露隐藏工具的存在）；授权缺少所需动作 → `notPermitted`；输入不符 schema → `invalidInput`；处理函数内再做字段校验与账号范围检查。授权每次重新评估，不缓存。
 - `null` 输入视为 `{}`。
+- 可选值用“省略”表示，不用 `null`：输入的可选字段不在 `required` 中且只有单一类型；输出的可选字段（如 `nextCursor`、`nextOffset`、`from.name`、`lastSyncedAt`）无值时不出现。工具 schema 统一在 `core/src/tools/spec.rs` 的 `schema_of` 生成，会去掉 schemars 为 `Option<T>` 加的 `null` 类型，因为部分 MCP 客户端不支持 `type` 数组。
 
 ## 3. RequestContext
 
@@ -75,7 +76,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
-| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、状态 |
+| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
 | `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；按文件夹 id 过滤待将来的 `list_folders` |
 | `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页 |
 | `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |

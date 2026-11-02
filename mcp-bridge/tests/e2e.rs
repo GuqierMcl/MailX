@@ -118,7 +118,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
 
     assert!(matches!(
         handle.status(),
-        mailx_mcp_server::McpStatus::Running { connections: 1, .. }
+        mailx_mcp_server::McpStatus::Running { ref clients } if clients.len() == 1
     ));
     // Closing stdin ends the bridge cleanly.
     drop(bridge.stdin.take());
@@ -132,7 +132,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
     for _ in 0..50 {
         if matches!(
             handle.status(),
-            mailx_mcp_server::McpStatus::Running { connections: 0, .. }
+            mailx_mcp_server::McpStatus::Running { ref clients } if clients.is_empty()
         ) {
             freed = true;
             break;

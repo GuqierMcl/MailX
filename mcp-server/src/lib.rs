@@ -29,4 +29,4 @@ pub use handler::TOOL_PREFIX;
 pub use handshake::{BRIDGE_PROTOCOL, HANDSHAKE_TIMEOUT, MAX_HANDSHAKE_BYTES};
 pub use limited::MAX_MESSAGE_BYTES;
 pub use server::{MAX_CONNECTIONS, McpConfig, McpHandle, McpServer};
-pub use status::{McpFailureCode, McpStartError, McpStatus};
+pub use status::{McpClient, McpFailureCode, McpStartError, McpStatus};

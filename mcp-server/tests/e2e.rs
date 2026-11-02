@@ -38,18 +38,29 @@ async fn raw_handshake(endpoint: &str, line: &[u8]) -> (UnixStream, String) {
     (stream, reply)
 }
 
+fn labels(clients: &[mailx_mcp_server::McpClient]) -> Vec<Option<&str>> {
+    clients
+        .iter()
+        .map(|client| client.label.as_deref())
+        .collect()
+}
+
 async fn connect(discovery: &Discovery, name: &str) -> RunningService<RoleClient, ClientConfig> {
+    connect_as(discovery, Implementation::new(name, "0.0.0")).await
+}
+
+async fn connect_as(
+    discovery: &Discovery,
+    info: Implementation,
+) -> RunningService<RoleClient, ClientConfig> {
     let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
     let (stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
     assert_eq!(reply.trim(), "{\"ok\":true}");
     let (read, write) = tokio::io::split(stream);
-    ClientConfig::new(
-        ClientCapabilities::default(),
-        Implementation::new(name, "0.0.0"),
-    )
-    .serve(AsyncRwTransport::new_client(read, write))
-    .await
-    .unwrap()
+    ClientConfig::new(ClientCapabilities::default(), info)
+        .serve(AsyncRwTransport::new_client(read, write))
+        .await
+        .unwrap()
 }
 
 /// The server closed the connection: EOF, or a reset when it closed with
@@ -123,7 +134,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     // Status reflects the client.
     assert!(matches!(
         handle.status(),
-        McpStatus::Running { connections: 1, last_client_name: Some(ref name) } if name == "e2e-client"
+        McpStatus::Running { ref clients } if labels(clients) == [Some("e2e-client")]
     ));
     client.cancel().await.unwrap();
     handle.stop().await;
@@ -316,7 +327,7 @@ async fn connections_beyond_the_cap_are_refused() {
     }
     assert!(matches!(
         handle.status(),
-        McpStatus::Running { connections, .. } if connections as usize == MAX_CONNECTIONS
+        McpStatus::Running { ref clients } if clients.len() == MAX_CONNECTIONS
     ));
 
     let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
@@ -396,5 +407,169 @@ async fn open_session_is_rejected_per_call_once_disabled() {
     assert!(client.peer().list_all_tools().await.is_err());
 
     client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+/// Meta a stateless (2026-07-28) client puts on every request.
+fn stateless_meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "claude-code", "title": "Claude Code", "version": "2.1.316"
+        }
+    })
+}
+
+async fn rpc(
+    reader: &mut BufReader<tokio::io::ReadHalf<UnixStream>>,
+    writer: &mut tokio::io::WriteHalf<UnixStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Value {
+    let line = format!(
+        "{}\n",
+        json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+    );
+    writer.write_all(line.as_bytes()).await.unwrap();
+    let mut reply = String::new();
+    tokio::time::timeout(Duration::from_secs(3), reader.read_line(&mut reply))
+        .await
+        .expect("reply in time")
+        .unwrap();
+    serde_json::from_str(&reply).unwrap()
+}
+
+#[tokio::test]
+async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+    let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
+    let (stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
+    assert_eq!(reply.trim(), "{\"ok\":true}");
+    let (read, mut write) = tokio::io::split(stream);
+    let mut read = BufReader::new(read);
+
+    // server/discover with the full stateless meta succeeds.
+    let discover = rpc(
+        &mut read,
+        &mut write,
+        1,
+        "server/discover",
+        json!({"_meta": stateless_meta()}),
+    )
+    .await;
+    assert!(discover["error"].is_null(), "{discover}");
+    assert_eq!(
+        discover["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+        "mailx"
+    );
+    assert!(
+        discover["result"]["supportedVersions"]
+            .to_string()
+            .contains("2026-07-28")
+    );
+    assert!(discover["result"]["capabilities"]["tools"].is_object());
+
+    // Without `_meta` rmcp itself rejects the request (-32602) before the
+    // handler runs; see docs/contracts/mcp.md.
+    let bare = rpc(&mut read, &mut write, 2, "server/discover", json!({})).await;
+    assert_eq!(bare["error"]["code"], -32602, "{bare}");
+
+    // No initialize: list and call work on the per-request meta alone.
+    let list = rpc(
+        &mut read,
+        &mut write,
+        3,
+        "tools/list",
+        json!({"_meta": stateless_meta()}),
+    )
+    .await;
+    assert_eq!(
+        list["result"]["tools"].as_array().unwrap().len(),
+        4,
+        "{list}"
+    );
+    assert!(matches!(
+        handle.status(),
+        McpStatus::Running { ref clients } if labels(clients) == [Some("Claude Code")]
+    ));
+
+    let called = rpc(
+        &mut read,
+        &mut write,
+        4,
+        "tools/call",
+        json!({
+            "name": "mailx_list_accounts",
+            "arguments": {},
+            "_meta": stateless_meta()
+        }),
+    )
+    .await;
+    assert!(called["error"].is_null(), "{called}");
+    assert_ne!(called["result"]["isError"], true, "{called}");
+    assert!(
+        called["result"]["structuredContent"]
+            .to_string()
+            .contains(&fixture.account_id)
+    );
+
+    // Without client info in `_meta` the call still works, just anonymous.
+    let anonymous = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    let called = rpc(
+        &mut read,
+        &mut write,
+        5,
+        "tools/call",
+        json!({"name": "mailx_list_accounts", "arguments": {}, "_meta": anonymous}),
+    )
+    .await;
+    assert!(called["error"].is_null(), "{called}");
+
+    drop((read, write));
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn status_lists_the_clients_that_are_connected_now() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+
+    let mut titled = Implementation::new("cursor", "1");
+    titled.title = Some("Cursor".to_owned());
+    let first = connect_as(&discovery, titled).await;
+    let second = connect(&discovery, "plain-name").await;
+    let wait = |expected: Vec<Option<&'static str>>| {
+        let handle = &handle;
+        async move {
+            for _ in 0..50 {
+                if let McpStatus::Running { clients } = handle.status()
+                    && labels(&clients) == expected
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            panic!("status never became {expected:?}: {:?}", handle.status());
+        }
+    };
+    wait(vec![Some("Cursor"), Some("plain-name")]).await;
+
+    // A raw session that never identifies itself shows up without a label.
+    let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
+    let (_silent, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
+    assert_eq!(reply.trim(), "{\"ok\":true}");
+    wait(vec![Some("Cursor"), Some("plain-name"), None]).await;
+
+    first.cancel().await.unwrap();
+    wait(vec![Some("plain-name"), None]).await;
+    second.cancel().await.unwrap();
     handle.stop().await;
 }

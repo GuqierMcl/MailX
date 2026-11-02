@@ -160,7 +160,6 @@
     "tokenUnavailable": "A secure token could not be generated",
     "acceptFailed": "The listener stopped while running"
   },
-  "mcpLastClient": "Last client to connect: {{name}} (reported by the client, not verified)",
   "mcpCapabilities": "What it can do",
   "mcpCan": "Can: read local mail from all accounts (lists, bodies, search) and create drafts.",
   "mcpCannot": "Cannot: send, delete or mark mail, or change accounts or settings. You review and send drafts yourself.",
@@ -182,7 +181,11 @@
   "mcpConfirmOff": "You can turn it off here at any time.",
   "mcpConfirmCancel": "Cancel",
   "mcpConfirmEnable": "Turn on",
-  "mcpTitleLabel": "MCP server",
-  "mcpTitleClients": "Last client: {{name}} (self-reported)",
-  "mcpTitleOpen": "Open MCP settings"
+  "mcpTitleLabel": "MCP server: {{status}}",
+  "mcpStatusRunningNone": "Running, no clients connected",
+  "mcpClientUnknown": "Unknown client",
+  "mcpClientGroup": "{{label}} ×{{count}}",
+  "mcpClientSeparator": ", ",
+  "mcpClientsConnected": "Connected clients",
+  "mcpTitleConnected": "Connected: {{names}}"
 }

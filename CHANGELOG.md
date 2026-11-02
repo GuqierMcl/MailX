@@ -12,7 +12,7 @@
 
 ### Feature
 
-- 新增本地 MCP 服务器（默认关闭）：在“设置 → MCP”开启并确认后，本机的 AI 助手等程序可通过随应用附带的 `mailx-mcp` 读取所有账号的本地邮件并创建草稿，不能发送、删除或标记邮件；设置页显示运行状态并可一键复制客户端配置，开启后标题栏出现状态图标。尚未与真实客户端联调。 ([#78](https://github.com/GuqierMcl/MailX/pull/78))
+- 新增本地 MCP 服务器（默认关闭）：在“设置 → MCP”开启并确认后，本机的 AI 助手等程序可通过随应用附带的 `mailx-mcp` 读取所有账号的本地邮件并创建草稿，不能发送、删除或标记邮件；设置页显示运行状态、当前已连接的客户端，并可一键复制客户端配置，开启后标题栏出现状态图标。已在 macOS 上与两个客户端联调，其他平台与客户端未验证。 ([#78](https://github.com/GuqierMcl/MailX/pull/78))
 - 设置导航按“应用 / 邮件 / 集成”分组，“关于”固定在底部。 ([#78](https://github.com/GuqierMcl/MailX/pull/78))
 - 账号管理列表左侧新增拖动手柄，可用鼠标、触控或键盘调整账号显示顺序；顺序保存在本机，并同步到侧栏、写信和相关设置列表。 ([#72](https://github.com/GuqierMcl/MailX/pull/72))
 - 阅读邮件时可以归档：邮件只在本机移出收件箱，不改动服务器；在侧栏“全部已归档”或账号下的“已归档”里查看，可随时移回收件箱，归档后几秒内也可在提示中撤销。收件箱未读数不再计入已归档的邮件。
@@ -55,6 +55,7 @@
 
 ### Fixed
 
+- 修复阅读邮件时远程图片的加载状态与“重试加载”无法使用的问题。 ([#78](https://github.com/GuqierMcl/MailX/pull/78))
 - 修复 Linux AppImage 缺少托盘运行库导致启动退出的问题；托盘运行库不可用时保留主窗口并禁用后台隐藏。 ([#74](https://github.com/GuqierMcl/MailX/pull/74))
 - 退出时停止后台搜索索引建立，避免退出后继续占用本地数据库。 ([258e825](https://github.com/GuqierMcl/MailX/commit/258e825af4ea4b36128709ea6dfa6c5b759aa034))
 - 修复 Linux 安装包依赖过新的系统库，导致 Ubuntu 22.04 上无法启动的问题。 ([#73](https://github.com/GuqierMcl/MailX/pull/73))

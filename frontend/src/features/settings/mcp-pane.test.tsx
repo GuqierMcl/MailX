@@ -89,13 +89,18 @@ describe('MCP settings page', () => {
     expect(toggle).not.toBeChecked()
   })
 
-  it('renders off, running with a self-reported client name, and every failure reason', async () => {
+  it('renders off, running with the client name, and every failure reason', async () => {
     const { client, push } = pushableClient()
     renderMcp(client)
     expect(await screen.findByRole('status')).toHaveTextContent('已关闭')
-    push({ state: 'running', connections: 2, lastClientName: 'Claude Desktop' })
-    expect(await screen.findByText('运行中，2 个客户端已连接')).toBeInTheDocument()
-    expect(screen.getByText(/最近连接的客户端：Claude Desktop（由客户端自行报告/)).toBeInTheDocument()
+    push({ state: 'running', clients: [] })
+    expect(await screen.findByText('运行中，0 个客户端已连接')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '已连接的客户端' })).not.toBeInTheDocument()
+    push({ state: 'running', clients: [{ label: 'Claude Code' }, { label: null }, { label: 'Claude Code' }, { label: 'Cursor' }] })
+    expect(await screen.findByText('运行中，4 个客户端已连接')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: '已连接的客户端' })
+    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Claude Code ×2', '未知客户端', 'Cursor'])
+    expect(screen.queryByText(/最近连接/)).not.toBeInTheDocument()
     const reasons = { endpointInUse: '已被占用', endpointCreateFailed: '无法创建本地通信端点', permissionDenied: '系统拒绝访问', discoveryWriteFailed: '无法写入连接信息文件', tokenUnavailable: '无法生成安全令牌', acceptFailed: '监听在运行中中断' }
     for (const [code, text] of Object.entries(reasons)) {
       push({ state: 'failed', code } as McpStatus)

@@ -247,6 +247,9 @@ pub(crate) fn check(
 }
 
 #[cfg(test)]
+mod registry_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

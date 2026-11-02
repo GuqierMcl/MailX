@@ -7,7 +7,7 @@ import { requestSettings } from '@/features/settings/settings-requests'
 import { useSettings } from '@/features/settings/settings-queries'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import type { MailxClient } from '@/lib/mailx-client'
-import { mcpStatusText } from './mcp-status-text'
+import { mcpClientGroups, mcpStatusText } from './mcp-status-text'
 import { useMcpStatus } from './use-mcp-status'
 
 /**
@@ -20,9 +20,9 @@ export function McpTitleIcon({ client }: { client: MailxClient }) {
   const settings = useSettings(client)
   const status = useMcpStatus(client)
   if (!settings.data?.settings.mcp.enabled) return null
-  const text = mcpStatusText(status, true)
-  const lastClient = status?.state === 'running' ? status.lastClientName : null
-  const label = `${t('mcpTitleLabel')}: ${text}`
+  const clients = status?.state === 'running' ? mcpClientGroups(status.clients) : []
+  const text = status?.state === 'running' && clients.length === 0 ? t('mcpStatusRunningNone') : mcpStatusText(status, true)
+  const label = t('mcpTitleLabel', { status: text })
   const dot = status?.state === 'running' ? 'bg-emerald-500' : status?.state === 'failed' ? 'bg-destructive' : null
   return (
     <TitleBarActions side="trailing" order={-2}>
@@ -39,8 +39,7 @@ export function McpTitleIcon({ client }: { client: MailxClient }) {
           <TooltipContent side="bottom">
             <div className="flex flex-col gap-0.5">
               <span>{label}</span>
-              {lastClient && <span>{t('mcpTitleClients', { name: lastClient })}</span>}
-              <span>{t('mcpTitleOpen')}</span>
+              {clients.length > 0 && <span>{t('mcpTitleConnected', { names: clients.join(t('mcpClientSeparator')) })}</span>}
             </div>
           </TooltipContent>
         </Tooltip>
