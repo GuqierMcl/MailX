@@ -52,6 +52,22 @@ async fn connect(discovery: &Discovery, name: &str) -> RunningService<RoleClient
     .unwrap()
 }
 
+/// The server closed the connection: EOF, or a reset when it closed with
+/// unread bytes still in its receive buffer (Linux sends RST then).
+async fn assert_closed(stream: &mut UnixStream) {
+    let mut rest = Vec::new();
+    match stream.read_to_end(&mut rest).await {
+        Ok(read) => assert_eq!(read, 0, "no data expected after the rejection"),
+        Err(error) => assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            ),
+            "{error:?}"
+        ),
+    }
+}
+
 fn args(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap()
 }
@@ -154,9 +170,7 @@ async fn bad_handshakes_are_rejected() {
     ] {
         let (mut stream, reply) = raw_handshake(&discovery.endpoint, &line).await;
         assert_eq!(reply.trim(), "{\"ok\":false}");
-        let mut rest = Vec::new();
-        let read = stream.read_to_end(&mut rest).await.unwrap();
-        assert_eq!(read, 0, "connection must be closed after a rejection");
+        assert_closed(&mut stream).await;
     }
 
     // A peer that never says anything is cut off after the timeout.
@@ -308,8 +322,7 @@ async fn connections_beyond_the_cap_are_refused() {
     let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
     let (mut stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
     assert_eq!(reply.trim(), "{\"ok\":false}");
-    let mut rest = Vec::new();
-    assert_eq!(stream.read_to_end(&mut rest).await.unwrap(), 0);
+    assert_closed(&mut stream).await;
 
     // Freeing a slot lets a new one in.
     clients.pop().unwrap().cancel().await.unwrap();

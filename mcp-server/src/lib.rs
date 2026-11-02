@@ -11,6 +11,7 @@
 
 mod audit;
 mod discovery;
+#[cfg(unix)]
 mod endpoint;
 mod handler;
 mod handshake;
@@ -22,6 +23,7 @@ mod token;
 
 pub use audit::StderrAudit;
 pub use discovery::{DISCOVERY_FILE_NAME, DISCOVERY_VERSION, Discovery, discovery_path};
+#[cfg(unix)]
 pub use endpoint::{MAX_SOCKET_PATH_BYTES, SOCKET_DIR_NAME, SOCKET_FILE_NAME};
 pub use handler::TOOL_PREFIX;
 pub use handshake::{BRIDGE_PROTOCOL, HANDSHAKE_TIMEOUT, MAX_HANDSHAKE_BYTES};
