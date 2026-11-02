@@ -30,6 +30,8 @@ const EXIT_USAGE: u8 = 64;
 const CORE_UNAVAILABLE_CODE: i64 = -32001;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEGRADED_WAIT: Duration = Duration::from_secs(30);
+/// How long replies may still drain after stdin reaches EOF.
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
 const MAX_ACK_BYTES: usize = 256;
 const HINT: &str = "MailX 未运行，或未启用本地 MCP。请先启动 MailX，并在设置中开启 MCP。 / \
 MailX is not running or local MCP is turned off. Start MailX and enable MCP in Settings.";
@@ -68,8 +70,26 @@ struct Discovery {
     token: String,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("mailx-mcp: cannot start the runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let code = runtime.block_on(run_bridge());
+    // `tokio::io::stdin()` reads on a blocking thread that cannot be
+    // cancelled; a normal runtime drop would wait for it forever when the
+    // server closed first while the client keeps stdin open.
+    runtime.shutdown_background();
+    code
+}
+
+async fn run_bridge() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let flag = match parse_args(&args) {
         Ok(flag) => flag,
@@ -101,10 +121,35 @@ async fn run(path: &std::path::Path) -> Result<(), (Reason, String)> {
     tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut stream, &discovery.token))
         .await
         .map_err(|_| (Reason::HandshakeRejected, "handshake timed out".to_owned()))??;
-    let mut stdio = io::join(io::stdin(), io::stdout());
-    // Either side closing ends the relay; that is a normal end of session.
-    let _ = io::copy_bidirectional(&mut stdio, &mut stream).await;
+    relay(&mut stream).await;
     Ok(())
+}
+
+/// Copies stdin to the endpoint and the endpoint to stdout. MCP stdio ends
+/// when the client closes stdin, and a Windows named pipe has no half-close,
+/// so on stdin EOF the bridge flushes, gives the server `DRAIN_GRACE` to finish
+/// its last replies, and then drops the connection so the server frees the
+/// session. If the server closes first, the relay ends at once.
+async fn relay<S>(stream: &mut S)
+where
+    S: io::AsyncRead + io::AsyncWrite + Unpin,
+{
+    let (mut from_server, mut to_server) = io::split(stream);
+    let upstream = async {
+        let _ = io::copy(&mut io::stdin(), &mut to_server).await;
+        let _ = to_server.flush().await;
+    };
+    let mut downstream = Box::pin(async {
+        let mut stdout = io::stdout();
+        let _ = io::copy(&mut from_server, &mut stdout).await;
+        let _ = stdout.flush().await;
+    });
+    tokio::select! {
+        () = &mut downstream => {}
+        () = upstream => {
+            let _ = tokio::time::timeout(DRAIN_GRACE, &mut downstream).await;
+        }
+    }
 }
 
 fn read_discovery(path: &std::path::Path) -> Result<Discovery, (Reason, String)> {

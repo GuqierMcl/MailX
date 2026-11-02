@@ -116,6 +116,10 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
             .contains(&fixture.account_id)
     );
 
+    assert!(matches!(
+        handle.status(),
+        mailx_mcp_server::McpStatus::Running { connections: 1, .. }
+    ));
     // Closing stdin ends the bridge cleanly.
     drop(bridge.stdin.take());
     let status = tokio::time::timeout(Duration::from_secs(10), bridge.child.wait())
@@ -123,6 +127,19 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         .unwrap()
         .unwrap();
     assert!(status.success(), "{status:?}");
+    // The server frees the session once the bridge's connection drops.
+    let mut freed = false;
+    for _ in 0..50 {
+        if matches!(
+            handle.status(),
+            mailx_mcp_server::McpStatus::Running { connections: 0, .. }
+        ) {
+            freed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(freed, "session slot must be freed after the bridge exits");
     handle.stop().await;
 }
 
@@ -203,4 +220,21 @@ async fn disabled_server_makes_the_bridge_unavailable() {
     handle.stop().await;
     // The old token and endpoint no longer work.
     assert_core_unavailable(spawn_bridge(&saved), "connectFailed").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_exits_when_the_server_closes_first_even_with_stdin_open() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let mut bridge = spawn_bridge(&discovery_path(fixture.data_dir()));
+    bridge.initialize().await;
+
+    // stdin stays open (held by `bridge.stdin`); the server goes away.
+    handle.stop().await;
+    let status = tokio::time::timeout(Duration::from_secs(5), bridge.child.wait())
+        .await
+        .expect("bridge must exit after the server closes")
+        .unwrap();
+    assert!(status.success(), "{status:?}");
+    drop(bridge.stdin.take());
 }
