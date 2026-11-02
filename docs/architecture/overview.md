@@ -72,7 +72,7 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/localization.rs       # 通知与引用模板的纯文本生成
   src/tools/                # 共享工具层（MCP 与未来 Agent 共用）
 mcp-server/                 # mailx-mcp-server（候选名），本地 MCP 服务端库：rmcp 适配、socket / 命名管道、握手、发现文件
-mcp-bridge/                 # mailx-mcp-bridge，二进制 mailx-mcp（候选名）：stdio 到本地 IPC 的转发，不链接 core
+mcp-bridge/                 # mailx-mcp-bridge，cargo 二进制 mailx-mcp-bridge，随包 sidecar 名 mailx-mcp（候选名）：stdio 到本地 IPC 的转发，不链接 core
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
   src/locale.rs             # 系统语言读取并注入共享核心

@@ -89,7 +89,8 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]`）随安装包分发，版本与应用一致。
 
-- **构建**：`scripts/mcp-sidecar.mjs` 构建 `mailx-mcp-bridge` 并复制为 `desktop/binaries/mailx-mcp-<target triple>[.exe]`（该目录已加入 `.gitignore`）。`beforeDevCommand` 以 debug、`beforeBuildCommand` 以 release 调用它，并遵循 Tauri 提供的 `TAURI_ENV_TARGET_TRIPLE` / `TAURI_ENV_DEBUG`；`universal-apple-darwin` 会构建两个 macOS 架构后用 `lipo` 合并。Tauri 的 build script 在文件缺失时就会失败，因此 `bun run rust:check` / `rust:clippy` / `rust:test` 先放置一个空占位文件（`--placeholder`，只用于编译检查，不会进入安装包）。发布工作流在各自原生三元组的 runner 上运行 `tauri build`，由 `beforeBuildCommand` 取得正确的 bridge，无需另设步骤；当前不构建 universal 包。
+- **构建**：`scripts/mcp-sidecar.mjs` 构建 `mailx-mcp-bridge`（cargo 二进制名同为 `mailx-mcp-bridge`）并复制为 `desktop/binaries/mailx-mcp-<target triple>[.exe]`（该目录已加入 `.gitignore`）。`beforeDevCommand` 以 debug、`beforeBuildCommand` 以 release 调用它，并遵循 Tauri 提供的 `TAURI_ENV_TARGET_TRIPLE` / `TAURI_ENV_DEBUG`；`universal-apple-darwin` 会构建两个 macOS 架构后用 `lipo` 合并。Tauri 的 build script 在文件缺失时就会失败，因此 `bun run rust:check` / `rust:clippy` / `rust:test` 先放置一个空占位文件（`--placeholder`，只用于编译检查，不会进入安装包）。发布工作流在各自原生三元组的 runner 上运行 `tauri build`，由 `beforeBuildCommand` 取得正确的 bridge，无需另设步骤；当前不构建 universal 包。
+- **命名**：cargo 二进制叫 `mailx-mcp-bridge`，随包分发的 sidecar / 客户端命令叫 `mailx-mcp`。两者故意不同：`tauri-build` 会把 sidecar 去掉三元组后复制到 `target/<profile>/mailx-mcp`，若 cargo 二进制同名，空占位文件会覆盖真实 bridge（Windows CI 因此出现 `%1 is not a valid Win32 application`）。后端发现 bridge 为空文件时按“找不到 bridge”处理。
 - **运行时位置**：Tauri 把外部程序放在主程序旁（macOS `MailX.app/Contents/MacOS/mailx-mcp`，Windows 安装目录，deb / rpm 为 `/usr/bin`），`tauri dev` 同样复制到调试程序旁。后端按“主程序所在目录下的 `mailx-mcp`”解析。
 - **AppImage**：挂载路径每次启动都变，不能写进客户端配置。检测到环境变量 `APPIMAGE` 时，后端把 bridge 复制到 `<数据目录>/mcp/bin/mailx-mcp`（目录 `0700`，文件 `0755`，先写临时文件再改名；内容与打包版不同才覆盖），并返回该稳定路径。
 - **复制客户端配置**：命令 `mcp_client_config`（仅主窗口）返回 `{ command, args }`，`args` 恒为 `["--discovery", "<发现文件绝对路径>"]`，因为数据目录可能被用户改过。前端复制的 JSON 为 `{"mcpServers":{"mailx":{"command":…,"args":[…]}}}`（缩进两格）。该命令不读取 token。
@@ -120,7 +121,7 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 **crate 与二进制**
 
 - `mcp-server/`（crate `mailx-mcp-server`，库）：手写 `rmcp` `ServerHandler`、IPC 监听、握手、发现文件、状态。自带 `[lints.rust] unsafe_code = "deny"`，仅 Windows 命名管道模块以 `#![allow(unsafe_code)]` 放行，每个 `unsafe` 块都有 SAFETY 注释。公开接口：`McpServer::start(McpConfig { data_dir, tools }) -> Result<McpHandle, McpStartError>`、`McpHandle::{stop, status, subscribe}`、`McpStatus`、`McpFailureCode`、`StderrAudit`。可重复启停。
-- `mcp-bridge/`（crate `mailx-mcp-bridge`，二进制 `mailx-mcp`）：只依赖 tokio 与 `serde_json`，不链接 core，只读取发现文件。
+- `mcp-bridge/`（crate `mailx-mcp-bridge`，cargo 二进制 `mailx-mcp-bridge`，随包名称 `mailx-mcp`）：只依赖 tokio 与 `serde_json`，不链接 core，只读取发现文件。
 - 桌面：`desktop/src/mcp.rs`；设置项 `mcp.enabled`（`AppSettings.mcp`，默认 `false`，只能经 `SettingsStore::set_mcp_enabled` 修改，通用设置保存不会改变它）；命令 `mcp_get_status`、`mcp_set_enabled`（沿用现有 `<模块>_<动词>` 命名）；事件 `mailx://mcp-status-changed`。
 
 **端点与权限**

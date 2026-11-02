@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "mailx-mcp"
+name = "mailx-mcp-bridge"
 path = "src/main.rs"
 
 # Deliberately small: no mailx-core, no storage. See docs/contracts/mcp.md.

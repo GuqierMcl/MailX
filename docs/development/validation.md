@@ -113,7 +113,7 @@ MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.
 
 `mcp-server` 与 `mcp-bridge` 是工作区成员，已被上述三平台 `rust:clippy` / `rust:test` 覆盖，其中 Windows 命名管道与 DACL 代码只在 `windows-2025` 任务里编译并运行测试；没有为它们另设任务。
 
-本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。另有无状态（`2026-07-28`，不 initialize、客户端信息在 `_meta`）会话的端到端测试。Windows 部分只证明编译与同一组测试在 CI 通过，不是实机手测。真实客户端联调仅在 macOS 上做过：MCP Inspector CLI 与 Claude Code 2.1.316 成功调用四个工具；Windows、Linux 与其他客户端未测。
+本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp-bridge` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。另有无状态（`2026-07-28`，不 initialize、客户端信息在 `_meta`）会话的端到端测试。Windows 部分只证明编译与同一组测试在 CI 通过，不是实机手测。真实客户端联调仅在 macOS 上做过：MCP Inspector CLI 与 Claude Code 2.1.316 成功调用四个工具；Windows、Linux 与其他客户端未测。
 
 设置 → MCP 页、导航分组、标题栏状态图标由前端测试覆盖（开启前确认、取消保持关闭、关闭不确认、状态与各失败原因、复制的 JSON 含 `--discovery`、图标显隐与圆点、点击打开 MCP 页）；`desktop/src/mcp_sidecar.rs` 测试 bridge 解析、`mcp_client_config` 的参数与 AppImage 稳定副本（权限、内容变化时覆盖）；`scripts/mcp-sidecar.test.mjs` 测试 sidecar 命名与参数。sidecar 打包可用 `bun run tauri build --debug --bundles app` 在 macOS 上检查 `MailX.app/Contents/MacOS/mailx-mcp` 存在且可运行（`--discovery` 指向不存在的文件时退出码 69）；这不等于安装包安装后、其他平台或 AppImage 的行为已验证，未做手测；该条未涉及客户端联调（见上段）。
 

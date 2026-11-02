@@ -7,9 +7,9 @@ test("sidecar names carry the target triple and the Windows extension", () => {
 });
 
 test("the host triple builds without --target, others land under their triple", () => {
-  expect(builtPath("a-linux", "a-linux", true, "/t")).toBe("/t/release/mailx-mcp");
-  expect(builtPath("b-linux", "a-linux", false, "/t")).toBe("/t/b-linux/debug/mailx-mcp");
-  expect(builtPath("x-windows-msvc", "a-linux", true, "/t")).toBe("/t/x-windows-msvc/release/mailx-mcp.exe");
+  expect(builtPath("a-linux", "a-linux", true, "/t")).toBe("/t/release/mailx-mcp-bridge");
+  expect(builtPath("b-linux", "a-linux", false, "/t")).toBe("/t/b-linux/debug/mailx-mcp-bridge");
+  expect(builtPath("x-windows-msvc", "a-linux", true, "/t")).toBe("/t/x-windows-msvc/release/mailx-mcp-bridge.exe");
 });
 
 test("Tauri's environment picks the profile and target, flags override it", () => {

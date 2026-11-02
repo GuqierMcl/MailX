@@ -1,4 +1,4 @@
-//! Runs the built `mailx-mcp` binary against a real server through stdio.
+//! Runs the built `mailx-mcp-bridge` binary against a real server through stdio.
 
 #[path = "../../mcp-server/tests/common/mod.rs"]
 mod common;
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-const BIN: &str = env!("CARGO_BIN_EXE_mailx-mcp");
+const BIN: &str = env!("CARGO_BIN_EXE_mailx-mcp-bridge");
 
 struct Bridge {
     child: Child,

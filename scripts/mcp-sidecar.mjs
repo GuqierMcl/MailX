@@ -15,7 +15,11 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const PACKAGE = "mailx-mcp-bridge";
+// The shipped sidecar keeps the user-facing name `mailx-mcp`; the cargo binary is named
+// differently because `tauri-build` copies the sidecar into target/<profile>/ under the
+// stripped name `mailx-mcp`, which would overwrite a cargo binary of the same name.
 const BINARY = "mailx-mcp";
+const CARGO_BINARY = "mailx-mcp-bridge";
 const UNIVERSAL = "universal-apple-darwin";
 
 /** `desktop/binaries/mailx-mcp-<triple>[.exe]`, the name Tauri looks for. */
@@ -26,7 +30,7 @@ export function sidecarPath(triple, directory = join(root, "desktop", "binaries"
 /** Where cargo leaves the bridge for a triple; `host` triples build without `--target`. */
 export function builtPath(triple, host, release, targetDirectory = join(root, "target")) {
   const profile = release ? "release" : "debug";
-  const file = `${BINARY}${triple.includes("windows") ? ".exe" : ""}`;
+  const file = `${CARGO_BINARY}${triple.includes("windows") ? ".exe" : ""}`;
   return triple === host ? join(targetDirectory, profile, file) : join(targetDirectory, triple, profile, file);
 }
 

@@ -38,7 +38,11 @@ pub(crate) fn locate_bridge(
     let bundled = exe
         .parent()
         .map(|dir| dir.join(BRIDGE_FILE))
-        .filter(|path| path.is_file())
+        // Tauri's build script leaves an empty placeholder when the real bridge is not built.
+        .filter(|path| {
+            path.metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+        })
         .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
     if appimage {
         stable_copy(&bundled, data_dir)
@@ -152,6 +156,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let exe = dir.path().join("mailx-desktop");
         std::fs::write(&exe, b"app").unwrap();
+        assert!(locate_bridge(&exe, dir.path(), false).is_err());
+    }
+
+    #[test]
+    fn empty_placeholder_bridge_counts_as_missing() {
+        let (dir, exe) = app_dir_with_bridge(b"");
         assert!(locate_bridge(&exe, dir.path(), false).is_err());
     }
 
