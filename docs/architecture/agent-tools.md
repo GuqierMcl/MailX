@@ -56,7 +56,7 @@
 | `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、状态 |
 | `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标 |
 | `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页 |
-| `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源 |
+| `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源（`Draft.origin` 字段与界面标记已有，工具本身尚未实现） |
 | `get_ui_context` | ✓ | | 当前选中的邮件或正在编辑的草稿引用 |
 | `propose_draft_edit` | ✓ | | 对编辑器中的草稿提出修改，带 revision，由用户接受 |
 | `present_suggestions` | ✓ | | 摘要、待办等结构化建议展示到界面 |
@@ -92,7 +92,7 @@
 
 本地 MCP 先于内置 AI 落地（2026-11-02 决定）：内置 AI 涉及较多前端设计，暂缓；MCP 作为工具层的首个使用方。为避免工具层只为 MCP 服务，工具层测试在进程内分别以 MCP 与内置 Agent 主体调用。
 
-1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。
+1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。草稿来源（`DraftOrigin`、`create_draft_with_origin`、界面标记）与 HTML-only 邮件的分行纯文本已具备，纯文本分页等仍待工具层实现；目前没有任何入口创建 `mcp` 草稿。
 2. 工具层骨架、`RequestContext` 与首批四个共享工具，只在 core 内以进程内测试验证。
 3. M0 原型验证 `rmcp` 与本地 IPC，随后实现 MCP 适配层、桌面 IPC 监听与 stdio bridge。
 4. 设置中的 MCP 页、标题栏运行状态图标、复制客户端配置与 bridge 随应用分发。

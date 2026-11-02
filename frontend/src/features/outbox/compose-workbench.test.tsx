@@ -17,9 +17,9 @@ const mail: EmailSummary = {
 const detail: EmailDetail = { summary: mail, to: [], cc: [], replyTo: [], body: { text: '正文', hasHtml: false, truncated: false, remoteImagesBlocked: 0 }, bodyFailure: null, attachments: [] }
 
 function draft(id = '3f2b8c1e-9a4d-4e6f-8b1a-2c3d4e5f6a7b'): Draft {
-  return { id, accountId: account.id, kind: 'new', sourceEmailId: null, to: [{ name: null, address: 'li@example.org' }], cc: [], bcc: [], subject: '草稿主题', bodyHtml: '<p>草稿正文</p>', bodyText: '草稿正文', inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 2, attachments: [] }
+  return { id, accountId: account.id, kind: 'new', origin: 'user', sourceEmailId: null, to: [{ name: null, address: 'li@example.org' }], cc: [], bcc: [], subject: '草稿主题', bodyHtml: '<p>草稿正文</p>', bodyText: '草稿正文', inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 2, attachments: [] }
 }
-const summary = (d: Draft): DraftSummary => ({ id: d.id, accountId: d.accountId, kind: d.kind, sourceEmailId: null, to: d.to, subject: d.subject, preview: d.bodyText, updatedAt: d.updatedAt, revision: d.revision })
+const summary = (d: Draft): DraftSummary => ({ id: d.id, accountId: d.accountId, kind: d.kind, origin: d.origin, sourceEmailId: null, to: d.to, subject: d.subject, preview: d.bodyText, updatedAt: d.updatedAt, revision: d.revision })
 
 function item(overrides: Partial<OutboxItem> = {}): OutboxItem {
   return {
@@ -143,6 +143,18 @@ describe('drafts and outbox navigation', () => {
     setup({ outbox: [item(), item({ id: 'out-2', draftId: 'draft-2', state: 'failed' })] })
     const outbox = await screen.findByRole('button', { name: '发件箱' })
     expect(within(outbox.closest('li')!).getByLabelText('2 封未完成的邮件')).toHaveTextContent('2')
+  })
+
+  it('marks only drafts created via MCP in the list', async () => {
+    const mcp = { ...draft('33333333-3333-4333-8333-333333333333'), origin: 'mcp' as const, subject: '代理草稿' }
+    setup({ drafts: [draft(), mcp] })
+    await userEvent.click((await screen.findAllByRole('button', { name: '草稿' }))[0])
+    await screen.findByRole('list', { name: '草稿列表' })
+    const items = rows('草稿列表')
+    expect(items).toHaveLength(2)
+    const marked = items.filter((item) => within(item).queryByText('由 MCP 创建'))
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toHaveTextContent('代理草稿')
   })
 
   it('lists drafts in the island and shows a preview with 继续编辑 and 删除', async () => {

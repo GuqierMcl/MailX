@@ -484,6 +484,8 @@ data: string, kind: AvatarKind, };
 
 export type DraftKind = "new" | "reply" | "replyAll" | "forward";
 
+export type DraftOrigin = "user" | "mcp";
+
 export type Draft = { id: string, accountId: string, kind: DraftKind,
 /**
  * The message this draft answers or forwards. Cleared if that message
@@ -509,13 +511,13 @@ references: string | null, createdAt: string, updatedAt: string,
 /**
  * Advances on every saved change; updates must present the one they saw.
  */
-revision: number, attachments: Array<DraftAttachmentSummary>, };
+revision: number, attachments: Array<DraftAttachmentSummary>, origin: DraftOrigin, };
 
 export type DraftSummary = { id: string, accountId: string, kind: DraftKind, sourceEmailId: string | null, to: Array<MailAddress>, subject: string,
 /**
  * Start of the body on one line.
  */
-preview: string, updatedAt: string, revision: number, };
+preview: string, updatedAt: string, revision: number, origin: DraftOrigin, };
 
 export type CreateDraftRequest = {
 /**

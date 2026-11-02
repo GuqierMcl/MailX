@@ -95,6 +95,7 @@ export function DraftList({ drafts, loading, error, accounts, selectedId, onSele
             <div className="flex w-full items-center gap-2">
               <span className={cn('min-w-0 truncate', to ? 'font-semibold' : 'font-normal text-muted-foreground')}>{to || t('composer:list.noRecipients')}</span>
               {account && <span className="min-w-0 shrink truncate text-xs text-muted-foreground">| {account}</span>}
+              {draft.origin === 'mcp' && <span className="shrink-0 text-xs text-muted-foreground">{t('composer:draft.createdViaMcp')}</span>}
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{formatListTime(draft.updatedAt)}</span>
             </div>
             <span className="w-full truncate text-xs text-foreground/75">{draft.subject || t('composer:list.noSubject')}</span>

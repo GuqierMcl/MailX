@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Draft, DraftAttachmentSummary, DraftKind, InlineImage } from '@/generated/accounts'
+import type { Draft, DraftAttachmentSummary, DraftKind, DraftOrigin, InlineImage } from '@/generated/accounts'
 import { clientFailure, clientFailureCode, type MailxClient, type ClientFailure } from '@/lib/mailx-client'
 import { recipientsFromAddresses, toMailAddresses, type Recipient } from './address-parse'
 import { draftHtmlIsEmpty } from './draft-html'
@@ -68,6 +68,7 @@ type Notice = { kind: 'conflict' } | { kind: 'locked' }
 export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: (notice: Notice) => void) {
   const [fields, setFields] = useState<EditorFields | null>(null)
   const [kind, setKind] = useState<DraftKind>('new')
+  const [origin, setOrigin] = useState<DraftOrigin>('user')
   const [problem, setProblem] = useState<EditorProblem | null>(null)
   const [status, setStatus] = useState<SaveStatus>('idle')
   const [readOnly, setReadOnly] = useState(false)
@@ -113,6 +114,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     applyAttachments(draft.attachments)
     setChangeToken((value) => value + 1)
     setKind(draft.kind)
+    setOrigin(draft.origin)
     setStatus('idle')
   }, [applyAttachments])
 
@@ -413,6 +415,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   return {
     fields,
     kind,
+    origin,
     problem,
     status,
     readOnly,

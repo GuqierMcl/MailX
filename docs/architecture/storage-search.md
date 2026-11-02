@@ -49,7 +49,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 ### 正文缓存（v4）
 
 `messages` 追加 body_state（missing / fetching / ready / failed）、body_failure 和 preview。
-`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。当前净化版本为 2，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。
+`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。当前净化版本为 2，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。没有 text/plain 部分的邮件，plain_text 由净化后的 HTML 按块级元素分行生成（段落、`<br>`、表格行断行，列表项带 `- `，`<pre>` 保留换行，空行最多一个）；列表预览与 `partial_text` 仍折叠为单行。该行为只作用于新渲染的邮件，已缓存的旧行不会重渲染，没有回填。
 
 ### 远程图片的阅读期内存缓存
 
@@ -64,7 +64,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | attachments | id, message_id, mime_part, file_name, media_type, size, blob_id, content_id | 文件名仅用于展示；下载用 ID |
 | blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
 | pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
-| drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at | unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
+| drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at, origin | `origin`（迁移 v22）为 `user` / `mcp`，NOT NULL 默认 `user`，创建时由宿主写入、之后不变，目前只有 `user`；unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
 | draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，macOS 用户手测通过）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
 | outbox | id, draft_id, account_id, client_mutation_id, message_id, snapshot_hash, snapshot_size, snapshot_released_at, subject, recipients_preview, recipient_count, state, accepted_at, server_copy_message_id, deleted_locally_at, resolution 等；v18 加 preview, attachment_count | unique(account_id, client_mutation_id)；快照存为 blob（发信设计第 16.6 节），服务器副本对上后释放（第 16.7 节）。尚未对上的 `accepted` 行在已发送角色文件夹的列表中作为本机副本出现（已实现，见发信设计第 9 节） |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |

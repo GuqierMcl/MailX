@@ -22,6 +22,7 @@
     "conflictBeforeSend": "草稿已在别处修改，已加载最新版本，请确认后再发送"
   },
   "draft": {
+    "createdViaMcp": "由 MCP 创建",
     "gone": "这份草稿已不存在",
     "goneDescription": "它可能已被发送或删除。",
     "goneWindowDescription": "它可能已被发送或删除。关闭此窗口即可。",

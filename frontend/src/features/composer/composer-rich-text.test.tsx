@@ -19,7 +19,7 @@ function setup(bodyHtml = '<p>Hello</p>', attachments: DraftAttachmentSummary[] 
   const account = exampleAccount()
   const client = testClient([account])
   let saved: Draft = {
-    id: 'rich-draft', accountId: account.id, kind: 'new', sourceEmailId: null,
+    id: 'rich-draft', accountId: account.id, kind: 'new', origin: 'user', sourceEmailId: null,
     to: [{ address: 'test@example.org', name: null }], cc: [], bcc: [], subject: 'Rich text',
     ...mockDraftBody(bodyHtml), inReplyTo: null, references: null,
     createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z', revision: 1, attachments,

@@ -34,6 +34,35 @@ impl DraftKind {
     }
 }
 
+/// Who created a draft. Set by the host when the draft is created and never
+/// read from a request payload or changed by later updates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum DraftOrigin {
+    /// Written in the app by the user, including reply and forward drafts.
+    #[default]
+    User,
+    /// Created through the local MCP server.
+    Mcp,
+}
+
+impl DraftOrigin {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Mcp => "mcp",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "user" => Self::User,
+            "mcp" => Self::Mcp,
+            _ => return None,
+        })
+    }
+}
+
 /// A message being written. The core sanitizes HTML and derives plain text.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +91,7 @@ pub struct Draft {
     #[ts(type = "number")]
     pub revision: u32,
     pub attachments: Vec<DraftAttachmentSummary>,
+    pub origin: DraftOrigin,
 }
 
 impl Draft {
@@ -92,6 +122,7 @@ pub struct DraftSummary {
     pub updated_at: String,
     #[ts(type = "number")]
     pub revision: u32,
+    pub origin: DraftOrigin,
 }
 
 /// Creates an empty or pre-filled new draft. Retrying with the same

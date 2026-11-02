@@ -94,9 +94,83 @@ fn html_text_and_preview_exclude_script_and_style_text() {
     let result = rendered_html(
         "<style>p { color: red }</style><script>secret()</script><p>你好</p><b>世界 &amp; others</b>",
     );
-    assert_eq!(result.plain_text.as_deref(), Some("你好 世界 & others"));
+    assert_eq!(result.plain_text.as_deref(), Some("你好\n\n世界 & others"));
     assert_eq!(preview(Some(&"界".repeat(220))).chars().count(), 200);
     assert_eq!(preview(None), "");
+    assert_eq!(preview(result.plain_text.as_deref()), "你好 世界 & others");
+    assert_eq!(preview(Some("a\n\n  b\r\nc")), "a b c");
+    assert_eq!(preview(Some(&"a b ".repeat(100))).chars().count(), 200);
+}
+
+fn text_of(html: &str) -> String {
+    html::plain_text(&html::sanitize(html).html)
+}
+
+#[test]
+fn html_text_paragraphs_and_breaks_become_lines() {
+    assert_eq!(
+        text_of("<p>First   paragraph\n continues</p><p>Second<br>line<br><br>after</p>"),
+        "First paragraph continues\n\nSecond\nline\n\nafter"
+    );
+    assert_eq!(
+        text_of("<div>a</div><div>b</div>text<h1>T</h1>x"),
+        "a\nb\ntext\n\nT\n\nx"
+    );
+    assert_eq!(text_of("<b>bold</b> and <i>it</i>alic"), "bold and italic");
+}
+
+#[test]
+fn html_text_lists_get_prefixes_and_nesting_indent() {
+    assert_eq!(
+        text_of(
+            "<p>Todo</p><ul><li>one</li><li>two<ul><li>nested</li></ul></li><li><p>three</p></li></ul><p>end</p>"
+        ),
+        "Todo\n\n- one\n- two\n  - nested\n- three\n\nend"
+    );
+}
+
+#[test]
+fn html_text_tables_use_rows_and_cell_spacing() {
+    assert_eq!(
+        text_of("<table><tr><th>Name</th><th>Qty</th></tr><tr><td>Tea</td><td>2</td></tr></table>"),
+        "Name Qty\nTea 2"
+    );
+}
+
+#[test]
+fn html_text_pre_keeps_line_breaks_and_indent() {
+    assert_eq!(
+        text_of("<p>Code:</p><pre>fn main() {\n    run();\n}</pre><p>done</p>"),
+        "Code:\n\nfn main() {\n    run();\n}\n\ndone"
+    );
+}
+
+#[test]
+fn html_text_collapses_blank_lines_and_trims() {
+    assert_eq!(
+        text_of("<p> </p><br><br><br><p>  a  </p><div></div><div> </div><hr><p>b</p><br>"),
+        "a\n\nb"
+    );
+    assert_eq!(text_of("<style>x{}</style><title>t</title>  "), "");
+}
+
+#[test]
+fn html_text_decodes_entities_and_keeps_cjk() {
+    assert_eq!(
+        text_of("<p>Fish &amp; chips &lt;3&nbsp;&copy;</p><p>你好，世界<br>第二行</p>"),
+        "Fish & chips <3 ©\n\n你好，世界\n第二行"
+    );
+}
+
+#[test]
+fn html_only_message_text_is_multiline_but_partial_text_is_single_line() {
+    let body = "<p>Hi Ana,</p><p>Lunch?<br>12:30</p><ul><li>a</li><li>b</li></ul>";
+    let raw = email("text/html; charset=utf-8", body);
+    assert_eq!(
+        render(&raw, "owner").unwrap().plain_text.as_deref(),
+        Some("Hi Ana,\n\nLunch?\n12:30\n\n- a\n- b")
+    );
+    assert_eq!(partial_text(&raw).unwrap(), "Hi Ana, Lunch? 12:30 - a - b");
 }
 
 #[test]

@@ -105,6 +105,7 @@ fn main() {
         SentCopiesChanged,
         AvatarImage,
         DraftKind,
+        DraftOrigin,
         Draft,
         DraftSummary,
         CreateDraftRequest,

@@ -104,6 +104,7 @@ impl AccountService {
         &mut self,
         request: CreateDraftRequest,
         default_account_id: &str,
+        origin: DraftOrigin,
     ) -> Result<Draft, AppError> {
         validate_uuid(&request.client_mutation_id, "clientMutationId")?;
         let content = validate::normalize(DraftContent {
@@ -127,6 +128,7 @@ impl AccountService {
             id: &id,
             account_id: &account_id,
             kind: DraftKind::New,
+            origin,
             source_email_id: None,
             content: &content,
             in_reply_to: None,
@@ -254,6 +256,7 @@ impl AccountService {
                 id: &id,
                 account_id: &detail.summary.account_id,
                 kind: request.kind,
+                origin: DraftOrigin::User,
                 // A local Sent copy is no `messages` row to point at.
                 source_email_id: Some(request.email_id.as_str())
                     .filter(|id| !id.starts_with(crate::mail::LOCAL_SENT_PREFIX)),

@@ -260,6 +260,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
             <AlertDescription>{t('composer:draft.lockedDescription')}</AlertDescription>
           </Alert>
         )}
+        {editor.origin === 'mcp' && <p className="px-2 text-xs text-muted-foreground">{t('composer:draft.createdViaMcp')}</p>}
         <div className="flex items-center gap-2 rounded-lg px-2 py-1">
           <span id="composer-from-label" className="w-14 shrink-0 text-xs text-muted-foreground">{t('composer:field.from')}</span>
           <Select

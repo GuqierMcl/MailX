@@ -153,6 +153,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_archives"],
         sql: include_str!("migrations/0021_message_archives.sql"),
     },
+    Migration {
+        version: 22,
+        description: "draft origin",
+        required_tables: &[],
+        sql: include_str!("migrations/0022_draft_origin.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -557,7 +563,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 21);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 22);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -565,7 +571,14 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for column in ["id", "account_id", "kind", "revision", "client_mutation_id"] {
+        for column in [
+            "id",
+            "account_id",
+            "kind",
+            "revision",
+            "client_mutation_id",
+            "origin",
+        ] {
             assert!(columns.iter().any(|name| name == column), "{column}");
         }
         assert!(
@@ -746,7 +759,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            21
+            22
         );
     }
 

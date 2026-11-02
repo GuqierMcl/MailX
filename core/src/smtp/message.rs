@@ -258,7 +258,7 @@ mod tests {
     use mail_parser::{HeaderValue as ParsedValue, MessageParser, MimeHeaders};
 
     use super::*;
-    use crate::drafts::types::DraftKind;
+    use crate::drafts::types::{DraftKind, DraftOrigin};
 
     fn who(name: Option<&str>, address: &str) -> MailAddress {
         MailAddress {
@@ -272,6 +272,7 @@ mod tests {
             id: "d".into(),
             account_id: "a".into(),
             kind: DraftKind::New,
+            origin: DraftOrigin::User,
             source_email_id: None,
             to: vec![who(Some("李四"), "li@example.org")],
             cc: vec![],

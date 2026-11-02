@@ -21,7 +21,7 @@ const account = exampleAccount({ senderName: '林薇' })
 
 function draft(overrides: Partial<Draft> = {}): Draft {
   return {
-    id: DRAFT_ID, accountId: account.id, kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
+    id: DRAFT_ID, accountId: account.id, kind: 'new', origin: 'user', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyText: overrides.bodyHtml?.replace(/<[^>]+>/g, '') ?? '', bodyHtml: '',
     inReplyTo: null, references: null, createdAt: '2026-10-23T00:00:00Z', updatedAt: '2026-10-23T00:00:00Z', revision: 1, attachments: [], ...overrides,
   }
 }
@@ -65,6 +65,16 @@ describe('composer layout', () => {
     expect(status()).toHaveTextContent(/^$/)
     await userEvent.click(screen.getByRole('button', { name: '抄送' }))
     expect(screen.getByRole('textbox', { name: '抄送' })).toBeInTheDocument()
+  })
+
+  it('labels the draft 由 MCP 创建 only when MCP created it', async () => {
+    const first = setup()
+    await body()
+    expect(screen.queryByText('由 MCP 创建')).not.toBeInTheDocument()
+    first.view.unmount()
+    setup(draft({ origin: 'mcp' }))
+    await body()
+    expect(screen.getByText('由 MCP 创建')).toBeInTheDocument()
   })
 
   it('opens Cc and Bcc rows when the draft already has those recipients', async () => {

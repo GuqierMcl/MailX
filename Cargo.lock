@@ -2863,6 +2863,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cssparser 0.37.0",
+ "ego-tree",
  "fs2",
  "futures-util",
  "html5ever 0.39.0",
