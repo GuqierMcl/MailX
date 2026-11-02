@@ -16,6 +16,7 @@ use tauri::async_runtime::JoinHandle;
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow};
 
 use crate::commands::{EmptyArgs, authorize, parse, respond};
+use crate::mcp_sidecar::McpClientConfig;
 use crate::state::DesktopState;
 
 pub(crate) const STATUS_EVENT: &str = "mailx://mcp-status-changed";
@@ -215,6 +216,21 @@ pub(crate) async fn mcp_set_enabled(
         Ok(args) => set_enabled(&app, &state, &manager, args.enabled).await,
         Err(error) => Err(error),
     }))
+}
+
+/// Command and arguments a client needs to start the bridge. Reads no secret:
+/// the discovery file's token is only ever read by the bridge itself.
+#[tauri::command]
+pub(crate) async fn mcp_client_config(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<McpClientConfig>, ()> {
+    let args =
+        authorize(&window, "mcp_client_config").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(args.and_then(|_| {
+        crate::mcp_sidecar::current_client_config(&state.data_dir()?)
+    })))
 }
 
 async fn set_enabled(

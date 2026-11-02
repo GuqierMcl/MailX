@@ -143,6 +143,7 @@ const MAIN_ONLY: &[&str] = &[
     "updater_open_link",
     "mcp_get_status",
     "mcp_set_enabled",
+    "mcp_client_config",
 ];
 
 /// Commands both kinds may call.
@@ -407,6 +408,7 @@ mod tests {
             ("settings_update", true, false),
             ("mcp_get_status", true, false),
             ("mcp_set_enabled", true, false),
+            ("mcp_client_config", true, false),
             ("notifications_test", true, false),
             ("notifications_preview_sound", true, false),
             ("window_get_chrome", true, true),

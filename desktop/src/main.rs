@@ -12,6 +12,7 @@ mod lifecycle;
 mod locale;
 #[cfg_attr(feature = "body-webview-test", allow(dead_code))]
 mod mcp;
+mod mcp_sidecar;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
@@ -301,6 +302,7 @@ fn main() {
             updater::updater_open_link,
             mcp::mcp_get_status,
             mcp::mcp_set_enabled,
+            mcp::mcp_client_config,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the MailX desktop host")

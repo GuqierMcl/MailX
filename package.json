@@ -36,10 +36,11 @@
     "i18n:check": "bun scripts/check-i18n.mjs",
     "icons:generate": "bun scripts/generate-icons.mjs",
     "icons:check": "bun scripts/generate-icons.mjs --check",
-    "rust:check": "cargo check --workspace --locked",
+    "mcp:sidecar": "bun scripts/mcp-sidecar.mjs",
+    "rust:check": "bun scripts/mcp-sidecar.mjs --placeholder && cargo check --workspace --locked",
     "rust:fmt": "cargo fmt --all -- --check",
-    "rust:clippy": "cargo clippy --workspace --all-targets --locked -- -D warnings",
-    "rust:test": "cargo test --workspace --locked",
+    "rust:clippy": "bun scripts/mcp-sidecar.mjs --placeholder && cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "rust:test": "bun scripts/mcp-sidecar.mjs --placeholder && cargo test --workspace --locked",
     "check": "bun run version:check && bun run version:test && bun run i18n:check && bun run types:check && bun run typecheck && bun run lint && bun run frontend:test && bun run build && bun run rust:check"
   },
   "devDependencies": {

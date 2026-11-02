@@ -2,13 +2,14 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { ComputerIcon, InformationCircleIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon } from '@hugeicons/core-free-icons'
+import { ComputerIcon, InformationCircleIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -22,9 +23,10 @@ import { NotificationsPane } from './notifications-pane'
 import { ComposePane } from './compose-pane'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { GeneralPane } from './general-pane'
+import { McpPane } from './mcp-pane'
 import { AutoCheckRow, UpdateStatusRow } from '@/features/updater/about-updates'
 
-export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -39,14 +41,29 @@ type SettingsDialogProps = {
 /** Application preferences. Email accounts have their own dialog. */
 export function SettingsDialog({ client, target, onClose }: SettingsDialogProps) {
   useTranslation()
-  const SECTIONS: { id: SettingsSection; name: string; icon: IconSvgElement }[] = [
-    { id: 'general', name: t('settings:general'), icon: ComputerIcon },
-    { id: 'appearance', name: t('settings:appearance'), icon: PaintBoardIcon },
-    { id: 'notifications', name: t('settings:notifications'), icon: Notification03Icon },
-    { id: 'compose', name: t('settings:compose'), icon: PencilEdit02Icon },
-    { id: 'security', name: t('settings:security'), icon: Shield01Icon },
-    { id: 'about', name: t('settings:about'), icon: InformationCircleIcon },
+  type NavItem = { id: SettingsSection; name: string; icon: IconSvgElement }
+  // Related pages sit together under a small heading; About stands alone at the bottom.
+  const GROUPS: { id: string; heading: string; items: NavItem[] }[] = [
+    {
+      id: 'app',
+      heading: t('settings:groupApp'),
+      items: [
+        { id: 'general', name: t('settings:general'), icon: ComputerIcon },
+        { id: 'appearance', name: t('settings:appearance'), icon: PaintBoardIcon },
+        { id: 'notifications', name: t('settings:notifications'), icon: Notification03Icon },
+      ],
+    },
+    {
+      id: 'mail',
+      heading: t('settings:groupMail'),
+      items: [
+        { id: 'compose', name: t('settings:compose'), icon: PencilEdit02Icon },
+        { id: 'security', name: t('settings:security'), icon: Shield01Icon },
+      ],
+    },
+    { id: 'integrations', heading: t('settings:groupIntegrations'), items: [{ id: 'mcp', name: t('settings:mcp'), icon: McpServerIcon }] },
   ]
+  const ABOUT: NavItem = { id: 'about', name: t('settings:about'), icon: InformationCircleIcon }
   const [section, setSection] = useState<SettingsSection>('general')
 
   // Reset the view whenever the dialog is opened with a new target.
@@ -56,7 +73,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
     if (target) setSection(target.section)
   }
 
-  const sectionName = SECTIONS.find((item) => item.id === section)?.name
+  const sectionName = [...GROUPS.flatMap((group) => group.items), ABOUT].find((item) => item.id === section)?.name
 
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
@@ -69,20 +86,16 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
               <DialogTitle className="text-base font-semibold">{t('settings:title')}</DialogTitle>
             </SidebarHeader>
-            <SidebarContent>
-              <SidebarGroup className="py-2 md:p-2">
-                <SidebarGroupContent>
-                  <SidebarMenu className="flex-row md:flex-col">
-                    {SECTIONS.map((item) => (
-                      <SidebarMenuItem key={item.id}>
-                        <SidebarMenuButton isActive={item.id === section} onClick={() => setSection(item.id)}>
-                          <HugeiconsIcon icon={item.icon} />
-                          <span>{item.name}</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
+            <SidebarContent className="flex-row md:flex-col">
+              {GROUPS.map((group) => (
+                <SidebarGroup key={group.id} className="py-2 md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
+                  {/* The strip in narrow windows has no room for headings. */}
+                  <SidebarGroupLabel className="hidden md:flex">{group.heading}</SidebarGroupLabel>
+                  <NavMenu items={group.items} section={section} onSelect={setSection} />
+                </SidebarGroup>
+              ))}
+              <SidebarGroup className="py-2 md:mt-auto md:p-2">
+                <NavMenu items={[ABOUT]} section={section} onSelect={setSection} />
               </SidebarGroup>
             </SidebarContent>
           </Sidebar>
@@ -96,6 +109,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
+              {section === 'mcp' && <McpPane client={client} onOpenSection={setSection} />}
               {section === 'about' && <AboutSection client={client} />}
             </div>
           </main>
@@ -129,5 +143,22 @@ function AboutSection({ client }: { client: MailxClient }) {
         <SettingsRow label={t('settings:messageContent')} description={t('settings:messageContentDescription')} />
       </SettingsGroup>
     </SettingsPage>
+  )
+}
+
+function NavMenu({ items, section, onSelect }: { items: { id: SettingsSection; name: string; icon: IconSvgElement }[]; section: SettingsSection; onSelect: (section: SettingsSection) => void }) {
+  return (
+    <SidebarGroupContent>
+      <SidebarMenu className="flex-row md:flex-col">
+        {items.map((item) => (
+          <SidebarMenuItem key={item.id}>
+            <SidebarMenuButton isActive={item.id === section} onClick={() => onSelect(item.id)}>
+              <HugeiconsIcon icon={item.icon} />
+              <span>{item.name}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </SidebarMenu>
+    </SidebarGroupContent>
   )
 }

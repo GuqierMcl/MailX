@@ -42,7 +42,7 @@ import type {
   RemoveAccountRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
-import type { McpStatus } from '@/features/mcp/types'
+import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
 import type { UpdateSnapshot } from '@/features/updater/types'
 
 export type ClientFailure = AppError | {
@@ -237,6 +237,8 @@ export interface MailxClient {
   getMcpStatus(): Promise<McpStatus>
   /** Persists `mcp.enabled`, starts or stops the server, and returns the resulting status. */
   setMcpEnabled(enabled: boolean): Promise<McpStatus>
+  /** Command and arguments for a client's `mcpServers` entry; `--discovery` is always among them. */
+  getMcpClientConfig(): Promise<McpClientConfig>
   /** Status changes: connections coming and going, start failures, stop. */
   onMcpStatus(listener: (status: McpStatus) => void): () => void
   /** Every change of the update state. */
@@ -501,6 +503,7 @@ export function createDesktopClient(): MailxClient {
     onUpdateState: (listener) => subscribe<UpdateSnapshot>(HOST_EVENTS.updater, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
+    getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),
     onMcpStatus: (listener) => subscribe<McpStatus>(HOST_EVENTS.mcp, listener),
   }
 }

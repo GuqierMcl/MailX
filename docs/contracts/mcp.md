@@ -1,6 +1,6 @@
 # MCP 初始设计
 
-状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发尚未实现，也未与真实 MCP 客户端联调。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
+状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发（Tauri sidecar）已有实现，尚未在任何平台手测，也未与真实 MCP 客户端联调。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
 
 ## 1. 角色与协议
 
@@ -85,9 +85,14 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 静态 Bearer token 可作为受控开发实验，但不能据此宣称完整标准授权兼容；实际公开部署前再确定授权服务器集成、发现与配对 UX。Session ID 只用于协议会话，不是认证凭据。远程 MCP 未完成时，Web 版本仍可独立发布但保持该端点关闭。
 
-## 6. 分发（草案）
+## 6. 分发
 
-首版建议把 stdio bridge 作为桌面应用的附带可执行程序随安装包分发，MCP 设置页提供“复制客户端配置”，生成带 bridge 绝对路径的配置片段，版本随应用一致。
+stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]`）随安装包分发，版本与应用一致。
+
+- **构建**：`scripts/mcp-sidecar.mjs` 构建 `mailx-mcp-bridge` 并复制为 `desktop/binaries/mailx-mcp-<target triple>[.exe]`（该目录已加入 `.gitignore`）。`beforeDevCommand` 以 debug、`beforeBuildCommand` 以 release 调用它，并遵循 Tauri 提供的 `TAURI_ENV_TARGET_TRIPLE` / `TAURI_ENV_DEBUG`；`universal-apple-darwin` 会构建两个 macOS 架构后用 `lipo` 合并。Tauri 的 build script 在文件缺失时就会失败，因此 `bun run rust:check` / `rust:clippy` / `rust:test` 先放置一个空占位文件（`--placeholder`，只用于编译检查，不会进入安装包）。发布工作流在各自原生三元组的 runner 上运行 `tauri build`，由 `beforeBuildCommand` 取得正确的 bridge，无需另设步骤；当前不构建 universal 包。
+- **运行时位置**：Tauri 把外部程序放在主程序旁（macOS `MailX.app/Contents/MacOS/mailx-mcp`，Windows 安装目录，deb / rpm 为 `/usr/bin`），`tauri dev` 同样复制到调试程序旁。后端按“主程序所在目录下的 `mailx-mcp`”解析。
+- **AppImage**：挂载路径每次启动都变，不能写进客户端配置。检测到环境变量 `APPIMAGE` 时，后端把 bridge 复制到 `<数据目录>/mcp/bin/mailx-mcp`（目录 `0700`，文件 `0755`，先写临时文件再改名；内容与打包版不同才覆盖），并返回该稳定路径。
+- **复制客户端配置**：命令 `mcp_client_config`（仅主窗口）返回 `{ command, args }`，`args` 恒为 `["--discovery", "<发现文件绝对路径>"]`，因为数据目录可能被用户改过。前端复制的 JSON 为 `{"mcpServers":{"mailx":{"command":…,"args":[…]}}}`（缩进两格）。该命令不读取 token。
 
 后续可提供 npm 薄启动器，供客户端配置 `npx` 一类命令：启动器只读取桌面应用写出的发现信息，定位并执行应用自带的 bridge，不打包原生程序，也不实现 MCP 逻辑。包名、npm scope 和是否发布均未决定。不安装桌面应用即可使用的场景属于远程 MCP，不由该启动器解决。
 
@@ -139,4 +144,6 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 **bridge**：`mailx-mcp [--discovery <路径>]`；发现文件优先级为 `--discovery`、环境变量 `MAILX_MCP_DISCOVERY`、`MAILX_DATA_DIR/mcp-discovery.json`、再按平台默认数据目录（macOS `~/Library/Application Support/MailX`，Windows `%APPDATA%\MailX`，其他 `$XDG_DATA_HOME` 或 `~/.local/share` 下的 `MailX`）。这一默认值**复制自** `desktop/src/storage_location.rs`，两处需同步修改。核心不可用时对第一个带 `id` 的请求回 JSON-RPC 错误：`code = -32001`，`message` 以 `CORE_UNAVAILABLE:` 开头并附中英文提示，`data = {"code":"CORE_UNAVAILABLE","reason":…}`，`reason` 为 `discoveryMissing`、`discoveryInvalid`、`connectFailed`、`handshakeRejected` 之一；通知不回应；等待至多 30 秒；stderr 写一行说明。stdin 到达 EOF 即视为客户端结束（命名管道没有半关闭）：bridge 刷新写端，给服务端最多 2 秒（`DRAIN_GRACE`）送完剩余回复，然后丢弃 IPC 连接并以 `0` 退出，服务端随连接断开释放会话；服务端先关闭时（例如用户关闭 MCP）立即结束并以 `0` 退出，即使客户端仍保持 stdin 打开；bridge 以 `shutdown_background` 结束运行时，不等待无法取消的 stdin 阻塞读取（核心不可用路径同样适用）。退出码：`0` 正常结束，`64` 参数错误，`69` 核心不可用。
 
-**仍未验证**：Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。
+**设置页与分发**：设置 → MCP 页含开关（开启前确认）、状态行、说明与复制配置；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
+
+**仍未验证**：各平台实机手测（含设置页、标题栏图标、复制配置和 sidecar 路径）、AppImage 实机复制、Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。

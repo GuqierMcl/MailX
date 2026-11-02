@@ -3,6 +3,7 @@ import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
 import { UpdaterProvider } from '@/features/updater/updater-provider'
 import { useUpdater } from '@/features/updater/updater-context'
+import { McpTitleIcon } from '@/features/mcp/mcp-title-icon'
 import { UpdateIndicator } from '@/features/updater/update-indicator'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -101,11 +102,12 @@ function App() {
   )
 }
 
-/** The update button and the theme toggle share the trailing slot, in that order. */
+/** The MCP status icon, the update button and the theme toggle share the trailing slot, in that order. */
 function UpdaterTitleBar({ client }: { client: MailxClient }) {
   const { snapshot, openDialog } = useUpdater()
   return (
     <>
+      <McpTitleIcon client={client} />
       <UpdateIndicator snapshot={snapshot} onOpen={openDialog} />
       <ThemeToggle client={client} />
     </>

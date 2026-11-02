@@ -23,7 +23,7 @@ import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
-import type { McpStatus } from '@/features/mcp/types'
+import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
@@ -603,6 +603,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
       return structuredClone(mcpStatus)
     },
+    getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'] }),
     onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
     getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
     async onSettingsChanged(listener) {

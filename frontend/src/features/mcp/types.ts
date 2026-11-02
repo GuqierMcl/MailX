@@ -15,3 +15,9 @@ export type McpStatus =
   | { state: 'off' }
   | { state: 'running'; connections: number; lastClientName: string | null }
   | { state: 'failed'; code: McpFailureCode }
+
+/**
+ * What a client's `mcpServers` entry runs, mirroring `McpClientConfig` in
+ * `desktop/src/mcp_sidecar.rs`. `args` always begin with `--discovery <file>`.
+ */
+export type McpClientConfig = { command: string; args: string[] }

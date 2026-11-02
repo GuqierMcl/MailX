@@ -3,9 +3,9 @@
   "productName": "MailX",
   "identifier": "com.mailxapp.desktop",
   "build": {
-    "beforeDevCommand": "bun run --cwd frontend dev",
+    "beforeDevCommand": "bun scripts/mcp-sidecar.mjs --debug && bun run --cwd frontend dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "bun run --cwd frontend build",
+    "beforeBuildCommand": "bun scripts/mcp-sidecar.mjs && bun run --cwd frontend build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
@@ -34,6 +34,9 @@
     "createUpdaterArtifacts": true,
     "active": true,
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "externalBin": [
+      "binaries/mailx-mcp"
+    ],
     "category": "Productivity",
     "shortDescription": "本地优先的 AI 原生邮件工作台",
     "icon": [
