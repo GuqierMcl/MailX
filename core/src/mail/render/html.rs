@@ -548,13 +548,186 @@ fn srcset_remote_count(value: &str) -> u32 {
     count
 }
 
+/// Flatten sanitized HTML to readable text: block elements and `<br>` become
+/// line breaks, list items get a `- ` prefix (indented two spaces per nesting
+/// level), table cells are separated by a space, `<pre>` keeps its line breaks,
+/// and every other run of whitespace collapses to one space. Lines are trimmed
+/// and blank-line runs shrink to a single blank line. Style, script, head and
+/// title content is not text of the message.
 pub(super) fn plain_text(html: &str) -> String {
+    enum Visit<'a> {
+        Enter(ego_tree::NodeRef<'a, Node>),
+        Exit(&'a str),
+    }
+
     let document = Html::parse_fragment(html);
-    document.tree.root().descendants().filter_map(|node| {
-        let text = node.value().as_text()?;
-        if node.parent().is_some_and(|parent| matches!(parent.value(), Node::Element(element) if element.name() == "style")) {
-            return None;
+    let mut out = TextOut::default();
+    let mut stack = vec![Visit::Enter(document.tree.root())];
+    while let Some(visit) = stack.pop() {
+        match visit {
+            Visit::Enter(node) => match node.value() {
+                Node::Text(text) => out.text(text.text.as_ref()),
+                Node::Element(element) => {
+                    let name = element.name();
+                    if matches!(name, "style" | "script" | "head" | "title" | "template") {
+                        continue;
+                    }
+                    out.enter(name);
+                    stack.push(Visit::Exit(name));
+                    let children: Vec<_> = node.children().collect();
+                    stack.extend(children.into_iter().rev().map(Visit::Enter));
+                }
+                _ => {
+                    let children: Vec<_> = node.children().collect();
+                    stack.extend(children.into_iter().rev().map(Visit::Enter));
+                }
+            },
+            Visit::Exit(name) => out.exit(name),
         }
-        Some(text.text.as_ref())
-    }).flat_map(str::split_whitespace).collect::<Vec<_>>().join(" ")
+    }
+    out.finish()
+}
+
+#[derive(Default)]
+struct TextOut {
+    buf: String,
+    /// Line breaks owed before the next text (1 = new line, 2 = blank line).
+    pending: u8,
+    /// A collapsed inline space is owed before the next word.
+    space: bool,
+    prefix: Option<String>,
+    /// Breaks owed when the current list item opened; nested blocks cannot add more.
+    prefix_cap: u8,
+    list_depth: usize,
+    pre_depth: usize,
+}
+
+impl TextOut {
+    fn breaks(&mut self, count: u8) {
+        self.pending = self.pending.max(count);
+        self.space = false;
+    }
+
+    fn enter(&mut self, name: &str) {
+        match name {
+            "br" => {
+                self.pending = (self.pending + 1).min(2);
+                self.space = false;
+            }
+            "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "hr" => self.breaks(2),
+            "pre" => {
+                self.breaks(2);
+                self.pre_depth += 1;
+            }
+            "ul" | "ol" | "menu" => {
+                self.breaks(1);
+                self.list_depth += 1;
+            }
+            "li" => {
+                self.breaks(1);
+                self.prefix_cap = self.pending;
+                self.prefix = Some(format!(
+                    "{}- ",
+                    "  ".repeat(self.list_depth.saturating_sub(1))
+                ));
+            }
+            "td" | "th" => self.space = true,
+            "div" | "tr" | "table" | "section" | "article" | "header" | "footer" | "nav"
+            | "aside" | "main" | "address" | "figure" | "figcaption" | "dl" | "dt" | "dd"
+            | "fieldset" | "form" | "details" | "summary" | "caption" | "thead" | "tbody"
+            | "tfoot" | "center" => self.breaks(1),
+            _ => {}
+        }
+    }
+
+    fn exit(&mut self, name: &str) {
+        match name {
+            "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" => self.breaks(2),
+            "pre" => {
+                self.pre_depth = self.pre_depth.saturating_sub(1);
+                self.breaks(2);
+            }
+            "ul" | "ol" | "menu" => {
+                self.list_depth = self.list_depth.saturating_sub(1);
+                self.breaks(1);
+            }
+            "td" | "th" => self.space = true,
+            "li" | "div" | "tr" | "table" | "section" | "article" | "header" | "footer" | "nav"
+            | "aside" | "main" | "address" | "figure" | "figcaption" | "dl" | "dt" | "dd"
+            | "fieldset" | "form" | "details" | "summary" | "caption" | "thead" | "tbody"
+            | "tfoot" | "center" => self.breaks(1),
+            _ => {}
+        }
+    }
+
+    /// Write owed breaks, list prefix and inline space ahead of visible text.
+    fn start_text(&mut self) {
+        if self.prefix.is_some() {
+            self.pending = self.pending.min(self.prefix_cap);
+        }
+        if !self.buf.is_empty() {
+            for _ in 0..self.pending {
+                self.buf.push('\n');
+            }
+        }
+        let line_start = self.buf.is_empty() || self.buf.ends_with('\n');
+        self.pending = 0;
+        if let Some(prefix) = self.prefix.take() {
+            self.buf.push_str(&prefix);
+        } else if self.space && !line_start {
+            self.buf.push(' ');
+        }
+        self.space = false;
+    }
+
+    fn text(&mut self, text: &str) {
+        if self.pre_depth > 0 {
+            if text.is_empty() {
+                return;
+            }
+            self.start_text();
+            let mut lines = text.split('\n').peekable();
+            while let Some(line) = lines.next() {
+                self.buf.push_str(line.trim_end_matches('\r'));
+                if lines.peek().is_some() {
+                    self.buf.push('\n');
+                }
+            }
+            return;
+        }
+        if text.starts_with(char::is_whitespace) {
+            self.space = true;
+        }
+        for (index, word) in text.split_whitespace().enumerate() {
+            if index > 0 {
+                self.space = true;
+            }
+            self.start_text();
+            self.buf.push_str(word);
+        }
+        if text.ends_with(char::is_whitespace) {
+            self.space = true;
+        }
+    }
+
+    fn finish(self) -> String {
+        let mut result = String::with_capacity(self.buf.len());
+        let mut blank = false;
+        for line in self.buf.split('\n') {
+            let line = line.trim_end();
+            if line.is_empty() {
+                blank = !result.is_empty();
+                continue;
+            }
+            if !result.is_empty() {
+                result.push('\n');
+                if blank {
+                    result.push('\n');
+                }
+            }
+            blank = false;
+            result.push_str(line);
+        }
+        result
+    }
 }

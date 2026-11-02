@@ -139,9 +139,25 @@ pub fn partial_text(raw: &[u8]) -> Result<String, RenderError> {
     Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-/// A list excerpt, counted in Unicode scalar values rather than UTF-8 bytes.
+/// A single-line list excerpt, counted in Unicode scalar values rather than
+/// UTF-8 bytes. Body text can span lines; the excerpt never does.
 pub fn preview(text: Option<&str>) -> String {
-    text.unwrap_or_default().chars().take(200).collect()
+    let mut out = String::new();
+    let mut count = 0;
+    for word in text.unwrap_or_default().split_whitespace() {
+        if count > 0 {
+            out.push(' ');
+            count += 1;
+        }
+        for c in word.chars() {
+            if count == 200 {
+                return out;
+            }
+            out.push(c);
+            count += 1;
+        }
+    }
+    out
 }
 
 /// Re-read one inline entity from its owning raw MIME. A duplicate Content-ID

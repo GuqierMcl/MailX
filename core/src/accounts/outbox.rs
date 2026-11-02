@@ -563,6 +563,7 @@ mod tests {
                 }))
                 .unwrap(),
                 "",
+                crate::drafts::types::DraftOrigin::User,
             )
             .unwrap()
     }
@@ -830,6 +831,7 @@ mod tests {
                 }))
                 .unwrap(),
                 "",
+                crate::drafts::types::DraftOrigin::User,
             )
             .unwrap();
         let error = service.queue_send(&request(&empty), 0, t0()).unwrap_err();

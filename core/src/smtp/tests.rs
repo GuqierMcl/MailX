@@ -9,7 +9,7 @@ use super::message::{OutgoingMessage, SmtpEnvelope, build};
 use super::reply::sanitize;
 use super::*;
 use crate::accounts::types::ProxyKind;
-use crate::drafts::types::{Draft, DraftKind};
+use crate::drafts::types::{Draft, DraftKind, DraftOrigin};
 use crate::mail::MailAddress;
 use crate::net::test_support::{TestTls, dead_port, fake_http_connect, fake_socks5, proxy_route};
 
@@ -612,6 +612,7 @@ async fn a_built_message_survives_the_session_and_parses_back() {
         id: "d".into(),
         account_id: "a".into(),
         kind: DraftKind::New,
+        origin: DraftOrigin::User,
         source_email_id: None,
         to: vec![MailAddress {
             name: Some("李四".into()),

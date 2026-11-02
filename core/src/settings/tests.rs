@@ -7,6 +7,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
+        mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
@@ -351,7 +352,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "sound": "system",
                     "mutedAccounts": []
                 },
-                "compose": { "defaultAccountId": "", "undoSendSeconds": 0 }
+                "compose": { "defaultAccountId": "", "undoSendSeconds": 0 },
+                "mcp": { "enabled": false }
             },
             "stored": false,
             "recovered": false,
@@ -1105,4 +1107,29 @@ fn failed_native_close_choice_does_not_change_memory_or_revision() {
     fs::create_dir(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
     assert!(store.set_close_behavior(CloseBehavior::Quit).is_err());
     assert_eq!(store.get().unwrap(), before);
+}
+
+#[test]
+fn mcp_is_off_by_default_and_only_its_own_setter_changes_it() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let initial = store.get().unwrap();
+    assert!(!initial.settings.mcp.enabled);
+
+    let enabled = store.set_mcp_enabled(true).unwrap();
+    assert!(enabled.settings.mcp.enabled);
+    assert_eq!(enabled.revision, initial.revision + 1);
+
+    // A whole-object save from the UI cannot flip the switch.
+    let mut sent = enabled.settings.clone();
+    sent.mcp.enabled = false;
+    let saved = store.update(sent).unwrap();
+    assert!(saved.settings.mcp.enabled);
+
+    let reopened = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(reopened.settings.mcp.enabled);
+    assert!(!store.set_mcp_enabled(false).unwrap().settings.mcp.enabled);
 }

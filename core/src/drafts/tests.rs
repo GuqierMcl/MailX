@@ -133,6 +133,105 @@ fn code<T: std::fmt::Debug>(result: Result<T, AppError>) -> (ErrorCode, Option<S
 }
 
 #[tokio::test]
+async fn origin_defaults_to_user_and_the_host_can_record_mcp() {
+    let f = fixture(&[plain("x")]);
+    let request = |subject: &str| CreateDraftRequest {
+        subject: subject.into(),
+        ..f.blank(None)
+    };
+    let user = f.core.create_draft(request("Mine"), NONE).unwrap();
+    assert_eq!(user.origin, DraftOrigin::User);
+
+    let mcp = f
+        .core
+        .create_draft_with_origin(request("Agent"), NONE, DraftOrigin::Mcp)
+        .unwrap();
+    assert_eq!(mcp.origin, DraftOrigin::Mcp);
+    let stored: String =
+        f.db.query_row("SELECT origin FROM drafts WHERE id = ?1", [&mcp.id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(stored, "mcp");
+    assert_eq!(f.core.get_draft(&mcp.id).unwrap().origin, DraftOrigin::Mcp);
+    let listed = f.core.list_drafts(None).unwrap();
+    assert_eq!(
+        listed.iter().find(|d| d.id == mcp.id).unwrap().origin,
+        DraftOrigin::Mcp
+    );
+    assert_eq!(
+        listed.iter().find(|d| d.id == user.id).unwrap().origin,
+        DraftOrigin::User
+    );
+}
+
+#[tokio::test]
+async fn origin_survives_updates_and_reply_drafts_are_the_users() {
+    let f = fixture(&[plain("hello")]);
+    let mcp = f
+        .core
+        .create_draft_with_origin(f.blank(None), NONE, DraftOrigin::Mcp)
+        .unwrap();
+    let updated = f
+        .core
+        .update_draft(UpdateDraftRequest {
+            id: mcp.id.clone(),
+            expected_revision: mcp.revision,
+            account_id: None,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Edited".into(),
+            body_html: "<p>text</p>".into(),
+        })
+        .unwrap();
+    assert_eq!(updated.origin, DraftOrigin::Mcp);
+
+    let reply = f.derive(0, DraftKind::Reply).unwrap();
+    assert_eq!(reply.origin, DraftOrigin::User);
+}
+
+#[tokio::test]
+async fn the_host_can_record_ai_and_storage_rejects_unknown_origins() {
+    let f = fixture(&[plain("x")]);
+    let ai = f
+        .core
+        .create_draft_with_origin(f.blank(None), NONE, DraftOrigin::Ai)
+        .unwrap();
+    assert_eq!(ai.origin, DraftOrigin::Ai);
+    let stored: String =
+        f.db.query_row("SELECT origin FROM drafts WHERE id = ?1", [&ai.id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(stored, "ai");
+    assert_eq!(f.core.get_draft(&ai.id).unwrap().origin, DraftOrigin::Ai);
+    assert!(
+        f.db.execute("UPDATE drafts SET origin = 'robot' WHERE id = ?1", [&ai.id])
+            .is_err()
+    );
+}
+
+#[test]
+fn requests_cannot_carry_an_origin_and_the_wire_values_are_camel_case() {
+    let create = serde_json::json!({
+        "to": [], "cc": [], "bcc": [], "subject": "", "bodyHtml": "",
+        "clientMutationId": id(), "origin": "mcp",
+    });
+    assert!(serde_json::from_value::<CreateDraftRequest>(create).is_err());
+    let from = serde_json::json!({
+        "emailId": "e", "kind": "reply", "clientMutationId": id(), "origin": "mcp",
+    });
+    assert!(serde_json::from_value::<CreateDraftFromRequest>(from).is_err());
+    assert_eq!(
+        serde_json::to_string(&DraftOrigin::User).unwrap(),
+        "\"user\""
+    );
+    assert_eq!(serde_json::to_string(&DraftOrigin::Mcp).unwrap(), "\"mcp\"");
+    assert_eq!(serde_json::to_string(&DraftOrigin::Ai).unwrap(), "\"ai\"");
+}
+
+#[tokio::test]
 async fn create_is_idempotent_for_the_same_content_and_conflicts_otherwise() {
     let f = fixture(&[plain("x")]);
     let mut request = f.blank(None);

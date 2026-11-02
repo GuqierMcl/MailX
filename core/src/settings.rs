@@ -301,6 +301,16 @@ pub struct ComposeSettings {
     pub undo_send_seconds: u32,
 }
 
+/// Local MCP access for other programs on this computer. Only the desktop
+/// host's dedicated command changes it, so a generic settings save can never
+/// open or close the endpoint without the server being started or stopped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpSettings {
+    /// Off until the user turns it on.
+    pub enabled: bool,
+}
+
 impl ComposeSettings {
     /// Trimmed account id; `None` for input that is not one.
     fn normalized_account(&self) -> Option<String> {
@@ -390,6 +400,7 @@ pub struct AppSettings {
     pub layout: LayoutSettings,
     pub notifications: NotificationSettings,
     pub compose: ComposeSettings,
+    pub mcp: McpSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -469,6 +480,7 @@ impl AppSettings {
             layout,
             notifications,
             compose,
+            mcp: self.mcp,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -509,6 +521,7 @@ impl AppSettings {
             security: self.security,
             notifications,
             compose,
+            mcp: self.mcp,
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
                 list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
@@ -732,6 +745,7 @@ impl SettingsStore {
             compose: patch
                 .compose
                 .unwrap_or_else(|| state.settings.compose.clone()),
+            mcp: state.settings.mcp,
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;
@@ -763,11 +777,31 @@ impl SettingsStore {
         Ok(state.snapshot(self.system_locale))
     }
 
-    /// Replaces all settings. The file is written atomically before the
-    /// in-memory copy changes, so a failed write leaves both untouched.
-    pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
-        let settings = settings.normalized()?;
+    /// Turns local MCP access on or off. This is the only writer of
+    /// `mcp.enabled`; `patch` and `update` keep the stored value.
+    pub fn set_mcp_enabled(&self, enabled: bool) -> Result<SettingsSnapshot, AppError> {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let mut settings = state.settings.clone();
+        settings.mcp.enabled = enabled;
+        write_file(&self.directory, &settings)?;
+        *state = State {
+            revision: state.revision.saturating_add(1),
+            settings,
+            stored: true,
+            recovered: false,
+        };
+        Ok(state.snapshot(self.system_locale))
+    }
+
+    /// Replaces all settings except `mcp`. The file is written atomically
+    /// before the in-memory copy changes, so a failed write leaves both untouched.
+    pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
+        let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let settings = AppSettings {
+            mcp: state.settings.mcp,
+            ..settings
+        }
+        .normalized()?;
         write_file(&self.directory, &settings)?;
         *state = State {
             revision: state.revision.saturating_add(1),

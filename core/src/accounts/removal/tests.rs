@@ -109,6 +109,7 @@ fn queue(service: &mut AccountService, account: &str) -> (String, OutboxItem) {
             }))
             .unwrap(),
             "",
+            crate::drafts::types::DraftOrigin::User,
         )
         .unwrap();
     let (item, _) = service

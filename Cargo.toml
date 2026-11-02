@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "desktop"]
+members = ["core", "desktop", "mcp-server", "mcp-bridge"]
 resolver = "3"
 
 [workspace.package]

@@ -10,7 +10,7 @@ function PreviewEditor({ value }: { value: string }) {
 
 function draft(): Draft {
   return {
-    id: 'loading-draft', accountId: exampleAccount().id, kind: 'new', sourceEmailId: null,
+    id: 'loading-draft', accountId: exampleAccount().id, kind: 'new', origin: 'user', sourceEmailId: null,
     to: [], cc: [], bcc: [], subject: 'Original', bodyHtml: '<p>Saved body</p>', bodyText: 'Saved body',
     inReplyTo: null, references: null, createdAt: '2026-10-25T00:00:00Z', updatedAt: '2026-10-25T00:00:00Z', revision: 1, attachments: [],
   }

@@ -28,7 +28,7 @@
 - [x] [版本化迁移与启动准入](../architecture/database-migrations.md)：兼容 v1，启动完成数据库准备后再开放业务；备份恢复与完整升级保障后续实施。
 - [x] FTS5 搜索探针（本地全文搜索 F0，结果见[验证策略](../development/validation.md)第 23 节）。
 - [x] 三平台合成 HTML iframe 隔离与外链处理验证；平台链接差异见验证策略。
-- [ ] MCP SDK + stdio bridge / 本地 IPC 最小连通性验证。
+- [ ] MCP SDK + stdio bridge / 本地 IPC 最小连通性验证。macOS 原型已跑通（`rmcp` 3.8、Unix socket、token 握手、bridge 不打开数据库），Windows named pipe 与 Linux 尚未验证，见 [MCP 草案 M0 结论](../contracts/mcp.md#8-m0-原型结论2026-11-02)。
 - [x] `.github/workflows/ci.yml` 已配置前端格式相关检查、类型、测试和构建，以及 Linux / macOS / Windows 的 Rust Clippy 与测试；本次执行结果单独记录，不由工作流存在推定通过。
 
 完成条件：空应用可运行；协议探针在受控服务完成收发并证明代理不回退；有一条生成 DTO 的 IPC 调用；关键风险有结论或替代方案。没有证明 SMTP 代理前，不宣称分账号收发路由已实现。
@@ -78,12 +78,12 @@
 
 依赖 M2 的阅读、草稿和权限服务。AI 与 MCP 共用[工具层](../architecture/agent-tools.md)，工具层与 `RequestContext` 先于任一入口落地。
 
-- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。本地 MCP 先于内置 AI 落地，见[实施顺序](../architecture/agent-tools.md#7-实施顺序)。
+- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。本地 MCP 先于内置 AI 落地，见[实施顺序](../architecture/agent-tools.md#7-实施顺序)。进展：`core/src/tools/` 已实现 `RequestContext`、按入口可见性与策略、授权检查及 `list_accounts` / `search_emails` / `read_email` / `create_draft` 四个工具（仅 core 进程内测试）；纯文本读取与草稿来源标记（`user` / `mcp` / `ai`）已具备。尚无宿主构造 `RequestContext`、MCP 适配层或授权记录持久化，因此本项未完成。
 
 - [ ] 云端兼容接口与 Ollama、提供商配置、内容披露与取消。
 - [ ] 摘要、待办建议、拟信与改写；Run 快照和输入 revision 检查。
-- [ ] 本地 MCP 开关、统一授权（只读加新建草稿）、发现文件与 token 握手、随 MailX 进程的生命周期；设置中的 MCP 页与标题栏运行状态图标。逐客户端配对与范围留作后续。
-- [ ] MCP 适配层托管于桌面核心，bridge 只做握手与转发；list / search / read / create-draft 工具，至少两个目标 MCP 客户端联调。
+- [ ] 本地 MCP 开关、统一授权（只读加新建草稿）、发现文件与 token 握手、随 MailX 进程的生命周期；设置中的 MCP 页与标题栏运行状态图标。逐客户端配对与范围留作后续。进展：开关 `mcp.enabled`、授权、发现文件、token 握手与生命周期的后端已实现并有自动测试（见 [MCP 契约第 9 节](../contracts/mcp.md#9-后端实现状态2026-11-02)）；设置页（含分组导航、开启确认、复制客户端配置）、标题栏状态图标与 bridge sidecar 打包已实现，尚未在任何平台手测，因此本项仍未勾选。
+- [ ] MCP 适配层托管于桌面核心，bridge 只做握手与转发；list / search / read / create-draft 工具，至少两个目标 MCP 客户端联调。进展：适配层与 `mailx-mcp` bridge 已实现，当前共四个工具；bridge 已作为 sidecar 随应用打包（未经安装包手测），已在 macOS 上与两个客户端联调（MCP Inspector CLI、Claude Code 2.1.316，四个工具均调用成功；Claude Code 使用无状态 `2026-07-28`）；Windows、Linux 与其他客户端（Cursor、Claude Desktop 等）未测，故本项暂不勾选。
 - [ ] 注入样本、跨账号访问、失败流、进程中断验证。
 
 完成条件：AI 只使用选定上下文，异常不影响收发；外部 Agent 可在授权范围检索和创建草稿；不能绕过 UI 发送，正文与日志不泄漏凭证。

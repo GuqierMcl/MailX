@@ -22,6 +22,7 @@ import { NAV_DEFAULT } from '@/features/shell/nav-width'
 import { clampListWidth, LIST_DEFAULT, LIST_MIN, READER_MIN } from '@/features/shell/layout-defaults'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { ShellLayout } from '@/features/shell/shell-layout'
+import { useSettingsRequests } from '@/features/settings/settings-requests'
 import { SettingsDialog, type SettingsTarget } from '@/features/settings/settings-dialog'
 import { AccountsDialog, type AccountsTarget } from '@/features/accounts/accounts-dialog'
 import { AddAccountDialog } from '@/features/accounts/add-account-dialog'
@@ -346,6 +347,7 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
+  useSettingsRequests(setSettings)
   useDesktopActions((action) => {
     if (action === 'settings') setSettings({ section: 'general' })
     else if (action === 'compose') void composeNew()

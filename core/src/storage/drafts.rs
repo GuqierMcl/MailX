@@ -6,20 +6,21 @@ use crate::{
     AppError, ErrorCode,
     drafts::{
         body::plain_text_to_html,
-        types::{Draft, DraftKind, DraftSummary},
+        types::{Draft, DraftKind, DraftOrigin, DraftSummary},
         validate::DraftContent,
     },
 };
 
 const COLUMNS: &str = "id, account_id, kind, source_email_id, to_addresses, cc_addresses,
     bcc_addresses, subject, body_text, in_reply_to, references_header, created_at,
-    updated_at, revision, body_html";
+    updated_at, revision, body_html, origin";
 
 /// Everything a new row needs besides the content.
 pub(crate) struct NewDraft<'a> {
     pub id: &'a str,
     pub account_id: &'a str,
     pub kind: DraftKind,
+    pub origin: DraftOrigin,
     pub source_email_id: Option<&'a str>,
     pub content: &'a DraftContent,
     pub in_reply_to: Option<&'a str>,
@@ -47,6 +48,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
     let body_html = row
         .get::<_, Option<String>>(14)?
         .unwrap_or_else(|| plain_text_to_html(&body));
+    let origin: String = row.get(15)?;
     Ok((|| {
         Ok(Draft {
             id,
@@ -66,6 +68,8 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<Draft, AppError>> {
             updated_at: updated,
             revision,
             attachments: Vec::new(),
+            origin: DraftOrigin::parse(&origin)
+                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?,
         })
     })())
 }
@@ -143,8 +147,8 @@ impl Storage {
             "INSERT INTO drafts (id, account_id, kind, source_email_id, to_addresses,
                 cc_addresses, bcc_addresses, subject, body_text, in_reply_to,
                 references_header, created_at, updated_at, revision, client_mutation_id,
-                create_canonical, body_html)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, 1, ?13, ?14, ?15)",
+                create_canonical, body_html, origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, 1, ?13, ?14, ?15, ?16)",
             params![
                 draft.id,
                 draft.account_id,
@@ -161,6 +165,7 @@ impl Storage {
                 draft.client_mutation_id,
                 draft.canonical,
                 draft.content.body_html,
+                draft.origin.as_str(),
             ],
         )?;
         for attachment in attachments {
@@ -200,7 +205,7 @@ impl Storage {
                      WHERE client_mutation_id = ?1 ORDER BY created_at, id LIMIT 1"
                 ),
                 [client_mutation_id],
-                |row| Ok((parse(row)?, row.get::<_, String>(15)?)),
+                |row| Ok((parse(row)?, row.get::<_, String>(16)?)),
             )
             .optional()?;
         found
@@ -247,6 +252,7 @@ impl Storage {
                     subject: draft.subject,
                     updated_at: draft.updated_at,
                     revision: draft.revision,
+                    origin: draft.origin,
                 })
             })
             .collect()

@@ -384,6 +384,12 @@ defaultAccountId: string,
  */
 undoSendSeconds: number, };
 
+export type McpSettings = {
+/**
+ * Off until the user turns it on.
+ */
+enabled: boolean, };
+
 export type LanguagePreference = "system" | "zh-CN" | "en";
 
 export type SupportedLocale = "zh-CN" | "en";
@@ -406,7 +412,7 @@ closeBehavior: CloseBehavior,
  */
 showMenuBarIcon: boolean, };
 
-export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
+export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, };
 
 export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, };
 
@@ -484,6 +490,8 @@ data: string, kind: AvatarKind, };
 
 export type DraftKind = "new" | "reply" | "replyAll" | "forward";
 
+export type DraftOrigin = "user" | "mcp" | "ai";
+
 export type Draft = { id: string, accountId: string, kind: DraftKind,
 /**
  * The message this draft answers or forwards. Cleared if that message
@@ -509,13 +517,13 @@ references: string | null, createdAt: string, updatedAt: string,
 /**
  * Advances on every saved change; updates must present the one they saw.
  */
-revision: number, attachments: Array<DraftAttachmentSummary>, };
+revision: number, attachments: Array<DraftAttachmentSummary>, origin: DraftOrigin, };
 
 export type DraftSummary = { id: string, accountId: string, kind: DraftKind, sourceEmailId: string | null, to: Array<MailAddress>, subject: string,
 /**
  * Start of the body on one line.
  */
-preview: string, updatedAt: string, revision: number, };
+preview: string, updatedAt: string, revision: number, origin: DraftOrigin, };
 
 export type CreateDraftRequest = {
 /**

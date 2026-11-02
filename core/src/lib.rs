@@ -21,6 +21,7 @@ mod smtp;
 mod startup;
 mod storage;
 mod sync;
+pub mod tools;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
@@ -47,9 +48,9 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings,
-    LayoutSettings, LayoutSettingsPatch, MailTheme, NotificationSettings, NotificationSound,
-    PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsChanged, SettingsPatch,
-    SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings, NotificationSettings,
+    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsChanged,
+    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

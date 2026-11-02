@@ -18,7 +18,8 @@ use crate::drafts::attachments::{
     AddAttachmentRequest, AttachmentPolicy, InlineImage, RemoveAttachmentRequest,
 };
 use crate::drafts::types::{
-    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftSummary, UpdateDraftRequest,
+    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftOrigin, DraftSummary,
+    UpdateDraftRequest,
 };
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
@@ -423,7 +424,21 @@ impl MailxCore {
         request: CreateDraftRequest,
         default_account_id: &str,
     ) -> Result<Draft, AppError> {
-        let draft = self.accounts()?.create_draft(request, default_account_id)?;
+        self.create_draft_with_origin(request, default_account_id, DraftOrigin::User)
+    }
+
+    /// Like [`Self::create_draft`], recording who created the draft. Only host
+    /// code (such as the MCP tool layer) can choose the origin: requests carry
+    /// none, so the IPC cannot claim `Mcp`.
+    pub fn create_draft_with_origin(
+        &self,
+        request: CreateDraftRequest,
+        default_account_id: &str,
+        origin: DraftOrigin,
+    ) -> Result<Draft, AppError> {
+        let draft = self
+            .accounts()?
+            .create_draft(request, default_account_id, origin)?;
         self.announce_draft(&draft, DraftChange::Created);
         Ok(draft)
     }

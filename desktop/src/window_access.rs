@@ -141,6 +141,9 @@ const MAIN_ONLY: &[&str] = &[
     "updater_cancel",
     "updater_restart",
     "updater_open_link",
+    "mcp_get_status",
+    "mcp_set_enabled",
+    "mcp_client_config",
 ];
 
 /// Commands both kinds may call.
@@ -242,6 +245,9 @@ pub(crate) fn check(
     check_draft(kind, command, draft.unwrap_or(""))?;
     Ok(kind)
 }
+
+#[cfg(test)]
+mod registry_tests;
 
 #[cfg(test)]
 mod tests {
@@ -403,6 +409,9 @@ mod tests {
             ("sync_refresh", true, false),
             ("settings_get", true, true),
             ("settings_update", true, false),
+            ("mcp_get_status", true, false),
+            ("mcp_set_enabled", true, false),
+            ("mcp_client_config", true, false),
             ("notifications_test", true, false),
             ("notifications_preview_sound", true, false),
             ("window_get_chrome", true, true),

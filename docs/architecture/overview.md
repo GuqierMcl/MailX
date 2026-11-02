@@ -46,7 +46,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 与 `ammonia` 4 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号、文件夹、邮件头与游标使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；头部使用参数化 LIKE 查询，FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
-| MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 候选 | M0 验证 SDK / 客户端协议协商，首版 stdio |
+| MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 3.8（仅 `server` 功能，放在独立 MCP 适配 crate） | M0 原型已在 macOS 跑通本地 IPC 与 bridge，见 [MCP 草案 M0 结论](../contracts/mcp.md#8-m0-原型结论2026-11-02)；首版 stdio |
 | Web | Axum + 同源静态 SPA + SSE | v0.2；单用户、服务端 Session、TOTP |
 | 工具链 | Rust / Cargo 1.94.0、Bun 1.3.12，均已记录 | 根 `package.json` 提供命令与版本入口；`bun.lock`、`Cargo.lock` 分别锁定依赖 |
 
@@ -57,7 +57,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 关键目录直接放在仓库根目录。`core/` 与 `desktop/` 是现有 Cargo 包，`frontend/` 是 Bun 工作区中的前端包；`server/` 仍只占位，`.github/workflows/ci.yml` 已配置前端与三平台 Rust 检查。Cargo 包名表达当前工程依赖，不冻结对外程序、安装包或镜像名称。
 
 ```text
-Cargo.toml                  # workspace：core + desktop
+Cargo.toml                  # workspace：core + desktop + mcp-server + mcp-bridge
 Cargo.lock                  # Rust 依赖解析结果
 rust-toolchain.toml          # Rust 1.94.0、rustfmt、Clippy
 core/                       # mailx-core，共享核心；业务与通用实现均在这里
@@ -70,9 +70,13 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/secrets.rs            # 宿主注入的 SecretStore
   src/settings.rs           # 应用偏好、语言兼容与设置快照版本
   src/localization.rs       # 通知与引用模板的纯文本生成
+  src/tools/                # 共享工具层（MCP 与未来 Agent 共用）
+mcp-server/                 # mailx-mcp-server（候选名），本地 MCP 服务端库：rmcp 适配、socket / 命名管道、握手、发现文件
+mcp-bridge/                 # mailx-mcp-bridge，cargo 二进制 mailx-mcp-bridge，随包 sidecar 名 mailx-mcp（候选名）：stdio 到本地 IPC 的转发，不链接 core
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
   src/locale.rs             # 系统语言读取并注入共享核心
+  src/mcp.rs                # 本地 MCP 服务的启停、状态事件与命令
   capabilities/             # 主窗口权限
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位

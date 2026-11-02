@@ -42,6 +42,7 @@ import type {
   RemoveAccountRequest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
+import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
 import type { UpdateSnapshot } from '@/features/updater/types'
 
 export type ClientFailure = AppError | {
@@ -230,6 +231,16 @@ export interface MailxClient {
   restartToUpdate(): Promise<UpdateSnapshot>
   /** Opens a release-notes link in the system browser; the host accepts `https:` only. */
   openUpdateLink(url: string): Promise<void>
+
+  // --- Local MCP server (docs/contracts/mcp.md). Main window only.
+  /** Current status of the local MCP server. */
+  getMcpStatus(): Promise<McpStatus>
+  /** Persists `mcp.enabled`, starts or stops the server, and returns the resulting status. */
+  setMcpEnabled(enabled: boolean): Promise<McpStatus>
+  /** Command and arguments for a client's `mcpServers` entry; `--discovery` is always among them. */
+  getMcpClientConfig(): Promise<McpClientConfig>
+  /** Status changes: connections coming and going, start failures, stop. */
+  onMcpStatus(listener: (status: McpStatus) => void): () => void
   /** Every change of the update state. */
   onUpdateState(listener: (snapshot: UpdateSnapshot) => void): () => void
 }
@@ -247,6 +258,7 @@ export const HOST_EVENTS = {
   filesDropped: 'composer://files-dropped',
   settingsChanged: 'mailx://settings-changed',
   updater: 'mailx://updater-state',
+  mcp: 'mailx://mcp-status-changed',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -489,5 +501,9 @@ export function createDesktopClient(): MailxClient {
     restartToUpdate: () => call<UpdateSnapshot>('updater_restart'),
     openUpdateLink: (url) => call<void>('updater_open_link', { url }),
     onUpdateState: (listener) => subscribe<UpdateSnapshot>(HOST_EVENTS.updater, listener),
+    getMcpStatus: () => call<McpStatus>('mcp_get_status'),
+    setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
+    getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),
+    onMcpStatus: (listener) => subscribe<McpStatus>(HOST_EVENTS.mcp, listener),
   }
 }

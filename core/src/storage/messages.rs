@@ -851,6 +851,10 @@ impl ScopeFilter {
             let role = encode(&role)?;
             result.add("f.role = ?", role.trim_matches('"').to_owned());
         }
+        for role in &query.exclude_folder_roles {
+            let role = encode(role)?;
+            result.add("f.role <> ?", role.trim_matches('"').to_owned());
+        }
         Ok(result)
     }
 

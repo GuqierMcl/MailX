@@ -28,6 +28,8 @@ fn main() {
             "emails_prepare_body",
             "emails_release_body",
             "emails_body_links",
+            "emails_image_status",
+            "emails_retry_images",
             "links_request",
             "links_open",
             "sync_states",
@@ -76,6 +78,9 @@ fn main() {
             "updater_cancel",
             "updater_restart",
             "updater_open_link",
+            "mcp_get_status",
+            "mcp_set_enabled",
+            "mcp_client_config",
         ]),
     ))
     .expect("failed to prepare the MailX desktop host");

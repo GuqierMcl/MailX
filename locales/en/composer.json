@@ -23,6 +23,8 @@
     "conflictBeforeSend": "This draft changed elsewhere. Review the latest version before sending."
   },
   "draft": {
+    "createdViaMcp": "Created via MCP",
+    "createdViaAi": "Created by AI",
     "gone": "This draft no longer exists",
     "goneDescription": "It may have been sent or deleted.",
     "goneWindowDescription": "It may have been sent or deleted. You can close this window.",

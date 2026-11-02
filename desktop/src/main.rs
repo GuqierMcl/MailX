@@ -10,6 +10,9 @@ mod compose_files;
 #[cfg_attr(feature = "body-webview-test", allow(dead_code))]
 mod lifecycle;
 mod locale;
+#[cfg_attr(feature = "body-webview-test", allow(dead_code))]
+mod mcp;
+mod mcp_sidecar;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
@@ -209,6 +212,9 @@ fn main() {
                 updater::start_scheduler(app.handle());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
+                // Registered before initialization so the ready hook fires; the
+                // single-instance plugin has already let this process live.
+                mcp::setup(app.handle(), &state);
                 state.start_initialization();
                 notifications::on_click(app.handle());
                 window_chrome::create_main_window(app.handle())?;
@@ -294,6 +300,9 @@ fn main() {
             updater::updater_cancel,
             updater::updater_restart,
             updater::updater_open_link,
+            mcp::mcp_get_status,
+            mcp::mcp_set_enabled,
+            mcp::mcp_client_config,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the MailX desktop host")
@@ -315,6 +324,9 @@ fn main() {
             // downloaded update now, and relaunch when the user asked to.
             #[cfg(not(feature = "body-webview-test"))]
             if matches!(_event, tauri::RunEvent::Exit) {
+                // Close the local MCP endpoint and remove its discovery file
+                // before an update installer or relaunch takes over.
+                mcp::shutdown(_app);
                 updater::on_exit(_app);
             }
         });

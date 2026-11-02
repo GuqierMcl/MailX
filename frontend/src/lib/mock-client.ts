@@ -23,6 +23,7 @@ import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
+import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
@@ -64,7 +65,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const emails = buildEmails(dataset)
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -89,6 +90,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const previewListeners = new Set<(previews: EmailPreviews) => void>()
   let previewRequest = 0
   const draftListeners = new Set<(change: DraftChanged) => void>()
+  let mcpStatus: McpStatus = { state: 'off' }
+  const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
@@ -152,7 +155,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const now = new Date().toISOString()
     const found = options.resolveDraft(id)
     const draft: Draft = found ?? {
-      id, accountId: accounts[0]?.id ?? '', kind: 'new', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '<p></p>', bodyText: '',
+      id, accountId: accounts[0]?.id ?? '', kind: 'new', origin: 'user', sourceEmailId: null, to: [], cc: [], bcc: [], subject: '', bodyHtml: '<p></p>', bodyText: '',
       inReplyTo: null, references: null, createdAt: now, updatedAt: now, revision: 1, attachments: [],
     }
     if (!accounts.some((row) => row.id === draft.accountId)) draft.accountId = accounts[0]?.id ?? ''
@@ -167,7 +170,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     return created
   }
   const summary = (draft: Draft): DraftSummary => ({
-    id: draft.id, accountId: draft.accountId, kind: draft.kind, sourceEmailId: draft.sourceEmailId, to: draft.to,
+    id: draft.id, accountId: draft.accountId, kind: draft.kind, origin: draft.origin, sourceEmailId: draft.sourceEmailId, to: draft.to,
     subject: draft.subject, preview: draft.bodyText.replace(/\s+/g, ' ').slice(0, 120), updatedAt: draft.updatedAt, revision: draft.revision,
   })
 
@@ -466,7 +469,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!accountId || !accounts.some((a) => a.id === accountId)) throw notFound()
       const known = draftsByMutation.get(request.clientMutationId)
       if (known && drafts.has(known)) return clone(drafts.get(known)!)
-      const draft = newDraft({ accountId, kind: 'new', sourceEmailId: null, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, ...mockDraftBody(request.bodyHtml), inReplyTo: null, references: null })
+      const draft = newDraft({ accountId, kind: 'new', origin: 'user', sourceEmailId: null, to: request.to, cc: request.cc, bcc: request.bcc, subject: request.subject, ...mockDraftBody(request.bodyHtml), inReplyTo: null, references: null })
       draftsByMutation.set(request.clientMutationId, draft.id)
       return clone(draft)
     },
@@ -482,7 +485,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         ? `<p></p>${mockPlainToHtml(`${email.summary.from.name ?? email.summary.from.address} 写道：`)}<blockquote>${original}</blockquote>`
         : `<p></p>${mockPlainToHtml(`---------- 转发的邮件 ----------\n发件人：${email.summary.from.address}\n日期：${email.summary.receivedAt}\n主题：${email.summary.subject}\n收件人：${email.to.map((address) => address.address).join(', ')}`)}${original}`
       const draft = newDraft({
-        accountId: email.summary.accountId, kind: request.kind, sourceEmailId: email.summary.id,
+        accountId: email.summary.accountId, kind: request.kind, origin: 'user', sourceEmailId: email.summary.id,
         to: reply ? [email.summary.from] : [], cc: request.kind === 'replyAll' ? email.cc : [], bcc: [],
         subject: `${reply ? '回复' : '转发'}：${base}`, ...mockDraftBody(quoted), inReplyTo: null, references: null,
       })
@@ -593,6 +596,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     restartToUpdate: async () => { throw new MailxClientError({ code: 'unsupported', message: '当前版本尚不支持此认证方式。', field: null }) },
     openUpdateLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
+    // The browser preview has no host: the switch only changes an in-memory status.
+    getMcpStatus: async () => structuredClone(mcpStatus),
+    async setMcpEnabled(enabled) {
+      mcpStatus = enabled ? { state: 'running', clients: [] } : { state: 'off' }
+      for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
+      return structuredClone(mcpStatus)
+    },
+    getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'] }),
+    onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
     getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
     async onSettingsChanged(listener) {
       const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })

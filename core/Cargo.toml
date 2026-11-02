@@ -14,6 +14,7 @@ async-imap = { version = "0.12", default-features = false, features = ["runtime-
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cssparser = "0.37"
+ego-tree = "0.11"
 fs2 = "0.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
@@ -43,6 +44,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
 resvg = { version = "0.48.1", default-features = false }
+schemars = "1"
 
 [features]
 # Synthetic cache construction is excluded from normal desktop/core builds.
