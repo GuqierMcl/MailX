@@ -166,6 +166,7 @@ async fn missing_discovery_file_answers_core_unavailable() {
 async fn stale_discovery_file_answers_core_unavailable() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mcp-discovery.json");
+    #[cfg(not(windows))]
     let endpoint = dir.path().join("gone.sock");
     #[cfg(windows)]
     let endpoint = std::path::PathBuf::from(r"\\.\pipe\mailx-mcp-does-not-exist");
