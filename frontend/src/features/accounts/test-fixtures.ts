@@ -30,7 +30,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }
   let settingsRevision = 0
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
   return {
@@ -124,6 +124,9 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     cancelUpdate: vi.fn<MailxClient['cancelUpdate']>().mockResolvedValue({ canInstall: true, phase: 'available', version: '0.2.0', current: '0.1.0', notes: null, date: null }),
     restartToUpdate: vi.fn<MailxClient['restartToUpdate']>().mockResolvedValue({ canInstall: true, phase: 'ready', version: '0.2.0', current: '0.1.0', notes: null, date: null }),
     openUpdateLink: vi.fn<MailxClient['openUpdateLink']>().mockResolvedValue(undefined),
+    getMcpStatus: vi.fn<MailxClient['getMcpStatus']>().mockResolvedValue({ state: 'off' }),
+    setMcpEnabled: vi.fn<MailxClient['setMcpEnabled']>().mockResolvedValue({ state: 'off' }),
+    onMcpStatus: vi.fn<MailxClient['onMcpStatus']>().mockReturnValue(() => undefined),
     onUpdateState: vi.fn<MailxClient['onUpdateState']>().mockReturnValue(() => undefined),
   }
 }

@@ -22,7 +22,11 @@ struct Inner {
     settings: Mutex<Option<Arc<SettingsStore>>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
+    /// Called each time the core becomes ready (also after a retry).
+    ready_hook: Mutex<Option<ReadyHook>>,
 }
+
+type ReadyHook = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Clone)]
 pub(crate) struct DesktopState(Arc<Inner>);
@@ -44,7 +48,35 @@ impl DesktopState {
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
             initialization_in_flight: AtomicBool::new(false),
+            ready_hook: Mutex::new(None),
         }))
+    }
+
+    /// Registers work to run whenever the core becomes ready, for services
+    /// that need the core (the local MCP server). Replaces an earlier hook.
+    pub(crate) fn set_ready_hook(&self, hook: impl Fn() + Send + Sync + 'static) {
+        if let Ok(mut slot) = self.0.ready_hook.lock() {
+            *slot = Some(Arc::new(hook));
+        }
+    }
+
+    pub(crate) fn data_dir(&self) -> Result<PathBuf, AppError> {
+        self.0.data_dir.clone()
+    }
+
+    /// The persisted `mcp.enabled` switch; false when settings cannot be read.
+    pub(crate) fn mcp_enabled(&self) -> bool {
+        self.settings_store()
+            .and_then(|store| store.get())
+            .is_ok_and(|snapshot| snapshot.settings.mcp.enabled)
+    }
+
+    /// Account the shared tools use when a call names none.
+    pub(crate) fn default_account_id(&self) -> String {
+        self.settings_store()
+            .and_then(|store| store.get())
+            .map(|snapshot| snapshot.settings.compose.default_account_id)
+            .unwrap_or_default()
     }
 
     /// Remembers how the window is being used and tells the core if it is open.
@@ -289,8 +321,15 @@ impl DesktopState {
         self.0
             .initialization_in_flight
             .store(false, Ordering::Release);
+        let ready = matches!(status, StartupStatus::Ready { .. });
         if let Ok(mut current) = self.0.startup.lock() {
             *current = status;
+        }
+        if ready {
+            let hook = self.0.ready_hook.lock().ok().and_then(|slot| slot.clone());
+            if let Some(hook) = hook {
+                hook();
+            }
         }
     }
 

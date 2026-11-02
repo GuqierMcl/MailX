@@ -1,0 +1,38 @@
+[package]
+name = "mailx-mcp-server"
+description = "Local MCP server for MailX: IPC endpoint, token handshake and tool adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom = "0.3"
+mailx-core.workspace = true
+rmcp = { version = "~3.8", default-features = false, features = ["server"] }
+serde.workspace = true
+serde_json = "1"
+subtle = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+rmcp = { version = "~3.8", default-features = false, features = ["server", "client"] }
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
+
+# The workspace forbids unsafe code. This crate needs it in exactly one place
+# (the Windows named-pipe security descriptor), so it keeps the workspace's
+# other lints and downgrades `forbid` to `deny`; the Windows module opts in.
+[lints.rust]
+unsafe_code = "deny"

@@ -111,6 +111,10 @@ MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.
 
 修改正文渲染、CSP、资源协议、链接拦截或升级 Tauri / Wry 时，建议按受影响行为补跑；发布前再进行三平台检查。该检查使用隔离数据目录和合成 MIME，在真实 WKWebView、WebView2、WebKitGTK 中检查正文协议、沙箱与外链路径，并上传 `body-webview-<os>` 证据。仅测试构建入口与桥接能力仍不能进入正式应用。常规前端与 Rust 测试继续覆盖净化、协议和权限相关回归。
 
+`mcp-server` 与 `mcp-bridge` 是工作区成员，已被上述三平台 `rust:clippy` / `rust:test` 覆盖，其中 Windows 命名管道与 DACL 代码只在 `windows-2025` 任务里编译并运行测试；没有为它们另设任务。
+
+本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。Windows 部分只证明编译与同一组测试在 CI 通过，不是实机手测；也未与任何真实 MCP 客户端联调，设置页尚未实现。
+
 只有对应运行通过时，CI 才能证明该提交在三平台能编译并通过所配置的自动测试；工作流存在不等于本次运行成功，也不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
 
 ### 账号配置的可重复检查

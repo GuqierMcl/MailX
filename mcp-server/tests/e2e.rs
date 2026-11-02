@@ -1,0 +1,387 @@
+//! End-to-end tests over a real Unix socket with an rmcp client.
+#![cfg(unix)]
+
+mod common;
+
+use std::os::unix::fs::PermissionsExt as _;
+use std::time::Duration;
+
+use common::Fixture;
+use mailx_mcp_server::{
+    Discovery, MAX_CONNECTIONS, MAX_MESSAGE_BYTES, McpServer, McpStatus, discovery_path,
+};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ClientCapabilities, ClientConfig, Implementation,
+    JsonObject,
+};
+use rmcp::service::{RoleClient, RunningService};
+use rmcp::transport::async_rw::AsyncRwTransport;
+use rmcp::{ErrorData, ServiceError, ServiceExt as _};
+use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::net::UnixStream;
+
+fn read_discovery(fixture: &Fixture) -> Discovery {
+    let bytes = std::fs::read(discovery_path(fixture.data_dir())).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn raw_handshake(endpoint: &str, line: &[u8]) -> (UnixStream, String) {
+    let mut stream = UnixStream::connect(endpoint).await.unwrap();
+    stream.write_all(line).await.unwrap();
+    let mut reply = String::new();
+    let mut reader = BufReader::new(&mut stream);
+    tokio::time::timeout(Duration::from_secs(3), reader.read_line(&mut reply))
+        .await
+        .unwrap()
+        .unwrap();
+    (stream, reply)
+}
+
+async fn connect(discovery: &Discovery, name: &str) -> RunningService<RoleClient, ClientConfig> {
+    let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
+    let (stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
+    assert_eq!(reply.trim(), "{\"ok\":true}");
+    let (read, write) = tokio::io::split(stream);
+    ClientConfig::new(
+        ClientCapabilities::default(),
+        Implementation::new(name, "0.0.0"),
+    )
+    .serve(AsyncRwTransport::new_client(read, write))
+    .await
+    .unwrap()
+}
+
+fn args(value: Value) -> JsonObject {
+    value.as_object().cloned().unwrap()
+}
+
+async fn call(
+    client: &RunningService<RoleClient, ClientConfig>,
+    name: &str,
+    arguments: Value,
+) -> Result<CallToolResult, ServiceError> {
+    client
+        .peer()
+        .call_tool(CallToolRequestParams::new(name.to_owned()).with_arguments(args(arguments)))
+        .await
+}
+
+fn rpc_code(error: &ServiceError) -> Option<i32> {
+    match error {
+        ServiceError::McpError(ErrorData { code, .. }) => Some(code.0),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn tools_list_and_calls_work_end_to_end() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let client = connect(&read_discovery(&fixture), "e2e-client").await;
+
+    let tools = client.peer().list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 4);
+    for tool in &tools {
+        assert!(tool.name.starts_with("mailx_"), "{}", tool.name);
+        assert!(tool.output_schema.is_some(), "{}", tool.name);
+        assert!(tool.annotations.is_some());
+        let meta = serde_json::to_value(tool).unwrap();
+        assert!(meta["_meta"]["mailx/requiredActions"].is_array());
+        assert!(meta["_meta"]["mailx/limits"].is_object());
+    }
+
+    let accounts = call(&client, "mailx_list_accounts", json!({}))
+        .await
+        .unwrap();
+    assert_ne!(accounts.is_error, Some(true));
+    let structured = accounts.structured_content.unwrap();
+    assert!(structured.to_string().contains(&fixture.account_id));
+
+    let search = call(&client, "mailx_search_emails", json!({"query": "hello"}))
+        .await
+        .unwrap();
+    assert_ne!(search.is_error, Some(true));
+    assert!(search.structured_content.is_some());
+
+    // Status reflects the client.
+    assert!(matches!(
+        handle.status(),
+        McpStatus::Running { connections: 1, last_client_name: Some(ref name) } if name == "e2e-client"
+    ));
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn invalid_input_and_unknown_tools_are_tool_errors_but_unprefixed_is_a_protocol_error() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let client = connect(&read_discovery(&fixture), "e2e-client").await;
+
+    let invalid = call(&client, "mailx_search_emails", json!({"query": 5}))
+        .await
+        .unwrap();
+    assert_eq!(invalid.is_error, Some(true));
+    assert!(invalid.structured_content.is_none());
+    let text = serde_json::to_value(&invalid.content).unwrap().to_string();
+    assert!(text.contains("invalidInput"), "{text}");
+
+    let unknown = call(&client, "mailx_nonexistent", json!({})).await.unwrap();
+    assert_eq!(unknown.is_error, Some(true));
+    assert!(unknown.structured_content.is_none());
+    let text = serde_json::to_value(&unknown.content).unwrap().to_string();
+    assert!(text.contains("unknownTool"), "{text}");
+
+    let unprefixed = call(&client, "list_accounts", json!({})).await.unwrap_err();
+    assert_eq!(rpc_code(&unprefixed), Some(-32602));
+
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn bad_handshakes_are_rejected() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+
+    for line in [
+        b"{\"bridge\":1,\"token\":\"wrong\"}\n".to_vec(),
+        b"this is not json\n".to_vec(),
+        b"{\"bridge\":9,\"token\":\"x\"}\n".to_vec(),
+        [vec![b'a'; 600], b"\n".to_vec()].concat(),
+    ] {
+        let (mut stream, reply) = raw_handshake(&discovery.endpoint, &line).await;
+        assert_eq!(reply.trim(), "{\"ok\":false}");
+        let mut rest = Vec::new();
+        let read = stream.read_to_end(&mut rest).await.unwrap();
+        assert_eq!(read, 0, "connection must be closed after a rejection");
+    }
+
+    // A peer that never says anything is cut off after the timeout.
+    let mut silent = UnixStream::connect(&discovery.endpoint).await.unwrap();
+    let mut buf = Vec::new();
+    let read = tokio::time::timeout(Duration::from_secs(8), silent.read_to_end(&mut buf))
+        .await
+        .expect("silent handshake must time out")
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&buf[..read]).trim(),
+        "{\"ok\":false}"
+    );
+
+    // The server is still healthy.
+    let client = connect(&discovery, "after-bad").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn oversized_message_ends_the_session() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+    let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
+    let (mut stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
+    assert_eq!(reply.trim(), "{\"ok\":true}");
+
+    let junk = vec![b'x'; MAX_MESSAGE_BYTES + 10];
+    // The server may close while we are still writing.
+    let _ = stream.write_all(&junk).await;
+    let mut rest = Vec::new();
+    let result = tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut rest))
+        .await
+        .expect("session must end");
+    assert!(result.is_err() || rest.is_empty());
+
+    // Other sessions are unaffected.
+    let client = connect(&discovery, "after-oversize").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn endpoint_and_discovery_have_private_permissions() {
+    let fixture = Fixture::new().await;
+    let data_mode_before = std::fs::metadata(fixture.data_dir())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+
+    let mode =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(std::path::Path::new(&discovery.endpoint)), 0o600);
+    assert_eq!(mode(&discovery_path(fixture.data_dir())), 0o600);
+    let socket_dir = std::path::Path::new(&discovery.endpoint).parent().unwrap();
+    assert_eq!(mode(socket_dir), 0o700);
+    assert_eq!(socket_dir, fixture.data_dir().join("mcp"));
+    assert_eq!(
+        mode(fixture.data_dir()),
+        data_mode_before,
+        "data dir must not be chmod-ed"
+    );
+    assert!(std::path::Path::new(&discovery.endpoint).is_absolute());
+    assert_eq!(discovery.token.len(), 64);
+    assert_eq!(discovery.pid, std::process::id());
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn discovery_removal_only_for_the_matching_instance() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let path = discovery_path(fixture.data_dir());
+
+    // Someone else (a newer instance) replaces the file while we run.
+    let mut other = read_discovery(&fixture);
+    other.instance_id = "someone-else".into();
+    std::fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+
+    handle.stop().await;
+    assert!(path.exists(), "a foreign discovery file must be left alone");
+
+    // Normal case: our own file is removed.
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    assert!(path.exists());
+    handle.stop().await;
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn token_rotates_and_restart_works() {
+    let fixture = Fixture::new().await;
+    let mut tokens = Vec::new();
+    for _ in 0..3 {
+        let handle = McpServer::start(fixture.config()).await.unwrap();
+        let discovery = read_discovery(&fixture);
+        tokens.push(discovery.token.clone());
+        let client = connect(&discovery, "restart").await;
+        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+        client.cancel().await.unwrap();
+        handle.stop().await;
+    }
+    tokens.sort();
+    tokens.dedup();
+    assert_eq!(tokens.len(), 3);
+}
+
+#[tokio::test]
+async fn stop_disconnects_sessions_and_refuses_new_connections() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+    let client = connect(&discovery, "stopper").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+
+    handle.stop().await;
+    assert_eq!(handle.status(), McpStatus::Off);
+
+    let after = client.peer().list_all_tools().await;
+    assert!(after.is_err(), "session must be closed after stop");
+    assert!(UnixStream::connect(&discovery.endpoint).await.is_err());
+    assert!(!discovery_path(fixture.data_dir()).exists());
+    // Idempotent.
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn connections_beyond_the_cap_are_refused() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let discovery = read_discovery(&fixture);
+
+    let mut clients = Vec::new();
+    for index in 0..MAX_CONNECTIONS {
+        clients.push(connect(&discovery, &format!("client-{index}")).await);
+    }
+    assert!(matches!(
+        handle.status(),
+        McpStatus::Running { connections, .. } if connections as usize == MAX_CONNECTIONS
+    ));
+
+    let hello = format!("{{\"bridge\":1,\"token\":\"{}\"}}\n", discovery.token);
+    let (mut stream, reply) = raw_handshake(&discovery.endpoint, hello.as_bytes()).await;
+    assert_eq!(reply.trim(), "{\"ok\":false}");
+    let mut rest = Vec::new();
+    assert_eq!(stream.read_to_end(&mut rest).await.unwrap(), 0);
+
+    // Freeing a slot lets a new one in.
+    clients.pop().unwrap().cancel().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let again = connect(&discovery, "again").await;
+    again.cancel().await.unwrap();
+    for client in clients {
+        client.cancel().await.unwrap();
+    }
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn second_server_on_the_same_data_dir_reports_endpoint_in_use() {
+    let fixture = Fixture::new().await;
+    let first = McpServer::start(fixture.config()).await.unwrap();
+    let error = McpServer::start(fixture.config()).await.err().unwrap();
+    assert_eq!(error.code, mailx_mcp_server::McpFailureCode::EndpointInUse);
+    // The failed start must not have touched the first server's files.
+    let client = connect(&read_discovery(&fixture), "still-alive").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+    client.cancel().await.unwrap();
+    first.stop().await;
+}
+
+#[tokio::test]
+async fn long_data_dir_falls_back_to_a_short_private_socket_path() {
+    let fixture = Fixture::new().await;
+    let long = fixture.data_dir().join("a".repeat(110));
+    std::fs::create_dir_all(&long).unwrap();
+    let mut config = fixture.config();
+    config.data_dir = long.clone();
+    let handle = McpServer::start(config).await.unwrap();
+
+    let bytes = std::fs::read(discovery_path(&long)).unwrap();
+    let discovery: Discovery = serde_json::from_slice(&bytes).unwrap();
+    let endpoint = std::path::Path::new(&discovery.endpoint);
+    assert!(discovery.endpoint.len() <= mailx_mcp_server::MAX_SOCKET_PATH_BYTES);
+    assert!(!endpoint.starts_with(&long));
+    assert_eq!(
+        std::fs::metadata(endpoint.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    let client = connect(&discovery, "long-path").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+    client.cancel().await.unwrap();
+    handle.stop().await;
+    assert!(!endpoint.exists());
+}
+
+#[tokio::test]
+async fn open_session_is_rejected_per_call_once_disabled() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let client = connect(&read_discovery(&fixture), "per-call").await;
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 4);
+
+    // Flip the flag without aborting the session: the call itself must fail.
+    handle.disable_calls_only_for_tests();
+    let call_error = call(&client, "mailx_list_accounts", json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(call_error, ServiceError::McpError(_)),
+        "{call_error:?}"
+    );
+    assert!(client.peer().list_all_tools().await.is_err());
+
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}

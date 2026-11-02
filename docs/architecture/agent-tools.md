@@ -1,6 +1,6 @@
 # 工具层与调用入口
 
-状态：**Partial** · 工具层与首批四个共享工具已在 `core/src/tools/` 实现，仅有 core 内的进程内测试；尚无任何宿主（MCP 适配层、桌面 IPC、内置 Agent）调用它，也没有宿主构造 `RequestContext`。决定见 [ADR 0004](../adr/0004-shared-tool-layer.md)。第 4 节“专属工具”、MCP 适配层与传输仍是草案，实现时可调整并同步更新。
+状态：**Partial** · 工具层与首批四个共享工具已在 `core/src/tools/` 实现，仅有 core 内的进程内测试；本地 MCP 适配层（`mcp-server/`，见 [MCP 契约第 9 节](../contracts/mcp.md#9-后端实现状态2026-11-02)）已由桌面宿主在 `mcp.enabled` 打开时启动，并为每个连接构造 `Principal::LocalMcp` 的 `RequestContext`，授权为 `Grant::mcp_read_and_draft()`，审计经 `ToolAudit` 写到 stderr；该链路只有 macOS / Linux 自动测试，Windows 仅 CI 编译与测试，尚未与真实 MCP 客户端联调。桌面 IPC 与内置 Agent 尚未调用。决定见 [ADR 0004](../adr/0004-shared-tool-layer.md)。第 4 节“专属工具”、MCP 适配层与传输仍是草案，实现时可调整并同步更新。
 
 ## 1. 分层
 

@@ -85,6 +85,7 @@ fn main() {
         NotificationSound,
         NotificationSettings,
         ComposeSettings,
+        McpSettings,
         LanguagePreference,
         SupportedLocale,
         CloseBehavior,

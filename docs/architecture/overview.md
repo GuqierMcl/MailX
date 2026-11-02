@@ -57,7 +57,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 关键目录直接放在仓库根目录。`core/` 与 `desktop/` 是现有 Cargo 包，`frontend/` 是 Bun 工作区中的前端包；`server/` 仍只占位，`.github/workflows/ci.yml` 已配置前端与三平台 Rust 检查。Cargo 包名表达当前工程依赖，不冻结对外程序、安装包或镜像名称。
 
 ```text
-Cargo.toml                  # workspace：core + desktop
+Cargo.toml                  # workspace：core + desktop + mcp-server + mcp-bridge
 Cargo.lock                  # Rust 依赖解析结果
 rust-toolchain.toml          # Rust 1.94.0、rustfmt、Clippy
 core/                       # mailx-core，共享核心；业务与通用实现均在这里
@@ -70,9 +70,13 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/secrets.rs            # 宿主注入的 SecretStore
   src/settings.rs           # 应用偏好、语言兼容与设置快照版本
   src/localization.rs       # 通知与引用模板的纯文本生成
+  src/tools/                # 共享工具层（MCP 与未来 Agent 共用）
+mcp-server/                 # mailx-mcp-server（候选名），本地 MCP 服务端库：rmcp 适配、socket / 命名管道、握手、发现文件
+mcp-bridge/                 # mailx-mcp-bridge，二进制 mailx-mcp（候选名）：stdio 到本地 IPC 的转发，不链接 core
 desktop/                    # mailx-desktop，Tauri 宿主
   src/                      # 程序入口与 IPC 适配
   src/locale.rs             # 系统语言读取并注入共享核心
+  src/mcp.rs                # 本地 MCP 服务的启停、状态事件与命令
   capabilities/             # 主窗口权限
   icons/                    # 正式桌面应用图标与托盘图标资源
 server/                     # 第二阶段服务器宿主，当前占位

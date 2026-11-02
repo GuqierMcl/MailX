@@ -1,6 +1,6 @@
 # MCP 初始设计
 
-状态：**Draft / 未冻结** · 尚未实现；v0.1 先验证本地 stdio，远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
+状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发尚未实现，也未与真实 MCP 客户端联调。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
 
 ## 1. 角色与协议
 
@@ -28,7 +28,7 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 
 唯一例外是核心不可用：发现文件缺失、连接被拒或握手失败时，bridge 对收到的第一个请求回 JSON-RPC 错误（携带 `CORE_UNAVAILABLE` 与“请先启动 MailX 并开启 MCP”的提示），对通知不回应，同时向 stderr 写说明并以非零状态退出。M0 中只退出不回应时，客户端只能看到连接关闭，看不到原因。bridge 为此只解析到能回填请求 `id` 的程度。
 
-限制（M0 实测值，作为首版初值）：握手行不超过 512 字节、5 秒内完成，否则直接关闭；单条 MCP 消息不超过 1 MiB。`rmcp` 对超长消息只丢弃、不回错误，客户端会一直等待，因此实现时应改为对超限请求回错误，至少依赖客户端超时。并发连接上限尚未定，实现时确定并写入本文。
+限制（M0 实测值，作为首版初值）：握手行不超过 512 字节、5 秒内完成，否则直接关闭；单条 MCP 消息不超过 1 MiB。`rmcp` 对超长消息只丢弃、不回错误，客户端会一直等待。已实现的处理见第 9 节：超限即关闭该连接。并发连接上限为 8（第 9 节）。
 
 客户端在调用中途断开时，正在执行的工具调用会跑完（工具层是阻塞调用），不会写一半草稿；如需可取消的工具，需在工具层另行设计。
 
@@ -103,7 +103,40 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 在仓库外的临时 crate 中验证：真实 `MailxCore`（临时数据目录）→ 工具层 → 手写 `rmcp` `ServerHandler` → Unix socket + token 握手 → bridge → `rmcp` 客户端。macOS 上 initialize、工具列表、`mailx_list_accounts`、`mailx_search_emails`、输入错误与未知工具均按预期返回；两个客户端并发会话互不影响；`lsof` 显示 bridge 进程只持有标准输入输出与 socket，没有打开数据目录或 SQLite。
 
-- **SDK**：`rmcp` 3.8，`default-features = false, features = ["server"]`。在 core 之上只新增约 7 个包，不引入 axum、hyper、reqwest、tower；类型多为 `#[non_exhaustive]`，需用构造器，跨小版本时有 API 变化，应锁定小版本。
+- **SDK**：`rmcp` ~3.8（固定次版本），`default-features = false, features = ["server"]`。在 core 之上只新增约 7 个包，不引入 axum、hyper、reqwest、tower；类型多为 `#[non_exhaustive]`，需用构造器，跨小版本时有 API 变化，应锁定小版本。
 - **crate 布局**：core 不依赖 `rmcp`，只保留工具层。新增 MCP 适配 crate（适配层、IPC 监听、发现文件、握手，自带 lint 配置以容纳 Windows 的 `unsafe`），由桌面宿主链接；新增 bridge 可执行 crate，只依赖异步运行时与 JSON 解析。crate 名称尚未决定。
 - **Windows**：tokio named pipe 支持 `first_pipe_instance`、`reject_remote_clients` 与自定义安全属性，配合 `windows-sys` 可把 DACL 限定为当前用户 SID。只查了 API，未编译、未运行。
 - **未验证**：Windows 与 Linux 运行、崩溃后的过期发现文件清理、并发连接上限、真实 MCP 客户端（Claude、Cursor 等）联调。
+
+## 9. 后端实现状态（2026-11-02）
+
+以下为已实现部分。crate 与可执行程序名称仍是候选，不是冻结的命名决定。
+
+**crate 与二进制**
+
+- `mcp-server/`（crate `mailx-mcp-server`，库）：手写 `rmcp` `ServerHandler`、IPC 监听、握手、发现文件、状态。自带 `[lints.rust] unsafe_code = "deny"`，仅 Windows 命名管道模块以 `#![allow(unsafe_code)]` 放行，每个 `unsafe` 块都有 SAFETY 注释。公开接口：`McpServer::start(McpConfig { data_dir, tools }) -> Result<McpHandle, McpStartError>`、`McpHandle::{stop, status, subscribe}`、`McpStatus`、`McpFailureCode`、`StderrAudit`。可重复启停。
+- `mcp-bridge/`（crate `mailx-mcp-bridge`，二进制 `mailx-mcp`）：只依赖 tokio 与 `serde_json`，不链接 core，只读取发现文件。
+- 桌面：`desktop/src/mcp.rs`；设置项 `mcp.enabled`（`AppSettings.mcp`，默认 `false`，只能经 `SettingsStore::set_mcp_enabled` 修改，通用设置保存不会改变它）；命令 `mcp_get_status`、`mcp_set_enabled`（沿用现有 `<模块>_<动词>` 命名）；事件 `mailx://mcp-status-changed`。
+
+**端点与权限**
+
+- Unix：首选 socket 放在数据目录下专用子目录 `<数据目录>/mcp/mcp.sock`；该子目录显式创建为 `0700` 并校验是真实目录、属主为当前用户，socket `chmod 0600`；数据目录本身只在缺失时创建，权限从不修改。残留 socket 若无人应答则删除，有人应答则报 `endpointInUse`，非 socket 文件不删除。完整 socket 路径超过 100 字节时改用 `$TMPDIR/mailx-<uid>/mcp-<数据目录哈希>.sock`（macOS）或 `$XDG_RUNTIME_DIR/mailx/`（Linux，缺失时 `/tmp/mailx-<uid>/`）；回退目录必须属于当前用户，否则报 `permissionDenied`。发现文件记录最终绝对路径。
+- Windows：管道名 `\\.\pipe\mailx-mcp-<instanceId>`，`first_pipe_instance(true)`、`reject_remote_clients(true)`，DACL 为 `D:P(A;;GA;;;<当前用户 SID>)`，在接受连接前先创建下一个实例。仅编译层面核对，未在 Windows 上运行。
+- 发现文件 `mcp-discovery.json`：`{version, endpoint, token, pid, instanceId}`，临时文件加重命名，Unix `0600`；停止时仅当 `instanceId` 相同才删除。token 为 `getrandom` 取 32 字节、十六进制，每次启动重新生成。
+
+**握手与限制**
+
+- 握手行 `{"bridge":1,"token":"…"}`，逐字节读取（不消耗 MCP 字节）、≤512 字节、5 秒；比较用 `subtle` 常量时间；失败回 `{"ok":false}` 并关闭。
+- 单条 MCP 消息 ≤1 MiB。超限的请求**得不到 JSON-RPC 错误**：未解析就不知道 `id`，而 `rmcp` 3.8 只丢弃不回错。服务端在 `rmcp` 之前加了读取包装，超限即结束该会话，客户端看到连接关闭（而不是无限等待）。
+- 并发会话上限 8（`MAX_CONNECTIONS`）：握手通过但已满时回 `{"ok":false}` 并关闭；握手前同时在途的连接上限 32。
+- 每次工具列出与调用都重新检查服务器是否仍启用；停止时先使 token 作废（删除发现文件），再断开全部会话、移除 socket，`stop()` 等待完成。
+- 工具映射按第 2 节：`mailx_` 前缀、`outputSchema` 透传、`readOnlyHint`、`_meta` 中的 `mailx/requiredActions`、`mailx/limits`、`mailx/writesLocalData`；`call_tool` 经 `spawn_blocking(Tools::call)`；`Principal::LocalMcp` 的连接 id 每连接新生成，客户端名取 `clientInfo.name`（去控制字符、截断 64 字符）。授权为 `Grant::mcp_read_and_draft()`。
+- 审计：`StderrAudit` 每次调用向 stderr 写一行（工具 id、主体、客户端名、请求 id、资源个数、结果），不含参数与内容。桌面宿主目前只有 stderr 这一种日志通道。
+
+**状态码**（`McpFailureCode`，camelCase）：`endpointInUse`、`endpointCreateFailed`、`permissionDenied`、`discoveryWriteFailed`、`tokenUnavailable`、`acceptFailed`。`McpStatus` 序列化为 `{"state":"off"}`、`{"state":"running","connections":n,"lastClientName":…}`、`{"state":"failed","code":…}`。
+
+**桌面生命周期**：单实例插件最先注册，第二个实例在到达 `setup` 前就退出，因此只有持锁进程会启动服务。服务在 core 就绪后（就绪回调）按 `mcp.enabled` 启动；开关切换后即时启停；`RunEvent::Exit` 时停止（先于更新器的收尾），后台模式下关窗不影响服务。崩溃遗留的 socket 与发现文件由下一次启动清理，bridge 连接被拒时按核心不可用处理。`Tools` 的默认账号来自写信设置里的默认账号。
+
+**bridge**：`mailx-mcp [--discovery <路径>]`；发现文件优先级为 `--discovery`、环境变量 `MAILX_MCP_DISCOVERY`、`MAILX_DATA_DIR/mcp-discovery.json`、再按平台默认数据目录（macOS `~/Library/Application Support/MailX`，Windows `%APPDATA%\MailX`，其他 `$XDG_DATA_HOME` 或 `~/.local/share` 下的 `MailX`）。这一默认值**复制自** `desktop/src/storage_location.rs`，两处需同步修改。核心不可用时对第一个带 `id` 的请求回 JSON-RPC 错误：`code = -32001`，`message` 以 `CORE_UNAVAILABLE:` 开头并附中英文提示，`data = {"code":"CORE_UNAVAILABLE","reason":…}`，`reason` 为 `discoveryMissing`、`discoveryInvalid`、`connectFailed`、`handshakeRejected` 之一；通知不回应；等待至多 30 秒；stderr 写一行说明。退出码：`0` 正常结束，`64` 参数错误，`69` 核心不可用。
+
+**仍未验证**：Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。

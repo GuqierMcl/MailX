@@ -23,6 +23,7 @@ import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
+import type { McpStatus } from '@/features/mcp/types'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
@@ -64,7 +65,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const emails = buildEmails(dataset)
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -89,6 +90,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const previewListeners = new Set<(previews: EmailPreviews) => void>()
   let previewRequest = 0
   const draftListeners = new Set<(change: DraftChanged) => void>()
+  let mcpStatus: McpStatus = { state: 'off' }
+  const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
@@ -593,6 +596,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     restartToUpdate: async () => { throw new MailxClientError({ code: 'unsupported', message: '当前版本尚不支持此认证方式。', field: null }) },
     openUpdateLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
+    // The browser preview has no host: the switch only changes an in-memory status.
+    getMcpStatus: async () => structuredClone(mcpStatus),
+    async setMcpEnabled(enabled) {
+      mcpStatus = enabled ? { state: 'running', connections: 0, lastClientName: null } : { state: 'off' }
+      for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
+      return structuredClone(mcpStatus)
+    },
+    onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
     getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
     async onSettingsChanged(listener) {
       const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })

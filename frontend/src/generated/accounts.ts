@@ -384,6 +384,12 @@ defaultAccountId: string,
  */
 undoSendSeconds: number, };
 
+export type McpSettings = {
+/**
+ * Off until the user turns it on.
+ */
+enabled: boolean, };
+
 export type LanguagePreference = "system" | "zh-CN" | "en";
 
 export type SupportedLocale = "zh-CN" | "en";
@@ -406,7 +412,7 @@ closeBehavior: CloseBehavior,
  */
 showMenuBarIcon: boolean, };
 
-export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, };
+export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, };
 
 export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, };
 
