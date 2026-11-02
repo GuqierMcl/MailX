@@ -11,7 +11,7 @@
 ```
 
 - **工具层**（core，`core/src/tools/`，已实现）：工具定义、schema 校验、按调用方的可见性与策略、授权检查、结果整形和错误码。与传输无关，不依赖 Tauri、Axum 或 UI。
-- **MCP 适配层**：把工具层中对 MCP 可见的工具映射为 MCP 工具，处理 initialize、版本协商、工具列表、取消与 JSON-RPC 错误。桌面核心与服务端进程托管同一份实现，只换底层传输。候选为 core 内的协议模块或桌面 / 服务端共用的独立 crate，M0 验证 `rmcp` 依赖后再定，任何一种都不能把 Tauri 或 Axum 带入 core。
+- **MCP 适配层**：把工具层中对 MCP 可见的工具映射为 MCP 工具，处理 initialize、版本协商、工具列表、取消与 JSON-RPC 错误。桌面核心与服务端进程托管同一份实现，只换底层传输。M0 后确定放在独立 crate：core 不依赖 `rmcp`，适配层、本地 IPC 监听与发现文件在 MCP 适配 crate 中，由桌面宿主链接，以后服务端也复用它；bridge 是另一个只依赖异步运行时与 JSON 解析的小可执行 crate。依据见 [MCP 草案 M0 结论](../contracts/mcp.md#8-m0-原型结论2026-11-02)。
 - **传输**：本地 IPC 监听由桌面宿主创建；远程 HTTP 路由由服务端宿主挂载。stdio bridge 只完成 token 握手后转发字节，不解析工具。
 - **内置 Agent**：AI Runtime 直接调用工具层，工具调用结果作为不可信材料回填给模型，不经 MCP 序列化。
 

@@ -46,7 +46,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 | MIME / HTML | `mail-parser` 0.11 + `full_encoding` 与 `ammonia` 4 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 账号、文件夹、邮件头与游标使用单连接、WAL、FULL 同步、外键、迁移校验与目录锁；头部使用参数化 LIKE 查询，FTS 待实现 |
 | AI | Rust `reqwest` 流式适配器 | v0.1 OpenAI 兼容与 Ollama；不同协议不伪装成同一种接口 |
-| MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 候选 | M0 验证 SDK / 客户端协议协商，首版 stdio |
+| MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk) 3.8（仅 `server` 功能，放在独立 MCP 适配 crate） | M0 原型已在 macOS 跑通本地 IPC 与 bridge，见 [MCP 草案 M0 结论](../contracts/mcp.md#8-m0-原型结论2026-11-02)；首版 stdio |
 | Web | Axum + 同源静态 SPA + SSE | v0.2；单用户、服务端 Session、TOTP |
 | 工具链 | Rust / Cargo 1.94.0、Bun 1.3.12，均已记录 | 根 `package.json` 提供命令与版本入口；`bun.lock`、`Cargo.lock` 分别锁定依赖 |
 

@@ -28,7 +28,7 @@
 - [x] [版本化迁移与启动准入](../architecture/database-migrations.md)：兼容 v1，启动完成数据库准备后再开放业务；备份恢复与完整升级保障后续实施。
 - [x] FTS5 搜索探针（本地全文搜索 F0，结果见[验证策略](../development/validation.md)第 23 节）。
 - [x] 三平台合成 HTML iframe 隔离与外链处理验证；平台链接差异见验证策略。
-- [ ] MCP SDK + stdio bridge / 本地 IPC 最小连通性验证。
+- [ ] MCP SDK + stdio bridge / 本地 IPC 最小连通性验证。macOS 原型已跑通（`rmcp` 3.8、Unix socket、token 握手、bridge 不打开数据库），Windows named pipe 与 Linux 尚未验证，见 [MCP 草案 M0 结论](../contracts/mcp.md#8-m0-原型结论2026-11-02)。
 - [x] `.github/workflows/ci.yml` 已配置前端格式相关检查、类型、测试和构建，以及 Linux / macOS / Windows 的 Rust Clippy 与测试；本次执行结果单独记录，不由工作流存在推定通过。
 
 完成条件：空应用可运行；协议探针在受控服务完成收发并证明代理不回退；有一条生成 DTO 的 IPC 调用；关键风险有结论或替代方案。没有证明 SMTP 代理前，不宣称分账号收发路由已实现。

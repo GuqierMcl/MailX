@@ -8,7 +8,7 @@ MailX 提供 MCP Server，外部 Agent 是 Client。MCP 只是工具层的一种
 
 MCP 服务实现驻留在核心所在进程：桌面版由桌面核心托管，服务端版由服务进程托管同一份实现，两者只在传输与认证上不同。
 
-传输以 stdio 与后续 Streamable HTTP 为方向，后者替代早期独立 HTTP+SSE 传输。初次联调以官方 `2025-11-25` 规范作为可复现参考，实际支持版本由 SDK 与目标客户端共同验证并在 initialize 中协商，不把该参考版本称为永远最新。[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
+传输以 stdio 与后续 Streamable HTTP 为方向，后者替代早期独立 HTTP+SSE 传输。初次联调以官方 `2025-11-25` 规范作为可复现参考，实际支持版本由 SDK 与目标客户端共同验证并在 initialize 中协商，不把该参考版本称为永远最新。M0 原型中 `rmcp` 3.8 对 `2025-11-25`、`2025-06-18`、`2024-11-05` 按请求版本应答，对无状态的 `2026-07-28` 或未知版本回落为 `2025-11-25`；采用 `2026-07-28` 的客户端需要另行验证。[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
 
 ## 2. 桌面连接与授权
 
@@ -20,11 +20,17 @@ MCP 服务随 MailX 进程运行：关窗行为为“在后台运行”时，关
 
 ### 桥接、发现与认证
 
-建议独立桥接程序由客户端以 stdio 启动，`mailx-mcp` 仅为暂用名称，正式可执行程序名称待定。它连接已运行的桌面核心，不打开 SQLite，也不另起同步器。
+建议独立桥接程序由客户端以 stdio 启动，`mailx-mcp` 仅为暂用名称，正式可执行程序名称待定。它连接已运行的桌面核心，不打开 SQLite，也不另起同步器；bridge 只依赖异步运行时与 JSON 解析，不链接 core。
 
-核心在 macOS / Linux 监听 Unix domain socket（socket 文件 `0600`，所在目录仅当前用户可访问），在 Windows 监听 named pipe（ACL 限定当前用户 SID），并写出发现文件：协议版本、连接端点、随机 token、进程 id 与核心实例 id。Unix socket 路径受系统长度限制，数据目录过长时放在当前用户专属的临时目录。发现文件固定位于数据目录内，原子写入，权限与 socket 相同；退出或关闭开关时只删除属于本实例的文件。token 每次启动服务时重新生成，关闭开关即作废。
+核心在 macOS / Linux 监听 Unix domain socket（socket 文件 `0600`，所在目录仅当前用户可访问），在 Windows 监听 named pipe（ACL 限定当前用户 SID），并写出发现文件：协议版本、连接端点、随机 token、进程 id 与核心实例 id。socket 优先放在数据目录内；macOS `sun_path` 可用 103 字节，默认路径约为 65 字节加用户名长度，超过约 100 字节时改用当前用户专属的临时目录（macOS `$TMPDIR/mailx-<uid>/`，Linux `$XDG_RUNTIME_DIR`）。socket 所在目录由宿主显式创建为 `0700`，core 不会替宿主设置目录权限。绑定前必须已持有单实例锁，否则第二个实例会删除第一个实例的 socket。发现文件固定位于数据目录内，端点写绝对路径，经临时文件加重命名原子写入，权限 `0600`；退出或关闭开关时只删除 instanceId 相同的文件。进程崩溃会留下过期发现文件，bridge 连接被拒时按核心不可用处理。token 由密码学安全随机数生成，每次启动服务时重新生成，关闭开关即作废。Windows 版需要 `unsafe` 构造安全描述符，而工作区禁止 `unsafe`，因此 IPC 代码放在单独配置 lint 的 crate 中（见第 8 节）。
 
-bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议版本与 token），核心以常量时间比较校验，通过后 bridge 只在 stdio 与 IPC 之间转发 MCP 消息；initialize、版本协商和工具调用都由核心中的 MCP 服务实现处理。握手版本与 MCP 协议版本分开，bridge 因此基本不随工具变化更新。单条消息大小、并发连接数与空闲超时都有上限，具体数值实现时确定并写入本文。
+bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议版本与 token），核心以常量时间比较校验，通过后 bridge 只在 stdio 与 IPC 之间转发 MCP 消息；initialize、版本协商和工具调用都由核心中的 MCP 服务实现处理。握手版本与 MCP 协议版本分开，bridge 因此基本不随工具变化更新。
+
+唯一例外是核心不可用：发现文件缺失、连接被拒或握手失败时，bridge 对收到的第一个请求回 JSON-RPC 错误（携带 `CORE_UNAVAILABLE` 与“请先启动 MailX 并开启 MCP”的提示），对通知不回应，同时向 stderr 写说明并以非零状态退出。M0 中只退出不回应时，客户端只能看到连接关闭，看不到原因。bridge 为此只解析到能回填请求 `id` 的程度。
+
+限制（M0 实测值，作为首版初值）：握手行不超过 512 字节、5 秒内完成，否则直接关闭；单条 MCP 消息不超过 1 MiB。`rmcp` 对超长消息只丢弃、不回错误，客户端会一直等待，因此实现时应改为对超限请求回错误，至少依赖客户端超时。并发连接上限尚未定，实现时确定并写入本文。
+
+客户端在调用中途断开时，正在执行的工具调用会跑完（工具层是阻塞调用），不会写一半草稿；如需可取消的工具，需在工具层另行设计。
 
 ### 首版授权（有意简化）
 
@@ -35,6 +41,8 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 ### 状态
 
 核心向宿主报告 MCP 状态：已关闭、运行中（当前连接数与最近连接的客户端自报名称）、启动失败（稳定错误码，例如端点被占用或无法写出发现文件）。设置页与标题栏状态图标都读取这一状态，界面规则见 [UI 设计](../architecture/ui-design.md)。
+
+工具映射：MCP 工具名为工具层 ID 加 `mailx_` 前缀；不带前缀的名称返回 JSON-RPC `-32602`。成功结果同时给 `structuredContent` 与 JSON 文本兜底；`ToolError` 返回 `isError: true`，错误 JSON 只放文本内容、不放 `structuredContent`，以免严格客户端按 `outputSchema` 校验失败。`readOnly` 映射为 `readOnlyHint`；所需动作与限制在 MCP 中没有对应字段，放入 `_meta`。客户端自报名称取自 initialize 的 `clientInfo`。
 
 stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按请求 ID 传递；客户端断开只取消其未完成读取 / AI 请求，不取消已保存草稿或其他客户端任务。
 
@@ -90,3 +98,12 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 - **dbx**（Tauri + Rust）：独立 MCP 可执行程序与桌面共用核心 crate，直接读取本地数据，界面类动作经桌面端桥接；内置 AI 工具与 MCP 工具分别实现。MailX 不采用直接读库（核心是单一写入方），也不采用两套工具实现。
 
 以上为调研时对公开仓库与文档的阅读结论，可能随上游变化。
+
+## 8. M0 原型结论（2026-11-02）
+
+在仓库外的临时 crate 中验证：真实 `MailxCore`（临时数据目录）→ 工具层 → 手写 `rmcp` `ServerHandler` → Unix socket + token 握手 → bridge → `rmcp` 客户端。macOS 上 initialize、工具列表、`mailx_list_accounts`、`mailx_search_emails`、输入错误与未知工具均按预期返回；两个客户端并发会话互不影响；`lsof` 显示 bridge 进程只持有标准输入输出与 socket，没有打开数据目录或 SQLite。
+
+- **SDK**：`rmcp` 3.8，`default-features = false, features = ["server"]`。在 core 之上只新增约 7 个包，不引入 axum、hyper、reqwest、tower；类型多为 `#[non_exhaustive]`，需用构造器，跨小版本时有 API 变化，应锁定小版本。
+- **crate 布局**：core 不依赖 `rmcp`，只保留工具层。新增 MCP 适配 crate（适配层、IPC 监听、发现文件、握手，自带 lint 配置以容纳 Windows 的 `unsafe`），由桌面宿主链接；新增 bridge 可执行 crate，只依赖异步运行时与 JSON 解析。crate 名称尚未决定。
+- **Windows**：tokio named pipe 支持 `first_pipe_instance`、`reject_remote_clients` 与自定义安全属性，配合 `windows-sys` 可把 DACL 限定为当前用户 SID。只查了 API，未编译、未运行。
+- **未验证**：Windows 与 Linux 运行、崩溃后的过期发现文件清理、并发连接上限、真实 MCP 客户端（Claude、Cursor 等）联调。
