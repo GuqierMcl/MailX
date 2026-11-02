@@ -484,7 +484,7 @@ data: string, kind: AvatarKind, };
 
 export type DraftKind = "new" | "reply" | "replyAll" | "forward";
 
-export type DraftOrigin = "user" | "mcp";
+export type DraftOrigin = "user" | "mcp" | "ai";
 
 export type Draft = { id: string, accountId: string, kind: DraftKind,
 /**

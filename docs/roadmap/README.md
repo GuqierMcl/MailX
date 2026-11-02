@@ -78,7 +78,7 @@
 
 依赖 M2 的阅读、草稿和权限服务。AI 与 MCP 共用[工具层](../architecture/agent-tools.md)，工具层与 `RequestContext` 先于任一入口落地。
 
-- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。本地 MCP 先于内置 AI 落地，见[实施顺序](../architecture/agent-tools.md#7-实施顺序)。
+- [ ] 工具层骨架、`RequestContext` / 授权记录、按入口可见性与策略；纯文本读取接口与草稿来源标记。本地 MCP 先于内置 AI 落地，见[实施顺序](../architecture/agent-tools.md#7-实施顺序)。进展：`core/src/tools/` 已实现 `RequestContext`、按入口可见性与策略、授权检查及 `list_accounts` / `search_emails` / `read_email` / `create_draft` 四个工具（仅 core 进程内测试）；纯文本读取与草稿来源标记（`user` / `mcp` / `ai`）已具备。尚无宿主构造 `RequestContext`、MCP 适配层或授权记录持久化，因此本项未完成。
 
 - [ ] 云端兼容接口与 Ollama、提供商配置、内容披露与取消。
 - [ ] 摘要、待办建议、拟信与改写；Run 快照和输入 revision 检查。

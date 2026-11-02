@@ -46,14 +46,18 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
-| `mailx_list_accounts` | `{}` | 授权范围内账号（首版为全部账号）id、显示名、状态 | `accounts:read` |
-| `mailx_search_emails` | `query?, accountId?, limit?, cursor?, receivedAfter?, receivedBefore?` | 限量摘要、游标、缓存覆盖说明 | `mail:read` |
-| `mailx_read_email` | `emailId, offset?, maxChars?` | 纯文本片段、发送方、附件元信息、nextOffset | `mail:read` |
-| `mailx_create_draft` | `accountId, to[], cc?, bcc?, subject, body, clientMutationId` | draftId、revision、需用户检查的提示 | `draft:create` |
+| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, status`（`status` 目前只有 `unverified`），范围内账号（首版为全部账号） | `accounts:read` |
+| `mailx_search_emails` | `query?, accountIds?, receivedAfter?, receivedBefore?, unread?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, subject, from{name?,address}, receivedAt, preview, isRead, hasAttachment, bodyCached`；`nextCursor` | `mail:read` |
+| `mailx_read_email` | `emailId, offset?, maxChars?` | `id, accountId, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾为 null）, totalChars, bodyTruncated` | `mail:read` |
+| `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
 
-建议限制：搜索默认 20 条、上限 100；正文默认 8,000 字符、单次上限 32,000；query 最长 256 字符，正文分页按 Unicode 字符计数，不能切断编码。读取不自动标记已读。正文未缓存报 `BODY_NOT_CACHED` 并引导在 UI 获取，首版不让 MCP 隐式触发大范围下载。
+状态：四个工具已在 core 工具层实现（`core/src/tools/`，进程内测试），MCP 适配层尚未实现，以上是适配层要暴露的形状；输入输出 JSON Schema 由工具层的 `ToolDescriptor` 提供，如有出入以其为准。适配层在工具层 id 前加 `mailx_` 前缀。`accountIds` 与授权范围取交集，范围外账号被忽略。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
 
-创建草稿必须显式指定账号，初版不接受宿主附件路径、URL 附件或可执行 HTML；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（`mcp`）及草稿列表 / 写信窗口的“由 MCP 创建”标记，但 MCP 服务本身尚未实现，目前没有任何草稿会带 `mcp`。
+限制（已实现于工具层，两个入口各自一份策略值，目前相同）：搜索默认 20 条、上限 100；`accountIds` 最多 20 个；正文默认 8,000 字符、单次上限 32,000；query 最长 256 字符；`cursor` 最长 1,024 字符。正文分页按 Unicode 字符（标量值）计数，`offset` 超过总长度报 `invalidInput`，不会切断编码。读取不自动标记已读。正文未缓存报 `bodyNotCached` 并引导在 UI 获取，首版不让 MCP 隐式触发下载。
+
+草稿限制：`to` / `cc` / `bcc` 各最多 50 个收件人，地址最长 320、显示名最长 200 字符，`subject` 最长 998 字符，`bodyHtml` 最长 200,000 字节，`clientMutationId` 最长 64 字符。
+
+创建草稿可显式指定账号，缺省使用默认发件账号（须在授权范围内），初版不接受宿主附件路径、URL 附件或可执行 HTML；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（MCP 主体写 `mcp`，内置 AI 主体经同一工具写 `ai`）及草稿列表 / 写信窗口的“由 MCP 创建”“由 AI 创建”标记；工具层已按主体写入来源，但没有宿主调用它，目前没有任何草稿会带 `mcp` 或 `ai`。
 
 不发布蓝图中语义混合的 `mailx_send_draft`。未来若提供发送工具，另行设计与完整内容哈希 / 草稿版本绑定的一次性确认，而不是由 Agent 提交 `confirmed=true` 自行批准。
 
@@ -65,7 +69,7 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 工具注解中的只读 / 破坏性标志仅帮助客户端理解行为，不作为安全控制。邮件正文返回为不可信数据，不能追加为 Agent 系统指令。结果不包括 API Key、邮箱密码、refresh token、本地路径或无关账号信息。
 
-参数或协议错误使用 JSON-RPC 错误；业务失败使用工具错误结果并带稳定错误码和简短建议。记录连接 id、客户端自报名称、动作、资源 ID、结果和 requestId，不记录完整邮件工具结果。
+参数或协议错误使用 JSON-RPC 错误；业务失败使用工具错误结果并带稳定错误码和简短建议；工具层错误码为 `unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`unavailable`、`internal`，范围外账号或邮件与不存在的资源同样报 `notFound`，未对该入口开放的工具报 `unknownTool`。记录连接 id、客户端自报名称、动作、资源 ID、结果和 requestId，不记录完整邮件工具结果。
 
 ## 5. 远程扩展边界
 

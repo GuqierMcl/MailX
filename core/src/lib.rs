@@ -21,6 +21,7 @@ mod smtp;
 mod startup;
 mod storage;
 mod sync;
+pub mod tools;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;

@@ -157,6 +157,19 @@ describe('drafts and outbox navigation', () => {
     expect(marked[0]).toHaveTextContent('代理草稿')
   })
 
+  it('marks only drafts created by the built-in AI with 由 AI 创建', async () => {
+    const ai = { ...draft('44444444-4444-4444-8444-444444444444'), origin: 'ai' as const, subject: 'AI 草稿' }
+    setup({ drafts: [draft(), ai] })
+    await userEvent.click((await screen.findAllByRole('button', { name: '草稿' }))[0])
+    await screen.findByRole('list', { name: '草稿列表' })
+    const items = rows('草稿列表')
+    expect(items).toHaveLength(2)
+    const marked = items.filter((item) => within(item).queryByText('由 AI 创建'))
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toHaveTextContent('AI 草稿')
+    expect(items.filter((item) => within(item).queryByText('由 MCP 创建'))).toHaveLength(0)
+  })
+
   it('lists drafts in the island and shows a preview with 继续编辑 and 删除', async () => {
     const d = draft()
     const { client } = setup({ drafts: [d] })

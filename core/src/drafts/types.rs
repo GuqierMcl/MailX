@@ -44,6 +44,8 @@ pub enum DraftOrigin {
     User,
     /// Created through the local MCP server.
     Mcp,
+    /// Created by MailX's built-in AI.
+    Ai,
 }
 
 impl DraftOrigin {
@@ -51,6 +53,7 @@ impl DraftOrigin {
         match self {
             Self::User => "user",
             Self::Mcp => "mcp",
+            Self::Ai => "ai",
         }
     }
 
@@ -58,6 +61,7 @@ impl DraftOrigin {
         Some(match value {
             "user" => Self::User,
             "mcp" => Self::Mcp,
+            "ai" => Self::Ai,
             _ => return None,
         })
     }

@@ -75,6 +75,18 @@ describe('composer layout', () => {
     setup(draft({ origin: 'mcp' }))
     await body()
     expect(screen.getByText('由 MCP 创建')).toBeInTheDocument()
+    expect(screen.queryByText('由 AI 创建')).not.toBeInTheDocument()
+  })
+
+  it('labels the draft 由 AI 创建 only when the built-in AI created it', async () => {
+    const first = setup()
+    await body()
+    expect(screen.queryByText('由 AI 创建')).not.toBeInTheDocument()
+    first.view.unmount()
+    setup(draft({ origin: 'ai' }))
+    await body()
+    expect(screen.getByText('由 AI 创建')).toBeInTheDocument()
+    expect(screen.queryByText('由 MCP 创建')).not.toBeInTheDocument()
   })
 
   it('opens Cc and Bcc rows when the draft already has those recipients', async () => {

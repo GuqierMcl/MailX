@@ -23,6 +23,7 @@
   },
   "draft": {
     "createdViaMcp": "由 MCP 创建",
+    "createdViaAi": "由 AI 创建",
     "gone": "这份草稿已不存在",
     "goneDescription": "它可能已被发送或删除。",
     "goneWindowDescription": "它可能已被发送或删除。关闭此窗口即可。",

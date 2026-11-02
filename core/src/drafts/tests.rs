@@ -191,6 +191,27 @@ async fn origin_survives_updates_and_reply_drafts_are_the_users() {
     assert_eq!(reply.origin, DraftOrigin::User);
 }
 
+#[tokio::test]
+async fn the_host_can_record_ai_and_storage_rejects_unknown_origins() {
+    let f = fixture(&[plain("x")]);
+    let ai = f
+        .core
+        .create_draft_with_origin(f.blank(None), NONE, DraftOrigin::Ai)
+        .unwrap();
+    assert_eq!(ai.origin, DraftOrigin::Ai);
+    let stored: String =
+        f.db.query_row("SELECT origin FROM drafts WHERE id = ?1", [&ai.id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(stored, "ai");
+    assert_eq!(f.core.get_draft(&ai.id).unwrap().origin, DraftOrigin::Ai);
+    assert!(
+        f.db.execute("UPDATE drafts SET origin = 'robot' WHERE id = ?1", [&ai.id])
+            .is_err()
+    );
+}
+
 #[test]
 fn requests_cannot_carry_an_origin_and_the_wire_values_are_camel_case() {
     let create = serde_json::json!({
@@ -207,6 +228,7 @@ fn requests_cannot_carry_an_origin_and_the_wire_values_are_camel_case() {
         "\"user\""
     );
     assert_eq!(serde_json::to_string(&DraftOrigin::Mcp).unwrap(), "\"mcp\"");
+    assert_eq!(serde_json::to_string(&DraftOrigin::Ai).unwrap(), "\"ai\"");
 }
 
 #[tokio::test]
