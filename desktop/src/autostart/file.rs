@@ -301,13 +301,15 @@ mod tests {
             assert!(!desktop_enabled(modified.as_bytes(), bytes).unwrap());
         }
         assert!(desktop_enabled(bytes, bytes).unwrap());
+        // Use native absolute paths: a Unix-rooted path is not absolute when
+        // this portable file-format test is compiled on Windows.
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let custom = directory.path().join("custom-config");
+        assert_eq!(config_home(&home, Some(custom.clone())), custom);
         assert_eq!(
-            config_home(Path::new("/home/test"), Some("/custom/config".into())),
-            PathBuf::from("/custom/config")
-        );
-        assert_eq!(
-            config_home(Path::new("/home/test"), Some("relative".into())),
-            PathBuf::from("/home/test/.config")
+            config_home(&home, Some("relative".into())),
+            home.join(".config")
         );
         assert_eq!(
             quote_exec("/应用/Mail X%/mailx").unwrap(),

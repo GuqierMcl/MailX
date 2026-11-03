@@ -63,12 +63,12 @@ impl Entry {
                 .0
                 .set_value(ENTRY_ID, &self.command)?;
             // Only explicit user enabling clears a Task Manager override.
-            let mut bytes = vec![0; 12];
+            let mut bytes = vec![0_u8; 12];
             bytes[0] = 2;
             user.create_subkey(APPROVED)?.0.set_raw_value(
                 ENTRY_ID,
                 &RegValue {
-                    bytes,
+                    bytes: bytes.into(),
                     vtype: REG_BINARY,
                 },
             )
