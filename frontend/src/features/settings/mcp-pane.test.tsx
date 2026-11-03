@@ -137,10 +137,4 @@ describe('MCP settings page', () => {
     await userEvent.click(screen.getByRole('button', { name: '复制程序路径' }))
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('/opt/MailX/mailx-mcp'))
   })
-
-  it('leads to the General page from the lifecycle note', async () => {
-    const { dialog } = renderMcp()
-    await userEvent.click(await within(dialog).findByRole('button', { name: '前往「通用」设置' }))
-    expect(await within(dialog).findByText('语言')).toBeInTheDocument()
-  })
 })

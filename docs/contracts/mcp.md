@@ -174,6 +174,6 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 
 **bridge**：`mailx-mcp [--discovery <路径>]`；发现文件优先级为 `--discovery`、环境变量 `MAILX_MCP_DISCOVERY`、`MAILX_DATA_DIR/mcp-discovery.json`、再按平台默认数据目录（macOS `~/Library/Application Support/MailX`，Windows `%APPDATA%\MailX`，其他 `$XDG_DATA_HOME` 或 `~/.local/share` 下的 `MailX`）。这一默认值**复制自** `desktop/src/storage_location.rs`，两处需同步修改。核心不可用时对第一个带 `id` 的请求回 JSON-RPC 错误：`code = -32001`，`message` 以 `CORE_UNAVAILABLE:` 开头并附中英文提示，`data = {"code":"CORE_UNAVAILABLE","reason":…}`，`reason` 为 `discoveryMissing`、`discoveryInvalid`、`connectFailed`、`handshakeRejected` 之一；通知不回应；等待至多 30 秒；stderr 写一行说明。stdin 到达 EOF 即视为客户端结束（命名管道没有半关闭）：bridge 刷新写端，给服务端最多 2 秒（`DRAIN_GRACE`）送完剩余回复，然后丢弃 IPC 连接并以 `0` 退出，服务端随连接断开释放会话；服务端先关闭时（例如用户关闭 MCP）立即结束并以 `0` 退出，即使客户端仍保持 stdin 打开；bridge 以 `shutdown_background` 结束运行时，不等待无法取消的 stdin 阻塞读取（核心不可用路径同样适用）。退出码：`0` 正常结束，`64` 参数错误，`69` 核心不可用。
 
-**设置页与分发**：设置 → MCP 页含开关（开启前确认）、状态行、说明与复制配置；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
+**设置页与分发**：设置 → MCP 页保留开关（开启前确认）、运行状态与错误、已连接客户端、复制配置和默认折叠的手动配置；访问范围与能力边界集中在开启确认中说明；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
 
 **仍未验证**：各平台实机手测（含设置页、标题栏图标、复制配置和 sidecar 路径）、AppImage 实机复制、Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。

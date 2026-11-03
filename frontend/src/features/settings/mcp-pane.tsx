@@ -18,9 +18,8 @@ import { mcpClientSnippet } from '@/features/mcp/client-snippet'
 import { errorText } from '@/i18n/errors'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings } from './settings-queries'
-import type { SettingsSection } from './settings-dialog'
 
-export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpenSection: (section: SettingsSection) => void }) {
+export function McpPane({ client }: { client: MailxClient }) {
   const { t } = useTranslation('settings')
   const queryClient = useQueryClient()
   const settings = useSettings(client)
@@ -68,8 +67,8 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
       <AlertTitle>{t(settings.isError ? 'readFailed' : 'mcpToggleFailed')}</AlertTitle>
       <AlertDescription>{errorText(settings.error ?? error)}</AlertDescription>
     </Alert>}
-    <SettingsGroup title={t('mcp')} description={t('mcpIntro')}>
-      <SettingsRow label={t('mcpEnable')} description={t('mcpEnableHint')} htmlFor="mcp.enabled">
+    <SettingsGroup title={t('mcp')}>
+      <SettingsRow label={t('mcpEnable')} htmlFor="mcp.enabled">
         <Switch id="mcp.enabled" checked={enabled} disabled={!settings.data || pending}
           onCheckedChange={(next) => { if (next) setConfirming(true); else void apply(false) }} />
       </SettingsRow>
@@ -80,19 +79,10 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
         {clients.map((name) => <li key={name}>{name}</li>)}
       </ul>}
     </SettingsGroup>
-    <SettingsGroup title={t('mcpCapabilities')}>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-        <li>{t('mcpCan')}</li>
-        <li>{t('mcpCannot')}</li>
-        <li>{t('mcpLocalAccess')}</li>
-      </ul>
-      <p className="text-sm text-muted-foreground">{t('mcpLifecycle')}</p>
-      <div><Button variant="link" size="sm" className="h-auto px-0" onClick={() => onOpenSection('general')}>{t('mcpOpenGeneral')}</Button></div>
-    </SettingsGroup>
     <SettingsGroup title={t('mcpClients')} description={t('mcpClientsHint')}>
-      <SettingsRow label={t('mcpCopyConfig')} description={t('mcpCopyConfigHint')}>
+      <div>
         <Button variant="outline" size="sm" disabled={config.isError} onClick={() => void copy()}>{t('mcpCopyConfig')}</Button>
-      </SettingsRow>
+      </div>
       {config.isError
         ? <p role="alert" className="text-sm text-destructive">{errorText(config.error)}</p>
         : <Collapsible>
