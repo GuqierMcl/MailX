@@ -54,7 +54,7 @@ fn content_json(content: &DraftContent) -> serde_json::Value {
 }
 
 impl AccountService {
-    fn check_account(&self, account_id: &str) -> Result<(), AppError> {
+    pub(crate) fn check_account(&self, account_id: &str) -> Result<(), AppError> {
         validate_uuid(account_id, "accountId")?;
         if self.storage.account_exists(account_id)? {
             Ok(())

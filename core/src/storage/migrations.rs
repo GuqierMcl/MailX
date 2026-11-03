@@ -159,6 +159,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &[],
         sql: include_str!("migrations/0022_draft_origin.sql"),
     },
+    Migration {
+        version: 23,
+        description: "attachment origin for agents",
+        required_tables: &["draft_attachments"],
+        sql: include_str!("migrations/0023_attachment_origin.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -563,7 +569,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 22);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 23);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -759,7 +765,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            22
+            23
         );
     }
 
@@ -894,6 +900,88 @@ mod tests {
         assert!(
             db.execute("UPDATE accounts SET use_provider_icon=NULL", [])
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn attachment_origin_upgrade_preserves_rows_order_indexes_and_cascades() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(22)).unwrap();
+        let draft = "d".repeat(36);
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO drafts(id, account_id, kind, to_addresses, cc_addresses, bcc_addresses,
+             subject, body_text, body_html, created_at, updated_at, client_mutation_id, create_canonical)
+             VALUES (?1, 'a', 'new', '[]', '[]', '[]', 'Test', '', '', 't', 't', ?2, '{}')",
+            [&draft, &"m".repeat(36)],
+        )
+        .unwrap();
+        let old_rows = [
+            (5_i64, "user", 0, None),
+            (8, "forwarded", 1, Some("inline@test")),
+        ];
+        for (rowid, origin, inline, cid) in old_rows {
+            db.execute(
+                "INSERT INTO draft_attachments
+                 (rowid, draft_id, id, file_name, media_type, size, blob_hash, inline, content_id, origin, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 'text/plain', 9, ?5, ?6, ?7, ?8, 'created')",
+                rusqlite::params![rowid, draft, rowid.to_string().repeat(36), format!("{rowid}.txt"), "b".repeat(64), inline, cid, origin],
+            )
+            .unwrap();
+        }
+        let snapshot = |db: &Connection| {
+            db.prepare("SELECT json_array(rowid, draft_id, id, file_name, media_type, size, blob_hash, inline, content_id, origin, created_at)
+                        FROM draft_attachments ORDER BY rowid")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let before = snapshot(&db);
+        apply(&mut db, MIGRATIONS).unwrap();
+        assert_eq!(snapshot(&db), before);
+        for (index, origin) in ["mcp", "ai"].into_iter().enumerate() {
+            db.execute(
+                "INSERT INTO draft_attachments(draft_id, id, file_name, media_type, size, blob_hash, origin, created_at)
+                 VALUES (?1, ?2, 'new.txt', 'text/plain', 1, ?3, ?4, 't')",
+                rusqlite::params![draft, char::from(b'x' + index as u8).to_string().repeat(36), "c".repeat(64), origin],
+            ).unwrap();
+        }
+        assert!(
+            db.execute("UPDATE draft_attachments SET origin = 'untrusted'", [])
+                .is_err()
+        );
+        assert!(
+            db.execute("UPDATE draft_attachments SET draft_id = 'missing'", [])
+                .is_err()
+        );
+        assert!(db.execute("UPDATE draft_attachments SET inline = 1, content_id = 'inline@test' WHERE origin = 'mcp'", []).is_err());
+        for name in [
+            "draft_attachments_by_blob",
+            "draft_attachments_inline_content_id",
+        ] {
+            assert!(
+                db.query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1",
+                    [name],
+                    |row| row.get::<_, i64>(0)
+                )
+                .is_ok()
+            );
+        }
+        db.execute("DELETE FROM drafts WHERE id = ?1", [&draft])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

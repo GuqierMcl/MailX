@@ -2,11 +2,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Who is asking. Only the interactive composer may queue mail for sending
-/// (sending.md section 3): a model or MCP principal never can, however it
-/// calls. Settling an `unknown` item is also allowed from the main window,
-/// the other interactive UI. The host decides the principal; the core never
-/// infers it.
+/// Who is asking. The composer and authorized MCP/model tools may queue mail.
+/// Only interactive UI callers may settle an `unknown` result. The trusted
+/// host decides the principal; request input cannot choose it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Caller {
     /// The user's own composer window.
@@ -20,7 +18,7 @@ pub enum Caller {
     Model,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum OutboxState {
     Queued,
@@ -46,7 +44,7 @@ impl OutboxState {
 }
 
 /// How the user settled an `unknown` item.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum OutboxResolution {
     /// Declared delivered; the item became `accepted`.

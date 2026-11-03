@@ -452,6 +452,40 @@ impl Storage {
         rows.into_iter().collect()
     }
 
+    /// Scope and state filtering happen before keyset pagination.
+    pub(crate) fn list_outbox_page(
+        &self,
+        account_ids: Option<&[String]>,
+        states: Option<&[OutboxState]>,
+        before: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        let accounts = account_ids.map(|ids| encode(&ids)).transpose()?;
+        let states = states.map(|states| encode(&states)).transpose()?;
+        let mut statement = self.db.prepare(&format!(
+            "SELECT {COLUMNS} FROM outbox
+             WHERE (?1 IS NULL OR account_id IN (SELECT value FROM json_each(?1)))
+               AND ((?2 IS NULL AND (state IN ('queued', 'sending', 'failed')
+                    OR (state = 'unknown' AND resolution IS NULL)))
+                    OR state IN (SELECT value FROM json_each(?2)))
+               AND (?3 IS NULL OR (created_at, id) < (?3, ?4))
+             ORDER BY created_at DESC, id DESC LIMIT ?5"
+        ))?;
+        let rows = statement
+            .query_map(
+                params![
+                    accounts,
+                    states,
+                    before.map(|b| b.0),
+                    before.map(|b| b.1),
+                    limit
+                ],
+                parse,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().collect()
+    }
+
     /// Fails queued items whose envelope sender is no longer the account's
     /// address (sending.md section 5, `accountChanged`).
     pub(crate) fn fail_changed_sender(

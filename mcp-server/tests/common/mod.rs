@@ -63,7 +63,9 @@ impl Fixture {
             )
             .unwrap();
         let default_account = account.id.clone();
-        let tools = Arc::new(Tools::new(core, move || default_account.clone()));
+        let tools = Arc::new(
+            Tools::new(core, move || default_account.clone()).with_undo_send_seconds(|| Ok(30)),
+        );
         Self {
             dir,
             tools,

@@ -47,6 +47,16 @@ impl AccountService {
         request: AddAttachmentRequest,
         bytes: &[u8],
     ) -> Result<Draft, AppError> {
+        self.add_attachment_with_origin(request, bytes, AttachmentOrigin::User)
+    }
+
+    /// The trusted caller supplies provenance; it is never part of tool input.
+    pub fn add_attachment_with_origin(
+        &mut self,
+        request: AddAttachmentRequest,
+        bytes: &[u8],
+        origin: AttachmentOrigin,
+    ) -> Result<Draft, AppError> {
         validate_uuid(&request.draft_id, "draftId")?;
         let file_name = sanitize_file_name(&request.file_name)
             .ok_or_else(|| AppError::validation("fileName"))?;
@@ -58,6 +68,9 @@ impl AccountService {
         }
         if self.storage.draft_locked(&request.draft_id)? {
             return Err(AppError::new(ErrorCode::DraftLocked));
+        }
+        if draft.revision != request.expected_revision {
+            return Err(AppError::new(ErrorCode::Conflict));
         }
         let media_type = sniff_media_type(bytes, &file_name);
         let blob = self.storage.blobs.put(bytes)?;
@@ -71,7 +84,7 @@ impl AccountService {
                 file_name: &file_name,
                 media_type: &media_type,
                 blob: &blob,
-                origin: AttachmentOrigin::User,
+                origin,
             },
             policy,
             &now(),

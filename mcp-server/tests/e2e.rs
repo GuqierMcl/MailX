@@ -108,7 +108,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     let client = connect(&read_discovery(&fixture), "e2e-client").await;
 
     let tools = client.peer().list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 16);
+    assert_eq!(tools.len(), 22);
     for tool in &tools {
         assert!(tool.name.starts_with("mailx_"), "{}", tool.name);
         assert!(tool.output_schema.is_some(), "{}", tool.name);
@@ -122,7 +122,10 @@ async fn tools_list_and_calls_work_end_to_end() {
         let hint = tool.annotations.as_ref().unwrap().destructive_hint;
         assert_eq!(
             hint,
-            Some(tool.name == "mailx_delete_draft"),
+            Some(matches!(
+                tool.name.as_ref(),
+                "mailx_delete_draft" | "mailx_send_email" | "mailx_remove_draft_attachment"
+            )),
             "{}",
             tool.name
         );
@@ -260,6 +263,159 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
 }
 
 #[tokio::test]
+async fn sending_and_attachments_work_through_the_default_mcp_grant() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let client = connect(&read_discovery(&fixture), "sending-client").await;
+    let tools = client.peer().list_all_tools().await.unwrap();
+    for name in [
+        "mailx_send_email",
+        "mailx_list_outbox",
+        "mailx_get_outbox",
+        "mailx_cancel_outbox",
+        "mailx_add_draft_attachment",
+        "mailx_remove_draft_attachment",
+    ] {
+        assert!(tools.iter().any(|tool| tool.name == name), "{name}");
+    }
+    let send = serde_json::to_value(
+        tools
+            .iter()
+            .find(|tool| tool.name == "mailx_send_email")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(send["annotations"]["readOnlyHint"], false);
+    assert_eq!(send["annotations"]["destructiveHint"], true);
+    assert_eq!(send["annotations"]["openWorldHint"], true);
+    assert_eq!(send["_meta"]["mailx/writesServerData"], true);
+    assert_eq!(send["_meta"]["mailx/requiredActions"], json!(["mail:send"]));
+
+    let created = call(
+        &client,
+        "mailx_create_draft",
+        json!({"to": [{"address": "recipient@example.test"}], "subject": "MCP send test", "bodyHtml": "<p>Local fixture only</p>"}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(created.is_error, Some(true));
+    let draft_id = created.structured_content.unwrap()["draftId"].clone();
+    let read = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    let path = fixture.dir.path().join("attachment.txt");
+    std::fs::write(&path, "synthetic attachment").unwrap();
+    let added = call(
+        &client,
+        "mailx_add_draft_attachment",
+        json!({"draftId": draft_id, "expectedRevision": read["revision"], "filePath": path}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(added.is_error, Some(true), "{:?}", added.content);
+    let added = added.structured_content.unwrap();
+    assert_eq!(added["attachment"]["name"], "attachment.txt");
+    assert_eq!(added["attachment"]["origin"], "mcp");
+    assert!(!added.to_string().contains(path.to_str().unwrap()));
+    let read = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(read["attachments"][0]["id"], added["attachment"]["id"]);
+    let removed = call(
+        &client,
+        "mailx_remove_draft_attachment",
+        json!({"draftId": draft_id, "expectedRevision": added["revision"], "attachmentId": added["attachment"]["id"]}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(removed.is_error, Some(true), "{:?}", removed.content);
+    let removed = removed.structured_content.unwrap();
+    assert_eq!(removed["removed"], true);
+
+    let input = json!({
+        "action": "send", "draftId": draft_id, "expectedRevision": removed["revision"],
+        "clientMutationId": "00000000-0000-4000-8000-000000000057"
+    });
+    let queued = call(&client, "mailx_send_email", input.clone())
+        .await
+        .unwrap();
+    assert_ne!(queued.is_error, Some(true), "{:?}", queued.content);
+    let queued = queued.structured_content.unwrap();
+    assert_eq!(queued["state"], "queued");
+    let outbox_id = queued["id"].clone();
+    let replay = call(&client, "mailx_send_email", input).await.unwrap();
+    assert_eq!(replay.structured_content.unwrap()["id"], outbox_id);
+
+    let retry = call(
+        &client,
+        "mailx_send_email",
+        json!({"action": "retry", "outboxId": outbox_id}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(retry.is_error, Some(true));
+    let retry = retry.structured_content.unwrap();
+    assert_eq!(retry["id"], outbox_id);
+    assert_eq!(retry["state"], "queued");
+    assert_eq!(retry["notBefore"], queued["notBefore"]);
+    let list = call(
+        &client,
+        "mailx_list_outbox",
+        json!({"accountId": fixture.account_id, "states": ["queued"], "limit": 1}),
+    )
+    .await
+    .unwrap()
+    .structured_content
+    .unwrap();
+    assert_eq!(list["items"][0]["id"], outbox_id);
+    let item = call(&client, "mailx_get_outbox", json!({"outboxId": outbox_id}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(item["state"], "queued");
+    assert!(item.get("serverReply").is_none());
+
+    let invalid = call(
+        &client,
+        "mailx_send_email",
+        json!({"action": "retry", "outboxId": outbox_id, "draftId": draft_id}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(invalid.is_error, Some(true));
+    assert!(
+        serde_json::to_value(invalid.content)
+            .unwrap()
+            .to_string()
+            .contains("invalidInput")
+    );
+    let canceled = call(
+        &client,
+        "mailx_cancel_outbox",
+        json!({"outboxId": outbox_id}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(canceled.is_error, Some(true));
+    assert_eq!(canceled.structured_content.unwrap()["state"], "canceled");
+    let draft = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(draft["locked"], false);
+    assert_eq!(draft["attachments"], json!([]));
+
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
 async fn invalid_input_and_unknown_tools_are_tool_errors_but_unprefixed_is_a_protocol_error() {
     let fixture = Fixture::new().await;
     let handle = McpServer::start(fixture.config()).await.unwrap();
@@ -317,7 +473,7 @@ async fn bad_handshakes_are_rejected() {
 
     // The server is still healthy.
     let client = connect(&discovery, "after-bad").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -342,7 +498,7 @@ async fn oversized_message_ends_the_session() {
 
     // Other sessions are unaffected.
     let client = connect(&discovery, "after-oversize").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -406,7 +562,7 @@ async fn token_rotates_and_restart_works() {
         let discovery = read_discovery(&fixture);
         tokens.push(discovery.token.clone());
         let client = connect(&discovery, "restart").await;
-        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
         client.cancel().await.unwrap();
         handle.stop().await;
     }
@@ -421,7 +577,7 @@ async fn stop_disconnects_sessions_and_refuses_new_connections() {
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let discovery = read_discovery(&fixture);
     let client = connect(&discovery, "stopper").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
 
     handle.stop().await;
     assert_eq!(handle.status(), McpStatus::Off);
@@ -473,7 +629,7 @@ async fn second_server_on_the_same_data_dir_reports_endpoint_in_use() {
     assert_eq!(error.code, mailx_mcp_server::McpFailureCode::EndpointInUse);
     // The failed start must not have touched the first server's files.
     let client = connect(&read_discovery(&fixture), "still-alive").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     first.stop().await;
 }
@@ -501,7 +657,7 @@ async fn long_data_dir_falls_back_to_a_short_private_socket_path() {
         0o700
     );
     let client = connect(&discovery, "long-path").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
     assert!(!endpoint.exists());
@@ -512,7 +668,7 @@ async fn open_session_is_rejected_per_call_once_disabled() {
     let fixture = Fixture::new().await;
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let client = connect(&read_discovery(&fixture), "per-call").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
 
     // Flip the flag without aborting the session: the call itself must fail.
     handle.disable_calls_only_for_tests();
@@ -608,7 +764,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
     .await;
     assert_eq!(
         list["result"]["tools"].as_array().unwrap().len(),
-        16,
+        22,
         "{list}"
     );
     assert!(matches!(

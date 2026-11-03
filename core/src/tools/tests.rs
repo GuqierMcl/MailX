@@ -178,12 +178,18 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
             "archive_emails",
             "unarchive_emails",
             "refresh_sync",
+            "send_email",
+            "list_outbox",
+            "get_outbox",
+            "cancel_outbox",
+            "add_draft_attachment",
+            "remove_draft_attachment",
         ];
         if audience == Audience::Mcp {
             expected.push("show_email_in_app");
             expected.push("show_draft_in_app");
         }
-        assert_eq!(ids.len(), if audience == Audience::Mcp { 16 } else { 14 });
+        assert_eq!(ids.len(), if audience == Audience::Mcp { 22 } else { 20 });
         assert_eq!(ids, expected);
         let delete = list.iter().find(|t| t.id == "delete_draft").unwrap();
         assert!(delete.annotations.destructive && !delete.annotations.read_only);
@@ -204,7 +210,7 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
         assert!(search.description.contains("untrusted"));
         assert!(search.annotations.read_only);
         let draft = &list[4];
-        assert!(draft.description.contains("NOT sent"));
+        assert!(draft.description.contains("without sending"));
         assert!(draft.description.contains("untrusted"));
         assert!(draft.annotations.writes_local_data && !draft.annotations.read_only);
         assert!(list[2].description.contains("untrusted"));
@@ -221,8 +227,8 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
         assert!(folders.annotations.read_only);
         assert_eq!(folders.required_actions, [Action::MailRead]);
         let reply = &list[5];
-        assert!(reply.description.contains("NOT sent"));
-        assert!(reply.description.contains("download true"));
+        assert!(reply.description.contains("without sending"));
+        assert!(reply.description.contains("download: true"));
         assert!(reply.annotations.writes_local_data && !reply.annotations.read_only);
         assert_eq!(
             reply.required_actions,
@@ -890,7 +896,7 @@ async fn create_draft_resolves_the_account_within_the_grant() {
 }
 
 #[tokio::test]
-async fn principals_map_to_callers_that_cannot_send() {
+async fn principals_keep_their_identity_and_need_a_send_grant() {
     assert_eq!(mcp().principal.caller(), Caller::Mcp);
     assert_eq!(agent().principal.caller(), Caller::Model);
     assert_eq!(mcp().principal.audience(), Audience::Mcp);
@@ -902,19 +908,19 @@ async fn principals_map_to_callers_that_cannot_send() {
         .unwrap();
     let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
     for ctx in both() {
-        let error = f
-            .core
-            .queue_send(
-                ctx.principal.caller(),
-                QueueSendRequest {
-                    draft_id: draft.id.clone(),
-                    expected_revision: draft.revision,
-                    client_mutation_id: Uuid::new_v4().to_string(),
-                },
-                0,
-            )
-            .unwrap_err();
-        assert_eq!(error.code, ErrorCode::Forbidden);
+        let scoped = with_grant(ctx, Grant::new(AccountScope::All, [Action::DraftCreate]));
+        assert_eq!(
+            code(f.call(
+                &scoped,
+                "send_email",
+                json!({
+                    "action": "send", "draftId": draft.id,
+                    "expectedRevision": draft.revision,
+                    "clientMutationId": Uuid::new_v4().to_string(),
+                }),
+            )),
+            ToolErrorCode::NotPermitted
+        );
     }
     assert!(f.core.list_outbox(None, true).unwrap().is_empty());
 }

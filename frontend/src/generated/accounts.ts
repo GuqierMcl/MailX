@@ -588,7 +588,7 @@ export type InlineImage = { attachmentId: string,
  */
 contentId: string, fileName: string, };
 
-export type AttachmentOrigin = "user" | "forwarded";
+export type AttachmentOrigin = "user" | "forwarded" | "mcp" | "ai";
 
 export type AttachmentPolicy = {
 /**

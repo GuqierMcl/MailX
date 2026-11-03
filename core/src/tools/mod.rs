@@ -5,20 +5,26 @@
 //! what the user granted) and call [`Tools::call`]; tool input can never
 //! widen that context. Calls block on storage like [`crate::MailxCore`], so
 //! async hosts must run them in `spawn_blocking`. Nothing here depends on
-//! Tauri, Axum, a UI or an MCP crate, and no tool can send mail.
+//! Tauri, Axum, a UI or an MCP crate.
 mod accounts;
+mod attachments;
 mod audit;
 mod context;
 mod drafts;
 mod error;
 mod mail;
 mod organize;
+mod sending;
 mod spec;
 #[cfg(test)]
 mod tests;
 mod ui;
 
 pub use accounts::{AccountInfo, ListAccountsInput, ListAccountsOutput, SyncStatus};
+pub use attachments::{
+    AddDraftAttachmentInput, AddDraftAttachmentOutput, RemoveDraftAttachmentInput,
+    RemoveDraftAttachmentOutput,
+};
 pub use audit::{NoAudit, ToolAudit, ToolCallRecord};
 pub use context::{AccountScope, Action, Audience, Grant, Principal, RequestContext};
 pub use drafts::{
@@ -32,6 +38,10 @@ pub use mail::{
 };
 pub use organize::{
     ArchiveEmailsInput, ArchiveEmailsOutput, SetEmailFlagsInput, SetEmailFlagsOutput,
+};
+pub use sending::{
+    ListOutboxInput, ListOutboxOutput, OutboxFailure, OutboxIdInput, OutboxInfo, SendAction,
+    SendEmailInput,
 };
 pub use spec::{Annotations, AudiencePolicy, ToolCall, ToolDescriptor, ToolSpec, Tools};
 pub use ui::{ShowEmailInput, ShowEmailOutput};

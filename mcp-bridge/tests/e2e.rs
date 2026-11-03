@@ -95,7 +95,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
 
     let list = bridge.request(2, "tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 16);
+    assert_eq!(tools.len(), 22);
     assert!(
         tools
             .iter()
@@ -115,6 +115,50 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
             .to_string()
             .contains(&fixture.account_id)
     );
+
+    let draft = bridge
+        .request(
+            4,
+            "tools/call",
+            json!({"name": "mailx_create_draft", "arguments": {
+                "to": [{"address": "recipient@example.test"}],
+                "subject": "Bridge send test", "bodyHtml": "<p>Local fixture only</p>"
+            }}),
+        )
+        .await;
+    assert_ne!(draft["result"]["isError"], json!(true));
+    let draft_id = draft["result"]["structuredContent"]["draftId"].clone();
+    let read = bridge
+        .request(
+            5,
+            "tools/call",
+            json!({"name": "mailx_read_draft", "arguments": {"draftId": draft_id}}),
+        )
+        .await;
+    let queued = bridge
+        .request(
+            6,
+            "tools/call",
+            json!({"name": "mailx_send_email", "arguments": {
+                "action": "send", "draftId": draft_id,
+                "expectedRevision": read["result"]["structuredContent"]["revision"],
+                "clientMutationId": "00000000-0000-4000-8000-000000000058"
+            }}),
+        )
+        .await;
+    assert_ne!(queued["result"]["isError"], json!(true), "{queued}");
+    assert_eq!(queued["result"]["structuredContent"]["state"], "queued");
+    let canceled = bridge
+        .request(
+            7,
+            "tools/call",
+            json!({"name": "mailx_cancel_outbox", "arguments": {
+                "outboxId": queued["result"]["structuredContent"]["id"]
+            }}),
+        )
+        .await;
+    assert_ne!(canceled["result"]["isError"], json!(true), "{canceled}");
+    assert_eq!(canceled["result"]["structuredContent"]["state"], "canceled");
 
     assert!(matches!(
         handle.status(),
