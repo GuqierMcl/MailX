@@ -98,12 +98,12 @@ git diff --check
 
 CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，安装步骤仍有 8 分钟总上限，更新索引时的临时错误也必须使步骤失败。2026-10-28 排查的 [main CI 40540404597](https://github.com/GuqierMcl/MailX/actions/runs/40540404597) 在 Azure Ubuntu 镜像缓慢下载依赖时触发该上限，Linux 的编译和测试尚未开始；同次前端、macOS 与 Windows 检查已通过。修复的工作流已通过本地 `actionlint`（含 ShellCheck）与差异检查，实际 Ubuntu 安装和三平台结果以修复提交对应的 CI 为准。
 
-`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行：
+`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行；所有 Linux 任务使用与发布构建一致的 Ubuntu 22.04，Rust 缓存按 runner 版本隔离：
 
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
-`.github/workflows/linux-appimage.yml` 在 Linux 打包相关 PR 中运行，也支持手动触发。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 运行环境验证：所有包内 ELF 与 AppImage runtime 的 glibc 版本需求不高于 2.35；包内五个托盘运行库的 SONAME、依赖解析与实际动态加载；正常 AppImage 和移除 AppIndicator 后的降级启动均须出现可见主窗口、持续存活并建立隔离的空数据库，日志也须符合是否发生降级的预期。运行应用时使用非 root 用户与 `--network none`，保留 WebKit 沙箱；为允许其创建嵌套命名空间，测试容器放开外层 seccomp/AppArmor，同时移除所有 capabilities。日志、依赖与窗口/数据库证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现；这项启动检查不代替真实桌面托盘菜单、GNOME/Wayland 或邮件收发验证。
+`.github/workflows/linux-appimage.yml` 仅通过 GitHub Actions 的 `workflow_dispatch` 手动触发，不随 PR 或 push 自动运行，也不作为合并所需的 CI 检查。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 运行环境验证：所有包内 ELF 与 AppImage runtime 的 glibc 版本需求不高于 2.35；包内五个托盘运行库的 SONAME、依赖解析与实际动态加载；正常 AppImage 和移除 AppIndicator 后的降级启动均须出现可见主窗口、持续存活并建立隔离的空数据库，日志也须符合是否发生降级的预期。运行应用时使用非 root 用户与 `--network none`，保留 WebKit 沙箱；为允许其创建嵌套命名空间，测试容器放开外层 seccomp/AppArmor，同时移除所有 capabilities。日志、依赖与窗口/数据库证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现；这项启动检查不代替真实桌面托盘菜单、GNOME/Wayland 或邮件收发验证。
 
 2026-11-02，[PR #74](https://github.com/GuqierMcl/MailX/pull/74) 的代码提交 `9c501b8` 已通过[三平台 CI](https://github.com/GuqierMcl/MailX/actions/runs/41324929231) 与 [Linux AppImage 启动检查](https://github.com/GuqierMcl/MailX/actions/runs/41324929243)。实际检查 180 个 ELF（含 AppImage runtime），最高 glibc 需求为 2.35；五个托盘库依赖解析与动态加载成功。正常场景无降级日志；删除 AppIndicator 后仅记录一次降级，窗口仍可见且进程存活。两个独立空数据库均通过完整性检查，schema 与迁移版本均为 21。运行环境为 Ubuntu 22.04.5、非 root、无网络；该证据未覆盖 AppImageHub 的 Firejail 环境或真实桌面托盘交互。
 

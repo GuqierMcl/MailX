@@ -23,7 +23,7 @@ jobs:
   # A job skipped through `if` reports success instead, which lets docs-only PRs merge.
   changes:
     name: Detect code changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -64,7 +64,7 @@ jobs:
     name: Frontend and repository checks
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-22.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -118,6 +118,9 @@ jobs:
       # rustup reads rust-toolchain.toml and installs the pinned toolchain.
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep native artifacts from different Ubuntu releases separate.
+          key: ${{ matrix.os }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -144,7 +147,7 @@ jobs:
     name: CI result
     needs: [changes, frontend, rust]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: Judge the checks

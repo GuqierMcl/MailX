@@ -91,7 +91,8 @@ function App() {
             {/* Encloses the gate too: Settings → About reads the update state. */}
             <UpdaterProvider client={client}>
               <UpdaterTitleBar client={client} />
-              <div className="relative min-h-0 flex-1 overflow-auto">
+              {/* The island's shadow extends upward onto the title-bar canvas. */}
+              <div className="relative min-h-0 flex-1">
                 <StartupGate client={client} />
               </div>
             </UpdaterProvider>
