@@ -134,6 +134,8 @@ const MAIN_ONLY: &[&str] = &[
     "avatars_get",
     "image_cache_clear",
     "settings_update",
+    "autostart_get",
+    "autostart_set",
     "notifications_test",
     "notifications_preview_sound",
     "drafts_create",
@@ -405,6 +407,8 @@ mod tests {
         let table = [
             ("app_get_startup_status", true, false),
             ("app_get_lifecycle", true, false),
+            ("autostart_get", true, false),
+            ("autostart_set", true, false),
             ("app_resolve_close", true, false),
             ("app_quit", true, false),
             ("app_cancel_quit", true, false),

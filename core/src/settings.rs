@@ -346,6 +346,9 @@ pub struct GeneralSettings {
     pub close_behavior: CloseBehavior,
     /// Optional macOS menu bar shortcut; the Dock remains available.
     pub show_menu_bar_icon: bool,
+    /// Hide the main window only on a registered desktop login launch. The
+    /// desktop host still requires an available Dock/tray recovery entry.
+    pub silent_start: bool,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -364,6 +367,7 @@ impl Default for GeneralSettings {
             auto_check_updates: true,
             close_behavior: CloseBehavior::Ask,
             show_menu_bar_icon: false,
+            silent_start: false,
         }
     }
 }
@@ -849,7 +853,7 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 }
                 if let Some(general) = general.as_object_mut() {
                     general.insert("language".into(), value.into());
-                    for key in ["autoCheckUpdates", "showMenuBarIcon"] {
+                    for key in ["autoCheckUpdates", "showMenuBarIcon", "silentStart"] {
                         if general.get(key).is_some_and(|value| !value.is_boolean()) {
                             general.remove(key);
                         }

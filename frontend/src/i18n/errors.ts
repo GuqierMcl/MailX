@@ -8,6 +8,7 @@ export function errorText(error: unknown, context?: ErrorContext): string {
   const failure: unknown = error instanceof MailxClientError ? error.failure : error
   if (failure && typeof failure === 'object' && 'code' in failure && typeof failure.code === 'string') {
     const code = failure.code as keyof typeof messages
+    if ('field' in failure && failure.field === 'autostart') return t('settings:autostartSystemError')
     if (code === 'validation' && 'field' in failure && typeof failure.field === 'string') {
       const field = failure.field
       if (/\.port$|^proxyPort$/.test(field)) return t('accounts:invalidPort')

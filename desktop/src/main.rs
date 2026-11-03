@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod attachment_save;
+#[cfg_attr(feature = "body-webview-test", allow(dead_code))]
+mod autostart;
 mod body_protocol;
 #[cfg(feature = "body-webview-test")]
 mod body_webview_test;
@@ -58,12 +60,21 @@ const SENT_COPIES_EVENT: &str = "mailx://sent-copies";
 fn main() {
     #[cfg(feature = "body-webview-test")]
     body_webview_test::checkpoint("main entered");
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .manage(autostart::StartupIntent::default())
+        .manage(autostart::foreground_environment(tauri::Env::default()));
+    // AppKit otherwise activates the app even when its initial window is
+    // hidden and unfocused. A visible/manual launch still focuses explicitly.
+    #[cfg(target_os = "macos")]
+    let builder =
+        builder.activate_ignoring_other_apps(!autostart::is_login_launch(std::env::args()));
     // Registered first, as the plugin requires. A second launch hands over to the
     // running instance and exits, so it never reaches the data-directory lock.
     #[cfg(not(feature = "body-webview-test"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        window_chrome::focus_main_window(app)
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if !autostart::is_login_launch(args) {
+            window_chrome::focus_main_window(app);
+        }
     }));
     #[cfg(not(feature = "body-webview-test"))]
     let builder = builder.plugin(tauri_plugin_notification::init());
@@ -218,6 +229,7 @@ fn main() {
                 app.manage(lifecycle::LifecycleState::default());
                 app.manage(tray::TrayState::default());
                 app.manage(updater::UpdaterState::default());
+                app.manage(autostart::AutostartState::new(app.handle()));
                 updater::start_scheduler(app.handle());
                 // Prepare the data directory before exposing business commands;
                 // the task itself runs on Tauri's blocking pool.
@@ -226,8 +238,15 @@ fn main() {
                 mcp::setup(app.handle(), &state);
                 state.start_initialization();
                 notifications::on_click(app.handle());
-                window_chrome::create_main_window(app.handle())?;
+                let login_launch = autostart::is_login_launch(std::env::args());
+                window_chrome::create_main_window(
+                    app.handle(),
+                    !login_launch || autostart::user_activated(app.handle()),
+                )?;
                 lifecycle::setup(app.handle());
+                if login_launch {
+                    autostart::prepare_startup(app.handle());
+                }
                 Ok(())
             }
         })
@@ -240,6 +259,8 @@ fn main() {
             lifecycle::app_cancel_quit,
             lifecycle::app_confirm_quit,
             lifecycle::app_desktop_ready,
+            autostart::autostart_get,
+            autostart::autostart_set,
             commands::accounts_list,
             commands::accounts_get,
             commands::accounts_create,
