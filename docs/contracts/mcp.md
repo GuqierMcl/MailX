@@ -104,7 +104,7 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 - **命名**：cargo 二进制叫 `mailx-mcp-bridge`，随包分发的 sidecar / 客户端命令叫 `mailx-mcp`。两者故意不同：`tauri-build` 会把 sidecar 去掉三元组后复制到 `target/<profile>/mailx-mcp`，若 cargo 二进制同名，空占位文件会覆盖真实 bridge（Windows CI 因此出现 `%1 is not a valid Win32 application`）。后端发现 bridge 为空文件时按“找不到 bridge”处理。
 - **运行时位置**：Tauri 把外部程序放在主程序旁（macOS `MailX.app/Contents/MacOS/mailx-mcp`，Windows 安装目录，deb / rpm 为 `/usr/bin`），`tauri dev` 同样复制到调试程序旁。后端按“主程序所在目录下的 `mailx-mcp`”解析。
 - **AppImage**：挂载路径每次启动都变，不能写进客户端配置。检测到环境变量 `APPIMAGE` 时，后端把 bridge 复制到 `<数据目录>/mcp/bin/mailx-mcp`（目录 `0700`，文件 `0755`，先写临时文件再改名；内容与打包版不同才覆盖），并返回该稳定路径。
-- **复制客户端配置**：命令 `mcp_client_config`（仅主窗口）返回 `{ command, args }`，`args` 恒为 `["--discovery", "<发现文件绝对路径>"]`，因为数据目录可能被用户改过。前端复制的 JSON 为 `{"mcpServers":{"mailx":{"command":…,"args":[…]}}}`（缩进两格）。该命令不读取 token。
+- **复制客户端配置**：命令 `mcp_client_config`（仅主窗口）返回 `{ command, args, display }`，`args` 恒为 `["--discovery", "<发现文件绝对路径>"]`，因为数据目录可能被用户改过。前端复制的 JSON 为 `{"mcpServers":{"mailx":{"command":…,"args":[…]}}}`（缩进两格）。`command` 与 `args` 里都是完整绝对路径（客户端直接启动命令，不做 `~` / `%USERPROFILE%` 展开）；Windows 上路径经 `dunce` 规范化，能不带 `\\?\` 前缀表示时去掉该前缀，避免部分客户端（尤其基于 Node 的）无法启动。`display = { command, discovery }` 只用于界面显示：路径位于用户主目录内时以 `~` 代替主目录（按路径分量匹配，Windows 上不区分大小写并保留平台分隔符），其他路径原样返回；复制内容不使用它。该命令不读取 token。
 
 后续可提供 npm 薄启动器，供客户端配置 `npx` 一类命令：启动器只读取桌面应用写出的发现信息，定位并执行应用自带的 bridge，不打包原生程序，也不实现 MCP 逻辑。包名、npm scope 和是否发布均未决定。不安装桌面应用即可使用的场景属于远程 MCP，不由该启动器解决。
 

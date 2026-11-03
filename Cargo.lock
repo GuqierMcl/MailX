@@ -2915,6 +2915,7 @@ dependencies = [
 name = "mailx-desktop"
 version = "0.1.0-rc.6"
 dependencies = [
+ "dunce",
  "gtk",
  "keyring",
  "libappindicator-sys",

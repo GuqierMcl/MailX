@@ -15,6 +15,7 @@ tauri-build.workspace = true
 mailx-core.workspace = true
 mailx-mcp-server = { path = "../mcp-server" }
 serde.workspace = true
+dunce = "1.0.5"
 serde_json = "1"
 sys-locale = "0.3.2"
 tauri = { workspace = true, features = ["tray-icon", "image-png"] }

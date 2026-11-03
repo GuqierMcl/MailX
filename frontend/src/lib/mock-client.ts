@@ -603,7 +603,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
       return structuredClone(mcpStatus)
     },
-    getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'] }),
+    getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }),
     onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
     getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
     async onSettingsChanged(listener) {

@@ -113,11 +113,26 @@ describe('MCP settings page', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     renderMcp()
-    expect(await screen.findByTestId('mcp-command-path')).toHaveTextContent('/opt/MailX/mailx-mcp')
     await userEvent.click(screen.getByRole('button', { name: '复制客户端配置' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SNIPPET))
     expect(JSON.parse(writeText.mock.calls[0][0] as string)).toEqual({ mcpServers: { mailx: { command: '/opt/MailX/mailx-mcp', args: ['--discovery', '/data/mcp-discovery.json'] } } })
     expect(await screen.findByText('已复制客户端配置')).toBeInTheDocument()
+  })
+
+  it('keeps manual setup collapsed, shows shortened paths and copies full ones', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    renderMcp()
+    const trigger = await screen.findByRole('button', { name: '手动配置' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('mcp-command-path')).not.toBeInTheDocument()
+    await userEvent.click(trigger)
+    expect(await screen.findByTestId('mcp-command-path')).toHaveTextContent('/opt/MailX/mailx-mcp')
+    expect(screen.getByTestId('mcp-discovery-path')).toHaveTextContent('~/data/mcp-discovery.json')
+    await userEvent.click(screen.getByRole('button', { name: '复制连接信息文件路径' }))
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('/data/mcp-discovery.json'))
+    await userEvent.click(screen.getByRole('button', { name: '复制程序路径' }))
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('/opt/MailX/mailx-mcp'))
   })
 
   it('leads to the General page from the lifecycle note', async () => {
