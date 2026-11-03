@@ -124,6 +124,27 @@ impl McpManager {
                                     .unwrap_or_else(crate::locale::system_locale)
                             }
                         })
+                        .with_draft_open_check({
+                            let handle = app.clone();
+                            move |draft_id| {
+                                crate::window_access::draft_open_in(
+                                    handle.webview_windows().into_keys(),
+                                    draft_id,
+                                )
+                            }
+                        })
+                        .with_ui_opener({
+                            let handle = app.clone();
+                            move |account_id, email_id| {
+                                if crate::notifications::open_email(&handle, account_id, email_id) {
+                                    Ok(())
+                                } else {
+                                    Err(mailx_core::tools::ToolError::new(
+                                        mailx_core::tools::ToolErrorCode::Unavailable,
+                                    ))
+                                }
+                            }
+                        })
                         .with_audit(Arc::new(StderrAudit));
                 let config = McpConfig {
                     data_dir,

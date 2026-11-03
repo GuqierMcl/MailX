@@ -339,6 +339,45 @@ pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// Brings the main window forward (showing it when hidden) and asks the page
+/// to open one message, the same event a notification click sends. `false`
+/// when the main window does not exist.
+pub(crate) fn open_email<R: Runtime>(app: &AppHandle<R>, account_id: &str, email_id: &str) -> bool {
+    if app.get_webview_window(MAIN_WINDOW).is_none() {
+        return false;
+    }
+    window_chrome::focus_main_window(app);
+    app.emit_to(
+        EventTarget::webview_window(MAIN_WINDOW),
+        OPEN_EVENT,
+        OpenRequest {
+            account_id: account_id.to_owned(),
+            email_id: Some(email_id.to_owned()),
+            outbox_id: None,
+        },
+    )
+    .is_ok()
+}
+
+#[cfg(test)]
+mod open_request_tests {
+    use super::OpenRequest;
+
+    #[test]
+    fn open_request_uses_the_camel_case_shape_the_page_listens_for() {
+        let value = serde_json::to_value(OpenRequest {
+            account_id: "a1".into(),
+            email_id: Some("e1".into()),
+            outbox_id: None,
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "accountId": "a1", "emailId": "e1", "outboxId": null })
+        );
+    }
+}
+
 #[cfg(test)]
 fn plan(mail: &NewMail, settings: &NotificationSettings, window_in_front: bool) -> Option<Shown> {
     plan_localized(mail, settings, window_in_front, SupportedLocale::ZhCn)

@@ -42,16 +42,25 @@ pub struct Annotations {
     pub read_only: bool,
     /// Writes MailX's local data (never mail servers).
     pub writes_local_data: bool,
+    /// Removes data that cannot be recovered through the tool layer.
+    pub destructive: bool,
 }
 
 impl Annotations {
     pub const READ_ONLY: Self = Self {
         read_only: true,
         writes_local_data: false,
+        destructive: false,
     };
     pub const WRITES_LOCAL: Self = Self {
         read_only: false,
         writes_local_data: true,
+        destructive: false,
+    };
+    pub const DESTROYS_LOCAL: Self = Self {
+        read_only: false,
+        writes_local_data: true,
+        destructive: true,
     };
 }
 
@@ -181,6 +190,8 @@ pub struct ToolCall<'a> {
     pub policy: AudiencePolicy,
     default_account: &'a (dyn Fn() -> String + Send + Sync),
     locale: &'a (dyn Fn() -> crate::SupportedLocale + Send + Sync),
+    draft_open: &'a (dyn Fn(&str) -> bool + Send + Sync),
+    ui_opener: &'a UiOpener,
     resources: RefCell<Vec<String>>,
 }
 
@@ -194,6 +205,16 @@ impl ToolCall<'_> {
     /// applies at once.
     pub fn locale(&self) -> crate::SupportedLocale {
         (self.locale)()
+    }
+
+    /// Whether the host has this draft open in an editor window.
+    pub fn draft_open(&self, draft_id: &str) -> bool {
+        (self.draft_open)(draft_id)
+    }
+
+    /// Asks the host UI to show a message (`account_id`, `email_id`).
+    pub fn open_in_app(&self, account_id: &str, email_id: &str) -> Result<(), ToolError> {
+        (self.ui_opener)(account_id, email_id)
     }
 
     /// Records an account or email id for the call log.
@@ -214,6 +235,8 @@ impl ToolCall<'_> {
     }
 }
 
+type UiOpener = dyn Fn(&str, &str) -> Result<(), ToolError> + Send + Sync;
+
 type Erased = Box<dyn Fn(&ToolCall<'_>, Value) -> Result<Value, ToolError> + Send + Sync>;
 
 struct Entry {
@@ -227,6 +250,8 @@ pub struct Tools {
     core: MailxCore,
     default_account: Arc<dyn Fn() -> String + Send + Sync>,
     locale: Arc<dyn Fn() -> crate::SupportedLocale + Send + Sync>,
+    draft_open: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    ui_opener: Arc<UiOpener>,
     audit: Arc<dyn ToolAudit>,
     entries: Vec<Entry>,
 }
@@ -242,12 +267,15 @@ impl Tools {
             core,
             default_account: Arc::new(default_account),
             locale: Arc::new(crate::SupportedLocale::default),
+            draft_open: Arc::new(|_| false),
+            ui_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             audit: Arc::new(NoAudit),
             entries: Vec::new(),
         };
         super::accounts::register(&mut tools);
         super::mail::register(&mut tools);
         super::drafts::register(&mut tools);
+        super::ui::register(&mut tools);
         tools
     }
 
@@ -258,6 +286,27 @@ impl Tools {
         locale: impl Fn() -> crate::SupportedLocale + Send + Sync + 'static,
     ) -> Self {
         self.locale = Arc::new(locale);
+        self
+    }
+
+    /// Host check for drafts currently open in an editor window, read at
+    /// call time. Defaults to "never open". Update and delete refuse open
+    /// drafts.
+    pub fn with_draft_open_check(
+        mut self,
+        check: impl Fn(&str) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.draft_open = Arc::new(check);
+        self
+    }
+
+    /// Host hook that brings the UI to the front and opens one message
+    /// (`account_id`, `email_id`). Defaults to `unavailable`.
+    pub fn with_ui_opener(
+        mut self,
+        opener: impl Fn(&str, &str) -> Result<(), ToolError> + Send + Sync + 'static,
+    ) -> Self {
+        self.ui_opener = Arc::new(opener);
         self
     }
 
@@ -366,6 +415,8 @@ impl Tools {
             policy,
             default_account: &*self.default_account,
             locale: &*self.locale,
+            draft_open: &*self.draft_open,
+            ui_opener: &*self.ui_opener,
             resources: RefCell::new(Vec::new()),
         };
         let result = (entry.run)(&call, input);

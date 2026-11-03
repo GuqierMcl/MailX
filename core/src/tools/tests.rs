@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 use super::*;
 use crate::accounts::sync_plan::tests::config;
-use crate::{Caller, CreateDraftFromRequest, DraftOrigin, ErrorCode, MailxCore, QueueSendRequest};
+use crate::{
+    Caller, CreateDraftFromRequest, CreateDraftRequest, Draft, DraftOrigin, ErrorCode, MailAddress,
+    MailxCore, QueueSendRequest,
+};
 
 const CJK: &str = "你好😀世界👨‍👩‍👧漢字🎉";
 
@@ -126,7 +129,7 @@ fn mcp() -> RequestContext {
             connection_id: "conn-1".into(),
             client_name: Some("Test Client".into()),
         },
-        Grant::mcp_read_and_draft(),
+        Grant::mcp_default(),
         "req-mcp",
     )
 }
@@ -136,7 +139,7 @@ fn agent() -> RequestContext {
         Principal::BuiltinAgent {
             run_id: "run-1".into(),
         },
-        Grant::mcp_read_and_draft(),
+        Grant::mcp_default(),
         "req-agent",
     )
 }
@@ -155,22 +158,32 @@ fn code(result: Result<Value, ToolError>) -> ToolErrorCode {
 }
 
 #[tokio::test]
-async fn both_audiences_list_the_six_tools_with_schemas_and_limits() {
+async fn both_audiences_list_their_tools_with_schemas_and_limits() {
     let f = fx();
     for audience in [Audience::Mcp, Audience::BuiltinAgent] {
         let list = f.tools.list(audience);
         let ids: Vec<_> = list.iter().map(|t| t.id).collect();
-        assert_eq!(
-            ids,
-            [
-                "list_accounts",
-                "search_emails",
-                "read_email",
-                "list_folders",
-                "create_draft",
-                "create_reply_draft"
-            ]
-        );
+        let mut expected = vec![
+            "list_accounts",
+            "search_emails",
+            "read_email",
+            "list_folders",
+            "create_draft",
+            "create_reply_draft",
+            "list_drafts",
+            "read_draft",
+            "update_draft",
+            "delete_draft",
+        ];
+        if audience == Audience::Mcp {
+            expected.push("show_email_in_app");
+        }
+        assert_eq!(ids.len(), if audience == Audience::Mcp { 11 } else { 10 });
+        assert_eq!(ids, expected);
+        let delete = list.iter().find(|t| t.id == "delete_draft").unwrap();
+        assert!(delete.annotations.destructive && !delete.annotations.read_only);
+        let update = list.iter().find(|t| t.id == "update_draft").unwrap();
+        assert!(!update.annotations.destructive && !update.annotations.read_only);
         for tool in &list {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.id);
             assert_eq!(
@@ -230,7 +243,10 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
             "list_accounts",
             "search_emails",
             "read_email",
-            "list_folders"
+            "list_folders",
+            "list_drafts",
+            "read_draft",
+            "show_email_in_app"
         ]
     );
 }
@@ -805,6 +821,13 @@ async fn create_draft_resolves_the_account_within_the_grant() {
             .call(&ctx, "create_draft", draft_input(json!({})))
             .unwrap();
         assert_eq!(out["accountId"], other);
+        // A stale default (a removed account) falls back like the composer
+        // does instead of failing with notFound.
+        *f.default_account.lock().unwrap() = Uuid::new_v4().to_string();
+        let out = f
+            .call(&ctx, "create_draft", draft_input(json!({})))
+            .unwrap();
+        assert!(out["accountId"] == f.account || out["accountId"] == other);
         // An explicit account wins.
         let out = f
             .call(
@@ -1690,4 +1713,416 @@ async fn reply_draft_text_follows_the_host_locale_read_per_call() {
     let english = forward(&tools);
     assert!(!english.contains("转发的邮件"));
     assert!(english.contains("Forwarded message"), "{english}");
+}
+
+fn user_draft(f: &Fx, account: &str, subject: &str) -> Draft {
+    f.core
+        .create_draft(
+            CreateDraftRequest {
+                account_id: Some(account.to_string()),
+                to: vec![MailAddress {
+                    name: None,
+                    address: "ann@example.com".into(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: subject.into(),
+                body_html: "<p>mine</p>".into(),
+                client_mutation_id: Uuid::new_v4().to_string(),
+            },
+            account,
+        )
+        .unwrap()
+}
+
+fn draft_ids(out: &Value) -> Vec<String> {
+    out["drafts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn list_and_read_drafts_cover_all_origins_and_respect_scope() {
+    let f = fx();
+    let other = f.add_account();
+    let mine = user_draft(&f, &f.account, "From user");
+    let by_mcp = f
+        .call(&mcp(), "create_draft", draft_input(json!({})))
+        .unwrap();
+    let by_ai = f
+        .call(&agent(), "create_draft", draft_input(json!({})))
+        .unwrap();
+    let elsewhere = f
+        .call(
+            &mcp(),
+            "create_draft",
+            draft_input(json!({ "accountId": other })),
+        )
+        .unwrap();
+    for ctx in both() {
+        let out = f.call(&ctx, "list_drafts", json!({})).unwrap();
+        let ids = draft_ids(&out);
+        assert_eq!(ids.len(), 4);
+        assert_eq!(out["truncated"], false);
+        let origins: Vec<&str> = out["drafts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["origin"].as_str().unwrap())
+            .collect();
+        for expected in ["user", "mcp", "ai"] {
+            assert!(origins.contains(&expected), "{origins:?}");
+        }
+        let item = &out["drafts"][0];
+        assert!(item.get("bodyHtml").is_none());
+        assert_eq!(item["locked"], false);
+        assert_eq!(item["open"], false);
+
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![f.account.clone()]),
+                [Action::MailRead],
+            ),
+        );
+        let out = f.call(&scoped, "list_drafts", json!({})).unwrap();
+        assert_eq!(draft_ids(&out).len(), 3);
+        assert!(!draft_ids(&out).contains(&elsewhere["draftId"].as_str().unwrap().to_string()));
+        assert_eq!(
+            code(f.call(&scoped, "list_drafts", json!({ "accountId": other }))),
+            ToolErrorCode::NotFound
+        );
+        let filtered = f
+            .call(&ctx, "list_drafts", json!({ "accountId": other }))
+            .unwrap();
+        assert_eq!(draft_ids(&filtered).len(), 1);
+
+        for id in [
+            mine.id.as_str(),
+            by_mcp["draftId"].as_str().unwrap(),
+            by_ai["draftId"].as_str().unwrap(),
+        ] {
+            let read = f
+                .call(&ctx, "read_draft", json!({ "draftId": id }))
+                .unwrap();
+            assert_eq!(read["id"], id);
+            assert!(read["bodyHtml"].as_str().unwrap().contains("<p>"));
+            assert!(read["revision"].as_u64().is_some());
+            assert_eq!(read["attachments"], json!([]));
+        }
+        let hidden = code(f.call(
+            &scoped,
+            "read_draft",
+            json!({ "draftId": elsewhere["draftId"] }),
+        ));
+        let missing = code(f.call(
+            &scoped,
+            "read_draft",
+            json!({ "draftId": Uuid::new_v4().to_string() }),
+        ));
+        let malformed = code(f.call(&scoped, "read_draft", json!({ "draftId": "x" })));
+        assert_eq!(hidden, ToolErrorCode::NotFound);
+        assert_eq!(missing, hidden);
+        assert_eq!(malformed, hidden);
+    }
+}
+
+#[tokio::test]
+async fn update_draft_changes_only_given_fields_keeps_origin_and_sanitizes() {
+    let f = fx();
+    let mine = user_draft(&f, &f.account, "Original");
+    for ctx in both() {
+        let current = f.core.get_draft(&mine.id).unwrap();
+        let out = f
+            .call(
+                &ctx,
+                "update_draft",
+                json!({
+                    "draftId": mine.id,
+                    "expectedRevision": current.revision,
+                    "subject": "Changed",
+                    "bodyHtml": "<p>new</p><script>alert(1)</script>"
+                }),
+            )
+            .unwrap();
+        let after = f.core.get_draft(&mine.id).unwrap();
+        assert_eq!(out["revision"], after.revision);
+        assert!(after.revision > current.revision);
+        assert_eq!(out["subject"], "Changed");
+        assert_eq!(after.subject, "Changed");
+        assert!(after.body_html.contains("new") && !after.body_html.contains("script"));
+        assert_eq!(after.to, current.to);
+        assert_eq!(after.origin, DraftOrigin::User);
+
+        let only_to = f
+            .call(
+                &ctx,
+                "update_draft",
+                json!({
+                    "draftId": mine.id,
+                    "expectedRevision": after.revision,
+                    "to": [{ "address": "bob@example.com" }]
+                }),
+            )
+            .unwrap();
+        let last = f.core.get_draft(&mine.id).unwrap();
+        assert_eq!(only_to["revision"], last.revision);
+        assert_eq!(last.to[0].address, "bob@example.com");
+        assert_eq!(last.subject, "Changed");
+        assert_eq!(last.body_html, after.body_html);
+    }
+}
+
+#[tokio::test]
+async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
+    let f = fx();
+    let other = f.add_account();
+    let mine = user_draft(&f, &f.account, "Original");
+    let elsewhere = user_draft(&f, &other, "Elsewhere");
+    for ctx in both() {
+        let current = f.core.get_draft(&mine.id).unwrap();
+        let stale = code(f.call(
+            &ctx,
+            "update_draft",
+            json!({ "draftId": mine.id, "expectedRevision": current.revision + 7, "subject": "x" }),
+        ));
+        assert_eq!(stale, ToolErrorCode::Conflict);
+        assert_eq!(f.core.get_draft(&mine.id).unwrap().subject, "Original");
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "update_draft",
+                json!({ "draftId": mine.id, "subject": "x" }),
+            )),
+            ToolErrorCode::InvalidInput
+        );
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "update_draft",
+                json!({ "draftId": mine.id, "expectedRevision": current.revision, "subject": "s".repeat(999) }),
+            )),
+            ToolErrorCode::InvalidInput
+        );
+        let read_only = with_grant(
+            ctx.clone(),
+            Grant::new(AccountScope::All, [Action::MailRead, Action::DraftCreate]),
+        );
+        for (tool, input) in [
+            (
+                "update_draft",
+                json!({ "draftId": mine.id, "expectedRevision": current.revision, "subject": "x" }),
+            ),
+            (
+                "delete_draft",
+                json!({ "draftId": mine.id, "expectedRevision": current.revision }),
+            ),
+        ] {
+            assert_eq!(
+                code(f.call(&read_only, tool, input)),
+                ToolErrorCode::NotPermitted
+            );
+        }
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![f.account.clone()]),
+                [Action::MailRead, Action::DraftWrite],
+            ),
+        );
+        for tool in ["update_draft", "delete_draft"] {
+            assert_eq!(
+                code(f.call(
+                    &scoped,
+                    tool,
+                    json!({ "draftId": elsewhere.id, "expectedRevision": elsewhere.revision }),
+                )),
+                ToolErrorCode::NotFound
+            );
+        }
+    }
+    assert!(f.core.get_draft(&elsewhere.id).is_ok());
+}
+
+#[tokio::test]
+async fn locked_drafts_refuse_update_and_delete_and_show_locked() {
+    let f = fx();
+    let draft = user_draft(&f, &f.account, "Queued");
+    f.core
+        .queue_send(
+            Caller::Composer,
+            QueueSendRequest {
+                draft_id: draft.id.clone(),
+                expected_revision: draft.revision,
+                client_mutation_id: Uuid::new_v4().to_string(),
+            },
+            30,
+        )
+        .unwrap();
+    for ctx in both() {
+        let read = f
+            .call(&ctx, "read_draft", json!({ "draftId": draft.id }))
+            .unwrap();
+        assert_eq!(read["locked"], true);
+        let list = f.call(&ctx, "list_drafts", json!({})).unwrap();
+        assert_eq!(list["drafts"][0]["locked"], true);
+        for (tool, input) in [
+            (
+                "update_draft",
+                json!({ "draftId": draft.id, "expectedRevision": read["revision"], "subject": "x" }),
+            ),
+            (
+                "delete_draft",
+                json!({ "draftId": draft.id, "expectedRevision": read["revision"] }),
+            ),
+        ] {
+            assert_eq!(code(f.call(&ctx, tool, input)), ToolErrorCode::DraftLocked);
+        }
+    }
+    assert!(f.core.get_draft(&draft.id).is_ok());
+}
+
+#[tokio::test]
+async fn open_drafts_are_reported_and_refuse_update_and_delete() {
+    let f = fx();
+    let draft = user_draft(&f, &f.account, "Open");
+    let open_id = Arc::new(Mutex::new(Some(draft.id.clone())));
+    let shared = open_id.clone();
+    let tools = Tools::new(f.core.clone(), String::new)
+        .with_draft_open_check(move |id| shared.lock().unwrap().as_deref() == Some(id));
+    for ctx in both() {
+        let read = tools
+            .call(&ctx, "read_draft", json!({ "draftId": draft.id }))
+            .unwrap();
+        assert_eq!(read["open"], true);
+        let list = tools.call(&ctx, "list_drafts", json!({})).unwrap();
+        assert_eq!(list["drafts"][0]["open"], true);
+        for (tool, input) in [
+            (
+                "update_draft",
+                json!({ "draftId": draft.id, "expectedRevision": draft.revision, "subject": "x" }),
+            ),
+            (
+                "delete_draft",
+                json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
+            ),
+        ] {
+            let error = tools.call(&ctx, tool, input).unwrap_err();
+            assert_eq!(error.code, ToolErrorCode::DraftOpen);
+        }
+    }
+    assert_eq!(f.core.get_draft(&draft.id).unwrap().subject, "Open");
+    // The check is read at call time: once the window closes, edits go through.
+    *open_id.lock().unwrap() = None;
+    tools
+        .call(
+            &agent(),
+            "update_draft",
+            json!({ "draftId": draft.id, "expectedRevision": draft.revision, "subject": "Closed" }),
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn delete_draft_needs_the_current_revision() {
+    let f = fx();
+    for ctx in both() {
+        let draft = user_draft(&f, &f.account, "Doomed");
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "delete_draft",
+                json!({ "draftId": draft.id, "expectedRevision": draft.revision + 1 }),
+            )),
+            ToolErrorCode::Conflict
+        );
+        assert!(f.core.get_draft(&draft.id).is_ok());
+        let out = f
+            .call(
+                &ctx,
+                "delete_draft",
+                json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
+            )
+            .unwrap();
+        assert_eq!(out["deleted"], true);
+        assert!(f.core.get_draft(&draft.id).is_err());
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "delete_draft",
+                json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
+            )),
+            ToolErrorCode::NotFound
+        );
+    }
+}
+
+#[tokio::test]
+async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
+    let f = fx();
+    let calls = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let sink = calls.clone();
+    let tools = Tools::new(f.core.clone(), String::new).with_ui_opener(move |account, email| {
+        sink.lock().unwrap().push((account.into(), email.into()));
+        Ok(())
+    });
+    let email = f.emails[1].clone();
+    let input = json!({ "emailId": email });
+
+    assert_eq!(
+        tools
+            .call(&agent(), "show_email_in_app", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::UnknownTool
+    );
+    assert!(calls.lock().unwrap().is_empty());
+
+    let other = f.add_account();
+    let scoped = with_grant(
+        mcp(),
+        Grant::new(AccountScope::Only(vec![other]), [Action::MailRead]),
+    );
+    let hidden = tools
+        .call(&scoped, "show_email_in_app", input.clone())
+        .unwrap_err()
+        .code;
+    let missing = tools
+        .call(
+            &scoped,
+            "show_email_in_app",
+            json!({ "emailId": Uuid::new_v4().to_string() }),
+        )
+        .unwrap_err()
+        .code;
+    assert_eq!(hidden, ToolErrorCode::NotFound);
+    assert_eq!(missing, hidden);
+    assert!(calls.lock().unwrap().is_empty());
+
+    let no_read = with_grant(mcp(), Grant::new(AccountScope::All, [Action::AccountsRead]));
+    assert_eq!(
+        tools
+            .call(&no_read, "show_email_in_app", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::NotPermitted
+    );
+
+    let out = tools
+        .call(&mcp(), "show_email_in_app", input.clone())
+        .unwrap();
+    assert_eq!(out, json!({ "opened": true }));
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![(f.account.clone(), email.clone())]
+    );
+
+    // Without a host the default hook says so.
+    assert_eq!(
+        f.call(&mcp(), "show_email_in_app", input).unwrap_err().code,
+        ToolErrorCode::Unavailable
+    );
 }

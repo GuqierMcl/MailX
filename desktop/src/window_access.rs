@@ -25,6 +25,16 @@ pub(crate) fn composer_label(draft_id: &Uuid) -> String {
     format!("{COMPOSER_PREFIX}{}", draft_id.hyphenated())
 }
 
+/// Whether `draft_id` has a composer window among `labels`. Anything that is
+/// not a canonical draft id is never open.
+pub(crate) fn draft_open_in(labels: impl IntoIterator<Item = String>, draft_id: &str) -> bool {
+    let Some(id) = parse_draft_id(draft_id) else {
+        return false;
+    };
+    let wanted = composer_label(&id);
+    labels.into_iter().any(|label| label == wanted)
+}
+
 /// A draft id in the canonical lowercase hyphenated form; anything else
 /// (braces, URN prefix, upper case) is not an id this host created.
 pub(crate) fn parse_draft_id(id: &str) -> Option<Uuid> {
@@ -259,6 +269,31 @@ mod tests {
 
     fn id() -> Uuid {
         Uuid::new_v4()
+    }
+
+    #[test]
+    fn a_draft_is_open_only_when_its_own_composer_window_exists() {
+        let draft = id();
+        let other = id();
+        let labels = || {
+            vec![
+                "main".to_string(),
+                composer_label(&other),
+                "composer-x".to_string(),
+            ]
+        };
+        assert!(!draft_open_in(labels(), &draft.hyphenated().to_string()));
+        let mut with_draft = labels();
+        with_draft.push(composer_label(&draft));
+        assert!(draft_open_in(with_draft, &draft.hyphenated().to_string()));
+        assert!(draft_open_in(labels(), &other.hyphenated().to_string()));
+        // Not canonical ids: never open.
+        assert!(!draft_open_in(
+            labels(),
+            &other.hyphenated().to_string().to_uppercase()
+        ));
+        assert!(!draft_open_in(labels(), "composer-x"));
+        assert!(!draft_open_in(labels(), ""));
     }
 
     #[test]

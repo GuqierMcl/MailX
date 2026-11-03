@@ -95,7 +95,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
 
     let list = bridge.request(2, "tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 11);
     assert!(
         tools
             .iter()

@@ -330,6 +330,12 @@ impl AccountService {
         self.storage.purge_blank_drafts()
     }
 
+    /// Whether the outbox holds the draft (queued or sending).
+    pub fn draft_locked(&mut self, id: &str) -> Result<bool, AppError> {
+        validate_uuid(id, "draftId")?;
+        self.storage.draft_locked(id)
+    }
+
     pub fn delete_draft(&mut self, id: &str) -> Result<(), AppError> {
         validate_uuid(id, "draftId")?;
         if self.storage.draft_locked(id)? {

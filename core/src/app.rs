@@ -605,6 +605,34 @@ impl MailxCore {
         self.accounts()?.attachment_policy(account_id)
     }
 
+    /// Whether the draft is queued or being sent.
+    pub fn draft_locked(&self, id: &str) -> Result<bool, AppError> {
+        self.accounts()?.draft_locked(id)
+    }
+
+    /// Deletes the draft only if it is still at `expected_revision`;
+    /// otherwise `Conflict`. Used by callers that did not just read it
+    /// themselves in the interactive UI.
+    pub fn delete_draft_at_revision(
+        &self,
+        id: &str,
+        expected_revision: u32,
+    ) -> Result<(), AppError> {
+        // One service lock covers the check and the delete: every draft save
+        // takes the same lock, so none can land in between.
+        let draft = {
+            let mut service = self.accounts()?;
+            let draft = service.get_draft(id)?;
+            if draft.revision != expected_revision {
+                return Err(AppError::new(ErrorCode::Conflict));
+            }
+            service.delete_draft(id)?;
+            draft
+        };
+        self.announce_draft(&draft, DraftChange::Deleted);
+        Ok(())
+    }
+
     pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
         let draft = self.accounts()?.get_draft(id)?;
         self.accounts()?.delete_draft(id)?;
