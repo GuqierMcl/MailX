@@ -13,7 +13,8 @@
 | [存储与搜索](storage-search.md) | 数据身份、表结构、缓存、全文索引和一致性备份 |
 | [网络与安全](network-security.md) | 代理、OAuth、密钥、HTML、日志和外部数据访问 |
 | [远程图片调研与优化](remote-image-loading.md) | Implemented：外部项目证据、图片兼容、代理信任策略；真实代理矩阵待补 |
-| [工具层与调用入口](agent-tools.md) | 内置 Agent、本地 MCP 与远程 MCP 如何共用工具、授权和结果整形（Planned，未实现） |
+| [工具层与调用入口](agent-tools.md) | 共享工具、授权和结果整形；本地 MCP 已接入，内置 Agent 与远程 MCP 待接入 |
+| [整理邮件工具](mail-organize-tools.md) | 本批 MCP 标记、归档、同步刷新与打开草稿，查询增强、事件和精确撤销 |
 | [桌面与 Web](desktop-web.md) | 两种宿主、前端数据流、进程生命周期和部署 |
 | [界面设计语言](ui-design.md) | 画布与浮动岛屿、无分割线、自有外壳组件、标题栏插槽与命令面板 |
 | [中英文文本适配](internationalization.md) | Implemented：界面、错误、语言设置、多窗口同步及 Rust 文本；三平台体验待验，区域格式化 Planned |

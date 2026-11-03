@@ -39,6 +39,7 @@ fn main() {
             "emails_undo_delete",
             "emails_archive",
             "emails_unarchive",
+            "emails_undo_archive",
             "attachments_save",
             "avatars_get",
             "image_cache_clear",

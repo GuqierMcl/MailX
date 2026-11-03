@@ -109,7 +109,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
-              {section === 'mcp' && <McpPane client={client} onOpenSection={setSection} />}
+              {section === 'mcp' && <McpPane client={client} />}
               {section === 'about' && <AboutSection client={client} />}
             </div>
           </main>
@@ -133,14 +133,6 @@ function AboutSection({ client }: { client: MailxClient }) {
         </SettingsRow>
         <UpdateStatusRow />
         <AutoCheckRow client={client} />
-      </SettingsGroup>
-      <SettingsGroup title={t('settings:privacy')} description={t('settings:privacyDescription')}>
-        <SettingsRow label={t('settings:dataLocation')} description={t('settings:dataLocationDescription')} />
-        <SettingsRow label={t('settings:password')} description={t('settings:passwordDescription')} />
-        <SettingsRow label={t('settings:network')} description={t('settings:networkDescription')} />
-        <SettingsRow label={t('settings:telemetry')} description={t('settings:telemetryDescription')} />
-        <SettingsRow label={t('settings:mailChanges')} description={t('settings:mailChangesDescription')} />
-        <SettingsRow label={t('settings:messageContent')} description={t('settings:messageContentDescription')} />
       </SettingsGroup>
     </SettingsPage>
   )

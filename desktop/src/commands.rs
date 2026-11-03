@@ -777,13 +777,19 @@ pub(crate) async fn emails_archive(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
-) -> Result<ApiResult<()>, ()> {
+) -> Result<ApiResult<mailx_core::ArchiveOutcome>, ()> {
     let args = authorize(&window, "emails_archive")
         .and_then(|_| parse::<ArchiveEmailsArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.archive_emails(&args.email_ids))
+                .run(move |core| {
+                    core.change_email_archive(
+                        &args.email_ids,
+                        true,
+                        mailx_core::MailChangeSource::User,
+                    )
+                })
                 .await
         }
         Err(error) => Err(error),
@@ -796,13 +802,44 @@ pub(crate) async fn emails_unarchive(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
-) -> Result<ApiResult<()>, ()> {
+) -> Result<ApiResult<mailx_core::ArchiveOutcome>, ()> {
     let args = authorize(&window, "emails_unarchive")
         .and_then(|_| parse::<ArchiveEmailsArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.unarchive_emails(&args.email_ids))
+                .run(move |core| {
+                    core.change_email_archive(
+                        &args.email_ids,
+                        false,
+                        mailx_core::MailChangeSource::User,
+                    )
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UndoArchiveArgs {
+    undo_token: String,
+}
+
+/// Restores only the changes in a host-issued archive receipt.
+#[tauri::command]
+pub(crate) async fn emails_undo_archive(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "emails_undo_archive")
+        .and_then(|_| parse::<UndoArchiveArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.undo_archive(&args.undo_token))
                 .await
         }
         Err(error) => Err(error),

@@ -9,6 +9,12 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true) })
 
 describe('desktop client boundary', () => {
+  it('undoes only the archive receipt issued by the host', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'request' })
+    await createDesktopClient().undoArchive('receipt-1')
+    expect(invoke).toHaveBeenCalledWith('emails_undo_archive', { undoToken: 'receipt-1' })
+  })
+
   it('removes only the named account at the confirmed revision and returns its receipt', async () => {
     const data = { accountId: 'account', draftIds: ['draft'], credentialsPending: true }
     vi.mocked(invoke).mockResolvedValue({ ok: true, data, requestId: 'request' })

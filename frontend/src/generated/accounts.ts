@@ -238,7 +238,11 @@ folderRole: FolderRole | null,
 /**
  * `None` hides archived messages, except in a text search, which finds them.
  */
-archive: ArchiveScope | null, text: string | null, unread: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
+archive: ArchiveScope | null, text: string | null, unread: boolean | null,
+/**
+ * Match the local desired star state, including pending server writes.
+ */
+starred: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
 
 export type Coverage = { headersComplete: boolean,
 /**
@@ -445,6 +449,16 @@ sent: number,
  */
 localOnlyStars: number, };
 
+export type MailChangeSource = "user" | "mcp" | "ai";
+
+export type MailStateChangeKind = "flags" | "archive" | "unarchive" | "undoArchive";
+
+export type MailStateChanged = { accountIds: Array<string>, emailIds: Array<string>, source: MailChangeSource, kind: MailStateChangeKind, changedCount: number,
+/**
+ * A short-lived, one-use capability delivered only to the trusted UI.
+ */
+undoToken: string | null, };
+
 export type MessagesDeleted = { accountId: string, deleted: number, givenBack: number, };
 
 export type EmailDeletion = { batchId: string,
@@ -459,6 +473,12 @@ undoUntil: string,
 permanent: boolean, };
 
 export type ArchiveScope = "exclude" | "only" | "include";
+
+export type ArchiveOutcome = { processedCount: number, changedCount: number,
+/**
+ * For the trusted host UI only. Tool results must not expose this token.
+ */
+undoToken: string | null, };
 
 export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
 /**

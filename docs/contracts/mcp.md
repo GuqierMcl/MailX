@@ -14,7 +14,7 @@ MCP 服务实现驻留在核心所在进程：桌面版由桌面核心托管，�
 
 ### 启用与生命周期
 
-MCP 默认关闭，在设置的“MCP”页用“开启 MCP 服务器”开关启用；开启时弹出确认，说明外部 Agent 将能读取全部账号的本地邮件和草稿，并创建、修改和删除草稿（不能发送、删除或标记邮件）。开关状态保存在本机设置中，下次启动 MailX 时按该状态自动启动。
+MCP 默认关闭，在设置的“MCP”页用“开启 MCP 服务器”开关启用；开启时弹出确认，说明外部 Agent 将能读取全部账号的本地邮件和草稿，创建、修改和删除草稿，并可标记邮件、本机归档 / 取消归档、请求刷新同步和打开草稿（不能发送或删除邮件）。开关状态保存在本机设置中，下次启动 MailX 时按该状态自动启动。
 
 MCP 服务随 MailX 进程运行：关窗行为为“在后台运行”时，关闭窗口不影响 MCP；从托盘或菜单真正退出 MailX，或关闭开关时，服务停止并断开所有连接。之后 bridge 返回 `CORE_UNAVAILABLE` 和启动应用的提示。
 
@@ -34,7 +34,7 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 
 ### 首版授权（有意简化）
 
-首版不做逐客户端配对：开启 MCP 后，同一操作系统用户下能读取发现文件的进程都可以连接，所有连接获得同一档授权“读取邮件与草稿、创建 / 修改 / 删除草稿；不能发送、删除邮件或标记邮件”（`accounts:read`、`mail:read`、`draft:create`、`draft:write`），范围为全部账号，包括用户自己写的草稿。客户端在 initialize 中自报的名称与版本只用于状态展示和审计，不作为身份依据。核心为每个连接派生 RequestContext，bridge 输入不能自报额外权限。
+首版不做逐客户端配对：开启 MCP 后，同一操作系统用户下能读取发现文件的进程都可以连接，所有连接获得同一档授权“读取邮件与草稿、创建 / 修改 / 删除草稿、已读 / 星标、本机归档 / 取消归档与刷新同步；不能发送或删除邮件”（`accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`），范围为全部账号，包括用户自己写的草稿。客户端在 initialize 中自报的名称与版本只用于状态展示和审计，不作为身份依据。核心为每个连接派生 RequestContext，bridge 输入不能自报额外权限。
 
 这意味着开启期间，本机同一用户的任何程序都能读取全部本地邮件。对应的缓解是：默认关闭、开启前确认、主界面常驻运行状态图标、关闭开关立即断开连接并作废 token。逐客户端配对、账号范围与单独撤销留作后续，届时扩展授权记录即可，工具层与 RequestContext 的检查位置不变。
 
@@ -42,21 +42,21 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 
 核心向宿主报告 MCP 状态：已关闭、运行中（当前已连接的各会话及其客户端自报标签，按连接先后排列）、启动失败（稳定错误码，例如端点被占用或无法写出发现文件）。设置页与标题栏状态图标都读取这一状态，界面规则见 [UI 设计](../architecture/ui-design.md)。
 
-工具映射：MCP 工具名为工具层 ID 加 `mailx_` 前缀；不带前缀的名称返回 JSON-RPC `-32602`。成功结果同时给 `structuredContent` 与 JSON 文本兜底；`ToolError` 返回 `isError: true`，错误 JSON 只放文本内容、不放 `structuredContent`，以免严格客户端按 `outputSchema` 校验失败。`readOnly` 映射为 `readOnlyHint`；所需动作与限制在 MCP 中没有对应字段，放入 `_meta`。客户端自报名称取自 initialize 的 `clientInfo`。
+工具映射：MCP 工具名为工具层 ID 加 `mailx_` 前缀；不带前缀的名称返回 JSON-RPC `-32602`。成功结果同时给 `structuredContent` 与 JSON 文本兜底；`ToolError` 返回 `isError: true`，错误 JSON 只放文本内容、不放 `structuredContent`，以免严格客户端按 `outputSchema` 校验失败。`readOnly`、`destructive`、`idempotent`、`openWorld` 分别映射为 MCP 对应 Hint；所需动作与限制在 MCP 中没有对应字段，放入 `_meta`。客户端自报名称取自 initialize 的 `clientInfo`。
 
 stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按请求 ID 传递；客户端断开只取消其未完成读取 / AI 请求，不取消已保存草稿或其他客户端任务。
 
 ## 3. 工具草案
 
-下表是首批对 MCP 可见的共享工具，对应工具层的 `list_accounts`、`search_emails`、`read_email`、`list_folders`、`create_draft`、`create_reply_draft`、`list_drafts`、`read_draft`、`update_draft`、`delete_draft` 与 MCP 专属的 `show_email_in_app`。其余 MCP 专属候选（如 `get_grant_scope`）与只对内置 Agent 可见的工具见[工具层工具集](../architecture/agent-tools.md#4-工具集草案)，进入实现前再补齐 schema。
+下表列出对 MCP 可见的十六个工具，其中 `show_email_in_app` 与 `show_draft_in_app` 仅 MCP 可见，其余十四个与内置 Agent 共用。整理工具与搜索增强的行为详见[整理邮件与 MCP 工具扩展](../architecture/mail-organize-tools.md)。
 
 工具 JSON Schema 拒绝未知字段；ID 与字符串长度有上限。表内字段采用 camelCase，与应用 DTO 一致。
 
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
 | `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
-| `mailx_search_emails` | `query?, accountIds?, folderRole?, folderId?, receivedAfter?, receivedBefore?, unread?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, subject, from{name?,address}, receivedAt, preview, isRead, hasAttachment, bodyCached`；`nextCursor` | `mail:read` |
-| `mailx_read_email` | `emailId, offset?, maxChars?, download?` | `id, accountId, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾省略）, totalChars, bodyTruncated` | `mail:read` |
+| `mailx_search_emails` | `query?, accountIds?, folderRole?, folderId?, receivedAfter?, receivedBefore?, unread?, starred?, archive?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, folderId, subject, from{name?,address}, receivedAt, preview, isRead, isStarred, archived, pendingChanges, localOnly, hasAttachment, bodyCached`；`coverage, nextCursor` | `mail:read` |
+| `mailx_read_email` | `emailId, offset?, maxChars?, download?` | `id, accountId, folderId, isRead, isStarred, archived, pendingChanges, localOnly, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾省略）, totalChars, bodyTruncated` | `mail:read` |
 | `mailx_list_folders` | `accountId?` | `folders[]`：`id, accountId, name, role, unreadCount?, totalCount?`（计数服务器尚未报告时省略） | `mail:read` |
 | `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
 | `mailx_create_reply_draft` | `emailId, mode（reply / replyAll / forward）, bodyHtml?, clientMutationId?` | `draftId, accountId, subject, mode` | `draft:create` + `mail:read` |
@@ -65,8 +65,13 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 | `mailx_update_draft` | `draftId, expectedRevision, to?, cc?, bcc?, subject?, bodyHtml?` | `draftId, revision, subject` | `draft:write` |
 | `mailx_delete_draft` | `draftId, expectedRevision` | `deleted` | `draft:write` |
 | `mailx_show_email_in_app` | `emailId` | `opened` | `mail:read` |
+| `mailx_set_email_flags` | `emailIds`（1–50 个不同 ID）、`isRead?`、`isStarred?` | `results[]`：每封、每个请求字段的 `status`（queued / unchanged / localOnly / failed）与失败时的 `errorCode` | `mail:organize` |
+| `mailx_archive_emails` | `emailIds`（1–50 个不同 ID） | `processedCount, changedCount`，仅本机，全有或全无 | `mail:archive` |
+| `mailx_unarchive_emails` | 同上 | 同上，恢复本机收件箱显示 | `mail:archive` |
+| `mailx_refresh_sync` | `accountId` | `accountId, accepted, syncStatus, userActionRequired`；只请求正常同步任务刷新，不等待完成 | `mail:sync` |
+| `mailx_show_draft_in_app` | `draftId` | `opened`，只打开 / 聚焦草稿，不发送 | `mail:read` |
 
-状态：十一个工具（内置 Agent 可见其中十个，`show_email_in_app` 仅 MCP）已在 core 工具层实现（`core/src/tools/`，进程内测试），MCP 适配层尚未实现，以上是适配层要暴露的形状；输入输出 JSON Schema 由工具层的 `ToolDescriptor` 提供，如有出入以其为准。适配层在工具层 id 前加 `mailx_` 前缀。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。`folderId`（取自 `list_folders`）只搜该文件夹，给出时不再默认排除 trash / junk；与 `folderRole` 同时给出报 `invalidInput`；不存在或不在授权范围内的文件夹与范围外 `accountIds` 一样没有结果（返回空列表，两者不可区分）。`list_folders` 只读本地已同步的文件夹，不联系服务器，需要 `mail:read`（文件夹名与计数描述的是邮箱内容，且它的用途是给 `search_emails` 提供 `folderId`）；`accountId` 缺省列出范围内全部账号，范围外账号与不存在的账号同样报 `notFound`；文件夹名来自服务器，属不可信内容。本机归档（仅本机、不动服务器）的规则不变：不带 query 时隐藏，带 query 的文本搜索会找到它们。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
+状态：十六个工具已在 core 工具层实现，由本地 MCP 适配层暴露；schema 以 `ToolDescriptor` 为准。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。`folderId`（取自 `list_folders`）只搜该文件夹，给出时不再默认排除 trash / junk；与 `folderRole` 同时给出报 `invalidInput`；不存在或不在授权范围内的文件夹与范围外 `accountIds` 一样没有结果（返回空列表，两者不可区分）。`list_folders` 只读本地已同步的文件夹，不联系服务器，需要 `mail:read`（文件夹名与计数描述的是邮箱内容，且它的用途是给 `search_emails` 提供 `folderId`）；`accountId` 缺省列出范围内全部账号，范围外账号与不存在的账号同样报 `notFound`；文件夹名来自服务器，属不可信内容。本机归档筛选 `archive` 为 `exclude` / `only` / `include`；省略时不带有效 query 隐藏归档，有效文本搜索包含归档。`starred` 在核心 SQL 分页前过滤，本机已发送副本永不带星标。`coverage` 描述本地查询范围的同步与索引覆盖，不代表完整服务器历史。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
 
 限制（已实现于工具层，两个入口各自一份策略值，目前相同）：搜索默认 20 条、上限 100；`accountIds` 最多 20 个；正文默认 8,000 字符、单次上限 32,000；query 最长 256 字符；`cursor` 最长 1,024 字符。正文分页按 Unicode 字符（标量值）计数，`offset` 超过总长度报 `invalidInput`，不会切断编码。读取不自动标记已读。正文未缓存时默认报 `bodyNotCached`，不会隐式下载；`read_email` 的 `download: true` 才会按需下载：先检查账号范围，再经该账号自己的网络路由（含代理，失败不回退直连）向邮件服务器取正文，使用只读取（`BODY.PEEK`，不改已读状态），上限 60 秒；已缓存时 `download` 无效。下载失败只返回稳定错误码，不带服务器文本：超时报 `downloadTimeout`，网络 / 认证 / 代理 / TLS / 协议 / 服务商限制报 `downloadFailed`，邮件超过正文大小上限报 `bodyTooLarge`，服务器上邮件已不存在（或邮箱已重建）报 `notFound`；没有可用运行时报 `unavailable`。`create_reply_draft` 包装应用的回复 / 全部回复 / 转发：收件人、主题前缀、引用与附件（转发）沿用写信窗口的规则，`bodyHtml` 是调用方自己的文字，放在引用之上并与整封草稿一起按写信白名单清理（上限与 `create_draft` 相同）；暂不支持追加 `to` / `cc`，用户在草稿里编辑。草稿的发件账号即原邮件所属账号（必在范围内），来源标记随主体：MCP 写 `mcp`，内置 Agent 写 `ai`，界面里创建的回复草稿仍为 `user`。原邮件正文未缓存报 `bodyNotCached`（先用 `read_email` 带 `download: true`），不隐式下载；工具永不发送。同一 `clientMutationId` 重放返回同一草稿，忽略重放时不同的 `bodyHtml`。引用头等生成文字的语言由宿主提供（桌面端与写信窗口的回复命令一致，每次调用时读取应用语言设置，切换语言即时生效）。
 
@@ -76,7 +81,11 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 草稿限制：`to` / `cc` / `bcc` 各最多 50 个收件人，地址最长 320、显示名最长 200 字符，`subject` 最长 998 字符，`bodyHtml` 最长 200,000 字节，`clientMutationId` 最长 64 字符。
 
-创建草稿可显式指定账号，缺省使用默认发件账号（须在授权范围内），初版不接受宿主附件路径、URL 附件或可执行 HTML；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（MCP 主体写 `mcp`，内置 AI 主体经同一工具写 `ai`）及草稿列表 / 写信窗口的“由 MCP 创建”“由 AI 创建”标记；工具层已按主体写入来源，但没有宿主调用它，目前没有任何草稿会带 `mcp` 或 `ai`。
+创建草稿可显式指定账号，缺省使用默认发件账号（须在授权范围内），初版不接受宿主附件路径、URL 附件或可执行 HTML；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（MCP 主体写 `mcp`，内置 AI 主体经同一工具写 `ai`）及草稿列表 / 写信窗口的“由 MCP 创建”“由 AI 创建”标记；MCP 宿主已接通来源写入；内置 Agent 入口仍待接入。
+
+本批整理与刷新能力随现有 MCP 总开关统一开放，没有额外整理开关；已开启的用户升级后获得新能力。标记使用目标值，返回 queued 时仅本地提交、尚未确认服务器写回；两个标志分别报告结果，允许部分成功。归档先检查整批账号范围，再在同一事务中执行；processedCount 包含已经处于目标状态的请求目标，changedCount 反映同 Message-ID 副本的实际变更数，重复操作为零。界面通过 core 变更事件刷新并提供精确撤销；撤销只恢复本次变化，后续改动导致旧回执失效，token 不返回 MCP。
+
+`refresh_sync` 只唤醒正常任务，不重启因服务商策略或认证 / 凭据问题停止的账号，不涉及发送重试；accepted 为 false 时不表示邮箱没有新邮件。`show_draft_in_app` 复用宿主写信窗口并固定为已有草稿模式，先检查范围，打开失败返回 unavailable。
 
 不发布蓝图中语义混合的 `mailx_send_draft`。未来若提供发送工具，另行设计与完整内容哈希 / 草稿版本绑定的一次性确认，而不是由 Agent 提交 `confirmed=true` 自行批准。
 
@@ -147,7 +156,7 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 - 单条 MCP 消息 ≤1 MiB。超限的请求**得不到 JSON-RPC 错误**：未解析就不知道 `id`，而 `rmcp` 3.8 只丢弃不回错。服务端在 `rmcp` 之前加了读取包装，超限即结束该会话，客户端看到连接关闭（而不是无限等待）。
 - 并发会话上限 8（`MAX_CONNECTIONS`）：握手通过但已满时回 `{"ok":false}` 并关闭；握手前同时在途的连接上限 32。
 - 每次工具列出与调用都重新检查服务器是否仍启用；停止时先使 token 作废（删除发现文件），再断开全部会话、移除 socket，`stop()` 等待完成。
-- 工具映射按第 2 节：`mailx_` 前缀、`outputSchema` 透传、`readOnlyHint`、`destructiveHint`（仅 `delete_draft`）、`_meta` 中的 `mailx/requiredActions`、`mailx/limits`、`mailx/writesLocalData`；`call_tool` 经 `spawn_blocking(Tools::call)`；`Principal::LocalMcp` 的连接 id 每连接新生成，客户端名取自 `RequestContext::client_info()`：会话式客户端为 `initialize` 的 `clientInfo.name`，无状态客户端为每个请求 `params._meta["io.modelcontextprotocol/clientInfo"].name`；审计取 `name` 而不是展示用的 `title`（稳定标识，审计更易检索）；状态里的展示标签则优先取非空 `title`、否则取 `name`（二者都去控制字符、截断 64 字符），二者都是客户端自报、不可信，只用于展示与审计、绝不作身份依据；界面直接显示名称，不加“自行报告”之类的限定语（面向非技术用户的措辞决定，安全规则不变）；`initialize` 完成、`list_tools` 与 `call_tool` 都会把本会话的标签写入状态；会话结束即从状态中移除，未自报身份的会话标签为 `null`（界面显示“未知客户端”）。界面显示当前已连接的客户端，不再保留“最近连接”。授权为 `Grant::mcp_default()`。
+- 工具映射按第 2 节：`mailx_` 前缀、`outputSchema` 透传、`readOnlyHint`、`destructiveHint`（仅 `delete_draft`）、`idempotentHint`、`openWorldHint`、`_meta` 中的 `mailx/requiredActions`、`mailx/limits`、`mailx/writesLocalData`、`mailx/writesServerData`；`call_tool` 经 `spawn_blocking(Tools::call)`；`Principal::LocalMcp` 的连接 id 每连接新生成，客户端名取自 `RequestContext::client_info()`：会话式客户端为 `initialize` 的 `clientInfo.name`，无状态客户端为每个请求 `params._meta["io.modelcontextprotocol/clientInfo"].name`；审计取 `name` 而不是展示用的 `title`（稳定标识，审计更易检索）；状态里的展示标签则优先取非空 `title`、否则取 `name`（二者都去控制字符、截断 64 字符），二者都是客户端自报、不可信，只用于展示与审计、绝不作身份依据；界面直接显示名称，不加“自行报告”之类的限定语（面向非技术用户的措辞决定，安全规则不变）；`initialize` 完成、`list_tools` 与 `call_tool` 都会把本会话的标签写入状态；会话结束即从状态中移除，未自报身份的会话标签为 `null`（界面显示“未知客户端”）。界面显示当前已连接的客户端，不再保留“最近连接”。授权为 `Grant::mcp_default()`。
 - 审计：`StderrAudit` 每次调用向 stderr 写一行（工具 id、主体、客户端名、请求 id、资源个数、结果），不含参数与内容。桌面宿主目前只有 stderr 这一种日志通道。
 
 **协议版本与客户端联调（2026-11-02）**
@@ -165,6 +174,6 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 
 **bridge**：`mailx-mcp [--discovery <路径>]`；发现文件优先级为 `--discovery`、环境变量 `MAILX_MCP_DISCOVERY`、`MAILX_DATA_DIR/mcp-discovery.json`、再按平台默认数据目录（macOS `~/Library/Application Support/MailX`，Windows `%APPDATA%\MailX`，其他 `$XDG_DATA_HOME` 或 `~/.local/share` 下的 `MailX`）。这一默认值**复制自** `desktop/src/storage_location.rs`，两处需同步修改。核心不可用时对第一个带 `id` 的请求回 JSON-RPC 错误：`code = -32001`，`message` 以 `CORE_UNAVAILABLE:` 开头并附中英文提示，`data = {"code":"CORE_UNAVAILABLE","reason":…}`，`reason` 为 `discoveryMissing`、`discoveryInvalid`、`connectFailed`、`handshakeRejected` 之一；通知不回应；等待至多 30 秒；stderr 写一行说明。stdin 到达 EOF 即视为客户端结束（命名管道没有半关闭）：bridge 刷新写端，给服务端最多 2 秒（`DRAIN_GRACE`）送完剩余回复，然后丢弃 IPC 连接并以 `0` 退出，服务端随连接断开释放会话；服务端先关闭时（例如用户关闭 MCP）立即结束并以 `0` 退出，即使客户端仍保持 stdin 打开；bridge 以 `shutdown_background` 结束运行时，不等待无法取消的 stdin 阻塞读取（核心不可用路径同样适用）。退出码：`0` 正常结束，`64` 参数错误，`69` 核心不可用。
 
-**设置页与分发**：设置 → MCP 页含开关（开启前确认）、状态行、说明与复制配置；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
+**设置页与分发**：设置 → MCP 页保留开关（开启前确认）、运行状态与错误、已连接客户端、复制配置和默认折叠的手动配置；访问范围与能力边界集中在开启确认中说明；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
 
 **仍未验证**：各平台实机手测（含设置页、标题栏图标、复制配置和 sidecar 路径）、AppImage 实机复制、Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。

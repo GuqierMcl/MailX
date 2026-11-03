@@ -174,11 +174,16 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
             "read_draft",
             "update_draft",
             "delete_draft",
+            "set_email_flags",
+            "archive_emails",
+            "unarchive_emails",
+            "refresh_sync",
         ];
         if audience == Audience::Mcp {
             expected.push("show_email_in_app");
+            expected.push("show_draft_in_app");
         }
-        assert_eq!(ids.len(), if audience == Audience::Mcp { 11 } else { 10 });
+        assert_eq!(ids.len(), if audience == Audience::Mcp { 16 } else { 14 });
         assert_eq!(ids, expected);
         let delete = list.iter().find(|t| t.id == "delete_draft").unwrap();
         assert!(delete.annotations.destructive && !delete.annotations.read_only);
@@ -246,7 +251,8 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
             "list_folders",
             "list_drafts",
             "read_draft",
-            "show_email_in_app"
+            "show_email_in_app",
+            "show_draft_in_app"
         ]
     );
 }
@@ -392,11 +398,16 @@ async fn search_lists_mail_with_cursor_and_filters() {
             keys,
             [
                 "accountId",
+                "archived",
                 "bodyCached",
+                "folderId",
                 "from",
                 "hasAttachment",
                 "id",
                 "isRead",
+                "isStarred",
+                "localOnly",
+                "pendingChanges",
                 "preview",
                 "receivedAt",
                 "subject"
@@ -684,11 +695,17 @@ async fn read_email_returns_headers_and_attachment_shape() {
         keys,
         [
             "accountId",
+            "archived",
             "attachments",
             "bodyTruncated",
             "cc",
+            "folderId",
             "from",
             "id",
+            "isRead",
+            "isStarred",
+            "localOnly",
+            "pendingChanges",
             "receivedAt",
             "subject",
             "text",
@@ -1114,7 +1131,7 @@ async fn optional_fields_are_omittable_not_nullable() {
     );
     let out = &search.output_schema;
     assert_eq!(out["properties"]["nextCursor"]["type"], "string");
-    assert_eq!(out["required"], json!(["emails"]));
+    assert_eq!(out["required"], json!(["emails", "coverage"]));
 }
 
 // ---- download, reply drafts, folders ----
@@ -2125,4 +2142,300 @@ async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
         f.call(&mcp(), "show_email_in_app", input).unwrap_err().code,
         ToolErrorCode::Unavailable
     );
+}
+
+#[tokio::test]
+async fn organization_reports_each_field_without_leaking_or_modifying_out_of_scope_mail() {
+    for ctx in both() {
+        let f = fx();
+        f.db.execute("UPDATE messages SET is_read = 0, is_flagged = 0", [])
+            .unwrap();
+        f.db.execute("UPDATE folders SET can_flag = 0", []).unwrap();
+        let missing = Uuid::new_v4().to_string();
+        let input =
+            json!({ "emailIds": [f.emails[0], missing], "isRead": true, "isStarred": true });
+        let denied = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![f.add_account()]),
+                [Action::MailOrganize],
+            ),
+        );
+        let hidden = f.call(&denied, "set_email_flags", input.clone()).unwrap();
+        for item in hidden["results"].as_array().unwrap() {
+            assert_eq!(
+                item["isRead"],
+                json!({"status":"failed","errorCode":"notFound"})
+            );
+            assert_eq!(item["isStarred"], item["isRead"]);
+        }
+        assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.is_read);
+        let output = f.call(&ctx, "set_email_flags", input.clone()).unwrap();
+        assert_eq!(output["results"][0]["isRead"], json!({"status":"queued"}));
+        assert_eq!(
+            output["results"][0]["isStarred"],
+            json!({"status":"localOnly"})
+        );
+        assert_eq!(
+            output["results"][1]["isRead"],
+            json!({"status":"failed","errorCode":"notFound"})
+        );
+        let repeat = f.call(&ctx, "set_email_flags", input).unwrap();
+        assert_eq!(repeat["results"][0]["isRead"]["status"], "unchanged");
+        assert_eq!(repeat["results"][0]["isStarred"]["status"], "unchanged");
+        let read = f.read(&ctx, 0, json!({})).unwrap();
+        assert_eq!(read["isRead"], true);
+        assert_eq!(read["isStarred"], true);
+        assert_eq!(read["pendingChanges"], true);
+        assert_eq!(read["localOnly"], false);
+    }
+}
+
+#[tokio::test]
+async fn organization_validates_batch_before_any_change_and_audits_all_fifty_targets() {
+    let f = fx();
+    f.db.execute("UPDATE messages SET is_read = 0", []).unwrap();
+    for input in [
+        json!({"emailIds": [], "isRead":true}),
+        json!({"emailIds": [f.emails[0], f.emails[0]], "isRead":true}),
+        json!({"emailIds": [f.emails[0]]}),
+        json!({"emailIds": [f.emails[0]], "isRead":null}),
+        json!({"emailIds": [f.emails[0]], "isRead":true, "delete":true}),
+        json!({"emailIds": (0..51).map(|_| Uuid::new_v4().to_string()).collect::<Vec<_>>(), "isRead":true}),
+    ] {
+        assert_eq!(
+            code(f.call(&mcp(), "set_email_flags", input)),
+            ToolErrorCode::InvalidInput
+        );
+    }
+    assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.is_read);
+    let ids: Vec<_> = (0..50).map(|_| Uuid::new_v4().to_string()).collect();
+    let out = f
+        .call(
+            &mcp(),
+            "set_email_flags",
+            json!({"emailIds":ids,"isRead":true}),
+        )
+        .unwrap();
+    assert_eq!(out["results"].as_array().unwrap().len(), 50);
+    assert!(out["results"][0].get("isStarred").is_none());
+    let records = f.audit.0.lock().unwrap();
+    assert_eq!(records.last().unwrap().resource_ids, ids);
+}
+
+#[tokio::test]
+async fn organization_actions_are_independently_required() {
+    let f = fx();
+    for (tool, input) in [
+        (
+            "set_email_flags",
+            json!({"emailIds":[f.emails[0]],"isRead":true}),
+        ),
+        ("archive_emails", json!({"emailIds":[f.emails[0]]})),
+        ("unarchive_emails", json!({"emailIds":[f.emails[0]]})),
+        ("refresh_sync", json!({"accountId":f.account})),
+    ] {
+        let reader = with_grant(mcp(), Grant::new(AccountScope::All, [Action::MailRead]));
+        assert_eq!(
+            code(f.call(&reader, tool, input)),
+            ToolErrorCode::NotPermitted
+        );
+        assert!(!f.tools.list_for(&reader).iter().any(|item| item.id == tool));
+    }
+    let descriptors = f.tools.list(Audience::Mcp);
+    let flags = descriptors
+        .iter()
+        .find(|item| item.id == "set_email_flags")
+        .unwrap();
+    assert!(
+        flags.annotations.writes_server_data
+            && flags.annotations.open_world
+            && flags.annotations.idempotent
+    );
+    let archive = descriptors
+        .iter()
+        .find(|item| item.id == "archive_emails")
+        .unwrap();
+    assert!(
+        !archive.annotations.writes_server_data
+            && !archive.annotations.open_world
+            && archive.annotations.idempotent
+    );
+}
+
+#[tokio::test]
+async fn archive_tools_preserve_atomic_scope_checks_and_search_restore_round_trip() {
+    for ctx in both() {
+        let f = fx();
+        let missing = Uuid::new_v4().to_string();
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "archive_emails",
+                json!({"emailIds":[f.emails[0],missing]})
+            )),
+            ToolErrorCode::NotFound
+        );
+        assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.archived);
+        let denied = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![f.add_account()]),
+                [Action::MailArchive],
+            ),
+        );
+        assert_eq!(
+            code(f.call(&denied, "archive_emails", json!({"emailIds":[f.emails[0]]}))),
+            ToolErrorCode::NotFound
+        );
+        assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.archived);
+        let out = f
+            .call(&ctx, "archive_emails", json!({"emailIds":[f.emails[0]]}))
+            .unwrap();
+        assert_eq!(out["processedCount"], 1);
+        assert_eq!(out["changedCount"], 1);
+        assert!(out.get("undoToken").is_none());
+        let repeat = f
+            .call(&ctx, "archive_emails", json!({"emailIds":[f.emails[0]]}))
+            .unwrap();
+        assert_eq!(repeat["changedCount"], 0);
+        let archived = f
+            .call(&ctx, "search_emails", json!({"archive":"only"}))
+            .unwrap();
+        assert_eq!(archived["emails"].as_array().unwrap().len(), 1);
+        assert_eq!(archived["emails"][0]["id"], f.emails[0]);
+        assert_eq!(archived["emails"][0]["archived"], true);
+        assert!(archived["emails"][0]["folderId"].is_string());
+        assert!(archived["coverage"]["headersComplete"].is_boolean());
+        assert!(archived["coverage"]["indexedBodies"].is_number());
+        assert_eq!(f.read(&ctx, 0, json!({})).unwrap()["archived"], true);
+        let restored = f
+            .call(&ctx, "unarchive_emails", json!({"emailIds":[f.emails[0]]}))
+            .unwrap();
+        assert_eq!(restored["changedCount"], 1);
+        assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.archived);
+    }
+}
+
+#[tokio::test]
+async fn search_accepts_starred_and_archive_filters_and_scope_coverage_is_safe() {
+    let f = fx();
+    f.db.execute(
+        "UPDATE messages SET is_flagged = CASE WHEN id = ?1 THEN 1 ELSE 0 END",
+        [&f.emails[1]],
+    )
+    .unwrap();
+    for ctx in both() {
+        let hits = f
+            .call(
+                &ctx,
+                "search_emails",
+                json!({"starred":true,"archive":"include"}),
+            )
+            .unwrap();
+        assert_eq!(hits["emails"].as_array().unwrap().len(), 1);
+        assert_eq!(hits["emails"][0]["id"], f.emails[1]);
+        assert_eq!(hits["emails"][0]["isStarred"], true);
+        assert_eq!(
+            code(f.call(&ctx, "search_emails", json!({"archive":true}))),
+            ToolErrorCode::InvalidInput
+        );
+        assert_eq!(
+            code(f.call(&ctx, "search_emails", json!({"archive":"invalid"}))),
+            ToolErrorCode::InvalidInput
+        );
+        let empty = with_grant(
+            ctx,
+            Grant::new(AccountScope::Only(vec![]), [Action::MailRead]),
+        );
+        let output = f.call(&empty, "search_emails", json!({})).unwrap();
+        assert_eq!(output["emails"], json!([]));
+        assert_eq!(output["coverage"]["indexedBodies"], 0);
+        assert!(output["coverage"].get("syncedAfter").is_none());
+    }
+}
+
+#[tokio::test]
+async fn show_draft_is_scoped_mcp_only_and_uses_existing_draft_hook() {
+    let f = fx();
+    let draft = user_draft(&f, &f.account, "Show me");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let sink = calls.clone();
+    let tools = Tools::new(f.core.clone(), String::new).with_draft_opener(move |account, id| {
+        sink.lock()
+            .unwrap()
+            .push((account.to_owned(), id.to_owned()));
+        Ok(())
+    });
+    let input = json!({"draftId":draft.id});
+    assert_eq!(
+        tools
+            .call(&agent(), "show_draft_in_app", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::UnknownTool
+    );
+    let denied = with_grant(
+        mcp(),
+        Grant::new(
+            AccountScope::Only(vec![f.add_account()]),
+            [Action::MailRead],
+        ),
+    );
+    assert_eq!(
+        tools
+            .call(&denied, "show_draft_in_app", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::NotFound
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    assert_eq!(
+        tools
+            .call(&mcp(), "show_draft_in_app", input.clone())
+            .unwrap(),
+        json!({"opened":true})
+    );
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![(f.account.clone(), draft.id.clone())]
+    );
+    assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
+    assert_eq!(
+        code(f.call(&mcp(), "show_draft_in_app", input)),
+        ToolErrorCode::Unavailable
+    );
+}
+
+#[tokio::test]
+async fn refresh_sync_is_scoped_and_reports_an_idle_worker_without_claiming_completion() {
+    let f = fx_real(1);
+    for ctx in both() {
+        let denied = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![f.add_account()]),
+                [Action::MailSync],
+            ),
+        );
+        assert_eq!(
+            code(f.call(&denied, "refresh_sync", json!({"accountId":f.account}))),
+            ToolErrorCode::NotFound
+        );
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "refresh_sync",
+                json!({"accountId":Uuid::new_v4().to_string()})
+            )),
+            ToolErrorCode::NotFound
+        );
+        let output = f
+            .call(&ctx, "refresh_sync", json!({"accountId":f.account}))
+            .unwrap();
+        assert_eq!(output["accountId"], f.account);
+        assert_eq!(output["accepted"], false);
+        assert_eq!(output["syncStatus"], "unknown");
+        assert_eq!(output["userActionRequired"], false);
+    }
 }

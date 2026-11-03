@@ -23,6 +23,12 @@ pub struct ShowEmailOutput {
     pub opened: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShowDraftInput {
+    pub draft_id: String,
+}
+
 pub(super) fn register(tools: &mut Tools) {
     let show = ToolSpec::new::<ShowEmailInput, ShowEmailOutput>(
         "show_email_in_app",
@@ -36,6 +42,32 @@ pub(super) fn register(tools: &mut Tools) {
     .requires(&[Action::MailRead])
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
     tools.register(show, show_email_in_app);
+
+    let show_draft = ToolSpec::new::<ShowDraftInput, ShowEmailOutput>(
+        "show_draft_in_app",
+        "Show a draft in MailX",
+        "Open or focus the existing draft's editor in MailX for the user to review, edit and send themselves. \
+         This never sends, deletes, or changes a draft. It moves focus to MailX, so only call it when the user \
+         asked to see or review the draft. Unknown and out-of-scope draft ids are both notFound.",
+        Annotations::READ_ONLY,
+    )
+    .requires(&[Action::MailRead])
+    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
+    tools.register(show_draft, show_draft_in_app);
+}
+
+fn show_draft_in_app(
+    call: &ToolCall<'_>,
+    input: ShowDraftInput,
+) -> Result<ShowEmailOutput, ToolError> {
+    if input.draft_id.is_empty() || input.draft_id.chars().count() > MAX_ID_CHARS {
+        return Err(ToolError::invalid("draftId", "invalid"));
+    }
+    let draft = call.core.get_draft(&input.draft_id)?;
+    call.require_account(&draft.account_id)?;
+    call.note_resource(&draft.id);
+    call.open_draft_in_app(&draft.account_id, &draft.id)?;
+    Ok(ShowEmailOutput { opened: true })
 }
 
 fn show_email_in_app(

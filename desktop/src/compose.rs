@@ -577,21 +577,49 @@ pub(crate) async fn composer_open(
     });
     let result = async {
         let (id, fresh) = args?;
-        if is_quitting(&app) {
-            return Err(AppError::new(ErrorCode::Conflict));
-        }
-        let text = id.hyphenated().to_string();
-        // The draft must exist; a window for nothing is never created.
-        state
-            .run(move |core| core.get_draft(&text).map(|_| ()))
-            .await?;
-        if is_quitting(&app) {
-            return Err(AppError::new(ErrorCode::Conflict));
-        }
-        open_composer(&app, &id, fresh).map_err(|_| AppError::new(ErrorCode::Internal))
+        open_checked_draft(&app, &state, id, fresh, None).await
     }
     .await;
     Ok(respond(result))
+}
+
+/// Opens an existing agent-selected draft without the new-draft cleanup flag.
+/// The tool layer checks its grant first; check the account again after
+/// scheduling on the desktop runtime, before constructing a window.
+pub(crate) async fn open_agent_draft(
+    app: &AppHandle,
+    state: &DesktopState,
+    account_id: String,
+    draft_id: String,
+) -> Result<(), AppError> {
+    let id = parse_draft_id(&draft_id).ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+    open_checked_draft(app, state, id, false, Some(account_id)).await
+}
+
+async fn open_checked_draft(
+    app: &AppHandle,
+    state: &DesktopState,
+    id: uuid::Uuid,
+    fresh: bool,
+    expected_account: Option<String>,
+) -> Result<(), AppError> {
+    if is_quitting(app) {
+        return Err(AppError::new(ErrorCode::Conflict));
+    }
+    let text = id.hyphenated().to_string();
+    state
+        .run(move |core| {
+            let draft = core.get_draft(&text)?;
+            if expected_account.is_some_and(|account| account != draft.account_id) {
+                return Err(AppError::new(ErrorCode::NotFound));
+            }
+            Ok(())
+        })
+        .await?;
+    if is_quitting(app) {
+        return Err(AppError::new(ErrorCode::Conflict));
+    }
+    open_composer(app, &id, fresh).map_err(|_| AppError::new(ErrorCode::Internal))
 }
 
 /// Closes the calling composer window. The frontend has already flushed the

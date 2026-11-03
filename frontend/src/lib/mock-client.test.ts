@@ -345,6 +345,21 @@ describe('showcase seed', () => {
 describe('mock local archive', () => {
   const inboxQuery = (archive: 'only' | null) => emailQuery({ folderRole: 'inbox', archive, limit: 50 })
 
+  it('restores only new changes in a mixed batch and rejects superseded receipts', async () => {
+    const client = createMockClient()
+    const [first, second] = (await client.listEmails(inboxQuery(null))).items
+    await client.archiveEmails([first.id])
+    const batch = await client.archiveEmails([first.id, second.id])
+    expect(batch).toMatchObject({ processedCount: 2, changedCount: 1 })
+    await client.undoArchive(batch.undoToken!)
+    expect((await client.getEmail(first.id)).summary.archived).toBe(true)
+    expect((await client.getEmail(second.id)).summary.archived).toBe(false)
+    const later = await client.archiveEmails([second.id])
+    await client.archiveEmails([second.id])
+    await expect(client.undoArchive(later.undoToken!)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    expect((await client.getEmail(second.id)).summary.archived).toBe(true)
+  })
+
   it('moves unread mail out of the inbox view and its number into the archived counts', async () => {
     const client = createMockClient()
     const [account] = await client.listAccounts()

@@ -40,27 +40,55 @@ impl AudiencePolicy {
 #[serde(rename_all = "camelCase")]
 pub struct Annotations {
     pub read_only: bool,
-    /// Writes MailX's local data (never mail servers).
+    /// Writes MailX's local data, including caches and pending flag changes.
     pub writes_local_data: bool,
+    /// May change flags on a mail server.
+    pub writes_server_data: bool,
     /// Removes data that cannot be recovered through the tool layer.
     pub destructive: bool,
+    pub idempotent: bool,
+    /// May contact mail servers rather than only the local store.
+    pub open_world: bool,
 }
 
 impl Annotations {
     pub const READ_ONLY: Self = Self {
         read_only: true,
         writes_local_data: false,
+        writes_server_data: false,
         destructive: false,
+        idempotent: true,
+        open_world: false,
     };
     pub const WRITES_LOCAL: Self = Self {
         read_only: false,
         writes_local_data: true,
+        writes_server_data: false,
         destructive: false,
+        idempotent: false,
+        open_world: false,
     };
     pub const DESTROYS_LOCAL: Self = Self {
         read_only: false,
         writes_local_data: true,
+        writes_server_data: false,
         destructive: true,
+        idempotent: false,
+        open_world: false,
+    };
+    pub const ORGANIZES_MAIL: Self = Self {
+        writes_server_data: true,
+        idempotent: true,
+        open_world: true,
+        ..Self::WRITES_LOCAL
+    };
+    pub const LOCAL_ARCHIVE: Self = Self {
+        idempotent: true,
+        ..Self::WRITES_LOCAL
+    };
+    pub const REFRESHES_MAIL: Self = Self {
+        open_world: true,
+        ..Self::WRITES_LOCAL
     };
 }
 
@@ -192,6 +220,7 @@ pub struct ToolCall<'a> {
     locale: &'a (dyn Fn() -> crate::SupportedLocale + Send + Sync),
     draft_open: &'a (dyn Fn(&str) -> bool + Send + Sync),
     ui_opener: &'a UiOpener,
+    draft_opener: &'a UiOpener,
     resources: RefCell<Vec<String>>,
 }
 
@@ -217,10 +246,14 @@ impl ToolCall<'_> {
         (self.ui_opener)(account_id, email_id)
     }
 
+    pub fn open_draft_in_app(&self, account_id: &str, draft_id: &str) -> Result<(), ToolError> {
+        (self.draft_opener)(account_id, draft_id)
+    }
+
     /// Records an account or email id for the call log.
     pub fn note_resource(&self, id: &str) {
         let mut resources = self.resources.borrow_mut();
-        if resources.len() < 32 && !resources.iter().any(|r| r == id) {
+        if resources.len() < 128 && !resources.iter().any(|r| r == id) {
             resources.push(id.chars().take(64).collect());
         }
     }
@@ -252,6 +285,7 @@ pub struct Tools {
     locale: Arc<dyn Fn() -> crate::SupportedLocale + Send + Sync>,
     draft_open: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     ui_opener: Arc<UiOpener>,
+    draft_opener: Arc<UiOpener>,
     audit: Arc<dyn ToolAudit>,
     entries: Vec<Entry>,
 }
@@ -269,12 +303,14 @@ impl Tools {
             locale: Arc::new(crate::SupportedLocale::default),
             draft_open: Arc::new(|_| false),
             ui_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
+            draft_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             audit: Arc::new(NoAudit),
             entries: Vec::new(),
         };
         super::accounts::register(&mut tools);
         super::mail::register(&mut tools);
         super::drafts::register(&mut tools);
+        super::organize::register(&mut tools);
         super::ui::register(&mut tools);
         tools
     }
@@ -307,6 +343,15 @@ impl Tools {
         opener: impl Fn(&str, &str) -> Result<(), ToolError> + Send + Sync + 'static,
     ) -> Self {
         self.ui_opener = Arc::new(opener);
+        self
+    }
+
+    /// Host hook to open or focus an existing draft, without sending it.
+    pub fn with_draft_opener(
+        mut self,
+        opener: impl Fn(&str, &str) -> Result<(), ToolError> + Send + Sync + 'static,
+    ) -> Self {
+        self.draft_opener = Arc::new(opener);
         self
     }
 
@@ -417,6 +462,7 @@ impl Tools {
             locale: &*self.locale,
             draft_open: &*self.draft_open,
             ui_opener: &*self.ui_opener,
+            draft_opener: &*self.draft_opener,
             resources: RefCell::new(Vec::new()),
         };
         let result = (entry.run)(&call, input);

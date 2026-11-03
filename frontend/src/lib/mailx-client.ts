@@ -15,6 +15,8 @@ import type {
   FlagWriteBack,
   EmailDeletion,
   MessagesDeleted,
+  MailStateChanged,
+  ArchiveOutcome,
   CreateAccountRequest,
   CreateDraftFromRequest,
   CreateDraftRequest,
@@ -105,9 +107,13 @@ export interface MailxClient {
    * Archives inbox emails on this device only (the server is not touched);
    * the whole batch is refused unless every id is a visible inbox email.
    */
-  archiveEmails(emailIds: string[]): Promise<void>
+  archiveEmails(emailIds: string[]): Promise<ArchiveOutcome>
   /** Moves locally archived emails back to the inbox. */
-  unarchiveEmails(emailIds: string[]): Promise<void>
+  unarchiveEmails(emailIds: string[]): Promise<ArchiveOutcome>
+  /** Restores only an archive operation's changes; newer changes are never overwritten. */
+  undoArchive(undoToken: string): Promise<void>
+  /** Committed local flag/archive changes, including those made by agents. */
+  onMailStateChanged(listener: (change: MailStateChanged) => void): () => void
   /** Hears when deletions reached the server or came back (`givenBack`). */
   onDeletions(listener: (deleted: MessagesDeleted) => void): () => void
   /** Asks the account's sync worker to run its next round now. */
@@ -370,8 +376,10 @@ export function createDesktopClient(): MailxClient {
     },
     deleteEmails: (emailIds, confirmedPermanent) => call<EmailDeletion>('emails_delete', { emailIds, confirmedPermanent }),
     undoDelete: (batchId) => call<void>('emails_undo_delete', { batchId }),
-    archiveEmails: (emailIds) => call<void>('emails_archive', { emailIds }),
-    unarchiveEmails: (emailIds) => call<void>('emails_unarchive', { emailIds }),
+    archiveEmails: (emailIds) => call<ArchiveOutcome>('emails_archive', { emailIds }),
+    unarchiveEmails: (emailIds) => call<ArchiveOutcome>('emails_unarchive', { emailIds }),
+    undoArchive: (undoToken) => call<void>('emails_undo_archive', { undoToken }),
+    onMailStateChanged: (listener) => subscribe<MailStateChanged>('mailx://mail-state-changed', listener),
     onDeletions(listener) {
       if (!available) return () => undefined
       let disposed = false

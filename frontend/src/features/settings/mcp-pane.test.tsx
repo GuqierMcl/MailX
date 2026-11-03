@@ -56,7 +56,10 @@ describe('MCP settings page', () => {
     const confirm = await screen.findByRole('alertdialog')
     expect(confirm).toHaveTextContent('读取所有账号的本地邮件和草稿')
     expect(confirm).toHaveTextContent('创建、修改和删除草稿')
-    expect(confirm).toHaveTextContent('不能发送邮件，也不能删除或标记邮件')
+    expect(confirm).toHaveTextContent('设置已读和星标，本机归档和取消归档')
+    expect(confirm).toHaveTextContent('已读和星标会尝试同步到邮件服务器')
+    expect(confirm).toHaveTextContent('归档仅在本机生效，不移动服务器邮件')
+    expect(confirm).toHaveTextContent('不能发送或删除邮件')
     expect(confirm).toHaveTextContent('以同一系统用户运行的任何程序都可以连接')
     expect(confirm).toHaveTextContent('随时在这里关闭')
     expect(client.setMcpEnabled).not.toHaveBeenCalled()
@@ -133,11 +136,5 @@ describe('MCP settings page', () => {
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('/data/mcp-discovery.json'))
     await userEvent.click(screen.getByRole('button', { name: '复制程序路径' }))
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('/opt/MailX/mailx-mcp'))
-  })
-
-  it('leads to the General page from the lifecycle note', async () => {
-    const { dialog } = renderMcp()
-    await userEvent.click(await within(dialog).findByRole('button', { name: '前往「通用」设置' }))
-    expect(await within(dialog).findByText('语言')).toBeInTheDocument()
   })
 })

@@ -187,5 +187,10 @@
   "unarchiveFailed": "Couldn’t move back to inbox",
   "allArchived": "All archived",
   "archivedFolder": "Archived",
-  "archivedMarker": "Archived"
+  "archivedMarker": "Archived",
+  "agentArchived_one": "{{source}} archived {{count}} message on this device",
+  "agentArchived_other": "{{source}} archived {{count}} messages on this device",
+  "agentUnarchived_one": "{{source}} moved {{count}} message back to the inbox on this device",
+  "agentUnarchived_other": "{{source}} moved {{count}} messages back to the inbox on this device",
+  "undoArchiveFailed": "Couldn’t undo this archive operation"
 }

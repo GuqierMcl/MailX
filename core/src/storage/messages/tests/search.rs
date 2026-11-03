@@ -245,3 +245,75 @@ fn snippets_come_only_from_body_hits_and_coverage_counts_indexed_bodies() {
             .all(|i| i.match_snippet.is_none())
     );
 }
+
+#[test]
+fn starred_filter_precedes_pagination_and_combines_with_text_and_archive() {
+    let mut f = setup();
+    let records: Vec<_> = (1..=12)
+        .map(|uid| {
+            let mut item = record(uid);
+            item.subject = "searchable mail".into();
+            item.is_flagged = uid % 3 == 0;
+            item
+        })
+        .collect();
+    put(&mut f, &records);
+    let mut query = EmailListQuery {
+        starred: Some(true),
+        limit: Some(2),
+        ..text_query("searchable")
+    };
+    let first = f.service.list_emails(&query).unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert!(first.items.iter().all(|mail| mail.is_starred));
+    query.cursor = first.next_cursor;
+    assert!(query.cursor.is_some());
+    let second = f.service.list_emails(&query).unwrap();
+    assert_eq!(second.items.len(), 2);
+    assert!(second.items.iter().all(|mail| mail.is_starred));
+    assert!(second.next_cursor.is_none());
+    let ids: std::collections::HashSet<_> = first
+        .items
+        .iter()
+        .chain(&second.items)
+        .map(|mail| &mail.id)
+        .collect();
+    assert_eq!(ids.len(), 4);
+
+    let archived = message_id(&f, 3);
+    f.service
+        .archive_messages(std::slice::from_ref(&archived))
+        .unwrap();
+    let only = EmailListQuery {
+        starred: Some(true),
+        archive: Some(ArchiveScope::Only),
+        ..text_query("searchable")
+    };
+    assert_eq!(listed(&f, &only), vec![archived]);
+    let unstarred = EmailListQuery {
+        starred: Some(false),
+        ..inbox_query()
+    };
+    assert_eq!(listed(&f, &unstarred).len(), 8);
+}
+
+#[test]
+fn starred_filter_excludes_local_sent_copies_but_false_includes_them() {
+    let mut f = setup();
+    let copy = local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "Offer letter", 0);
+    let mut server = sent_copy("different@mailx.test", 3);
+    server.is_flagged = true;
+    put_sent(&mut f, &[server]);
+    let starred = EmailListQuery {
+        starred: Some(true),
+        ..sent_query(&f)
+    };
+    let page = f.service.list_emails(&starred).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert!(page.items[0].is_starred && !page.items[0].local_only);
+    let unstarred = EmailListQuery {
+        starred: Some(false),
+        ..sent_query(&f)
+    };
+    assert_eq!(listed(&f, &unstarred), vec![copy]);
+}

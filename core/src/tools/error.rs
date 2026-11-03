@@ -1,11 +1,12 @@
 //! Tool failures with stable codes and messages that are safe to show a model.
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{AppError, ErrorCode};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolErrorCode {
     /// No such tool, or not visible to this audience.
