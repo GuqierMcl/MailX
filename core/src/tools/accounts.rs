@@ -52,6 +52,65 @@ impl SyncStatus {
     }
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RefreshSyncInput {
+    pub account_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshSyncOutput {
+    pub account_id: String,
+    /// The normal sync worker was asked to run. This is not completion.
+    pub accepted: bool,
+    pub sync_status: SyncStatus,
+    /// Login, credentials or provider policy requires the user in MailX.
+    pub user_action_required: bool,
+}
+
+pub(super) fn register_refresh(tools: &mut Tools) {
+    let spec = ToolSpec::new::<RefreshSyncInput, RefreshSyncOutput>(
+        "refresh_sync",
+        "Request mail refresh",
+        "Request the permitted account's normal sync worker to run its next round. accepted only means \
+         a running worker was notified, not that sync finished. Read list_accounts later for status. \
+         Never restarts a worker stopped by authentication, missing credentials or provider policy; \
+         userActionRequired means the user must handle it in MailX. Do not loop retries for that state. \
+         This contacts the account's mail server over its configured route and refreshes local data; \
+         it does not send, delete or change server mail and cannot change settings.",
+        Annotations::REFRESHES_MAIL,
+    )
+    .requires(&[Action::MailSync])
+    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
+    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
+    tools.register(spec, refresh_sync);
+}
+
+fn refresh_sync(
+    call: &ToolCall<'_>,
+    input: RefreshSyncInput,
+) -> Result<RefreshSyncOutput, ToolError> {
+    if input.account_id.is_empty() || input.account_id.chars().count() > 64 {
+        return Err(ToolError::invalid("accountId", "invalid"));
+    }
+    call.require_account(&input.account_id)?;
+    call.note_resource(&input.account_id);
+    let accepted = call.core.refresh_sync_for_agent(&input.account_id)?;
+    let states = call.core.sync_states();
+    let status = SyncStatus::of(
+        states
+            .iter()
+            .find(|state| state.account_id == input.account_id),
+    );
+    Ok(RefreshSyncOutput {
+        account_id: input.account_id,
+        accepted,
+        sync_status: status,
+        user_action_required: status == SyncStatus::AuthError,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInfo {

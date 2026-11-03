@@ -12,6 +12,7 @@ mod context;
 mod drafts;
 mod error;
 mod mail;
+mod organize;
 mod spec;
 #[cfg(test)]
 mod tests;
@@ -28,6 +29,9 @@ pub use error::{ToolError, ToolErrorCode};
 pub use mail::{
     Address, AttachmentInfo, EmailHit, ReadEmailInput, ReadEmailOutput, SearchEmailsInput,
     SearchEmailsOutput,
+};
+pub use organize::{
+    ArchiveEmailsInput, ArchiveEmailsOutput, SetEmailFlagsInput, SetEmailFlagsOutput,
 };
 pub use spec::{Annotations, AudiencePolicy, ToolCall, ToolDescriptor, ToolSpec, Tools};
 pub use ui::{ShowEmailInput, ShowEmailOutput};

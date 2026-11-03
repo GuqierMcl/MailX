@@ -26,11 +26,12 @@ pub mod tools;
 pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use app::{
-    AccountConnectionVerification, Activity, AttachmentFile, AttachmentInfo, AvatarImage,
-    AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
+    AccountConnectionVerification, Activity, ArchiveOutcome, AttachmentFile, AttachmentInfo,
+    AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
     CancelDraftVerification, ConnectionVerificationCode, ConnectionVerificationStage,
-    ConnectionVerificationStatus, DraftConnectionVerification, FlagChange, MailxCore, MessageFlag,
-    ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
+    ConnectionVerificationStatus, DraftConnectionVerification, EmailFlagResult, FlagChange,
+    MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus, VerifyAccountConnection,
+    VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -39,8 +40,8 @@ pub use drafts::attachments::{
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{
-    CoreEvent, EmailPreviewItem, EmailPreviews, EventSink, Events, NewMail, NewMailMessage,
-    SentCopiesChanged,
+    CoreEvent, EmailPreviewItem, EmailPreviews, EventSink, Events, MailChangeSource,
+    MailStateChangeKind, MailStateChanged, NewMail, NewMailMessage, SentCopiesChanged,
 };
 pub use localization::{LanguagePreference, SupportedLocale};
 pub use mail::*;

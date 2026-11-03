@@ -14,7 +14,7 @@ export function canArchive(email: EmailSummary, folders: Folder[]) {
 
 /**
  * Archives and unarchives inbox emails on this device only; the server is not
- * touched. It takes effect at once, and the toast's undo is the opposite call.
+ * touched. The toast restores exactly this change through a host receipt.
  * `onHidden` runs once an email left the view, so the reader can let go of it.
  */
 export function useArchiveEmail(client: MailxClient, onHidden: (email: EmailSummary) => void) {
@@ -31,27 +31,34 @@ export function useArchiveEmail(client: MailxClient, onHidden: (email: EmailSumm
   }, [queryClient])
 
   const change = useCallback(async (emailIds: string[], archive: boolean) => {
-    await (archive ? client.archiveEmails(emailIds) : client.unarchiveEmails(emailIds))
+    const receipt = await (archive ? client.archiveEmails(emailIds) : client.unarchiveEmails(emailIds))
     // An opened copy carries the archived mark.
     for (const id of emailIds) void queryClient.invalidateQueries({ queryKey: mailKeys.email(id) })
     refresh()
+    return receipt
   }, [client, queryClient, refresh])
 
   return useCallback(async (email: EmailSummary, archive: boolean) => {
+    let receipt
     try {
-      await change([email.id], archive)
+      receipt = await change([email.id], archive)
     } catch (error) {
       toast.error(t(archive ? 'mail:archiveFailed' : 'mail:unarchiveFailed'), { description: errorText(error) })
       return
     }
     latest.current(email)
+    if (receipt.changedCount === 0) return
+    const undoToken = receipt.undoToken
     toast.info(t(archive ? 'mail:archived' : 'mail:movedBackToInbox'), {
-      action: {
+      action: undoToken ? {
         label: t('mail:undo'),
-        onClick: () => void change([email.id], !archive).catch((error: unknown) => {
-          toast.error(t(archive ? 'mail:unarchiveFailed' : 'mail:archiveFailed'), { description: errorText(error) })
+        onClick: () => void client.undoArchive(undoToken).then(() => {
+          void queryClient.invalidateQueries({ queryKey: mailKeys.email(email.id) })
+          refresh()
+        }).catch((error: unknown) => {
+          toast.error(t('mail:undoArchiveFailed'), { description: errorText(error) })
         }),
-      },
+      } : undefined,
     })
-  }, [change])
+  }, [change, client, queryClient, refresh])
 }

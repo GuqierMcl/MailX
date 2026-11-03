@@ -57,7 +57,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 - `accountIds` 为 null 或省略时查询所有本地账号，空数组返回空结果；数组元素必须为有效 UUID。当前只有受信本地 UI 入口，未来 HTTP / MCP 再与宿主授权账号范围取交集。
 - `folderId` 指定本地文件夹 UUID；`folderRole` 在选定账号间按角色匹配，`inbox` 即统一收件箱。二者不能同时给出，否则返回 `validation`。
-- `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。星标是返回字段，本阶段没有星标筛选参数或标记写回。
+- `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。`starred` 按 true / false / null 筛选星标，核心 SQL 在分页前处理，本机已发送副本不带星标；标记写回见后文。
 - `text` 为本地全文搜索（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索第一批已实现尚未手测)）：按 Unicode 空白拆词，所有词都须命中，双引号括起的部分作为整体；最多 16 个词、256 个字符，超出返回 `validation`（字段 `text`）；空白文本视为不限。检索主题、人员（发件人、收件人、抄送的名字与地址）、预览、已缓存正文（每封最多 64 KiB）与附件名，全角 ASCII 与半角互相匹配；不少于 3 个字符的词用 FTS5 trigram，少于 3 个字符的词退回参数化 LIKE；用户文本不作为 SQL 或 FTS 表达式执行，不调用服务商搜索。`EmailSummary.matchSnippet` 为命中片段 `SnippetSegment[] | null`（`{ text, hit }` 纯文本分段，无 HTML，仅在正文或附件名命中时给出），`coverage.indexedBodies` 为作用域内已收进索引的正文数。
 - `receivedAfter` / `receivedBefore` 为 RFC 3339 时间，规范化为 UTC 毫秒格式后按左闭右开区间过滤；无效时间返回 `validation`。
 - `limit` 为 null 或省略时默认 50，有效范围 1–200；工作台请求 100。越界返回 `validation`。
@@ -428,7 +428,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 **垃圾邮件的显示。** 垃圾邮件文件夹不显示数字，有未读时只显示一个圆点（`aria-label="有未读邮件"`）；它的未读数不计入账号行，也不计入折叠父文件夹的汇总，折叠的父文件夹在其下有未读垃圾邮件时显示圆点以免被折叠藏起来。“全部收件箱”本来只汇总收件箱角色，不受影响。
 
-**自动已读。** 前端在邮件详情显示出来之后才把它标为已读，只经过列表而没打开的邮件保持未读；已读、有待同步变更的邮件不处理。已读、星标仅作用于当前打开的邮件，批量操作尚未实现。
+**自动已读。** 前端在邮件详情显示出来之后才把它标为已读，只经过列表而没打开的邮件保持未读；已读、有待同步变更的邮件不处理。界面按钮作用于当前打开的邮件；共享工具层另提供最多 50 封的批量已读 / 星标操作，分别报告每个字段的写回结果。
 
 ### 删除
 
@@ -444,7 +444,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 归档（仅本机）
 
-`archiveEmails(emailIds)` 对应 `emails_archive`，`unarchiveEmails(emailIds)` 对应 `emails_unarchive`，参数均为 `{ emailIds }`，返回空；只开放给主窗口。归档**只改本机显示，不向服务器发任何命令**：邮件仍在服务器的 INBOX 里，其他设备和网页版照常显示。命名预留了以后按账号加“同时移到服务器归档文件夹”的策略，前端接口不需要变。
+`archiveEmails(emailIds)` 对应 `emails_archive`，`unarchiveEmails(emailIds)` 对应 `emails_unarchive`，参数均为 `{ emailIds }`，返回 `ArchiveOutcome { processedCount, changedCount, undoToken }`（无变化时 undoToken 为 null）；只开放给主窗口。归档**只改本机显示，不向服务器发任何命令**：邮件仍在服务器的 INBOX 里，其他设备和网页版照常显示。命名预留了以后按账号加“同时移到服务器归档文件夹”的策略，前端接口不需要变。
 
 - **范围。** 只有收件箱角色（`inbox`）文件夹中的可见邮件可归档；已删除、垃圾邮件、已发送、草稿、其他文件夹和本机已发送副本（`localOnly`）不可归档。服务器上角色为 `archive` 的文件夹是普通文件夹，与本机归档无关。
 - **输入。** `emailIds` 去重后为 1 到 500 个，否则 `validation`；任一邮件不是可归档的可见收件箱邮件（含不存在、已删除墓碑、来自旧 UID 世代），整批返回 `notFound` 且不改任何状态。重复归档已归档的邮件不报错。
@@ -580,3 +580,12 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 `general.closeBehavior` 为 `ask`（默认）、`background`、`quit`；`general.showMenuBarIcon` 默认 false，仅 macOS 使用。旧文件自动补默认值，设置仅影响下一次关窗。macOS 的 background 依靠 Dock 恢复，无须菜单栏图标；Windows/Linux 需要托盘入口，Linux 还检查 AppIndicator 运行库与当前桌面宿主。运行库加载失败时主窗口仍可使用，`backgroundAvailable` 为 false。已记住 background 但当前不可用时重新询问，保留原偏好，不静默退出。
 
 托盘工作台动作 `mailx://desktop-action` 载荷为 `"settings"` 或 `"compose"`；只有工作台完成监听并报告 ready 后启用菜单项。打开窗口、立即同步和退出由 Rust 宿主执行。普通最小化保留平台原生行为，关窗隐藏不暂停收发任务。
+
+
+### MCP 整理工具的本地状态事件（2026-11-03）
+
+`CoreEvent::MailStateChanged` 由 desktop 转发为 `mailx://mail-state-changed`，包含 `accountIds, emailIds, source, kind, changedCount, undoToken`。账号与邮件引用只用于刷新，不含正文；emailIds 是有界提示，前端同时刷新列表、详情和目录计数，不能只依赖提示列表覆盖全部共享 Message-ID 副本。source 为 user / mcp / ai；kind 为 flags / archive / unarchive / undoArchive。
+
+UI、MCP / AI 的归档或取消归档都使用精确撤销回执；Agent 变更经事件显示提示，UI 自己的调用使用返回回执避免重复提示。可选 undoToken 经主窗口 `emails_undo_archive` 命令（`{ undoToken }`，返回空）调用核心 `undo_archive`，只恢复该批次真实改变的归档键。已有状态不反转；后续对同一键的操作、账号来源改变、回执过期或重复使用使撤销失败。内存回执最多 100 条，有效 10 分钟，重启失效；token 不出现在 MCP 结果中。正常归档数据仍持久化。
+
+共享工具层已提供 `show_draft_in_app`：先检查账号范围，再经宿主打开 / 聚焦已有草稿，固定 fresh=false，保留退出与异步建窗检查。该工具不发送或删除草稿。

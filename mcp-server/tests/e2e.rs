@@ -108,7 +108,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     let client = connect(&read_discovery(&fixture), "e2e-client").await;
 
     let tools = client.peer().list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 16);
     for tool in &tools {
         assert!(tool.name.starts_with("mailx_"), "{}", tool.name);
         assert!(tool.output_schema.is_some(), "{}", tool.name);
@@ -146,6 +146,115 @@ async fn tools_list_and_calls_work_end_to_end() {
         handle.status(),
         McpStatus::Running { ref clients } if labels(clients) == [Some("e2e-client")]
     ));
+    client.cancel().await.unwrap();
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() {
+    let fixture = Fixture::new().await;
+    let handle = McpServer::start(fixture.config()).await.unwrap();
+    let client = connect(&read_discovery(&fixture), "organize-client").await;
+    let tools = client.peer().list_all_tools().await.unwrap();
+    for name in [
+        "mailx_set_email_flags",
+        "mailx_archive_emails",
+        "mailx_unarchive_emails",
+        "mailx_refresh_sync",
+        "mailx_show_draft_in_app",
+    ] {
+        assert!(tools.iter().any(|tool| tool.name == name), "{name}");
+    }
+    for name in [
+        "mailx_delete_emails",
+        "mailx_send_draft",
+        "mailx_get_grant_scope",
+    ] {
+        assert!(!tools.iter().any(|tool| tool.name == name), "{name}");
+    }
+    let flags = tools
+        .iter()
+        .find(|t| t.name == "mailx_set_email_flags")
+        .unwrap();
+    let flags = serde_json::to_value(flags).unwrap();
+    assert_eq!(flags["annotations"]["readOnlyHint"], false);
+    assert_eq!(flags["annotations"]["idempotentHint"], true);
+    assert_eq!(flags["annotations"]["openWorldHint"], true);
+    assert_eq!(flags["_meta"]["mailx/writesServerData"], true);
+    let archive = tools
+        .iter()
+        .find(|t| t.name == "mailx_archive_emails")
+        .unwrap();
+    let archive = serde_json::to_value(archive).unwrap();
+    assert_eq!(archive["annotations"]["idempotentHint"], true);
+    assert_eq!(archive["annotations"]["openWorldHint"], false);
+    assert_eq!(archive["_meta"]["mailx/writesServerData"], false);
+    let read = tools.iter().find(|t| t.name == "mailx_read_email").unwrap();
+    let read = serde_json::to_value(read).unwrap();
+    assert_eq!(read["annotations"]["readOnlyHint"], true);
+    assert_eq!(read["annotations"]["openWorldHint"], true);
+    assert_eq!(read["_meta"]["mailx/writesLocalData"], true);
+    assert_eq!(read["_meta"]["mailx/writesServerData"], false);
+
+    let missing = "00000000-0000-4000-8000-000000000099";
+    let flags = call(
+        &client,
+        "mailx_set_email_flags",
+        json!({
+            "emailIds": [missing], "isRead": true, "isStarred": true,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_ne!(flags.is_error, Some(true));
+    let result = flags.structured_content.unwrap();
+    for field in ["isRead", "isStarred"] {
+        assert_eq!(result["results"][0][field]["status"], "failed");
+        assert_eq!(result["results"][0][field]["errorCode"], "notFound");
+    }
+    for name in ["mailx_archive_emails", "mailx_unarchive_emails"] {
+        let result = call(&client, name, json!({"emailIds": [missing]}))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(result.structured_content.is_none());
+        let text = serde_json::to_value(result.content).unwrap().to_string();
+        assert!(text.contains("notFound"), "{text}");
+        assert!(!text.contains("notPermitted"), "{text}");
+    }
+    let sync = call(
+        &client,
+        "mailx_refresh_sync",
+        json!({"accountId": fixture.account_id}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(sync.is_error, Some(true));
+    assert!(sync.structured_content.unwrap()["accepted"].is_boolean());
+    let draft = call(
+        &client,
+        "mailx_show_draft_in_app",
+        json!({"draftId": missing}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(draft.is_error, Some(true));
+    assert!(
+        serde_json::to_value(draft.content)
+            .unwrap()
+            .to_string()
+            .contains("notFound")
+    );
+    let search = call(
+        &client,
+        "mailx_search_emails",
+        json!({"starred": true, "archive": "only"}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(search.is_error, Some(true));
+    assert!(search.structured_content.unwrap()["coverage"].is_object());
+
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -208,7 +317,7 @@ async fn bad_handshakes_are_rejected() {
 
     // The server is still healthy.
     let client = connect(&discovery, "after-bad").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -233,7 +342,7 @@ async fn oversized_message_ends_the_session() {
 
     // Other sessions are unaffected.
     let client = connect(&discovery, "after-oversize").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -297,7 +406,7 @@ async fn token_rotates_and_restart_works() {
         let discovery = read_discovery(&fixture);
         tokens.push(discovery.token.clone());
         let client = connect(&discovery, "restart").await;
-        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
         client.cancel().await.unwrap();
         handle.stop().await;
     }
@@ -312,7 +421,7 @@ async fn stop_disconnects_sessions_and_refuses_new_connections() {
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let discovery = read_discovery(&fixture);
     let client = connect(&discovery, "stopper").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
 
     handle.stop().await;
     assert_eq!(handle.status(), McpStatus::Off);
@@ -364,7 +473,7 @@ async fn second_server_on_the_same_data_dir_reports_endpoint_in_use() {
     assert_eq!(error.code, mailx_mcp_server::McpFailureCode::EndpointInUse);
     // The failed start must not have touched the first server's files.
     let client = connect(&read_discovery(&fixture), "still-alive").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
     client.cancel().await.unwrap();
     first.stop().await;
 }
@@ -392,7 +501,7 @@ async fn long_data_dir_falls_back_to_a_short_private_socket_path() {
         0o700
     );
     let client = connect(&discovery, "long-path").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
     client.cancel().await.unwrap();
     handle.stop().await;
     assert!(!endpoint.exists());
@@ -403,7 +512,7 @@ async fn open_session_is_rejected_per_call_once_disabled() {
     let fixture = Fixture::new().await;
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let client = connect(&read_discovery(&fixture), "per-call").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 16);
 
     // Flip the flag without aborting the session: the call itself must fail.
     handle.disable_calls_only_for_tests();
@@ -499,7 +608,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
     .await;
     assert_eq!(
         list["result"]["tools"].as_array().unwrap().len(),
-        11,
+        16,
         "{list}"
     );
     assert!(matches!(

@@ -555,6 +555,47 @@ impl SyncManager {
         }
     }
 
+    /// Automation may only wake an existing normal worker. In particular it
+    /// cannot invoke the interactive provider-policy recovery in `refresh`.
+    pub(crate) fn refresh_for_agent(&self, account_id: &str) -> bool {
+        let allowed = self.shared.states.lock().is_ok_and(|states| {
+            !states
+                .get(account_id)
+                .and_then(|state| state.failure.as_ref())
+                .is_some_and(|failure| {
+                    matches!(
+                        failure.code,
+                        SyncFailureCode::ProviderPolicy
+                            | SyncFailureCode::Authentication
+                            | SyncFailureCode::CredentialMissing
+                            | SyncFailureCode::CredentialUntrusted
+                    )
+                })
+        });
+        if !allowed {
+            return false;
+        }
+        let running = self.workers.lock().is_ok_and(|workers| {
+            workers
+                .get(account_id)
+                .is_some_and(|worker| !worker.is_finished())
+        });
+        if !running {
+            return false;
+        }
+        let wake = self
+            .wakers
+            .lock()
+            .ok()
+            .and_then(|wakers| wakers.get(account_id).cloned());
+        if let Some(wake) = wake {
+            wake.notify_one();
+            true
+        } else {
+            false
+        }
+    }
+
     /// Wakes a running worker for one more round. Unlike `refresh` it never
     /// restarts anything, so a worker stopped by policy or a login failure
     /// stays stopped.
@@ -1397,6 +1438,11 @@ mod tests {
             revision: account.revision,
             generation: state.generation,
         };
+        let sync_signal = manager.wakers.lock().unwrap()[&account.id].clone();
+        let _ = sync_signal.notified().now_or_never();
+        assert!(manager.refresh_for_agent(&account.id));
+        assert!(sync_signal.notified().now_or_never().is_some());
+        assert_eq!(manager.states().pop().unwrap().generation, old.generation);
         manager.shared.block_policy(&old);
         let signal = manager.writers.lock().unwrap()[&account.id].1.clone();
         assert!(signal.notified().now_or_never().is_some()); // drain initial round
@@ -1423,6 +1469,14 @@ mod tests {
         )
         .await;
         assert!(manager.shared.policy_blocked(&old));
+
+        // An agent request never takes the interactive recovery path or
+        // creates a new generation, even when repeated.
+        for _ in 0..3 {
+            assert!(!manager.refresh_for_agent(&account.id));
+            assert_eq!(manager.states().pop().unwrap().generation, old.generation);
+            assert!(manager.shared.policy_blocked(&old));
+        }
 
         assert!(manager.refresh(&account.id));
         let current = manager.states().pop().unwrap();

@@ -145,6 +145,40 @@ impl McpManager {
                                 }
                             }
                         })
+                        .with_draft_opener({
+                            let handle = app.clone();
+                            let draft_state = state.clone();
+                            move |account_id, draft_id| {
+                                let handle = handle.clone();
+                                let draft_state = draft_state.clone();
+                                let account_id = account_id.to_owned();
+                                let draft_id = draft_id.to_owned();
+                                // Tools execute on spawn_blocking. Build the
+                                // window on the async runtime, as composer_open
+                                // does, to avoid Windows synchronous IPC hangs.
+                                tauri::async_runtime::block_on(tauri::async_runtime::spawn(
+                                    async move {
+                                        crate::compose::open_agent_draft(
+                                            &handle,
+                                            &draft_state,
+                                            account_id,
+                                            draft_id,
+                                        )
+                                        .await
+                                    },
+                                ))
+                                .map_err(|_| {
+                                    mailx_core::tools::ToolError::new(
+                                        mailx_core::tools::ToolErrorCode::Unavailable,
+                                    )
+                                })?
+                                .map_err(|_| {
+                                    mailx_core::tools::ToolError::new(
+                                        mailx_core::tools::ToolErrorCode::Unavailable,
+                                    )
+                                })
+                            }
+                        })
                         .with_audit(Arc::new(StderrAudit));
                 let config = McpConfig {
                     data_dir,

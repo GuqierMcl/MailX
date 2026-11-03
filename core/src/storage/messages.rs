@@ -462,6 +462,13 @@ impl Storage {
                 local.clauses.push("0 = 1".into());
             }
         }
+        if let Some(starred) = query.starred {
+            filter.add("m.is_flagged = ?", i64::from(starred));
+            // Local Sent copies cannot carry stars. Filter before pagination.
+            if starred {
+                local.clauses.push("0 = 1".into());
+            }
+        }
         if let Some(attachment) = query.has_attachment {
             filter.add("m.has_attachment = ?", i64::from(attachment));
             local.add(

@@ -40,6 +40,7 @@ import { loadMailTree } from './mail-tree'
 import { DeleteForGoodDialog } from './delete-for-good-dialog'
 import { canArchive, useArchiveEmail } from './use-archive-email'
 import { useDeleteEmail } from './use-delete-email'
+import { useMailStateChanges } from './use-mail-state-changes'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
@@ -294,6 +295,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
   const { setFlag } = useMessageFlags(client)
+  useMailStateChanges(client)
   useEmailPreviews(client)
   const requestPreviews = useCallback((ids: string[]) => { void client.requestPreviews(ids).catch(() => undefined) }, [client])
   // The mail is "opened" once its detail is on screen; a mail the user only

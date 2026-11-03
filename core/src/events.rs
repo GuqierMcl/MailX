@@ -28,6 +28,8 @@ pub enum CoreEvent {
     Sync(AccountSyncState),
     /// A read / starred write-back round finished.
     FlagWriteBack(FlagWriteBack),
+    /// Local flags or archive state changed; all mailbox views refetch.
+    MailStateChanged(MailStateChanged),
     /// A write-back round deleted messages on the server or gave deletions
     /// back; lists of the account refetch.
     Deletions(MessagesDeleted),
@@ -42,6 +44,38 @@ pub enum CoreEvent {
     /// An account's local sent copies changed (a copy was removed from this
     /// device); lists showing its Sent folder refetch.
     SentCopies(SentCopiesChanged),
+}
+
+/// Origin is selected by the trusted caller, never from mail content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MailChangeSource {
+    User,
+    Mcp,
+    Ai,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MailStateChangeKind {
+    Flags,
+    Archive,
+    Unarchive,
+    UndoArchive,
+}
+
+/// Local change hints. Email IDs are bounded to 500; invalidate the account's
+/// lists and any open detail even if its ID was not included in the hints.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MailStateChanged {
+    pub account_ids: Vec<String>,
+    pub email_ids: Vec<String>,
+    pub source: MailChangeSource,
+    pub kind: MailStateChangeKind,
+    pub changed_count: u32,
+    /// A short-lived, one-use capability delivered only to the trusted UI.
+    pub undo_token: Option<String>,
 }
 
 /// Which account's local sent copies changed.

@@ -69,6 +69,12 @@ pub enum Action {
     AccountsRead,
     #[serde(rename = "mail:read")]
     MailRead,
+    #[serde(rename = "mail:organize")]
+    MailOrganize,
+    #[serde(rename = "mail:archive")]
+    MailArchive,
+    #[serde(rename = "mail:sync")]
+    MailSync,
     #[serde(rename = "draft:create")]
     DraftCreate,
     /// Update or delete existing drafts.
@@ -106,15 +112,17 @@ impl Grant {
         }
     }
 
-    /// First-version local MCP grant: read accounts, mail and drafts, create,
-    /// modify and delete drafts, every account. There is no send, delete-mail
-    /// or mark action.
+    /// Local MCP grant: read, organize, archive and refresh mail, and manage
+    /// drafts in every account. There is no send or delete-mail action.
     pub fn mcp_default() -> Self {
         Self::new(
             AccountScope::All,
             [
                 Action::AccountsRead,
                 Action::MailRead,
+                Action::MailOrganize,
+                Action::MailArchive,
+                Action::MailSync,
                 Action::DraftCreate,
                 Action::DraftWrite,
             ],

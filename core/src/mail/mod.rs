@@ -181,6 +181,8 @@ pub struct EmailListQuery {
     pub archive: Option<ArchiveScope>,
     pub text: Option<String>,
     pub unread: Option<bool>,
+    /// Match the local desired star state, including pending server writes.
+    pub starred: Option<bool>,
     pub has_attachment: Option<bool>,
     pub received_after: Option<String>,
     pub received_before: Option<String>,

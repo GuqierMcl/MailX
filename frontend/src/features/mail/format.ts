@@ -9,6 +9,7 @@ export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
     archive: null,
     text: null,
     unread: null,
+    starred: null,
     hasAttachment: null,
     receivedAfter: null,
     receivedBefore: null,

@@ -53,7 +53,7 @@ describe('which emails can be archived', () => {
 })
 
 describe('archiving an email', () => {
-  it('archives at once, lets go of the email and offers an undo that unarchives', async () => {
+  it('archives at once, lets go of the email and restores through the receipt', async () => {
     const user = userEvent.setup()
     const { client, onHidden } = setup()
     await user.click(screen.getByRole('button', { name: 'go' }))
@@ -61,16 +61,35 @@ describe('archiving an email', () => {
     await waitFor(() => expect(onHidden).toHaveBeenCalledWith(expect.objectContaining({ id: 'mail-1' })))
     expect(await screen.findByText(t('mail:archived'))).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: t('mail:undo') }))
-    expect(client.unarchiveEmails).toHaveBeenCalledWith(['mail-1'])
+    expect(client.undoArchive).toHaveBeenCalledWith('archive-1')
+    expect(client.unarchiveEmails).not.toHaveBeenCalled()
   })
 
-  it('moves an archived email back and undoes by archiving again', async () => {
+  it('moves an archived email back and restores only this change', async () => {
     const user = userEvent.setup()
     const { client } = setup(email({ archived: true }))
     await user.click(screen.getByRole('button', { name: 'go' }))
     expect(client.unarchiveEmails).toHaveBeenCalledWith(['mail-1'])
     await user.click(await screen.findByRole('button', { name: t('mail:undo') }))
-    expect(client.archiveEmails).toHaveBeenCalledWith(['mail-1'])
+    expect(client.undoArchive).toHaveBeenCalledWith('unarchive-1')
+    expect(client.archiveEmails).not.toHaveBeenCalled()
+  })
+
+  it('does not offer undo when the target state was already reached', async () => {
+    const { client, onHidden } = setup()
+    client.archiveEmails.mockResolvedValueOnce({ processedCount: 1, changedCount: 0, undoToken: null })
+    await userEvent.click(screen.getByRole('button', { name: 'go' }))
+    await waitFor(() => expect(onHidden).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: t('mail:undo') })).not.toBeInTheDocument()
+  })
+
+  it('reports an obsolete receipt and never applies a blind inverse operation', async () => {
+    const { client } = setup()
+    client.undoArchive.mockRejectedValueOnce(new MailxClientError({ code: 'notFound', message: '', field: null }))
+    await userEvent.click(screen.getByRole('button', { name: 'go' }))
+    await userEvent.click(await screen.findByRole('button', { name: t('mail:undo') }))
+    expect((await screen.findAllByText(t('mail:undoArchiveFailed'))).length).toBeGreaterThan(0)
+    expect(client.unarchiveEmails).not.toHaveBeenCalled()
   })
 
   it('keeps the email and reports a failure', async () => {

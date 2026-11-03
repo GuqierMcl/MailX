@@ -41,12 +41,14 @@ mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 mod flags;
+mod organize;
 mod verification;
 pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use flags::{FlagChange, MessageFlag};
+pub use organize::{ArchiveOutcome, EmailFlagResult};
 pub use verification::{
     AccountConnectionVerification, CancelConnectionVerification, CancelDraftVerification,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
@@ -79,6 +81,7 @@ pub struct MailxCore {
     events: Events,
     verification: Arc<verification::VerificationRegistry>,
     draft_verification: Arc<verification::VerificationRegistry>,
+    archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -216,6 +219,7 @@ impl MailxCore {
             events,
             verification: Arc::default(),
             draft_verification: Arc::default(),
+            archive_undo: Arc::default(),
         })
     }
 
@@ -370,20 +374,30 @@ impl MailxCore {
         flag: MessageFlag,
         wanted: bool,
     ) -> Result<FlagChange, AppError> {
-        let (change, account_id) = {
-            let mut service = self.accounts()?;
-            let change = service.set_message_flag(email_id, flag.into(), wanted)?;
-            let account_id = service.get_email(email_id)?.summary.account_id;
-            (change, account_id)
-        };
-        if change == crate::storage::LocalChange::Queued {
-            self.sync.changes_waiting(&account_id);
+        // Keep the existing single-message IPC contract: local Sent copies
+        // cannot carry server flags and are rejected as invalid targets.
+        crate::accounts::validate_email_id(email_id)?;
+        if email_id.starts_with(crate::mail::LOCAL_SENT_PREFIX) {
+            return Err(AppError::validation("emailId"));
         }
-        Ok(match change {
-            crate::storage::LocalChange::Unchanged => FlagChange::Unchanged,
-            crate::storage::LocalChange::Queued => FlagChange::Queued,
-            crate::storage::LocalChange::LocalOnly => FlagChange::LocalOnly,
-        })
+        let (read, starred) = match flag {
+            MessageFlag::Read => (Some(wanted), None),
+            MessageFlag::Starred => (None, Some(wanted)),
+        };
+        let result = self
+            .set_email_flags(
+                &[email_id.to_owned()],
+                read,
+                starred,
+                crate::MailChangeSource::User,
+            )?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
+        result
+            .is_read
+            .or(result.is_starred)
+            .ok_or_else(|| AppError::new(ErrorCode::Internal))?
     }
 
     /// Hides the emails and deletes them on the server once the undo window
@@ -418,13 +432,15 @@ impl MailxCore {
     /// server. Every id must be a visible inbox message, or none is archived
     /// (`notFound`); 1 to 500 distinct ids (`validation`).
     pub fn archive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
-        self.accounts()?.archive_messages(email_ids)
+        self.change_email_archive(email_ids, true, crate::MailChangeSource::User)
+            .map(|_| ())
     }
 
     /// Takes emails back into the inbox; the same rules as
     /// [`MailxCore::archive_emails`].
     pub fn unarchive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
-        self.accounts()?.unarchive_messages(email_ids)
+        self.change_email_archive(email_ids, false, crate::MailChangeSource::User)
+            .map(|_| ())
     }
 
     /// Takes back a deletion from [`MailxCore::delete_emails`] and shows its
@@ -797,6 +813,13 @@ impl MailxCore {
         self.accounts()?.get(account_id)?;
         self.sync.refresh(account_id);
         Ok(())
+    }
+
+    /// Automation may wake a normal worker but cannot revive one stopped by
+    /// a provider policy or authentication failure.
+    pub fn refresh_sync_for_agent(&self, account_id: &str) -> Result<bool, AppError> {
+        self.accounts()?.get(account_id)?;
+        Ok(self.sync.refresh_for_agent(account_id))
     }
 
     /// Current sync state of every account that has a worker.
