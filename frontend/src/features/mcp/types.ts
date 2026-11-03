@@ -23,4 +23,9 @@ export type McpStatus =
  * What a client's `mcpServers` entry runs, mirroring `McpClientConfig` in
  * `desktop/src/mcp_sidecar.rs`. `args` always begin with `--discovery <file>`.
  */
-export type McpClientConfig = { command: string; args: string[] }
+export type McpClientConfig = {
+  command: string
+  args: string[]
+  /** The same paths for display only, with the home directory written as `~`. Never copy these. */
+  display: { command: string; discovery: string }
+}

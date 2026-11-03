@@ -27,6 +27,51 @@ const APPIMAGE_DIR: [&str; 2] = ["mcp", "bin"];
 pub(crate) struct McpClientConfig {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
+    /// The same two paths for showing only; `command` / `args` are what gets copied.
+    pub(crate) display: McpClientDisplay,
+}
+
+/// The bridge and discovery file paths with the home directory written as `~`.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpClientDisplay {
+    pub(crate) command: String,
+    pub(crate) discovery: String,
+}
+
+/// `path` with its leading `home` directory replaced by `~`, for display.
+///
+/// Paths outside `home` come back unchanged. The match is on whole components, so
+/// `/Users/ab` is not inside `/Users/a`. A Windows-style home (backslashes or a drive
+/// letter) matches case-insensitively and treats `/` like `\`; the rest of `path`
+/// keeps its own separators.
+fn shorten_home(path: &str, home: &str) -> String {
+    let windows = home.contains('\\') || home.as_bytes().get(1) == Some(&b':');
+    let is_separator = |c: char| c == '/' || (windows && c == '\\');
+    let home = home.trim_end_matches(is_separator);
+    if home.is_empty() {
+        return path.to_owned();
+    }
+    let same = |a: char, b: char| {
+        if windows {
+            (is_separator(a) && is_separator(b)) || a.to_lowercase().eq(b.to_lowercase())
+        } else {
+            a == b
+        }
+    };
+    let mut rest = path.chars();
+    for expected in home.chars() {
+        match rest.next() {
+            Some(actual) if same(actual, expected) => {}
+            _ => return path.to_owned(),
+        }
+    }
+    let rest = rest.as_str();
+    if rest.is_empty() || rest.starts_with(is_separator) {
+        format!("~{rest}")
+    } else {
+        path.to_owned()
+    }
 }
 
 /// The bridge beside `exe`, or its stable copy under `data_dir` for an AppImage.
@@ -110,22 +155,36 @@ pub(crate) fn client_config(
     data_dir: &Path,
     appimage: bool,
 ) -> Result<McpClientConfig, AppError> {
+    // Clients spawn these paths as they are, and many cannot handle a `\\?\` prefix.
+    let data_dir = dunce::simplified(data_dir);
     let bridge = locate_bridge(exe, data_dir, appimage)?;
     let text = |path: &Path| {
         path.to_str()
             .map(str::to_owned)
             .ok_or_else(|| AppError::new(ErrorCode::Internal))
     };
+    let command = text(dunce::simplified(&bridge))?;
+    let discovery = text(dunce::simplified(&discovery_path(data_dir)))?;
+    let display = |path: &str| match std::env::home_dir() {
+        Some(home) => home
+            .to_str()
+            .map_or_else(|| path.to_owned(), |home| shorten_home(path, home)),
+        None => path.to_owned(),
+    };
     Ok(McpClientConfig {
-        command: text(&bridge)?,
-        args: vec!["--discovery".to_owned(), text(&discovery_path(data_dir))?],
+        display: McpClientDisplay {
+            command: display(&command),
+            discovery: display(&discovery),
+        },
+        command,
+        args: vec!["--discovery".to_owned(), discovery],
     })
 }
 
 /// [`client_config`] for the running process.
 pub(crate) fn current_client_config(data_dir: &Path) -> Result<McpClientConfig, AppError> {
     let exe = std::env::current_exe().map_err(|_| AppError::new(ErrorCode::Internal))?;
-    let exe = std::fs::canonicalize(exe).map_err(|_| AppError::new(ErrorCode::Internal))?;
+    let exe = dunce::canonicalize(exe).map_err(|_| AppError::new(ErrorCode::Internal))?;
     let appimage = std::env::var_os("APPIMAGE").is_some_and(|value| !value.is_empty());
     client_config(&exe, data_dir, appimage)
 }
@@ -210,5 +269,87 @@ mod tests {
                 discovery_path(data.path()).to_str().unwrap().to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn client_config_displays_the_same_paths_when_outside_home() {
+        // Temp directories sit outside the home directory, so nothing is shortened.
+        let (_dir, exe) = app_dir_with_bridge(b"bridge");
+        let data = tempfile::tempdir().unwrap();
+        let config = client_config(&exe, data.path(), false).unwrap();
+        assert_eq!(config.display.command, config.command);
+        assert_eq!(config.display.discovery, config.args[1]);
+    }
+
+    #[test]
+    fn shorten_home_replaces_the_home_prefix() {
+        let home = "/Users/a";
+        assert_eq!(
+            shorten_home("/Users/a/Library/MailX/mailx-mcp", home),
+            "~/Library/MailX/mailx-mcp"
+        );
+        assert_eq!(shorten_home("/Users/a", home), "~");
+        assert_eq!(shorten_home("/Users/a/", "/Users/a/"), "~/");
+        assert_eq!(shorten_home("/Users/a/x", "/Users/a/"), "~/x");
+    }
+
+    #[test]
+    fn shorten_home_leaves_other_paths_alone() {
+        let home = "/Users/a";
+        for path in [
+            "/Applications/MailX.app/Contents/MacOS/mailx-mcp",
+            "/usr/bin/mailx-mcp",
+            "/Users/ab/x",
+            "/users/a/x",
+            "/Users",
+        ] {
+            assert_eq!(shorten_home(path, home), path);
+        }
+        assert_eq!(shorten_home("/x", "/"), "/x");
+        assert_eq!(shorten_home("/x", ""), "/x");
+    }
+
+    #[test]
+    fn shorten_home_matches_windows_paths_case_insensitively() {
+        let home = r"C:\Users\Guqier";
+        assert_eq!(
+            shorten_home(r"C:\Users\Guqier\AppData\Local\MailX\mailx-mcp.exe", home),
+            r"~\AppData\Local\MailX\mailx-mcp.exe"
+        );
+        assert_eq!(
+            shorten_home(r"c:\users\GUQIER\AppData\x", home),
+            r"~\AppData\x"
+        );
+        assert_eq!(shorten_home(r"C:\Users\Guqier", home), "~");
+        assert_eq!(shorten_home("C:/Users/Guqier/x", home), "~/x");
+        assert_eq!(
+            shorten_home(r"C:\Users\Guqier2\x", home),
+            r"C:\Users\Guqier2\x"
+        );
+        assert_eq!(
+            shorten_home(r"C:\Program Files\MailX\mailx-mcp.exe", home),
+            r"C:\Program Files\MailX\mailx-mcp.exe"
+        );
+    }
+
+    #[test]
+    fn normal_paths_are_unchanged_by_simplification() {
+        let path = Path::new("/opt/MailX/mailx-mcp");
+        assert_eq!(dunce::simplified(path), path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_client_config_has_no_verbatim_prefix() {
+        let (_dir, exe) = app_dir_with_bridge(b"bridge");
+        let data = tempfile::tempdir().unwrap();
+        // `fs::canonicalize` would return `\\?\C:\...` for these.
+        let exe = dunce::canonicalize(exe).unwrap();
+        let data_dir = std::fs::canonicalize(data.path()).unwrap();
+        assert!(data_dir.to_str().unwrap().starts_with(r"\\?\"));
+        let config = client_config(&exe, &data_dir, false).unwrap();
+        for text in [&config.command, &config.args[1], &config.display.command] {
+            assert!(!text.starts_with(r"\\?\"), "{text}");
+        }
     }
 }

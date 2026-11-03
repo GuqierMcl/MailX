@@ -7,6 +7,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toast'
 import { mcpClientGroups, mcpStatusText } from '@/features/mcp/mcp-status-text'
@@ -52,6 +53,14 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
       toast.error(t('mcpCopyFailed'), { description: errorText(cause) })
     }
   }
+  const copyPath = async (label: string, path: string) => {
+    try {
+      await navigator.clipboard.writeText(path)
+      toast.success(t('mcpPathCopied', { label }))
+    } catch (cause) {
+      toast.error(t('mcpCopyFailed'), { description: errorText(cause) })
+    }
+  }
   const clients = status?.state === 'running' ? mcpClientGroups(status.clients) : []
 
   return <SettingsPage>
@@ -84,12 +93,23 @@ export function McpPane({ client, onOpenSection }: { client: MailxClient; onOpen
       <SettingsRow label={t('mcpCopyConfig')} description={t('mcpCopyConfigHint')}>
         <Button variant="outline" size="sm" disabled={config.isError} onClick={() => void copy()}>{t('mcpCopyConfig')}</Button>
       </SettingsRow>
-      <div className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">{t('mcpCommandPath')}</span>
-        {config.isError
-          ? <p role="alert" className="text-sm text-destructive">{errorText(config.error)}</p>
-          : <code className="break-all font-mono text-xs select-text" data-testid="mcp-command-path">{config.data?.command ?? '…'}</code>}
-      </div>
+      {config.isError
+        ? <p role="alert" className="text-sm text-destructive">{errorText(config.error)}</p>
+        : <Collapsible>
+          <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground">{t('mcpManualSetup')}</CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 flex flex-col gap-2">
+            {config.data && ([
+              { id: 'command', label: t('mcpCommandPath'), shown: config.data.display.command, full: config.data.command },
+              { id: 'discovery', label: t('mcpDiscoveryPath'), shown: config.data.display.discovery, full: config.data.args[1] ?? '' },
+            ] as const).map((item) => <div key={item.id} className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="text-xs text-muted-foreground">{item.label}</span>
+                <code className="break-all font-mono text-xs select-text" data-testid={`mcp-${item.id}-path`}>{item.shown}</code>
+              </div>
+              <Button variant="outline" size="sm" aria-label={t('mcpCopyPath', { label: item.label })} onClick={() => void copyPath(item.label, item.full)}>{t('mcpCopyShort')}</Button>
+            </div>)}
+          </CollapsibleContent>
+        </Collapsible>}
     </SettingsGroup>
     <AlertDialog open={confirming} onOpenChange={setConfirming}>
       <AlertDialogContent>
