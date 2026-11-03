@@ -23,6 +23,12 @@ pub enum ToolErrorCode {
     DownloadFailed,
     /// The message is larger than the body download limit.
     BodyTooLarge,
+    /// The draft changed since `expectedRevision`; read it again.
+    Conflict,
+    /// The draft is queued or being sent.
+    DraftLocked,
+    /// The user has the draft open in a composer window.
+    DraftOpen,
     /// Storage or the core is not ready; retrying later may work.
     Unavailable,
     Internal,
@@ -43,6 +49,11 @@ impl ToolErrorCode {
                 "The message body could not be downloaded from the mail server. Try again later."
             }
             Self::BodyTooLarge => "The message is too large to download.",
+            Self::Conflict => {
+                "The draft changed since it was read. Read it again and retry with the new revision."
+            }
+            Self::DraftLocked => "The draft is queued for sending and cannot be changed.",
+            Self::DraftOpen => "The user is editing this draft in MailX.",
             Self::Unavailable => "MailX is temporarily unavailable. Try again later.",
             Self::Internal => "An internal error occurred.",
         }
@@ -90,7 +101,9 @@ impl From<AppError> for ToolError {
     /// carry text that is not meant for a model.
     fn from(error: AppError) -> Self {
         match error.code {
-            ErrorCode::Validation | ErrorCode::IdempotencyConflict | ErrorCode::Conflict => {
+            ErrorCode::Conflict => Self::new(ToolErrorCode::Conflict),
+            ErrorCode::DraftLocked => Self::new(ToolErrorCode::DraftLocked),
+            ErrorCode::Validation | ErrorCode::IdempotencyConflict => {
                 match error.field.as_deref() {
                     Some(field) if field.len() <= 64 && field.chars().all(is_field_char) => {
                         Self::invalid(field, "value rejected")

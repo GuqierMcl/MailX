@@ -15,14 +15,19 @@ mod mail;
 mod spec;
 #[cfg(test)]
 mod tests;
+mod ui;
 
 pub use accounts::{AccountInfo, ListAccountsInput, ListAccountsOutput, SyncStatus};
 pub use audit::{NoAudit, ToolAudit, ToolCallRecord};
 pub use context::{AccountScope, Action, Audience, Grant, Principal, RequestContext};
-pub use drafts::{CreateDraftInput, CreateDraftOutput};
+pub use drafts::{
+    CreateDraftInput, CreateDraftOutput, DeleteDraftInput, DeleteDraftOutput, DraftIdInput,
+    ListDraftsInput, ListDraftsOutput, ReadDraftOutput, UpdateDraftInput, UpdateDraftOutput,
+};
 pub use error::{ToolError, ToolErrorCode};
 pub use mail::{
     Address, AttachmentInfo, EmailHit, ReadEmailInput, ReadEmailOutput, SearchEmailsInput,
     SearchEmailsOutput,
 };
 pub use spec::{Annotations, AudiencePolicy, ToolCall, ToolDescriptor, ToolSpec, Tools};
+pub use ui::{ShowEmailInput, ShowEmailOutput};

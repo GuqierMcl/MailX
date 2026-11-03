@@ -108,7 +108,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     let client = connect(&read_discovery(&fixture), "e2e-client").await;
 
     let tools = client.peer().list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 11);
     for tool in &tools {
         assert!(tool.name.starts_with("mailx_"), "{}", tool.name);
         assert!(tool.output_schema.is_some(), "{}", tool.name);
@@ -116,6 +116,16 @@ async fn tools_list_and_calls_work_end_to_end() {
         let meta = serde_json::to_value(tool).unwrap();
         assert!(meta["_meta"]["mailx/requiredActions"].is_array());
         assert!(meta["_meta"]["mailx/limits"].is_object());
+    }
+
+    for tool in &tools {
+        let hint = tool.annotations.as_ref().unwrap().destructive_hint;
+        assert_eq!(
+            hint,
+            Some(tool.name == "mailx_delete_draft"),
+            "{}",
+            tool.name
+        );
     }
 
     let accounts = call(&client, "mailx_list_accounts", json!({}))
@@ -198,7 +208,7 @@ async fn bad_handshakes_are_rejected() {
 
     // The server is still healthy.
     let client = connect(&discovery, "after-bad").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -223,7 +233,7 @@ async fn oversized_message_ends_the_session() {
 
     // Other sessions are unaffected.
     let client = connect(&discovery, "after-oversize").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -287,7 +297,7 @@ async fn token_rotates_and_restart_works() {
         let discovery = read_discovery(&fixture);
         tokens.push(discovery.token.clone());
         let client = connect(&discovery, "restart").await;
-        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
         client.cancel().await.unwrap();
         handle.stop().await;
     }
@@ -302,7 +312,7 @@ async fn stop_disconnects_sessions_and_refuses_new_connections() {
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let discovery = read_discovery(&fixture);
     let client = connect(&discovery, "stopper").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
 
     handle.stop().await;
     assert_eq!(handle.status(), McpStatus::Off);
@@ -354,7 +364,7 @@ async fn second_server_on_the_same_data_dir_reports_endpoint_in_use() {
     assert_eq!(error.code, mailx_mcp_server::McpFailureCode::EndpointInUse);
     // The failed start must not have touched the first server's files.
     let client = connect(&read_discovery(&fixture), "still-alive").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
     client.cancel().await.unwrap();
     first.stop().await;
 }
@@ -382,7 +392,7 @@ async fn long_data_dir_falls_back_to_a_short_private_socket_path() {
         0o700
     );
     let client = connect(&discovery, "long-path").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
     client.cancel().await.unwrap();
     handle.stop().await;
     assert!(!endpoint.exists());
@@ -393,7 +403,7 @@ async fn open_session_is_rejected_per_call_once_disabled() {
     let fixture = Fixture::new().await;
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let client = connect(&read_discovery(&fixture), "per-call").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 11);
 
     // Flip the flag without aborting the session: the call itself must fail.
     handle.disable_calls_only_for_tests();
@@ -489,7 +499,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
     .await;
     assert_eq!(
         list["result"]["tools"].as_array().unwrap().len(),
-        6,
+        11,
         "{list}"
     );
     assert!(matches!(
