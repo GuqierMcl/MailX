@@ -16,6 +16,13 @@ pub enum ToolErrorCode {
     /// Also reported for resources outside the grant's account scope.
     NotFound,
     BodyNotCached,
+    /// An on-demand body download did not finish within the time limit.
+    DownloadTimeout,
+    /// An on-demand body download failed (network, authentication, proxy,
+    /// TLS or protocol problem).
+    DownloadFailed,
+    /// The message is larger than the body download limit.
+    BodyTooLarge,
     /// Storage or the core is not ready; retrying later may work.
     Unavailable,
     Internal,
@@ -29,8 +36,13 @@ impl ToolErrorCode {
             Self::NotPermitted => "This action is not permitted.",
             Self::NotFound => "The requested item was not found.",
             Self::BodyNotCached => {
-                "The message body is not stored on this device. Ask the user to open the message in MailX first."
+                "The message body is not stored on this device. Call read_email with download: true to fetch it, then try again."
             }
+            Self::DownloadTimeout => "Downloading the message body took too long. Try again later.",
+            Self::DownloadFailed => {
+                "The message body could not be downloaded from the mail server. Try again later."
+            }
+            Self::BodyTooLarge => "The message is too large to download.",
             Self::Unavailable => "MailX is temporarily unavailable. Try again later.",
             Self::Internal => "An internal error occurred.",
         }

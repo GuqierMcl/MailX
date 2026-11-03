@@ -235,6 +235,11 @@ impl MailxCore {
             .map_err(|_| AppError::new(ErrorCode::Internal))
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_accounts_for_test<R>(&self, f: impl FnOnce(&mut AccountService) -> R) -> R {
+        f(&mut self.accounts().unwrap())
+    }
+
     pub fn list_accounts(&self) -> Result<Vec<Account>, AppError> {
         self.accounts()?.list()
     }
@@ -330,6 +335,22 @@ impl MailxCore {
     /// waiter cancellation and always honors the account's configured route.
     pub async fn fetch_body(&self, email_id: String) -> Result<EmailDetail, AppError> {
         self.bodies.fetch(email_id).await
+    }
+
+    /// Blocking variant of [`Self::fetch_body`] for the shared tool layer,
+    /// whose calls are synchronous and run on blocking threads.
+    pub(crate) fn fetch_body_blocking(
+        &self,
+        email_id: String,
+        timeout: std::time::Duration,
+    ) -> Result<EmailDetail, crate::sync::bodies::BlockingFetchError> {
+        self.bodies.fetch_blocking(email_id, timeout)
+    }
+
+    /// Test access to the body manager's fake connector.
+    #[cfg(test)]
+    pub(crate) fn body_manager(&self) -> &Arc<BodyManager> {
+        &self.bodies
     }
 
     /// Asks for list previews of the rows a list is showing, replacing any
@@ -465,6 +486,19 @@ impl MailxCore {
         request: CreateDraftFromRequest,
         locale: crate::SupportedLocale,
     ) -> Result<Draft, AppError> {
+        self.create_draft_from_with_origin(request, locale, DraftOrigin::User, None)
+    }
+
+    /// Like `create_draft_from_localized` for callers that are not the user
+    /// at the composer. `intro_html` is the caller's own text, placed above
+    /// the quoted original and sanitized with the rest of the body.
+    pub fn create_draft_from_with_origin(
+        &self,
+        request: CreateDraftFromRequest,
+        locale: crate::SupportedLocale,
+        origin: DraftOrigin,
+        intro_html: Option<&str>,
+    ) -> Result<Draft, AppError> {
         let source = self.accounts()?.draft_source(&request)?;
         let (detail, account_address, message_id, raw) = match source {
             crate::accounts::DraftSource::Existing(draft) => return Ok(draft),
@@ -500,6 +534,8 @@ impl MailxCore {
             },
             crate::accounts::local_offset(),
             locale,
+            origin,
+            intro_html,
         )?;
         self.announce_draft(&draft, DraftChange::Created);
         Ok(draft)

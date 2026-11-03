@@ -114,6 +114,16 @@ impl McpManager {
                 let default_state = state.clone();
                 let tools =
                     mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
+                        .with_locale({
+                            let locale_state = state.clone();
+                            // The same locale the UI's reply command uses.
+                            move || {
+                                locale_state
+                                    .notification_settings()
+                                    .map(|(_, locale)| locale)
+                                    .unwrap_or_else(crate::locale::system_locale)
+                            }
+                        })
                         .with_audit(Arc::new(StderrAudit));
                 let config = McpConfig {
                     data_dir,

@@ -50,11 +50,23 @@ struct Shared {
     service: Weak<Mutex<AccountService>>,
     flights: Mutex<Flights>,
     #[cfg(test)]
-    connector: Option<
-        tokio::sync::mpsc::UnboundedSender<
-            tokio::sync::oneshot::Sender<Result<imap::Session, ImapError>>,
-        >,
-    >,
+    connector: Mutex<Option<TestConnector>>,
+}
+
+#[cfg(test)]
+type TestConnector = tokio::sync::mpsc::UnboundedSender<
+    tokio::sync::oneshot::Sender<Result<imap::Session, ImapError>>,
+>;
+
+/// Why a blocking body download produced no detail. Server text never
+/// travels with it; a failed download itself is recorded on the message.
+#[derive(Debug)]
+pub(crate) enum BlockingFetchError {
+    /// No usable runtime to run the download on (closed, or the caller
+    /// would block the only worker thread).
+    Unavailable,
+    Timeout,
+    App(AppError),
 }
 
 pub(crate) struct BodyManager {
@@ -70,13 +82,18 @@ fn stale() -> AppError {
 }
 
 impl BodyManager {
+    #[cfg(test)]
+    pub(crate) fn set_test_connector(&self, connector: TestConnector) {
+        *self.shared.connector.lock().unwrap() = Some(connector);
+    }
+
     pub(crate) fn new(service: &Arc<Mutex<AccountService>>, runtime: Handle) -> Self {
         Self {
             shared: Arc::new(Shared {
                 service: Arc::downgrade(service),
                 flights: Mutex::new(Flights::default()),
                 #[cfg(test)]
-                connector: None,
+                connector: Mutex::new(None),
             }),
             runtime,
         }
@@ -93,6 +110,35 @@ impl BodyManager {
             })
             .await
             .map_err(|_| internal())?
+    }
+
+    /// Download from a thread that may block (`spawn_blocking`, a host
+    /// thread). The work runs on this manager's own runtime and the caller
+    /// waits on a std channel, so it never depends on the caller's runtime.
+    /// A caller on a current-thread runtime is refused instead of risking a
+    /// deadlock; the wait is bounded by `timeout`.
+    pub(crate) fn fetch_blocking(
+        self: &Arc<Self>,
+        id: String,
+        timeout: std::time::Duration,
+    ) -> Result<EmailDetail, BlockingFetchError> {
+        if Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
+        }) {
+            return Err(BlockingFetchError::Unavailable);
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let manager = self.clone();
+        self.runtime.spawn(async move {
+            let result = tokio::time::timeout(timeout, manager.fetch(id)).await;
+            let _ = sender.send(result);
+        });
+        // The sender is dropped unsent if the runtime is shutting down.
+        match receiver.recv() {
+            Ok(Ok(result)) => result.map_err(BlockingFetchError::App),
+            Ok(Err(_)) => Err(BlockingFetchError::Timeout),
+            Err(_) => Err(BlockingFetchError::Unavailable),
+        }
     }
 
     /// Protocol reads can rebuild an older sanitizer result but never start a
@@ -434,14 +480,17 @@ async fn connect(
     plan: &crate::accounts::sync_plan::SyncPlan,
 ) -> Result<imap::Session, ImapError> {
     #[cfg(test)]
-    if let Some(connector) = &shared.connector {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        connector
-            .send(sender)
-            .map_err(|_| ImapError::Protocol("test connector stopped".into()))?;
-        return receiver
-            .await
-            .map_err(|_| ImapError::Protocol("test connector stopped".into()))?;
+    {
+        let connector = shared.connector.lock().ok().and_then(|slot| slot.clone());
+        if let Some(connector) = connector {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            connector
+                .send(sender)
+                .map_err(|_| ImapError::Protocol("test connector stopped".into()))?;
+            return receiver
+                .await
+                .map_err(|_| ImapError::Protocol("test connector stopped".into()))?;
+        }
     }
     let _ = shared;
     imap::open_body_session(&plan.route, &plan.login).await

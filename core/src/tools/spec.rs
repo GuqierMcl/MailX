@@ -180,6 +180,7 @@ pub struct ToolCall<'a> {
     pub ctx: &'a RequestContext,
     pub policy: AudiencePolicy,
     default_account: &'a (dyn Fn() -> String + Send + Sync),
+    locale: &'a (dyn Fn() -> crate::SupportedLocale + Send + Sync),
     resources: RefCell<Vec<String>>,
 }
 
@@ -187,6 +188,12 @@ impl ToolCall<'_> {
     /// The host's default account id (may be empty when none is set).
     pub fn default_account_id(&self) -> String {
         (self.default_account)()
+    }
+
+    /// The host's current UI locale, read per call so a language change
+    /// applies at once.
+    pub fn locale(&self) -> crate::SupportedLocale {
+        (self.locale)()
     }
 
     /// Records an account or email id for the call log.
@@ -219,6 +226,7 @@ struct Entry {
 pub struct Tools {
     core: MailxCore,
     default_account: Arc<dyn Fn() -> String + Send + Sync>,
+    locale: Arc<dyn Fn() -> crate::SupportedLocale + Send + Sync>,
     audit: Arc<dyn ToolAudit>,
     entries: Vec<Entry>,
 }
@@ -233,6 +241,7 @@ impl Tools {
         let mut tools = Self {
             core,
             default_account: Arc::new(default_account),
+            locale: Arc::new(crate::SupportedLocale::default),
             audit: Arc::new(NoAudit),
             entries: Vec::new(),
         };
@@ -240,6 +249,16 @@ impl Tools {
         super::mail::register(&mut tools);
         super::drafts::register(&mut tools);
         tools
+    }
+
+    /// Host-supplied UI locale for generated draft text (quote headers,
+    /// subject prefixes), read at call time. Defaults to English.
+    pub fn with_locale(
+        mut self,
+        locale: impl Fn() -> crate::SupportedLocale + Send + Sync + 'static,
+    ) -> Self {
+        self.locale = Arc::new(locale);
+        self
     }
 
     /// Sends one record per call to `audit`.
@@ -346,6 +365,7 @@ impl Tools {
             ctx,
             policy,
             default_account: &*self.default_account,
+            locale: &*self.locale,
             resources: RefCell::new(Vec::new()),
         };
         let result = (entry.run)(&call, input);

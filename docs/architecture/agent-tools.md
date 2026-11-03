@@ -1,6 +1,6 @@
 # 工具层与调用入口
 
-状态：**Partial** · 工具层与首批四个共享工具已在 `core/src/tools/` 实现，仅有 core 内的进程内测试；本地 MCP 适配层（`mcp-server/`，见 [MCP 契约第 9 节](../contracts/mcp.md#9-后端实现状态2026-11-02)）已由桌面宿主在 `mcp.enabled` 打开时启动，并为每个连接构造 `Principal::LocalMcp` 的 `RequestContext`，授权为 `Grant::mcp_read_and_draft()`，审计经 `ToolAudit` 写到 stderr；该链路只有 macOS / Linux 自动测试，Windows 仅 CI 编译与测试，尚未与真实 MCP 客户端联调。桌面 IPC 与内置 Agent 尚未调用。决定见 [ADR 0004](../adr/0004-shared-tool-layer.md)。第 4 节“专属工具”、MCP 适配层与传输仍是草案，实现时可调整并同步更新。
+状态：**Partial** · 工具层与六个共享工具已在 `core/src/tools/` 实现，仅有 core 内的进程内测试；本地 MCP 适配层（`mcp-server/`，见 [MCP 契约第 9 节](../contracts/mcp.md#9-后端实现状态2026-11-02)）已由桌面宿主在 `mcp.enabled` 打开时启动，并为每个连接构造 `Principal::LocalMcp` 的 `RequestContext`，授权为 `Grant::mcp_read_and_draft()`，审计经 `ToolAudit` 写到 stderr；该链路只有 macOS / Linux 自动测试，Windows 仅 CI 编译与测试，尚未与真实 MCP 客户端联调。桌面 IPC 与内置 Agent 尚未调用。决定见 [ADR 0004](../adr/0004-shared-tool-layer.md)。第 4 节“专属工具”、MCP 适配层与传输仍是草案，实现时可调整并同步更新。
 
 ## 1. 分层
 
@@ -77,8 +77,10 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
 | `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
-| `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；按文件夹 id 过滤待将来的 `list_folders` |
-| `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页 |
+| `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；可选 `folderId`（取自 `list_folders`）只搜某个文件夹且不再默认排除 trash / junk |
+| `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页；可选 `download` 在正文未缓存时按需下载（不标已读、60 秒上限） |
+| `list_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |
+| `create_reply_draft` | ✓ | ✓ | 回复 / 全部回复 / 转发草稿，调用方文字放在引用之上，来源标记随主体；原邮件正文须已缓存，永不发送 |
 | `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |
 | `get_ui_context` | ✓ | | 当前选中的邮件或正在编辑的草稿引用 |
 | `propose_draft_edit` | ✓ | | 对编辑器中的草稿提出修改，带 revision，由用户接受 |
@@ -87,7 +89,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | `show_email_in_app` | | ✓ | 让 MailX 窗口定位并打开某封邮件，交给用户查看 |
 | `get_grant_scope` | | ✓ | 返回当前连接被授权的账号与动作 |
 
-前四项已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
+前六项已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
 
 没有任何入口提供可直接发信的工具；未来内置 Agent 推进发信只能经 `request_user_confirmation` 一类工具交给用户确认，确认与完整内容哈希 / 草稿版本绑定，规则见 [发送架构](sending.md)。
 
@@ -99,7 +101,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | --- | --- | --- |
 | 账号范围 | 本次 Run 的选定内容；需要检索更大范围时须先取得该提供商对相应账号的披露授权 | 首版为全部账号；引入逐客户端授权后可再收窄 |
 | `read_email` 输出上限 | 默认 8,000、单次上限 32,000 字符（`AudiencePolicy`，与 MCP 分开存放；Run 输入预算约束待内置 Agent 接入时再定） | 默认 8,000、单次上限 32,000 字符 |
-| 正文未缓存 | 返回 `bodyNotCached`，界面可提示用户获取 | 返回 `bodyNotCached`，引导到 UI 获取，不隐式下载 |
+| 正文未缓存 | 返回 `bodyNotCached`，界面可提示用户获取 | 默认返回 `bodyNotCached`，不隐式下载；调用方显式传 `download: true` 才下载 |
 | 结果去向 | 发送给所选模型提供商，属于内容披露 | 返回给外部客户端，MailX 无法约束其后续处理 |
 
 当前 `AudiencePolicy::DEFAULT` 两个入口取相同数值：搜索默认 20、上限 100 条；正文默认 8,000、上限 32,000 字符。`ToolDescriptor.limits` 返回列出该入口时适用的值。
@@ -110,7 +112,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 - 邮件正文、主题和发件显示信息作为不可信材料返回，不能被当作系统指令拼接。
 - 结果不包括 API Key、邮箱密码、refresh token、本地路径或无关账号信息。
-- 业务失败返回 `ToolError { code, message, field? }`。错误码（camelCase，稳定）：`unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`unavailable`、`internal`。`message` 是固定的英文短句，不含路径、凭证或服务器文本；`AppError` 只保留错误码映射（`Validation` / `IdempotencyConflict` / `Conflict` → `invalidInput`，`NotFound` → `notFound`，`BodyNotCached` → `bodyNotCached`，`Forbidden` → `notPermitted`，存储 / 核心未就绪 / 密钥库不可用 → `unavailable`，其余 → `internal`）。
+- 业务失败返回 `ToolError { code, message, field? }`。错误码（camelCase，稳定）：`unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`downloadTimeout`、`downloadFailed`、`bodyTooLarge`、`unavailable`、`internal`。`message` 是固定的英文短句，不含路径、凭证或服务器文本；`AppError` 只保留错误码映射（`Validation` / `IdempotencyConflict` / `Conflict` → `invalidInput`，`NotFound` → `notFound`，`BodyNotCached` → `bodyNotCached`，`Forbidden` → `notPermitted`，存储 / 核心未就绪 / 密钥库不可用 → `unavailable`，其余 → `internal`）。
 - MCP 适配层把参数或协议错误映射为 JSON-RPC 错误，把业务失败映射为工具错误结果。
 - 纯文本分页按 Unicode 字符计数，不切断编码；读取不自动标记已读。
 
@@ -119,7 +121,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 本地 MCP 先于内置 AI 落地（2026-11-02 决定）：内置 AI 涉及较多前端设计，暂缓；MCP 作为工具层的首个使用方。为避免工具层只为 MCP 服务，工具层测试在进程内分别以 MCP 与内置 Agent 主体调用。
 
 1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。已具备（`DraftOrigin::{User, Mcp, Ai}`、`create_draft_with_origin`、界面标记、HTML-only 邮件的分行纯文本）。目前没有任何入口创建 `mcp` 或 `ai` 草稿。
-2. 工具层骨架、`RequestContext` 与首批四个共享工具：**已完成**，只在 core 内以进程内测试验证（`core/src/tools/tests.rs`，MCP 与内置 Agent 两种主体各自调用）；尚无宿主接入。
+2. 工具层骨架、`RequestContext` 与六个共享工具：**已完成**，只在 core 内以进程内测试验证（`core/src/tools/tests.rs`，MCP 与内置 Agent 两种主体各自调用）；尚无宿主接入。
 3. M0 原型验证 `rmcp` 与本地 IPC，随后实现 MCP 适配层、桌面 IPC 监听与 stdio bridge。
 4. 设置中的 MCP 页、标题栏运行状态图标、复制客户端配置与 bridge 随应用分发。
 5. 至少两个目标 MCP 客户端联调。

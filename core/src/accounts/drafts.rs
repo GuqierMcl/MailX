@@ -188,6 +188,8 @@ impl AccountService {
         source: &SourceMessage<'_>,
         offset: FixedOffset,
         locale: crate::SupportedLocale,
+        origin: DraftOrigin,
+        intro_html: Option<&str>,
     ) -> Result<Draft, AppError> {
         let SourceMessage {
             detail,
@@ -227,6 +229,12 @@ impl AccountService {
             offset,
             locale,
         );
+        // The caller's own text goes above the quoted original, as in the
+        // composer. The whole body is sanitized together below.
+        let mut content = content;
+        if let Some(intro) = intro_html {
+            content.body_html = format!("{intro}{}", content.body_html);
+        }
         let content = validate::normalize(content)?;
         let canonical = Self::from_canonical(request)?;
         // The lock was released while the raw MIME was read: an identical
@@ -256,7 +264,7 @@ impl AccountService {
                 id: &id,
                 account_id: &detail.summary.account_id,
                 kind: request.kind,
-                origin: DraftOrigin::User,
+                origin,
                 // A local Sent copy is no `messages` row to point at.
                 source_email_id: Some(request.email_id.as_str())
                     .filter(|id| !id.starts_with(crate::mail::LOCAL_SENT_PREFIX)),
