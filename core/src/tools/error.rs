@@ -36,7 +36,7 @@ impl ToolErrorCode {
             Self::NotPermitted => "This action is not permitted.",
             Self::NotFound => "The requested item was not found.",
             Self::BodyNotCached => {
-                "The message body is not stored on this device. Ask the user to open the message in MailX first."
+                "The message body is not stored on this device. Call read_email with download: true to fetch it, then try again."
             }
             Self::DownloadTimeout => "Downloading the message body took too long. Try again later.",
             Self::DownloadFailed => {
