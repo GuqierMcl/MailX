@@ -98,7 +98,11 @@ export function StartupGate({ client }: { client: MailxClient }) {
 }
 
 function StartupShell({ children }: { children: React.ReactNode }) {
-  return <Card className="flex min-h-full w-full max-w-none flex-col items-center justify-center rounded-none border-0 bg-background p-6 shadow-none [&>*]:w-full [&>*]:max-w-md">{children}</Card>
+  return (
+    <div className="h-full overflow-auto">
+      <Card className="flex min-h-full w-full max-w-none flex-col items-center justify-center rounded-none border-0 bg-background p-6 shadow-none [&>*]:w-full [&>*]:max-w-md">{children}</Card>
+    </div>
+  )
 }
 
 function StartupLoadingScreen() {

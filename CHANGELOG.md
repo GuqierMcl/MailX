@@ -59,6 +59,7 @@
 
 ### Fixed
 
+- 修复主界面内容岛顶部阴影与描边被裁切的问题。
 - 修复 Windows 上复制的 MCP 客户端配置带有 `\\?\` 前缀，导致部分客户端无法启动 `mailx-mcp` 的问题。
 - 修复阅读邮件时远程图片的加载状态与“重试加载”无法使用的问题。 ([#78](https://github.com/GuqierMcl/MailX/pull/78))
 - 修复 Linux AppImage 缺少托盘运行库导致启动退出的问题；托盘运行库不可用时保留主窗口并禁用后台隐藏。 ([#74](https://github.com/GuqierMcl/MailX/pull/74))
