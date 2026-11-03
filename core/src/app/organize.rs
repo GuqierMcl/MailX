@@ -30,7 +30,7 @@ pub struct ArchiveOutcome {
 
 struct UndoReceipt {
     token: String,
-    created: Instant,
+    expires_at: Instant,
     keys: BTreeSet<ArchiveKey>,
     entries: Vec<ArchiveEntry>,
 }
@@ -42,8 +42,8 @@ pub(super) struct ArchiveUndoRegistry {
 
 impl ArchiveUndoRegistry {
     fn prune(&mut self) {
-        self.receipts
-            .retain(|r| r.created.elapsed() < UNDO_LIFETIME);
+        let now = Instant::now();
+        self.receipts.retain(|r| r.expires_at > now);
     }
 
     fn invalidate(&mut self, keys: &BTreeSet<ArchiveKey>) {
@@ -58,7 +58,7 @@ impl ArchiveUndoRegistry {
         let token = uuid::Uuid::new_v4().to_string();
         self.receipts.push_back(UndoReceipt {
             token: token.clone(),
-            created: Instant::now(),
+            expires_at: Instant::now() + UNDO_LIFETIME,
             keys: entries.iter().map(|entry| entry.key.clone()).collect(),
             entries,
         });

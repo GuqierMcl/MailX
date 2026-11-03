@@ -263,8 +263,10 @@ async fn expired_receipts_cannot_restore_mail() {
         .core
         .change_email_archive(&f.ids, true, MailChangeSource::Mcp)
         .unwrap();
-    f.core.archive_undo.lock().unwrap().receipts[0].created =
-        Instant::now() - UNDO_LIFETIME - Duration::from_secs(1);
+    // Expire the receipt without subtracting from the platform clock: a fresh
+    // Windows runner may not have a representable instant one lifetime ago.
+    f.core.archive_undo.lock().unwrap().receipts[0].expires_at = Instant::now();
+    f.events.lock().unwrap().clear();
     assert_eq!(
         f.core
             .undo_archive(&result.undo_token.unwrap())
@@ -272,7 +274,8 @@ async fn expired_receipts_cannot_restore_mail() {
             .code,
         ErrorCode::NotFound
     );
-    assert!(archived(&f, 0));
+    assert!((0..f.ids.len()).all(|index| archived(&f, index)));
+    assert!(f.events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
