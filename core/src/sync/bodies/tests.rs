@@ -129,9 +129,9 @@ pub(crate) fn fixture(sizes: &[Option<u32>]) -> Fixture {
     let account = create_account(&mut service, "first");
     let (target, messages) = seed(&mut service, &account, sizes);
     let service = Arc::new(Mutex::new(service));
-    let mut manager = BodyManager::new(&service, Handle::current());
+    let manager = BodyManager::new(&service, Handle::current());
     let (connector, connections) = mpsc::unbounded_channel();
-    Arc::get_mut(&mut manager.shared).unwrap().connector = Some(connector);
+    manager.set_test_connector(connector);
     let manager = Arc::new(manager);
     Fixture {
         _directory: directory,
@@ -163,6 +163,17 @@ pub(crate) async fn session(
     validity: u32,
     raw: &'static [u8],
 ) -> (imap::Session, oneshot::Sender<()>, JoinHandle<()>) {
+    session_for(uid, validity, 7, raw).await
+}
+
+/// As [`session`] for a stored UIDVALIDITY other than 7: the server only
+/// serves the body when it reports `validity == stored`.
+pub(crate) async fn session_for(
+    uid: u32,
+    validity: u32,
+    stored: u32,
+    raw: &'static [u8],
+) -> (imap::Session, oneshot::Sender<()>, JoinHandle<()>) {
     let (client, server) = tokio::io::duplex(16 * 1024);
     let (release, released) = oneshot::channel();
     let server = tokio::spawn(async move {
@@ -192,7 +203,7 @@ pub(crate) async fn session(
             )
             .await
             .unwrap();
-        if validity != 7 {
+        if validity != stored {
             return;
         }
         let tag = tagged_command(&mut server, &format!("UID FETCH {uid} (UID BODY.PEEK[])")).await;

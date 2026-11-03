@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::accounts::sync_plan::tests::config;
-use crate::{Caller, DraftOrigin, ErrorCode, MailxCore, QueueSendRequest};
+use crate::{Caller, CreateDraftFromRequest, DraftOrigin, ErrorCode, MailxCore, QueueSendRequest};
 
 const CJK: &str = "你好😀世界👨‍👩‍👧漢字🎉";
 
@@ -48,6 +48,29 @@ fn fx() -> Fx {
         Arc::new(|_: &crate::CoreEvent| {}),
     )
     .unwrap();
+    fx_from(dir, core, emails)
+}
+
+/// A real account (routable, plannable) whose messages are all uncached,
+/// for downloads through a fake IMAP server. Stored UIDVALIDITY is 7 and the
+/// uid of message `i` is `i + 1`.
+fn fx_real(count: usize) -> Fx {
+    let dir = TempDir::new().unwrap();
+    let core = MailxCore::open(
+        dir.path(),
+        Arc::new(crate::secrets::test_support::MemorySecrets::default()),
+        tokio::runtime::Handle::current(),
+        Arc::new(|_: &crate::CoreEvent| {}),
+    )
+    .unwrap();
+    let emails = core.with_accounts_for_test(|service| {
+        let account = crate::sync::bodies::tests::create_account(service, "first");
+        crate::sync::bodies::tests::seed(service, &account, &vec![Some(256); count]).1
+    });
+    fx_from(dir, core, emails)
+}
+
+fn fx_from(dir: TempDir, core: MailxCore, emails: Vec<String>) -> Fx {
     let db = Connection::open(dir.path().join("mailx.sqlite3")).unwrap();
     db.pragma_update(None, "foreign_keys", true).unwrap();
     let account: String = db
@@ -132,7 +155,7 @@ fn code(result: Result<Value, ToolError>) -> ToolErrorCode {
 }
 
 #[tokio::test]
-async fn both_audiences_list_the_four_tools_with_schemas_and_limits() {
+async fn both_audiences_list_the_six_tools_with_schemas_and_limits() {
     let f = fx();
     for audience in [Audience::Mcp, Audience::BuiltinAgent] {
         let list = f.tools.list(audience);
@@ -143,7 +166,9 @@ async fn both_audiences_list_the_four_tools_with_schemas_and_limits() {
                 "list_accounts",
                 "search_emails",
                 "read_email",
-                "create_draft"
+                "list_folders",
+                "create_draft",
+                "create_reply_draft"
             ]
         );
         for tool in &list {
@@ -160,12 +185,31 @@ async fn both_audiences_list_the_four_tools_with_schemas_and_limits() {
         let search = &list[1];
         assert!(search.description.contains("untrusted"));
         assert!(search.annotations.read_only);
-        let draft = &list[3];
+        let draft = &list[4];
         assert!(draft.description.contains("NOT sent"));
         assert!(draft.description.contains("untrusted"));
         assert!(draft.annotations.writes_local_data && !draft.annotations.read_only);
         assert!(list[2].description.contains("untrusted"));
         assert!(list[2].input_schema["properties"]["maxChars"].is_object());
+        assert_eq!(
+            list[2].input_schema["properties"]["download"]["type"],
+            "boolean"
+        );
+        assert!(
+            list[2].description.contains("never marks") || list[2].description.contains("never")
+        );
+        assert!(search.input_schema["properties"]["folderId"].is_object());
+        let folders = &list[3];
+        assert!(folders.annotations.read_only);
+        assert_eq!(folders.required_actions, [Action::MailRead]);
+        let reply = &list[5];
+        assert!(reply.description.contains("NOT sent"));
+        assert!(reply.description.contains("download true"));
+        assert!(reply.annotations.writes_local_data && !reply.annotations.read_only);
+        assert_eq!(
+            reply.required_actions,
+            [Action::DraftCreate, Action::MailRead]
+        );
     }
     let descriptor = serde_json::to_value(&f.tools.list(Audience::Mcp)[0]).unwrap();
     assert!(descriptor["inputSchema"].is_object());
@@ -180,7 +224,15 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
         Grant::new(AccountScope::All, [Action::AccountsRead, Action::MailRead]),
     );
     let ids: Vec<_> = f.tools.list_for(&ctx).iter().map(|t| t.id).collect();
-    assert_eq!(ids, ["list_accounts", "search_emails", "read_email"]);
+    assert_eq!(
+        ids,
+        [
+            "list_accounts",
+            "search_emails",
+            "read_email",
+            "list_folders"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -1040,4 +1092,602 @@ async fn optional_fields_are_omittable_not_nullable() {
     let out = &search.output_schema;
     assert_eq!(out["properties"]["nextCursor"]["type"], "string");
     assert_eq!(out["required"], json!(["emails"]));
+}
+
+// ---- download, reply drafts, folders ----
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use crate::sync::bodies::tests::session_for;
+
+const RAW: &[u8] = b"From: Sender <sender@example.test>\r\nTo: me@example.test\r\n\
+Subject: Remote\r\nMessage-ID: <remote@example.test>\r\n\
+Content-Type: text/plain; charset=utf-8\r\n\r\nDownloaded body text\r\n";
+
+/// Drops the stored body of message `index` of the bare `fx` core.
+fn uncache_body(f: &Fx, index: usize) {
+    f.db.execute(
+        "DELETE FROM message_bodies WHERE message_id = ?1",
+        params![f.emails[index]],
+    )
+    .unwrap();
+    f.db.execute(
+        "UPDATE messages SET body_state = 'missing' WHERE id = ?1",
+        params![f.emails[index]],
+    )
+    .unwrap();
+}
+
+/// Message `index` of an `fx_real` core: (uid, UIDVALIDITY), unread.
+fn uncached(f: &Fx, index: usize) -> (u32, u32) {
+    f.db.execute(
+        "UPDATE messages SET is_read = 0 WHERE id = ?1",
+        params![f.emails[index]],
+    )
+    .unwrap();
+    f.db.query_row(
+        "SELECT uid, uid_validity FROM messages WHERE id = ?1",
+        params![f.emails[index]],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .unwrap()
+}
+
+/// A fake IMAP server behind the body manager's test connector. Returns the
+/// number of connections it was asked for. With `respond` false the server
+/// accepts the command but never answers it.
+fn serve(f: &Fx, uid: u32, validity: u32, respond: bool) -> Arc<AtomicUsize> {
+    let (connector, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    f.core.body_manager().set_test_connector(connector);
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counter = connections.clone();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Some(reply) = requests.recv().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let (session, release, task) = session_for(uid, validity, validity, RAW).await;
+            // A held `release` keeps the server silent; dropping it would
+            // make the server give up, which is a different failure.
+            let release = if respond {
+                let _ = release.send(());
+                None
+            } else {
+                Some(release)
+            };
+            held.push((release, task));
+            let _ = reply.send(Ok(session));
+        }
+    });
+    connections
+}
+
+impl Fx {
+    /// Calls from a thread that may block, as the hosts' `spawn_blocking` does.
+    fn call_blocking(
+        &self,
+        ctx: &RequestContext,
+        tool: &str,
+        input: Value,
+    ) -> Result<Value, ToolError> {
+        tokio::task::block_in_place(|| self.call(ctx, tool, input))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn download_true_on_a_cached_body_changes_nothing_and_contacts_no_server() {
+    let f = fx();
+    let (uid, validity) = {
+        let i = 1;
+        f.db.query_row(
+            "SELECT uid, uid_validity FROM messages WHERE id = ?1",
+            params![f.emails[i]],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    let connections = serve(&f, uid, validity, true);
+    for ctx in both() {
+        let plain = f.read(&ctx, 0, json!({})).unwrap();
+        let with = f.read(&ctx, 0, json!({ "download": true })).unwrap();
+        assert_eq!(plain, with);
+    }
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn download_false_or_omitted_on_an_uncached_body_stays_body_not_cached_offline() {
+    let f = fx_real(1);
+    let (uid, validity) = uncached(&f, 0);
+    let connections = serve(&f, uid, validity, true);
+    for ctx in both() {
+        for patch in [json!({}), json!({ "download": false })] {
+            assert_eq!(code(f.read(&ctx, 0, patch)), ToolErrorCode::BodyNotCached);
+        }
+    }
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn download_true_fetches_an_uncached_body_without_marking_it_read() {
+    for ctx in both() {
+        let f = fx_real(1);
+        let (uid, validity) = uncached(&f, 0);
+        // The fake server only answers the exact `UID FETCH n (UID BODY.PEEK[])`
+        // after a read-only `EXAMINE`, so a plain BODY[] fetch would fail it.
+        let connections = serve(&f, uid, validity, true);
+        let out = f
+            .call_blocking(
+                &ctx,
+                "read_email",
+                json!({ "emailId": f.emails[0], "download": true }),
+            )
+            .unwrap();
+        assert!(
+            out["text"]
+                .as_str()
+                .unwrap()
+                .contains("Downloaded body text")
+        );
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
+        let is_read: i64 =
+            f.db.query_row(
+                "SELECT is_read FROM messages WHERE id = ?1",
+                params![f.emails[0]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_read, 0);
+        // Now cached: the next plain read needs no server.
+        let again = f.read(&ctx, 0, json!({})).unwrap();
+        assert_eq!(again["text"], out["text"]);
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn download_for_an_out_of_scope_or_unknown_id_makes_no_network_attempt() {
+    let f = fx_real(1);
+    let other = f.add_account();
+    let (uid, validity) = uncached(&f, 0);
+    let connections = serve(&f, uid, validity, true);
+    for ctx in both() {
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(AccountScope::Only(vec![other.clone()]), [Action::MailRead]),
+        );
+        let forbidden = f
+            .call_blocking(
+                &scoped,
+                "read_email",
+                json!({ "emailId": f.emails[0], "download": true }),
+            )
+            .unwrap_err();
+        let missing = f
+            .call_blocking(
+                &scoped,
+                "read_email",
+                json!({ "emailId": Uuid::new_v4().to_string(), "download": true }),
+            )
+            .unwrap_err();
+        assert_eq!(forbidden, missing);
+        assert_eq!(forbidden.code, ToolErrorCode::NotFound);
+    }
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stalled_download_ends_in_download_timeout() {
+    let f = fx_real(1);
+    let (uid, validity) = uncached(&f, 0);
+    serve(&f, uid, validity, false);
+    super::mail::DOWNLOAD_TIMEOUT_OVERRIDE.with(|t| t.set(Some(Duration::from_millis(300))));
+    let result = f.call_blocking(
+        &mcp(),
+        "read_email",
+        json!({ "emailId": f.emails[0], "download": true }),
+    );
+    super::mail::DOWNLOAD_TIMEOUT_OVERRIDE.with(|t| t.set(None));
+    assert_eq!(code(result), ToolErrorCode::DownloadTimeout);
+}
+
+#[tokio::test]
+async fn a_download_without_a_usable_runtime_is_unavailable_not_a_panic() {
+    // A current-thread runtime cannot run the download while the caller
+    // blocks it, so the tool refuses instead of deadlocking.
+    let f = fx_real(1);
+    let (uid, validity) = uncached(&f, 0);
+    let connections = serve(&f, uid, validity, true);
+    let result = f.read(&mcp(), 0, json!({ "download": true }));
+    assert_eq!(code(result), ToolErrorCode::Unavailable);
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_download_maps_to_a_stable_code_without_server_text() {
+    let f = fx_real(1);
+    let (uid, validity) = uncached(&f, 0);
+    let (connector, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    f.core.body_manager().set_test_connector(connector);
+    tokio::spawn(async move {
+        while let Some(reply) = requests.recv().await {
+            let _ = reply.send(Err(crate::imap::ImapError::Protocol(
+                "secret server text".into(),
+            )));
+        }
+    });
+    let _ = (uid, validity);
+    let error = f
+        .call_blocking(
+            &mcp(),
+            "read_email",
+            json!({ "emailId": f.emails[0], "download": true }),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ToolErrorCode::DownloadFailed);
+    assert!(!format!("{error:?}").contains("secret"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_message_gone_from_the_server_becomes_not_found() {
+    let f = fx_real(1);
+    let (uid, validity) = uncached(&f, 0);
+    // The server reports another UIDVALIDITY: the stored message is stale.
+    let (connector, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    f.core.body_manager().set_test_connector(connector);
+    tokio::spawn(async move {
+        while let Some(reply) = requests.recv().await {
+            let (session, release, _task) = session_for(uid, validity + 1, validity, RAW).await;
+            let _ = release.send(());
+            let _ = reply.send(Ok(session));
+        }
+    });
+    let error = f
+        .call_blocking(
+            &mcp(),
+            "read_email",
+            json!({ "emailId": f.emails[0], "download": true }),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ToolErrorCode::NotFound);
+}
+
+fn reply_input(f: &Fx, mode: &str, patch: Value) -> Value {
+    let mut input = json!({ "emailId": f.emails[0], "mode": mode });
+    input
+        .as_object_mut()
+        .unwrap()
+        .extend(patch.as_object().unwrap().clone());
+    input
+}
+
+#[tokio::test]
+async fn reply_drafts_follow_the_composer_rules_for_each_mode() {
+    let f = fx();
+    f.db.execute(
+        "UPDATE messages SET from_address = 'sender@example.test'",
+        [],
+    )
+    .unwrap();
+    for (mode, prefix) in [
+        ("reply", "Re: "),
+        ("replyAll", "Re: "),
+        ("forward", "Fwd: "),
+    ] {
+        let out = f
+            .call(
+                &mcp(),
+                "create_reply_draft",
+                reply_input(&f, mode, json!({})),
+            )
+            .unwrap();
+        assert_eq!(out["mode"], mode);
+        assert_eq!(out["accountId"], f.account);
+        assert!(
+            out["subject"].as_str().unwrap().starts_with(prefix),
+            "{out}"
+        );
+        let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
+        assert_eq!(draft.origin, DraftOrigin::Mcp);
+        assert_eq!(draft.subject, out["subject"]);
+        if mode == "forward" {
+            assert!(draft.to.is_empty());
+        } else {
+            assert!(!draft.to.is_empty());
+        }
+        assert!(!draft.body_html.is_empty());
+    }
+    assert!(f.core.list_outbox(None, true).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_quote() {
+    let f = fx();
+    let quoted = f
+        .call(
+            &mcp(),
+            "create_reply_draft",
+            reply_input(&f, "reply", json!({})),
+        )
+        .unwrap();
+    let plain = f
+        .core
+        .get_draft(quoted["draftId"].as_str().unwrap())
+        .unwrap();
+    for (ctx, origin) in [(mcp(), DraftOrigin::Mcp), (agent(), DraftOrigin::Ai)] {
+        let out = f
+            .call(
+                &ctx,
+                "create_reply_draft",
+                reply_input(
+                    &f,
+                    "reply",
+                    json!({ "bodyHtml": "<p>Agent says hi</p><script>alert(1)</script>" }),
+                ),
+            )
+            .unwrap();
+        let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
+        assert_eq!(draft.origin, origin);
+        assert!(!draft.body_html.contains("script"));
+        assert!(draft.body_html.starts_with("<p>Agent says hi</p>"));
+        assert!(draft.body_html.ends_with(&plain.body_html));
+    }
+    // The UI path is unchanged.
+    let by_user = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: crate::DraftKind::Reply,
+                client_mutation_id: Uuid::new_v4().to_string(),
+            },
+            crate::SupportedLocale::default(),
+        )
+        .unwrap();
+    assert_eq!(by_user.origin, DraftOrigin::User);
+}
+
+#[tokio::test]
+async fn reply_draft_errors_are_stable_and_nothing_is_created() {
+    let f = fx();
+    let other = f.add_account();
+    let drafts = |f: &Fx| f.core.list_drafts(None).map(|d| d.len()).unwrap_or(0);
+    let before = drafts(&f);
+    // Uncached original: no implicit download.
+    uncache_body(&f, 0);
+    for ctx in both() {
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "create_reply_draft",
+                reply_input(&f, "reply", json!({}))
+            )),
+            ToolErrorCode::BodyNotCached
+        );
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![other.clone()]),
+                [Action::MailRead, Action::DraftCreate],
+            ),
+        );
+        let forbidden = f
+            .call(
+                &scoped,
+                "create_reply_draft",
+                reply_input(&f, "reply", json!({})),
+            )
+            .unwrap_err();
+        let missing = f
+            .call(
+                &scoped,
+                "create_reply_draft",
+                json!({ "emailId": Uuid::new_v4().to_string(), "mode": "reply" }),
+            )
+            .unwrap_err();
+        assert_eq!(forbidden, missing);
+        assert_eq!(forbidden.code, ToolErrorCode::NotFound);
+        for actions in [vec![Action::DraftCreate], vec![Action::MailRead]] {
+            let weak = with_grant(ctx.clone(), Grant::new(AccountScope::All, actions));
+            assert_eq!(
+                code(f.call(
+                    &weak,
+                    "create_reply_draft",
+                    reply_input(&f, "reply", json!({}))
+                )),
+                ToolErrorCode::NotPermitted
+            );
+        }
+        assert_eq!(
+            code(f.call(
+                &ctx,
+                "create_reply_draft",
+                reply_input(&f, "bogus", json!({}))
+            )),
+            ToolErrorCode::InvalidInput
+        );
+    }
+    assert_eq!(drafts(&f), before);
+}
+
+fn inbox_id(f: &Fx) -> String {
+    f.db.query_row("SELECT id FROM folders WHERE role = 'inbox'", [], |r| {
+        r.get(0)
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn list_folders_without_an_account_lists_only_permitted_accounts() {
+    let dir = TempDir::new().unwrap();
+    let core = MailxCore::open(
+        dir.path(),
+        Arc::new(crate::secrets::test_support::MemorySecrets::default()),
+        tokio::runtime::Handle::current(),
+        Arc::new(|_: &crate::CoreEvent| {}),
+    )
+    .unwrap();
+    let mut config = config(json!({ "kind": "direct" }));
+    config["displayName"] = json!("Work");
+    let request: crate::CreateAccountRequest = serde_json::from_value(
+        json!({ "requestId": Uuid::new_v4().to_string(), "config": config }),
+    )
+    .unwrap();
+    let id = core.create_account(request).unwrap().id;
+    let tools = Tools::new(core, String::new);
+    for ctx in both() {
+        // A new account has no synced folders yet.
+        let all = tools.call(&ctx, "list_folders", json!({})).unwrap();
+        assert_eq!(all["folders"], json!([]));
+        let own = tools
+            .call(&ctx, "list_folders", json!({ "accountId": id }))
+            .unwrap();
+        assert_eq!(own["folders"], json!([]));
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(
+                AccountScope::Only(vec![Uuid::new_v4().to_string()]),
+                [Action::MailRead],
+            ),
+        );
+        assert_eq!(
+            tools.call(&scoped, "list_folders", json!({})).unwrap()["folders"],
+            json!([])
+        );
+        assert_eq!(
+            code(tools.call(&scoped, "list_folders", json!({ "accountId": id }))),
+            ToolErrorCode::NotFound
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_folders_is_scoped_and_reports_roles() {
+    let f = fx_real(3);
+    file_into_trash_and_junk(&f);
+    let other = Uuid::new_v4().to_string();
+    for ctx in both() {
+        let all = f
+            .call(&ctx, "list_folders", json!({ "accountId": f.account }))
+            .unwrap();
+        let folders = all["folders"].as_array().unwrap();
+        let roles: Vec<_> = folders.iter().filter_map(|x| x["role"].as_str()).collect();
+        for role in ["inbox", "trash", "junk"] {
+            assert!(roles.contains(&role), "{roles:?}");
+        }
+        let one = f
+            .call(&ctx, "list_folders", json!({ "accountId": f.account }))
+            .unwrap();
+        assert!(
+            one["folders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|x| x["accountId"] == f.account)
+        );
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(AccountScope::Only(vec![other.clone()]), [Action::MailRead]),
+        );
+        let forbidden = f
+            .call(&scoped, "list_folders", json!({ "accountId": f.account }))
+            .unwrap_err();
+        let missing = f
+            .call(
+                &scoped,
+                "list_folders",
+                json!({ "accountId": Uuid::new_v4().to_string() }),
+            )
+            .unwrap_err();
+        assert_eq!(forbidden, missing);
+        assert_eq!(forbidden.code, ToolErrorCode::NotFound);
+        let weak = with_grant(
+            ctx.clone(),
+            Grant::new(AccountScope::All, [Action::AccountsRead]),
+        );
+        assert_eq!(
+            code(f.call(&weak, "list_folders", json!({}))),
+            ToolErrorCode::NotPermitted
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_by_folder_id_includes_trash_and_validates_the_filter() {
+    let f = fx();
+    file_into_trash_and_junk(&f);
+    let other = f.add_account();
+    let folder_of = |role: &str| -> String {
+        f.db.query_row(
+            "SELECT id FROM folders WHERE role = ?1 AND account_id = ?2",
+            params![role, f.account],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    for ctx in both() {
+        let search = |input: Value| f.call(&ctx, "search_emails", input);
+        assert_eq!(
+            hit_ids(&search(json!({ "folderId": folder_of("trash") })).unwrap()),
+            vec![f.emails[1].clone()]
+        );
+        assert_eq!(
+            hit_ids(&search(json!({ "folderId": inbox_id(&f) })).unwrap()),
+            vec![f.emails[0].clone()]
+        );
+        assert_eq!(
+            code(search(
+                json!({ "folderId": inbox_id(&f), "folderRole": "inbox" })
+            )),
+            ToolErrorCode::InvalidInput
+        );
+        // Unknown and out-of-scope folders answer identically: no results.
+        let scoped = with_grant(
+            ctx.clone(),
+            Grant::new(AccountScope::Only(vec![other.clone()]), [Action::MailRead]),
+        );
+        let forbidden = f
+            .call(
+                &scoped,
+                "search_emails",
+                json!({ "folderId": folder_of("trash") }),
+            )
+            .unwrap();
+        let unknown = f
+            .call(
+                &scoped,
+                "search_emails",
+                json!({ "folderId": Uuid::new_v4().to_string() }),
+            )
+            .unwrap();
+        assert_eq!(forbidden, unknown);
+        assert_eq!(forbidden["emails"], json!([]));
+    }
+}
+
+#[tokio::test]
+async fn reply_draft_text_follows_the_host_locale_read_per_call() {
+    let f = fx();
+    let locale = Arc::new(Mutex::new(crate::SupportedLocale::ZhCn));
+    let shared = locale.clone();
+    let tools =
+        Tools::new(f.core.clone(), String::new).with_locale(move || *shared.lock().unwrap());
+    let forward = |tools: &Tools| {
+        let out = tools
+            .call(
+                &mcp(),
+                "create_reply_draft",
+                reply_input(&f, "forward", json!({})),
+            )
+            .unwrap();
+        f.core
+            .get_draft(out["draftId"].as_str().unwrap())
+            .unwrap()
+            .body_html
+    };
+    assert!(forward(&tools).contains("转发的邮件"));
+    *locale.lock().unwrap() = crate::SupportedLocale::En;
+    let english = forward(&tools);
+    assert!(!english.contains("转发的邮件"));
+    assert!(english.contains("Forwarded message"), "{english}");
 }
