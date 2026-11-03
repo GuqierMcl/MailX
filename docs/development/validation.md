@@ -906,6 +906,8 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 
 实现边界见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。自动化覆盖设置兼容与持久化、固定启动来源标记、主窗口权限、文件注册与删除、路径编码、XDG 禁用标记和配置目录、静默启动等待探测与降级，以及开关默认值、禁用依赖、系统外部变化、保存失败和重试。文件测试只使用临时目录，不写实际 LaunchAgents / XDG / 注册表，也不调用 launchctl 修改真实系统启动项。
 
+2026-11-04，本地 macOS 执行 `bun run check`（含 83 个前端测试文件 / 872 项测试、48 项版本脚本测试、类型 / 翻译 / lint / build / Rust check）、`bun run rust:test`、`bun run rust:clippy` 与 `bun run rust:fmt` 通过；最后的桌面增量重跑为 141 通过、2 项默认忽略。独立子代理审查并复核后无剩余阻塞发现。以上不代表真实登录或三平台安装包行为已经验收。
+
 待三平台安装包手测（本轮不标记已通过）：
 
 - 新安装与旧配置升级均默认关闭，安装 / 升级 / 普通启动不创建系统启动项。
