@@ -1,6 +1,6 @@
 {
   "name": "mailx",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0-rc.6",
   "private": true,
   "description": "MailX workspace entrypoint",
   "license": "Apache-2.0",
