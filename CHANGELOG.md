@@ -2,7 +2,7 @@
 
 This file records user-facing changes to MailX, in English and Chinese on the same line. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-- For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings exactly as written, emoji included: `### ✨ Feature`, `### ⚡ Optimization`, `### 🐛 Fixed`, `### 🔒 Security`, `### ⚠️ Changed`.
+- For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings exactly as written, emoji included: `### 🚀 Feature`, `### ✨ Optimization`, `### 🩹 Fixed`, `### 🔐 Security`, `### 🔄 Changed`.
 - Write entries for users, one sentence per line. Do not list tests, CI, refactors or documentation. End with the PR link, for example `- 修复远程图片加载失败后无法重试 ([#25](https://github.com/GuqierMcl/MailX/pull/25))`.
 - Write every entry in both languages on one line, separated by ` / `: English first, then Chinese, then the link or reference. Match the wording the app itself uses. Keep the two halves saying the same thing.
 - `Changed` holds only incompatible behaviour, data formats, configuration changes and removed features (including data migrations). Improvements that keep behaviour the same go under `Optimization`.
@@ -11,7 +11,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
-### ✨ Feature
+### 🚀 Feature
 
 - Settings have a new, off-by-default launch at login and start silently option; start silently only applies when MailX launches at login, and the main window shows when no background entry is available. / 设置中新增默认关闭的开机自启动与静默启动；静默启动仅在登录时自动启动生效，后台入口不可用时显示主窗口。 ([#87](https://github.com/GuqierMcl/MailX/pull/87))
 - Local MCP: the AI assistant can send drafts, query, retry and cancel queued sends, and add or remove local file attachments without confirming each message. / 本地 MCP：AI 助手可直接发送草稿、查询 / 重试 / 取消待发送任务，并添加或移除本机文件附件，无需逐封确认。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
@@ -44,7 +44,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - English and Chinese UI with a language setting that can follow the system; the main and compose windows switch together, and new notifications and quoted text in new replies and forwards use the chosen language. / 中英文界面与语言设置：支持跟随系统，主窗口与写信窗口同步切换，新通知及新建回复 / 转发的引用使用所选语言。 ([#29](https://github.com/GuqierMcl/MailX/pull/29))
 - In-app updates: checked about 30 seconds after launch and every 6 hours afterwards, and automatic checks can be turned off in settings. When a new version exists a title-bar notice appears, and the dialog shows the release notes with options to download and restart now or install on next quit. Links always open in the system browser. / 应用内更新：启动约 30 秒后和之后每 6 小时检查一次新版本（可在设置中关闭自动检查）；发现新版本时标题栏出现提示，弹窗里可以阅读更新说明、下载并立即重启安装，或选择下次退出时安装。链接一律用系统浏览器打开。
 
-### ⚡ Optimization
+### ✨ Optimization
 
 - MCP draft and send results return the sending address directly, and account lists mark the default sending account, so the AI assistant chooses and describes the right mailbox. / MCP 草稿和发送结果直接返回发件邮箱地址，账号列表标明默认发件账号，方便 AI 助手准确选择和说明使用的邮箱。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
 - The MCP settings page is trimmed to the switch, connection state and client configuration; the About page drops the static privacy text and keeps version and update controls. / 精简 MCP 设置页，只保留开关、连接状态与客户端配置；关于页移除静态隐私说明，保留版本和更新功能。 ([#85](https://github.com/GuqierMcl/MailX/pull/85))
@@ -62,7 +62,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - The settings window opens on General first so the language is easy to change. / 设置窗口默认打开第一项“通用”，便于调整语言。 ([#29](https://github.com/GuqierMcl/MailX/pull/29))
 - On macOS all account passwords are stored in one keychain entry, asking for authorization at most once per launch instead of once per account; old entries migrate on first launch and are cleaned up on the next. / macOS 上所有账号密码合并存放在一个钥匙串条目中，启动时最多只需授权一次，不再每个账号一次；旧条目会在首次启动时迁入、下次启动时清理。
 
-### 🐛 Fixed
+### 🩹 Fixed
 
 - Fixed the top shadow and outline of the main content island being clipped. / 修复主界面内容岛顶部阴影与描边被裁切的问题。 ([#84](https://github.com/GuqierMcl/MailX/pull/84))
 - Fixed copied MCP client configuration on Windows carrying a `\\?\` prefix that stopped some clients from launching `mailx-mcp`. / 修复 Windows 上复制的 MCP 客户端配置带有 `\\?\` 前缀，导致部分客户端无法启动 `mailx-mcp` 的问题。 ([#83](https://github.com/GuqierMcl/MailX/pull/83))
@@ -76,7 +76,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Providers that refuse access with an explicit security policy now show a distinct reason and stop automatic retries; after fixing it you can sync manually, keeping the local cache and pending flag changes. / 邮箱服务商明确以安全策略拒绝访问时显示独立原因，停止自动重试；处理后可手动同步恢复，保留本地缓存与待写标记。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - Attachments without a file name show a placeholder in the selected language instead of always Chinese. / 没有文件名的附件在英文界面下也按所选语言显示占位名称，不再固定显示中文。 ([#32](https://github.com/GuqierMcl/MailX/pull/32))
 
-### ⚠️ Changed
+### 🔄 Changed
 
 - The local database upgrades to v23, recording the origin of MCP drafts and attachments; older versions cannot open the upgraded database, so keep a full backup from before the upgrade if you may downgrade. / 本地数据库升级至 v23，记录 MCP 草稿与附件的来源；旧版无法直接打开升级后的数据库，降级前需保留升级前的完整数据备份。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
 - Upgrading from 0.1.0-rc.3 moves the local database from v19 to v21 for delete undo and local archive; older versions cannot open the upgraded database. / 从 0.1.0-rc.3 升级时，本地数据库自动从 v19 升级到 v21，以支持删除撤销和本地归档；旧版本无法打开升级后的数据库。 ([#69](https://github.com/GuqierMcl/MailX/pull/69), [#71](https://github.com/GuqierMcl/MailX/pull/71))
