@@ -55,16 +55,18 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 | 调用方 | 主体 | 账号范围来源 |
 | --- | --- | --- |
 | 内置 Agent | runId、模型提供商与模型 | 本次 Run 的选定内容与该提供商的披露授权 |
-| 本地 MCP | 连接 id（经发现文件中的 token 认证）与客户端自报名称 | 首版统一授权：全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿、已读 / 星标、本机归档 / 取消归档、刷新同步（无发送、删除邮件）；后续可改为逐客户端授权记录 |
+| 本地 MCP | 连接 id（经发现文件中的 token 认证）与客户端自报名称 | 统一授权：全部账号、读取与整理邮件、管理草稿及本机文件附件、直接发信与发件箱查询 / 取消（无删除邮件）；后续可改为逐客户端授权记录 |
 | 远程 MCP | 远程授权主体与 clientId | 远程授权范围（待设计） |
 
 本地 MCP 首版的简化及其风险说明见 [MCP 草案](../contracts/mcp.md#首版授权有意简化)。
 
-`RequestContext { principal, grant, request_id }` 由宿主用公有构造函数创建：`Principal::{BuiltinAgent { run_id }, LocalMcp { connection_id, client_name }}`（`client_name` 自报，只用于显示和审计），`Grant { accounts: AccountScope::{All, Only(ids)}, actions }`，`Action::{AccountsRead, MailRead, DraftCreate, DraftWrite, MailOrganize, MailArchive, MailSync}`（序列化为 `accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`）。`Grant::mcp_default()` 是本地 MCP 首版统一授权（全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿，包含整理、归档和刷新动作，没有发送或删除邮件动作）。界面状态由宿主提供：`Tools::with_draft_open_check`（草稿是否正开在写信窗口，默认从不）、`Tools::with_ui_opener`（把窗口带到前台并打开邮件，默认 `unavailable`）与 `Tools::with_draft_opener`（打开已有草稿，默认 `unavailable`），均在调用时读取。
+`RequestContext { principal, grant, request_id }` 由宿主用公有构造函数创建：`Principal::{BuiltinAgent { run_id }, LocalMcp { connection_id, client_name }}`（`client_name` 自报，只用于显示和审计），`Grant { accounts: AccountScope::{All, Only(ids)}, actions }`，`Action::{AccountsRead, MailRead, DraftCreate, DraftWrite, MailOrganize, MailArchive, MailSync, MailSend, OutboxRead, OutboxWrite, FilesRead}`（序列化为 `accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`、`mail:send`、`outbox:read`、`outbox:write`、`files:read`）。`Grant::mcp_default()` 是本地 MCP 首版统一授权（全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿，包含整理、归档、刷新、发送与发件箱动作，没有删除邮件动作）。界面状态由宿主提供：`Tools::with_draft_open_check`（草稿是否正开在写信窗口，默认从不）、`Tools::with_ui_opener`（把窗口带到前台并打开邮件，默认 `unavailable`）与 `Tools::with_draft_opener`（打开已有草稿，默认 `unavailable`），均在调用时读取。
 
-发送路径中的 `send::Caller`（`Composer`、`MainWindow`、`Mcp`、`Model`）保持不变，仍只允许写信窗口确认发信。`Principal::caller()` 映射：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`，二者在发送路径上都被拒绝（测试 `principals_map_to_callers_that_cannot_send` 经 `queue_send` 验证）。
+发送路径中的 `send::Caller` 由宿主提供：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`。两者在工具层检查 `mail:send` 与账号范围后走正常队列，不能通过输入伪造为 `Composer`。`MainWindow` 仍不能入队，处理 `unknown` 仍限用户 UI。宿主通过 `with_undo_send_seconds` 注入撤销窗口，读取失败会阻止发送。
 
 账号范围：`list_accounts` 只返回范围内账号；`search_emails` 把请求的 `accountIds` 与范围取交集（范围外 id 被忽略，与不存在的账号表现相同）；`read_email` 先读出邮件所属账号，范围外与不存在的 `emailId` 返回同样的 `notFound`；`create_draft` 的账号不在范围内同样返回 `notFound`。
+
+账号识别使用本地元数据，不读取凭据。`list_accounts` 的 `isDefault` 与当前范围内新草稿省略账号时的选择一致；草稿结果给出当前 `senderEmailAddress`，发送任务给出冻结的 SMTP 发件地址。Agent 通过邮箱选择账号并回报发件人，无需再猜测 UUID 对应的身份。
 
 每次调用都重新检查授权状态，关闭 MCP 或撤销后后续调用立即拒绝。已知 `emailId` 也要先确认其账号在范围内，不能绕过账号授权。调用记录主体、工具、资源 ID、结果与 requestId，不记录完整工具结果。
 
@@ -76,7 +78,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
-| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
+| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、实际默认标记 `isDefault`、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
 | `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；可选 `folderId`（取自 `list_folders`）只搜某个文件夹且不再默认排除 trash / junk |
 | `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页；可选 `download` 在正文未缓存时按需下载（不标已读、60 秒上限） |
 | `list_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |
@@ -95,10 +97,14 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | `archive_emails` / `unarchive_emails` | ✓ | ✓ | 1–50 个目标，本机归档 / 恢复，整批原子；真实计数与 UI 精确撤销 |
 | `refresh_sync` | ✓ | ✓ | 按账号唤醒正常同步任务，不自动恢复服务商策略停止状态 |
 | `show_draft_in_app` | | ✓ | 检查账号范围后打开已有草稿窗口，不发送 |
+| `send_email` | ✓ | ✓ | action 区分直接发送草稿 / 唤醒 queued 任务；版本与幂等保护 |
+| `list_outbox` / `get_outbox` | ✓ | ✓ | 有界查询范围内发送任务，返回稳定状态与错误类别 |
+| `cancel_outbox` | ✓ | ✓ | 仅取消 queued，发送开始后拒绝 |
+| `add_draft_attachment` / `remove_draft_attachment` | ✓ | ✓ | 按 revision 添加本机普通文件 / 移除普通附件，保留草稿打开保护 |
 
-十六个 MCP 工具（十四个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
+二十二个 MCP 工具（二十个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
 
-没有任何入口提供可直接发信的工具；未来内置 Agent 推进发信只能经 `request_user_confirmation` 一类工具交给用户确认，确认与完整内容哈希 / 草稿版本绑定，规则见 [发送架构](sending.md)。
+2026-11-04 起，发送工具随本地 MCP 总开关授权，直接发信无需逐封确认。首次发送核对草稿版本和幂等键，复用现有快照、发送队列与事件；规则见[发送与附件工具](mail-send-tools.md)。
 
 ## 5. 按入口策略
 
@@ -128,7 +134,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 本地 MCP 先于内置 AI 落地（2026-11-02 决定）：内置 AI 涉及较多前端设计，暂缓；MCP 作为工具层的首个使用方。为避免工具层只为 MCP 服务，工具层测试在进程内分别以 MCP 与内置 Agent 主体调用。
 
 1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。已具备（`DraftOrigin::{User, Mcp, Ai}`、`create_draft_with_origin`、界面标记、HTML-only 邮件的分行纯文本）。本地 MCP 已创建来源为 `mcp` 的草稿，内置 Agent 尚未接入。
-2. 工具层骨架、`RequestContext` 与十六个工具：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；本批新增的工具另需真实客户端与桌面手测。
+2. 工具层骨架、`RequestContext` 与二十二个工具：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；本批新增的工具另需真实客户端与桌面手测。
 3. M0 原型验证 `rmcp` 与本地 IPC，随后实现 MCP 适配层、桌面 IPC 监听与 stdio bridge。
 4. 设置中的 MCP 页、标题栏运行状态图标、复制客户端配置与 bridge 随应用分发。
 5. 至少两个目标 MCP 客户端联调。
@@ -142,3 +148,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 ## 8. 整理工具扩展（2026-11-03）
 
 本批不增加整理开关，新增动作随 MCP 总开关统一开放；内部仍保留权限与账号范围检查。搜索增加 starred 和三态 archive 筛选，结果及阅读补邮件状态，搜索暴露 coverage。标记结果按字段报告，归档事务返回真实计数，core 事件驱动列表 / 详情 / 目录计数刷新，可信界面使用短期凭据精确撤销。工具注解新增服务器写入、幂等性与外部访问说明，审计上限覆盖一批目标及其账号。完整接口和边界见[整理邮件与 MCP 工具扩展](mail-organize-tools.md)。
+
+## 9. 发送与附件工具（2026-11-04）
+
+本批新增六个工具，不增加额外设置页说明或逐封确认。发送 / 重试统一为 `send_email`；发件箱查询和取消复用核心，分页在存储层按授权范围与状态过滤。附件工具只接收本机普通文件，来源按主体记录，结果不带路径。设计与验证边界见[发送与附件工具](mail-send-tools.md)。

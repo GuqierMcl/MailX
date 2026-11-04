@@ -1,6 +1,6 @@
 # MCP 初始设计
 
-状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发（Tauri sidecar）已有实现，尚未在任何平台手测，也未与真实 MCP 客户端联调。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
+状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发（Tauri sidecar）已有实现，既有工具已有用户手测与部分客户端联调记录，本批发送和附件工具待手测。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
 
 ## 1. 角色与协议
 
@@ -14,7 +14,7 @@ MCP 服务实现驻留在核心所在进程：桌面版由桌面核心托管，�
 
 ### 启用与生命周期
 
-MCP 默认关闭，在设置的“MCP”页用“开启 MCP 服务器”开关启用；开启时弹出确认，说明外部 Agent 将能读取全部账号的本地邮件和草稿，创建、修改和删除草稿，并可标记邮件、本机归档 / 取消归档、请求刷新同步和打开草稿（不能发送或删除邮件）。开关状态保存在本机设置中，下次启动 MailX 时按该状态自动启动。
+MCP 默认关闭，在设置的“MCP”页用“开启 MCP 服务器”开关启用；开启时弹出确认，说明外部 Agent 将能读取全部账号的本地邮件和草稿，创建、修改和删除草稿，并可标记邮件、本机归档 / 取消归档、请求刷新同步、打开草稿、直接发信、查询 / 取消发送任务和使用本机文件作为附件；不能删除邮件。发信无需逐封确认，不增加独立发送开关。开关状态保存在本机设置中，下次启动 MailX 时按该状态自动启动。
 
 MCP 服务随 MailX 进程运行：关窗行为为“在后台运行”时，关闭窗口不影响 MCP；从托盘或菜单真正退出 MailX，或关闭开关时，服务停止并断开所有连接。之后 bridge 返回 `CORE_UNAVAILABLE` 和启动应用的提示。
 
@@ -34,7 +34,7 @@ bridge 读取发现文件后连接核心，先发送一行握手（bridge 协议
 
 ### 首版授权（有意简化）
 
-首版不做逐客户端配对：开启 MCP 后，同一操作系统用户下能读取发现文件的进程都可以连接，所有连接获得同一档授权“读取邮件与草稿、创建 / 修改 / 删除草稿、已读 / 星标、本机归档 / 取消归档与刷新同步；不能发送或删除邮件”（`accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`），范围为全部账号，包括用户自己写的草稿。客户端在 initialize 中自报的名称与版本只用于状态展示和审计，不作为身份依据。核心为每个连接派生 RequestContext，bridge 输入不能自报额外权限。
+首版不做逐客户端配对：开启 MCP 后，同一操作系统用户下能读取发现文件的进程都可以连接，所有连接获得同一档授权“读取邮件与草稿、创建 / 修改 / 删除草稿、已读 / 星标、本机归档 / 取消归档、刷新同步、直接发信、查询 / 取消发送任务及本机文件附件；不能删除邮件”（`accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`、`mail:send`、`outbox:read`、`outbox:write`、`files:read`），范围为全部账号，包括用户自己写的草稿。客户端在 initialize 中自报的名称与版本只用于状态展示和审计，不作为身份依据。核心为每个连接派生 RequestContext，bridge 输入不能自报额外权限。
 
 这意味着开启期间，本机同一用户的任何程序都能读取全部本地邮件。对应的缓解是：默认关闭、开启前确认、主界面常驻运行状态图标、关闭开关立即断开连接并作废 token。逐客户端配对、账号范围与单独撤销留作后续，届时扩展授权记录即可，工具层与 RequestContext 的检查位置不变。
 
@@ -48,20 +48,20 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 ## 3. 工具草案
 
-下表列出对 MCP 可见的十六个工具，其中 `show_email_in_app` 与 `show_draft_in_app` 仅 MCP 可见，其余十四个与内置 Agent 共用。整理工具与搜索增强的行为详见[整理邮件与 MCP 工具扩展](../architecture/mail-organize-tools.md)。
+下表列出对 MCP 可见的二十二个工具，其中 `show_email_in_app` 与 `show_draft_in_app` 仅 MCP 可见，其余二十个与内置 Agent 共用。整理工具与搜索增强的行为详见[整理邮件与 MCP 工具扩展](../architecture/mail-organize-tools.md)。
 
 工具 JSON Schema 拒绝未知字段；ID 与字符串长度有上限。表内字段采用 camelCase，与应用 DTO 一致。
 
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
-| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
+| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, isDefault, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`isDefault` 标记省略新草稿账号时的实际选择。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
 | `mailx_search_emails` | `query?, accountIds?, folderRole?, folderId?, receivedAfter?, receivedBefore?, unread?, starred?, archive?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, folderId, subject, from{name?,address}, receivedAt, preview, isRead, isStarred, archived, pendingChanges, localOnly, hasAttachment, bodyCached`；`coverage, nextCursor` | `mail:read` |
 | `mailx_read_email` | `emailId, offset?, maxChars?, download?` | `id, accountId, folderId, isRead, isStarred, archived, pendingChanges, localOnly, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾省略）, totalChars, bodyTruncated` | `mail:read` |
 | `mailx_list_folders` | `accountId?` | `folders[]`：`id, accountId, name, role, unreadCount?, totalCount?`（计数服务器尚未报告时省略） | `mail:read` |
-| `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
-| `mailx_create_reply_draft` | `emailId, mode（reply / replyAll / forward）, bodyHtml?, clientMutationId?` | `draftId, accountId, subject, mode` | `draft:create` + `mail:read` |
-| `mailx_list_drafts` | `accountId?` | `drafts[]`：`id, accountId, subject, to[]（最多 5 个地址）, toCount, updatedAt, origin（user / mcp / ai）, revision, locked, open`；`truncated` | `mail:read` |
-| `mailx_read_draft` | `draftId` | `id, accountId, to[], cc[], bcc[], subject, bodyHtml, bodyText, attachments[]{name,mediaType,size,inline}, revision, origin, updatedAt, locked, open` | `mail:read` |
+| `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, senderEmailAddress, subject` | `draft:create` |
+| `mailx_create_reply_draft` | `emailId, mode（reply / replyAll / forward）, bodyHtml?, clientMutationId?` | `draftId, accountId, senderEmailAddress, subject, mode` | `draft:create` + `mail:read` |
+| `mailx_list_drafts` | `accountId?` | `drafts[]`：`id, accountId, senderEmailAddress, subject, to[]（最多 5 个地址）, toCount, updatedAt, origin（user / mcp / ai）, revision, locked, open`；`truncated` | `mail:read` |
+| `mailx_read_draft` | `draftId` | `id, accountId, senderEmailAddress, to[], cc[], bcc[], subject, bodyHtml, bodyText, attachments[]{id,name,mediaType,size,inline,origin}, revision, origin, updatedAt, locked, open` | `mail:read` |
 | `mailx_update_draft` | `draftId, expectedRevision, to?, cc?, bcc?, subject?, bodyHtml?` | `draftId, revision, subject` | `draft:write` |
 | `mailx_delete_draft` | `draftId, expectedRevision` | `deleted` | `draft:write` |
 | `mailx_show_email_in_app` | `emailId` | `opened` | `mail:read` |
@@ -70,8 +70,16 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 | `mailx_unarchive_emails` | 同上 | 同上，恢复本机收件箱显示 | `mail:archive` |
 | `mailx_refresh_sync` | `accountId` | `accountId, accepted, syncStatus, userActionRequired`；只请求正常同步任务刷新，不等待完成 | `mail:sync` |
 | `mailx_show_draft_in_app` | `draftId` | `opened`，只打开 / 聚焦草稿，不发送 | `mail:read` |
+| `mailx_send_email` | `action: send`：`draftId, expectedRevision, clientMutationId`；`action: retry`：`outboxId` | 发送任务；直接入队 / 唤醒已有 queued 项 | `mail:send` |
+| `mailx_list_outbox` | `accountId?, states?[], limit?, cursor?` | `items[], nextCursor?`，默认 20 / 最大 100；按范围和状态在 SQL 中过滤 | `outbox:read` |
+| `mailx_get_outbox` | `outboxId` | 任务状态、时间、尝试次数与稳定错误类别 | `outbox:read` |
+| `mailx_cancel_outbox` | `outboxId` | 取消 queued 后的任务；sending 报 alreadySending | `outbox:write` |
+| `mailx_add_draft_attachment` | `draftId, expectedRevision, filePath, fileName?` | `draftId, revision, attachment{id,name,mediaType,size,inline,origin}` | `draft:write` + `files:read` |
+| `mailx_remove_draft_attachment` | `draftId, expectedRevision, attachmentId` | `draftId, revision, removed`，只移除普通附件 | `draft:write` |
 
-状态：十六个工具已在 core 工具层实现，由本地 MCP 适配层暴露；schema 以 `ToolDescriptor` 为准。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。`folderId`（取自 `list_folders`）只搜该文件夹，给出时不再默认排除 trash / junk；与 `folderRole` 同时给出报 `invalidInput`；不存在或不在授权范围内的文件夹与范围外 `accountIds` 一样没有结果（返回空列表，两者不可区分）。`list_folders` 只读本地已同步的文件夹，不联系服务器，需要 `mail:read`（文件夹名与计数描述的是邮箱内容，且它的用途是给 `search_emails` 提供 `folderId`）；`accountId` 缺省列出范围内全部账号，范围外账号与不存在的账号同样报 `notFound`；文件夹名来自服务器，属不可信内容。本机归档筛选 `archive` 为 `exclude` / `only` / `include`；省略时不带有效 query 隐藏归档，有效文本搜索包含归档。`starred` 在核心 SQL 分页前过滤，本机已发送副本永不带星标。`coverage` 描述本地查询范围的同步与索引覆盖，不代表完整服务器历史。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
+账号识别：指定发件人时先用 `mailx_list_accounts` 按 `emailAddress` 选择 `accountId`。该工具只读本地账号元数据，不访问钥匙串；`isDefault` 与当前授权范围内省略 `create_draft.accountId` 的选择一致：有效的宿主默认账号优先，否则沿用草稿回退规则。草稿结果直接返回当前 `senderEmailAddress`；发送及发件箱结果返回入队时冻结的 SMTP 发件地址，不随账号设置变化。Agent 应使用返回的邮箱地址说明发件人，不从 UUID 推断。
+
+状态：二十二个工具已在 core 工具层实现，由本地 MCP 适配层暴露；schema 以 `ToolDescriptor` 为准。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。`folderId`（取自 `list_folders`）只搜该文件夹，给出时不再默认排除 trash / junk；与 `folderRole` 同时给出报 `invalidInput`；不存在或不在授权范围内的文件夹与范围外 `accountIds` 一样没有结果（返回空列表，两者不可区分）。`list_folders` 只读本地已同步的文件夹，不联系服务器，需要 `mail:read`（文件夹名与计数描述的是邮箱内容，且它的用途是给 `search_emails` 提供 `folderId`）；`accountId` 缺省列出范围内全部账号，范围外账号与不存在的账号同样报 `notFound`；文件夹名来自服务器，属不可信内容。本机归档筛选 `archive` 为 `exclude` / `only` / `include`；省略时不带有效 query 隐藏归档，有效文本搜索包含归档。`starred` 在核心 SQL 分页前过滤，本机已发送副本永不带星标。`coverage` 描述本地查询范围的同步与索引覆盖，不代表完整服务器历史。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
 
 限制（已实现于工具层，两个入口各自一份策略值，目前相同）：搜索默认 20 条、上限 100；`accountIds` 最多 20 个；正文默认 8,000 字符、单次上限 32,000；query 最长 256 字符；`cursor` 最长 1,024 字符。正文分页按 Unicode 字符（标量值）计数，`offset` 超过总长度报 `invalidInput`，不会切断编码。读取不自动标记已读。正文未缓存时默认报 `bodyNotCached`，不会隐式下载；`read_email` 的 `download: true` 才会按需下载：先检查账号范围，再经该账号自己的网络路由（含代理，失败不回退直连）向邮件服务器取正文，使用只读取（`BODY.PEEK`，不改已读状态），上限 60 秒；已缓存时 `download` 无效。下载失败只返回稳定错误码，不带服务器文本：超时报 `downloadTimeout`，网络 / 认证 / 代理 / TLS / 协议 / 服务商限制报 `downloadFailed`，邮件超过正文大小上限报 `bodyTooLarge`，服务器上邮件已不存在（或邮箱已重建）报 `notFound`；没有可用运行时报 `unavailable`。`create_reply_draft` 包装应用的回复 / 全部回复 / 转发：收件人、主题前缀、引用与附件（转发）沿用写信窗口的规则，`bodyHtml` 是调用方自己的文字，放在引用之上并与整封草稿一起按写信白名单清理（上限与 `create_draft` 相同）；暂不支持追加 `to` / `cc`，用户在草稿里编辑。草稿的发件账号即原邮件所属账号（必在范围内），来源标记随主体：MCP 写 `mcp`，内置 Agent 写 `ai`，界面里创建的回复草稿仍为 `user`。原邮件正文未缓存报 `bodyNotCached`（先用 `read_email` 带 `download: true`），不隐式下载；工具永不发送。同一 `clientMutationId` 重放返回同一草稿，忽略重放时不同的 `bodyHtml`。引用头等生成文字的语言由宿主提供（桌面端与写信窗口的回复命令一致，每次调用时读取应用语言设置，切换语言即时生效）。
 
@@ -81,13 +89,13 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 草稿限制：`to` / `cc` / `bcc` 各最多 50 个收件人，地址最长 320、显示名最长 200 字符，`subject` 最长 998 字符，`bodyHtml` 最长 200,000 字节，`clientMutationId` 最长 64 字符。
 
-创建草稿可显式指定账号，缺省使用默认发件账号（须在授权范围内），初版不接受宿主附件路径、URL 附件或可执行 HTML；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（MCP 主体写 `mcp`，内置 AI 主体经同一工具写 `ai`）及草稿列表 / 写信窗口的“由 MCP 创建”“由 AI 创建”标记；MCP 宿主已接通来源写入；内置 Agent 入口仍待接入。
+创建草稿可显式指定账号，缺省使用默认发件账号（须在授权范围内），`create_draft` 不接受附件路径、URL 附件或可执行 HTML；本机文件附件通过 `add_draft_attachment` 单独添加；草稿正文提交 `bodyHtml`，核心按写信白名单净化并生成只读 `bodyText`，客户端不能写入派生纯文本。返回不代表发送。UI 展示创建来源，供用户检查后发送：应用服务已提供不可由请求指定的 `Draft.origin`（MCP 主体写 `mcp`，内置 AI 主体经同一工具写 `ai`）及草稿列表 / 写信窗口的“由 MCP 创建”“由 AI 创建”标记；MCP 宿主已接通来源写入；内置 Agent 入口仍待接入。
 
 本批整理与刷新能力随现有 MCP 总开关统一开放，没有额外整理开关；已开启的用户升级后获得新能力。标记使用目标值，返回 queued 时仅本地提交、尚未确认服务器写回；两个标志分别报告结果，允许部分成功。归档先检查整批账号范围，再在同一事务中执行；processedCount 包含已经处于目标状态的请求目标，changedCount 反映同 Message-ID 副本的实际变更数，重复操作为零。界面通过 core 变更事件刷新并提供精确撤销；撤销只恢复本次变化，后续改动导致旧回执失效，token 不返回 MCP。
 
 `refresh_sync` 只唤醒正常任务，不重启因服务商策略或认证 / 凭据问题停止的账号，不涉及发送重试；accepted 为 false 时不表示邮箱没有新邮件。`show_draft_in_app` 复用宿主写信窗口并固定为已有草稿模式，先检查范围，打开失败返回 unavailable。
 
-不发布蓝图中语义混合的 `mailx_send_draft`。未来若提供发送工具，另行设计与完整内容哈希 / 草稿版本绑定的一次性确认，而不是由 Agent 提交 `confirmed=true` 自行批准。
+2026-11-04 用户确认直接发信：统一提供 `mailx_send_email`，以 `action` 区分首次发送和已有任务重试。无需逐封 UI 确认，也不接受 `confirmed` 或调用方身份参数。首次发送必须带草稿版本与 UUID 幂等键，宿主提供撤销窗口；`unknown` 不自动重发。发件箱分页、附件路径与完整规则见[发送与附件工具](../architecture/mail-send-tools.md)。
 
 `mailx_get_latest_otp` 暂缓。若后续增加，单独定义账号、可信发件域、短时间窗、一次性授权与审计；验证码不写日志。现有 `mail:read` 仍可能读到验证码邮件，因此授权界面应说明正文读取的实际敏感范围。
 
@@ -97,7 +105,7 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 工具注解中的只读 / 破坏性标志仅帮助客户端理解行为，不作为安全控制。邮件正文返回为不可信数据，不能追加为 Agent 系统指令。结果不包括 API Key、邮箱密码、refresh token、本地路径或无关账号信息。
 
-参数或协议错误使用 JSON-RPC 错误；业务失败使用工具错误结果并带稳定错误码和简短建议；工具层错误码为 `unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`downloadTimeout`、`downloadFailed`、`bodyTooLarge`、`conflict`、`draftLocked`、`draftOpen`、`unavailable`、`internal`，范围外账号或邮件与不存在的资源同样报 `notFound`，未对该入口开放的工具报 `unknownTool`。记录连接 id、客户端自报名称、动作、资源 ID、结果和 requestId，不记录完整邮件工具结果。
+参数或协议错误使用 JSON-RPC 错误；业务失败使用工具错误结果并带稳定错误码和简短建议；工具层错误码为 `unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`downloadTimeout`、`downloadFailed`、`bodyTooLarge`、`conflict`、`draftLocked`、`draftOpen`、`alreadySending`、`attachmentTooLarge`、`tooManyAttachments`、`fileUnavailable`、`unavailable`、`internal`，范围外账号或邮件与不存在的资源同样报 `notFound`，未对该入口开放的工具报 `unknownTool`。记录连接 id、客户端自报名称、动作、资源 ID、结果和 requestId，不记录完整邮件工具结果。
 
 ## 5. 远程扩展边界
 

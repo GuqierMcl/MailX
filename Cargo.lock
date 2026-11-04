@@ -2893,6 +2893,7 @@ dependencies = [
  "rcgen",
  "resvg",
  "rusqlite",
+ "rustix",
  "rustls",
  "rustls-platform-verifier",
  "schemars 1.2.3",

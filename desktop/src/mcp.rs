@@ -114,6 +114,10 @@ impl McpManager {
                 let default_state = state.clone();
                 let tools =
                     mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
+                        .with_undo_send_seconds({
+                            let send_state = state.clone();
+                            move || send_state.undo_send_seconds().map_err(Into::into)
+                        })
                         .with_locale({
                             let locale_state = state.clone();
                             // The same locale the UI's reply command uses.

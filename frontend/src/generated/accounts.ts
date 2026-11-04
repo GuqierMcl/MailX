@@ -588,7 +588,7 @@ export type InlineImage = { attachmentId: string,
  */
 contentId: string, fileName: string, };
 
-export type AttachmentOrigin = "user" | "forwarded";
+export type AttachmentOrigin = "user" | "forwarded" | "mcp" | "ai";
 
 export type AttachmentPolicy = {
 /**
@@ -632,6 +632,10 @@ export type OutboxItem = { id: string,
  * local Sent copy and outlives its draft).
  */
 draftId: string | null, accountId: string,
+/**
+ * Sender address frozen in the SMTP envelope when this item was queued.
+ */
+senderEmailAddress: string,
 /**
  * With angle brackets.
  */

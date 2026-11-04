@@ -587,10 +587,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (draft.attachments.length > 20) throw new MailxClientError({ code: 'tooManyAttachments', message: '附件最多 20 个。', field: null })
       const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
       if (recipients.length === 0) throw new MailxClientError({ code: 'validation', message: '请至少填写一个收件人。', field: 'draft.recipients' })
+      const sender = accounts.find((account) => account.id === draft.accountId)
+      if (!sender) throw notFound()
       lockedDrafts.add(draftId)
       announceDraft({ draftId, accountId: draft.accountId, change: 'locked' })
       return clone(outbox.queue({
-        clientMutationId, draftId, accountId: draft.accountId, subject: draft.subject,
+        clientMutationId, draftId, accountId: draft.accountId, senderEmailAddress: sender.emailAddress, subject: draft.subject,
         recipients: recipients.slice(0, 3).map((r) => r.address), recipientCount: recipients.length,
         undoMs: settings.settings.compose.undoSendSeconds * 1000,
         simulate: simulatedOutcome(recipients.map((r) => r.address)),
@@ -1097,6 +1099,7 @@ type QueueInput = {
   clientMutationId: string
   draftId: string
   accountId: string
+  senderEmailAddress: string
   subject: string
   recipients: string[]
   recipientCount: number
@@ -1129,7 +1132,7 @@ function createMockOutbox(stepMs: number) {
       const now = new Date()
       const id = crypto.randomUUID()
       const item: OutboxItem = {
-        id, draftId: input.draftId, accountId: input.accountId, messageId: `<mock-${id}@mock.invalid>`, subject: input.subject,
+        id, draftId: input.draftId, accountId: input.accountId, senderEmailAddress: input.senderEmailAddress, messageId: `<mock-${id}@mock.invalid>`, subject: input.subject,
         recipients: input.recipients, recipientCount: input.recipientCount, state: 'queued',
         notBefore: new Date(now.getTime() + input.undoMs).toISOString(), dataStartedAt: null, attempts: 0, nextAttemptAt: null,
         firstQueuedAt: now.toISOString(), error: null, acceptedAt: null, serverReply: null, serverCopyMessageId: null,
@@ -1176,7 +1179,7 @@ function createMockOutbox(stepMs: number) {
       }
       item.resolution = 'resent'
       const next = api.queue({
-        clientMutationId: crypto.randomUUID(), draftId: item.draftId ?? '', accountId: item.accountId, subject: item.subject,
+        clientMutationId: crypto.randomUUID(), draftId: item.draftId ?? '', accountId: item.accountId, senderEmailAddress: item.senderEmailAddress, subject: item.subject,
         recipients: item.recipients, recipientCount: item.recipientCount, undoMs: 0, simulate: { kind: 'accept' },
       })
       next.messageId = item.messageId

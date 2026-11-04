@@ -30,6 +30,10 @@ pub enum ToolErrorCode {
     DraftLocked,
     /// The user has the draft open in a composer window.
     DraftOpen,
+    AlreadySending,
+    AttachmentTooLarge,
+    TooManyAttachments,
+    FileUnavailable,
     /// Storage or the core is not ready; retrying later may work.
     Unavailable,
     Internal,
@@ -51,10 +55,14 @@ impl ToolErrorCode {
             }
             Self::BodyTooLarge => "The message is too large to download.",
             Self::Conflict => {
-                "The draft changed since it was read. Read it again and retry with the new revision."
+                "The item changed or is not in a state that allows this action. Read it again."
             }
             Self::DraftLocked => "The draft is queued for sending and cannot be changed.",
             Self::DraftOpen => "The user is editing this draft in MailX.",
+            Self::AlreadySending => "Sending has already started and cannot be canceled.",
+            Self::AttachmentTooLarge => "The attachments exceed the allowed size.",
+            Self::TooManyAttachments => "The draft has too many attachments.",
+            Self::FileUnavailable => "The attachment file could not be read.",
             Self::Unavailable => "MailX is temporarily unavailable. Try again later.",
             Self::Internal => "An internal error occurred.",
         }
@@ -104,6 +112,9 @@ impl From<AppError> for ToolError {
         match error.code {
             ErrorCode::Conflict => Self::new(ToolErrorCode::Conflict),
             ErrorCode::DraftLocked => Self::new(ToolErrorCode::DraftLocked),
+            ErrorCode::AlreadySending => Self::new(ToolErrorCode::AlreadySending),
+            ErrorCode::AttachmentTooLarge => Self::new(ToolErrorCode::AttachmentTooLarge),
+            ErrorCode::TooManyAttachments => Self::new(ToolErrorCode::TooManyAttachments),
             ErrorCode::Validation | ErrorCode::IdempotencyConflict => {
                 match error.field.as_deref() {
                     Some(field) if field.len() <= 64 && field.chars().all(is_field_char) => {

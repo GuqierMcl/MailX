@@ -25,7 +25,7 @@ use crate::{
 const COLUMNS: &str = "id, draft_id, account_id, message_id, subject, recipients_preview,
     recipient_count, state, not_before, data_started_at, attempts, next_attempt_at,
     first_queued_at, last_error, accepted_at, server_reply, server_copy_message_id,
-    resolution, superseded_by, created_at, updated_at";
+    resolution, superseded_by, created_at, updated_at, json_extract(envelope, '$.from')";
 
 /// A draft is held by the queue while one of its items is in flight, waiting,
 /// or an `unknown` the user has not settled.
@@ -87,6 +87,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<OutboxItem, AppError>> {
     let last_error: Option<String> = row.get(13)?;
     let reply: Option<String> = row.get(15)?;
     let resolution: Option<String> = row.get(17)?;
+    let sender_email_address: String = row.get(21)?;
     let base = (
         row.get(0)?,
         row.get(1)?,
@@ -129,6 +130,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<OutboxItem, AppError>> {
             id: base.0,
             draft_id: base.1,
             account_id: base.2,
+            sender_email_address,
             message_id: base.3,
             subject: base.4,
             recipients: decode(&preview)?,
@@ -347,7 +349,7 @@ impl Storage {
                      WHERE client_mutation_id = ?1 ORDER BY created_at, id LIMIT 1"
                 ),
                 [client_mutation_id],
-                |row| Ok((parse(row)?, row.get::<_, String>(21)?)),
+                |row| Ok((parse(row)?, row.get::<_, String>(22)?)),
             )
             .optional()?;
         found
@@ -448,6 +450,40 @@ impl Storage {
         ))?;
         let rows = statement
             .query_map(params![account_id, include_all], parse)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().collect()
+    }
+
+    /// Scope and state filtering happen before keyset pagination.
+    pub(crate) fn list_outbox_page(
+        &self,
+        account_ids: Option<&[String]>,
+        states: Option<&[OutboxState]>,
+        before: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        let accounts = account_ids.map(|ids| encode(&ids)).transpose()?;
+        let states = states.map(|states| encode(&states)).transpose()?;
+        let mut statement = self.db.prepare(&format!(
+            "SELECT {COLUMNS} FROM outbox
+             WHERE (?1 IS NULL OR account_id IN (SELECT value FROM json_each(?1)))
+               AND ((?2 IS NULL AND (state IN ('queued', 'sending', 'failed')
+                    OR (state = 'unknown' AND resolution IS NULL)))
+                    OR state IN (SELECT value FROM json_each(?2)))
+               AND (?3 IS NULL OR (created_at, id) < (?3, ?4))
+             ORDER BY created_at DESC, id DESC LIMIT ?5"
+        ))?;
+        let rows = statement
+            .query_map(
+                params![
+                    accounts,
+                    states,
+                    before.map(|b| b.0),
+                    before.map(|b| b.1),
+                    limit
+                ],
+                parse,
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().collect()
     }

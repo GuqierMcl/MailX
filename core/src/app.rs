@@ -15,7 +15,7 @@ use crate::accounts::types::{
     UpdateProfileRequest,
 };
 use crate::drafts::attachments::{
-    AddAttachmentRequest, AttachmentPolicy, InlineImage, RemoveAttachmentRequest,
+    AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, InlineImage, RemoveAttachmentRequest,
 };
 use crate::drafts::types::{
     CreateDraftFromRequest, CreateDraftRequest, Draft, DraftOrigin, DraftSummary,
@@ -26,8 +26,8 @@ use crate::events::{CoreEvent, Events};
 use crate::mail::{EmailDeletion, EmailDetail, EmailListQuery, EmailPage, Folder};
 use crate::secrets::SecretStore;
 use crate::send::types::{
-    Caller, DraftChange, DraftChanged, OutboxItem, QueueSendRequest, ResolveUnknownRequest,
-    UnknownResolution,
+    Caller, DraftChange, DraftChanged, OutboxItem, OutboxState, QueueSendRequest,
+    ResolveUnknownRequest, UnknownResolution,
 };
 use crate::send::{OutboxManager, SendConfig};
 use crate::storage::outbox::Changed;
@@ -248,8 +248,23 @@ impl MailxCore {
         self.accounts()?.list()
     }
 
+    pub(crate) fn account_identities(
+        &self,
+    ) -> Result<Vec<crate::accounts::types::AccountIdentity>, AppError> {
+        self.accounts()?.identities()
+    }
+
+    pub(crate) fn account_email_address(&self, id: &str) -> Result<String, AppError> {
+        self.accounts()?.email_address(id)
+    }
+
     pub fn get_account(&self, id: &str) -> Result<Account, AppError> {
         self.accounts()?.get(id)
+    }
+
+    /// Checks durable account metadata without consulting the host's credentials.
+    pub(crate) fn require_account_exists(&self, id: &str) -> Result<(), AppError> {
+        self.accounts()?.check_account(id)
     }
 
     /// Creates an account and starts syncing it.
@@ -578,7 +593,19 @@ impl MailxCore {
         request: AddAttachmentRequest,
         bytes: &[u8],
     ) -> Result<Draft, AppError> {
-        let draft = self.accounts()?.add_attachment(request, bytes)?;
+        self.add_attachment_with_origin(request, bytes, AttachmentOrigin::User)
+    }
+
+    /// The trusted host supplies the attachment's origin.
+    pub fn add_attachment_with_origin(
+        &self,
+        request: AddAttachmentRequest,
+        bytes: &[u8],
+        origin: AttachmentOrigin,
+    ) -> Result<Draft, AppError> {
+        let draft = self
+            .accounts()?
+            .add_attachment_with_origin(request, bytes, origin)?;
         self.announce_draft(&draft, DraftChange::Updated);
         Ok(draft)
     }
@@ -659,30 +686,44 @@ impl MailxCore {
     /// Queues a draft for sending: the MIME is built now from the draft and the
     /// account's current sender, the draft is locked, and the account's worker
     /// sends it once `undo_send_seconds` (from `compose.undoSendSeconds`; one
-    /// of 0, 5, 10, 20, 30) have passed. Only the interactive composer may
-    /// call this; any other `caller` gets `Forbidden`.
+    /// of 0, 5, 10, 20, 30) have passed. The composer and authorized MCP/model
+    /// callers may queue mail; the main window cannot.
     pub fn queue_send(
         &self,
         caller: Caller,
         request: QueueSendRequest,
         undo_send_seconds: u32,
     ) -> Result<OutboxItem, AppError> {
-        if caller != Caller::Composer {
+        self.queue_send_scoped(caller, request, undo_send_seconds, None)
+    }
+
+    /// Queues within a host-supplied account grant, including idempotent replays.
+    pub fn queue_send_scoped(
+        &self,
+        caller: Caller,
+        request: QueueSendRequest,
+        undo_send_seconds: u32,
+        allowed_accounts: Option<&[String]>,
+    ) -> Result<OutboxItem, AppError> {
+        if caller == Caller::MainWindow {
             return Err(AppError::new(ErrorCode::Forbidden));
         }
         // The store lock is held to read the draft and again to commit; reading
         // attachment blobs and building the MIME happen in between, without it.
-        let plan = self.accounts()?.prepare_send(&request, undo_send_seconds)?;
+        let plan =
+            self.accounts()?
+                .prepare_send_scoped(&request, undo_send_seconds, allowed_accounts)?;
         let (item, locked) = match plan {
             SendPlan::Replay(item) => (*item, None),
             SendPlan::Build(build) => {
                 let frozen = build.freeze()?;
-                self.accounts()?.commit_send(
+                self.accounts()?.commit_send_scoped(
                     &request,
                     undo_send_seconds,
                     &build,
                     frozen,
                     self.outbox.now(),
+                    allowed_accounts,
                 )?
             }
         };
@@ -694,6 +735,27 @@ impl MailxCore {
             self.outbox.wake(&item.account_id);
         }
         Ok(item)
+    }
+
+    pub(crate) fn replay_send_scoped(
+        &self,
+        request: &QueueSendRequest,
+        allowed_accounts: Option<&[String]>,
+    ) -> Result<Option<OutboxItem>, AppError> {
+        self.accounts()?
+            .replay_send_scoped(request, allowed_accounts)
+    }
+
+    /// Bounded queue query with scope and state filters applied before paging.
+    pub fn list_outbox_page(
+        &self,
+        account_ids: Option<&[String]>,
+        states: Option<&[OutboxState]>,
+        before: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        self.accounts()?
+            .list_outbox_page(account_ids, states, before, limit)
     }
 
     /// Queue items, newest first. Without `include_all` only those that need
@@ -740,6 +802,10 @@ impl MailxCore {
     /// Skips the backoff wait of a `queued` item.
     pub fn retry_outbox_now(&self, id: &str) -> Result<OutboxItem, AppError> {
         let item = self.accounts()?.retry_outbox_now(id, self.outbox.now())?;
+        self.outbox.shared.announce(vec![Changed {
+            item: item.clone(),
+            draft: None,
+        }]);
         self.outbox.wake(&item.account_id);
         Ok(item)
     }

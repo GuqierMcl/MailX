@@ -1947,10 +1947,18 @@ fn local_sent(f: &Fixture, raw: &[u8]) -> (String, String) {
          snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
          state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
          attachment_count)
-         VALUES (?1, ?2, ?3, '{}', '<sent-1@example.com>', ?4, ?5, '{}', 'Sent subject',
+         VALUES (?1, ?2, ?3, '{}', '<sent-1@example.com>', ?4, ?5, ?6, 'Sent subject',
                  '[\"ann@example.com\"]', 1, 'accepted', '2026-10-20T08:31:00.000Z', 't', 't',
                  't', 't', 'Sent body', 1)",
-        params![outbox, f.account, id(), blob.sha256, blob.size as i64],
+        params![
+            outbox,
+            f.account,
+            id(),
+            blob.sha256,
+            blob.size as i64,
+            serde_json::json!({"from":"own@example.com", "recipients":["ann@example.com"]})
+                .to_string(),
+        ],
     )
     .unwrap();
     (format!("local-sent:{outbox}"), outbox)
@@ -2020,6 +2028,11 @@ async fn local_sent_copy_can_be_replied_to_and_forwarded() {
 async fn local_sent_copy_rejects_flags_and_is_removed_idempotently() {
     let f = fixture(&[plain("x")]);
     let (email, outbox) = local_sent(&f, &sent_raw(false));
+    f.db.execute(
+        "UPDATE accounts SET email_address='changed@example.test' WHERE id=?1",
+        [&f.account],
+    )
+    .unwrap();
     let flag = f
         .core
         .set_message_flag(&email, crate::MessageFlag::Starred, true);
@@ -2050,6 +2063,10 @@ async fn local_sent_copy_rejects_flags_and_is_removed_idempotently() {
         )
         .unwrap();
     assert!(released.is_some() && deleted.is_some() && hash.is_none());
+    assert_eq!(
+        f.core.get_outbox(&outbox).unwrap().sender_email_address,
+        "own@example.com"
+    );
     assert_eq!(code(f.core.get_email(&email)).0, ErrorCode::NotFound);
     // An unknown or malformed id is not a local copy.
     let unknown = format!("local-sent:{}", id());

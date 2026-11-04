@@ -46,6 +46,9 @@ zeroize = { version = "1", features = ["derive"] }
 resvg = { version = "0.48.1", default-features = false }
 schemars = "1"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [features]
 # Synthetic cache construction is excluded from normal desktop/core builds.
 body-webview-test = []

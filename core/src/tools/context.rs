@@ -51,9 +51,8 @@ impl Principal {
         }
     }
 
-    /// The send-path caller class. Both map to non-human callers, which the
-    /// send checks reject: `LocalMcp` is [`Caller::Mcp`], `BuiltinAgent` is
-    /// [`Caller::Model`].
+    /// The send-path caller class. Tool grants authorize sending separately;
+    /// neither principal is treated as an interactive composer.
     pub fn caller(&self) -> Caller {
         match self {
             Self::BuiltinAgent { .. } => Caller::Model,
@@ -75,6 +74,14 @@ pub enum Action {
     MailArchive,
     #[serde(rename = "mail:sync")]
     MailSync,
+    #[serde(rename = "mail:send")]
+    MailSend,
+    #[serde(rename = "outbox:read")]
+    OutboxRead,
+    #[serde(rename = "outbox:write")]
+    OutboxWrite,
+    #[serde(rename = "files:read")]
+    FilesRead,
     #[serde(rename = "draft:create")]
     DraftCreate,
     /// Update or delete existing drafts.
@@ -112,8 +119,8 @@ impl Grant {
         }
     }
 
-    /// Local MCP grant: read, organize, archive and refresh mail, and manage
-    /// drafts in every account. There is no send or delete-mail action.
+    /// Local MCP grant for all supported tools in every account.
+    /// Deleting received mail is not a tool capability.
     pub fn mcp_default() -> Self {
         Self::new(
             AccountScope::All,
@@ -123,6 +130,10 @@ impl Grant {
                 Action::MailOrganize,
                 Action::MailArchive,
                 Action::MailSync,
+                Action::MailSend,
+                Action::OutboxRead,
+                Action::OutboxWrite,
+                Action::FilesRead,
                 Action::DraftCreate,
                 Action::DraftWrite,
             ],

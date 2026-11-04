@@ -49,6 +49,13 @@ fn canonical(request: &QueueSendRequest) -> Result<String, AppError> {
     .map_err(|_| AppError::new(ErrorCode::Internal))
 }
 
+fn require_account(allowed: Option<&[String]>, account_id: &str) -> Result<(), AppError> {
+    if allowed.is_some_and(|ids| !ids.iter().any(|id| id == account_id)) {
+        return Err(AppError::new(ErrorCode::NotFound));
+    }
+    Ok(())
+}
+
 pub(crate) const UNDO_CHOICES: [u32; 5] = [0, 5, 10, 20, 30];
 
 /// Phase one of queueing, read under the store lock.
@@ -170,29 +177,52 @@ impl AccountService {
         }
     }
 
+    /// Looks up an idempotent send before reading its possibly deleted draft.
+    pub(crate) fn replay_send_scoped(
+        &self,
+        request: &QueueSendRequest,
+        allowed_accounts: Option<&[String]>,
+    ) -> Result<Option<OutboxItem>, AppError> {
+        validate_uuid(&request.draft_id, "draftId")?;
+        validate_uuid(&request.client_mutation_id, "clientMutationId")?;
+        let Some((item, saved)) = self
+            .storage
+            .outbox_by_mutation(&request.client_mutation_id)?
+        else {
+            return Ok(None);
+        };
+        require_account(allowed_accounts, &item.account_id)?;
+        if saved != canonical(request)? {
+            return Err(AppError::new(ErrorCode::IdempotencyConflict));
+        }
+        Ok(Some(item))
+    }
+
     /// Validates the request and gathers what the snapshot is built from.
+    #[cfg(test)]
     pub(crate) fn prepare_send(
         &self,
         request: &QueueSendRequest,
         undo_send_seconds: u32,
     ) -> Result<SendPlan, AppError> {
-        validate_uuid(&request.draft_id, "draftId")?;
-        validate_uuid(&request.client_mutation_id, "clientMutationId")?;
+        self.prepare_send_scoped(request, undo_send_seconds, None)
+    }
+
+    pub(crate) fn prepare_send_scoped(
+        &self,
+        request: &QueueSendRequest,
+        undo_send_seconds: u32,
+        allowed_accounts: Option<&[String]>,
+    ) -> Result<SendPlan, AppError> {
         if !UNDO_CHOICES.contains(&undo_send_seconds) {
             return Err(AppError::validation("undoSendSeconds"));
         }
-        let canonical = canonical(request)?;
-        if let Some((item, saved)) = self
-            .storage
-            .outbox_by_mutation(&request.client_mutation_id)?
-        {
-            return if saved == canonical {
-                Ok(SendPlan::Replay(Box::new(item)))
-            } else {
-                Err(AppError::new(ErrorCode::IdempotencyConflict))
-            };
+        if let Some(item) = self.replay_send_scoped(request, allowed_accounts)? {
+            return Ok(SendPlan::Replay(Box::new(item)));
         }
+        let canonical = canonical(request)?;
         let draft = self.storage.get_draft(&request.draft_id)?;
+        require_account(allowed_accounts, &draft.account_id)?;
         if draft.revision != request.expected_revision {
             return Err(AppError::new(ErrorCode::Conflict));
         }
@@ -240,6 +270,7 @@ impl AccountService {
 
     /// Inserts the queue item and locks the draft in one transaction, which
     /// fails with `conflict` if the draft changed since [`Self::prepare_send`].
+    #[cfg(test)]
     pub(crate) fn commit_send(
         &mut self,
         request: &QueueSendRequest,
@@ -248,6 +279,23 @@ impl AccountService {
         frozen: Frozen,
         now: DateTime<Utc>,
     ) -> Result<(OutboxItem, Option<DraftChanged>), AppError> {
+        self.commit_send_scoped(request, undo_send_seconds, build, frozen, now, None)
+    }
+
+    pub(crate) fn commit_send_scoped(
+        &mut self,
+        request: &QueueSendRequest,
+        undo_send_seconds: u32,
+        build: &SendBuild,
+        frozen: Frozen,
+        now: DateTime<Utc>,
+        allowed_accounts: Option<&[String]>,
+    ) -> Result<(OutboxItem, Option<DraftChanged>), AppError> {
+        // Two callers can freeze the same draft while the store is unlocked.
+        // The second commit must return the first item, even after it was sent.
+        if let Some(item) = self.replay_send_scoped(request, allowed_accounts)? {
+            return Ok((item, None));
+        }
         let Frozen {
             built,
             snapshot,
@@ -300,6 +348,20 @@ impl AccountService {
             validate_uuid(account_id, "accountId")?;
         }
         self.storage.list_outbox(account_id, include_all)
+    }
+
+    pub(crate) fn list_outbox_page(
+        &self,
+        account_ids: Option<&[String]>,
+        states: Option<&[OutboxState]>,
+        before: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<OutboxItem>, AppError> {
+        if !(1..=101).contains(&limit) {
+            return Err(AppError::validation("limit"));
+        }
+        self.storage
+            .list_outbox_page(account_ids, states, before, limit)
     }
 
     pub(crate) fn cancel_outbox(&self, id: &str, now: DateTime<Utc>) -> Result<Changed, AppError> {
