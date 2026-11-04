@@ -64,6 +64,8 @@ pub struct OutboxFailure {
 pub struct OutboxInfo {
     pub id: String,
     pub account_id: String,
+    /// Actual sender address frozen at enqueue time, even if the account changes.
+    pub sender_email_address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draft_id: Option<String>,
     pub subject: String,
@@ -133,6 +135,7 @@ impl From<OutboxItem> for OutboxInfo {
         Self {
             id: item.id,
             account_id: item.account_id,
+            sender_email_address: item.sender_email_address,
             draft_id: item.draft_id,
             subject: item.subject.chars().take(998).collect(),
             recipients: item

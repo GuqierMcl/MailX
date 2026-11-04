@@ -14,7 +14,9 @@
 | `add_draft_attachment` | `draftId, expectedRevision, filePath, fileName?` | 从本机绝对路径添加普通附件，返回新 revision 与附件元信息 |
 | `remove_draft_attachment` | `draftId, expectedRevision, attachmentId` | 移除普通草稿附件，返回新 revision 与 `removed` |
 
-对外名称带 `mailx_`。发送与重试共用一个工具，严格拒绝 action 不匹配的字段。发件箱结果只含 id、账号 / 草稿引用、主题、最多三个收件人与总数、状态、尝试次数、时间、人工处理结果及稳定错误类别 / SMTP 代码；不返回服务器原文、路径、MIME 或凭证。
+对外名称带 `mailx_`。发送与重试共用一个工具，严格拒绝 action 不匹配的字段。发件箱结果只含 id、账号 / 草稿引用、`senderEmailAddress`、主题、最多三个收件人与总数、状态、尝试次数、时间、人工处理结果及稳定错误类别 / SMTP 代码；不返回服务器原文、路径、MIME 或凭证。
+
+账号列表返回邮箱地址及 `isDefault`，标记当前授权范围内新草稿的实际默认账号。创建、回复、列出和读取草稿直接返回当前 `senderEmailAddress`；发送及发件箱结果从冻结的 SMTP 信封取地址，账号地址后续改变也不会改写历史。指定发件人时先按账号列表选择，向用户回报时使用返回的邮箱地址。
 
 ## 授权与发送
 

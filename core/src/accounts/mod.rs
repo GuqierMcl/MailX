@@ -50,6 +50,15 @@ impl AccountService {
             .collect()
     }
 
+    pub(crate) fn identities(&self) -> Result<Vec<AccountIdentity>, AppError> {
+        self.storage.account_identities()
+    }
+
+    pub(crate) fn email_address(&self, id: &str) -> Result<String, AppError> {
+        validate_uuid(id, "accountId")?;
+        self.storage.account_address(id)
+    }
+
     pub fn get(&self, id: &str) -> Result<Account, AppError> {
         validate_uuid(id, "accountId")?;
         let snapshot = self.storage.load(id)?;

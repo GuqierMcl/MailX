@@ -54,14 +54,14 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 | 工具 | 输入 | 输出 | 权限 |
 | --- | --- | --- | --- |
-| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
+| `mailx_list_accounts` | `{}` | `accounts[]`：`id, displayName, emailAddress, isDefault, syncStatus, lastSyncedAt?`，范围内账号（首版为全部账号）。`isDefault` 标记省略新草稿账号时的实际选择。`syncStatus` 取自同步状态：`ok`（最近一轮同步成功）、`syncing`、`authError`（认证、凭据缺失 / 不可信、服务商策略；需用户在 MailX 中处理）、`connectionError`（网络、代理、TLS、超时、协议或本地存储等其他失败）、`unknown`（本次启动尚无同步结果，不表示异常）；不含服务器原文。`lastSyncedAt` 为 RFC 3339，本次启动后尚无成功同步时省略 | `accounts:read` |
 | `mailx_search_emails` | `query?, accountIds?, folderRole?, folderId?, receivedAfter?, receivedBefore?, unread?, starred?, archive?, hasAttachment?, limit?, cursor?` | `emails[]`：`id, accountId, folderId, subject, from{name?,address}, receivedAt, preview, isRead, isStarred, archived, pendingChanges, localOnly, hasAttachment, bodyCached`；`coverage, nextCursor` | `mail:read` |
 | `mailx_read_email` | `emailId, offset?, maxChars?, download?` | `id, accountId, folderId, isRead, isStarred, archived, pendingChanges, localOnly, subject, from, to[], cc[], receivedAt, attachments[]{name,mimeType,size,isInline}, text, nextOffset（末尾省略）, totalChars, bodyTruncated` | `mail:read` |
 | `mailx_list_folders` | `accountId?` | `folders[]`：`id, accountId, name, role, unreadCount?, totalCount?`（计数服务器尚未报告时省略） | `mail:read` |
-| `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, subject` | `draft:create` |
-| `mailx_create_reply_draft` | `emailId, mode（reply / replyAll / forward）, bodyHtml?, clientMutationId?` | `draftId, accountId, subject, mode` | `draft:create` + `mail:read` |
-| `mailx_list_drafts` | `accountId?` | `drafts[]`：`id, accountId, subject, to[]（最多 5 个地址）, toCount, updatedAt, origin（user / mcp / ai）, revision, locked, open`；`truncated` | `mail:read` |
-| `mailx_read_draft` | `draftId` | `id, accountId, to[], cc[], bcc[], subject, bodyHtml, bodyText, attachments[]{id,name,mediaType,size,inline,origin}, revision, origin, updatedAt, locked, open` | `mail:read` |
+| `mailx_create_draft` | `accountId?, to[], cc?, bcc?, subject, bodyHtml, clientMutationId?` | `draftId, accountId, senderEmailAddress, subject` | `draft:create` |
+| `mailx_create_reply_draft` | `emailId, mode（reply / replyAll / forward）, bodyHtml?, clientMutationId?` | `draftId, accountId, senderEmailAddress, subject, mode` | `draft:create` + `mail:read` |
+| `mailx_list_drafts` | `accountId?` | `drafts[]`：`id, accountId, senderEmailAddress, subject, to[]（最多 5 个地址）, toCount, updatedAt, origin（user / mcp / ai）, revision, locked, open`；`truncated` | `mail:read` |
+| `mailx_read_draft` | `draftId` | `id, accountId, senderEmailAddress, to[], cc[], bcc[], subject, bodyHtml, bodyText, attachments[]{id,name,mediaType,size,inline,origin}, revision, origin, updatedAt, locked, open` | `mail:read` |
 | `mailx_update_draft` | `draftId, expectedRevision, to?, cc?, bcc?, subject?, bodyHtml?` | `draftId, revision, subject` | `draft:write` |
 | `mailx_delete_draft` | `draftId, expectedRevision` | `deleted` | `draft:write` |
 | `mailx_show_email_in_app` | `emailId` | `opened` | `mail:read` |
@@ -76,6 +76,8 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 | `mailx_cancel_outbox` | `outboxId` | 取消 queued 后的任务；sending 报 alreadySending | `outbox:write` |
 | `mailx_add_draft_attachment` | `draftId, expectedRevision, filePath, fileName?` | `draftId, revision, attachment{id,name,mediaType,size,inline,origin}` | `draft:write` + `files:read` |
 | `mailx_remove_draft_attachment` | `draftId, expectedRevision, attachmentId` | `draftId, revision, removed`，只移除普通附件 | `draft:write` |
+
+账号识别：指定发件人时先用 `mailx_list_accounts` 按 `emailAddress` 选择 `accountId`。该工具只读本地账号元数据，不访问钥匙串；`isDefault` 与当前授权范围内省略 `create_draft.accountId` 的选择一致：有效的宿主默认账号优先，否则沿用草稿回退规则。草稿结果直接返回当前 `senderEmailAddress`；发送及发件箱结果返回入队时冻结的 SMTP 发件地址，不随账号设置变化。Agent 应使用返回的邮箱地址说明发件人，不从 UUID 推断。
 
 状态：二十二个工具已在 core 工具层实现，由本地 MCP 适配层暴露；schema 以 `ToolDescriptor` 为准。`accountIds` 与授权范围取交集，范围外账号被忽略。`search_emails` 默认不含“已删除”（trash）与“垃圾邮件”（junk）文件夹；`folderRole`（`inbox`、`sent`、`drafts`、`archive`、`junk`、`trash`、`other`）给出时只搜该角色的文件夹，可借此查看已删除或垃圾邮件，无效取值报 `invalidInput`。`folderId`（取自 `list_folders`）只搜该文件夹，给出时不再默认排除 trash / junk；与 `folderRole` 同时给出报 `invalidInput`；不存在或不在授权范围内的文件夹与范围外 `accountIds` 一样没有结果（返回空列表，两者不可区分）。`list_folders` 只读本地已同步的文件夹，不联系服务器，需要 `mail:read`（文件夹名与计数描述的是邮箱内容，且它的用途是给 `search_emails` 提供 `folderId`）；`accountId` 缺省列出范围内全部账号，范围外账号与不存在的账号同样报 `notFound`；文件夹名来自服务器，属不可信内容。本机归档筛选 `archive` 为 `exclude` / `only` / `include`；省略时不带有效 query 隐藏归档，有效文本搜索包含归档。`starred` 在核心 SQL 分页前过滤，本机已发送副本永不带星标。`coverage` 描述本地查询范围的同步与索引覆盖，不代表完整服务器历史。`accountId` 缺省时依次用设置中的默认发件账号（须在授权范围内）、授权范围内的账号；`clientMutationId` 须为 UUID，缺省由工具层生成，重复提交同一 id 返回同一草稿。时间参数为 RFC 3339。
 

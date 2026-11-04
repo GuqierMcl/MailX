@@ -66,6 +66,8 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 
 账号范围：`list_accounts` 只返回范围内账号；`search_emails` 把请求的 `accountIds` 与范围取交集（范围外 id 被忽略，与不存在的账号表现相同）；`read_email` 先读出邮件所属账号，范围外与不存在的 `emailId` 返回同样的 `notFound`；`create_draft` 的账号不在范围内同样返回 `notFound`。
 
+账号识别使用本地元数据，不读取凭据。`list_accounts` 的 `isDefault` 与当前范围内新草稿省略账号时的选择一致；草稿结果给出当前 `senderEmailAddress`，发送任务给出冻结的 SMTP 发件地址。Agent 通过邮箱选择账号并回报发件人，无需再猜测 UUID 对应的身份。
+
 每次调用都重新检查授权状态，关闭 MCP 或撤销后后续调用立即拒绝。已知 `emailId` 也要先确认其账号在范围内，不能绕过账号授权。调用记录主体、工具、资源 ID、结果与 requestId，不记录完整工具结果。
 
 core 目前没有日志后端，存储中也没有审计表；工具层因此把每次调用（含被拒绝的）交给宿主提供的 `ToolAudit` sink（默认丢弃）：`ToolCallRecord { request_id, principal_kind, principal_id, client_name, tool_id（截断到 64 字符）, resource_ids（账号与邮件 / 草稿 id）, error: Option<ToolErrorCode> }`，不含参数、邮件内容或结果。宿主（MCP 适配层 / 桌面）接入时把记录写入自己的日志；是否落审计表待定。
@@ -76,7 +78,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
-| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
+| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、实际默认标记 `isDefault`、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
 | `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；可选 `folderId`（取自 `list_folders`）只搜某个文件夹且不再默认排除 trash / junk |
 | `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页；可选 `download` 在正文未缓存时按需下载（不标已读、60 秒上限） |
 | `list_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |

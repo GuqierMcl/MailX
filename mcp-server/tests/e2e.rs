@@ -136,7 +136,12 @@ async fn tools_list_and_calls_work_end_to_end() {
         .unwrap();
     assert_ne!(accounts.is_error, Some(true));
     let structured = accounts.structured_content.unwrap();
-    assert!(structured.to_string().contains(&fixture.account_id));
+    assert_eq!(structured["accounts"][0]["id"], fixture.account_id);
+    assert_eq!(
+        structured["accounts"][0]["emailAddress"],
+        "test@example.test"
+    );
+    assert_eq!(structured["accounts"][0]["isDefault"], true);
 
     let search = call(&client, "mailx_search_emails", json!({"query": "hello"}))
         .await
@@ -291,6 +296,16 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(send["_meta"]["mailx/writesServerData"], true);
     assert_eq!(send["_meta"]["mailx/requiredActions"], json!(["mail:send"]));
 
+    let accounts = call(&client, "mailx_list_accounts", json!({}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    let account = &accounts["accounts"][0];
+    assert_eq!(account["id"], fixture.account_id);
+    assert_eq!(account["emailAddress"], "test@example.test");
+    assert_eq!(account["isDefault"], true);
+
     let created = call(
         &client,
         "mailx_create_draft",
@@ -299,12 +314,26 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     .await
     .unwrap();
     assert_ne!(created.is_error, Some(true));
-    let draft_id = created.structured_content.unwrap()["draftId"].clone();
+    let created = created.structured_content.unwrap();
+    assert_eq!(created["accountId"], account["id"]);
+    assert_eq!(created["senderEmailAddress"], account["emailAddress"]);
+    let draft_id = created["draftId"].clone();
     let read = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
         .await
         .unwrap()
         .structured_content
         .unwrap();
+    assert_eq!(read["senderEmailAddress"], account["emailAddress"]);
+    let drafts = call(&client, "mailx_list_drafts", json!({}))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(drafts["drafts"][0]["id"], draft_id);
+    assert_eq!(
+        drafts["drafts"][0]["senderEmailAddress"],
+        account["emailAddress"]
+    );
     let path = fixture.dir.path().join("attachment.txt");
     std::fs::write(&path, "synthetic attachment").unwrap();
     let added = call(
@@ -346,9 +375,12 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_ne!(queued.is_error, Some(true), "{:?}", queued.content);
     let queued = queued.structured_content.unwrap();
     assert_eq!(queued["state"], "queued");
+    assert_eq!(queued["senderEmailAddress"], account["emailAddress"]);
     let outbox_id = queued["id"].clone();
     let replay = call(&client, "mailx_send_email", input).await.unwrap();
-    assert_eq!(replay.structured_content.unwrap()["id"], outbox_id);
+    let replay = replay.structured_content.unwrap();
+    assert_eq!(replay["id"], outbox_id);
+    assert_eq!(replay["senderEmailAddress"], account["emailAddress"]);
 
     let retry = call(
         &client,
@@ -362,6 +394,7 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(retry["id"], outbox_id);
     assert_eq!(retry["state"], "queued");
     assert_eq!(retry["notBefore"], queued["notBefore"]);
+    assert_eq!(retry["senderEmailAddress"], account["emailAddress"]);
     let list = call(
         &client,
         "mailx_list_outbox",
@@ -372,12 +405,17 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     .structured_content
     .unwrap();
     assert_eq!(list["items"][0]["id"], outbox_id);
+    assert_eq!(
+        list["items"][0]["senderEmailAddress"],
+        account["emailAddress"]
+    );
     let item = call(&client, "mailx_get_outbox", json!({"outboxId": outbox_id}))
         .await
         .unwrap()
         .structured_content
         .unwrap();
     assert_eq!(item["state"], "queued");
+    assert_eq!(item["senderEmailAddress"], account["emailAddress"]);
     assert!(item.get("serverReply").is_none());
 
     let invalid = call(

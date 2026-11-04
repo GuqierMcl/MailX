@@ -23,7 +23,7 @@ const summary = (d: Draft): DraftSummary => ({ id: d.id, accountId: d.accountId,
 
 function item(overrides: Partial<OutboxItem> = {}): OutboxItem {
   return {
-    id: 'out-1', draftId: 'draft-1', accountId: account.id, messageId: '<m@x>', subject: '外发邮件', recipients: ['li@example.org'], recipientCount: 1,
+    id: 'out-1', draftId: 'draft-1', accountId: account.id, senderEmailAddress: account.emailAddress, messageId: '<m@x>', subject: '外发邮件', recipients: ['li@example.org'], recipientCount: 1,
     state: 'queued', notBefore: '2026-10-23T12:00:10.000Z', dataStartedAt: null, attempts: 0, nextAttemptAt: null, firstQueuedAt: '2026-10-23T12:00:00.000Z',
     error: null, acceptedAt: null, serverReply: null, serverCopyMessageId: null, resolution: null, supersededBy: null, createdAt: '2026-10-23T12:00:00.000Z', updatedAt: '2026-10-23T12:00:00.000Z', ...overrides,
   }

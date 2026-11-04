@@ -248,6 +248,16 @@ impl MailxCore {
         self.accounts()?.list()
     }
 
+    pub(crate) fn account_identities(
+        &self,
+    ) -> Result<Vec<crate::accounts::types::AccountIdentity>, AppError> {
+        self.accounts()?.identities()
+    }
+
+    pub(crate) fn account_email_address(&self, id: &str) -> Result<String, AppError> {
+        self.accounts()?.email_address(id)
+    }
+
     pub fn get_account(&self, id: &str) -> Result<Account, AppError> {
         self.accounts()?.get(id)
     }

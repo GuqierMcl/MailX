@@ -123,6 +123,8 @@ pub struct OutboxItem {
     /// local Sent copy and outlives its draft).
     pub draft_id: Option<String>,
     pub account_id: String,
+    /// Sender address frozen in the SMTP envelope when this item was queued.
+    pub sender_email_address: String,
     /// With angle brackets.
     pub message_id: String,
     pub subject: String,

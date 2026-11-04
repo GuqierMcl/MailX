@@ -22,7 +22,7 @@ const MAX_NAME_CHARS: usize = 200;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateDraftInput {
-    /// Account to write from. Omit for the user's default sender account.
+    /// Id from list_accounts; choose by emailAddress. Omit for its isDefault account.
     pub account_id: Option<String>,
     /// Recipients, at most 50.
     pub to: Vec<Address>,
@@ -44,6 +44,7 @@ pub struct CreateDraftInput {
 pub struct CreateDraftOutput {
     pub draft_id: String,
     pub account_id: String,
+    pub sender_email_address: String,
     pub subject: String,
 }
 
@@ -85,6 +86,7 @@ pub struct CreateReplyDraftInput {
 pub struct CreateReplyDraftOutput {
     pub draft_id: String,
     pub account_id: String,
+    pub sender_email_address: String,
     pub subject: String,
     pub mode: ReplyMode,
 }
@@ -206,10 +208,11 @@ fn addresses(field: &str, list: Option<Vec<Address>>) -> Result<Vec<MailAddress>
 /// Explicit id; otherwise, with every account in scope, `None` so the core
 /// applies the host default and falls back to the first account when that
 /// default is stale (a removed account). A narrower grant uses the default
-/// only when the grant names it, else the first account it names.
+/// only when the grant names it, else the first existing account it names.
 fn resolve_account(
     call: &ToolCall<'_>,
     requested: Option<String>,
+    default: &str,
 ) -> Result<Option<String>, ToolError> {
     if let Some(id) = requested {
         if id.is_empty() || id.chars().count() > 64 {
@@ -220,16 +223,12 @@ fn resolve_account(
     }
     Ok(match &call.ctx.grant.accounts {
         AccountScope::All => None,
-        AccountScope::Only(ids) => {
-            let default = call.default_account_id();
-            Some(if ids.contains(&default) {
-                default
-            } else {
-                ids.first()
-                    .cloned()
-                    .ok_or_else(|| ToolError::new(ToolErrorCode::NotFound))?
-            })
-        }
+        scope @ AccountScope::Only(_) => Some(
+            super::accounts::default_account(&call.core.account_identities()?, scope, default)
+                .ok_or_else(|| ToolError::new(ToolErrorCode::NotFound))?
+                .id
+                .clone(),
+        ),
     })
 }
 
@@ -253,11 +252,11 @@ fn create_draft(
     let to = addresses("to", Some(input.to))?;
     let cc = addresses("cc", input.cc)?;
     let bcc = addresses("bcc", input.bcc)?;
-    let account_id = resolve_account(call, input.account_id)?;
+    let default = call.default_account_id();
+    let account_id = resolve_account(call, input.account_id, &default)?;
     if let Some(id) = &account_id {
         call.note_resource(id);
     }
-    let default = call.default_account_id();
     let draft = call.core.create_draft_with_origin(
         CreateDraftRequest {
             account_id,
@@ -273,9 +272,11 @@ fn create_draft(
         &default,
         origin_of(&call.ctx.principal),
     )?;
+    call.require_account(&draft.account_id)?;
     call.note_resource(&draft.account_id);
     call.note_resource(&draft.id);
     Ok(CreateDraftOutput {
+        sender_email_address: call.core.account_email_address(&draft.account_id)?,
         draft_id: draft.id,
         account_id: draft.account_id,
         subject: draft.subject,
@@ -321,9 +322,11 @@ fn create_reply_draft(
         origin_of(&call.ctx.principal),
         input.body_html.as_deref(),
     )?;
+    call.require_account(&draft.account_id)?;
     call.note_resource(&draft.account_id);
     call.note_resource(&draft.id);
     Ok(CreateReplyDraftOutput {
+        sender_email_address: call.core.account_email_address(&draft.account_id)?,
         draft_id: draft.id,
         account_id: draft.account_id,
         subject: draft.subject,
@@ -361,6 +364,7 @@ pub struct ListDraftsInput {
 pub struct DraftListItem {
     pub id: String,
     pub account_id: String,
+    pub sender_email_address: String,
     pub subject: String,
     /// At most 5 recipient addresses.
     pub to: Vec<String>,
@@ -406,6 +410,7 @@ pub struct DraftAttachmentInfo {
 pub struct ReadDraftOutput {
     pub id: String,
     pub account_id: String,
+    pub sender_email_address: String,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
     pub bcc: Vec<Address>,
@@ -499,6 +504,7 @@ fn list_drafts(call: &ToolCall<'_>, input: ListDraftsInput) -> Result<ListDrafts
     for summary in visible.by_ref().take(MAX_LISTED_DRAFTS) {
         let locked = call.core.draft_locked(&summary.id)?;
         drafts.push(DraftListItem {
+            sender_email_address: call.core.account_email_address(&summary.account_id)?,
             open: call.draft_open(&summary.id),
             locked,
             to_count: summary.to.len(),
@@ -524,6 +530,7 @@ fn read_draft(call: &ToolCall<'_>, input: DraftIdInput) -> Result<ReadDraftOutpu
     let draft = load_draft(call, &input.draft_id)?;
     let locked = call.core.draft_locked(&draft.id)?;
     Ok(ReadDraftOutput {
+        sender_email_address: call.core.account_email_address(&draft.account_id)?,
         open: call.draft_open(&draft.id),
         locked,
         to: draft.to.into_iter().map(Address::from).collect(),

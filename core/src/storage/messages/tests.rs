@@ -2108,7 +2108,7 @@ fn local_copy(f: &Fixture, n: u32, accepted_at: &str, subject: &str, attachments
          snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
          state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
          attachment_count)
-         VALUES (?1, ?2, ?3, '{}', ?4, ?5, ?6, '{}', ?7, '[\"a@example.test\",\"b@example.test\"]',
+         VALUES (?1, ?2, ?3, '{}', ?4, ?5, ?6, ?10, ?7, '[\"a@example.test\",\"b@example.test\"]',
                  2, 'accepted', ?8, 't', 't', 't', 't', 'Local body text', ?9)",
         rusqlite::params![
             local_id(n),
@@ -2120,6 +2120,8 @@ fn local_copy(f: &Fixture, n: u32, accepted_at: &str, subject: &str, attachments
             subject,
             accepted_at,
             attachments,
+            json!({"from":"me@example.test", "recipients":["a@example.test", "b@example.test"]})
+                .to_string(),
         ],
     )
     .unwrap();

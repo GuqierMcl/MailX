@@ -25,7 +25,7 @@ use crate::{
 const COLUMNS: &str = "id, draft_id, account_id, message_id, subject, recipients_preview,
     recipient_count, state, not_before, data_started_at, attempts, next_attempt_at,
     first_queued_at, last_error, accepted_at, server_reply, server_copy_message_id,
-    resolution, superseded_by, created_at, updated_at";
+    resolution, superseded_by, created_at, updated_at, json_extract(envelope, '$.from')";
 
 /// A draft is held by the queue while one of its items is in flight, waiting,
 /// or an `unknown` the user has not settled.
@@ -87,6 +87,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<OutboxItem, AppError>> {
     let last_error: Option<String> = row.get(13)?;
     let reply: Option<String> = row.get(15)?;
     let resolution: Option<String> = row.get(17)?;
+    let sender_email_address: String = row.get(21)?;
     let base = (
         row.get(0)?,
         row.get(1)?,
@@ -129,6 +130,7 @@ fn parse(row: &Row<'_>) -> rusqlite::Result<Result<OutboxItem, AppError>> {
             id: base.0,
             draft_id: base.1,
             account_id: base.2,
+            sender_email_address,
             message_id: base.3,
             subject: base.4,
             recipients: decode(&preview)?,
@@ -347,7 +349,7 @@ impl Storage {
                      WHERE client_mutation_id = ?1 ORDER BY created_at, id LIMIT 1"
                 ),
                 [client_mutation_id],
-                |row| Ok((parse(row)?, row.get::<_, String>(21)?)),
+                |row| Ok((parse(row)?, row.get::<_, String>(22)?)),
             )
             .optional()?;
         found

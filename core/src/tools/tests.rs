@@ -366,7 +366,16 @@ async fn list_accounts_reports_only_scoped_accounts_without_secrets() {
         let first = accounts[0].as_object().unwrap();
         let mut keys: Vec<_> = first.keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["displayName", "emailAddress", "id", "syncStatus"]);
+        assert_eq!(
+            keys,
+            [
+                "displayName",
+                "emailAddress",
+                "id",
+                "isDefault",
+                "syncStatus"
+            ]
+        );
         // The fixture's workers may or may not have started; the value is
         // always one of the coarse categories, never a server message.
         assert!(
@@ -387,6 +396,66 @@ async fn list_accounts_reports_only_scoped_accounts_without_secrets() {
         let out = tools.call(&scoped, "list_accounts", json!({})).unwrap();
         assert_eq!(out["accounts"].as_array().unwrap().len(), 1);
         assert_eq!(out["accounts"][0]["id"], ids[1]);
+        assert_eq!(out["accounts"][0]["isDefault"], true);
+    }
+}
+
+#[tokio::test]
+async fn reported_default_matches_draft_sender_for_settings_and_scopes() {
+    let f = fx();
+    let other = f.add_account();
+    let missing = Uuid::new_v4().to_string();
+    for ctx in both() {
+        for (configured, scope) in [
+            (String::new(), AccountScope::All),
+            (other.clone(), AccountScope::All),
+            (missing.clone(), AccountScope::All),
+            (f.account.clone(), AccountScope::Only(vec![other.clone()])),
+            (
+                missing.clone(),
+                AccountScope::Only(vec![missing.clone(), other.clone(), f.account.clone()]),
+            ),
+        ] {
+            *f.default_account.lock().unwrap() = configured;
+            let mut scoped = ctx.clone();
+            scoped.grant.accounts = scope;
+            let listed = f.call(&scoped, "list_accounts", json!({})).unwrap();
+            let defaults: Vec<_> = listed["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|account| account["isDefault"] == true)
+                .collect();
+            assert_eq!(defaults.len(), 1);
+            let draft = f
+                .call(&scoped, "create_draft", draft_input(json!({})))
+                .unwrap();
+            assert_eq!(draft["accountId"], defaults[0]["id"]);
+            assert_eq!(draft["senderEmailAddress"], defaults[0]["emailAddress"]);
+            assert!(draft["senderEmailAddress"].as_str().unwrap().contains('@'));
+            let read = f
+                .call(&scoped, "read_draft", json!({"draftId": draft["draftId"]}))
+                .unwrap();
+            assert_eq!(read["senderEmailAddress"], draft["senderEmailAddress"]);
+            let drafts = f.call(&scoped, "list_drafts", json!({})).unwrap();
+            let item = drafts["drafts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["id"] == draft["draftId"])
+                .unwrap();
+            assert_eq!(item["senderEmailAddress"], draft["senderEmailAddress"]);
+        }
+        let mut empty = ctx.clone();
+        empty.grant.accounts = AccountScope::Only(vec![missing.clone()]);
+        assert_eq!(
+            f.call(&empty, "list_accounts", json!({})).unwrap()["accounts"],
+            json!([])
+        );
+        assert_eq!(
+            code(f.call(&empty, "create_draft", draft_input(json!({})))),
+            ToolErrorCode::NotFound
+        );
     }
 }
 
@@ -1429,6 +1498,10 @@ async fn reply_drafts_follow_the_composer_rules_for_each_mode() {
             .unwrap();
         assert_eq!(out["mode"], mode);
         assert_eq!(out["accountId"], f.account);
+        assert_eq!(
+            out["senderEmailAddress"],
+            f.core.account_email_address(&f.account).unwrap()
+        );
         assert!(
             out["subject"].as_str().unwrap().starts_with(prefix),
             "{out}"

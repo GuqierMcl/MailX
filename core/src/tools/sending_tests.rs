@@ -136,6 +136,43 @@ async fn both_audiences_send_frozen_drafts_and_replay_without_duplicate_items() 
 }
 
 #[tokio::test]
+async fn every_outbox_result_keeps_the_frozen_sender_after_an_account_change() {
+    for ctx in contexts() {
+        let f = fixture();
+        let tools = f.tools();
+        let sender: String =
+            f.db.query_row(
+                "SELECT email_address FROM accounts WHERE id=?1",
+                [&f.account],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (input, sent) = f.queue(&tools, &ctx, &f.draft(&f.account));
+        assert_eq!(sent["senderEmailAddress"], sender);
+        let outbox_id = sent["id"].as_str().unwrap();
+        f.db.execute(
+            "UPDATE accounts SET email_address='changed@example.test' WHERE id=?1",
+            [&f.account],
+        )
+        .unwrap();
+        for (tool, input) in [
+            ("send_email", input),
+            ("get_outbox", json!({"outboxId":outbox_id})),
+            ("send_email", json!({"action":"retry","outboxId":outbox_id})),
+        ] {
+            let result = tools.call(&ctx, tool, input).unwrap();
+            assert_eq!(result["senderEmailAddress"], sender);
+        }
+        let listed = tools.call(&ctx, "list_outbox", json!({})).unwrap();
+        assert_eq!(listed["items"][0]["senderEmailAddress"], sender);
+        let canceled = tools
+            .call(&ctx, "cancel_outbox", json!({"outboxId":outbox_id}))
+            .unwrap();
+        assert_eq!(canceled["senderEmailAddress"], sender);
+    }
+}
+
+#[tokio::test]
 async fn send_validates_exact_action_fields_revision_and_mutation() {
     let f = fixture();
     let tools = f.tools();
@@ -198,6 +235,7 @@ async fn replay_survives_draft_deletion_and_never_leaks_another_accounts_mutatio
     let replay = tools.call(ctx, "send_email", input.clone()).unwrap();
     assert_eq!(replay["id"], result["id"]);
     assert_eq!(replay["state"], "accepted");
+    assert_eq!(replay["senderEmailAddress"], result["senderEmailAddress"]);
     let other = f.other_account();
     let mut restricted = ctx.clone();
     restricted.grant.accounts = AccountScope::Only(vec![other.clone()]);
@@ -418,7 +456,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
 }
 
 #[tokio::test]
-async fn account_outbox_queries_work_when_the_secret_store_is_unavailable() {
+async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
     #[derive(Default)]
     struct SwitchableSecrets {
         values: MemorySecrets,
@@ -499,10 +537,37 @@ async fn account_outbox_queries_work_when_the_secret_store_is_unavailable() {
     ] {
         *secrets.failure.lock().unwrap() = Some(failure);
         assert_eq!(f.core.get_account(&f.account).unwrap_err().code, code);
+        let accounts = tools.call(ctx, "list_accounts", json!({})).unwrap();
+        assert_eq!(accounts["accounts"].as_array().unwrap().len(), 1);
+        assert_eq!(accounts["accounts"][0]["id"], f.account);
+        assert_eq!(
+            accounts["accounts"][0]["emailAddress"],
+            item["senderEmailAddress"]
+        );
+        assert_eq!(accounts["accounts"][0]["isDefault"], true);
+        let draft = tools
+            .call(
+                ctx,
+                "create_draft",
+                json!({
+                    "to": [{"address":"recipient@example.test"}],
+                    "subject":"Local sender metadata", "bodyHtml":"<p>Body</p>"
+                }),
+            )
+            .unwrap();
+        assert_eq!(draft["senderEmailAddress"], item["senderEmailAddress"]);
+        let read = tools
+            .call(ctx, "read_draft", json!({"draftId":draft["draftId"]}))
+            .unwrap();
+        assert_eq!(read["senderEmailAddress"], item["senderEmailAddress"]);
         let result = tools.call(ctx, "list_outbox", input.clone()).unwrap();
         assert_eq!(result["items"].as_array().unwrap().len(), 1);
         assert_eq!(result["items"][0]["id"], item["id"]);
         assert_eq!(result["items"][0]["error"]["reason"], "secretStore");
+        assert_eq!(
+            result["items"][0]["senderEmailAddress"],
+            item["senderEmailAddress"]
+        );
         assert_eq!(
             error(&tools, ctx, "list_outbox", json!({"accountId":id()})),
             ToolErrorCode::NotFound

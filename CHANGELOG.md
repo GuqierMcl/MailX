@@ -47,6 +47,7 @@
 
 ### Optimization
 
+- MCP 草稿和发送结果直接返回发件邮箱地址，账号列表标明默认发件账号，方便 AI 助手准确选择和说明使用的邮箱。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
 - 精简 MCP 设置页，只保留开关、连接状态与客户端配置；关于页移除静态隐私说明，保留版本和更新功能。 ([#85](https://github.com/GuqierMcl/MailX/pull/85))
 - 通过 QQ、网易和 139 等服务商入口添加邮箱时默认不设置标识颜色，手动 IMAP/SMTP 仍自动分配颜色，各入口均可自行选色。 ([#66](https://github.com/GuqierMcl/MailX/pull/66))
 - 邮箱服务商图标改用官方原始素材，保留完整图形与原有配色，QQ 邮箱使用专属邮箱图标。 ([#64](https://github.com/GuqierMcl/MailX/pull/64))
