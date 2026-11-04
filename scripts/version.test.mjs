@@ -201,8 +201,10 @@ describe("a project on disk", () => {
 });
 
 describe("this repository", () => {
-  test("every recorded version agrees and prerelease notes can be built", () => {
+  test("every recorded version agrees and release notes can be built", () => {
     expect(checkVersions(repoRoot).ok).toBe(true);
-    expect(() => releaseNotes(repoRoot, "0.0.0-alpha.1")).not.toThrow();
+    // Notes for the recorded version exist whether it is a prerelease (built
+    // from [Unreleased]) or a stable one just folded into its own section.
+    expect(() => releaseNotes(repoRoot, checkVersions(repoRoot).version)).not.toThrow();
   });
 });
