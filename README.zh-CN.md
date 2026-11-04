@@ -15,9 +15,6 @@
 
 </div>
 
-> [!NOTE]
-> 下载见 [Releases](https://github.com/GuqierMcl/MailX/releases)，各版本变化见 [CHANGELOG](CHANGELOG.md)。安装前请阅读[已知限制](#已知限制)。
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/mailx-dark.webp">
   <img src="docs/assets/screenshots/mailx-light.webp" alt="MailX 主窗口" width="900">
