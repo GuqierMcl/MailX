@@ -15,9 +15,6 @@ English | [简体中文](README.zh-CN.md)
 
 </div>
 
-> [!NOTE]
-> Download published builds from [Releases](https://github.com/GuqierMcl/MailX/releases), read release changes in the [CHANGELOG](CHANGELOG.md), and check [known limitations](#known-limitations) before installing.
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/mailx-dark.webp">
   <img src="docs/assets/screenshots/mailx-light.webp" alt="MailX main window" width="900">
