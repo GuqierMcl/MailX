@@ -1,9 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::context::{Action, Audience};
+use super::context::{AccountScope, Action, Audience};
 use super::error::ToolError;
 use super::spec::{Annotations, AudiencePolicy, ToolCall, ToolSpec, Tools};
+use crate::accounts::types::AccountIdentity;
 use crate::{AccountSyncState, SyncFailureCode, SyncPhase};
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -118,6 +119,8 @@ pub struct AccountInfo {
     /// User-chosen label. Untrusted text for a model.
     pub display_name: String,
     pub email_address: String,
+    /// Used for a new draft when accountId is omitted, within this grant.
+    pub is_default: bool,
     pub sync_status: SyncStatus,
     /// RFC 3339 time of the last successful sync round since MailX started.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,9 +137,8 @@ pub(super) fn register(tools: &mut Tools) {
     let spec = ToolSpec::new::<ListAccountsInput, ListAccountsOutput>(
         "list_accounts",
         "List accounts",
-        "List the mail accounts this connection may use: id, display name, email address and a coarse sync status \
-         (ok, syncing, authError, connectionError or unknown; unknown only means no sync round has finished yet) and the time of the last successful sync. \
-         Display names are user-provided text. Returns no credentials or server settings.",
+        "List permitted accounts with emailAddress, id, isDefault and sync status. Use emailAddress to choose an accountId. \
+         isDefault marks the account used for a new draft when accountId is omitted. Display names are untrusted text.",
         Annotations::READ_ONLY,
     )
     .requires(&[Action::AccountsRead])
@@ -150,15 +152,21 @@ fn list_accounts(
     _input: ListAccountsInput,
 ) -> Result<ListAccountsOutput, ToolError> {
     let states = call.core.sync_states();
-    let accounts = call
-        .core
-        .list_accounts()?
+    let identities = call.core.account_identities()?;
+    let default = default_account(
+        &identities,
+        &call.ctx.grant.accounts,
+        &call.default_account_id(),
+    )
+    .map(|account| account.id.clone());
+    let accounts = identities
         .into_iter()
         .filter(|account| call.ctx.grant.accounts.permits(&account.id))
         .map(|account| {
             call.note_resource(&account.id);
             let state = states.iter().find(|s| s.account_id == account.id);
             AccountInfo {
+                is_default: default.as_deref() == Some(account.id.as_str()),
                 sync_status: SyncStatus::of(state),
                 last_synced_at: state.and_then(|s| s.last_synced_at.clone()),
                 id: account.id,
@@ -168,6 +176,23 @@ fn list_accounts(
         })
         .collect();
     Ok(ListAccountsOutput { accounts })
+}
+
+/// Mirrors draft selection, including stale settings and restricted grants.
+pub(super) fn default_account<'a>(
+    accounts: &'a [AccountIdentity],
+    scope: &AccountScope,
+    configured: &str,
+) -> Option<&'a AccountIdentity> {
+    accounts
+        .iter()
+        .find(|account| account.id == configured.trim() && scope.permits(&account.id))
+        .or_else(|| match scope {
+            AccountScope::All => accounts.first(),
+            AccountScope::Only(ids) => ids
+                .iter()
+                .find_map(|id| accounts.iter().find(|account| &account.id == id)),
+        })
 }
 
 #[cfg(test)]

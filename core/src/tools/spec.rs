@@ -42,9 +42,9 @@ pub struct Annotations {
     pub read_only: bool,
     /// Writes MailX's local data, including caches and pending flag changes.
     pub writes_local_data: bool,
-    /// May change flags on a mail server.
+    /// May write to a mail server, including SMTP submission.
     pub writes_server_data: bool,
-    /// Removes data that cannot be recovered through the tool layer.
+    /// Has irreversible effects, such as deleting data or sending mail.
     pub destructive: bool,
     pub idempotent: bool,
     /// May contact mail servers rather than only the local store.
@@ -218,6 +218,7 @@ pub struct ToolCall<'a> {
     pub policy: AudiencePolicy,
     default_account: &'a (dyn Fn() -> String + Send + Sync),
     locale: &'a (dyn Fn() -> crate::SupportedLocale + Send + Sync),
+    undo_send_seconds: &'a (dyn Fn() -> Result<u32, ToolError> + Send + Sync),
     draft_open: &'a (dyn Fn(&str) -> bool + Send + Sync),
     ui_opener: &'a UiOpener,
     draft_opener: &'a UiOpener,
@@ -234,6 +235,11 @@ impl ToolCall<'_> {
     /// applies at once.
     pub fn locale(&self) -> crate::SupportedLocale {
         (self.locale)()
+    }
+
+    /// Read the host's current undo-send window for a new queue item.
+    pub fn undo_send_seconds(&self) -> Result<u32, ToolError> {
+        (self.undo_send_seconds)()
     }
 
     /// Whether the host has this draft open in an editor window.
@@ -283,6 +289,7 @@ pub struct Tools {
     core: MailxCore,
     default_account: Arc<dyn Fn() -> String + Send + Sync>,
     locale: Arc<dyn Fn() -> crate::SupportedLocale + Send + Sync>,
+    undo_send_seconds: Arc<dyn Fn() -> Result<u32, ToolError> + Send + Sync>,
     draft_open: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     ui_opener: Arc<UiOpener>,
     draft_opener: Arc<UiOpener>,
@@ -301,6 +308,7 @@ impl Tools {
             core,
             default_account: Arc::new(default_account),
             locale: Arc::new(crate::SupportedLocale::default),
+            undo_send_seconds: Arc::new(|| Ok(0)),
             draft_open: Arc::new(|_| false),
             ui_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             draft_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
@@ -311,8 +319,20 @@ impl Tools {
         super::mail::register(&mut tools);
         super::drafts::register(&mut tools);
         super::organize::register(&mut tools);
+        super::sending::register(&mut tools);
+        super::attachments::register(&mut tools);
         super::ui::register(&mut tools);
         tools
+    }
+
+    /// Host setting read on each send. A settings failure must not bypass
+    /// the user's configured undo window.
+    pub fn with_undo_send_seconds(
+        mut self,
+        read: impl Fn() -> Result<u32, ToolError> + Send + Sync + 'static,
+    ) -> Self {
+        self.undo_send_seconds = Arc::new(read);
+        self
     }
 
     /// Host-supplied UI locale for generated draft text (quote headers,
@@ -326,7 +346,7 @@ impl Tools {
     }
 
     /// Host check for drafts currently open in an editor window, read at
-    /// call time. Defaults to "never open". Update and delete refuse open
+    /// call time. Defaults to "never open". Editing and sending refuse open
     /// drafts.
     pub fn with_draft_open_check(
         mut self,
@@ -460,6 +480,7 @@ impl Tools {
             policy,
             default_account: &*self.default_account,
             locale: &*self.locale,
+            undo_send_seconds: &*self.undo_send_seconds,
             draft_open: &*self.draft_open,
             ui_opener: &*self.ui_opener,
             draft_opener: &*self.draft_opener,

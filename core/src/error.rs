@@ -10,7 +10,7 @@ pub enum ErrorCode {
     IdempotencyConflict,
     /// The draft belongs to a live send queue item and cannot be changed.
     DraftLocked,
-    /// The caller is not allowed to do this (only the interactive composer may send).
+    /// The caller is not allowed to perform this action.
     Forbidden,
     /// Sending already started; it can no longer be canceled.
     AlreadySending,

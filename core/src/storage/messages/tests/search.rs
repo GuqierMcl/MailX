@@ -104,6 +104,13 @@ fn local_copy_lifecycle_follows_the_sent_list_rules() {
     // A server copy with the same Message-ID replaces it.
     put_sent(&mut f, &[sent_copy("local-1@mailx.test", 5)]);
     assert!(!indexed(&f, &copy));
+    assert_eq!(
+        f.service
+            .get_outbox(&local_id(1))
+            .unwrap()
+            .sender_email_address,
+        "me@example.test"
+    );
     // Removed from this device.
     let other = local_copy(&f, 2, "2026-10-18T10:00:00.000Z", "Second offer", 0);
     assert!(indexed(&f, &other));
@@ -111,6 +118,13 @@ fn local_copy_lifecycle_follows_the_sent_list_rules() {
         .remove_local_copy(&other, chrono::Utc::now())
         .unwrap();
     assert!(!indexed(&f, &other));
+    assert_eq!(
+        f.service
+            .get_outbox(&local_id(2))
+            .unwrap()
+            .sender_email_address,
+        "me@example.test"
+    );
     // Snapshot released by a non-qualifying state change.
     let third = local_copy(&f, 3, "2026-10-18T10:00:00.000Z", "Third offer", 0);
     f.db.execute(

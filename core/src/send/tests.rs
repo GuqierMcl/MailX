@@ -248,15 +248,13 @@ async fn queueing_is_idempotent_checks_the_revision_and_the_caller() {
             .code,
         ErrorCode::Conflict
     );
-    for caller in [Caller::Mcp, Caller::Model, Caller::MainWindow] {
-        assert_eq!(
-            fx.core
-                .queue_send(caller, Fx::request(&draft), 0)
-                .unwrap_err()
-                .code,
-            ErrorCode::Forbidden
-        );
-    }
+    assert_eq!(
+        fx.core
+            .queue_send(Caller::MainWindow, Fx::request(&draft), 0)
+            .unwrap_err()
+            .code,
+        ErrorCode::Forbidden
+    );
     fx.settle().await;
     assert_eq!(connections(&seen), 0);
     assert!(fx.core.list_outbox(None, true).unwrap().is_empty());
@@ -1291,4 +1289,48 @@ async fn a_requeue_releases_the_superseded_items_snapshot() {
     assert!(released.1.is_some());
     assert!(snapshot_of(&fx, &second.id).0.is_some());
     assert!(seen.lock().unwrap().connections >= 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn authorized_tool_callers_send_and_replay_after_the_draft_is_consumed() {
+    for caller in [Caller::Mcp, Caller::Model] {
+        let fx = fixture();
+        let (port, seen) = fx.server(|_| {}).await;
+        let account = fx.account("sender@example.test", port);
+        let draft = fx.draft(&account);
+        let request = Fx::request(&draft);
+        let first = fx
+            .core
+            .queue_send_scoped(
+                caller,
+                request.clone(),
+                0,
+                Some(std::slice::from_ref(&account.id)),
+            )
+            .unwrap();
+        fx.reaches(&first.id, OutboxState::Accepted).await;
+        assert_eq!(
+            fx.core.get_draft(&draft.id).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        let replay = fx
+            .core
+            .queue_send_scoped(
+                caller,
+                request.clone(),
+                0,
+                Some(std::slice::from_ref(&account.id)),
+            )
+            .unwrap();
+        assert_eq!(replay.id, first.id);
+        assert_eq!(replay.state, OutboxState::Accepted);
+        assert_eq!(data_count(&seen), 1);
+        assert_eq!(
+            fx.core
+                .queue_send_scoped(caller, request, 0, Some(&[]))
+                .unwrap_err()
+                .code,
+            ErrorCode::NotFound
+        );
+    }
 }

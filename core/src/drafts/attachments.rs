@@ -1,6 +1,7 @@
 //! Compose attachments: DTOs, limits, file name cleanup and media type
 //! detection. Persistence lives in `storage::attachments`; the service methods
 //! are on `AccountService`.
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -11,13 +12,17 @@ use crate::{
 };
 
 /// Where an attachment came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AttachmentOrigin {
     /// Added by the user.
     User,
     /// Carried over from the original message by a forward.
     Forwarded,
+    /// Added by an external MCP client.
+    Mcp,
+    /// Added by MailX's built-in agent.
+    Ai,
 }
 
 impl AttachmentOrigin {
@@ -25,6 +30,8 @@ impl AttachmentOrigin {
         match self {
             Self::User => "user",
             Self::Forwarded => "forwarded",
+            Self::Mcp => "mcp",
+            Self::Ai => "ai",
         }
     }
 
@@ -32,6 +39,8 @@ impl AttachmentOrigin {
         match value {
             "user" => Some(Self::User),
             "forwarded" => Some(Self::Forwarded),
+            "mcp" => Some(Self::Mcp),
+            "ai" => Some(Self::Ai),
             _ => None,
         }
     }

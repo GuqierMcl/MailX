@@ -86,6 +86,16 @@ impl DesktopState {
             .unwrap_or_default()
     }
 
+    /// The sending tools use the same undo window as the composer.
+    pub(crate) fn undo_send_seconds(&self) -> Result<u32, AppError> {
+        Ok(self
+            .settings_store()?
+            .get()?
+            .settings
+            .compose
+            .undo_send_seconds)
+    }
+
     /// Remembers how the window is being used and tells the core if it is open.
     /// Repeats cost nothing: the core only reacts to a real change.
     ///

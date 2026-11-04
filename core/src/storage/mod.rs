@@ -87,6 +87,21 @@ impl Storage {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub(crate) fn account_identities(&self) -> Result<Vec<AccountIdentity>, AppError> {
+        let mut statement = self.db.prepare(
+            "SELECT id, display_name, email_address FROM accounts ORDER BY created_at, id",
+        )?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok(AccountIdentity {
+                    id: row.get(0)?,
+                    display_name: row.get(1)?,
+                    email_address: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
         let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon FROM accounts WHERE id=?1", [id], |r| {
             Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?))

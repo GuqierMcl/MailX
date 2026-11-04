@@ -300,6 +300,13 @@ pub enum ConnectionStatus {
     Unverified,
 }
 
+/// Local account labels without connection or credential information.
+pub(crate) struct AccountIdentity {
+    pub id: String,
+    pub display_name: String,
+    pub email_address: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
