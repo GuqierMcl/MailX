@@ -2924,6 +2924,7 @@ dependencies = [
  "mailx-mcp-server",
  "objc2-foundation",
  "percent-encoding",
+ "plist",
  "rodio",
  "rusqlite",
  "security-framework 3.7.0",
@@ -2943,6 +2944,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "winreg",
  "zbus 5.19.0",
 ]
 

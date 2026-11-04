@@ -71,6 +71,13 @@ impl DesktopState {
             .is_ok_and(|snapshot| snapshot.settings.mcp.enabled)
     }
 
+    /// Called from the login-startup blocking worker, never on the UI thread.
+    pub(crate) fn silent_start(&self) -> bool {
+        self.settings_store()
+            .and_then(|store| store.get())
+            .is_ok_and(|snapshot| snapshot.settings.general.silent_start)
+    }
+
     /// Account the shared tools use when a call names none.
     pub(crate) fn default_account_id(&self) -> String {
         self.settings_store()

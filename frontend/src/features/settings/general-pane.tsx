@@ -10,6 +10,7 @@ import { errorText } from '@/i18n/errors'
 import { useLifecycle } from '@/features/lifecycle/lifecycle-context'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateGeneral } from './settings-queries'
+import { AutostartSettings } from './autostart-settings'
 
 export function GeneralPane({ client }: { client: MailxClient }) {
   const { t } = useTranslation('settings')
@@ -46,6 +47,7 @@ export function GeneralPane({ client }: { client: MailxClient }) {
         </Select>
       </SettingsRow>
     </SettingsGroup>
+    <AutostartSettings client={client} />
     {snapshot && <SettingsGroup title={t('windowBehavior')}>
       <SettingsRow label={t('closeBehavior')} description={t('closeBehaviorHint')} htmlFor="general.closeBehavior">
         <Select value={settings.data?.settings.general.closeBehavior ?? 'ask'} items={closeItems}

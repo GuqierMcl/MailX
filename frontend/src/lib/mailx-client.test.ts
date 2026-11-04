@@ -9,6 +9,15 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true) })
 
 describe('desktop client boundary', () => {
+  it('manages login startup through host commands with no caller-supplied paths', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: { enabled: true, available: true }, requestId: 'request' })
+    const client = createDesktopClient()
+    await expect(client.getAutostart()).resolves.toEqual({ enabled: true, available: true })
+    await client.setAutostart(true)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'autostart_get', undefined)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'autostart_set', { enabled: true })
+  })
+
   it('undoes only the archive receipt issued by the host', async () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'request' })
     await createDesktopClient().undoArchive('receipt-1')

@@ -333,7 +333,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": false },
+                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": false, "silentStart": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -1041,6 +1041,7 @@ fn saved_background_preferences_recover_independently() {
                 auto_check_updates,
                 close_behavior,
                 show_menu_bar_icon,
+                silent_start: false,
             },
             "{general}"
         );
@@ -1053,6 +1054,7 @@ fn saved_background_preferences_recover_independently() {
             auto_check_updates: false,
             close_behavior: CloseBehavior::Quit,
             show_menu_bar_icon: true,
+            silent_start: true,
         },
         ..Default::default()
     }
@@ -1061,6 +1063,37 @@ fn saved_background_preferences_recover_independently() {
     assert!(!settings.general.auto_check_updates);
     assert_eq!(settings.general.close_behavior, CloseBehavior::Quit);
     assert!(settings.general.show_menu_bar_icon);
+    assert!(settings.general.silent_start);
+}
+
+#[test]
+fn silent_login_preference_defaults_recovers_and_persists_without_changing_other_settings() {
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"silentStart": "yes"}),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":{"general":value,"appearance":{"theme":"dark"}}}).to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert!(!snapshot.settings.general.silent_start);
+        assert!(!snapshot.recovered);
+        let mut general = snapshot.settings.general;
+        general.silent_start = true;
+        store
+            .patch(SettingsPatch {
+                general: Some(general),
+                ..Default::default()
+            })
+            .unwrap();
+        let restored = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(restored.settings.general.silent_start);
+        assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+    }
 }
 
 #[test]

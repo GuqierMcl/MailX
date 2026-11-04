@@ -73,8 +73,9 @@ pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
 }
 
 /// Brings the existing window forward when a second launch is attempted. Before
-/// the window exists (the first instance is still starting) there is nothing to do.
+/// the window exists, the activation is remembered for its creation.
 pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+    crate::autostart::record_activation(app);
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
@@ -151,7 +152,7 @@ enum TitleBarGesture {
 }
 
 /// Builds the main window from `tauri.conf.json` with platform title bar settings.
-pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+pub(crate) fn create_main_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     let config = app
         .config()
         .app
@@ -167,13 +168,19 @@ pub(crate) fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow
     let builder = style_builder(
         WebviewWindowBuilder::from_config(app, &config)?
             .visible(false)
+            .focused(visible)
             .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url)),
     );
     let window = builder.build()?;
     watch_state(&window);
     crate::compose::watch_close(&window);
-    window.show()?;
-    window.set_focus()?;
+    // A second launch can arrive after the caller sampled intent but before
+    // build() registered the main window. Sample once more after registration;
+    // later callbacks can find and show the window themselves.
+    if visible || crate::autostart::user_activated(app) {
+        window.show()?;
+        window.set_focus()?;
+    }
     Ok(window)
 }
 
@@ -559,6 +566,16 @@ mod tests {
         let app = tauri::test::mock_app();
         focus_main_window(app.handle());
         assert!(app.get_webview_window(MAIN_WINDOW).is_none());
+    }
+
+    #[cfg(not(feature = "body-webview-test"))]
+    #[test]
+    fn an_early_manual_launch_is_remembered_before_the_login_window_is_created() {
+        let app = tauri::test::mock_app();
+        app.manage(crate::autostart::StartupIntent::default());
+        assert!(!crate::autostart::user_activated(app.handle()));
+        focus_main_window(app.handle());
+        assert!(crate::autostart::user_activated(app.handle()));
     }
 
     #[cfg(not(feature = "body-webview-test"))]

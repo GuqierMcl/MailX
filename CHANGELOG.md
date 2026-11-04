@@ -12,6 +12,8 @@
 
 ### Feature
 
+- 设置中新增默认关闭的开机自启动与静默启动；静默启动仅在登录时自动启动生效，后台入口不可用时显示主窗口。 ([#87](https://github.com/GuqierMcl/MailX/pull/87))
+
 - 本地 MCP：AI 助手可直接发送草稿、查询 / 重试 / 取消待发送任务，并添加或移除本机文件附件，无需逐封确认。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
 
 - 本地 MCP：AI 助手可批量设置已读和星标、本机归档或取消归档、请求刷新邮件，并打开草稿供你检查；搜索支持星标与本机归档筛选，界面同步刷新，归档提示可撤销。现有 MCP 总开关统一开放这些能力。 ([#85](https://github.com/GuqierMcl/MailX/pull/85))

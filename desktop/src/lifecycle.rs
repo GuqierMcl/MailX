@@ -22,6 +22,7 @@ struct Inner {
     locale: SupportedLocale,
     show_menu_bar_icon: bool,
     background_available: bool,
+    background_checked: bool,
     desktop_ready: bool,
     main_ready: bool,
     pending: Option<u64>,
@@ -30,6 +31,9 @@ struct Inner {
     revision: u64,
     quit_timed_out: bool,
     recovery_pending: bool,
+    /// Some(true) waits for the first tray-host probe before deciding whether
+    /// to leave a login-launched window hidden. Never hides a visible window.
+    startup_silent: Option<bool>,
 }
 
 impl Default for LifecycleState {
@@ -40,6 +44,7 @@ impl Default for LifecycleState {
             locale: crate::locale::system_locale(),
             show_menu_bar_icon: false,
             background_available: cfg!(target_os = "macos"),
+            background_checked: false,
             desktop_ready: false,
             main_ready: false,
             pending: None,
@@ -48,6 +53,7 @@ impl Default for LifecycleState {
             revision: 0,
             quit_timed_out: false,
             recovery_pending: false,
+            startup_silent: None,
         }))
     }
 }
@@ -209,7 +215,7 @@ pub(crate) fn tray_options(app: &AppHandle) -> (SupportedLocale, bool, bool) {
 }
 
 /// Called on the UI thread after the native tray and its host are checked.
-pub(crate) fn set_background_available(app: &AppHandle, available: bool) {
+pub(crate) fn set_background_available(app: &AppHandle, available: bool, checked: bool) {
     let state = app.state::<LifecycleState>();
     let changed = {
         let mut inner = state.lock();
@@ -221,9 +227,11 @@ pub(crate) fn set_background_available(app: &AppHandle, available: bool) {
             inner.recovery_pending = false;
         }
         inner.background_available = available;
+        inner.background_checked = checked;
         changed
     };
     let recover = state.lock().recovery_pending && !crate::tray::session_locked(app);
+    resolve_startup_visibility(app);
     if recover
         && !crate::compose::is_quitting(app)
         && let Some(window) = app.get_webview_window(MAIN_WINDOW)
@@ -245,6 +253,42 @@ pub(crate) fn set_background_available(app: &AppHandle, available: bool) {
         EVENT,
         snapshot(app, &state),
     );
+}
+
+pub(crate) fn startup_prepared(app: &AppHandle, silent: bool) {
+    app.state::<LifecycleState>().lock().startup_silent = Some(silent);
+    resolve_startup_visibility(app);
+}
+
+fn startup_visibility(silent: bool, checked: bool, available: bool) -> Option<bool> {
+    if !silent {
+        Some(true)
+    } else if checked {
+        Some(!available)
+    } else {
+        None
+    }
+}
+
+fn resolve_startup_visibility(app: &AppHandle) {
+    let state = app.state::<LifecycleState>();
+    let show = {
+        let mut inner = state.lock();
+        let Some(silent) = inner.startup_silent else {
+            return;
+        };
+        let Some(show) =
+            startup_visibility(silent, inner.background_checked, inner.background_available)
+        else {
+            return;
+        };
+        inner.startup_silent = None;
+        show
+    };
+    if show {
+        window_chrome::focus_main_window(app);
+    }
+    window_chrome::refresh_activity(app);
 }
 
 pub(crate) fn setup(app: &AppHandle) {
@@ -443,6 +487,14 @@ pub(crate) fn app_desktop_ready(
 mod tests {
     use super::*;
     use tauri::ipc::InvokeBody;
+
+    #[test]
+    fn silent_login_startup_waits_for_a_probe_and_falls_back_to_a_visible_window() {
+        assert_eq!(startup_visibility(false, false, false), Some(true));
+        assert_eq!(startup_visibility(true, false, false), None);
+        assert_eq!(startup_visibility(true, true, false), Some(true));
+        assert_eq!(startup_visibility(true, true, true), Some(false));
+    }
 
     #[test]
     fn remembered_background_requires_a_recovery_entry_but_quit_does_not() {

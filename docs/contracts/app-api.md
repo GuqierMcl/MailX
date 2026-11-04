@@ -229,6 +229,17 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改。新增 `providerPolicy` 同样停止自动同步与标记写回，但在用户处理服务商安全策略后，允许显式手动同步重启对应账号任务；修改连接也可恢复。缓存及待写标记保留，新标记和窗口前后台切换不自动解除停止状态。普通单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
 
+### 桌面登录启动
+
+| MailxClient | Tauri IPC | 返回 |
+| --- | --- | --- |
+| `getAutostart()` | `autostart_get`，无参数 | `{ enabled: boolean, available: boolean }` |
+| `setAutostart(enabled)` | `autostart_set`，`{ enabled: boolean }` | 重新读取后的同形快照 |
+
+仅本地可信 main 可调用，composer / 正文 / MCP 均不可访问；不要求邮件核心 Ready。路径、启动命令、参数由宿主固定，输入拒绝额外字段。操作按进程互斥串行执行，系统注册是事实来源，应用启动和普通设置保存不写系统启动项。开发或隔离运行查询返回 `available=false, enabled=false`，修改返回 `unsupported`。系统读取、写入或读回确认失败使用固定错误 `storageUnavailable`、`field: "autostart"`，不暴露原生错误或路径。
+
+`general.silentStart` 默认 false，属于已有设置快照与事件协议。关闭自启动后保留该偏好但不生效；手动打开显示窗口。静默仅适用于收到固定登录启动标记、系统启动项启用且后台恢复入口可用的本次启动。平台机制、外部系统限制与路径变化见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。
+
 ### 应用偏好设置
 
 | MailxClient 方法 | Tauri 命令与参数 | 核心组件 | 成功结果 |

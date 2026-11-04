@@ -25,6 +25,8 @@ pub(crate) struct TrayState {
     host_available: std::sync::atomic::AtomicBool,
     #[cfg(target_os = "linux")]
     session_locked: std::sync::atomic::AtomicBool,
+    #[cfg(target_os = "linux")]
+    host_checked: std::sync::atomic::AtomicBool,
 }
 
 struct TrayMenu {
@@ -64,6 +66,7 @@ pub(crate) fn setup(app: &AppHandle) {
                         .await
                         .unwrap_or_default();
                 let state = app.state::<TrayState>();
+                let first_check = !state.host_checked.load(std::sync::atomic::Ordering::SeqCst);
                 let host_changed = state
                     .host_available
                     .swap(status.host_available, std::sync::atomic::Ordering::SeqCst)
@@ -72,12 +75,29 @@ pub(crate) fn setup(app: &AppHandle) {
                     .session_locked
                     .swap(status.session_locked, std::sync::atomic::Ordering::SeqCst)
                     != status.session_locked;
-                if host_changed || lock_changed {
+                state
+                    .host_checked
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                if first_check || host_changed || lock_changed {
                     refresh(&app);
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
+    }
+}
+
+fn background_checked(app: &AppHandle) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        app.state::<TrayState>()
+            .host_checked
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        true
     }
 }
 
@@ -122,6 +142,9 @@ fn refresh_on_main(app: &AppHandle) {
         let _ = icon.set_visible(wanted);
     }
     drop(slot);
+    // Read completion before availability, so a concurrent first probe cannot
+    // make an old availability value look like a completed result.
+    let checked = background_checked(app);
     #[cfg(target_os = "linux")]
     let available = created
         && state
@@ -134,7 +157,7 @@ fn refresh_on_main(app: &AppHandle) {
         let _ = created;
         true
     }; // Dock is always retained.
-    lifecycle::set_background_available(app, available);
+    lifecycle::set_background_available(app, available, checked);
 }
 
 fn create(app: &AppHandle, labels: &Labels) -> tauri::Result<TrayMenu> {

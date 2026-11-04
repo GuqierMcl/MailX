@@ -34,6 +34,31 @@ Linux 的 AppIndicator 对象创建成功不证明有可用宿主。后台操作
 
 整应用退出期间不删除空草稿，避免另一窗口取消退出时迟到的删除仍破坏数据；普通写信窗口关闭保留空草稿清理，且没有强制销毁期限。账户移除导致草稿不再存在的强制关闭保留独立路径。更新重启沿用明确退出协调器；取消退出也取消更新重启标记，隐藏不会触发退出时安装。
 
-系统关机、注销、强制终止不能保证运行完整异步退出流程。草稿持续自动保存、发送结果持续落盘，重启按已有协议状态恢复：未开始投递可回队列，可能已送达且无法确认时保留 unknown，不自动重发。后台驻留不提供睡眠中收信、退出后常驻、登录自动启动或独立服务；登录启动与 IMAP IDLE 另行实施。
+系统关机、注销、强制终止不能保证运行完整异步退出流程。草稿持续自动保存、发送结果持续落盘，重启按已有协议状态恢复：未开始投递可回队列，可能已送达且无法确认时保留 unknown，不自动重发。后台驻留不提供睡眠中收信、退出后常驻或独立服务。登录启动见下节，IMAP IDLE 的实现边界见同步设计。
 
 实现入口：`desktop/src/lifecycle.rs`、`tray.rs`、`tray_support.rs`、`compose.rs`；前端 `features/lifecycle/`、通用设置和写信窗口关闭协议。接口见[应用 API](../contracts/app-api.md#桌面主窗口关闭与后台运行)。
+
+
+## 登录自动启动与静默启动
+
+状态：**已有实现与自动化验证，三平台安装包的登录行为待手测** · 2026-11-04。
+
+设置 → 通用 → 启动提供“开机自启动”与“静默启动”，两项默认关闭。开机自启动指当前用户登录图形桌面后启动 MailX，不是开机前的系统服务。安装、升级、普通启动和设置加载都不创建启动项，只有用户主动开启才写入。关闭时移除当前用户的 MailX 启动项，重复关闭幂等。
+
+开机自启动由系统启动项决定，不保存一个会在下次启动强制重建的 JSON 开关。主窗口通过专用 `autostart_get` / `autostart_set` 查询和操作，重新打开设置、应用重新获得焦点时重读；操作后读回确认，失败也重新读取以反映可能的部分写入。读失败显示状态无法确认并提供重试，不将失败解释为关闭。开发构建、浏览器预览和 `MAILX_DATA_DIR` 隔离配置禁用实际启动项操作。
+
+`general.silentStart` 是普通偏好，默认 false；旧设置补默认，非法存量值只恢复该字段。关闭自启动时静默开关置灰并保留选择，重新开启后继续使用。系统启动项只传固定的 `--mailx-autostart` 参数；只有本次收到该参数、当前启动项仍启用且静默偏好为 true 时才保持主窗口隐藏。手动启动忽略静默偏好，正常显示并聚焦；更新后的主动重启移除该参数。已有实例收到重复登录启动请求不抢焦点，收到普通启动请求则唤回主窗口。
+
+静默启动先隐藏创建主窗口，不经历显示后再隐藏的闪烁；macOS 登录启动关闭框架初始的强制激活动作，手动显示仍显式聚焦。设置与系统状态在 blocking worker 读取，等待首轮托盘检查后才决定是否保持隐藏。macOS 保留 Dock 恢复；Windows 需要成功创建托盘；Linux 还需要首轮 AppIndicator / 桌面宿主检查通过，无恢复入口则显示主窗口，不修改静默偏好。后续托盘宿主消失继续使用现有恢复窗口逻辑。同步、发件队列与 MCP 保持原生命周期。
+
+| 平台 | 当前用户启动项 | 状态与路径处理 |
+| --- | --- | --- |
+| macOS | `~/Library/LaunchAgents/com.mailxapp.desktop.autostart.plist` | 标准 plist 编码、`RunAtLoad`、绝对可执行文件路径，不配置 `KeepAlive`；读取当前 GUI domain 的 launchctl 禁用状态，只有显式开启才清除该项禁用。运行于安装镜像或非 app bundle 时拒绝注册。 |
+| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `com.mailxapp.desktop.autostart` 值 | 始终只写当前用户，exe 路径加引号并去掉扩展路径前缀；读取 `StartupApproved\Run` 的禁用状态，只在用户显式开启时重新允许。 |
+| Linux | `$XDG_CONFIG_HOME/autostart/com.mailxapp.desktop.autostart.desktop`，未设置或非绝对路径时使用 `~/.config` | XDG Exec 参数按规范引用与转义；读取 `Hidden` / `X-GNOME-Autostart-enabled`；AppImage 使用原始 AppImage 路径，不记录临时挂载路径。 |
+
+文件采用同目录临时文件写入、同步后原子替换。只接受固定 bool 输入，不允许前端指定文件、命令或参数；权限与来源校验只向可信 main 开放，composer、正文及 MCP 不可操作。
+
+系统全局策略、macOS 后台项目审批、Linux 桌面环境是否执行 XDG Autostart，仍可能阻止启动，应用的注册查询不能保证系统最终放行。移动 app bundle / AppImage 后需从新位置重新开启以刷新路径；卸载前关闭可移除启动项，直接删除应用可能留下指向旧路径的启动项。未完成这些行为的三平台实机验证，不据自动测试宣称已验收。
+
+实现：`desktop/src/autostart/`、`autostart.rs`、`lifecycle.rs` 与前端 `autostart-settings.tsx`。

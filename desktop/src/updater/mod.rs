@@ -284,6 +284,8 @@ pub(crate) fn on_exit(app: &AppHandle) {
     let restart = state.lock().restart_after_install;
     let installed = install_downloaded(&state, restart);
     if installed && restart {
+        // The managed Env excludes the one-shot login marker on every platform,
+        // including the arguments the Windows installer uses to relaunch.
         tauri::process::restart(&app.env());
     }
 }

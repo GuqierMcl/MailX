@@ -53,6 +53,12 @@ export type ClientFailure = AppError | {
   field: null
 }
 
+/** Current-user OS login registration, managed only by the desktop host. */
+export interface AutostartSnapshot {
+  enabled: boolean
+  available: boolean
+}
+
 export class MailxClientError extends Error {
   readonly failure: ClientFailure
 
@@ -152,6 +158,8 @@ export interface MailxClient {
   getSettings(): Promise<SettingsSnapshot>
   /** Updates preference sections (layout fields merge individually) and returns the canonical form. */
   updateSettings(settings: SettingsPatch): Promise<SettingsSnapshot>
+  getAutostart(): Promise<AutostartSnapshot>
+  setAutostart(enabled: boolean): Promise<AutostartSnapshot>
   /** Resolves once the host event listener is registered. */
   onSettingsChanged(listener: (change: { revision: number }) => void): Promise<() => void>
   /** Shows a sample notification with the saved notification settings. */
@@ -432,6 +440,8 @@ export function createDesktopClient(): MailxClient {
       return getCurrentWebviewWindow().listen<{ revision: number }>(HOST_EVENTS.settingsChanged, (event) => listener(event.payload))
     },
     updateSettings: (request) => call<SettingsSnapshot>('settings_update', { request }),
+    getAutostart: () => call<AutostartSnapshot>('autostart_get'),
+    setAutostart: (enabled) => call<AutostartSnapshot>('autostart_set', { enabled }),
     testNotification: () => call<void>('notifications_test'),
     previewSound: (sound) => call<void>('notifications_preview_sound', { sound }),
     onNotificationOpen(listener) {

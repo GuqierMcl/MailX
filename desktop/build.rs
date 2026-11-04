@@ -9,6 +9,8 @@ fn main() {
             "app_cancel_quit",
             "app_confirm_quit",
             "app_desktop_ready",
+            "autostart_get",
+            "autostart_set",
             "accounts_list",
             "accounts_get",
             "accounts_create",
