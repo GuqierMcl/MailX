@@ -4,7 +4,7 @@
 
 # MailX
 
-快速、轻量、本地优先的跨平台邮件客户端，兼容各类邮箱，AI 原生。
+快速、轻量的本地优先邮件客户端 —— 面向每一个收件箱，以 AI 为核心。
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
@@ -16,22 +16,23 @@
 </div>
 
 > [!NOTE]
-> MailX 正处于早期开发阶段，变化可能较快，欢迎提交 Issue 和 Pull Request。
+> 下载见 [Releases](https://github.com/GuqierMcl/MailX/releases)，各版本变化见 [CHANGELOG](CHANGELOG.md)。安装前请阅读[已知限制](#已知限制)。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/mailx-dark.webp">
   <img src="docs/assets/screenshots/mailx-light.webp" alt="MailX 主窗口" width="900">
 </picture>
 
-## 特性
+## 功能
 
-- **轻快** —— Rust 核心配合系统 WebView，不捆绑浏览器内核；打开即是本地缓存的邮件。支持 Windows、macOS 和 Linux。
-- **所有账号，一个收件箱** —— 多个邮箱汇总到统一收件箱。搜索和翻页都在本地完成，已读和星标会同步回服务器。
-- **安全阅读** —— 正文在打开时才下载，并在与应用隔离的沙箱中渲染；远程图片要等你允许才加载。
-- **独立的写信窗口** —— 富文本撰写新邮件、回复和转发，可以添加附件、直接粘贴截图；草稿边写边保存在本地。
-- **可靠的发送** —— 每封邮件都经过发送队列：发出后可撤销，失败自动重试，可能已被服务器接受的邮件不会自动重发。
+- **快速轻量** —— Rust 核心运行在系统 WebView 上，不捆绑浏览器内核。在 Windows、macOS 和 Linux 上打开即进入本地缓存的邮件。
+- **所有账号，一个收件箱** —— 多个邮箱汇总到一个统一收件箱。在本机搜索邮件头、预览、已缓存正文和附件名；已读与星标写回服务器，并支持本机归档和带短暂撤销窗口的删除。
+- **安全阅读** —— 正文在打开时才下载，并在无法触及应用的隔离沙箱中渲染；远程图片要等你允许才加载。
+- **独立的写信窗口** —— 富文本撰写新邮件、回复和转发，可添加附件、粘贴截图；草稿边写边保存在本地。
+- **可靠的发送** —— 每封邮件都经过发送队列，可设置撤销等待时间，符合条件的失败会自动重试；服务器可能已接受的邮件不会自动重发。在与服务器副本对上之前，已发送文件夹显示本机副本。
 - **按账号路由网络** —— 每个账号可以直连，也可以走自己的 SOCKS5 或 HTTP 代理；代理失败时直接停止，不会悄悄改为直连。
-- **桌面原生体验** —— 新邮件通知，关闭窗口后驻留托盘，应用内更新，浅色与深色主题，中英文界面。
+- **桌面原生体验** —— IMAP IDLE 让收件箱及时更新，配合新邮件通知、可选的后台运行与开机自启动、应用内更新、浅色与深色主题、中英文界面。
+- **连接你的 AI 工具** —— 可选的本地 MCP 服务器让兼容客户端搜索、阅读和整理邮件，管理草稿与附件，并直接发信。在“设置 → MCP”复制客户端配置即可连接，使用时需保持 MailX 运行。
 
 ## 支持的邮箱
 
@@ -41,16 +42,17 @@
 | :---: | :---: | :---: | :---: | :---: |
 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
 
-其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。需要 OAuth 登录的服务（如 Gmail、Outlook）暂不支持。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
+其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail、Outlook 等服务的 OAuth 登录在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
 
 <sub>服务商名称与 Logo 为其各自所有者的商标，仅用于标识服务商。</sub>
 
 ## 隐私与数据
 
-- **邮件留在你的电脑上。** 邮件头、已下载的邮件和草稿都存在本地数据库里。没有 MailX 账号、云端中转，也不收集遥测数据。
-- **密码存放在系统钥匙串**（macOS 钥匙串、Windows 凭据管理器、Linux Secret Service），应用不会再把它显示出来。
-- **只做必要的连接。** MailX 只连接你的邮件服务器（设置了代理就经由代理），以及向 GitHub 检查更新（可以关闭）。发件人头像查询默认关闭，邮件里的远程图片会先询问。
-- **发出的邮件自带图片。** 正文里的图片随邮件一起发出，收件人打开时不会从外部加载任何内容。
+- **邮件保存在本地。** 邮件头、已下载的邮件、草稿和附件保存在本地数据库与文件中。没有 MailX 账号、云端中转，也不收集遥测数据；MailX 本身不加密邮件缓存。
+- **密码存放在系统钥匙串** —— macOS 钥匙串、Windows 凭据管理器或 Linux 的 Secret Service —— 应用不会再把它显示出来。
+- **连接由你控制。** MailX 连接你的邮件服务器（设置了代理就经该账号的代理），并向 GitHub 检查更新（可以关闭）。启用发件人头像查询或允许远程图片后，也会向相应的图片服务发起请求；头像查询默认关闭，远程图片默认先询问。
+- **发出的邮件自带图片。** 插入正文的图片随邮件一起发出，显示这些图片无需从外部图片服务器下载。
+- **MCP 默认关闭。** 开启后，连接的本机客户端可访问所有账号、管理草稿、使用本机文件附件并直接发信，无需逐封确认。客户端可能把邮件内容转给其 AI 服务商。在设置中关闭 MCP 即可撤销访问；MCP 不能删除邮件。
 
 ## 路线图
 
@@ -58,20 +60,27 @@
 | --- | --- |
 | 桌面端：收信、阅读、本地搜索、多账号 | ✅ 可用 |
 | 桌面端：撰写与发送 | ✅ 可用 |
-| 桌面端：在已发送文件夹中显示发出的邮件 | 🚧 进行中 |
-| 全文搜索 | 🗓️ 规划中 |
+| 桌面端：在已发送文件夹中显示发出的邮件 | ✅ 已实现 |
+| 本地内容全文搜索 | ✅ 已实现 |
 | OAuth 登录（Gmail、Outlook） | 🗓️ 规划中 |
-| AI 助手 | 🗓️ 规划中 |
-| MCP 服务（经用户批准，让外部 AI 工具安全访问邮箱） | 🗓️ 规划中 |
+| 内置 AI 助手 | 🗓️ 规划中 |
+| 供外部 AI 客户端使用的本地 MCP 服务 | ✅ 已实现 |
 | 服务器：自托管 Web 版本 | 🗓️ 规划中 |
 
 各版本的变化见 [CHANGELOG](CHANGELOG.md)，更详细的路线图见 [docs/roadmap/README.md](docs/roadmap/README.md)。
+
+## 已知限制
+
+- 当前支持密码 / 授权码认证的 IMAP 和 SMTP 账号；OAuth、内置 AI 助手和自托管 Web 版本尚未提供。
+- 首次同步从固定的最近 30 天窗口开始，每轮补齐各文件夹窗口中最新的一千封邮件头，已缓存的邮件会保留。搜索只覆盖本机内容，未打开过的正文可能不在结果中；附件按名称搜索，不搜索文件内容。
+- 归档只在本机生效；移动到任意服务器文件夹和把本地草稿同步到服务器尚未实现。已发送的本机副本不会上传到服务器。
+- 提供 Windows、macOS 和 Linux 构建，但各功能与服务商的覆盖范围不同。已验证的组合和剩余缺口见[验证记录](docs/development/validation.md)。
 
 ## 快速开始
 
 ### 下载
 
-早期构建发布在 [Releases](https://github.com/GuqierMcl/MailX/releases) 页面：
+已发布构建位于 [Releases](https://github.com/GuqierMcl/MailX/releases) 页面：
 
 | 平台 | 文件 |
 | --- | --- |
@@ -82,18 +91,21 @@
 
 安装包尚未做代码签名，系统可能拦截首次启动，各版本发布说明里的安装说明介绍了打开方法。macOS、Windows 和 AppImage 版本可以在应用内自动更新。这些构建尚未在每个平台上逐一验证。
 
+添加账号、发信、连接 MCP 与升级注意事项见[使用入门](docs/guides/zh-CN/README.md)。
+
 ### 从源码构建
 
 环境要求：
 
-- [Bun](https://bun.sh/) 1.3.12（`package.json` 中固定的版本）
-- Rust 1.94.0（由 `rust-toolchain.toml` 固定，首次使用时 rustup 会自动安装）
+- [Bun](https://bun.sh/)，版本以 [package.json](package.json) 中的固定配置为准
+- 通过 rustup 管理 Rust，首次使用时按 [rust-toolchain.toml](rust-toolchain.toml) 自动安装指定工具链
 - [Tauri 平台依赖](https://v2.tauri.app/start/prerequisites/)
 
 ```sh
-bun install
+bun install --frozen-lockfile
 bun tauri dev       # 以开发模式运行桌面应用
-bun tauri build     # 构建当前平台的 release 安装包（未签名）
+# 无项目更新签名私钥时，构建当前平台未签名的本地安装包
+bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 bun run check       # 运行版本、类型、Lint、测试、构建与 Rust 检查
 ```
 
@@ -101,7 +113,10 @@ bun run check       # 运行版本、类型、Lint、测试、构建与 Rust 检
 
 ## 文档
 
+架构、开发与契约等设计文档以中文撰写；使用入门、参与贡献、安全政策与行为准则提供中英两版。
+
 - [文档入口](docs/README.md)
+- [使用入门](docs/guides/zh-CN/README.md)（[English](docs/guides/README.md)）
 - [架构总览](docs/architecture/overview.md)
 - [产品范围](docs/product/README.md)
 - [AI 设计](docs/ai-runtime/README.md)
@@ -109,7 +124,7 @@ bun run check       # 运行版本、类型、Lint、测试、构建与 Rust 检
 
 ## 参与贡献
 
-欢迎参与贡献，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+欢迎参与贡献。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)（[简体中文](CONTRIBUTING.zh-CN.md)），并遵守[行为准则](CODE_OF_CONDUCT.md)（[简体中文](CODE_OF_CONDUCT.zh-CN.md)）。报告安全问题时请按 [SECURITY.md](SECURITY.md) 私下提交。
 
 ## 许可证
 

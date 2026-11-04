@@ -1,25 +1,25 @@
 # 开发指南
 
-状态：**桌面账号、收信、阅读、富文本写信发信与首版中英文文本已有实现** · 2026-10-25。普通浏览器运行 `bun run dev` 时工作台使用合成 mock 数据，仅用于界面开发；真实邮件与凭证经 Tauri 宿主访问共享核心，非敏感数据存 user-data-dir 的 SQLite，凭证由系统凭据库保存。写信附件、已发送副本展示、OAuth 与服务器宿主尚未实现；完整服务商兼容性及三平台体验仍待验证。
+本文说明开发环境、命令与模块边界。普通浏览器运行 `bun run dev` 时工作台使用合成 mock 数据，仅用于界面开发；真实邮件与凭证经 Tauri 宿主访问共享核心，数据保存在用户数据目录的 SQLite 与 blob 文件中，凭证由系统凭据库保存。能力范围见[产品说明](../product/README.md)与[路线图](../roadmap/README.md)，服务商兼容性及平台体验的实际证据见[验证记录](validation.md)。
 
 ## 1. 环境与目录
 
-- 安装 Git 与通过 rustup 管理的 Rust。仓库 `rust-toolchain.toml` 指定 1.94.0、rustfmt 和 Clippy，首次运行 Cargo 时 rustup 会按需安装。
+- 安装 Git 与通过 rustup 管理的 Rust。仓库 `rust-toolchain.toml` 指定工具链版本、rustfmt 和 Clippy，首次运行 Cargo 时 rustup 会按需安装。
 - 安装 [Bun](https://bun.sh/)。根目录 `package.json` 记录当前包管理器版本，前端依赖统一从仓库根目录安装。
 - 构建桌面端需对应平台的 [Tauri 前置依赖](https://v2.tauri.app/start/prerequisites/)：Windows 的 MSVC 构建工具与 WebView2、macOS 的 Xcode 工具链、Linux 的 WebKitGTK 等。
 - 仅开发 `core/` 不需要 Tauri、WebView 或系统 GUI 依赖；桌面开发需要 Tauri 前置依赖。Tauri CLI 作为 `frontend/` 工作区的开发依赖安装，由根目录脚本统一调用。
 
-仓库顶层目录：`core/` 是共享 Rust 核心，`frontend/` 是 React + TypeScript + Vite + shadcn 前端工程，`desktop/` 是 Tauri 宿主，`server/` 留待服务器 MVP，仅占位。根目录 `package.json` 是命令入口和工作区版本入口，`bun run version:check` 校验根目录、`frontend/package.json` 与 Cargo workspace 的版本一致。
+仓库顶层目录：`core/` 是共享 Rust 核心，`frontend/` 是 React + TypeScript + Vite + shadcn 前端工程，`desktop/` 是 Tauri 宿主，`mcp-server/` 提供宿主内的本地 MCP 服务，`mcp-bridge/` 提供随应用打包的 stdio bridge，`server/` 留待服务器 MVP，仅占位。根目录 `package.json` 是命令入口和工作区版本入口，`bun run version:check` 校验根目录、`frontend/package.json` 与 Cargo workspace 的版本一致。
 
-根 Cargo workspace 包含 `core/` 和 `desktop/`；前端工作区位于 `frontend/`，公共 Rust 包元数据与依赖版本在根 `Cargo.toml` 管理，`Cargo.lock` 跟踪 Rust 解析结果，`bun.lock` 跟踪前端解析结果。Cargo 包暂不发布到 crates.io；当前版本以根 `package.json` 为入口，并经 `version:check` 核对各包和 Cargo.lock；工程版本号不表示已发布 MVP。
+根 Cargo workspace 包含 `core/`、`desktop/`、`mcp-server/` 和 `mcp-bridge/`；前端工作区位于 `frontend/`，公共 Rust 包元数据与依赖版本在根 `Cargo.toml` 管理，`Cargo.lock` 跟踪 Rust 解析结果，`bun.lock` 跟踪前端解析结果。Cargo 包暂不发布到 crates.io；当前版本以根 `package.json` 为入口，并经 `version:check` 核对各包和 Cargo.lock。已发布版本以 GitHub Releases 为准。
 
 ## 2. 已有开发命令
 
 以下命令均在仓库根目录执行：
 
 ```sh
-# 安装前端依赖；只使用根目录 bun.lock
-bun install
+# 安装前端依赖；按根目录 bun.lock 复现版本
+bun install --frozen-lockfile
 
 # 前端开发服务器
 bun run dev
@@ -30,16 +30,16 @@ bun tauri dev
 # 前端静态资源构建
 bun run build
 
-# 桌面 release 构建；bundle 已启用（dmg / nsis / deb / rpm / appimage，各平台只构建自己支持的格式），
-# 正式的安装包由发版工作流产出，见 release.md
-bun tauri build
+# 本机构建未签名的桌面安装包；未持有更新签名私钥时关闭更新包生成
+# 各平台只构建自己支持的格式，对外发布由发版工作流产出，见 release.md
+bun run tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
 # 版本入口校验：根 package.json、frontend/package.json、Cargo workspace、Cargo.lock
 bun run version:check
 
 # 版本进位 / 直接设置（只改文件）、发版脚本测试、预览发布说明；流程见 release.md
 bun run version:bump pre --dry-run
-bun run version:set 0.2.0-alpha.1
+bun run version:set 0.2.0-alpha.1 --dry-run
 bun run version:test
 bun run release:notes
 
@@ -78,7 +78,7 @@ git diff --check
 
 普通浏览器运行 `bun run dev` 时，可在地址后加 `?seed=showcase` 载入虚构的展示数据集（仅用 `example.*` 地址），用于截图；默认数据集不受影响。
 
-`bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`，并先执行 `bun run mcp:sidecar -- --placeholder` 放好 MCP bridge 占位文件（`desktop/binaries/`，Tauri 编译时要求其存在）；推荐使用会自动准备这些的 `bun run check` 与 `bun run rust:*`。`bun tauri dev` / `bun tauri build` 会先通过 `scripts/mcp-sidecar.mjs` 构建并放置真实的 bridge。当前 `bundle.active=true`，本机 `bun tauri build` 会在 `target/release/bundle/` 生成本平台的安装包；对外发布的安装包由 `.github/workflows/release.yml` 在推送版本标签后构建，目前未签名，应用内更新已接入，流程见[发版流程](release.md)。
+`bun run dev`（也可写作 `bun dev`）只启动 Vite；`bun tauri dev`（等价于 `bun run tauri dev`）由根脚本调用 Tauri CLI，并通过 `desktop/tauri.conf.json` 启动 Vite 和桌面宿主。`bun run build` 只生成 `frontend/dist`；`bun tauri build` 会先构建该目录，再编译桌面 release 二进制。由于 Tauri 在编译时检查 `frontendDist`，单独执行 `cargo check --workspace` 前也需要先执行 `bun run build`，并先执行 `bun run mcp:sidecar -- --placeholder` 放好 MCP bridge 占位文件（`desktop/binaries/`，Tauri 编译时要求其存在）；`bun run check` 包含前端构建和 Rust 检查，`bun run rust:*` 中的 check / clippy / test 只自动准备 bridge 占位文件。`bun tauri dev` / `bun tauri build` 会先通过 `scripts/mcp-sidecar.mjs` 构建并放置真实的 bridge。当前 `bundle.active=true`，本机安装包输出到 `target/release/bundle/`；默认还会生成更新包，缺少更新签名私钥时构建会失败，本地使用上方关闭 `createUpdaterArtifacts` 的命令。对外安装包由 `.github/workflows/release.yml` 在推送版本标签后构建，目前未做操作系统代码签名，更新包已签名，流程见[发版流程](release.md)。
 
 当前桌面前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航和邮件工作台；应用偏好可在核心启动失败时单独读取。账号配置经 `accounts_* IPC → AccountService` 完成读写，保存配置本身不访问邮箱服务器，连接测试与同步另行触发。普通浏览器的 `bun run dev` 使用合成 mock，语言等预览设置可保存在浏览器，但没有系统凭据及真实核心能力；生产构建在普通浏览器打开时会显示需要桌面应用。两者均不是桌面已保存配置的替代后端。
 
@@ -96,20 +96,20 @@ git diff --check
 
 MailX 自有 Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执行 `bun run icons:generate`，会同步品牌素材、桌面图标和网页图标；`bun run icons:check` 验证派生资源与源稿一致。这套工具仅适用于 MailX 自有品牌，在其设计资源变更时运行，无需加入每次应用构建。详见[品牌资源说明](../../branding/README.md)。
 
-- **core**：已实现账号、认证与路由配置、SQLite 存储及凭证更新恢复；之后按功能加入同步、发件队列、连接器和搜索。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
-- **desktop**：Tauri 生命周期、窗口、受限 IPC、user-data-dir 和系统凭据库装配，在阻塞线程串行调用同步核心。IPC 负责适配核心调用，不承载邮件业务。
+- **core**：账号、认证与路由配置、SQLite / blob 存储、IMAP 同步与正文缓存、全文搜索、草稿与附件、发件队列、删除 / 本机归档及共享工具服务。可直接依赖协议和数据库库，不依赖 Tauri、Axum 或 UI。
+- **desktop**：Tauri 生命周期、窗口、受限 IPC、用户数据目录和系统凭据库装配，以及后台同步、发送、通知、更新器、自动启动与本地 MCP 生命周期。IPC 负责适配核心调用，不承载邮件业务。
 - **frontend**：React + TypeScript + Vite + shadcn（Mira preset）；账号业务界面由 shadcn 组件组成，缺少组件时按现有配置安装。MailxClient 隔离传输，Rust DTO 生成 TypeScript，表单状态与应用契约分别维护。
+- **mcp-server**：本地 IPC 监听、握手认证和 MCP 工具适配，调用共享核心工具服务；由宿主授予动作和账号范围。
+- **mcp-bridge**：连接外部客户端 stdio 与运行中 MailX 的本地 IPC，随桌面包以 `mailx-mcp` 发布；不直接访问邮件数据库或凭证。
 - **server**：当前仅顶级目录占位，第二阶段服务器 MVP 复用 core。
 
 不预建空 trait、Repository 层或每种技术的独立 crate。需要多个实现、平台适配或故障注入时再引入明确接口。
 
-## 4. 接下来的桌面 MVP 工作
+## 4. 开发与发布协作
 
-1. 在已有账号配置基础上编写 IMAP / SMTP 探针，确定协议异步执行方案，验证 Direct / SOCKS5 / HTTP CONNECT 下的 TLS、认证与收发，并证明代理失败不会直连。
-2. 实现连接测试及状态，把密码/授权码配置接入真实连接器；按可用资格推进 OAuth 注册、主体核验与授权流程。
-3. 在现有 SQLite 迁移与恢复基础上加入邮件来源身份、批次事务和 FTS5 探针，验证搜索与同步负载下的执行模型。
-4. 完成“测试邮箱 → 最近 5 封头部 → 去重入库 → 重启读取 → 展示缓存正文”链路，再增加第二个不同路由账号。
-5. 随功能补齐故障测试与 CI；先桌面 MVP，再初始化 server 和容器部署。现有账号配置的自动化测试不代表邮件或全部平台已验证。
+1. 按[发布前检查](release.md#发布前检查)整理文档、升级说明和候选安装包验收；版本号通过版本脚本统一修改。
+2. 按[验证记录](validation.md)中的检查方法与缺口安排回归和手测，明确平台、客户端、服务商及路由组合；不能用自动回归替代平台体验结论。
+3. 后续能力与优先级依照[路线图](../roadmap/README.md)推进；落地后同步产品范围、接口与相关架构文档。
 
 ## 5. 增加邮箱预设
 

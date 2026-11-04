@@ -1,6 +1,19 @@
 # 发版流程
 
-状态：**已多次真实发布**（`v0.1.0-alpha.1` 至 `v0.1.0-rc.1`，其中 `rc.1` 已是 Latest Release）· 本页记录当前约定，遇到问题直接修订本页。安装包目前**未做代码签名**；应用内自动更新已接入（[设计](../architecture/updater.md)），各平台的端到端实测范围以该文档为准。
+本文记录版本管理、构建、草稿验证与发布流程。工程版本以根 `package.json` 为准，已发布版本与 Latest 以 [Releases](https://github.com/GuqierMcl/MailX/releases) 为准。操作系统代码签名和更新包签名分别说明；应用内更新机制见[更新器设计](../architecture/updater.md)，实际验证范围见[验证记录](validation.md)。
+
+## 发布前检查
+
+每次发布前按候选提交确认以下项目，并把实际结果写入[验证记录](validation.md)。版本号、发布标签和自动检查通过不代表平台或服务商体验已经验证。
+
+- **对外说明**：中英文 README、产品范围与路线图应与实现一致，区分已有能力、已知限制和后续计划。尤其核对搜索覆盖范围、本地与服务器动作的区别，以及 MCP 的授权范围。
+- **发布说明与升级**：检查 `[Unreleased]` 是否完整、迁移说明是否与[数据库迁移清单](../architecture/database-migrations.md)一致。跨版本升级前备份数据目录，确认账号、缓存、草稿、附件与发送记录保留，并说明数据格式不向后兼容的变化。版本脚本只归并日志，不替代这项检查。
+- **自动检查**：候选提交通过 `bun run check`、Rust 格式 / Clippy / 测试及三平台 CI；发布前运行手动 `Body WebView` 工作流，并核对 Linux AppImage 启动检查。检查结果应对应实际准备发布的提交。
+- **安装包冒烟**：对草稿中的各平台安装包验证安装启动、登录、同步、阅读、搜索、写信发信与附件、删除撤销、本机归档、退出 / 后台运行，以及 MCP、自启动和本次变更。按平台、客户端和服务商记录范围，未覆盖项明确保留为限制；既有手测或容器启动证据不能替代候选安装包的验证。
+- **更新路径**：用带更新器的旧版验证升级后数据可用，检查立即重启和退出时安装；按相邻版本和跨度升级分别记录。检查方法见[更新器验证计划](../architecture/updater.md#10-验证计划)，已有证据与缺口见[验证记录](validation.md)。
+- **安装说明**：按实际签名状态核对首次启动提示、安装包平台 / 架构、`SHA256SUMS.txt`、四平台更新包与 `.sig`、`latest.json`。更新包验签与操作系统代码签名是两件事。
+
+从预发布版转为正式版时，用 `bun run version:bump release --dry-run` 预览，再执行 `bun run version:bump release`；它会去掉预发布后缀，并将 `[Unreleased]` 归并为当日的小节。随后运行 `bun run version:check --release` 和 `bun run release:notes`，按下文流程合并发版 PR、打标签、验证草稿，最后发布。
 
 ## 1. 版本规则
 
@@ -62,7 +75,7 @@
    git push origin vX.Y.Z
    ```
 7. **等待构建**：推标签触发 `Release` 工作流（Actions 页）。依次是校验版本、四平台构建、全部成功后创建**草稿** Release。
-8. **验证草稿**：在仓库 `Releases` 页找到带 `Draft` 标记的条目，下载各平台安装包，至少在 macOS 和 Windows 各装一次，走登录、同步、阅读的冒烟；核对文件名中的版本号与 `SHA256SUMS.txt`。
+8. **验证草稿**：在仓库 `Releases` 页找到带 `Draft` 标记的条目，下载各平台安装包，走安装、登录、同步、阅读、发信与本次变更的冒烟；核对文件名中的版本号、`SHA256SUMS.txt`、更新包 / 签名和 `latest.json`。未验证的平台或场景须在发布说明中明确；检查范围见上面的发布前检查。
 9. **（可选）修改说明**：草稿的 `Edit`（铅笔）页可改正文，但只改 GitHub 上那份，不会回写 `CHANGELOG.md`。有价值的改动请同步进日志；想让正文重新生成，见第 7 节。
 10. **发布**：草稿的 `Edit` 页底部点 **Publish release**（命令行：`gh release edit vX.Y.Z --draft=false`）。**发布前决定要不要勾 Pre-release**：不勾就是推送给所有用户，见第 4 节。工作流不会替你勾。
 11. **观察更新**：发布后，已装旧版本的用户会在启动约 30 秒后或每 6 小时一次收到提示。可以在自己的机器上装上一个带更新器的版本，确认弹窗、下载、立即重启与退出时安装各走通一次。
@@ -78,8 +91,8 @@ Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 gl
 Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"`，再把该临时配置传给 `bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"`。脚本从构建机的 `pkg-config` 库目录解析 AppIndicator、Ayatana Indicator/Ido 与 dbusmenu 的五个 SONAME，检查 ELF、SONAME 和依赖闭包，并把真实文件复制到 AppImage 的 `usr/lib`。这组库由托盘后端动态加载，普通链接依赖扫描会遗漏；其余依赖和 RPATH 仍由 linuxdeploy 处理。macOS 与 Windows 继续使用原构建命令。
 
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
-- **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先。含 `-` 的版本标为预发布。
-- **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64、Linux x64，都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。两个 macOS 架构的 `.app.tar.gz` 同名，收集时按架构改名为 `MailX_<版本>_aarch64.app.tar.gz` / `_x64`。任一平台失败即整体失败。
+- **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
+- **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
 改动工作流或 runner 标签（如 `macos-15-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。

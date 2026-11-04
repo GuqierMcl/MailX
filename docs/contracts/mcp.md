@@ -1,6 +1,6 @@
 # MCP 初始设计
 
-状态：**Draft / 未冻结** · 本地 MCP 后端（服务端库、stdio bridge、桌面生命周期与状态接口）已有实现，实现细节见[第 9 节](#9-后端实现状态2026-11-02)；设置页、标题栏状态图标、复制配置和 bridge 随应用分发（Tauri sidecar）已有实现，既有工具已有用户手测与部分客户端联调记录，本批发送和附件工具待手测。远程接口后续设计。工具与内置 Agent 共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)。
+状态：**本地 MCP 已实现 / 契约未冻结 / 远程接口为 Planned**。本地服务端、stdio bridge、桌面生命周期与状态接口，以及设置页、标题栏状态图标、复制配置和 sidecar 分发均已有实现。工具与内置 Agent 的设计共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)；平台和客户端证据见[验证记录](../development/validation.md)。
 
 ## 1. 角色与协议
 
@@ -95,7 +95,7 @@ stdio 的 stdout 只输出协议消息，诊断写 stderr 且脱敏。取消按�
 
 `refresh_sync` 只唤醒正常任务，不重启因服务商策略或认证 / 凭据问题停止的账号，不涉及发送重试；accepted 为 false 时不表示邮箱没有新邮件。`show_draft_in_app` 复用宿主写信窗口并固定为已有草稿模式，先检查范围，打开失败返回 unavailable。
 
-2026-11-04 用户确认直接发信：统一提供 `mailx_send_email`，以 `action` 区分首次发送和已有任务重试。无需逐封 UI 确认，也不接受 `confirmed` 或调用方身份参数。首次发送必须带草稿版本与 UUID 幂等键，宿主提供撤销窗口；`unknown` 不自动重发。发件箱分页、附件路径与完整规则见[发送与附件工具](../architecture/mail-send-tools.md)。
+直接发信统一使用 `mailx_send_email`，以 `action` 区分首次发送和已有任务重试。无需逐封 UI 确认，也不接受 `confirmed` 或调用方身份参数。首次发送必须带草稿版本与 UUID 幂等键，宿主提供撤销窗口；`unknown` 不自动重发。发件箱分页、附件路径与完整规则见[发送与附件工具](../architecture/mail-send-tools.md)。
 
 `mailx_get_latest_otp` 暂缓。若后续增加，单独定义账号、可信发件域、短时间窗、一次性授权与审计；验证码不写日志。现有 `mail:read` 仍可能读到验证码邮件，因此授权界面应说明正文读取的实际敏感范围。
 
@@ -172,7 +172,7 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 - Claude Code 2.1.316 使用无状态协议 `2026-07-28`：先发 `server/discover`，**不发** `initialize`，并在每个请求的 `params._meta` 带 `io.modelcontextprotocol/protocolVersion` 与 `io.modelcontextprotocol/clientInfo`（`name`、`title`、`version` 等）。经 bridge 可用，bridge 只转发字节，无需改动。
 - `server/discover`：`rmcp` 3.8 的 `ServerHandler` 有默认的 `discover` 实现，`_meta` 带 `protocolVersion` 与 `clientCapabilities` 时正常应答（`supportedVersions` 含 `2026-07-28`，服务端信息在 `result._meta["io.modelcontextprotocol/serverInfo"]`）。缺这些 `_meta` 的 `server/discover` 由 `rmcp` 内部的统一入口（blanket `Service` 实现，先于任何 handler 方法）校验并回 `-32602`；`ServerHandler` 无法覆盖这一步，要改只能自己包一层 `Service`，我们没有这么做。实测 Claude Code 容忍这个错误，并继续用 `_meta` 调用 `tools/list` 与 `tools/call`。
 - 测试 `stateless_client_without_initialize_gets_its_name_from_request_meta` 覆盖：带 `_meta` 的 discover 成功、不带的回 `-32602`、不 initialize 直接 `tools/list` / `tools/call` 成功且状态里出现客户端名、无 `clientInfo` 时匿名调用仍成功。
-- 联调结果（仅 macOS）：MCP Inspector CLI 与 Claude Code 2.1.316 各自成功调用了四个工具。Windows、Linux 与其他客户端（Cursor、Claude Desktop 等）未测试。
+- 当次联调结果（仅 macOS）：MCP Inspector CLI 与 Claude Code 2.1.316 各自成功调用了四个工具。2026-11-04 用户另反馈 Windows 上 MCP 使用正常，未记录具体客户端与逐项工具范围；Linux 和其他客户端组合仍无明确记录。
 - 重启与断线（Claude Code 实测）：MailX 重启或关闭 MCP 开关时，bridge 按设计退出；Claude Code 随即把该服务器标为断开，旧连接上进行中的调用以“Connection closed”失败，用户需用 `/mcp` 重新连接。
 - 并发（Claude Code 实测）：在同一条存活连接上，经 bridge 并行发起 4 个 `tools/call` 均成功。
 
@@ -184,4 +184,4 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 
 **设置页与分发**：设置 → MCP 页保留开关（开启前确认）、运行状态与错误、已连接客户端、复制配置和默认折叠的手动配置；访问范围与能力边界集中在开启确认中说明；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
 
-**仍未验证**：各平台实机手测（含设置页、标题栏图标、复制配置和 sidecar 路径）、AppImage 实机复制、Windows 实机运行（仅 CI 编译与测试）、Linux 手测、睡眠唤醒、真实 MCP 客户端联调、进程崩溃后的清理路径手测。
+**手测范围与剩余缺口**：平台、客户端、sidecar 分发和工具组合的记录集中维护于[验证记录](../development/validation.md#mcp-send-attachments)，不由后端自动测试推定完整桌面行为已验收。

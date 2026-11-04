@@ -16,7 +16,7 @@
  */
 
 /** Longer notes are cut here; the full text stays on GitHub. */
-export const NOTES_LIMIT = 20_000
+export const NOTES_LIMIT = 40_000
 
 export type Inline =
   | { kind: 'text'; text: string }

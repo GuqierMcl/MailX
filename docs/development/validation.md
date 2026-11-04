@@ -113,7 +113,7 @@ MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.
 
 `mcp-server` 与 `mcp-bridge` 是工作区成员，已被上述三平台 `rust:clippy` / `rust:test` 覆盖，其中 Windows 命名管道与 DACL 代码只在 `windows-2025` 任务里编译并运行测试；没有为它们另设任务。
 
-本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp-bridge` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。另有无状态（`2026-07-28`，不 initialize、客户端信息在 `_meta`）会话的端到端测试。Windows 部分只证明编译与同一组测试在 CI 通过，不是实机手测。真实客户端联调仅在 macOS 上做过：MCP Inspector CLI 与 Claude Code 2.1.316 成功调用四个工具；Windows、Linux 与其他客户端未测。
+本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、首批四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp-bridge` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。另有无状态（`2026-07-28`，不 initialize、客户端信息在 `_meta`）会话的端到端测试。Windows 命名管道代码有 CI 编译和测试覆盖。已有具体客户端联调记录为 macOS 的 MCP Inspector CLI 与 Claude Code 2.1.316，均成功调用首批四个工具；用户于 2026-11-04 另确认 Windows 上 MCP 使用正常，但未逐项记录客户端、工具与服务商组合。Linux 未手测，新增工具的证据见第 28、29 节。
 
 设置 → MCP 页、导航分组、标题栏状态图标由前端测试覆盖（开启前确认、取消保持关闭、关闭不确认、状态与各失败原因、复制的 JSON 含 `--discovery`、图标显隐与圆点、点击打开 MCP 页）；`desktop/src/mcp_sidecar.rs` 测试 bridge 解析、`mcp_client_config` 的参数与 AppImage 稳定副本（权限、内容变化时覆盖）；`scripts/mcp-sidecar.test.mjs` 测试 sidecar 命名与参数。sidecar 打包可用 `bun run tauri build --debug --bundles app` 在 macOS 上检查 `MailX.app/Contents/MacOS/mailx-mcp` 存在且可运行（`--discovery` 指向不存在的文件时退出码 69）；这不等于安装包安装后、其他平台或 AppImage 的行为已验证，未做手测；该条未涉及客户端联调（见上段）。
 
@@ -902,9 +902,12 @@ QQ 邮箱、网易 163 / 126 / yeah.net 与 139 的本地图标已替换为官�
 Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Instant::now()` 倒推 601 秒，在时钟起点不足该时长时发生下溢。撤销回执改存单调时钟的到期时刻，仍在 10 分钟到期时失效；测试直接把到期时刻设为当前时刻，经过完整撤销入口验证拒绝、所有邮件仍归档且不产生事件，无需倒推时钟或等待。本机整理模块 10 项测试、core all-targets Clippy、Rust fmt 与差异检查通过，独立子代理复核无发现。
 
 
-## 29. MCP 发信与附件工具（2026-11-04，待用户手测）
+<a id="mcp-send-attachments"></a>
+<a id="29-mcp-发信与附件工具2026-11-04待用户手测"></a>
 
-本批直接发送草稿、查询 / 取消发送任务和添加 / 移除普通草稿附件；发送与 queued 重试统一为 `send_email`，无需逐封 UI 确认，仍不能删除邮件。规则见[发送与附件工具](../architecture/mail-send-tools.md)。上一批整理工具已由用户于 2026-11-04 反馈手测正常，未逐项记录平台、客户端与服务商；本批不沿用该结果。
+## 29. MCP 发信与附件工具（2026-11-04，已有用户手测反馈）
+
+本批直接发送草稿、查询 / 取消发送任务和添加 / 移除普通草稿附件；发送与 queued 重试统一为 `send_email`，无需逐封 UI 确认，仍不能删除邮件。规则见[发送与附件工具](../architecture/mail-send-tools.md)。上一批整理工具已由用户于 2026-11-04 反馈手测正常；同日用户另确认本批直接发信与附件工具在 macOS 上测试正常，并反馈 Windows 上 MCP 使用正常。反馈未逐项记录客户端、工具、服务商与异常场景，不将其扩展为完整矩阵通过；Linux 未手测。
 
 协议验证使用临时账号与本机关闭端口，发送任务配置 30 秒撤销窗口并在尝试前取消：MCP 调用覆盖附件添加 / 读取 ID / 移除、草稿直接入队、相同幂等键重放、分页查询、状态查询、重试保留撤销窗口和取消后草稿解锁；stdio bridge 覆盖新工具目录与直接入队 / 取消。设置测试核对精简开启说明包含直接发信、本机文件附件及不能删除邮件。
 
@@ -912,15 +915,18 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 
 手测反馈修正：Agent 只报账号 ID，未能说明对应邮箱。账号列表现标明实际默认账号，创建 / 回复 / 列表 / 读取草稿和发送任务均返回发件邮箱；发送任务使用入队时冻结的地址。自动测试覆盖默认设置失效、授权范围与失效账号回退、钥匙串 Locked / Unavailable、账号地址改变后的幂等重放，以及本机副本移除 / 匹配服务器副本后地址仍保留。MCP 协议端到端覆盖账号列表至草稿、发送与查询链路；独立子代理复核通过。修正后再次通过 `bun run check`（前端 865 项）、Rust 全量测试（1032 项通过、5 项忽略）、Clippy、格式与差异检查。
 
-手测重点：真实客户端从本机文件添加附件，检查收件人、正文、附件与发送账号；工具发送后用户界面的发件箱 / 草稿 / 已发送列表刷新；查询 accepted 不误称投递成功；离线重试与撤销窗口；unknown 不自动再次发送；Windows / macOS / Linux 的路径与本机文件限制。自动测试和合成 SMTP 不替代这些证据。
+后续补充证据的重点：真实客户端从本机文件添加附件，检查收件人、正文、附件与发送账号；工具发送后用户界面的发件箱 / 草稿 / 已发送列表刷新；查询 accepted 不误称投递成功；离线重试与撤销窗口；unknown 不自动再次发送；Windows / macOS / Linux 的路径与本机文件限制。已有总体手测反馈未逐项覆盖这张清单，自动测试和合成 SMTP 也不替代这些证据。
 
-## 登录自动启动与静默启动（2026-11-04）
+<a id="login-autostart"></a>
+<a id="登录自动启动与静默启动2026-11-04"></a>
+
+## 30. 登录自动启动与静默启动（2026-11-04）
 
 实现边界见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。自动化覆盖设置兼容与持久化、固定启动来源标记、主窗口权限、文件注册与删除、路径编码、XDG 禁用标记和配置目录、静默启动等待探测与降级，以及开关默认值、禁用依赖、系统外部变化、保存失败和重试。文件测试只使用临时目录，不写实际 LaunchAgents / XDG / 注册表，也不调用 launchctl 修改真实系统启动项。
 
-2026-11-04，本地 macOS 执行 `bun run check`（含 83 个前端测试文件 / 872 项测试、48 项版本脚本测试、类型 / 翻译 / lint / build / Rust check）、`bun run rust:test`、`bun run rust:clippy` 与 `bun run rust:fmt` 通过；最后的桌面增量重跑为 141 通过、2 项默认忽略。独立子代理审查并复核后无剩余阻塞发现。以上不代表真实登录或三平台安装包行为已经验收。
+2026-11-04，本地 macOS 执行 `bun run check`（含 83 个前端测试文件 / 872 项测试、48 项版本脚本测试、类型 / 翻译 / lint / build / Rust check）、`bun run rust:test`、`bun run rust:clippy` 与 `bun run rust:fmt` 通过；最后的桌面增量重跑为 141 通过、2 项默认忽略。独立子代理审查并复核后无剩余阻塞发现。同日用户确认开机自启动与静默启动在 macOS 上测试正常；未逐项记录安装形态、系统策略与异常场景，Windows / Linux 未手测。
 
-待三平台安装包手测（本轮不标记已通过）：
+后续平台与场景验证清单（macOS 总体反馈不等于以下每项均已通过）：
 
 - 新安装与旧配置升级均默认关闭，安装 / 升级 / 普通启动不创建系统启动项。
 - 开启自启动、退出并注销登录后正常打开；关闭后再次登录不启动。

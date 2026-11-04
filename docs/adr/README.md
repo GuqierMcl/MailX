@@ -4,9 +4,9 @@
 
 | 记录 | 初始建议 | 状态 |
 | --- | --- | --- |
-| [0001](0001-shared-core-and-hosts.md) | 合并 core / infra，顶级目录、桌面先行、服务器随后 | Accepted，骨架已落地 |
-| [0002](0002-stack-and-storage.md) | Rust / Tauri、React + Vite + shadcn、rusqlite 与 ts-rs；协议待验证 | 部分 Accepted / 部分 Proposed |
+| [0001](0001-shared-core-and-hosts.md) | 合并 core / infra，顶级目录、桌面先行、服务器随后 | Accepted，桌面与共享核心已有实现，服务器仍规划 |
+| [0002](0002-stack-and-storage.md) | Rust / Tauri、React + Vite + shadcn、rusqlite 与 ts-rs | 基础选型、IMAP / SMTP、FTS5 与 blob 存储已落地；OAuth 等仍规划 |
 | [0003](0003-ai-and-agent-boundaries.md) | 内置 Rust AI 与受限 MCP Server | Proposed，能力范围与接入方式由 0004 修订 |
-| [0004](0004-shared-tool-layer.md) | 内置 Agent 与本地 / 远程 MCP 共用工具层，工具集按入口相交 | Accepted，未实现 |
+| [0004](0004-shared-tool-layer.md) | 内置 Agent 与本地 / 远程 MCP 共用工具层，工具集按入口相交 | Accepted，共享工具层与本地 MCP 已实现；内置 Agent / 远程 MCP 仍规划 |
 
 这些记录可以在早期直接修订。若后续已有实现或公开讨论需要保留历史，再将旧记录标记 Superseded 并链接新方案；不要求每次探索都创建新 ADR，也不因偏离启动愿景额外设置审批。实际实现状态在相应架构文档维护。

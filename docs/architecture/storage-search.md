@@ -1,6 +1,6 @@
 # 存储、搜索与备份
 
-状态：**账号、文件夹与邮件头、正文缓存和本地全文搜索已有实现（全文搜索尚未手测）/ 备份为 Initial draft** · 2026-10-20。当前使用 `rusqlite`，编号 schema 位于 `core/src/storage/migrations/`：v1 为账号和凭证恢复，v2 为文件夹，v3 为邮件头与同步游标，v4 为正文与 MIME 部分。真实服务商和平台运行证据见[验证策略](../development/validation.md)。
+状态：**账号、邮件缓存、草稿、发送队列、邮件整理与本地全文搜索已有实现 / 备份工具为 Planned**。存储使用 `rusqlite`，迁移清单以 [migrations.rs](../../core/src/storage/migrations.rs) 为准，升级语义见[数据库迁移与启动](database-migrations.md)。本文描述数据边界与一致性规则，具体平台、服务商和搜索测试结果见[验证策略](../development/validation.md)。
 
 ## 1. 所有权与目录
 
@@ -8,17 +8,19 @@
 
 ```text
 user-data-dir/
-  mailx.sqlite3             # 当前：账号、连接、认证、路由、文件夹、邮件头、正文与游标
+  mailx.sqlite3             # 账号、邮件缓存、草稿、发送队列、整理状态与全文索引
   mailx.sqlite3-wal / -shm  # SQLite 管理的运行文件
   mailx.lock                # 核心实例持有的文件锁
-  blobs/<前两位>/<SHA-256>  # 不可变原始 MIME
+  blobs/<前两位>/<SHA-256>  # 原始 MIME、草稿附件与发送快照
+  image-cache/              # 已验证的远程图片与头像，可清理
+  settings.json             # 应用偏好，不存邮箱凭证
 ```
 
 正文 blob 按内容哈希保存，临时文件与最终文件在同一文件系统；不保存主题或文件名作为路径。
 
-密钥不在该 SQLite 中明文保存。桌面存系统凭据库，服务端用外部注入主密钥保护独立密钥库，详见[网络与安全](network-security.md)。正文和附件首版默认不做应用层整体加密，磁盘与备份的加密由部署者承担。
+密钥不在该 SQLite 中明文保存。桌面存系统凭据库，后续服务端计划用外部注入主密钥保护独立密钥库，详见[网络与安全](network-security.md)。正文和附件首版默认不做应用层整体加密，磁盘与备份的加密由部署者承担。
 
-WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存。当前为单连接同步服务，宿主在阻塞线程串行执行；未来同步与搜索负载出现后再评估读取连接池。[SQLite WAL 文档](https://www.sqlite.org/wal.html)。
+WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存。当前为单连接加锁的短事务服务，宿主在阻塞线程调用；网络 I/O 不持存储锁，读取连接池需根据后续实际负载评估。[SQLite WAL 文档](https://www.sqlite.org/wal.html)。
 
 ## 2. 当前表与后续邮件模型
 
@@ -49,24 +51,31 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 ### 正文缓存（v4）
 
 `messages` 追加 body_state（missing / fetching / ready / failed）、body_failure 和 preview。
-`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。当前净化版本为 2，旧结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。没有 text/plain 部分的邮件，plain_text 由净化后的 HTML 按块级元素分行生成（段落、`<br>`、表格行断行，列表项带 `- `，`<pre>` 保留换行，空行最多一个）；列表预览与 `partial_text` 仍折叠为单行。该行为只作用于新渲染的邮件，已缓存的旧行不会重渲染，没有回填。
+`message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。净化版本由 [SANITIZER_VERSION](../../core/src/mail/render.rs) 定义，版本落后的结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。没有 text/plain 部分的邮件，plain_text 由净化后的 HTML 按块级元素分行生成（段落、`<br>`、表格行断行，列表项带 `- `，`<pre>` 保留换行，空行最多一个）；列表预览与 `partial_text` 仍折叠为单行。旧缓存按净化版本在读取时重建，不主动全量回填。
 
-### 远程图片的阅读期内存缓存
+### 远程图片缓存
 
-远程图片不建表、不写入 blob，也不复用跨阅读缓存。验证后的图片只保存在当前文档绑定的内存中，按 URL 复用，保留字节总预算 64 MiB；超过预算的图片本次仍可显示，但不额外保留。切换邮件、关闭阅读、隐藏或文档意外重载时，UI 释放对应令牌与缓存；收紧图片策略同样释放缓存，在途请求不能重新写回已释放的绑定。再次打开会建立新的空缓存，继续按 ask / automatic / never 策略决定是否加载。
+远程图片不建表、不写入邮件 blob。成功验证后的图片同时保存在阅读绑定的内存和 `image-cache/` 磁盘缓存中。当前阅读按 URL 复用，成功图片累计最多 64 MiB，超限返回明确错误；磁盘键按账号、邮箱来源、连接版本与 URL 隔离并哈希，TTL 为 30 天。磁盘缓存与头像共用容量管理，超过 200 MiB 时淘汰至 160 MiB，长时间未使用的项会清理。
 
-当前净化版本为 2，旧正文缓存从本地 MIME 重建，不重新下载邮件。远程图片功能没有新增数据库迁移，schema 仍为 v4；原始 MIME 与 CID 的持久化行为不变。
+命中任一级缓存仍须检查当前邮件身份与图片许可。切换邮件、关闭阅读、隐藏或文档意外重载时，UI 释放阅读令牌与内存缓存；收紧图片策略同样撤销绑定，在途请求不能恢复已撤销的访问。再次打开可复用磁盘字节，但仍遵守 ask / automatic / never 策略。重试仅重取失败资源，保留当前阅读中成功的图片。远程图片缓存不新增数据库迁移；原始 MIME 与 CID 的持久化行为不变，详见[远程图片设计](remote-image-loading.md)。
 
-### 后续模型（尚未建表）
+### 已建草稿、发送与整理状态
 
 | 表 | 核心字段 | 关键约束 |
 | --- | --- | --- |
-| attachments | id, message_id, mime_part, file_name, media_type, size, blob_id, content_id | 文件名仅用于展示；下载用 ID |
-| blobs | id, digest, relative_path, size, created_at | 应用生成路径；不可变，引用统计后回收 |
-| pending_mutations | id, account_id, mailbox_source_id, target_identity, kind, desired_value, client_mutation_id, state | unique(account_id, client_mutation_id) |
-| drafts | id, account_id, revision, client_mutation_id, create_payload_hash, recipients, subject, plain_text, reply_headers, updated_at, origin | `origin`（迁移 v22）为 `user` / `mcp` / `ai`（CHECK 约束），NOT NULL 默认 `user`，创建时由宿主写入、之后不变，目前只有 `user`（没有入口创建 `mcp` 或 `ai`）；unique(account_id, client_mutation_id) 保证创建幂等；更新使用乐观锁 |
-| draft_attachments | draft_id, attachment_id, blob_id, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希（见[发信设计](sending.md)第 16 节；普通附件已实现）。内嵌图片（已实现，macOS 用户手测通过）用 `inline = 1` 加 `content_id` 表示，草稿 HTML 以 `cid:` 引用；迁移 v17 已加 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引。保存草稿不删记录，未被正文引用的内嵌记录在新增附件时或草稿发送、删除时清理（sending.md 16.11.2、16.11.6） |
+| drafts | id, account_id, revision, client_mutation_id, create_canonical, to_addresses, cc_addresses, bcc_addresses, subject, body_text, body_html, in_reply_to, references_header, updated_at, origin | `origin`（迁移 v22）为 `user` / `mcp` / `ai`，NOT NULL 默认 `user`，由宿主在创建时写入，之后不变；UI 创建为 `user`、MCP 创建为 `mcp`，`ai` 为后续预留；unique(account_id, client_mutation_id) 保证创建幂等，更新使用乐观锁 |
+| draft_attachments | draft_id, id, blob_hash, file_name, media_type, size, inline, content_id, origin, created_at | 添加时复制进 blob；草稿删除时级联删除；入队前校验哈希。`origin` 支持 `user` / `forwarded` / `mcp` / `ai`（v23 扩展）。内嵌图片以 `inline = 1` 和 `content_id` 表示，正文用 `cid:` 引用；v17 建部分唯一索引，v23 重建时保留。未被正文引用的内嵌记录按[发信设计](sending.md) 16.11 的规则清理 |
 | outbox | id, draft_id, account_id, client_mutation_id, message_id, snapshot_hash, snapshot_size, snapshot_released_at, subject, recipients_preview, recipient_count, state, accepted_at, server_copy_message_id, deleted_locally_at, resolution 等；v18 加 preview, attachment_count | unique(account_id, client_mutation_id)；快照存为 blob（发信设计第 16.6 节），服务器副本对上后释放（第 16.7 节）。尚未对上的 `accepted` 行在已发送角色文件夹的列表中作为本机副本出现（已实现，见发信设计第 9 节） |
+| flag_changes | message_id, flag, wanted, state, attempts, created_at, updated_at | 按邮件与标记保存最新意图，`pending` 等待写回，`local` 为服务器不支持时的本地状态 |
+| message_deletions | message_id, batch_id, account_id, mailbox_source_id, folder_id, uid_validity, uid, target_folder_id, permanent, due_at, started, attempts | v20；删除立即隐藏、撤销窗口后由写回任务执行；始终核对来源与 UID 身份 |
+| message_archives | account_id, mailbox_source_id, archive_key, archived_at | v21；本地归档不操作服务器，按来源与 Message-ID（缺失时用本地 ID）保存 |
+
+### 后续模型（尚未建表）
+
+接收附件当前用 `message_parts` 元数据与原始 MIME，blob 用哈希文件和各业务表引用，写回使用 `flag_changes` / `message_deletions`；尚未建立独立 `attachments`、`blobs` 或通用 `pending_mutations` 表，也不要求为初始模型预建这些表。
+
+| 表 | 核心字段 | 关键约束 |
+| --- | --- | --- |
 | ai_runs | id, kind, provider_id, model, state, context_refs, context_hash, input_revision, result, error_code | 原始完整提示词默认不另存 |
 | mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 后续逐客户端授权时启用，首版本地 MCP 只用开关与统一授权；随时可撤销；不存邮箱凭证 |
 | audit_events | id, time, actor_id, account_id, action, resource_id, outcome, request_id | 不记录正文、地址列表、OTP、密钥 |
@@ -77,10 +86,10 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 邮件批次、flags、删除与既有游标推进事务核对账号当前来源、文件夹归属和 UIDVALIDITY。文件夹计数更新核对来源与归属，代际初始化事务负责建立或切换 UIDVALIDITY。批次邮件与最高已处理 UID 原子提交，数据库失败不推进游标；账号切换服务器、文件夹删除或代际切换后的迟到写入被拒绝。来源切换后读取立即排除旧来源，目录清理或删除文件夹时通过外键级联删除对应邮件和游标。
 
-- 当前连接设置外键校验和 `busy_timeout`，启用 WAL、`synchronous=FULL`，为配置提交提供持久化基础。未来草稿与发送状态沿用该边界。性能调整需基准与 ADR。
+- 当前连接设置外键校验和 `busy_timeout`，启用 WAL、`synchronous=FULL`，账号、草稿与发送状态共用该持久化边界。性能调整需基准与 ADR。
 - 网络、MIME 大文件解析和模型请求不能占用数据库事务；当前 `rusqlite` 调用隔离到宿主阻塞执行器，未来连接池与事务调度必须继续避免阻塞异步任务。
 - 当前 blob 先写临时文件、同步并原子重命名，文件持久化后短事务写入正文、parts、preview 与 ready；已存在哈希复用。启动持目录独占锁、后台任务开始前恢复 fetching 并清理未引用的严格哈希文件 / 本程序临时文件，不跟随符号链接。运行期 GC、配额与 LRU 尚未实现。
-- 后续正文与对应全文索引同事务更新，避免搜索结果指向不存在的内容；索引是派生数据，可以重建。
+- 正文提交与对应全文索引在同一事务更新；已有数据的索引由后台分批补建。索引是派生数据，可以重建。
 - 后续 GC 不删除被草稿、outbox 或备份引用的 blob；写信附件落地后，启动 GC 把 `draft_attachments` 与尚未释放的 outbox 快照算作存活引用（内嵌图片的记录同样算，包括暂未被正文引用、尚待清理的）。已发送快照在服务器对上后只清空引用，文件由下次启动 GC 回收。磁盘满时不清理用户未发送草稿来给邮件缓存腾空间。
 
 ## 4. 缓存边界
@@ -89,11 +98,11 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 后续正文和接收附件拟使用 LRU 配额，初始合计 2 GiB，可配置。草稿（含写信附件）、待发送与尚未对上服务器的已发送 MIME 快照、用户固定的离线内容不参与自动淘汰，单独显示占用。缓存被淘汰后 `bodyState=missing`，同步状态不能仍宣称可离线阅读。
 
-当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件仅列元数据，不解压、执行或提供独立保存。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。原始 MIME 的运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
+当前按需正文实现：完整原始 MIME 上限 100 MiB，既检查 RFC822.SIZE，也在接收层按超限 literal 预分配之前拒绝；单个解码正文保留最多 20 MiB，超限按 UTF-8 边界截断并明确标记 truncated，不假装完整。20 MiB 是保留正文上限，不是解析器总内存上限。MIME 深度上限 30，内嵌资源单件上限 50 MiB；附件元数据来自已缓存 MIME，桌面可经另存为对话框保存，不自动解压或执行。原始 MIME 按内容哈希写入 blobs，迁移 v4 为正文 / MIME 部分建表，派生 HTML 带净化版本；文件同步与原子重命名先于数据库引用，启动恢复遗留 fetching 并清理孤立 blob。原始 MIME 的运行期配额与 LRU 尚不实现；实际验收与服务商覆盖见验证策略。
 
 ## 5. 邮件查询与本地全文搜索
 
-`emails_list` 搜索**已缓存且当前可见的头部**，查询由 `AccountService` 校验后交给 Storage；账号与文件夹作用域在 SQL 中限定，不先跨账号搜索再在界面隐藏。当前支持 `accountIds`、`folderId` 或 `folderRole`、`unread`、`hasAttachment`、`text`、`receivedAfter` / `receivedBefore`。统一收件箱使用 `folderRole=inbox`，详情用 `emails_get`；完整参数和错误见[应用 API](../contracts/app-api.md#2-当前邮件分页与查询)。
+`emails_list` 查询**本地缓存中当前可见的邮件与本机已发送副本**，查询由 `AccountService` 校验后交给 Storage；账号与文件夹作用域在 SQL 中限定，不先跨账号搜索再在界面隐藏。当前支持 `accountIds`、`folderId` 或 `folderRole`、`unread`、`hasAttachment`、`text`、`receivedAfter` / `receivedBefore` 等筛选。统一收件箱使用 `folderRole=inbox`，详情用 `emails_get`；完整参数和错误见[应用 API](../contracts/app-api.md#2-当前邮件分页与查询)。
 
 `text` 走本地全文搜索（5.1）：检索主题、人员、预览、已缓存正文与附件名，用户文本不作为 SQL 或 FTS 表达式执行。时间范围左闭右开，RFC 3339 参数先转为 UTC 毫秒格式。查询默认每页 50 条，上限 200；前端请求 100 条，按 `(receivedAt DESC, id DESC)` 游标分页并防抖搜索，丢弃过期响应。
 
@@ -101,7 +110,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 返回 `coverage { headersComplete, windowCapped, bodiesComplete, indexedBodies, syncedAfter, syncedBefore }`（`indexedBodies` 见 5.1）：对账号 / 文件夹作用域内的全部当前可选文件夹，存在游标、`backfill_done=1` 且 `window_capped=0` 才认为头部窗口完整；无匹配文件夹或任一文件夹未同步时为 false。`syncedAfter` 为涉及游标中最晚的固定窗口起点（UTC 日期），无游标时为 null；`syncedBefore=null`，`bodiesComplete=false`。`windowCapped=true` 表示至少一个匹配目录的窗口超过本轮选取上限；coverage 不表达当前任务是否正在运行。
 
-完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要的 preview / bodyState 来自 v4 缓存列，pendingChanges=false。详情返回缓存纯文本、HTML 存在标志、截断和远程图片计数，以及非内联附件元数据。
+完整性声明的是这些文件夹的**同步窗口**，不声明整箱历史已缓存；文本、未读、附件或时间过滤不缩小计算完整性的文件夹范围。即使查询请求窗口之前的时间，`headersComplete=true` 也不能证明那段历史完整，应结合 `syncedAfter` 理解结果。邮件摘要的 preview / bodyState 来自缓存列，`previewState` 区分摘要状态；`pendingChanges` 由是否存在 `pending` 标记写回记录派生，本机已发送副本为 false。详情返回缓存纯文本、HTML 存在标志、截断和远程图片计数，以及非内联附件元数据。
 
 全文搜索见 5.1（2026-10-30 确认，第一批已实现，尚未手测）。向量索引、云端 embedding 和自然语言转 SQL 不在本阶段范围内。
 
@@ -115,7 +124,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 | 分批 | 内容 |
 | --- | --- |
-| 第一批（F0–F4，本次） | 索引已有数据：头部、预览、已缓存正文、附件名、本机已发送副本；查询、短词退回、命中片段与覆盖说明 |
+| 第一批（F0–F4） | 索引已有数据：头部、预览、已缓存正文、附件名、本机已发送副本；查询、短词退回、命中片段与覆盖说明 |
 | 第二批（规划） | 同步窗口内后台下载正文文本部分，只写入索引，让正文搜索覆盖最近的邮件 |
 | 不做 | 服务商端 `SEARCH`、相关度排序、`from:` 等字段语法、向量 / 语义搜索 |
 
@@ -163,11 +172,11 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 ## 6. 迁移与恢复
 
-当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按序以逐步事务执行，当前登记至 v12，可从已有版本顺序升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与账号写入前还恢复凭证更新 journal 和移除后的凭证清理意图，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
+当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按 [migrations.rs](../../core/src/storage/migrations.rs) 登记的顺序逐步执行事务，可从兼容的已有版本升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与账号写入前还恢复凭证更新 journal 和移除后的凭证清理意图，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
 
 账号移除使用一个事务核对连接 revision 与无 `sending` 项，再清除配置及其全部来源的缓存、草稿和发件记录。v11 的 `account_removals`、`removed_create_requests` 与 `secret_gc` 保存可重试收据、禁止创建请求重放的墓碑和不含秘密的清理引用；凭证删除失败不恢复已移除账号。共享 blob 只删除数据库引用，下次启动 GC 再回收孤立文件，不在运行中执行全局 GC；已保存到用户选择路径的附件不受账号移除影响。
 
-[数据库迁移与启动方案](database-migrations.md)记录本轮已实现的迁移核心和启动准入；升级前备份、恢复入口和完整故障矩阵仍是后续要求。
+[数据库迁移与启动方案](database-migrations.md)记录迁移核心和启动准入；升级前备份、恢复入口和完整故障矩阵仍是后续要求。
 
 以下为后续升级和邮件数据恢复要求：迁移在任何同步任务启动前执行，每个迁移在支持的事务边界内完成。升级前创建一致性备份；不支持直接降级打开更高版本数据库，提示恢复兼容备份。迁移失败保持原数据可恢复，禁止删除数据库重建作为通用修复手段。
 
@@ -175,7 +184,7 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 
 ## 7. 备份协议（后续）
 
-v0.1 以停机备份为正式路径：暂停并等待任务退出 → 关闭所有数据库连接 → 复制完整数据目录 → 输出版本、文件清单与校验和。不能只复制运行中的 `mailx.sqlite3`，也不能把备份目录直接放回当前运行目录覆盖。
+备份方案优先采用停机路径：暂停并等待任务退出 → 关闭所有数据库连接 → 复制完整数据目录 → 输出版本、文件清单与校验和。不能只复制运行中的 `mailx.sqlite3`，也不能把备份目录直接放回当前运行目录覆盖。
 
 后续在线备份采用 SQLite Backup API 生成数据库快照，同时冻结 blob 删除并复制快照引用的不可变文件；两者都完成后才能标记备份成功。[SQLite Backup API](https://www.sqlite.org/backup.html)。
 

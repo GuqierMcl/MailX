@@ -1,9 +1,10 @@
 //! Shared, host-independent foundation for MailX.
 //!
-//! Account configuration and app preferences are persisted here; hosts supply a data directory,
-//! system secret store and async runtime. Read-only background IMAP sync keeps
-//! folders and per-folder message headers in a local cache for paginated queries.
-//! Message bodies, flag writes and sending are not implemented yet.
+//! Hosts supply a data directory, system secret store and async runtime. The core owns
+//! account configuration, IMAP sync and IDLE, cached message reading and search,
+//! flag writes, deletion, local archiving, drafts, attachments and the SMTP send queue.
+//! The transport-independent tool layer exposes authorized operations to local MCP;
+//! built-in AI and the server host are not implemented yet.
 
 pub mod accounts;
 mod app;
