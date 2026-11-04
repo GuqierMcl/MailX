@@ -1,6 +1,6 @@
 # 桌面应用内更新
 
-状态：**已实现；端到端更新已在 Windows 上实测通过，macOS 与 Linux 未验证**（设计确认于 2026-10-27）。本文记录检查时机、网络路径、发版规则、签名与交互的已确认决定与实现；验证记录见第 10 节，没有实测的部分在那里如实列出。
+本文记录应用内更新的检查时机、网络路径、发版规则、签名与交互。设计确认于 2026-10-27；第 10 节保留验证方法与历史证据，实际平台覆盖和后续结果统一见[验证记录](../development/validation.md)。
 
 ## 1. 目标与边界
 
@@ -22,8 +22,8 @@
 ## 3. 签名密钥
 
 - 更新器签名用 Tauri 的 minisign 密钥对。公钥（密钥 ID `B0DE08C9ED9EA8E9`）写入 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey`，随应用发布。
-- 私钥与密码在 GitHub `release` 环境的 secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥由维护者离线保管，**未设密码**；`…_PASSWORD` secret 已存在，内容未知，第一次接入时需先用手动触发的工作流单独验证签名能成功。
-- `release` 环境目前**没有**分支 / 标签保护。建议维护者在网页上把它的部署分支 / 标签规则限制为 **`v*` 标签和 `main` 分支**两者：构建任务都在这个环境里跑，而打开 `createUpdaterArtifacts` 后没有私钥的构建会直接失败，所以 `workflow_dispatch` 的试跑同样需要它——从 `main` 触发是允许的，从其他分支触发会被环境拒绝。这需要在 GitHub 网页上手动设置，代码里不配置。
+- 私钥与密码只放在 GitHub `release` 环境的 secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，私钥由维护者离线保管。已有发布产出四平台签名，见第 10 节；修改密钥配置后需重新验证构建与更新。
+- 按[发版流程](../development/release.md#8-更新器签名)记录，`release` 环境的部署分支 / 标签已限制为 **`v*` 标签和 `main` 分支**。构建任务都在这个环境里跑；打开 `createUpdaterArtifacts` 后没有私钥的构建会失败，因此 `workflow_dispatch` 的试跑同样需要它。从 `main` 触发允许，从其他分支触发会被环境拒绝。这是 GitHub 环境设置，代码里不配置。
 - 私钥或密码丢失：已安装用户无法再自动更新，只能手动安装带新公钥的版本。更换公钥同理，需要过渡版本。
 
 ## 4. 产物与 `latest.json`
@@ -123,7 +123,7 @@
 
 ### 8.4 更新说明的轻量 Markdown 渲染
 
-- 自行实现，不引入 Markdown 库。支持：`#`–`###` 标题、段落、`- ` / `* ` 列表、`> ` 引用、`**粗体**`、`` `代码` ``、`[文字](链接)`。其余语法按原文显示。
+- 自行实现，不引入 Markdown 库。支持：`#`–`###` 标题、段落、`- ` / `* ` 列表、`> ` 引用、`**粗体**`、`` `代码` ``、`[文字](https://…)` 形式的链接。其余语法按原文显示。
 - 渲染为 React 元素，**不使用 `dangerouslySetInnerHTML`，原始 HTML 一律按文本显示**。
 - 链接只接受 `https:`，点击后由宿主用系统浏览器打开；其他协议（含 `javascript:`、`data:`、`file:`）按纯文本显示。
 - `notes` 超过 20 000 字符时截断并提示可在 GitHub 查看完整说明。
@@ -169,7 +169,7 @@
 
 验证的发布：`v0.1.0-alpha.3` 与 `v0.1.0-alpha.4` 均以普通 Release 发布（不勾 Pre-release），`latest.json` 由 CI 生成并上传，四平台签名齐全，文件名按 `MailX_<版本>_<平台><扩展名>` 命名。
 
-**仍未验证**：macOS 与 Linux 上的端到端更新；Linux AppImage 的替换行为；macOS、Windows、Linux 三个平台上的系统代理实际表现（仅核对了源码，没有在受限网络里测过）；下载取消与中途断网的界面反馈；多版本跨度的升级（目前只验证了相邻的 alpha.3 → alpha.4）。
+**上述记录当时未覆盖**：macOS 与 Linux 上的端到端更新；Linux AppImage 的替换行为；macOS、Windows、Linux 三个平台上的系统代理实际表现（仅核对了源码，没有在受限网络里测过）；下载取消与中途断网的界面反馈；多版本跨度的升级（该轮只验证了相邻的 alpha.3 → alpha.4）。后续结果统一记入[验证记录](../development/validation.md)。
 
 ## 11. 服务端兼容
 

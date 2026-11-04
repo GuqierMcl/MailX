@@ -1,35 +1,35 @@
-# 安全政策
+# Security Policy
 
-> English summary: please report vulnerabilities privately through GitHub's private vulnerability reporting (Security Advisories) and never in public issues; do not include real credentials or real mail content in reports.
+English | [简体中文](SECURITY.zh-CN.md)
 
-MailX 仍处于早期开发阶段，目前只发布过 `0.1.0` 的预发布版本（alpha / rc）。
+Released versions are listed in [Releases](https://github.com/GuqierMcl/MailX/releases), and changes are in the [CHANGELOG](CHANGELOG.md).
 
-## 受支持的版本
+## Supported versions
 
-目前没有正式版本；只有 `main` 分支上的最新代码会被考虑修复。
+Security issues are fixed on `main` and shipped in a new release. Older versions are not patched separately. Include the app version in your report.
 
-## 如何报告漏洞
+## Reporting a vulnerability
 
-请通过本仓库 **Security** 页签的 “Report a vulnerability”（GitHub 私有漏洞报告 / Security Advisories）私下提交。
+Please report privately through the **Report a vulnerability** form on the repository's **Security** tab (GitHub private vulnerability reporting / Security Advisories).
 
-<!-- TODO（维护者）：若私有漏洞报告不可用，在此补充安全联系邮箱。此处尚未确定任何联系地址。 -->
+Private reporting is enabled: [Report a vulnerability](https://github.com/GuqierMcl/MailX/security/advisories/new).
 
-请不要：
+Please do not:
 
-- 为安全漏洞创建公开 Issue、Pull Request 或讨论；
-- 在报告中附带真实的邮箱凭证、令牌、私钥，或真实邮件内容、附件和包含真实地址的完整日志；复现请使用合成数据；
-- 对他人的邮箱账号或服务发起测试。
+- open a public issue, pull request or discussion for a vulnerability;
+- include real mailbox credentials, tokens, private keys, or real mail content, attachments and full logs containing real addresses; reproduce with synthetic data;
+- test against anyone else's mailbox account or provider.
 
-报告中请尽量说明受影响的提交或分支、复现步骤、影响范围与你的判断。本项目为个人维护的早期项目，不承诺固定的响应或修复时限，但会认真对待并尽力沟通。
+Include the affected commit or branch, reproduction steps, impact and your assessment where you can. This project is maintained by one person and does not promise a fixed response or fix time, but reports are taken seriously and answered as promptly as possible.
 
-## 关注范围
+## Scope of interest
 
-以下方向与 MailX 的安全边界直接相关，欢迎重点审视：
+These areas sit directly on MailX's security boundary and are especially welcome:
 
-- 邮件 HTML 与正文隔离：邮件内容不可信，不应能执行脚本、未经用户允许加载远程资源，或获得 Tauri IPC 权限；
-- Tauri IPC 暴露面：命令与权限是否超出界面实际所需；
-- 凭证存储：凭证应只由后端 SecretStore 管理，不应出现在返回值、日志、数据库或诊断输出中；
-- 网络路由：协议连接必须走账号路由，自定义代理失败时不得回退直连；
-- 模型输出与 MCP 输入同样不可信，AI 不能自行批准发信。
+- Mail HTML and body isolation: message content is untrusted and must not be able to run scripts, load remote resources without permission, or gain Tauri IPC access;
+- Tauri IPC surface: whether commands and permissions exceed what the UI actually needs;
+- Credential storage: credentials should be managed only by the backend SecretStore and must not appear in return values, logs, the database or diagnostics;
+- Network routing: protocol connections must use the account's routing, and a failing custom proxy must never fall back to a direct connection;
+- Model output and MCP input are equally untrusted and must not extend the permissions the host granted. The current MCP master switch confirmation grants access to mail reading, organizing, draft and attachment management and direct sending for all accounts, with no per-message confirmation; tools must still check the action, account scope, draft version and idempotency key. Turning the switch off must revoke access. MCP does not provide mail deletion.
 
-设计细节见[网络与安全](docs/architecture/network-security.md)。
+Design details are in [Network and security](docs/architecture/network-security.md).

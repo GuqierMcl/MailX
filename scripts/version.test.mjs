@@ -187,7 +187,7 @@ describe("a project on disk", () => {
     writeFileSync(join(dir, ".github/release-install-notes.md"), "## 安装说明\n\n脚注\n");
 
     const pre = releaseNotes(dir, "0.2.0-alpha.1");
-    expect(pre).toStartWith("> **预发布版本**");
+    expect(pre).toStartWith("> **预发布版本 / Prerelease**");
     expect(pre).toContain("- 新功能 A");
     expect(pre).toEndWith("---\n\n## 安装说明\n\n脚注\n");
 
@@ -195,7 +195,7 @@ describe("a project on disk", () => {
     writeFileSync(join(dir, "CHANGELOG.md"), stable);
     const notes = releaseNotes(dir, "0.2.0");
     expect(notes).not.toContain("预发布版本");
-    expect(notes).toContain("**完整变更**：https://example.test/o/r/compare/v0.1.0...v0.2.0");
+    expect(notes).toContain("**完整变更 / Full changelog**：https://example.test/o/r/compare/v0.1.0...v0.2.0");
     expect(() => releaseNotes(dir, "0.3.0")).toThrow();
   });
 });

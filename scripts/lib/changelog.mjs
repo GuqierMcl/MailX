@@ -59,7 +59,7 @@ export function releaseProblems(text, version) {
 }
 
 const PRERELEASE_NOTICE =
-  "> **预发布版本**：仍在开发中，功能不完整，也未经真实邮件服务商的完整兼容性验证。请勿用于唯一的邮箱工作流。";
+  "> **预发布版本 / Prerelease**: 仍在开发中，功能不完整，也未经真实邮件服务商的完整兼容性验证。请勿用于唯一的邮箱工作流。 / still in development, incomplete, and not fully verified against real mail providers. Do not use it as your only mailbox workflow.";
 
 /** The GitHub Release body for `version`. */
 export function releaseNotes(dir, version) {
@@ -72,7 +72,7 @@ export function releaseNotes(dir, version) {
   if (prerelease) parts.push(PRERELEASE_NOTICE);
   parts.push(sectionBody(text, prerelease ? "Unreleased" : version));
   const link = new RegExp(`^\\[${version.replace(/\./g, "\\.")}\\]:\\s+(\\S+)`, "m").exec(text)?.[1];
-  if (link && link.includes("/compare/")) parts.push(`**完整变更**：${link}`);
+  if (link && link.includes("/compare/")) parts.push(`**完整变更 / Full changelog**：${link}`);
 
   const footer = resolve(dir, ".github/release-install-notes.md");
   if (existsSync(footer)) parts.push(`---\n\n${readFileSync(footer, "utf8").trim()}`);

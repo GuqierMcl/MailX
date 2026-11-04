@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability / 报告安全漏洞
+    url: https://github.com/GuqierMcl/MailX/security/advisories/new
+    about: Report vulnerabilities privately through GitHub, never in a public issue. / 请通过 GitHub 私有漏洞报告提交，不要创建公开 Issue。
+  - name: Getting started / 使用入门
+    url: https://github.com/GuqierMcl/MailX/blob/main/docs/guides/README.md
+    about: Install, account setup, MCP configuration and known limitations. / 安装、账号接入、MCP 配置与已知限制。

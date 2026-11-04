@@ -1,6 +1,6 @@
 # 应用数据库版本化迁移与启动
 
-状态：**Implemented（迁移与启动准入）**。应用启动时自动完成本地数据库准备，成功后才开放业务界面和账号操作；覆盖 v1 兼容、有序迁移、启动准入和失败重试。当前生产清单为 v1–v19：v2 文件夹、v3 邮件头、v4 正文缓存、v5 账号颜色、v6 待写回标记、v7 草稿 / 发件人名称、v8 发送队列、v9 草稿 HTML、v10 代理图片域名解析策略、v11 账号移除、v12 服务商图标偏好、v13 写信附件，v14 发送快照改存 blob，v15 账号的 SMTP `SIZE` 记录，v16 邮件预览状态，v17 内嵌图片 Content-ID 的唯一索引，v18 发送队列的列表摘要与附件数，以及 v19 本地全文搜索索引。`0010_image_proxy_dns.sql` 为 `network_routes` 增加默认 0 的 `image_proxy_dns`，约束非 custom 路由不得启用；既有账号升级后保持受限策略。`0011_account_removal.sql` 新建删除收据、已移除创建请求与待清理凭证引用三表，不修改已有账号或凭证。`0012_account_provider_icon.sql` 为 `accounts` 增加 `use_provider_icon INTEGER NOT NULL DEFAULT 1 CHECK (use_provider_icon IN (0, 1))`，已有账号升级后默认启用服务商图标；此资料偏好不推进连接 `revision`，连接提交与 journal 恢复保留用户已保存的选择。`0013_draft_attachments.sql` 新建草稿附件表，草稿删除时级联删除。`0014_outbox_snapshot_blob.sql` 重建 `outbox`（SQLite 不能就地放宽 NOT NULL），新增快照哈希、字节数与释放时间三列，`mime` 改为可空；只搬结构，旧行的字节由 `Storage::open` 中的非 SQL 外迁步骤写成 blob 后再清空，见第 4.4 节。`0015_account_smtp_size_limit.sql` 为 `accounts` 增加可空的 `smtp_size_limit`（字节，CHECK 大于 0），保存服务器在 `EHLO` 声明的 `SIZE`，只用于写信窗口的上限提示。`0016_preview_state.sql` 为 `messages` 增加 `preview_state`（`missing` / `ready` / `failed`，默认 `missing`），已缓存正文的行升级为 `ready`。`0017_inline_image_content_id.sql` 为 `draft_attachments` 建 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引；`inline = 1` 与 `content_id` 非空成对由核心写入路径保证（SQLite 不能给已有表补 `CHECK`，不为此重建表）。`0018_outbox_sent_copy_list.sql` 为 `outbox` 增加可空的 `preview` 与 `attachment_count`，入队时写入；已有的 `accepted` 行由启动时的非 SQL 外迁从未释放的快照补齐（与第 4.4 节同一模式，可重复执行）。`0019_search_index.sql` 新建 FTS5 trigram 表 `search_fts`、映射表 `search_docs` 与状态表 `search_index_state`，并在 `messages`、`outbox` 上建删除触发器；已有数据不在迁移中写入，由启动后的后台任务分批补建（存储与搜索 5.1）。历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
+状态：**Implemented（迁移与启动准入）**。应用启动时自动完成本地数据库准备，成功后才开放业务界面和账号操作；覆盖 v1 兼容、有序迁移、启动准入和失败重试。完整生产清单以 [migrations.rs](../../core/src/storage/migrations.rs) 及其引用的编号 SQL 为准，本页说明迁移与恢复机制，不重复维护最新 schema 版本号。备份恢复工具与完整升级保障仍是后续工作。
 
 ## 1. 目标与范围
 
@@ -39,8 +39,9 @@ core/src/storage/
   mod.rs                               # 目录锁、连接配置与存储操作
   migrations.rs                        # 有序清单、历史检查、事务执行
   migrations/
-    0001_account_configuration.sql     # 现有 schema.sql 原样迁入
-    0002_*.sql                         # 以后真实变更时追加，本轮不创建
+    0001_account_configuration.sql     # 旧 schema.sql 原样迁入
+    0002_folders.sql                   # 文件夹缓存
+    ...                               # 按功能追加，历史 SQL 不改写
 desktop/src/
   state.rs                             # 启动状态、服务所有权、单次初始化/重试
   commands.rs                          # 状态接口、业务准入及既有来源检查
@@ -51,6 +52,38 @@ frontend/src/features/startup/
 迁移描述由 Rust 静态清单提供：`version`、`description`、`sql`，并声明该版本完成后必须存在的业务表。SQL 使用 `include_str!` 嵌入二进制，校验值按当前原始 UTF-8 字节计算 SHA-256。清单从版本 1 开始连续递增，禁止重复、乱序或缺号；运行时验证清单，不通过悄悄排序掩盖错误。
 
 新增迁移必须同时新增 SQL 和清单条目。运行时不扫描磁盘 SQL 目录，不下载迁移，不接受前端提供的 SQL、文件路径或目标版本。显式修改 Rust 清单使新增文件进入编译依赖。
+
+### 既有迁移的兼容机制
+
+以下记录解释已引入迁移的兼容行为，不是完整或最新的迁移清单。新增迁移继续以代码登记的顺序为准。
+
+`0010_image_proxy_dns.sql` 为 `network_routes` 增加默认 0 的 `image_proxy_dns`，约束非 custom 路由不得启用；既有账号升级后保持受限策略。
+
+`0011_account_removal.sql` 新建删除收据、已移除创建请求与待清理凭证引用三表，不修改已有账号或凭证。
+
+`0012_account_provider_icon.sql` 为 `accounts` 增加 `use_provider_icon INTEGER NOT NULL DEFAULT 1 CHECK (use_provider_icon IN (0, 1))`，已有账号升级后默认启用服务商图标；此资料偏好不推进连接 `revision`，连接提交与 journal 恢复保留用户已保存的选择。
+
+`0013_draft_attachments.sql` 新建草稿附件表，草稿删除时级联删除。
+
+`0014_outbox_snapshot_blob.sql` 重建 `outbox`（SQLite 不能就地放宽 NOT NULL），新增快照哈希、字节数与释放时间三列，`mime` 改为可空；只搬结构，旧行的字节由 `Storage::open` 中的非 SQL 外迁步骤写成 blob 后再清空，见第 4.4 节。
+
+`0015_account_smtp_size_limit.sql` 为 `accounts` 增加可空的 `smtp_size_limit`（字节，CHECK 大于 0），保存服务器在 `EHLO` 声明的 `SIZE`，只用于写信窗口的上限提示。
+
+`0016_preview_state.sql` 为 `messages` 增加 `preview_state`（`missing` / `ready` / `failed`，默认 `missing`），已缓存正文的行升级为 `ready`。
+
+`0017_inline_image_content_id.sql` 为 `draft_attachments` 建 `(draft_id, content_id) WHERE inline = 1` 部分唯一索引；`inline = 1` 与 `content_id` 非空成对由核心写入路径保证（SQLite 不能给已有表补 `CHECK`，不为此重建表）。
+
+`0018_outbox_sent_copy_list.sql` 为 `outbox` 增加可空的 `preview` 与 `attachment_count`，入队时写入；已有的 `accepted` 行由启动时的非 SQL 外迁从未释放的快照补齐（与第 4.4 节同一模式，可重复执行）。
+
+`0019_search_index.sql` 新建 FTS5 trigram 表 `search_fts`、映射表 `search_docs` 与状态表 `search_index_state`，并在 `messages`、`outbox` 上建删除触发器；已有数据不在迁移中写入，由启动后的后台任务分批补建（存储与搜索 5.1）。
+
+`0020_message_deletions.sql` 新建删除队列，保存撤销窗口、服务器目标与重试状态。
+
+`0021_message_archives.sql` 新建仅本机的归档表，按账号来源和 Message-ID（缺失时用本地 ID）保存状态。
+
+`0022_draft_origin.sql` 为草稿增加 `user` / `mcp` / `ai` 来源，已有草稿默认 `user`；`ai` 是预留来源，不表示内置 AI 已接入。
+
+`0023_attachment_origin.sql` 重建附件表，保留原顺序和引用并允许 `mcp` / `ai` 来源，同时重建 blob 和内嵌 Content-ID 索引。历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则
 
@@ -63,7 +96,7 @@ PRAGMA user_version;
 SELECT version, checksum FROM schema_migrations ORDER BY version;
 ```
 
-`schema_migrations(version, checksum)` 是已执行历史，`user_version` 是末个已提交版本；两者必须一致。描述暂存静态清单，本轮不为增加时间、描述或耗时字段制造一个没有业务必要性的 v2。
+`schema_migrations(version, checksum)` 是已执行历史，`user_version` 是末个已提交版本；两者必须一致。描述保存在静态清单中，不为增加历史记录的时间、描述或耗时字段另建无业务必要的迁移。
 
 现有 `schema.sql` 原字节迁入 `0001_account_configuration.sql`，包括空白和换行。保留原 checksum 算法，不重新格式化、正规化或重写初始 SQL。v1 SQL 已包含创建 `schema_migrations` 的语句，执行器不能提前创建同名表。
 
@@ -155,13 +188,13 @@ type StartupStatus =
 
 `Failed` 是成功取得的启动状态，不是状态查询本身通信失败。`canRetry` 由宿主决定：读写暂不可用、目录被占用、凭据库暂不可用等错误允许用户处理原因后重试；历史或版本不兼容不提供原地重试，也不提供跳过迁移按钮。即使客户端直接调用重试命令，`canRetry=false` 时也只返回原状态，不派发任务。任务异常按固定 `internal` 错误处理，可手动重试；没有自动循环重试。
 
-两个启动命令与账号命令一样，只允许本地可信 main 窗口，沿用 URL / capability / 参数解析检查。业务准入放在共用宿主执行入口，四个账号命令全部覆盖：`Initializing` / `Failed` 返回 `coreNotReady`；前端通过状态接口获取原因。来源校验在准入检查前执行。客户端不能自报 Ready、选择目录或访问迁移表及 SQL。
+两个启动命令只允许本地可信 main 窗口，沿用 URL / capability / 参数解析检查。业务准入放在共用宿主执行入口，账号和邮件业务命令在 `Initializing` / `Failed` 时返回 `coreNotReady`；前端通过状态接口获取原因。各业务命令仍按主窗口 / 写信窗口能力分别授权，来源校验在准入检查前执行。客户端不能自报 Ready、选择目录或访问迁移表及 SQL。
 
 前端启动边界先查询快照，只在 `Initializing` 时以约 500 ms 间隔继续查询，同时最多一个状态请求在途；达到 `Ready` 或 `Failed` 后停止。重试命令返回 `Initializing` 后恢复轮询；如果重试响应丢失，先重新查询快照，不盲目再次派发重试。查询传输失败显示通信错误并提供再次查询，不误报迁移失败或就绪。旧响应按 `revision` 丢弃；组件卸载使在途响应失效。WebView 刷新重新读快照，不能重新触发建库。本轮不增加依赖一次性事件的通知机制。
 
-`Ready` 前不挂载账号页面、不执行账号列表 effect；启动页由 shadcn 组件组成，不显示假进度。失败页展示固定脱敏原因、按 `canRetry` 显示重试操作，用户也可关闭窗口退出。界面不展示 SQL、原始错误堆栈、绝对路径、凭证或账号内容。普通浏览器保持宿主不可用提示，不启动无效轮询或模拟持久化。
+`Ready` 前不挂载账号页面、不执行账号列表 effect；启动页由 shadcn 组件组成，不显示假进度。失败页展示固定脱敏原因、按 `canRetry` 显示重试操作，用户也可关闭窗口退出。界面不展示 SQL、原始错误堆栈、绝对路径、凭证或账号内容。普通浏览器的开发模式使用合成 mock，生产构建提示需要桌面应用；两者均不打开桌面数据库或访问真实凭据。
 
-以后增加同步、发送、MCP 等后台任务时，也须在同一 Ready 条件满足后启动；本轮不创建这些任务。
+当前同步、正文与预览下载、发送队列和本地 MCP 已接入宿主生命周期，均在本地核心准备完成后启动；数据库准备失败时不启动邮件任务或 MCP 服务。后续新增后台任务沿用同一准入条件。
 
 ## 7. 实施顺序与基本验收
 

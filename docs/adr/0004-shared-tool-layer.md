@@ -1,6 +1,8 @@
 # ADR 0004：内置 Agent 与 MCP 共用工具层
 
-状态：**Accepted，未实现** · 2026-11-02 · 修订 [ADR 0003](0003-ai-and-agent-boundaries.md) 中内置 AI 的能力范围与 MCP 的接入方式；内容披露边界仍沿用 ADR 0003；发信授权在 2026-11-04 按下述补充决定修订。
+状态：**Accepted；共享工具层与本地 MCP 已实现，内置 Agent / 远程 MCP 仍规划**。原决定于 2026-11-02 修订 [ADR 0003](0003-ai-and-agent-boundaries.md) 中内置 AI 的能力范围与 MCP 的接入方式；内容披露边界仍沿用 ADR 0003；发信授权在 2026-11-04 按下述补充决定修订。
+
+当前 `core/src/tools/` 承载工具与宿主授权检查，`mcp-server/` 提供本地协议适配，`mcp-bridge/` 随桌面包提供 stdio 入口。桌面 MCP 默认关闭，开启后使用全部账号的统一授权，包含直接发信与普通文件附件；逐客户端配对与账号范围仍留待后续。实现与验证范围见[工具层设计](../architecture/agent-tools.md)和[MCP 契约](../contracts/mcp.md)，不将本地 MCP 已落地等同于内置 AI 或远程服务已可用。
 
 ## 背景
 
