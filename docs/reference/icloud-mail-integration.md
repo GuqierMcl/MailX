@@ -1,27 +1,27 @@
 # iCloud 邮箱接入可行性评估
 
-状态：**Proposed / 现有协议与账号模型具备接入基础，尚未实现专用预设或完成真实账号验收**。
+状态：**Implemented / 专用预设、应用专用密码引导与官方帮助入口已有实现；真实账号兼容尚待验收**。
 
 本评估区分 Apple 官方要求、MailX 当前实现和待验证行为。公开端点探测及调研基线集中记录在[验证记录](../development/validation.md#icloud-mail-feasibility)，不将公开握手成功视为真实邮箱兼容通过。
 
 ## 1. 结论与建议范围
 
-**可行性高，建议先采用 IMAP + SMTP + Apple 应用专用密码。** 现有通用 IMAP/SMTP 入口已能表达所需配置，凭证、账号路由、同步、正文读取和发送队列可以复用。预计无需新增认证类型、数据库迁移或协议适配层；最终是否需要小型兼容修复，由真实账号验收决定。
+**已采用 IMAP + SMTP + Apple 应用专用密码，复用现有协议与账号模型。** iCloud 专用入口提供端点预填、双语引导和固定官方帮助链接，凭证、账号路由、同步、正文读取和发送队列沿用现有实现。本次没有新增认证类型、数据库迁移或协议适配层；是否需要小型兼容修复，由真实账号验收决定。
 
 | 配置 | 建议 |
 | --- | --- |
 | 首轮账号 | 已开通 iCloud Mail 的主邮箱，优先验证 `@icloud.com` |
 | 接收服务器 | `imap.mail.me.com:993`，隐式 TLS |
 | 发送服务器 | `smtp.mail.me.com:587`，强制 STARTTLS，要求认证 |
-| IMAP 用户名 | Apple 首先建议地址的本地部分，例如 `you`；连接失败时可用完整 iCloud Mail 地址 |
+| IMAP 用户名 | 预设默认完整 iCloud Mail 地址；高级设置可单独改为地址的本地部分，例如 `you` |
 | SMTP 用户名 | 完整 iCloud Mail 地址，例如 `you@icloud.com` |
 | 凭证 | 同一份 Apple 应用专用密码，收发共享 |
 
 以上参数来自官方服务器说明 [S1]。587 必须配置为 `startTls`，不能复制现有服务商的 465 / 隐式 TLS 预设。无需增加明文端口、忽略证书错误或失败后自动切换主机的逻辑。iCloud Mail 不支持 POP [S1]。
 
-当前手动验证可在通用入口分别填写收发用户名。未来预设可以先沿用完整邮箱地址作为两端默认用户名，因为 Apple 明确允许 IMAP 使用完整地址；需要时由用户显式将 IMAP 用户名改为本地部分。是否改用不同的收发默认值，应先取得真实账号证据，不在后台自动尝试多个身份。
+Apple 首先建议 IMAP 使用地址的本地部分，并在连接失败时使用完整地址 [S1]。预设沿用 MailX 的完整邮箱用户名默认值，因为官方明确允许该格式；引导说明需要时在高级设置中单独修改 IMAP 用户名，SMTP 保持完整地址。收发均不在后台自动尝试多个身份，编辑已有账号也不会重新套用预设。
 
-首轮不承诺别名登录、别名发件、iCloud+ 自定义域名或 Apple 授权登录。`@me.com`、`@mac.com` 历史地址应按实际账号独立验收，不通过后缀直接推断它们的主地址或登录身份 [S6]。
+入口精确接受 `icloud.com`、`me.com` 和 `mac.com`，首轮优先验证已开通的 `@icloud.com` 主地址。别名登录、别名发件、历史地址和 iCloud+ 自定义域兼容均待独立验收，不通过后缀直接推断其主地址或登录身份 [S6]。自定义域可使用通用 IMAP / SMTP 入口；Apple 授权登录尚未实现。
 
 ## 2. 认证与账号前提
 
@@ -44,20 +44,21 @@ Apple 已提供面向**受支持第三方应用**的账号授权方式，允许�
 
 MailX 当前 `oauth2` 输入返回 `unsupported`（`core/src/accounts/mod.rs`），尚无 Apple 授权回调和 token 生命周期管理。首轮采用应用专用密码可以独立推进，不以此证明 Apple 授权方式不可实施。
 
-## 3. 当前能力与最小实现范围
+## 3. 当前实现
 
-| 范围 | 当前实现 | 接入工作 |
-| --- | --- | --- |
-| TLS 与路由 | `core/src/imap/mod.rs::connect_client` 支持隐式 TLS；`core/src/smtp/mod.rs::authenticated_connection` 支持强制 STARTTLS，升级后重新 EHLO；连接经过账号路由 | 复用现有实现，真实直连与代理分别验证 |
-| 用户名与秘密 | `core/src/accounts/types.rs` 支持独立收发用户名、shared/separate password；`frontend/src/features/accounts/account-draft.ts` 空用户名默认完整邮箱地址 | 无需新 DTO 或秘密类型；增加明确的用户名引导 |
-| 协议认证 | IMAP 使用 LOGIN 命令；SMTP 优先 AUTH PLAIN，仅在未公告 PLAIN 时使用 LOGIN，认证失败不自动切换机制 | SMTP 公开能力匹配；IMAP LOGIN 与真实应用专用密码仍待验，不把 AUTH=PLAIN 与 LOGIN 命令混为一谈 |
-| 账号预设 | `frontend/src/features/accounts/providers.ts` 没有 iCloud；现有预设仅初始化新账号 | 增加 `icloud` 注册项、搜索词、993/587 默认端点；不覆盖已保存的手动配置 |
-| 入口域名 | 现有 `preset.domains` 在创建时做精确白名单校验，通用入口无此限制 | 可先限定 `icloud.com` / `me.com` / `mac.com`；自定义域继续通用入口，不为此移除所有服务商的域名校验 |
-| 凭证文案 | `ProviderSetup` 及连接表单、故障帮助目前按“授权码”展示 | 小幅扩展凭证文案，提供中英文“应用专用密码”、双重认证及撤销规则；后端仍是 password |
-| 官方帮助 | `desktop/src/commands.rs::provider_help_url` 与 mock client 使用固定 URL 白名单 | 增加 `icloud` → Apple 官方帮助映射，仍只接受 provider ID |
-| 服务商图标 | `MailProvider.logo` 可选，已有通用邮件图标回退 | 有可核实且适合的官方原件再本地打包；没有时使用通用图标与 iCloud 名称，遵守[图标规范](../../frontend/src/assets/providers/README.md) |
+| 范围 | 当前实现与边界 |
+| --- | --- |
+| TLS 与路由 | `core/src/imap/mod.rs::connect_client` 使用隐式 TLS；`core/src/smtp/mod.rs::authenticated_connection` 使用强制 STARTTLS，升级后重新 EHLO；连接经过既有账号路由，真实直连与代理分别验证。 |
+| 用户名与秘密 | `core/src/accounts/types.rs` 支持独立收发用户名、shared/separate password；`frontend/src/features/accounts/account-draft.ts` 空用户名默认完整邮箱地址。高级设置保留独立覆盖，应用专用密码按原值进入现有 SecretStore。 |
+| 协议认证 | IMAP 使用 LOGIN 命令；SMTP 优先 AUTH PLAIN，仅在未公告 PLAIN 时使用 LOGIN，认证失败不自动切换机制。SMTP 公开能力匹配；IMAP LOGIN 与真实应用专用密码仍待验，不把 AUTH=PLAIN 与 LOGIN 命令混为一谈。 |
+| 账号预设 | `frontend/src/features/accounts/providers.ts` 注册 `icloud`，提供搜索词和 993 / 587 默认端点。预设仅初始化新账号，不覆盖已保存的手动配置。 |
+| 入口域名 | `preset.domains` 在创建时精确校验 `icloud.com` / `me.com` / `mac.com`，子域和近似后缀不匹配。自定义域使用通用入口，不改变其他服务商的域名校验。 |
+| 凭证文案 | 连接表单与故障帮助提供中英文“应用专用密码”、主地址开通、双重认证及撤销规则；后端仍是 password，不新增秘密格式约束。 |
+| 官方帮助 | `desktop/src/commands.rs::provider_help_url` 与 mock client 将 `icloud` 映射到 Apple 官方应用专用密码帮助 [S2]，仍只接受 provider ID 白名单。 |
+| 服务商图标 | 使用通用邮件图标与 iCloud 名称，没有新增或仿制 Apple 图形，遵守[图标规范](../../frontend/src/assets/providers/README.md)。 |
+| 服务商兼容 | `imap.mail.me.com` 使用标准默认策略，没有 iCloud 专属兼容模块；已有前端入口不构成新增服务端特判的证据，见[兼容层约定](../architecture/provider-compatibility.md)。 |
 
-专用预设主要是前端入口、双语引导和固定帮助链接工作。无须先建立通用 provider 插件系统，或为 Apple 改写同步、存储及发送队列。实施用户可见行为时，再同步双语用户指南、相关入口文档与 CHANGELOG；本评估不把 iCloud 加入“已支持”列表。
+本次同步更新双语用户指南、账号说明、相关入口与 CHANGELOG。预设和引导已有实现，真实登录、收读发及写回仍待验证；不把入口存在或公开握手成功写成完整兼容证明。
 
 ## 4. 重点兼容边界
 
@@ -73,7 +74,7 @@ MailX 当前 `oauth2` 输入返回 `unsupported`（`core/src/accounts/mod.rs`）
 
 ### 已发送、草稿与归档
 
-MailX 已为 SMTP accepted 的邮件保留本机副本，并在同步到相同 Message-ID 的服务器已发送副本后交接（`core/src/storage/outbox.rs::release_matched_snapshots`）。当前不执行 IMAP APPEND。
+MailX 已为 SMTP accepted 的邮件保留本机副本，标准策略按同账号当前来源、当前 UIDVALIDITY 的已发送目录原生 `Message-ID` 对账（`core/src/storage/outbox.rs::reconcile_sent_copies`）。SMTP 接受与服务器副本同步的先后顺序均可处理。iCloud 沿用该默认策略，未借用 QQ 的扩展头部规则；匹配成立后释放本机快照，当前不执行 IMAP APPEND，边界见[服务商兼容层](../architecture/provider-compatibility.md)。
 
 必须通过真实 iCloud SMTP 发信检查服务器是否自动保存副本、目录和 Message-ID 是否正确、是否重复。若服务商不自动保存，MailX 本机可见不能保证 iCloud 网页或 Apple Mail 可见；是否增加 APPEND 是独立行为设计，不为预设直接加入，也不因缺少副本重发 SMTP。草稿和归档沿用当前本机行为，不承诺跨设备同步。
 
@@ -95,12 +96,12 @@ MailX 当前限制的是普通附件和内嵌图片**原始总字节 20 MiB**，
 
 | 工作包 | 内容与完成标准 |
 | --- | --- |
-| A：真实最小 PoC | 经通用入口接入一个已开通的主邮箱，显式填写用户名与应用专用密码；验证收发登录、LIST / EXAMINE、正文读取和一次获授权的实际投递，核对服务器已发送副本。先排除认证和目录访问阻断。 |
-| B：专用预设 | 增加 iCloud 入口、993/587 参数、应用专用密码双语引导和固定帮助链接；复用高级用户名、路由及凭证修改。不改变已有手动账号。扩展现有预设、域名、表单、帮助链接和编辑保护回归。 |
+| A：真实最小 PoC（待验） | 经 iCloud 或通用入口接入一个已开通的主邮箱，显式填写用户名与应用专用密码；验证收发登录、LIST / EXAMINE、正文读取和一次获授权的实际投递，核对服务器已发送副本。排除认证和目录访问阻断。 |
+| B：专用预设（已实现） | iCloud 入口、993/587 参数、应用专用密码双语引导和固定帮助链接；复用高级用户名、路由及凭证修改，不改变已有手动账号。自动回归与本轮检查结果见[验证记录](../development/validation.md#icloud-mail-feasibility)。 |
 | C：基础兼容验收 | 首次/增量同步、中文与自定义目录、正文和附件、已读/星标写回、删除与撤销、IDLE 或轮询、重启离线缓存、应用专用密码撤销及替换恢复；分别记录 SMTP accepted、收件端到达和已发送可见。 |
 | D：扩大范围 | `me.com` / `mac.com`、别名、自定义域、SOCKS5 / HTTP CONNECT、其他平台分别取得证据；Apple 授权登录另行评估。 |
 
-建议先完成 A，再实施 B，并以 C 中已完成的组合界定公开支持范围。新增预设本身工作量较小；真实服务商的登录、目录写回与已发送副本是主要不确定性。公开握手、自动回归和单一平台主地址成功，均不替代其他组合的验收。真实账号读取、写回和发信在届时获得相应授权后进行。
+B 已完成，下一步以 A 和 C 的真实证据界定公开兼容范围。真实服务商的登录、目录写回与已发送副本仍是主要不确定性；本次未使用真实 iCloud 账号。公开握手、自动回归和单一平台主地址成功，均不替代其他组合的验收。真实账号读取、写回和发信在届时获得相应授权后进行。
 
 ## 6. 官方来源
 

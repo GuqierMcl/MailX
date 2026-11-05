@@ -7,9 +7,17 @@ This page covers the basics of the desktop app. Published installers are listed 
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
-2. Enable IMAP / SMTP on your provider's website and get a client password or authorization code. MailX has built-in entries for QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
-3. Add the account in MailX with its address and password or authorization code; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
+2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for QQ Mail / Foxmail, 163, 126, yeah.net, 139 and iCloud; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
+3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync and the account and folders appear in the sidebar; inboxes from several accounts are collected into a unified inbox. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
+
+### iCloud Mail
+
+First [create an iCloud Mail address](https://support.apple.com/guide/icloud/create-a-primary-icloudcom-email-address-mmdd8d1c5c/icloud) if you do not already have one. Enable two-factor authentication for your Apple Account, then generate an [app-specific password](https://support.apple.com/en-us/102654) at `account.apple.com` under Sign-In and Security → App-Specific Passwords. Enter that password in MailX; use your iCloud Mail address rather than an unrelated email address used to sign in to your Apple Account.
+
+Choose iCloud for an `@icloud.com`, `@me.com` or `@mac.com` address. MailX fills in `imap.mail.me.com:993` with implicit TLS and `smtp.mail.me.com:587` with STARTTLS, sharing the app-specific password. Both usernames default to your full email address. If incoming sign-in fails, Advanced settings lets you change only the IMAP username to the part before `@`, as [Apple's server guide](https://support.apple.com/en-us/102525) suggests; keep the full address for SMTP.
+
+Changing or resetting your Apple Account password revokes all app-specific passwords. Generate a new one and update the account connection in MailX to restore access. Apple Account authorization sign-in is not available in MailX. Use manual IMAP / SMTP setup for an iCloud+ custom domain; aliases have no separate sender selector, and MailX does not automatically merge addresses that share one mailbox. Mail Drop is not available, so Apple's ordinary message-size limit still applies to attachments and inline images.
 
 ## Reading, search and organizing
 

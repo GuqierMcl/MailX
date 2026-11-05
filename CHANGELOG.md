@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- An iCloud Mail entry fills in encrypted IMAP / SMTP settings for @icloud.com, @me.com and @mac.com, with app-specific password guidance and separate username settings. / 新增 iCloud 邮箱添加入口，为 @icloud.com、@me.com 和 @mac.com 预填加密收发服务器，提供应用专用密码指引与收发独立用户名设置。
+
 ### ✨ Optimization
 
 - Automatic sync keeps sidebar account rows quiet and unread counts visible; manual refresh shows progress only on the refresh button you use, newly added accounts get a subdued first-fetch hint, and sync problems keep static warnings. / 自动同步时侧栏账号行保持安静并保留未读数；手动刷新只在使用的刷新按钮上显示进度，新接入账号首次获取内容时显示弱化提示，同步问题继续保留静态警示。

@@ -14,14 +14,15 @@ export type ProviderPreset = {
   smtp: Omit<ConnectionConfig, 'username'>
 }
 
-/** Guidance for a preset that signs in with a client authorization code. */
+/** Guidance for a preset that signs in with a provider-issued client secret. */
 export type ProviderSetup = {
+  credentialKind: 'authorizationCode' | 'appPassword'
   title: string
   description: string
   emailHint: string
   emailPlaceholder: string
   emailRequired: string
-  authorizationCodeHint: string
+  credentialHint: string
   rangeHint?: string
   authenticationHelp: string
   providerPolicyHelp?: string
@@ -48,7 +49,7 @@ export type MailProvider = {
   icon: IconSvgElement
   /** Defaults for a new account only; saved connections always keep their values. */
   preset?: ProviderPreset
-  /** Localized guidance; its presence enables the compact authorization-code form. */
+  /** Localized guidance; its presence enables the compact credential form. */
   setup?: ProviderSetup
 }
 
@@ -77,14 +78,15 @@ export const QQ_PROVIDER: MailProvider = {
     imap: { host: 'imap.qq.com', port: 993, tls: 'implicit' },
     smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit' },
   },
-  get setup() {
+  get setup(): ProviderSetup {
     return {
+      credentialKind: 'authorizationCode',
       title: t('accounts:qqSetupTitle'),
       description: t('accounts:qqSetupDescription'),
       emailHint: t('accounts:qqEmailHint'),
       emailPlaceholder: 'you@qq.com',
       emailRequired: t('accounts:qqEmailRequired'),
-      authorizationCodeHint: t('accounts:qqAuthorizationCodeHint'),
+      credentialHint: t('accounts:qqAuthorizationCodeHint'),
       rangeHint: t('accounts:qqRangeHint'),
       authenticationHelp: t('accounts:qqAuthenticationHelp'),
     }
@@ -106,14 +108,15 @@ function neteaseProvider(id: string, domain: '163.com' | '126.com' | 'yeah.net',
       imap: { host: `imap.${domain}`, port: 993, tls: 'implicit' },
       smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit' },
     },
-    get setup() {
+    get setup(): ProviderSetup {
       return {
+        credentialKind: 'authorizationCode',
         title: t('accounts:neteaseSetupTitle', { brand }),
         description: t('accounts:neteaseSetupDescription'),
         emailHint: t('accounts:neteaseEmailHint', { domain }),
         emailPlaceholder: `you@${domain}`,
         emailRequired: t('accounts:providerEmailRequired', { domains: `@${domain}` }),
-        authorizationCodeHint: t('accounts:neteaseAuthorizationCodeHint'),
+        credentialHint: t('accounts:neteaseAuthorizationCodeHint'),
         rangeHint: t('accounts:neteaseRangeHint'),
         authenticationHelp: t('accounts:neteaseAuthenticationHelp'),
         providerPolicyHelp: t('accounts:neteaseProviderPolicyHelp'),
@@ -139,20 +142,70 @@ export const MAIL_139_PROVIDER: MailProvider = {
     imap: { host: 'imap.139.com', port: 993, tls: 'implicit' },
     smtp: { host: 'smtp.139.com', port: 465, tls: 'implicit' },
   },
-  get setup() {
+  get setup(): ProviderSetup {
     return {
+      credentialKind: 'authorizationCode',
       title: t('accounts:mail139SetupTitle'),
       description: t('accounts:mail139SetupDescription'),
       emailHint: t('accounts:mail139EmailHint'),
       emailPlaceholder: 'you@139.com',
       emailRequired: t('accounts:providerEmailRequired', { domains: '@139.com' }),
-      authorizationCodeHint: t('accounts:mail139AuthorizationCodeHint'),
+      credentialHint: t('accounts:mail139AuthorizationCodeHint'),
       authenticationHelp: t('accounts:mail139AuthenticationHelp'),
     }
   },
 }
 
-export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
+const ICLOUD_DOMAINS = ['icloud.com', 'me.com', 'mac.com'] as const
+
+export const ICLOUD_PROVIDER: MailProvider = {
+  id: 'icloud',
+  get name() { return t('accounts:icloudProviderName') },
+  domain: ICLOUD_DOMAINS.join(' / '),
+  get description() { return t('accounts:icloudProviderDescription') },
+  searchAliases: ['iCloud', 'Apple', '苹果', '苹果邮箱'],
+  icon: Mail01Icon,
+  preset: {
+    domains: ICLOUD_DOMAINS,
+    imap: { host: 'imap.mail.me.com', port: 993, tls: 'implicit' },
+    smtp: { host: 'smtp.mail.me.com', port: 587, tls: 'startTls' },
+  },
+  get setup(): ProviderSetup {
+    return {
+      credentialKind: 'appPassword',
+      title: t('accounts:icloudSetupTitle'),
+      description: t('accounts:icloudSetupDescription'),
+      emailHint: t('accounts:icloudEmailHint'),
+      emailPlaceholder: 'you@icloud.com',
+      emailRequired: t('accounts:icloudEmailRequired'),
+      credentialHint: t('accounts:icloudAppPasswordHint'),
+      authenticationHelp: t('accounts:icloudAuthenticationHelp'),
+    }
+  },
+}
+
+export const PROVIDERS: MailProvider[] = [QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, ICLOUD_PROVIDER, GENERIC_PROVIDER]
+
+const CREDENTIAL_TEXT_KEYS = {
+  password: {
+    shared: 'accounts:sharedPasswordLabel', incoming: 'accounts:incomingPassword', outgoing: 'accounts:outgoingPassword',
+    placeholder: 'accounts:enterPassword', help: 'accounts:providerPolicyHelpLink',
+  },
+  authorizationCode: {
+    shared: 'accounts:authorizationCode', incoming: 'accounts:incomingAuthorizationCode', outgoing: 'accounts:outgoingAuthorizationCode',
+    placeholder: 'accounts:enterAuthorizationCode', help: 'accounts:getAuthorizationCode',
+  },
+  appPassword: {
+    shared: 'accounts:appPassword', incoming: 'accounts:incomingAppPassword', outgoing: 'accounts:outgoingAppPassword',
+    placeholder: 'accounts:enterAppPassword', help: 'accounts:getAppPassword',
+  },
+} as const
+
+/** Shared form and recovery copy follows credential metadata, not provider names. */
+export function providerCredentialText(setup?: ProviderSetup) {
+  const keys = CREDENTIAL_TEXT_KEYS[setup?.credentialKind ?? 'password']
+  return { shared: t(keys.shared), incoming: t(keys.incoming), outgoing: t(keys.outgoing), placeholder: t(keys.placeholder), help: t(keys.help) }
+}
 
 /** Address errors use only the preset's reviewed domains and localized guidance. */
 export function providerEmailRequired(provider: MailProvider): string {

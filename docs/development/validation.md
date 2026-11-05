@@ -976,3 +976,18 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 该探测使用 Python 网络栈，不能替代 MailX 的 rustls / 平台证书验证、账号路由、真实认证、代理和收发验证。尚未验证任何真实 iCloud 账号、目录/标记/删除、IDLE、SMTP 投递、服务器已发送副本、密码撤销恢复、别名、历史地址、自定义域或 Windows / Linux 组合。后续按评估文档工作包独立记录证据。
 
 调研文档经独立代码与官方资料复核，修正了删除能力的表述和两处来源标题；UTF-8 / LF、相关本地 Markdown 链接及差异空白检查通过。本轮仅修改文档，没有运行应用自动回归或桌面手测。
+
+### iCloud 预设与应用专用密码引导
+
+实现以 `9e07199` 为主干基线，新增 `icloud` 入口，精确接受 `icloud.com` / `me.com` / `mac.com`，预填 IMAP 993 隐式 TLS 与 SMTP 587 STARTTLS。收发用户名默认完整邮箱地址，高级设置保留独立覆盖；密码复用 shared / separate 的写入型输入并保留原值。凭证种类元数据统一决定表单和故障帮助文案，QQ、网易、139 继续使用授权码文案，通用入口继续使用普通密码文案。
+
+桌面与浏览器 mock 将精确 `icloud` ID 映射到 Apple 官方应用专用密码帮助，拒绝任意 URL、路径、近似 ID 及额外 URL 参数。未新增品牌图形、认证类型、数据库迁移或 iCloud 核心特判；`imap.mail.me.com` 沿用标准兼容策略。双语用户说明、账号配置、兼容层说明、路线图与 CHANGELOG 已同步。
+
+本机 macOS 检查通过：
+
+- `bun install --frozen-lockfile` 无依赖变更；`bun run check` 通过，包括 48 项版本脚本测试、914 条双语资源、Rust DTO 一致性、类型、lint、84 个前端测试文件 / 911 项测试、生产构建与 Rust workspace check。构建保留既有 chunk 大小提示。
+- 前端定向 7 文件 / 211 项回归覆盖三域与近似域拒绝、993 / 587 TLS、默认和独立用户名、共享密码原值、添加前测试与保存、往返步骤、语言切换、已保存连接保护及认证失败帮助；mock 的 24 项现有回归亦通过。
+- `cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments` 1 项通过；`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过。未运行本地 Rust 全 workspace 测试。
+- 相关修改文件 UTF-8 / LF、本地 Markdown 链接及双语标题结构检查通过；独立应用代码审查未发现确定缺陷。
+
+浏览器预览未完成：浏览器控制宿主不可用，原生控制尝试超时；本轮不记录界面目测通过。没有使用真实 iCloud 凭据、登录邮箱、修改邮件标记或发送邮件；真实登录与收读发、已发送服务器副本、IDLE / 删除、凭证撤销恢复、别名与自定义域及三平台桌面行为继续待验。预设存在和上述自动检查不能代替这些验证。

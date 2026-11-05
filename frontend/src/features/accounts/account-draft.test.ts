@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -105,6 +105,28 @@ describe('139 provider identity and domain boundary', () => {
     draft.smtp.username = 'different-synthetic-login'
     expect(draftToConnection(draft, null, MAIL_139_PROVIDER)).toMatchObject({
       emailAddress: 'Synthetic@139.COM', imap: { username: 'synthetic-phone-login' }, smtp: { username: 'different-synthetic-login' },
+    })
+  })
+})
+
+describe('iCloud provider domain and credential boundaries', () => {
+  it.each(['sub.icloud.com', 'icloud.com.evil', 'evilicloud.com', 'sub.me.com', 'me.com.evil', 'sub.mac.com', 'mac.com.evil', 'example.com'])('rejects %s before submitting a credential', (domain) => {
+    const draft = initialDraft(null, ICLOUD_PROVIDER)
+    draft.emailAddress = `synthetic@${domain}`
+    draft.sharedPassword.value = 'abcd-efgh-ijkl-mnop'
+    expect(() => draftToConnection(draft, null, ICLOUD_PROVIDER)).toThrow(MailxClientError)
+  })
+
+  it('keeps independently entered IMAP and SMTP identities and an unchanged shared app password', () => {
+    const draft = initialDraft(null, ICLOUD_PROVIDER)
+    draft.emailAddress = 'Synthetic@ME.COM'
+    draft.imap.username = ' Synthetic '
+    draft.smtp.username = ' synthetic@icloud.com '
+    draft.sharedPassword.value = ' abcd-efgh-ijkl-mnop '
+    expect(draftToConnection(draft, null, ICLOUD_PROVIDER)).toMatchObject({
+      providerId: 'icloud', emailAddress: 'Synthetic@ME.COM',
+      imap: { username: 'Synthetic' }, smtp: { username: 'synthetic@icloud.com' },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: ' abcd-efgh-ijkl-mnop ' } },
     })
   })
 })
