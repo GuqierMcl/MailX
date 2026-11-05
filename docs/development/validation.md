@@ -947,3 +947,11 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 本机 macOS 检查通过：core 库增量回归 835 项通过、1 项默认忽略（超大旧草稿 HTML 测试已在上一轮通过，增量重跑未重复该耗时项）；最后新增边界与迁移测试后，`cargo test -p mailx-core --locked sent_identity --quiet` 16 项通过。另通过 core all-targets Clippy（`-D warnings`）、`bun run rust:check`、`cargo fmt --all -- --check` 和 `git diff --check`。独立复核发现的撤销删除 / 角色变化漏对账、跨目录对账时机和重复 UID 歧义已修复并补回归。
 
 尚待安装更新后的桌面实测：现有 QQ 重复项随同步合并、新发送只显示一份、阅读和附件在交接后可用；普通 QQ / VIP / Foxmail 账号与其他服务商分别记录结果。自动化与现场只读诊断不等于更新后真实服务器及三平台验收。
+
+## 32. 侧栏同步反馈降噪（2026-11-05）
+
+规则见[界面设计语言](../architecture/ui-design.md#同步状态反馈)。自动同步不再替换账号未读数或播放动画；手动刷新只反馈对应按钮的进度，悬停或聚焦可查看同步状态及本次运行中的最近整轮成功时间。尚无文件夹时保留静态首次获取文字，已有文件夹缓存启动时不重复显示，异常警示继续保留。
+
+本机 Windows 自动检查通过：前端 84 个测试文件 / 885 项测试、lint、生产构建（含 TypeScript 检查）、中英文资源校验和 `git diff --check`。默认并发及 5 秒单项时限的首次运行有两项测试超时；最终完整运行使用 `bun run frontend:test -- --maxWorkers=4 --testTimeout=15000`，未修改测试断言或仓库默认时限。回归覆盖后台同步静默、手动刷新保留未读数、重复请求阻止、完成事件先于唤醒响应、失败恢复、无 worker 启动的有限等待、来源 / generation 替换、服务商安全策略显式重试及卸载清理。
+
+浏览器预览使用仓库合成数据，核对深色界面中默认 256px 和最窄 220px 侧栏下刷新按钮与未读数并列显示。独立代码复核未发现阻塞问题。本次未进行真实账号同步、原生桌面安装包或 macOS / Linux 界面验收。

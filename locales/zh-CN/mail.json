@@ -123,6 +123,8 @@
   "settings": "设置",
   "syncing": "正在同步",
   "syncAccount": "立即同步 {{label}}",
+  "syncingAccount": "正在同步 {{label}}",
+  "lastSyncSucceededAt": "最近同步成功：{{time}}",
   "hasUnread": "有未读邮件",
   "toggleFolder": "{{action}}{{folder}}",
   "collapse": "收起",

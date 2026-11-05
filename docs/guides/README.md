@@ -15,6 +15,8 @@ This page covers the basics of the desktop app. Published installers are listed 
 
 The first sync of each folder starts from the last 30 days and fills up to the newest 1,000 message headers in that window per round, keeping previously cached history. This is not a full download of the mailbox. Accounts that support IMAP IDLE listen for inbox changes; other folders and accounts without IDLE keep polling.
 
+Automatic sync runs quietly: account rows keep their unread counts without a loading animation. When you refresh manually, only the refresh button you use shows progress. A newly added account shows a subdued text hint while first fetching browsable content; accounts with cached content do not repeat that hint on normal startup. Sync problems still show a static warning so you can check the account.
+
 Opening a message downloads and caches its body, so cached content can be read offline later. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
 
 Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under All archived or Archived under an account, and it is unchanged for other clients. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.

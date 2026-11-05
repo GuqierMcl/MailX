@@ -43,6 +43,8 @@ import { cn } from '@/lib/utils'
 import { buildFolderTree, countedUnread, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { formatFullTime } from './format'
+import { useManualSync } from './use-manual-sync'
 
 /** Shown in the tooltip; the shortcut itself is handled by the workbench. */
 const COMPOSE_SHORTCUT = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘N' : 'Ctrl N'
@@ -73,7 +75,7 @@ type MailSidebarProps = {
   /** Unfinished sends (queued, sending, failed, unknown); the entry only appears when there are some. */
   outboxCount: number
   /** Starts the account's next sync round now. */
-  onRefresh: (accountId: string) => void
+  onRefresh: (accountId: string) => Promise<void>
 }
 
 export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onCompose, draftCount, outboxCount, onRefresh }: MailSidebarProps) {
@@ -194,16 +196,23 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                     render={<SidebarMenuItem />}
                   >
                     <CollapsibleTrigger
-                      render={<SidebarMenuButton title={account.emailAddress} className={cn('font-medium', sync?.failure ? 'pr-14' : 'pr-8')} />}
+                      render={(
+                        <SidebarMenuButton
+                          title={account.emailAddress}
+                          className="font-medium"
+                          style={{ paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 4 : 2.5}rem)` }}
+                        />
+                      )}
                     >
                       <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
                       <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
                       <span>{account.displayName}</span>
                     </CollapsibleTrigger>
                     <AccountSyncSlot
+                      key={account.mailboxSourceId}
                       unread={unread}
                       countsKnown={countsKnown}
-                      syncing={sync?.phase === 'syncing'}
+                      sync={sync}
                       label={account.displayName}
                       onRefresh={() => onRefresh(account.id)}
                       className={cn(sync?.failure && 'right-7')}
@@ -215,11 +224,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                           <SidebarMenuItem>
                             <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
                               {sync?.phase === 'failed' || sync?.phase === 'idle' ? t('mail:noFolders') : (
-                                <>
-                                  <SyncIcon className="size-3.5" spinning />
-
-                                  {t('mail:syncingFolders')}
-                                </>
+                                <span role="status">{t('mail:syncingFolders')}</span>
                               )}
                             </span>
                           </SidebarMenuItem>
@@ -286,63 +291,72 @@ function fadeMask({ top, bottom }: { top: boolean; bottom: boolean }): React.CSS
   return { maskImage: mask, WebkitMaskImage: mask }
 }
 
-/** The sync glyph; it turns while a round runs. */
+/** Only a user-requested refresh animates this glyph. */
 function SyncIcon({ spinning, className }: { spinning: boolean; className?: string }) {
   return (
     <HugeiconsIcon
       icon={RefreshIcon}
       strokeWidth={2}
-      className={cn(className, spinning && 'animate-spin [animation-duration:1.4s]')}
+      className={cn(className, spinning && 'animate-spin [animation-duration:1.4s] motion-reduce:animate-none')}
     />
   )
 }
 
 /**
- * Sync status and manual refresh belong to each account's top-level row only.
- * While the account syncs (after a short delay, so quick background checks
- * don't blink) a turning glyph replaces the unread count; otherwise hovering
- * or focusing this row turns the count into a refresh button. Folder rows
- * below never react. `--show` is set only by this row's own button or slot,
- * never by an ancestor, because the account's `li` contains its whole subtree.
+ * Unread counts remain visible during every sync. The separate refresh button
+ * appears on this row's hover/focus, or while its own manual refresh is running.
+ * Automatic rounds never animate or announce a status. `--show` is local to
+ * this row because the account's `li` also contains its whole folder subtree.
  */
-function AccountSyncSlot({ unread, countsKnown, syncing, label, onRefresh, className }: {
+function AccountSyncSlot({ unread, countsKnown, sync, label, onRefresh, className }: {
   unread: number
   countsKnown: boolean
-  syncing: boolean
+  sync: AccountSyncState | undefined
   label: string
-  onRefresh: () => void
+  onRefresh: () => Promise<void>
   className?: string
 }) {
   useTranslation()
-  const turning = useDelayedFlag(syncing, 400, 700)
+  const { refreshing, refresh } = useManualSync(sync, onRefresh)
+  const turning = useDelayedFlag(refreshing, 400, 700)
+  const busy = sync?.phase === 'syncing' || refreshing || turning
   const showCount = !countsKnown || unread > 0
-  const canRefresh = !syncing
+  const actionLabel = busy ? t('mail:syncingAccount', { label }) : t('mail:syncAccount', { label })
   return (
     <div
+      data-slot="account-sync"
       className={cn(
-        'absolute top-1.5 right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden [--show:0]',
-        canRefresh && 'peer-hover/menu-button:text-sidebar-accent-foreground peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
+        'absolute top-1.5 right-1 flex h-5 items-center gap-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
+        refreshing || turning ? '[--show:1]' : '[--show:0]',
         className,
       )}
     >
-      <span className={cn('pointer-events-none flex items-center transition-opacity', canRefresh && 'opacity-[calc(1-var(--show))]')}>
-        {turning ? (
-          <span role="status" aria-label={t('mail:syncing')}><SyncIcon className="size-3.5" spinning /></span>
-        ) : showCount && (
+      <Tooltip>
+        <TooltipTrigger
+          render={(
+            <button
+              type="button"
+              aria-label={actionLabel}
+              aria-disabled={busy}
+              onClick={() => { if (!busy) refresh() }}
+              className="flex size-5 shrink-0 items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            />
+          )}
+        >
+          {turning ? (
+            <span role="status" aria-label={t('mail:syncing')}><SyncIcon className="size-3.5" spinning /></span>
+          ) : <SyncIcon className="size-3.5" spinning={false} />}
+        </TooltipTrigger>
+        <TooltipContent side="right" className="flex-col items-start">
+          <p>{actionLabel}</p>
+          {sync?.lastSyncedAt && <p>{t('mail:lastSyncSucceededAt', { time: formatFullTime(sync.lastSyncedAt) })}</p>}
+        </TooltipContent>
+      </Tooltip>
+      <span className="pointer-events-none flex min-w-5 items-center justify-center px-1">
+        {showCount && (
           <span aria-label={!countsKnown ? t('mail:unreadCountUnknown') : undefined}>{countsKnown ? unread : '—'}</span>
         )}
       </span>
-      {canRefresh && (
-        <button
-          type="button"
-          aria-label={t('mail:syncAccount', { label })}
-          title={t('mail:syncAccount', { label })}
-          onClick={onRefresh}
-          className="absolute inset-0 flex items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-        >
-          <SyncIcon className="size-3.5" spinning={false} />
-        </button>
-      )}
     </div>
   )
 }

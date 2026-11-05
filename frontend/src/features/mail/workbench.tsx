@@ -455,7 +455,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             onCompose={() => void compose.compose()}
             draftCount={draftCount}
             outboxCount={outboxCount}
-            onRefresh={(accountId) => void client.refreshSync(accountId).catch(() => undefined)}
+            onRefresh={(accountId) => client.refreshSync(accountId)}
           />
         )}
       >

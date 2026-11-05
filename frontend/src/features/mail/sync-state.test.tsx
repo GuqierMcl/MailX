@@ -44,7 +44,9 @@ describe('folder sync in the workbench', () => {
   it('says folders are syncing before the first listing arrives, then refetches when it does', async () => {
     const { client, emit } = desktopLike()
     render(<Workbench client={client} />)
-    expect(await screen.findByText('正在同步文件夹…')).toBeInTheDocument()
+    const hint = await screen.findByText('正在同步文件夹…')
+    expect(hint).toHaveAttribute('role', 'status')
+    expect(hint.querySelector('svg')).toBeNull()
 
     client.listFolders.mockResolvedValue([folder('INBOX', { role: 'inbox', unreadCount: 2 })])
     emit(exampleSyncState({ folderRevision: 1, folders: [exampleFolderSyncState('INBOX')] }))
