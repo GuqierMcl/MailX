@@ -126,6 +126,8 @@
   "settings": "Settings",
   "syncing": "Syncing",
   "syncAccount": "Sync {{label}} now",
+  "syncingAccount": "Syncing {{label}}",
+  "lastSyncSucceededAt": "Last successful sync: {{time}}",
   "hasUnread": "Has unread messages",
   "toggleFolder": "{{action}} {{folder}}",
   "collapse": "Collapse",

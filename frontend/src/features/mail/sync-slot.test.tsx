@@ -1,4 +1,4 @@
-import { render, screen, within } from '@/test/render'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState } from '@/features/accounts/test-fixtures'
@@ -12,7 +12,7 @@ const inbox: Folder = {
   selectable: true, countsKnown: true, unreadCount: 3, totalCount: 9, archivedCount: 0, archivedUnreadCount: 0,
 }
 
-function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRefresh: (accountId: string) => void }) {
+function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRefresh: (accountId: string) => Promise<void> }) {
   return (
     <TooltipProvider>
       <MailSidebar
@@ -30,34 +30,69 @@ function Harness({ sync, onRefresh }: { sync: AccountSyncState | undefined; onRe
   )
 }
 
-function sidebar(sync: AccountSyncState | undefined, onRefresh = vi.fn()) {
+function sidebar(sync: AccountSyncState | undefined, onRefresh = vi.fn().mockResolvedValue(undefined)) {
   render(<Harness sync={sync} onRefresh={onRefresh} />)
   return onRefresh
 }
 
 const accountRow = () => screen.getByRole('button', { name: account.displayName }).closest('li')!
 const folderRow = () => screen.getByRole('button', { name: '收件箱' }).closest('li')!
+const syncSlot = () => within(accountRow().querySelector<HTMLElement>('[data-slot="account-sync"]')!)
 
 describe('account sync indicator', () => {
-  it('turns a glyph on the syncing account instead of its count, and offers no refresh then', async () => {
+  it('keeps automatic sync silent and preserves the unread count', () => {
     sidebar(exampleSyncState({
       accountId: account.id, mailboxSourceId: account.mailboxSourceId, phase: 'syncing',
       folders: [exampleFolderSyncState('inbox', { phase: 'syncing' })],
     }))
-    expect(within(accountRow()).queryByRole('button', { name: /立即同步/ })).not.toBeInTheDocument()
-    const status = await screen.findByRole('status', { name: '正在同步' })
-    expect(status.querySelector('svg')).toHaveClass('animate-spin')
+    expect(syncSlot().getByText('3')).toBeInTheDocument()
+    expect(syncSlot().queryByRole('status')).not.toBeInTheDocument()
+    const refresh = syncSlot().getByRole('button', { name: `正在同步 ${account.displayName}` })
+    expect(refresh).toHaveAttribute('aria-disabled', 'true')
+    expect(refresh.querySelector('svg')).not.toHaveClass('animate-spin')
   })
 
-  it('does not blink for a round that ends within the delay', async () => {
+  it('keeps automatic rounds silent across syncing and idle transitions', () => {
     const state = (phase: 'syncing' | 'idle') =>
       exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId, phase })
-    const view = render(<Harness sync={state('syncing')} onRefresh={vi.fn()} />)
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    const view = render(<Harness sync={state('syncing')} onRefresh={vi.fn().mockResolvedValue(undefined)} />)
     expect(screen.queryByRole('status', { name: '正在同步' })).not.toBeInTheDocument()
-    view.rerender(<Harness sync={state('idle')} onRefresh={vi.fn()} />)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    view.rerender(<Harness sync={state('idle')} onRefresh={vi.fn().mockResolvedValue(undefined)} />)
     expect(screen.queryByRole('status', { name: '正在同步' })).not.toBeInTheDocument()
+  })
+
+  it('animates a manual refresh through completion without replacing the count or animating the next automatic round', async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined)
+    const state = (phase: AccountSyncState['phase'], sequence: number) => exampleSyncState({ phase, sequence })
+    const view = render(<Harness sync={state('idle', 1)} onRefresh={onRefresh} />)
+    await userEvent.click(syncSlot().getByRole('button', { name: `立即同步 ${account.displayName}` }))
+    expect(onRefresh).toHaveBeenCalledOnce()
+    expect(syncSlot().getByRole('button')).toHaveAttribute('aria-disabled', 'true')
+    view.rerender(<Harness sync={state('syncing', 2)} onRefresh={onRefresh} />)
+    expect((await screen.findByRole('status', { name: '正在同步' })).querySelector('svg')).toHaveClass('animate-spin')
+    expect(syncSlot().getByText('3')).toBeVisible()
+    await userEvent.click(syncSlot().getByRole('button'))
+    expect(onRefresh).toHaveBeenCalledOnce()
+
+    view.rerender(<Harness sync={state('idle', 3)} onRefresh={onRefresh} />)
+    await waitFor(() => expect(syncSlot().queryByRole('status')).not.toBeInTheDocument(), { timeout: 1500 })
+    expect(syncSlot().getByRole('button')).toHaveAttribute('aria-disabled', 'false')
+    view.rerender(<Harness sync={state('syncing', 4)} onRefresh={onRefresh} />)
+    expect(syncSlot().queryByRole('status')).not.toBeInTheDocument()
+    expect(syncSlot().getByText('3')).toBeVisible()
+  })
+
+  it('exposes background sync and the last successful sync on hover and focus without restarting it', async () => {
+    const onRefresh = sidebar(exampleSyncState({ phase: 'syncing' }))
+    const refresh = syncSlot().getByRole('button', { name: `正在同步 ${account.displayName}` })
+    await userEvent.hover(refresh)
+    expect(await screen.findByText(/^最近同步成功：/)).toBeInTheDocument()
+    await userEvent.click(refresh)
+    expect(onRefresh).not.toHaveBeenCalled()
+    await userEvent.unhover(refresh)
+    act(() => { refresh.blur(); refresh.focus() })
+    expect(await screen.findByText(`正在同步 ${account.displayName}`)).toBeInTheDocument()
+    expect(refresh.querySelector('svg')).not.toHaveClass('animate-spin')
   })
 
   it('refreshes only that account from its own row', async () => {
@@ -77,8 +112,9 @@ describe('account sync indicator', () => {
     const unified = screen.getByRole('button', { name: '全部收件箱' }).closest('li')!
     expect(within(unified).queryByRole('button', { name: /同步/ })).not.toBeInTheDocument()
     expect(within(unified).queryByRole('status')).not.toBeInTheDocument()
-    // The only refresh button is the account's own.
+    // A busy account exposes a static, unavailable action for status inspection.
     expect(screen.queryAllByRole('button', { name: /立即同步/ })).toHaveLength(0)
+    expect(screen.getAllByRole('button', { name: /正在同步/ })).toHaveLength(1)
   })
 
   it('shows exactly one refresh button, on the account row, when idle', () => {
