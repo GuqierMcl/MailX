@@ -165,6 +165,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["draft_attachments"],
         sql: include_str!("migrations/0023_attachment_origin.sql"),
     },
+    Migration {
+        version: 24,
+        description: "provider-neutral sent copy identity",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0024_sent_copy_identity.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -569,7 +575,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 23);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 24);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -765,7 +771,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            23
+            MIGRATIONS.last().unwrap().version
         );
     }
 
@@ -979,6 +985,57 @@ mod tests {
             .unwrap();
         assert_eq!(
             db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn sent_identity_upgrade_preserves_v23_mail_and_marks_headers_for_refresh() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(23)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+               attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'Sent', 'Sent', 'sent', 1, '[]', 0, 1, 't');
+             INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+               message_id_header, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
+               received_at, is_read, is_flagged, flags, has_attachment, remote_state, updated_at, body_state, preview)
+             VALUES ('m', 'a', 'source', 'f', 7, 42, 'server@example.invalid', 'Saved', 'work@example.invalid',
+               '[]', '[]', '[]', 't', 1, 1, '[]', 0, 'present', 't', 'ready', 'preview');
+             INSERT INTO message_bodies(message_id, raw_sha256, raw_size, plain_text, sanitizer_version,
+               links, remote_images_blocked, truncated, fetched_at)
+             VALUES ('m', 'hash', 12, 'cached body', 1, '[]', 0, 0, 't');",
+        ).unwrap();
+        let snapshot = |db: &Connection| -> String {
+            db.query_row("SELECT json_array(m.id, m.uid, m.uid_validity, m.message_id_header,
+                m.subject, m.is_read, m.is_flagged, m.body_state, m.preview, b.raw_sha256, b.plain_text)
+                FROM messages m JOIN message_bodies b ON b.message_id = m.id", [], |row| row.get(0)).unwrap()
+        };
+        let before = snapshot(&db);
+        apply(&mut db, MIGRATIONS).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        assert_eq!(snapshot(&db), before);
+        let identity: (Option<String>, String) = db
+            .query_row(
+                "SELECT original_message_id, sent_identity_policy FROM messages WHERE id = 'm'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(identity, (None, String::new()));
+        assert!(
+            db.execute("UPDATE messages SET sent_identity_policy = NULL", [])
+                .is_err()
+        );
+        db.execute("DELETE FROM folders WHERE id = 'f'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM message_bodies", [], |row| row
                 .get::<_, i64>(0))
                 .unwrap(),
             0

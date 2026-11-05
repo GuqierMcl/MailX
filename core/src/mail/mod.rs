@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub(crate) mod compatibility;
 pub mod filename;
 pub mod preview;
 pub mod render;

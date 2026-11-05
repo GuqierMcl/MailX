@@ -83,7 +83,11 @@ frontend/src/features/startup/
 
 `0022_draft_origin.sql` 为草稿增加 `user` / `mcp` / `ai` 来源，已有草稿默认 `user`；`ai` 是预留来源，不表示内置 AI 已接入。
 
-`0023_attachment_origin.sql` 重建附件表，保留原顺序和引用并允许 `mcp` / `ai` 来源，同时重建 blob 和内嵌 Content-ID 索引。历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
+`0023_attachment_origin.sql` 重建附件表，保留原顺序和引用并允许 `mcp` / `ai` 来源，同时重建 blob 和内嵌 Content-ID 索引。
+
+`0024_sent_copy_identity.sql` 为 `messages` 增加可空的 `original_message_id` 和默认空串的 `sent_identity_policy`，分别保存服务商兼容层校验的原始标识和已处理策略版本；原生 `message_id_header` 保留。迁移本身不联网，不根据主题或时间回填身份。启动补做已有缓存的标准 `Message-ID` 对账；需要扩展头部的旧已发送缓存由启动后的同步按持久化策略标记分批补抓，每个已发送文件夹每轮最多 200 个，失败或重启可继续。规则与保护条件见[邮箱服务商兼容层](provider-compatibility.md#33-存储与恢复)。
+
+历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则
 

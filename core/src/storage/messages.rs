@@ -16,6 +16,8 @@ use crate::{
     sync::headers::MessageRecord,
 };
 
+mod sent_copies;
+
 /// Identity captured before network I/O; every write checks it again in its transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SyncTarget {
@@ -227,10 +229,12 @@ impl Storage {
         let mut statement = tx.prepare(
             "INSERT INTO messages (id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
              message_id_header, subject, from_name, from_address, to_addresses, cc_addresses, reply_to_addresses,
-             received_at, sent_at, size, is_read, is_flagged, flags, has_attachment, remote_state, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'present', ?21)
+             received_at, sent_at, size, is_read, is_flagged, flags, has_attachment, remote_state, updated_at,
+             original_message_id, sent_identity_policy)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'present', ?21, ?22, ?23)
              ON CONFLICT (folder_id, uid_validity, uid) DO UPDATE SET
              message_id_header = excluded.message_id_header, subject = excluded.subject,
+             original_message_id = excluded.original_message_id, sent_identity_policy = excluded.sent_identity_policy,
              from_name = excluded.from_name, from_address = excluded.from_address,
              to_addresses = excluded.to_addresses, cc_addresses = excluded.cc_addresses, reply_to_addresses = excluded.reply_to_addresses,
              received_at = excluded.received_at, sent_at = excluded.sent_at, size = excluded.size,
@@ -263,6 +267,8 @@ impl Storage {
                 encode_flags(&record.flags)?,
                 record.has_attachment,
                 timestamp,
+                record.original_message_id,
+                record.sent_identity_policy,
             ])?;
         }
         drop(statement);
@@ -280,14 +286,10 @@ impl Storage {
             |row| row.get(0),
         )?;
         if is_sent {
-            let message_ids: Vec<&str> = records
-                .iter()
-                .filter_map(|record| record.message_id_header.as_deref())
-                .collect();
-            super::outbox::release_matched_snapshots(
+            super::outbox::reconcile_sent_copies(
                 &tx,
                 &target.account_id,
-                &message_ids,
+                Some(&target.folder_id),
                 &timestamp,
             )?;
         }

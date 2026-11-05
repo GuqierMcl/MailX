@@ -197,47 +197,69 @@ fn release_snapshots(tx: &rusqlite::Connection, draft_id: &str, now: &str) -> Re
     Ok(())
 }
 
-/// Header sync of a `sent` folder: every accepted item of the account whose
-/// Message-ID is among `message_ids` (as the parser reports them, without angle
-/// brackets) now has its server copy. Records that copy and lets go of the
-/// snapshot (sending.md section 16.7). Matches by Message-ID only, never by
-/// subject or time, and only items already settled as `accepted`: `queued`,
-/// `sending` and `unknown` keep their snapshot. Idempotent: an item with a
-/// recorded copy is not touched again, so nothing is released twice or revived.
-/// Returns how many items were matched.
-pub(super) fn release_matched_snapshots(
+/// Reconcile accepted sends against current, visible Sent identities. Used in
+/// both arrival orders and at startup; provider rules have already extracted
+/// the optional original identity. Standard IDs take precedence over aliases.
+pub(super) fn reconcile_sent_copies(
     tx: &rusqlite::Connection,
     account_id: &str,
-    message_ids: &[&str],
+    folder_id: Option<&str>,
     now: &str,
 ) -> Result<usize, AppError> {
-    let mut statement = tx.prepare_cached(
-        "UPDATE outbox SET server_copy_message_id = message_id, snapshot_hash = NULL,
-             snapshot_size = NULL, snapshot_released_at = ?3
-         WHERE account_id = ?1 AND state = 'accepted'
-           AND trim(message_id, '<>') = ?2 AND server_copy_message_id IS NULL",
+    let pending: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM outbox WHERE account_id = ?1 AND state = 'accepted'
+         AND server_copy_message_id IS NULL)",
+        [account_id],
+        |row| row.get(0),
     )?;
-    let mut matched = 0;
-    for message_id in message_ids {
-        // `message_ids` come without angle brackets; the outbox keeps the
-        // header as it was sent, with them.
-        let ids = {
-            let mut select = tx.prepare_cached(
-                "SELECT id FROM outbox WHERE account_id = ?1 AND state = 'accepted'
-                   AND trim(message_id, '<>') = ?2 AND server_copy_message_id IS NULL",
-            )?;
-            select
-                .query_map(params![account_id, message_id], |row| {
-                    row.get::<_, String>(0)
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        matched += statement.execute(params![account_id, message_id, now])?;
-        for id in ids {
-            super::search_index::remove_local(tx, &id)?;
-        }
+    if !pending {
+        return Ok(0);
     }
-    Ok(matched)
+    let host: String = tx
+        .query_row(
+            "SELECT host FROM mail_connections WHERE account_id = ?1 AND protocol = 'imap'",
+            [account_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or_default();
+    let policy = crate::providers::for_imap_host(&host).policy_key();
+    let ids = {
+        let mut select = tx.prepare_cached(
+            "SELECT o.id FROM outbox o
+             WHERE o.account_id = ?1 AND o.state = 'accepted' AND o.server_copy_message_id IS NULL
+             AND EXISTS (
+               SELECT 1 FROM messages m
+               JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
+               JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id
+                 AND f.mailbox_source_id = m.mailbox_source_id
+               JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity
+               WHERE m.account_id = o.account_id AND (?3 IS NULL OR m.folder_id = ?3)
+                 AND f.role = 'sent' AND f.selectable = 1
+                 AND m.remote_state = 'present'
+                 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)
+                 AND (m.message_id_header = trim(o.message_id, '<>')
+                   OR (m.original_message_id = trim(o.message_id, '<>') AND m.sent_identity_policy = ?2
+                     AND lower(m.from_address) = lower(json_extract(o.envelope, '$.from'))
+                     AND NOT EXISTS (SELECT 1 FROM outbox direct WHERE direct.account_id = m.account_id
+                       AND trim(direct.message_id, '<>') = m.message_id_header))))",
+        )?;
+        select
+            .query_map(params![account_id, policy, folder_id], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for id in &ids {
+        tx.execute(
+            "UPDATE outbox SET server_copy_message_id = message_id, snapshot_hash = NULL,
+             snapshot_size = NULL, snapshot_released_at = ?2
+             WHERE id = ?1 AND state = 'accepted' AND server_copy_message_id IS NULL",
+            params![id, now],
+        )?;
+        super::search_index::remove_local(tx, id)?;
+    }
+    Ok(ids.len())
 }
 
 impl Storage {
@@ -918,6 +940,7 @@ fn accept_in(
     if rows == 0 {
         return Ok(None);
     }
+    reconcile_sent_copies(tx, &before.account_id, None, &stamp(now))?;
     super::search_index::refresh_local(tx, id)?;
     let mut draft = None;
     if let Some(draft_id) = &before.draft_id

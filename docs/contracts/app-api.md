@@ -85,6 +85,8 @@ type EmailPage = {
 
 已发送副本（发信设计第 9 节，已实现，macOS 用户手测通过）：`EmailSummary` 新增 `to`（`EmailRecipients { addresses, total }`，最多 3 个地址与总数；已发送角色文件夹的列表行据此显示“致：收件人”）与 `localOnly`（本机已发送副本为 true）。本机副本的 `id` 为 `local-sent:<outbox id>`，恒为已读、无星标、`bodyState=ready`、`pendingChanges=false`；`emails_get`、正文准备、附件保存、回复与转发按 ID 前缀改从快照读取；`emails_fetch_body` 直接返回已就绪，`emails_request_previews` 忽略本机副本，`emails_set_flag` 对其返回 `validation`。本机副本的收件人 `name` 为空。没有已发送角色文件夹的账号不返回本机副本。新增 `outbox_remove_local_copy { emailId }` → `ApiResult<null>`（仅主窗口）：写入 `deleted_locally_at` 并释放快照，不影响服务器，重复调用无副作用；ID 必须是 `local-sent:` 加小写标准 UUID，否则 `validation`（字段 `emailId`），不是可移除的本机副本时 `notFound`。移除成功后宿主向主窗口发出 `mailx://sent-copies` 事件（`SentCopiesChanged { accountId }`），显示已发送的列表据此重新获取。
 
+已发送对账由共享核心完成，不新增 UI 或 MCP 入参：同账号当前来源的服务器副本以原生 `Message-ID` 优先匹配，并允许[服务商兼容层](../architecture/provider-compatibility.md)提供经校验的原始标识。匹配后查询只返回服务器那封，原本的 `local-sent:` ID 不再可读取；发送结果先后顺序及旧缓存的头部补抓不改变 `EmailSummary` / `EmailDetail` 的结构，也不会重新发送邮件。
+
 `coverage` 按查询的账号 / 文件夹作用域汇总当前可选文件夹游标，不计入 Noselect 容器：
 
 - 至少有一个匹配文件夹，且每个都存在游标、`backfill_done=1`、`window_capped=0` 时，`headersComplete=true`。任一文件夹尚未同步、抓取未完成或窗口超过 1,000 封上限时为 false；不存在匹配文件夹时同样为 false。

@@ -34,7 +34,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | --- | --- | --- |
 | `folders`（v2） | id、account_id、mailbox_source_id、remote_name、parent_id、name、delimiter、role、selectable、attributes、unread_count、total_count、uid_next、uid_validity、synced_at | `UNIQUE(account_id, mailbox_source_id, remote_name)`；v3 增加 `folders_identity(id, account_id, mailbox_source_id)` 唯一索引 |
 | `folder_sync_cursors`（v3） | folder_id、uid_validity、window_start、window_capped、backfill_done、highest_uid、updated_at | folder_id 是主键，外键引用 folders 并级联删除；邮件批次和 highest_uid 在同一事务推进 |
-| `messages`（v3） | id、account_id、mailbox_source_id、folder_id、uid_validity、uid、message_id_header、subject、from_name、from_address、to_addresses、cc_addresses、reply_to_addresses、received_at、sent_at、size、is_read、is_flagged、flags、has_attachment、remote_state、updated_at | `UNIQUE(folder_id, uid_validity, uid)`；复合外键引用 folders 的 id / account_id / mailbox_source_id 并级联删除 |
+| `messages`（v3，v24 增加已发送身份） | id、account_id、mailbox_source_id、folder_id、uid_validity、uid、message_id_header、original_message_id、sent_identity_policy、subject、from_name、from_address、to_addresses、cc_addresses、reply_to_addresses、received_at、sent_at、size、is_read、is_flagged、flags、has_attachment、remote_state、updated_at | `UNIQUE(folder_id, uid_validity, uid)`；复合外键引用 folders 的 id / account_id / mailbox_source_id 并级联删除；补充标识不替换原生 `message_id_header` |
 
 `folders.synced_at` 记录最后一次成功 STATUS 计数观测的时间；新发现且尚无计数的目录使用空串。LIST-only 更新保留旧计数和此时间，`Folder.countsKnown` 由可选目录且该时间非空派生，未知计数不能当成服务器真实零值。此调整不改写已应用迁移；既有版本存储可选目录前已完成 STATUS。
 
@@ -45,6 +45,8 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 - `stale`：UIDVALIDITY 改变后失效的旧代际；保留本地行但不展示，不把旧 UID 套用到新邮件。
 
 本地邮件 id 为 UUID，重复写入同一 `(folder_id, uid_validity, uid)` 使用 upsert 且保留 id。收件人、抄送、回复地址保存为 `{ name: string | null, address: string }` 的 JSON 数组，flags 保存为字符串 JSON 数组。邮件时间为固定 UTC 毫秒格式 `YYYY-MM-DDTHH:MM:SS.sssZ`，字典序与时间序一致。账号与文件夹的查询索引都包含 `remote_state, received_at DESC, id DESC`。
+
+`original_message_id` 是[服务商兼容层](provider-compatibility.md)校验后的补充身份，`sent_identity_policy` 是该次处理使用的策略版本，空串表示旧头部待处理。已发送对账优先使用原生 `message_id_header`；补充身份还核对冻结发件地址，并不得覆盖同账号已有的原生关联。对账仅匹配当前来源、当前 UIDVALIDITY、可选已发送文件夹中远端仍存在且没有待删除记录的邮件，只释放 `accepted` 项的快照，事务内同步移除本机搜索索引。
 
 游标的 `window_start` 是首次同步或 UIDVALIDITY 切换时的 UTC 当日减 30 天，代际内保持不变。`window_capped` 表示完整搜索匹配超过每轮 1,000 封上限；`backfill_done` 表示当轮选中的 UID 头部均已抓取，且删除与 flags 对账成功，不能用 `highest_uid` 推断所有历史已完成。文件夹 STATUS 更新的 UIDNEXT / UIDVALIDITY 与已提交的邮件同步游标分开存储，避免目录刷新覆盖旧代际判断依据。
 
@@ -173,6 +175,8 @@ Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未�
 ## 6. 迁移与恢复
 
 当前由宿主启动任务取得目录锁，再检查 `user_version` 与 `schema_migrations` 中的 SHA-256 checksum；编号 SQL 按 [migrations.rs](../../core/src/storage/migrations.rs) 登记的顺序逐步执行事务，可从兼容的已有版本升级，重复启动不会重跑。较新 schema、校验不符或非空无版本数据库均拒绝继续，保留原数据。核心打开与账号写入前还恢复凭证更新 journal 和移除后的凭证清理意图，具体步骤见[账号配置的一致性协议](account-configuration.md#4-sqlite-与凭据库的一致性)。
+
+已发送身份迁移不访问网络。启动时用已有缓存补做标准 `Message-ID` 对账；同步按 `sent_identity_policy` 为每个已发送文件夹每轮最多补抓 200 个旧 UID 的头部，包括已缓存但在常规窗口之外的 UID。成功处理后保存策略标记，失败不记完成，重启可继续；策略版本变化会重新获取。接受发送和用户 `markSent` 时也反查缓存，以覆盖服务器副本先到的顺序。未匹配项保留快照，整个恢复过程不会重新发送邮件，详见[兼容层的存储与恢复](provider-compatibility.md#33-存储与恢复)。
 
 账号移除使用一个事务核对连接 revision 与无 `sending` 项，再清除配置及其全部来源的缓存、草稿和发件记录。v11 的 `account_removals`、`removed_create_requests` 与 `secret_gc` 保存可重试收据、禁止创建请求重放的墓碑和不含秘密的清理引用；凭证删除失败不恢复已移除账号。共享 blob 只删除数据库引用，下次启动 GC 再回收孤立文件，不在运行中执行全局 GC；已保存到用户选择路径的附件不受账号移除影响。
 

@@ -229,8 +229,15 @@ async fn run_with(
     }
     let (client, server) = tokio::io::duplex(64 * 1024);
     let server = tokio::spawn(serve(server, script));
+    let endpoint = fixture
+        .service
+        .lock()
+        .unwrap()
+        .get(&fixture.account_id)
+        .unwrap()
+        .imap;
     let login = ImapLogin {
-        host: "imap.example.com".into(),
+        host: endpoint.host,
         port: 993,
         tls: crate::accounts::types::TlsMode::Implicit,
         username: "lin".into(),
@@ -1250,6 +1257,155 @@ async fn an_unchanged_folder_skips_the_full_round_and_reports_no_change() {
     let (result, changed) = run_with(&fixture, unchanged, true, &mut memory).await;
     result.unwrap();
     assert!(!changed, "nothing changed, so readers need not refetch");
+}
+
+fn qq_sent_fixture() -> Fixture {
+    let mut account = config(json!({"kind":"direct"}));
+    account["imap"]["host"] = json!("imap.qq.com");
+    account["emailAddress"] = json!("lin@vip.qq.com");
+    fixture_with(account, FolderRole::Sent)
+}
+
+fn accepted_sent_copy(fixture: &Fixture) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let raw = b"From: lin@vip.qq.com\r\nTo: friend@example.com\r\nSubject: Sent copy\r\nMessage-ID: <original@vip.qq.com>\r\n\r\nbody";
+    let snapshot = crate::storage::bodies::BlobStore::open(fixture._directory.path())
+        .unwrap()
+        .put(raw)
+        .unwrap();
+    let db = rusqlite::Connection::open(fixture._directory.path().join("mailx.sqlite3")).unwrap();
+    db.execute(
+        "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+         snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+         state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
+         attachment_count)
+         VALUES (?1, ?2, ?3, '{}', '<original@vip.qq.com>', ?4, ?5,
+         '{\"from\":\"lin@vip.qq.com\",\"recipients\":[\"friend@example.com\"]}',
+         'Sent copy', '[\"friend@example.com\"]', 1, 'accepted', ?6, ?6, ?6, ?6, ?6, 'body', 0)",
+        rusqlite::params![
+            id,
+            fixture.account_id,
+            uuid::Uuid::new_v4().to_string(),
+            snapshot.sha256,
+            snapshot.size as i64,
+            timestamp
+        ],
+    )
+    .unwrap();
+    id
+}
+
+fn add_qq_sent_header(script: &mut Script, include_original: bool) {
+    let fields =
+        "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION X-OQ-MSGID";
+    let original = if include_original {
+        "X-OQ-MSGID: <original@vip.qq.com>\r\n"
+    } else {
+        ""
+    };
+    let header = format!(
+        "From: lin@vip.qq.com\r\nTo: friend@example.com\r\nSubject: Sent copy\r\nMessage-ID: <rewritten@qq.com>\r\n{original}\r\n"
+    );
+    let date = chrono::Utc::now()
+        .format("%d-%b-%Y %H:%M:%S +0000")
+        .to_string();
+    script.push((
+        format!("UID FETCH 2 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({fields})])"),
+        format!("* 1 FETCH (UID 2 FLAGS (\\Seen) INTERNALDATE \"{date}\" RFC822.SIZE 200 BODY[HEADER.FIELDS ({fields})] {{{}}}\r\n{header})\r\n{{tag}} OK fetched\r\n", header.len()),
+    ));
+}
+
+fn sent_page(fixture: &Fixture) -> crate::mail::EmailPage {
+    fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery {
+            account_ids: Some(vec![fixture.account_id.clone()]),
+            folder_role: Some(FolderRole::Sent),
+            ..Default::default()
+        })
+        .unwrap()
+}
+
+#[tokio::test]
+async fn cached_sent_identity_refreshes_despite_unchanged_status_then_stops() {
+    let fixture = qq_sent_fixture();
+    let outbox = accepted_sent_copy(&fixture);
+    let mut memory = FolderMemory::new();
+    let mut first = commands(21, &[2]);
+    add_qq_sent_header(&mut first, false);
+    run_with(&fixture, first, true, &mut memory)
+        .await
+        .0
+        .unwrap();
+    assert_eq!(sent_page(&fixture).items.len(), 2);
+
+    // A migrated cache has the standard Message-ID and an empty policy stamp.
+    // Keep the round's STATUS memory unchanged to exercise the skip guard.
+    let db = rusqlite::Connection::open(fixture._directory.path().join("mailx.sqlite3")).unwrap();
+    db.execute("UPDATE messages SET sent_identity_policy = ''", [])
+        .unwrap();
+    let before: String = db
+        .query_row("SELECT id FROM messages WHERE uid = 2", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let mut repair = commands(21, &[2]);
+    add_qq_sent_header(&mut repair, true);
+    repair.push((
+        "UID FETCH 2 (UID FLAGS)".into(),
+        "* 1 FETCH (UID 2 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
+    ));
+    let (result, changed) = run_with(&fixture, repair, true, &mut memory).await;
+    result.unwrap();
+    assert!(changed, "matching removes the duplicate local row");
+    let page = sent_page(&fixture);
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(
+        page.items[0].id, before,
+        "repair preserves the cached server row"
+    );
+    assert!(!page.items[0].local_only);
+    assert!(
+        fixture
+            .service
+            .lock()
+            .unwrap()
+            .get_outbox(&outbox)
+            .unwrap()
+            .server_copy_message_id
+            .is_some()
+    );
+
+    // No further EXAMINE, SEARCH, identity FETCH or flags FETCH is expected.
+    let unchanged = commands(21, &[2]).into_iter().take(3).collect();
+    let (result, changed) = run_with(&fixture, unchanged, true, &mut memory).await;
+    result.unwrap();
+    assert!(!changed);
+}
+
+#[tokio::test]
+async fn new_sent_header_uses_provider_identity_without_a_second_fetch() {
+    let fixture = qq_sent_fixture();
+    let outbox = accepted_sent_copy(&fixture);
+    let mut script = commands(21, &[2]);
+    add_qq_sent_header(&mut script, true);
+    run(&fixture, script, true).await.unwrap();
+    let page = sent_page(&fixture);
+    assert_eq!(page.items.len(), 1);
+    assert!(!page.items[0].local_only);
+    assert!(
+        fixture
+            .service
+            .lock()
+            .unwrap()
+            .get_outbox(&outbox)
+            .unwrap()
+            .server_copy_message_id
+            .is_some()
+    );
 }
 
 /// One full `sync_targets` round for the fixture's INBOX against `script`; the

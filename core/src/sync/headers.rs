@@ -12,6 +12,9 @@ use crate::mail::MailAddress;
 pub(crate) struct MessageRecord {
     pub uid: u32,
     pub message_id_header: Option<String>,
+    /// Additional identity supplied by the endpoint's compatibility policy.
+    pub original_message_id: Option<String>,
+    pub sent_identity_policy: &'static str,
     pub subject: String,
     pub from_name: Option<String>,
     pub from_address: String,
@@ -28,7 +31,11 @@ pub(crate) struct MessageRecord {
 }
 
 /// Malformed or absent fields degrade independently; no message rejects a batch.
-pub(crate) fn parse_header(remote: &RemoteHeader, sync_time: DateTime<Utc>) -> MessageRecord {
+pub(crate) fn parse_header(
+    remote: &RemoteHeader,
+    sync_time: DateTime<Utc>,
+    compatibility: &dyn crate::mail::compatibility::ProviderCompatibility,
+) -> MessageRecord {
     let parsed = MessageParser::default().parse_headers(&remote.header);
     let from = addresses(parsed.as_ref().and_then(|message| message.from()))
         .into_iter()
@@ -44,6 +51,10 @@ pub(crate) fn parse_header(remote: &RemoteHeader, sync_time: DateTime<Utc>) -> M
         .unwrap_or(sync_time);
     MessageRecord {
         uid: remote.uid,
+        original_message_id: parsed
+            .as_ref()
+            .and_then(|message| compatibility.original_message_id(message)),
+        sent_identity_policy: compatibility.policy_key(),
         message_id_header: parsed
             .as_ref()
             .and_then(|message| message.message_id())
@@ -146,6 +157,10 @@ fn utc_string(date: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_header(remote: &RemoteHeader, sync_time: DateTime<Utc>) -> MessageRecord {
+        super::parse_header(remote, sync_time, crate::providers::for_imap_host(""))
+    }
 
     fn sync_time() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-18T04:05:06.789Z")
@@ -335,7 +350,7 @@ mod attachment_tests {
             size: None,
             header: format!("{headers}\r\n\r\n").into_bytes(),
         };
-        parse_header(&remote, Utc::now()).has_attachment
+        parse_header(&remote, Utc::now(), crate::providers::for_imap_host("")).has_attachment
     }
 
     #[test]

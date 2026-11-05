@@ -137,8 +137,18 @@ pub(super) async fn sync_folder(
         changed,
     )?;
 
+    let compatibility = session.compatibility();
+    let policy = compatibility.policy_key();
+    let (id, source_id, folder) = (account_id.clone(), source.clone(), folder_id.to_owned());
+    let pending_identity = with_store(shared, token, move |service| {
+        service.sent_identity_refresh_uids(&id, &source_id, &folder, policy)
+    })
+    .await?;
     let started = Instant::now();
-    if let Some(previous) = previous.filter(|previous| can_skip(Some(previous), &status, started)) {
+    if let Some(previous) = previous.filter(|previous| {
+        pending_identity.is_empty() && can_skip(Some(previous), &status, started)
+    }) {
+        reconcile_cached_sent(shared, token, folder_id, changed).await?;
         memory.insert(folder_id.to_owned(), previous);
         return Ok(());
     }
@@ -169,6 +179,17 @@ pub(super) async fn sync_folder(
     let guard = target.clone();
     let cached = with_store(shared, token, move |service| service.cached_uids(&guard)).await?;
     let plan = plan_messages(&cursor, &cached, &remote);
+    // Commit known disappearances before any new identity can release a local
+    // snapshot against an already-removed server copy from this round.
+    let guard = target.clone();
+    let deleted = plan.deleted.clone();
+    written(
+        with_store(shared, token, move |service| {
+            service.mark_deleted(&guard, &deleted)
+        })
+        .await?,
+        changed,
+    )?;
     let guard = target.clone();
     let capped = plan.capped;
     // Backfill is marked open for the round and closed at its end; only the
@@ -195,7 +216,7 @@ pub(super) async fn sync_folder(
         let complete = batch.iter().all(|uid| fetched.contains(uid));
         let records: Vec<_> = headers
             .iter()
-            .map(|header| parse_header(header, now))
+            .map(|header| parse_header(header, now, compatibility))
             .collect();
         highest_uid = highest_uid.max(records.iter().map(|record| record.uid).max().unwrap_or(0));
         let guard = target.clone();
@@ -211,6 +232,36 @@ pub(super) async fn sync_folder(
             // records but re-enumerate before claiming complete coverage.
             return Err(ImapError::Mailbox("mailbox changed during header fetch".into()).into());
         }
+    }
+
+    // Existing cached UIDs normally refresh only flags. Repair their identity
+    // once per policy version, even when STATUS is unchanged or mail is older
+    // than the ordinary sync window. The second selection follows any UIDVALIDITY
+    // reset/new-header writes above, so it cannot repair the previous generation.
+    let guard = target.clone();
+    let refresh = with_store(shared, token, move |service| {
+        service.sent_identity_refresh_uids(
+            &guard.account_id,
+            &guard.mailbox_source_id,
+            &guard.folder_id,
+            policy,
+        )
+    })
+    .await?;
+    if !refresh.is_empty() {
+        let headers = session.fetch_headers(&refresh).await?;
+        let records: Vec<_> = headers
+            .iter()
+            .map(|header| parse_header(header, now, compatibility))
+            .collect();
+        let guard = target.clone();
+        written(
+            with_store(shared, token, move |service| {
+                service.store_sent_identity_batch(&guard, &records, &refresh, policy)
+            })
+            .await?,
+            changed,
+        )?;
     }
 
     if let Some(after) = arrived_after {
@@ -232,14 +283,6 @@ pub(super) async fn sync_folder(
             );
         }
     }
-    let guard = target.clone();
-    written(
-        with_store(shared, token, move |service| {
-            service.mark_deleted(&guard, &plan.deleted)
-        })
-        .await?,
-        changed,
-    )?;
     for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
         let flags = session.fetch_flags(batch).await?;
         let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
@@ -265,6 +308,7 @@ pub(super) async fn sync_folder(
         &mut transient,
     )?;
     *changed |= !cursor.backfill_done || cursor.window_capped != capped;
+    reconcile_cached_sent(shared, token, folder_id, changed).await?;
     memory.insert(
         folder_id.to_owned(),
         StatusSnapshot {
@@ -273,6 +317,26 @@ pub(super) async fn sync_folder(
         },
     );
     Ok(())
+}
+
+async fn reconcile_cached_sent(
+    shared: &std::sync::Arc<Shared>,
+    token: &WorkerToken,
+    folder: &str,
+    changed: &mut bool,
+) -> Result<(), SyncError> {
+    let (account, source, folder) = (
+        token.account_id.clone(),
+        token.source.clone(),
+        folder.to_owned(),
+    );
+    written(
+        with_store(shared, token, move |service| {
+            service.reconcile_sent_folder(&account, &source, &folder)
+        })
+        .await?,
+        changed,
+    )
 }
 
 #[cfg(test)]

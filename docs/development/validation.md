@@ -937,3 +937,13 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 - macOS 当前 GUI domain 的禁用、系统后台项目审批、未签名安装包与钥匙串授权分别确认。
 - Windows 安装路径含空格 / 中文、Task Manager 禁用和普通用户无管理员权限；Linux GNOME / KDE、XDG_CONFIG_HOME、含特殊字符的 AppImage 路径。
 - 三平台升级后路径仍有效；移动 app bundle / AppImage 后重新开启刷新路径，卸载前关闭能清理注册。
+
+## 31. 服务商兼容层与已发送副本对账（2026-11-05）
+
+规则见[邮箱服务商兼容层](../architecture/provider-compatibility.md)。对本机已有的两组 `vip.qq.com` 发送快照与服务器缓存进行了只读比对：解码后的 MIME 部件、主题和日期一致，服务器改写 `Message-ID`，`X-OQ-MSGID` 保留完整原始标识。这是本次问题的现场证据，未将私人邮件、地址或标识写入仓库，也未修改实际邮件数据。普通 `qq.com` 与其他账号别名未做真实发送验收。
+
+自动回归使用临时 SQLite、合成头部和受控 IMAP：覆盖 QQ / 标准默认策略与端点隔离，重复、畸形、超长原始标识及重复 UID 拒绝；新邮件与旧缓存消重，服务器副本先到、SMTP 接受与 `markSent` 后对账；当前账号、来源、代际、目录、待删除状态与发件人约束；原生标识优先；不覆盖正文、旗标和本地 UUID；每文件夹 200 条补抓、重启续做、STATUS 不变时补抓、完成后停止重复抓取、撤销删除与角色变化后的对账，以及 v23 → v24 迁移保留缓存。
+
+本机 macOS 检查通过：core 库增量回归 835 项通过、1 项默认忽略（超大旧草稿 HTML 测试已在上一轮通过，增量重跑未重复该耗时项）；最后新增边界与迁移测试后，`cargo test -p mailx-core --locked sent_identity --quiet` 16 项通过。另通过 core all-targets Clippy（`-D warnings`）、`bun run rust:check`、`cargo fmt --all -- --check` 和 `git diff --check`。独立复核发现的撤销删除 / 角色变化漏对账、跨目录对账时机和重复 UID 歧义已修复并补回归。
+
+尚待安装更新后的桌面实测：现有 QQ 重复项随同步合并、新发送只显示一份、阅读和附件在交接后可用；普通 QQ / VIP / Foxmail 账号与其他服务商分别记录结果。自动化与现场只读诊断不等于更新后真实服务器及三平台验收。

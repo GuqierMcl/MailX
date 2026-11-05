@@ -15,6 +15,7 @@ mod imap;
 pub mod localization;
 pub mod mail;
 mod net;
+mod providers;
 pub mod secrets;
 mod send;
 pub mod settings;
