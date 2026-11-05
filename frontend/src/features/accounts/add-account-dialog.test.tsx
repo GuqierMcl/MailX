@@ -161,10 +161,11 @@ describe('add account wizard', () => {
     expect(client.queueSend).not.toHaveBeenCalled()
     await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
     expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
-    expect(within(dialog).queryByRole('switch', { name: '使用服务商图标' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('switch', { name: '使用服务商图标' })).toBeChecked()
+    expect(within(dialog).getByLabelText('账号名称').parentElement!.querySelector('img')).toHaveAttribute('src', ICLOUD_PROVIDER.logo)
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
-    expect(client.createAccount.mock.calls[0][0].config).toMatchObject(expected)
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ ...expected, useProviderIcon: true })
   })
 
   it('keeps iCloud IMAP and SMTP username overrides through the profile step', async () => {

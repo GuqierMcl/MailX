@@ -35,11 +35,11 @@
 
 以下服务商内置预设：选择服务商，填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好。
 
-| <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> |
-| :---: | :---: | :---: | :---: | :---: |
-| QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
+| <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 | iCloud 邮箱 |
 
-iCloud 邮箱也有专用预设，接受 `@icloud.com`、`@me.com` 和 `@mac.com`，使用 Apple 应用专用密码。账号前提和用户名设置见[添加账号指南](docs/guides/zh-CN/README.md#icloud-邮箱)。
+iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 Apple 应用专用密码。账号前提和用户名设置见[添加账号指南](docs/guides/zh-CN/README.md#icloud-邮箱)。
 
 其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail、Outlook 等服务的 OAuth 登录在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
 

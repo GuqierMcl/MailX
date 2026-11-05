@@ -1,6 +1,6 @@
 # iCloud 邮箱接入可行性评估
 
-状态：**Implemented / 专用预设、应用专用密码引导与官方帮助入口已有实现；真实账号兼容尚待验收**。
+状态：**Implemented / 专用预设、官方图标、应用专用密码引导与官方帮助入口已有实现；真实账号兼容尚待验收**。
 
 本评估区分 Apple 官方要求、MailX 当前实现和待验证行为。公开端点探测及调研基线集中记录在[验证记录](../development/validation.md#icloud-mail-feasibility)，不将公开握手成功视为真实邮箱兼容通过。
 
@@ -55,7 +55,7 @@ MailX 当前 `oauth2` 输入返回 `unsupported`（`core/src/accounts/mod.rs`）
 | 入口域名 | `preset.domains` 在创建时精确校验 `icloud.com` / `me.com` / `mac.com`，子域和近似后缀不匹配。自定义域使用通用入口，不改变其他服务商的域名校验。 |
 | 凭证文案 | 连接表单与故障帮助提供中英文“应用专用密码”、主地址开通、双重认证及撤销规则；后端仍是 password，不新增秘密格式约束。 |
 | 官方帮助 | `desktop/src/commands.rs::provider_help_url` 与 mock client 将 `icloud` 映射到 Apple 官方应用专用密码帮助 [S2]，仍只接受 provider ID 白名单。 |
-| 服务商图标 | 使用通用邮件图标与 iCloud 名称，没有新增或仿制 Apple 图形，遵守[图标规范](../../frontend/src/assets/providers/README.md)。 |
+| 服务商图标 | 本地打包 iCloud 官网用于 Mail / Mail2 的蓝底白信封 PNG 原件，保留完整图形、背景、透明度和细字。复用账号图标偏好，默认显示官方图标，关闭后回到首字母头像；来源链、尺寸与 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md#icloud-mail)。 |
 | 服务商兼容 | `imap.mail.me.com` 使用标准默认策略，没有 iCloud 专属兼容模块；已有前端入口不构成新增服务端特判的证据，见[兼容层约定](../architecture/provider-compatibility.md)。 |
 
 本次同步更新双语用户指南、账号说明、相关入口与 CHANGELOG。预设和引导已有实现，真实登录、收读发及写回仍待验证；不把入口存在或公开握手成功写成完整兼容证明。

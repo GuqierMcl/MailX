@@ -58,9 +58,16 @@
 - [原始图片](https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/40/94/0c/40940c85-1451-304d-da2c-ec1d2dd78560/AppIcon-0-1x_U007epad-0-11-0-P3-85-220-0.png/512x512bb.jpg)为 JPEG，仅按原尺寸解码保存为 PNG；已逐像素核对解码结果一致，没有裁切、缩放、补画或去背景。
 - JPEG 原文件 SHA-256：`704bc48e9153048dbabbb7fa18841308d70bfa37182f01c874707c885d3e3d00`。
 
+## iCloud Mail
+
+- 文件：`icloud-mail.png`，240 × 240 PNG，直接保存 Apple 官方浅色版原文件；统一用于浅深主题，保留蓝色圆角背景、白色信封及信封上的细小文字，没有裁切、改色或格式转换。
+- 来源页面：[iCloud Mail](https://www.icloud.com/mail/)，核验日期：2026-11-06。
+- 来源链：页面声明 `<base href="/system/icloud.com/2640Build24/en-us/">`，并引用[官方 `main.js`](https://www.icloud.com/system/icloud.com/2640Build24/en-us/main.js)。其中 AppIcon 的 `case "mail": case "mail2"` 明确选择 Mail 图标，并在浅色图片的 `srcSet` 中以 `3x` 引用 `../2b0f92bb67c43113d3f94d0d1377573c.png`；相对页面 base 解析得到下方原图 URL。
+- 原图：[iCloud Mail 3x PNG](https://www.icloud.com/system/icloud.com/2640Build24/2b0f92bb67c43113d3f94d0d1377573c.png)。本地文件与下载原件字节一致，保留完整图形与原始长宽比例；SHA-256 见下表。
+
 ## 文件核验与维护
 
-核验日期：2026-10-30。下表记录本地 PNG 的 SHA-256，用于发现素材更新或意外修改。
+QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06。下表记录本地 PNG 的 SHA-256，用于发现素材更新或意外修改。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -69,5 +76,6 @@
 | `netease-126.png` | `7a938c619dbeca51d4ece451d4f8b02107435638be5ab6e98fa3ed8c3d694b2d` |
 | `netease-yeah.png` | `77f34d1b7c3ac5477cf9a1e79e8c601a990332e9186aeab428e0dd3a82d4fc86` |
 | `mail-139.png` | `2d438d12f0e6bbc1d668d705b817cd1a374e7ffe053eedca16c5a6f15ee1862f` |
+| `icloud-mail.png` | `eb04a20229ea2fe673b7b78bf84213176a8ae765bf5c5ec88ac5c2458585f869` |
 
 服务商名称及图形属于各自权利人，与 MailX 自有品牌资源分开维护。

@@ -60,15 +60,21 @@ describe('mail providers', () => {
     expect(providerOf('icloud')).toBe(ICLOUD_PROVIDER)
   })
 
-  it('uses the iCloud TLS endpoints and a generic mark without fetching a logo', () => {
+  it('uses the iCloud TLS endpoints and a bundled official Mail mark', () => {
     expect(ICLOUD_PROVIDER.preset).toEqual({
       domains: ['icloud.com', 'me.com', 'mac.com'],
       imap: { host: 'imap.mail.me.com', port: 993, tls: 'implicit' },
       smtp: { host: 'smtp.mail.me.com', port: 587, tls: 'startTls' },
     })
     const { container } = render(<><ProviderIcon provider={ICLOUD_PROVIDER} /><ProviderBadge providerId="icloud" /></>)
-    expect(container.querySelector('img')).toBeNull()
-    expect(container.querySelectorAll('svg')).toHaveLength(2)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', ICLOUD_PROVIDER.logo)
+      expect(image).toHaveClass('object-contain')
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+    }
+    expect(container.querySelector('svg')).toBeNull()
     expect(screen.getByText('iCloud 邮箱')).toBeInTheDocument()
   })
 

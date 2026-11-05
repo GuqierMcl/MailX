@@ -6,6 +6,7 @@ import netease163Logo from '@/assets/providers/netease-163.png'
 import netease126Logo from '@/assets/providers/netease-126.png'
 import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
+import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -164,6 +165,7 @@ export const ICLOUD_PROVIDER: MailProvider = {
   domain: ICLOUD_DOMAINS.join(' / '),
   get description() { return t('accounts:icloudProviderDescription') },
   searchAliases: ['iCloud', 'Apple', '苹果', '苹果邮箱'],
+  logo: icloudMailLogo,
   icon: Mail01Icon,
   preset: {
     domains: ICLOUD_DOMAINS,

@@ -35,11 +35,11 @@ English | [简体中文](README.zh-CN.md)
 
 These providers have built-in presets: pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you.
 
-| <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="32"> |
-| :---: | :---: | :---: | :---: | :---: |
-| QQ Mail | 163 Mail | 126 Mail | Yeah Mail | 139 Mail |
+| <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud Mail" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| QQ Mail | 163 Mail | 126 Mail | Yeah Mail | 139 Mail | iCloud Mail |
 
-iCloud Mail also has a preset for `@icloud.com`, `@me.com` and `@mac.com`, using an Apple app-specific password. See the [account setup guide](docs/guides/README.md#icloud-mail) for the requirements and username settings.
+iCloud Mail accepts `@icloud.com`, `@me.com` and `@mac.com` addresses with an Apple app-specific password. See the [account setup guide](docs/guides/README.md#icloud-mail) for the requirements and username settings.
 
 Any other mailbox that offers IMAP and SMTP with password sign-in can be added by entering its servers manually. OAuth sign-in for services such as Gmail and Outlook is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
 

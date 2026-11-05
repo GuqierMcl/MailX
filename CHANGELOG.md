@@ -13,7 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- An iCloud Mail entry fills in encrypted IMAP / SMTP settings for @icloud.com, @me.com and @mac.com, with app-specific password guidance and separate username settings. / 新增 iCloud 邮箱添加入口，为 @icloud.com、@me.com 和 @mac.com 预填加密收发服务器，提供应用专用密码指引与收发独立用户名设置。
+- An iCloud Mail entry fills in encrypted IMAP / SMTP settings for @icloud.com, @me.com and @mac.com, with the official bundled Mail icon, app-specific password guidance and separate username settings. / 新增 iCloud 邮箱添加入口，为 @icloud.com、@me.com 和 @mac.com 预填加密收发服务器，采用本地打包的官方 Mail 图标，提供应用专用密码指引与收发独立用户名设置。
 
 ### ✨ Optimization
 
