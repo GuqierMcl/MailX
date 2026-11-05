@@ -19,6 +19,7 @@ pub(crate) use preview::{
     PREVIEW_BATCH, PREVIEW_BATCH_BYTES, PREVIEW_FALLBACK_BYTES, PartialFetch,
 };
 
+use std::collections::HashSet;
 use std::fmt;
 use std::future::Future;
 use std::time::Duration;
@@ -34,6 +35,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use tokio::time::timeout;
 
 use crate::accounts::types::TlsMode;
+use crate::mail::compatibility::ProviderCompatibility;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
 use crate::secrets::SecretValue;
 
@@ -176,6 +178,7 @@ pub(crate) struct Session {
     completion: Option<ResponseCodeKind>,
     /// Capability atoms the server announced after login, upper-cased.
     capabilities: Vec<String>,
+    compatibility: &'static dyn ProviderCompatibility,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,6 +370,7 @@ async fn authenticate(
         body_guard: None,
         completion: None,
         capabilities: Vec::new(),
+        compatibility: crate::providers::for_imap_host(&login.host),
     };
     // The library collector drops tagged NO/BAD. Use the same checked
     // completion boundary as mailbox commands so policy refusals cannot vanish.
@@ -406,6 +410,10 @@ async fn authenticate(
 }
 
 impl Session {
+    pub(crate) fn compatibility(&self) -> &'static dyn ProviderCompatibility {
+        self.compatibility
+    }
+
     /// Whether the server announced a capability atom such as `MOVE`.
     pub(crate) fn supports(&self, capability: &str) -> bool {
         self.capabilities
@@ -731,56 +739,71 @@ impl Session {
         // Content-Disposition types as bare atoms, which the response parser
         // rejects, and one such message would fail every retry of its batch.
         // Attachments are inferred from CONTENT-TYPE / CONTENT-DISPOSITION.
+        let mut fields =
+            "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION"
+                .to_owned();
+        for field in self.compatibility.extra_header_fields() {
+            fields.push(' ');
+            fields.push_str(field);
+        }
         let query = format!(
-            "UID FETCH {} (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)])",
+            "UID FETCH {} (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({fields})])",
             uid_set(uids)
         );
-        self.checked_command(&query, |response, _| {
-            let Response::Fetch(_, attributes) = response else {
-                return Ok(None);
-            };
-            if flags_notification(attributes) {
-                // Even a requested UID can receive an unsolicited flags-only
-                // update. The driver verifies that all requested headers arrive.
-                return Ok(None);
-            }
-            let Some((uid, flags)) = fetch_identity(attributes, uids)? else {
-                return Ok(None);
-            };
-            let mut result = RemoteHeader {
-                uid,
-                flags,
-                internal_date: None,
-                size: None,
-                header: Vec::new(),
-            };
-            let mut found_header = false;
-            for attribute in attributes {
-                match attribute {
-                    AttributeValue::InternalDate(value) => {
-                        result.internal_date =
-                            DateTime::parse_from_str(value, "%d-%b-%Y %H:%M:%S %z").ok();
-                    }
-                    AttributeValue::Rfc822Size(value) => result.size = Some(*value),
-                    AttributeValue::BodySection {
-                        section: Some(SectionPath::Full(MessageSection::Header)),
-                        data: Some(value),
-                        ..
-                    } => {
-                        result.header = value.to_vec();
-                        found_header = true;
-                    }
-                    _ => {}
+        let headers = self
+            .checked_command(&query, |response, _| {
+                let Response::Fetch(_, attributes) = response else {
+                    return Ok(None);
+                };
+                if flags_notification(attributes) {
+                    // Even a requested UID can receive an unsolicited flags-only
+                    // update. The driver verifies that all requested headers arrive.
+                    return Ok(None);
                 }
-            }
-            if !found_header {
-                return Err(ImapError::Protocol(
-                    "header response did not contain header data".into(),
-                ));
-            }
-            Ok(Some(result))
-        })
-        .await
+                let Some((uid, flags)) = fetch_identity(attributes, uids)? else {
+                    return Ok(None);
+                };
+                let mut result = RemoteHeader {
+                    uid,
+                    flags,
+                    internal_date: None,
+                    size: None,
+                    header: Vec::new(),
+                };
+                let mut found_header = false;
+                for attribute in attributes {
+                    match attribute {
+                        AttributeValue::InternalDate(value) => {
+                            result.internal_date =
+                                DateTime::parse_from_str(value, "%d-%b-%Y %H:%M:%S %z").ok();
+                        }
+                        AttributeValue::Rfc822Size(value) => result.size = Some(*value),
+                        AttributeValue::BodySection {
+                            section: Some(SectionPath::Full(MessageSection::Header)),
+                            data: Some(value),
+                            ..
+                        } => {
+                            result.header = value.to_vec();
+                            found_header = true;
+                        }
+                        _ => {}
+                    }
+                }
+                if !found_header {
+                    return Err(ImapError::Protocol(
+                        "header response did not contain header data".into(),
+                    ));
+                }
+                Ok(Some(result))
+            })
+            .await?;
+        // Reconciliation must never choose between conflicting identities for
+        // one UID. Reject the complete batch before any caller can persist it.
+        let mut seen = HashSet::with_capacity(headers.len());
+        if headers.iter().any(|header| !seen.insert(header.uid)) {
+            return Err(ImapError::Protocol("header response repeated a UID".into()));
+        }
+        Ok(headers)
     }
 
     pub(crate) async fn fetch_flags(
@@ -1354,6 +1377,13 @@ mod tests {
     async fn header_session(
         commands: Vec<(String, String)>,
     ) -> (Session, tokio::task::JoinHandle<()>) {
+        header_session_for_host("imap.example.com", commands).await
+    }
+
+    async fn header_session_for_host(
+        host: &str,
+        commands: Vec<(String, String)>,
+    ) -> (Session, tokio::task::JoinHandle<()>) {
         let (client, server) = tokio::io::duplex(64 * 1024);
         let mut script = vec![
             ("LOGIN".into(), "{tag} OK\r\n".into()),
@@ -1364,8 +1394,45 @@ mod tests {
         ];
         script.extend(commands);
         let server = tokio::spawn(serve(server, script));
-        let session = test_session(Box::new(client), &login()).await.unwrap();
+        let mut login = login();
+        login.host = host.into();
+        let session = test_session(Box::new(client), &login).await.unwrap();
         (session, server)
+    }
+
+    #[tokio::test]
+    async fn header_fetch_uses_the_actual_endpoints_compatibility_fields() {
+        let header = b"Message-ID: <rewritten@qq.com>\r\nX-OQ-MSGID: <original@vip.qq.com>\r\n\r\n";
+        let fields = "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION X-OQ-MSGID";
+        let response = format!(
+            "* 1 FETCH (UID 42 FLAGS (\\Seen) BODY[HEADER.FIELDS ({fields})] {{{}}}\r\n{})\r\n{{tag}} OK\r\n",
+            header.len(),
+            String::from_utf8_lossy(header)
+        );
+        let (mut session, server) = header_session_for_host(
+            "IMAP.QQ.COM",
+            vec![
+                (
+                    format!("UID FETCH 42 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({fields})])"),
+                    response,
+                ),
+                ("LOGOUT".into(), "{tag} OK\r\n".into()),
+            ],
+        )
+        .await;
+        let fetched = session.fetch_headers(&[42]).await.unwrap();
+        let message = mail_parser::MessageParser::default()
+            .parse(&fetched[0].header)
+            .unwrap();
+        assert_eq!(
+            session
+                .compatibility()
+                .original_message_id(&message)
+                .as_deref(),
+            Some("original@vip.qq.com")
+        );
+        session.logout().await.unwrap();
+        server.await.unwrap();
     }
 
     #[test]
@@ -1431,6 +1498,33 @@ mod tests {
             vec![(42, vec!["\\Seen".into()])]
         );
         session.logout().await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_header_uids_reject_the_entire_batch() {
+        let mut response = String::new();
+        for (uid, message_id) in [
+            (41, "other@example.test"),
+            (42, "first@example.test"),
+            (42, "conflicting@example.test"),
+        ] {
+            let header = format!("Message-ID: <{message_id}>\r\n\r\n");
+            response.push_str(&format!(
+                "* 1 FETCH (UID {uid} FLAGS (\\Seen) BODY[HEADER.FIELDS (MESSAGE-ID)] {{{}}}\r\n{header})\r\n",
+                header.len(),
+            ));
+        }
+        response.push_str("{tag} OK fetched\r\n");
+        let (mut session, server) = header_session(vec![(
+            "UID FETCH 41:42 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS ".into(),
+            response,
+        )])
+        .await;
+        assert!(matches!(
+            session.fetch_headers(&[41, 42]).await,
+            Err(ImapError::Protocol(reason)) if reason == "header response repeated a UID"
+        ));
         server.await.unwrap();
     }
 

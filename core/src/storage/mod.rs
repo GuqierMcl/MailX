@@ -75,6 +75,7 @@ impl Storage {
         storage.backfill_outbox_list_fields()?;
         storage.recover_bodies()?;
         storage.ensure_search_index_version()?;
+        storage.reconcile_cached_sent_copies()?;
         Ok(storage)
     }
 

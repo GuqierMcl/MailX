@@ -29,7 +29,7 @@ Check the recipients, sending account, body and attachments, then confirm sendin
 
 The outbox shows queued, failed and unknown outcomes. An unknown outcome means the server may have accepted the message, and MailX will not resend it on its own; check the recipient or the provider's Sent folder first, then decide whether to retry manually. The server accepting an SMTP submission does not mean the recipient received the message.
 
-The Sent folder shows local copies that have not yet matched a server copy. Whether the provider saves sent mail automatically depends on its behaviour; MailX does not upload local copies to the server yet.
+The Sent folder shows a local copy until MailX matches it to the provider's saved copy, then shows only the server copy. QQ Mail may assign a new message identifier; MailX also checks the original identifier preserved by QQ to avoid showing both copies. Existing duplicates are reconciled as mail headers sync, without sending the message again. If no match can be confirmed, the local copy stays. Whether the provider saves sent mail automatically depends on its behaviour; MailX does not upload local copies to the server yet.
 
 ## Connecting external AI clients (MCP)
 

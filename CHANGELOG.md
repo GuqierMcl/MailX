@@ -11,6 +11,14 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🩹 Fixed
+
+- Fixed duplicate local and server copies in Sent when QQ Mail rewrites message identifiers or the server copy syncs before sending finishes; existing duplicates are reconciled during sync without sending again. / 修复 QQ 邮箱重写邮件标识或服务器副本先于发送完成同步时，“已发送”中同时出现本机与服务器副本的问题；已有重复项会在同步时重新对账，无需再次发送。
+
+### 🔄 Changed
+
+- The local database upgrades to v24 to track sent-copy identities; older versions cannot open the upgraded database. / 本地数据库升级至 v24，以记录已发送副本的身份；旧版无法直接打开升级后的数据库。
+
 ## [0.1.0] - 2026-11-04
 
 ### 🚀 Feature

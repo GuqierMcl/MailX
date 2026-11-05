@@ -1,3 +1,4 @@
+mod sent_identity;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -93,6 +94,8 @@ fn record(uid: u32) -> MessageRecord {
     MessageRecord {
         uid,
         message_id_header: Some(format!("message-{uid}@example.test")),
+        original_message_id: None,
+        sent_identity_policy: crate::providers::for_imap_host("").policy_key(),
         subject: format!("Subject {uid}"),
         from_name: Some("林女士".into()),
         from_address: "sender@example.test".into(),
@@ -1958,6 +1961,8 @@ fn snapshot_of(f: &Fixture, id: &str) -> (Option<String>, Option<i64>, bool, Opt
 fn sent_copy(message_id: &str, uid: u32) -> MessageRecord {
     MessageRecord {
         message_id_header: Some(message_id.into()),
+        original_message_id: None,
+        sent_identity_policy: crate::providers::for_imap_host("").policy_key(),
         ..record(uid)
     }
 }

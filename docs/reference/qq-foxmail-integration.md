@@ -106,9 +106,9 @@ QQ 的“最近 30 天”与 MailX 的固定窗口不同：MailX 在每个目录
 
 ### 已发送副本
 
-发送队列已保存 accepted MIME 快照，但本地副本与服务器邮件的列表合并尚未实现，见 `docs/architecture/sending.md:232`。应实测 QQ SMTP 是否自动保存已发送、是否保留 Message-ID，以及 Foxmail 发件身份如何呈现。
+本机已发送副本的展示与对账已有实现，当前行为见[写信与发送](../architecture/sending.md#9-已发送副本)。QQ 的服务器副本可能重写 `Message-ID`；其保留的原始标识由独立模块校验，规则以[邮箱服务商兼容层](../architecture/provider-compatibility.md)为准，真实账号类型和别名的验证范围见[验证记录](../development/validation.md)。
 
-首版不默认增加 IMAP APPEND，避免双副本；副本未出现也不能触发再次 SMTP 发送。若要交付完整的“发送后立即在已发送里看到”体验，可并行推进现有发送设计的本地副本展示与对账，但作为单独工作包。写信附件同样维持当前未实现的边界。
+当前不增加 IMAP APPEND；副本未出现或尚未匹配均不能触发再次 SMTP 发送。写信附件的当前行为见[写信与发送](../architecture/sending.md#16-写信附件与内嵌图片)，本调研文档不另行维护功能状态。
 
 ## 7. 实施拆分
 

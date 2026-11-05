@@ -84,6 +84,8 @@ pub(crate) fn seed(
         .map(|(index, size)| MessageRecord {
             uid: index as u32 + 1,
             message_id_header: Some(format!("fixture-{index}@example.test")),
+            original_message_id: None,
+            sent_identity_policy: crate::providers::for_imap_host("").policy_key(),
             subject: format!("Synthetic {index}"),
             from_name: None,
             from_address: "fixture@example.test".into(),

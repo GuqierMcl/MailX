@@ -67,6 +67,8 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/accounts/             # 账号服务、写入型认证输入与脱敏 DTO、同步凭证解析
   src/net/                  # 按账号路由建立直连 / SOCKS5 / HTTP CONNECT 与 TLS
   src/imap/                 # IMAP 会话与修改版 UTF-7
+  src/mail/compatibility.rs # 主干消费的服务商兼容接口
+  src/providers/            # 服务商识别、注册与具体兼容规则
   src/sync/                 # 文件夹 / 邮件头解析、同步计划与每账号后台任务
   src/storage/              # SQLite、迁移、文件夹 / 邮件头缓存与游标、凭证恢复和实例锁
   src/secrets.rs            # 宿主注入的 SecretStore
@@ -101,6 +103,8 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 当前依赖为 **`desktop → core`**、**`desktop → mcp-server → core`**；`mcp-bridge` 不链接 core。第二阶段增加 **`server → core`** 并复用 MCP 适配层。不再单设 `infra` 包：存储、邮件协议、网络路由和后续模型适配随功能放入 `core` 的内部模块。宿主无关意味着 core 不导入 Tauri、Axum 或 UI API，可以依赖 SQLite 驱动、协议库和 HTTP 客户端；不要求为每个实现预建 trait。平台特定能力按需要由宿主注入。
 
 邮件同步、收信、发信、重试与持久化均由 Rust core 承担，前端负责展示、输入和交互。桌面 IPC 与本地 MCP 工具共用核心应用服务；后续 HTTP 也应复用同一套服务。出现独立发布、可选重依赖或明确复用需求时，再评估拆包。
+
+服务商差异通过 core 内的中立兼容接口接入，具体识别与偏差处理放在 `core/src/providers/`，不在主干同步、发送、存储流程中散布品牌分支。模块边界、已发送副本对账和扩展约束以[邮箱服务商兼容层](provider-compatibility.md)为准。
 
 账号以 Rust DTO 为跨边界类型来源，通过 `ts-rs` 生成 TypeScript；输入秘密与读取结果分开。前端仅经 `MailxClient` 调用宿主，生成产物可检查漂移。接口仍处于开发期，未冻结对外兼容承诺。
 

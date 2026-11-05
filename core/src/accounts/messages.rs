@@ -89,6 +89,37 @@ impl AccountService {
         self.storage.cached_uids(target)
     }
 
+    pub(crate) fn sent_identity_refresh_uids(
+        &self,
+        account: &str,
+        source: &str,
+        folder: &str,
+        policy: &str,
+    ) -> Result<Vec<u32>, AppError> {
+        self.storage
+            .sent_identity_refresh_uids(account, source, folder, policy)
+    }
+
+    pub(crate) fn reconcile_sent_folder(
+        &mut self,
+        account: &str,
+        source: &str,
+        folder: &str,
+    ) -> Result<Option<usize>, AppError> {
+        self.storage.reconcile_sent_folder(account, source, folder)
+    }
+
+    pub(crate) fn store_sent_identity_batch(
+        &mut self,
+        target: &SyncTarget,
+        records: &[MessageRecord],
+        requested: &[u32],
+        policy: &str,
+    ) -> Result<Option<usize>, AppError> {
+        self.storage
+            .store_sent_identity_batch(target, records, requested, policy)
+    }
+
     pub(crate) fn store_message_batch(
         &mut self,
         target: &SyncTarget,
