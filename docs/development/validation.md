@@ -955,3 +955,24 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 本机 Windows 自动检查通过：前端 84 个测试文件 / 885 项测试、lint、生产构建（含 TypeScript 检查）、中英文资源校验和 `git diff --check`。默认并发及 5 秒单项时限的首次运行有两项测试超时；最终完整运行使用 `bun run frontend:test -- --maxWorkers=4 --testTimeout=15000`，未修改测试断言或仓库默认时限。回归覆盖后台同步静默、手动刷新保留未读数、重复请求阻止、完成事件先于唤醒响应、失败恢复、无 worker 启动的有限等待、来源 / generation 替换、服务商安全策略显式重试及卸载清理。
 
 浏览器预览使用仓库合成数据，核对深色界面中默认 256px 和最窄 220px 侧栏下刷新按钮与未读数并列显示。独立代码复核未发现阻塞问题。本次未进行真实账号同步、原生桌面安装包或 macOS / Linux 界面验收。
+
+<a id="icloud-mail-feasibility"></a>
+
+## 33. iCloud 邮箱接入调研与公开端点探测（2026-11-06）
+
+调研基线为 `5973b4a`。本轮只读审查账号、IMAP / SMTP、服务商表单、同步与已发送副本代码，并阅读 Apple 官方服务器设置、应用专用密码、第三方应用授权、邮箱限制及自定义域说明。结论与来源见[iCloud 接入评估](../reference/icloud-mail-integration.md)；没有实现专用预设或修改应用行为。
+
+本机 macOS 于 2026-11-06 00:26:44（Asia/Shanghai）使用 Python 标准库 `imaplib` / `smtplib` 直接连接 Apple 官方端点，以默认信任链验证证书及主机名；没有 LOGIN / AUTH / MAIL / RCPT / DATA，也未使用凭据或访问真实邮件。
+
+| 端点 | 探测操作与结果 |
+| --- | --- |
+| `imap.mail.me.com:993` | 隐式 TLS 1.2 成功，执行 CAPABILITY / LOGOUT。登录前公告 `XAPPLEPUSHSERVICE IMAP4 IMAP4rev1 SASL-IR AUTH=ATOKEN AUTH=PLAIN AUTH=ATOKEN2 AUTH=XOAUTH2`；未公告 LOGINDISABLED。 |
+| `smtp.mail.me.com:587` | 执行 EHLO → STARTTLS → TLS 后 EHLO → QUIT，TLS 1.2 成功。升级前公告 STARTTLS，未公告 AUTH；升级后公告 `AUTH LOGIN PLAIN ATOKEN ATOKEN2 WSTOKEN WETOKEN XOAUTH2`。两次 EHLO 均公告 `SIZE 28319744`，以及 PIPELINING、ETRN、ENHANCEDSTATUSCODES、8BITMIME、DSN、SMTPUTF8、CHUNKING。 |
+
+本次结果证明公开端点当时可达、证书验证通过、SMTP STARTTLS 可用且公告 MailX 已实现的 PLAIN / LOGIN。IMAP 的 AUTH=PLAIN 不等同于 LOGIN 命令；未公告 LOGINDISABLED 也不能代替真实 LOGIN 验证。登录前未公告 IDLE / MOVE / UIDPLUS 不代表登录后缺失，XOAUTH2 公告不代表 MailX 已获 Apple 授权资格。
+
+本次 SMTP `SIZE 28319744` 约为 27.0 MiB，与官方 20 MB 邮件大小指引是不同层面的证据；不据此扩大可投递上限或推导稳定的原始附件额度。MailX 当前原始附件总量 20 MiB 的本地规则、最终 MIME / SIZE 检查和 Mail Drop 未实现的边界保持不变。
+
+该探测使用 Python 网络栈，不能替代 MailX 的 rustls / 平台证书验证、账号路由、真实认证、代理和收发验证。尚未验证任何真实 iCloud 账号、目录/标记/删除、IDLE、SMTP 投递、服务器已发送副本、密码撤销恢复、别名、历史地址、自定义域或 Windows / Linux 组合。后续按评估文档工作包独立记录证据。
+
+调研文档经独立代码与官方资料复核，修正了删除能力的表述和两处来源标题；UTF-8 / LF、相关本地 Markdown 链接及差异空白检查通过。本轮仅修改文档，没有运行应用自动回归或桌面手测。
