@@ -374,7 +374,7 @@ impl Default for GeneralSettings {
             language: "system".into(),
             auto_check_updates: true,
             close_behavior: CloseBehavior::Ask,
-            show_menu_bar_icon: false,
+            show_menu_bar_icon: true,
             silent_start: false,
         }
     }

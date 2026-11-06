@@ -60,7 +60,7 @@ export function GeneralPane({ client }: { client: MailxClient }) {
       </SettingsRow>
       {!snapshot.backgroundAvailable && <p className="text-xs text-muted-foreground">{t('trayUnavailable')}</p>}
       {snapshot.platform === 'macos' && <SettingsRow label={t('showMenuBarIcon')} description={t('showMenuBarIconHint')} htmlFor="general.showMenuBarIcon">
-        <Switch id="general.showMenuBarIcon" checked={settings.data?.settings.general.showMenuBarIcon ?? false}
+        <Switch id="general.showMenuBarIcon" checked={settings.data?.settings.general.showMenuBarIcon ?? true}
           disabled={!settings.data || update.isPending || snapshot.quitting}
           onCheckedChange={(showMenuBarIcon) => update.mutate({ showMenuBarIcon })} />
       </SettingsRow>}

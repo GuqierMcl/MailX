@@ -103,7 +103,7 @@ describe('workbench', () => {
     const dialog = await screen.findByRole('dialog', { name: '设置' })
     const select = await within(dialog).findByRole('combobox', { name: '关闭主窗口时' })
     expect(select).toHaveTextContent('关闭窗口并继续运行')
-    expect(within(dialog).getByRole('switch', { name: '在菜单栏显示 MailX' })).not.toBeChecked()
+    expect(within(dialog).getByRole('switch', { name: '在菜单栏显示 MailX' })).toBeChecked()
     await userEvent.click(select)
     await userEvent.click(await screen.findByRole('option', { name: '每次询问' }))
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { ...current.settings.general, closeBehavior: 'ask' } }))

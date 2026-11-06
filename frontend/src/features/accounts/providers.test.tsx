@@ -4,6 +4,11 @@ import { ProviderBadge, ProviderIcon } from './provider-badge'
 import { filterProviders, GENERIC_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
+  it('puts iCloud first and manual setup last in the default provider list', () => {
+    expect(PROVIDERS[0]).toBe(ICLOUD_PROVIDER)
+    expect(PROVIDERS.at(-1)).toBe(GENERIC_PROVIDER)
+  })
+
   it('labels a manually configured account as IMAP/SMTP', () => {
     expect(providerOf(null)).toBe(GENERIC_PROVIDER)
     render(<ProviderBadge providerId={null} />)

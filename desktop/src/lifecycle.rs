@@ -42,6 +42,8 @@ impl Default for LifecycleState {
             policy: CloseBehavior::Ask,
             settings_revision: 0,
             locale: crate::locale::system_locale(),
+            // Keep the native tray hidden until persisted settings load. This
+            // avoids briefly showing it for users who explicitly turned it off.
             show_menu_bar_icon: false,
             background_available: cfg!(target_os = "macos"),
             background_checked: false,

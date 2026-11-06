@@ -71,7 +71,7 @@ describe('language settings synchronization', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: '语言' }))
     await userEvent.click(await screen.findByRole('option', { name: 'English' }))
     await waitFor(() => expect(i18n.language).toBe('en'))
-    expect(client.updateSettings).toHaveBeenCalledWith({ general: { language: 'en', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false } })
+    expect(client.updateSettings).toHaveBeenCalledWith({ general: { language: 'en', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false } })
     expect(screen.getByRole('combobox', { name: 'Language' })).toHaveTextContent('English')
     expect(JSON.parse(localStorage.getItem('mailx.language')!)).toEqual({ language: 'en', effectiveLocale: 'en' })
   })
