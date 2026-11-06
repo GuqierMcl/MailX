@@ -14,9 +14,17 @@
 ## 安装与添加账号
 
 1. 在 Releases 选择对应平台的安装包，按该版本安装说明打开。macOS 区分 Apple 芯片与 Intel；Windows 提供 x64 安装程序；Linux 提供 x64 AppImage、deb 和 rpm。安装包尚未做代码签名，可用同一版本的 `SHA256SUMS.txt` 核对下载文件。
-2. 在邮箱服务商网站启用 IMAP / SMTP，并取得客户端密码或授权码。MailX 内置 QQ / Foxmail、163、126、yeah.net 和 139 入口，其他账号可手动填写服务器与端口。当前不支持 OAuth 登录。
-3. 在 MailX 添加账号，填写地址、密码或授权码；需要代理时，为该账号设置 SOCKS5 或 HTTP CONNECT。可在保存前测试收发登录并分别查看结果。登录测试成功只表示可以认证，实际投递仍需用自己的测试收件人确认。
+2. 在邮箱服务商网站准备客户端访问，按服务商要求启用 IMAP / SMTP，并取得客户端密码、授权码或应用专用密码。MailX 内置 QQ / Foxmail、163、126、yeah.net、139 和 iCloud 入口，其他账号可手动填写服务器与端口。当前不支持 OAuth 登录。
+3. 在 MailX 添加账号，填写地址与客户端凭证；需要代理时，为该账号设置 SOCKS5 或 HTTP CONNECT。可在保存前测试收发登录并分别查看结果。登录测试成功只表示可以认证，实际投递仍需用自己的测试收件人确认。
 4. 保存后等待同步。侧栏顶部汇总所有账号的收件箱、星标、草稿和已发送，归档、垃圾邮件和已删除收在“更多”里；有多个账号时，悬停某一行并点它的箭头可按账号分别列出。下方的各账号默认折叠，展开后可以看到该账号的全部文件夹，包括收件箱和已发送。想给邮件更多空间时，用标题栏按钮或 Cmd/Ctrl+B 收起侧栏：它会变成一列图标，入口不变，悬停显示名称和未读数，“更多”和账号改为弹出菜单；选择会被记住。服务商拒绝连接时，检查客户端协议是否开启、授权码是否有效以及网络路由。
+
+### iCloud 邮箱
+
+如果尚未开通邮箱，先[创建 iCloud Mail 地址](https://support.apple.com/guide/icloud/create-a-primary-icloudcom-email-address-mmdd8d1c5c/icloud)。为 Apple 账号启用双重认证，再到 `account.apple.com` 的“登录与安全 → 应用专用密码”生成[应用专用密码](https://support.apple.com/en-us/102654)。将该密码填入 MailX；邮箱地址应填写 iCloud Mail 地址，而非仅用于登录 Apple 账号的其他邮箱。
+
+`@icloud.com`、`@me.com` 和 `@mac.com` 地址可选择 iCloud 入口。MailX 预填 `imap.mail.me.com:993` 隐式 TLS 与 `smtp.mail.me.com:587` STARTTLS，收发共享应用专用密码。两端用户名默认使用完整邮箱地址；收信登录失败时，可按 [Apple 服务器指南](https://support.apple.com/en-us/102525)，在高级设置中仅将 IMAP 用户名改为 `@` 前的部分，SMTP 保持完整地址。
+
+修改或重置 Apple 账号主密码会撤销全部应用专用密码，需重新生成并在 MailX 的账号连接设置中更新。MailX 尚未提供 Apple 账号授权登录。iCloud+ 自定义域请使用手动 IMAP / SMTP 入口；别名没有独立的发件人选择器，指向同一邮箱的多个地址也不会自动合并。Mail Drop 尚不可用，附件与内嵌图片仍受 Apple 普通邮件大小限制。
 
 ## 收信、搜索与整理
 

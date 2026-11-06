@@ -955,3 +955,47 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 本机 Windows 自动检查通过：前端 84 个测试文件 / 885 项测试、lint、生产构建（含 TypeScript 检查）、中英文资源校验和 `git diff --check`。默认并发及 5 秒单项时限的首次运行有两项测试超时；最终完整运行使用 `bun run frontend:test -- --maxWorkers=4 --testTimeout=15000`，未修改测试断言或仓库默认时限。回归覆盖后台同步静默、手动刷新保留未读数、重复请求阻止、完成事件先于唤醒响应、失败恢复、无 worker 启动的有限等待、来源 / generation 替换、服务商安全策略显式重试及卸载清理。
 
 浏览器预览使用仓库合成数据，核对深色界面中默认 256px 和最窄 220px 侧栏下刷新按钮与未读数并列显示。独立代码复核未发现阻塞问题。本次未进行真实账号同步、原生桌面安装包或 macOS / Linux 界面验收。
+
+<a id="icloud-mail-feasibility"></a>
+
+## 33. iCloud 邮箱接入调研与公开端点探测（2026-11-06）
+
+调研基线为 `5973b4a`。本轮只读审查账号、IMAP / SMTP、服务商表单、同步与已发送副本代码，并阅读 Apple 官方服务器设置、应用专用密码、第三方应用授权、邮箱限制及自定义域说明。结论与来源见[iCloud 接入评估](../reference/icloud-mail-integration.md)；没有实现专用预设或修改应用行为。
+
+本机 macOS 于 2026-11-06 00:26:44（Asia/Shanghai）使用 Python 标准库 `imaplib` / `smtplib` 直接连接 Apple 官方端点，以默认信任链验证证书及主机名；没有 LOGIN / AUTH / MAIL / RCPT / DATA，也未使用凭据或访问真实邮件。
+
+| 端点 | 探测操作与结果 |
+| --- | --- |
+| `imap.mail.me.com:993` | 隐式 TLS 1.2 成功，执行 CAPABILITY / LOGOUT。登录前公告 `XAPPLEPUSHSERVICE IMAP4 IMAP4rev1 SASL-IR AUTH=ATOKEN AUTH=PLAIN AUTH=ATOKEN2 AUTH=XOAUTH2`；未公告 LOGINDISABLED。 |
+| `smtp.mail.me.com:587` | 执行 EHLO → STARTTLS → TLS 后 EHLO → QUIT，TLS 1.2 成功。升级前公告 STARTTLS，未公告 AUTH；升级后公告 `AUTH LOGIN PLAIN ATOKEN ATOKEN2 WSTOKEN WETOKEN XOAUTH2`。两次 EHLO 均公告 `SIZE 28319744`，以及 PIPELINING、ETRN、ENHANCEDSTATUSCODES、8BITMIME、DSN、SMTPUTF8、CHUNKING。 |
+
+本次结果证明公开端点当时可达、证书验证通过、SMTP STARTTLS 可用且公告 MailX 已实现的 PLAIN / LOGIN。IMAP 的 AUTH=PLAIN 不等同于 LOGIN 命令；未公告 LOGINDISABLED 也不能代替真实 LOGIN 验证。登录前未公告 IDLE / MOVE / UIDPLUS 不代表登录后缺失，XOAUTH2 公告不代表 MailX 已获 Apple 授权资格。
+
+本次 SMTP `SIZE 28319744` 约为 27.0 MiB，与官方 20 MB 邮件大小指引是不同层面的证据；不据此扩大可投递上限或推导稳定的原始附件额度。MailX 当前原始附件总量 20 MiB 的本地规则、最终 MIME / SIZE 检查和 Mail Drop 未实现的边界保持不变。
+
+该探测使用 Python 网络栈，不能替代 MailX 的 rustls / 平台证书验证、账号路由、真实认证、代理和收发验证。尚未验证任何真实 iCloud 账号、目录/标记/删除、IDLE、SMTP 投递、服务器已发送副本、密码撤销恢复、别名、历史地址、自定义域或 Windows / Linux 组合。后续按评估文档工作包独立记录证据。
+
+调研文档经独立代码与官方资料复核，修正了删除能力的表述和两处来源标题；UTF-8 / LF、相关本地 Markdown 链接及差异空白检查通过。本轮仅修改文档，没有运行应用自动回归或桌面手测。
+
+### iCloud 预设与应用专用密码引导
+
+实现以 `9e07199` 为主干基线，新增 `icloud` 入口，精确接受 `icloud.com` / `me.com` / `mac.com`，预填 IMAP 993 隐式 TLS 与 SMTP 587 STARTTLS。收发用户名默认完整邮箱地址，高级设置保留独立覆盖；密码复用 shared / separate 的写入型输入并保留原值。凭证种类元数据统一决定表单和故障帮助文案，QQ、网易、139 继续使用授权码文案，通用入口继续使用普通密码文案。
+
+桌面与浏览器 mock 将精确 `icloud` ID 映射到 Apple 官方应用专用密码帮助，拒绝任意 URL、路径、近似 ID 及额外 URL 参数。未新增品牌图形、认证类型、数据库迁移或 iCloud 核心特判；`imap.mail.me.com` 沿用标准兼容策略。双语用户说明、账号配置、兼容层说明、路线图与 CHANGELOG 已同步。
+
+本机 macOS 检查通过：
+
+- `bun install --frozen-lockfile` 无依赖变更；`bun run check` 通过，包括 48 项版本脚本测试、914 条双语资源、Rust DTO 一致性、类型、lint、84 个前端测试文件 / 911 项测试、生产构建与 Rust workspace check。构建保留既有 chunk 大小提示。
+- 前端定向 7 文件 / 211 项回归覆盖三域与近似域拒绝、993 / 587 TLS、默认和独立用户名、共享密码原值、添加前测试与保存、往返步骤、语言切换、已保存连接保护及认证失败帮助；mock 的 24 项现有回归亦通过。
+- `cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments` 1 项通过；`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过。未运行本地 Rust 全 workspace 测试。
+- 相关修改文件 UTF-8 / LF、本地 Markdown 链接及双语标题结构检查通过；独立应用代码审查未发现确定缺陷。
+
+浏览器预览未完成：浏览器控制宿主不可用，原生控制尝试超时；本轮不记录界面目测通过。没有使用真实 iCloud 凭据、登录邮箱、修改邮件标记或发送邮件；真实登录与收读发、已发送服务器副本、IDLE / 删除、凭证撤销恢复、别名与自定义域及三平台桌面行为继续待验。预设存在和上述自动检查不能代替这些验证。
+
+### 官方 iCloud Mail 图标与解耦复核
+
+同日后续将通用图标替换为 iCloud 官网 AppIcon 为 `mail` / `mail2` 引用的 Apple 官方浅色版 PNG，直接本地打包原文件，240 × 240、22,835 字节；来源链和 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md#icloud-mail)。已核对本地文件与官方原件字节一致；离线渲染检查 14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景下的完整图形、比例和辨识度，保留原始背景与细字。该检查只验证素材显示，不替代原生桌面界面验收。
+
+服务商选择器、徽标与账号头像复用现有 `logo` 元数据及账号图标开关。现有 3 个服务商 / 头像 / 添加账号测试文件共 94 项通过，覆盖 iCloud 的本地图片、默认开启与关闭回退、添加并保存图标偏好；`bun run lint`、`bun run build`（含 TypeScript）及 `git diff --check` 通过。生产构建输出 `icloud-mail-CSkDyzeG.png`，与源码图片字节一致，应用运行时无需热链官网；保留既有 chunk 大小提示。
+
+实现完成后委派未参与实现的独立子代理审查整个 PR。复核确认 iCloud 端点、域名、引导与图标集中在前端服务商登记中，公共表单按中立凭证元数据工作；`core/src` 没有本次改动，iCloud 沿用 `StandardCompatibility`，同步、发送和存储没有新增品牌特判；桌面端只扩展官方帮助白名单。审查发现的账号配置文档旧图标描述已修正并通过复核，无剩余阻塞发现。真实 iCloud 认证与收发、服务器副本和三平台桌面验证仍待完成。

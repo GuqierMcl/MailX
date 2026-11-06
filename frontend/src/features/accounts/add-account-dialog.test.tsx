@@ -5,7 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
-import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
+import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -42,7 +42,9 @@ function fillQqConnection(dialog: HTMLElement, emailAddress = 'synthetic@qq.com'
 async function chooseProvider(dialog: HTMLElement, provider: MailProvider) {
   fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: provider.preset!.domains[0] } })
   const option = within(dialog).getByRole('radio', { name: provider.name })
-  expect(option.closest('label')!.querySelector('img')).toHaveAttribute('src', provider.logo)
+  const logo = option.closest('label')!.querySelector('img')
+  if (provider.logo) expect(logo).toHaveAttribute('src', provider.logo)
+  else expect(logo).toBeNull()
   await userEvent.click(option)
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
 }
@@ -132,6 +134,94 @@ describe('add account wizard', () => {
   })
 
   it.each([
+    'Synthetic@ICLOUD.COM', 'synthetic@me.com', 'synthetic@mac.com',
+  ])('tests and saves %s with the iCloud endpoints and an unchanged app password', async (emailAddress) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseProvider(dialog, ICLOUD_PROVIDER)
+    expect(within(dialog).getAllByText('应用专用密码')).toHaveLength(2)
+    expect(within(dialog).getByLabelText('应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+    expect(within(dialog).queryByLabelText('授权码')).not.toBeInTheDocument()
+    expect(within(dialog).getByText(ICLOUD_PROVIDER.setup!.description)).toHaveTextContent('双重认证')
+    expect(within(dialog).getByText(ICLOUD_PROVIDER.setup!.credentialHint)).toHaveTextContent('撤销全部应用专用密码')
+    await userEvent.click(within(dialog).getByRole('button', { name: '如何生成应用专用密码' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith('icloud')
+    fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: emailAddress } })
+    fireEvent.change(within(dialog).getByLabelText('应用专用密码'), { target: { value: 'abcd-efgh-ijkl-mnop' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '测试登录' }))
+    expect(await within(dialog).findByText('登录验证通过，尚未测试实际投递。')).toBeInTheDocument()
+    const expected = {
+      emailAddress, providerId: 'icloud',
+      imap: { host: 'imap.mail.me.com', port: 993, tls: 'implicit', username: emailAddress },
+      smtp: { host: 'smtp.mail.me.com', port: 587, tls: 'startTls', username: emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'abcd-efgh-ijkl-mnop' } },
+      route: { kind: 'direct' },
+    }
+    expect(client.verifyDraftConnection.mock.calls[0][0]).toEqual(expected)
+    expect(client.createAccount).not.toHaveBeenCalled()
+    expect(client.queueSend).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
+    expect(within(dialog).getByRole('switch', { name: '使用服务商图标' })).toBeChecked()
+    expect(within(dialog).getByLabelText('账号名称').parentElement!.querySelector('img')).toHaveAttribute('src', ICLOUD_PROVIDER.logo)
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ ...expected, useProviderIcon: true })
+  })
+
+  it('keeps iCloud IMAP and SMTP username overrides through the profile step', async () => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseProvider(dialog, ICLOUD_PROVIDER)
+    fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: 'synthetic@me.com' } })
+    fireEvent.change(within(dialog).getByLabelText('应用专用密码'), { target: { value: 'abcd-efgh-ijkl-mnop' } })
+    await userEvent.click(within(dialog).getByText('高级设置'))
+    fireEvent.change(within(dialog).getByLabelText('IMAP 登录用户名'), { target: { value: 'synthetic' } })
+    fireEvent.change(within(dialog).getByLabelText('SMTP 登录用户名'), { target: { value: 'synthetic@icloud.com' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    await within(dialog).findByLabelText('账号名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '上一步' }))
+    expect(within(dialog).getByLabelText('IMAP 登录用户名')).toHaveValue('synthetic')
+    expect(within(dialog).getByLabelText('SMTP 登录用户名')).toHaveValue('synthetic@icloud.com')
+    expect(within(dialog).getByLabelText('应用专用密码')).toHaveValue('abcd-efgh-ijkl-mnop')
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    await within(dialog).findByLabelText('账号名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({
+      emailAddress: 'synthetic@me.com', imap: { username: 'synthetic' }, smtp: { username: 'synthetic@icloud.com' },
+    })
+  })
+
+  it('keeps a custom domain in manual setup and clears its rejected iCloud app password', async () => {
+    const { client, dialog } = renderDialog()
+    await chooseProvider(dialog, ICLOUD_PROVIDER)
+    fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: 'synthetic@example.com' } })
+    fireEvent.change(within(dialog).getByLabelText('应用专用密码'), { target: { value: 'abcd-efgh-ijkl-mnop' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(within(dialog).getByLabelText('邮箱地址')).toHaveAttribute('aria-invalid', 'true')
+    expect(within(dialog).getByLabelText('应用专用密码')).toHaveValue('')
+    expect(dialog).toHaveTextContent('iCloud+ 自定义域名请使用手动配置')
+    expect(within(dialog).queryByLabelText('账号名称')).not.toBeInTheDocument()
+    expect(client.createAccount).not.toHaveBeenCalled()
+  })
+
+  it('updates iCloud app-password labels, placeholders and help when switching languages', async () => {
+    const { dialog } = renderDialog()
+    await chooseProvider(dialog, ICLOUD_PROVIDER)
+    try {
+      await act(async () => { await i18n.changeLanguage('en') })
+      expect(within(dialog).getByText('Connect iCloud Mail')).toBeInTheDocument()
+      expect(within(dialog).getAllByText('App-specific password')).toHaveLength(2)
+      expect(within(dialog).getByLabelText('App-specific password')).toHaveAttribute('placeholder', 'Enter your app-specific password')
+      expect(within(dialog).getByRole('button', { name: 'How to generate an app-specific password' })).toBeInTheDocument()
+      expect(dialog).toHaveTextContent('two-factor authentication')
+      expect(within(dialog).queryByLabelText('Authorization code')).not.toBeInTheDocument()
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+    }
+    expect(within(dialog).getByLabelText('应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+  })
+
+  it.each([
     { provider: NETEASE_163_PROVIDER, emailAddress: 'Synthetic@163.COM', domain: '163.com' },
     { provider: NETEASE_126_PROVIDER, emailAddress: 'Synthetic@126.COM', domain: '126.com' },
     { provider: NETEASE_YEAH_PROVIDER, emailAddress: 'Synthetic@YEAH.NET', domain: 'yeah.net' },
@@ -144,7 +234,7 @@ describe('add account wizard', () => {
     expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
     if (provider === MAIL_139_PROVIDER) {
       expect(within(dialog).getByText(provider.setup!.description)).toHaveTextContent('广电号码暂不支持')
-      expect(within(dialog).getByText(provider.setup!.authorizationCodeHint)).toHaveTextContent('90 天')
+      expect(within(dialog).getByText(provider.setup!.credentialHint)).toHaveTextContent('90 天')
       expect(within(dialog).getByText(provider.setup!.emailHint)).toHaveTextContent('分别修改 IMAP / SMTP 登录用户名')
     }
     await userEvent.click(within(dialog).getByRole('button', { name: '如何获取授权码' }))
@@ -196,11 +286,11 @@ describe('add account wizard', () => {
       await act(async () => { await i18n.changeLanguage('en') })
       expect(within(dialog).getByText('Connect 139 Mail')).toBeInTheDocument()
       expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.description)).toHaveTextContent('China Broadnet numbers currently cannot enable authorization codes')
-      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('valid for 90 days')
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.credentialHint)).toHaveTextContent('valid for 90 days')
       expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.emailHint)).toHaveTextContent('edit the IMAP and SMTP login usernames separately in Advanced settings')
       await act(async () => { await i18n.changeLanguage('zh-CN') })
       expect(within(dialog).getByText('连接 139 邮箱')).toBeInTheDocument()
-      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('以网页显示的到期日为准')
+      expect(within(dialog).getByText(MAIL_139_PROVIDER.setup!.credentialHint)).toHaveTextContent('以网页显示的到期日为准')
     } finally {
       await act(async () => { await i18n.changeLanguage('zh-CN') })
     }

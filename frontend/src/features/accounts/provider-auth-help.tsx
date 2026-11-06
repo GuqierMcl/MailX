@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import type { MailxClient } from '@/lib/mailx-client'
-import { providerOf } from './providers'
+import { providerCredentialText, providerOf } from './providers'
 
 export function ProviderAuthHelp({ client, providerId, reason = 'authentication' }: {
   client: MailxClient
@@ -21,7 +21,7 @@ export function ProviderAuthHelp({ client, providerId, reason = 'authentication'
       <Button variant="link" className="h-auto px-0" onClick={() => {
         setFailed(false)
         void client.openProviderHelp(providerId).catch(() => setFailed(true))
-      }}>{t(reason === 'providerPolicy' ? 'accounts:providerPolicyHelpLink' : 'accounts:getAuthorizationCode')}</Button>
+      }}>{reason === 'providerPolicy' ? t('accounts:providerPolicyHelpLink') : providerCredentialText(setup).help}</Button>
       {failed && <p role="alert" className="text-destructive">{t('accounts:helpOpenFailed')}</p>}
     </div>
   )

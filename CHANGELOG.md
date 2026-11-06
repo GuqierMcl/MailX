@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- An iCloud Mail entry fills in encrypted IMAP / SMTP settings for @icloud.com, @me.com and @mac.com, with the official bundled Mail icon, app-specific password guidance and separate username settings. / 新增 iCloud 邮箱添加入口，为 @icloud.com、@me.com 和 @mac.com 预填加密收发服务器，采用本地打包的官方 Mail 图标，提供应用专用密码指引与收发独立用户名设置。
+
 ### ✨ Optimization
 
 - Collapsing the sidebar now leaves a column of icons with unread counts, tooltips, and menus for More and each account, and the choice is remembered; a narrow window uses the icon column on its own. / 收起侧栏后保留一列图标，带未读数、悬停提示，以及“更多”和各账号的弹出菜单，选择会被记住；窗口较窄时自动使用图标栏。 ([#95](https://github.com/GuqierMcl/MailX/pull/95))

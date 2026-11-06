@@ -48,17 +48,18 @@ describe('mock provider help', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     try {
       const client = createMockClient()
-      for (const providerId of ['qq', '139', 'netease163', 'netease126', 'neteaseYeah']) {
+      for (const providerId of ['qq', '139', 'icloud', 'netease163', 'netease126', 'neteaseYeah']) {
         await client.openProviderHelp(providerId)
         expect(open).toHaveBeenLastCalledWith(providerId === 'qq'
           ? 'https://help.mail.qq.com/detail/0/1087'
           : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
-            : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
+            : providerId === 'icloud' ? 'https://support.apple.com/en-us/102654'
+              : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
       }
-      for (const providerId of ['https://example.com', 'constructor', 'netease', '139.com', '139/../', '']) {
+      for (const providerId of ['https://example.com', 'constructor', 'netease', '139.com', '139/../', 'icloud.com', 'icloud/../', 'ICLOUD', '']) {
         await expect(client.openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
       }
-      expect(open).toHaveBeenCalledTimes(5)
+      expect(open).toHaveBeenCalledTimes(6)
     } finally { open.mockRestore() }
   })
 })
