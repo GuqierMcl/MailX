@@ -9,7 +9,7 @@ This page covers the basics of the desktop app. Published installers are listed 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
 2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for QQ Mail / Foxmail, 163, 126, yeah.net, 139 and iCloud; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
-4. After saving, wait for the sync and the account and folders appear in the sidebar; inboxes from several accounts are collected into a unified inbox. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
+4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
 
 ### iCloud Mail
 
@@ -27,7 +27,7 @@ Automatic sync runs quietly: account rows keep their unread counts without a loa
 
 Opening a message downloads and caches its body, so cached content can be read offline later. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
 
-Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under All archived or Archived under an account, and it is unchanged for other clients. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
+Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under More → Archive or under Archived in the account, and it is unchanged for other clients. A server folder that is itself called Archive stays under its account with the server's name. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
 
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 

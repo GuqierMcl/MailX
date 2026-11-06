@@ -57,6 +57,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 
 - `accountIds` 为 null 或省略时查询所有本地账号，空数组返回空结果；数组元素必须为有效 UUID。当前只有受信本地 UI 入口，未来 HTTP / MCP 再与宿主授权账号范围取交集。
 - `folderId` 指定本地文件夹 UUID；`folderRole` 在选定账号间按角色匹配，`inbox` 即统一收件箱。二者不能同时给出，否则返回 `validation`。
+- `excludeFolderRoles` 可省略（默认空数组，不排除），列出的角色所在文件夹不出现在结果中；侧栏“星标”用 `{ starred: true, archive: 'include', excludeFolderRoles: ['junk', 'trash'] }`。它只缩小结果，显式的 `folderRole` 不受影响；MCP 工具在未指定文件夹时也用它排除垃圾邮件与已删除。
 - `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。`starred` 按 true / false / null 筛选星标，核心 SQL 在分页前处理，本机已发送副本不带星标；标记写回见后文。
 - `text` 为本地全文搜索（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索第一批已实现尚未手测)）：按 Unicode 空白拆词，所有词都须命中，双引号括起的部分作为整体；最多 16 个词、256 个字符，超出返回 `validation`（字段 `text`）；空白文本视为不限。检索主题、人员（发件人、收件人、抄送的名字与地址）、预览、已缓存正文（每封最多 64 KiB）与附件名，全角 ASCII 与半角互相匹配；不少于 3 个字符的词用 FTS5 trigram，少于 3 个字符的词退回参数化 LIKE；用户文本不作为 SQL 或 FTS 表达式执行，不调用服务商搜索。`EmailSummary.matchSnippet` 为命中片段 `SnippetSegment[] | null`（`{ text, hit }` 纯文本分段，无 HTML，仅在正文或附件名命中时给出），`coverage.indexedBodies` 为作用域内已收进索引的正文数。
 - `receivedAfter` / `receivedBefore` 为 RFC 3339 时间，规范化为 UTC 毫秒格式后按左闭右开区间过滤；无效时间返回 `validation`。
@@ -461,7 +462,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 - **范围。** 只有收件箱角色（`inbox`）文件夹中的可见邮件可归档；已删除、垃圾邮件、已发送、草稿、其他文件夹和本机已发送副本（`localOnly`）不可归档。服务器上角色为 `archive` 的文件夹是普通文件夹，与本机归档无关。
 - **输入。** `emailIds` 去重后为 1 到 500 个，否则 `validation`；任一邮件不是可归档的可见收件箱邮件（含不存在、已删除墓碑、来自旧 UID 世代），整批返回 `notFound` 且不改任何状态。重复归档已归档的邮件不报错。
-- **列表。** `EmailListQuery.archive`：`exclude` 隐藏已归档，`only` 只列已归档，`include` 两者都列；缺省时除全文搜索外等同 `exclude`，搜索缺省为 `include`。因此收件箱视图和“全部收件箱”不含已归档邮件，“全部已归档”用 `{ folderRole: 'inbox', archive: 'only' }`，账号下的“已归档”再加 `accountIds`。`EmailSummary.archived` 标记已归档邮件；按 id 打开详情不受影响。
+- **列表。** `EmailListQuery.archive`：`exclude` 隐藏已归档，`only` 只列已归档，`include` 两者都列；缺省时除全文搜索外等同 `exclude`，搜索缺省为 `include`。因此收件箱视图和“全部收件箱”不含已归档邮件，侧栏“更多 → 归档”（标题“全部已归档”）用 `{ folderRole: 'inbox', archive: 'only' }`，单个账号（顶部展开后的子行或账号下的“已归档”）再加 `accountIds`。`EmailSummary.archived` 标记已归档邮件；按 id 打开详情不受影响。
 - **未读数。** `Folder.unreadCount` 对收件箱是服务器未读数减去本机已归档的未读邮件（不低于 0），在读取文件夹时计算，库中仍保存服务器原值，同步更新不会丢掉这个扣减。`Folder.archivedCount` / `archivedUnreadCount` 是该收件箱已归档邮件总数 / 未读数，供“已归档”视图使用；非收件箱为 0。
 - **身份。** 归档按账号、邮箱来源和 `Message-ID` 头记录，UIDVALIDITY 重置后重建的邮件仍是已归档；没有 `Message-ID` 的邮件按本地 id 记录，重置后会回到收件箱。账号换了邮箱来源时不继承旧记录。共用同一 `Message-ID` 的两封收件箱邮件会一起视为已归档；邮件被别处移出收件箱后不再归入任何收件箱视图，若之后带同一 `Message-ID` 回到收件箱，会显示为已归档。
 - 前端归档立即生效，Toast 提供“撤销”（即取消归档）；见[邮件同步](../architecture/mail-sync.md#已实现本地归档仅本机自动测试覆盖经-macos-用户手测)。

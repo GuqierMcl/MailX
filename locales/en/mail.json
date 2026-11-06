@@ -118,7 +118,6 @@
   "outbox": "Outbox",
   "outboxCount_other": "{{count}} unfinished messages",
   "outboxCount_one": "{{count}} unfinished message",
-  "mailboxes": "Mailboxes",
   "noFolders": "No folders yet",
   "syncingFolders": "Syncing folders…",
   "accounts": "Accounts",
@@ -138,7 +137,6 @@
   "retryAfterProviderPolicy": "After following the provider's guidance, sync this account manually to try again.",
   "allDrafts": "All drafts",
   "allSent": "All sent",
-  "allArchive": "All archived",
   "allJunk": "All junk",
   "allTrash": "All deleted",
   "allMail": "All mail",
@@ -188,11 +186,15 @@
   "archiveFailed": "Couldn’t archive",
   "unarchiveFailed": "Couldn’t move back to inbox",
   "allArchived": "All archived",
-  "archivedFolder": "Archived",
   "archivedMarker": "Archived",
   "agentArchived_one": "{{source}} archived {{count}} message on this device",
   "agentArchived_other": "{{source}} archived {{count}} messages on this device",
   "agentUnarchived_one": "{{source}} moved {{count}} message back to the inbox on this device",
   "agentUnarchived_other": "{{source}} moved {{count}} messages back to the inbox on this device",
-  "undoArchiveFailed": "Couldn’t undo this archive operation"
+  "undoArchiveFailed": "Couldn’t undo this archive operation",
+  "starredView": "Starred",
+  "more": "More",
+  "toggleAccounts": "{{action}} {{folder}} by account",
+  "mailboxes": "Mailboxes",
+  "archivedFolder": "Archived"
 }

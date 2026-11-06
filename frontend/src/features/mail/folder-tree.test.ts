@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Folder } from '@/generated/accounts'
-import { buildFolderTree, loadCollapsed, saveCollapsed } from './folder-tree'
+import { buildFolderTree, loadCollapsed, loadExpanded, saveCollapsed, saveExpanded } from './folder-tree'
 
 function folder(id: string, overrides: Partial<Folder> = {}): Folder {
   return {
@@ -54,6 +54,15 @@ describe('buildFolderTree', () => {
     expect(root.unreadWithChildren).toBe(0)
     expect(root.countsKnown).toBe(false)
     expect(buildFolderTree([folder('container', { selectable: false, countsKnown: false })])[0].countsKnown).toBe(true)
+  })
+})
+
+describe('expanded state', () => {
+  it('starts empty and round-trips', () => {
+    expect(loadExpanded()).toEqual(new Set())
+    saveExpanded(new Set(['more', 'role:inbox']))
+    expect(loadExpanded()).toEqual(new Set(['more', 'role:inbox']))
+    localStorage.removeItem('mailx.sidebar.expanded')
   })
 })
 

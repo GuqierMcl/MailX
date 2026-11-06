@@ -31,7 +31,7 @@ import { useDebouncedLayoutSave, useSettings } from '@/features/settings/setting
 import { AvatarSourceProvider } from './sender-avatar'
 import { MailSidebar } from './mail-sidebar'
 import { ReaderToggle } from './reader-toggle'
-import { folderLabel, mailboxTitle, type Mailbox } from './mailbox'
+import { folderLabel, mailboxTitle, STARRED_EXCLUDED_ROLES, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
 import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
@@ -222,6 +222,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const mailView = isMailView(activeMailbox)
   const folderId = activeMailbox.kind === 'folder' ? activeMailbox.folder.id : null
   const archivedView = activeMailbox.kind === 'archived'
+  const starredView = activeMailbox.kind === 'starred'
   const folderRole = activeMailbox.kind === 'unified' ? activeMailbox.role : archivedView ? 'inbox' : null
   const selectedAccountId = activeMailbox.kind === 'folder' ? activeMailbox.folder.accountId : activeMailbox.kind === 'archived' ? activeMailbox.accountId : null
   const compose = useComposeActions(client, accounts, selectedAccountId)
@@ -232,7 +233,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     return state?.mailboxSourceId === account.mailboxSourceId ? [[account.id, state]] : []
   }))
   const sentView = mailView && (folderRole === 'sent' || (activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'sent'))
-  const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId : folder.role === folderRole && (!archivedView || !selectedAccountId || folder.accountId === selectedAccountId)))
+  const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId
+    : starredView ? !STARRED_EXCLUDED_ROLES.includes(folder.role)
+      : folder.role === folderRole && (!archivedView || !selectedAccountId || folder.accountId === selectedAccountId)))
   const scopeRevision = JSON.stringify(scopedFolders.map((folder) => [
     folder.id,
     accounts.find((account) => account.id === folder.accountId)?.mailboxSourceId,
@@ -243,11 +246,13 @@ export function Workbench({ client }: { client: MailxClient }) {
     folderId,
     folderRole,
     accountIds: archivedView && selectedAccountId ? [selectedAccountId] : null,
-    archive: archivedView ? 'only' : null,
+    archive: archivedView ? 'only' : starredView ? 'include' : null,
+    starred: starredView ? true : null,
+    excludeFolderRoles: starredView ? STARRED_EXCLUDED_ROLES : [],
     unread: filter === 'unread' ? true : null,
     text: query || null,
     limit: PAGE_SIZE,
-  }), [folderId, folderRole, archivedView, selectedAccountId, filter, query])
+  }), [folderId, folderRole, archivedView, starredView, selectedAccountId, filter, query])
   const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
 
   const list = useInfiniteQuery({
@@ -404,7 +409,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       </>
     )
   }
-  const showAccountBadges = (activeMailbox.kind === 'unified' || (activeMailbox.kind === 'archived' && !activeMailbox.accountId)) && accounts.length > 1
+  const showAccountBadges = (activeMailbox.kind === 'unified' || activeMailbox.kind === 'starred' || (activeMailbox.kind === 'archived' && !activeMailbox.accountId)) && accounts.length > 1
   // Drafts and outbox are not searched; the title-bar search then speaks for the inbox.
   const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : activeMailbox.kind === 'folder'
     ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
@@ -468,8 +473,14 @@ export function Workbench({ client }: { client: MailxClient }) {
           onOpenChange={setPaletteOpen}
           scope={searchScope}
           search={mailView ? search : ''}
-          folderId={folderId}
-          folderRole={mailView ? folderRole : 'inbox'}
+          scopeQuery={mailView ? {
+            accountIds: listQuery.accountIds,
+            folderId: listQuery.folderId,
+            folderRole: listQuery.folderRole,
+            archive: listQuery.archive,
+            starred: listQuery.starred,
+            excludeFolderRoles: listQuery.excludeFolderRoles,
+          } : { folderRole: 'inbox' }}
           sourceIdentity={sourceIdentity}
           accounts={displayAccounts}
           folders={folders}

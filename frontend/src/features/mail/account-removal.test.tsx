@@ -65,7 +65,9 @@ describe('workbench account removal', () => {
   it('falls back from the removed folder, closes its reader, and keeps the other account', async () => {
     const { client, cache, remove, emitStaleSync } = setup()
     await screen.findByRole('list', { name: '邮件列表' })
-    await userEvent.click(screen.getAllByRole('button', { name: '收件箱' })[0])
+    const inboxRow = screen.getByRole('button', { name: '收件箱' }).closest('li')!
+    await userEvent.click(within(inboxRow).getByRole('button', { name: '展开收件箱的各账号' }))
+    await userEvent.click(within(inboxRow).getByRole('button', { name: account.displayName }))
     const list = await screen.findByRole('list', { name: '邮件列表' })
     await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1))
     await userEvent.click(within(list).getByRole('listitem'))

@@ -5,7 +5,6 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Alert02Icon,
-  Archive02Icon,
   Archive03Icon,
   ArrowRight01Icon,
   AtSignIcon,
@@ -14,11 +13,13 @@ import {
   Folder01Icon,
   InboxIcon,
   MailUpload01Icon,
+  MoreHorizontalIcon,
   PencilEdit02Icon,
   RefreshIcon,
   SentIcon,
   Settings01Icon,
   SpamIcon,
+  StarIcon,
 } from '@hugeicons/core-free-icons'
 import type { Account, AccountSyncState, Folder, FolderRole, SyncFailure } from '@/generated/accounts'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -40,7 +41,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { buildFolderTree, countedUnread, loadCollapsed, saveCollapsed, type FolderNode } from './folder-tree'
+import { buildFolderTree, countedUnread, loadCollapsed, loadExpanded, saveCollapsed, saveExpanded, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { formatFullTime } from './format'
@@ -49,11 +50,15 @@ import { useManualSync } from './use-manual-sync'
 /** Shown in the tooltip; the shortcut itself is handled by the workbench. */
 const COMPOSE_SHORTCUT = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘N' : 'Ctrl N'
 
+/**
+ * Icons of the folders under an account. Server drafts and archive folders look
+ * like any other folder there: the top's 草稿 and 归档 are MailX's local views.
+ */
 const ROLE_ICONS: Record<FolderRole, IconSvgElement> = {
   inbox: InboxIcon,
-  drafts: File01Icon,
+  drafts: Folder01Icon,
   sent: SentIcon,
-  archive: Archive02Icon,
+  archive: Folder01Icon,
   junk: SpamIcon,
   trash: Delete02Icon,
   other: Folder01Icon,
@@ -109,13 +114,90 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
     return () => observer.disconnect()
   }, [])
 
+  // Accounts and top rows start closed; `expanded` is what the user opened and is
+  // remembered. `revealed` is opened for this session only, to show a selection
+  // made elsewhere (command palette, notification); closing a row clears both.
+  const [expanded, setExpanded] = useState(loadExpanded)
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set())
+  const isOpen = (id: string) => expanded.has(id) || revealed.has(id)
+  const setOpen = (id: string, open: boolean) => {
+    const next = new Set(expanded)
+    if (open) next.add(id)
+    else next.delete(id)
+    setExpanded(next)
+    saveExpanded(next)
+    if (!open && revealed.has(id)) setRevealed((current) => new Set([...current].filter((item) => item !== id)))
+  }
+
   const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
   const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
   const unifiedCountsKnown = inboxes.every((folder) => folder.countsKnown)
   // Locally archived inbox mail (not the server's archive folder), counted apart from the inbox number.
   const archivedUnread = inboxes.reduce((total, folder) => total + folder.archivedUnreadCount, 0)
+  const junkUnread = folders.some((folder) => folder.selectable && folder.role === 'junk' && folder.countsKnown && folder.unreadCount > 0)
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
   const hasSyncFailure = accounts.some((account) => syncStates[account.id]?.failure)
+
+  /** Each account's folder of this role, in the user's account order. */
+  const byAccount = (role: FolderRole): AccountChild[] => accounts.flatMap((account) => {
+    const folder = folders.find((item) => item.accountId === account.id && item.selectable && item.role === role)
+    if (!folder) return []
+    const badge = role === 'inbox' ? countBadge(folder.unreadCount, folder.countsKnown)
+      : role === 'junk' && folder.countsKnown && folder.unreadCount > 0 ? <UnreadDot /> : null
+    return [{ account, badge, active: folder.id === selectedId, mailbox: { kind: 'folder', folder } }]
+  })
+  const archivedByAccount: AccountChild[] = accounts.flatMap((account) => {
+    const inbox = inboxes.find((folder) => folder.accountId === account.id)
+    if (!inbox) return []
+    return [{
+      account,
+      badge: countBadge(inbox.archivedUnreadCount, true),
+      active: mailbox.kind === 'archived' && mailbox.accountId === account.id,
+      mailbox: { kind: 'archived', accountId: account.id },
+    }]
+  })
+  const isUnified = (role: FolderRole) => mailbox.kind === 'unified' && mailbox.role === role
+  const roleRow = (role: FolderRole, icon: IconSvgElement, label: string, badge: React.ReactNode = null) => (
+    <TopRow
+      icon={icon} label={label} badge={badge}
+      active={isUnified(role)} onSelect={() => onSelect({ kind: 'unified', role })}
+      accounts={byAccount(role)} open={isOpen(`role:${role}`)} onOpenChange={(next) => setOpen(`role:${role}`, next)} onSelectChild={onSelect}
+    />
+  )
+  const moreRows: [string, () => React.ReactNode][] = [
+    ['archived', () => (
+      <TopRow
+        icon={Archive03Icon} label={t('mail:archive')} badge={countBadge(archivedUnread, true)}
+        active={mailbox.kind === 'archived' && !mailbox.accountId} onSelect={() => onSelect({ kind: 'archived', accountId: null })}
+        accounts={archivedByAccount} open={isOpen('role:archived')} onOpenChange={(next) => setOpen('role:archived', next)} onSelectChild={onSelect}
+      />
+    )],
+    ['junk', () => roleRow('junk', SpamIcon, t('mail:junk'), junkUnread ? <UnreadDot /> : null)],
+    ['trash', () => roleRow('trash', Delete02Icon, t('mail:trash'))],
+  ]
+  const moreOpen = isOpen('more')
+
+  // When the selection changes, open what it takes to show it, unless it is in sight
+  // already: a view under 更多 opens 更多; a folder opens its account, unless the
+  // top row it belongs to lists it.
+  const shownUnderTop = (role: FolderRole, children: AccountChild[]) => {
+    const rowId = role === 'inbox' || role === 'sent' || role === 'junk' || role === 'trash' ? `role:${role}` : null
+    return rowId !== null && children.length > 1 && isOpen(rowId) && (role === 'inbox' || role === 'sent' || moreOpen)
+  }
+  const reveal: string[] = mailbox.kind === 'unified' && (mailbox.role === 'junk' || mailbox.role === 'trash') ? ['more']
+    : mailbox.kind === 'archived' && !mailbox.accountId ? ['more']
+      : mailbox.kind === 'folder' && !shownUnderTop(mailbox.folder.role, byAccount(mailbox.folder.role)) ? [`account:${mailbox.folder.accountId}`]
+        : mailbox.kind === 'archived' && mailbox.accountId && !(archivedByAccount.length > 1 && isOpen('role:archived') && moreOpen) ? [`account:${mailbox.accountId}`]
+          : []
+  const selectionKey = JSON.stringify([mailbox.kind, mailbox.kind === 'folder' ? mailbox.folder.id : mailbox.kind === 'archived' ? mailbox.accountId : mailbox.kind === 'unified' ? mailbox.role : null])
+  // `null` first, so a selection the sidebar starts with is revealed as well.
+  const [revealedFor, setRevealedFor] = useState<string | null>(null)
+  if (revealedFor !== selectionKey) {
+    // Adjusting state during render: React re-renders before painting, so nothing flickers.
+    setRevealedFor(selectionKey)
+    const missing = reveal.filter((id) => !isOpen(id))
+    if (missing.length > 0) setRevealed((current) => new Set([...current, ...missing]))
+  }
 
   return (
     <div data-slot="mail-sidebar" className="flex h-full min-h-0 flex-col">
@@ -133,25 +215,12 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
+              {roleRow('inbox', InboxIcon, t('mail:inbox'), unifiedCountsKnown ? countBadge(unifiedUnread, true) : countBadge(0, false))}
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={mailbox.kind === 'unified'}
-                  onClick={() => onSelect({ kind: 'unified', role: 'inbox' })}
-                >
-                  <HugeiconsIcon icon={InboxIcon} />
-                  <span>{t('mail:allInboxes')}</span>
+                <SidebarMenuButton isActive={mailbox.kind === 'starred'} onClick={() => onSelect({ kind: 'starred' })}>
+                  <HugeiconsIcon icon={StarIcon} />
+                  <span>{t('mail:starredView')}</span>
                 </SidebarMenuButton>
-                {!unifiedCountsKnown ? <SidebarMenuBadge aria-label={t('mail:unreadCountUnknown')}>—</SidebarMenuBadge> : unifiedUnread > 0 && <SidebarMenuBadge>{unifiedUnread}</SidebarMenuBadge>}
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={mailbox.kind === 'archived' && !mailbox.accountId}
-                  onClick={() => onSelect({ kind: 'archived', accountId: null })}
-                >
-                  <HugeiconsIcon icon={Archive03Icon} />
-                  <span>{t('mail:allArchived')}</span>
-                </SidebarMenuButton>
-                {archivedUnread > 0 && <SidebarMenuBadge>{archivedUnread}</SidebarMenuBadge>}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}>
@@ -160,6 +229,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                 </SidebarMenuButton>
                 {draftCount > 0 && <SidebarMenuBadge aria-label={t('mail:draftCount', { count: draftCount })}>{draftCount}</SidebarMenuBadge>}
               </SidebarMenuItem>
+              {roleRow('sent', SentIcon, t('mail:sent'))}
               {outboxCount > 0 && (
                 <SidebarMenuItem>
                   <SidebarMenuButton isActive={mailbox.kind === 'outbox'} onClick={() => onSelect({ kind: 'outbox' })}>
@@ -169,6 +239,18 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                   <SidebarMenuBadge aria-label={t('mail:outboxCount', { count: outboxCount })}>{outboxCount}</SidebarMenuBadge>
                 </SidebarMenuItem>
               )}
+              <Collapsible open={moreOpen} onOpenChange={(next) => setOpen('more', next)} render={<SidebarMenuItem />}>
+                <CollapsibleTrigger render={<SidebarMenuButton />}>
+                  <HugeiconsIcon icon={MoreHorizontalIcon} />
+                  <span className="flex-1">{t('mail:more')}</span>
+                  <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform motion-reduce:transition-none', moreOpen && 'rotate-90')} />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    {moreRows.map(([key, row]) => <Fragment key={key}>{row()}</Fragment>)}
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </Collapsible>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -183,31 +265,14 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                   </SidebarMenuItem>
                 ))}
               {accounts.map((account) => {
-                const tree = buildFolderTree(folders.filter((folder) => folder.accountId === account.id))
+                const own = folders.filter((folder) => folder.accountId === account.id)
+                const tree = buildFolderTree(own)
                 const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
                 const countsKnown = tree.every((node) => node.countsKnown)
-                const open = !collapsed.has(account.id)
                 const sync = syncStates[account.id]
-                return (
-                  <Collapsible
-                    key={account.id}
-                    open={open}
-                    onOpenChange={(next) => toggle(account.id, next)}
-                    render={<SidebarMenuItem />}
-                  >
-                    <CollapsibleTrigger
-                      render={(
-                        <SidebarMenuButton
-                          title={account.emailAddress}
-                          className="font-medium"
-                          style={{ paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 4 : 2.5}rem)` }}
-                        />
-                      )}
-                    >
-                      <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform', open && 'rotate-90')} />
-                      <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
-                      <span>{account.displayName}</span>
-                    </CollapsibleTrigger>
+                const rowStyle = { paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 4 : 2.5}rem)` }
+                const status = (
+                  <>
                     <AccountSyncSlot
                       key={account.mailboxSourceId}
                       unread={unread}
@@ -218,17 +283,47 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                       className={cn(sync?.failure && 'right-7')}
                     />
                     {sync?.failure && <SyncFailureAction failure={sync.failure} />}
+                  </>
+                )
+                const avatar = <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
+                // Before its first folder listing an account has nothing to fold: say why it is empty.
+                if (own.length === 0) {
+                  return (
+                    <SidebarMenuItem key={account.id}>
+                      <SidebarMenuButton render={<div />} title={account.emailAddress} className="font-medium hover:bg-transparent active:bg-transparent" style={rowStyle}>
+                        <span aria-hidden className="size-4 shrink-0" />
+                        {avatar}
+                        <span>{account.displayName}</span>
+                      </SidebarMenuButton>
+                      {status}
+                      <SidebarMenuSub>
+                        <SidebarMenuItem>
+                          <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
+                            {sync?.phase === 'failed' || sync?.phase === 'idle' ? t('mail:noFolders') : (
+                              <span role="status">{t('mail:syncingFolders')}</span>
+                            )}
+                          </span>
+                        </SidebarMenuItem>
+                      </SidebarMenuSub>
+                    </SidebarMenuItem>
+                  )
+                }
+                const open = isOpen(`account:${account.id}`)
+                return (
+                  <Collapsible
+                    key={account.id}
+                    open={open}
+                    onOpenChange={(next) => setOpen(`account:${account.id}`, next)}
+                    render={<SidebarMenuItem />}
+                  >
+                    <CollapsibleTrigger render={<SidebarMenuButton title={account.emailAddress} className="font-medium" style={rowStyle} />}>
+                      <HugeiconsIcon icon={ArrowRight01Icon} className={cn('transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
+                      {avatar}
+                      <span>{account.displayName}</span>
+                    </CollapsibleTrigger>
+                    {status}
                     <CollapsibleContent>
                       <SidebarMenuSub>
-                        {tree.length === 0 && (
-                          <SidebarMenuItem>
-                            <span className="flex h-8 items-center gap-2 px-2 text-xs text-sidebar-foreground/70">
-                              {sync?.phase === 'failed' || sync?.phase === 'idle' ? t('mail:noFolders') : (
-                                <span role="status">{t('mail:syncingFolders')}</span>
-                              )}
-                            </span>
-                          </SidebarMenuItem>
-                        )}
                         {tree.map((node) => (
                           <Fragment key={node.folder.id}>
                             <FolderItem
@@ -279,6 +374,98 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
         </SidebarMenu>
       </SidebarFooter>
     </div>
+  )
+}
+
+/** One account's entry under a top row such as 收件箱. */
+type AccountChild = { account: Account; badge: React.ReactNode; active: boolean; mailbox: Mailbox }
+
+/** An unread number, "—" while unknown, or nothing for none. */
+function countBadge(count: number, known: boolean): React.ReactNode {
+  if (!known) return <span aria-label={t('mail:unreadCountUnknown')}>—</span>
+  return count > 0 ? count : null
+}
+
+/** Junk signals unread mail with a dot, never a number. */
+function UnreadDot() {
+  return (
+    <span aria-label={t('mail:hasUnread')} className="flex items-center justify-center">
+      <span className="size-1.5 rounded-full bg-current" />
+    </span>
+  )
+}
+
+/**
+ * A view across all accounts. With two or more accounts a chevron, shown on
+ * hover or focus and while open, lists each account's own folder below it;
+ * the badge slides left to make room rather than being covered. `--show` is set
+ * by this row's own button or slot only, since the item holds its children too.
+ */
+function TopRow({ icon, label, badge, active, onSelect, accounts, open: wanted, onOpenChange, onSelectChild }: {
+  icon: IconSvgElement
+  label: string
+  badge: React.ReactNode
+  active: boolean
+  onSelect: () => void
+  accounts: AccountChild[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSelectChild: (mailbox: Mailbox) => void
+}) {
+  useTranslation()
+  const expandable = accounts.length > 1
+  const open = expandable && wanted
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange} render={<SidebarMenuItem />}>
+      <SidebarMenuButton isActive={active} onClick={onSelect} className={cn(expandable ? (badge != null ? 'pr-14' : 'pr-8') : badge != null && 'pr-8')}>
+        <HugeiconsIcon icon={icon} />
+        <span>{label}</span>
+      </SidebarMenuButton>
+      {(badge != null || expandable) && (
+        <div
+          className={cn(
+            'pointer-events-none absolute top-1.5 right-1 flex h-5 items-center text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden',
+            // A selected row keeps light text when hovered too, like `SidebarMenuBadge`.
+            'peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-primary-foreground peer-data-active/menu-button:peer-hover/menu-button:text-primary-foreground',
+            open ? '[--show:1]' : '[--show:0] peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
+          )}
+        >
+          {badge != null && <span className="flex min-w-5 items-center justify-center px-1">{badge}</span>}
+          {expandable && (
+            <CollapsibleTrigger
+              render={(
+                <button
+                  type="button"
+                  aria-label={t('mail:toggleAccounts', { action: open ? t('mail:collapse') : t('mail:expand'), folder: label })}
+                  className={cn(
+                    'pointer-events-auto flex h-5 w-[calc(1.25rem*var(--show))] shrink-0 items-center justify-center overflow-hidden rounded-md opacity-(--show) outline-hidden transition-[width,opacity] motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                    // On a selected row, a light tint like `SidebarMenuAction`, not the light hover fill.
+                    active ? 'hover:bg-primary-foreground/15 hover:text-primary-foreground' : 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                  )}
+                />
+              )}
+            >
+              <HugeiconsIcon icon={ArrowRight01Icon} className={cn('size-4 shrink-0 transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
+            </CollapsibleTrigger>
+          )}
+        </div>
+      )}
+      {expandable && (
+        <CollapsibleContent>
+          <SidebarMenuSub>
+            {accounts.map((child) => (
+              <SidebarMenuItem key={child.account.id}>
+                <SidebarMenuButton isActive={child.active} title={child.account.emailAddress} onClick={() => onSelectChild(child.mailbox)} className={cn(child.badge != null && 'pr-8')}>
+                  <AccountAvatar displayName={child.account.displayName} color={child.account.color} providerId={child.account.providerId} useProviderIcon={child.account.useProviderIcon} className="size-4 text-[9px]" />
+                  <span>{child.account.displayName}</span>
+                </SidebarMenuButton>
+                {child.badge != null && <SidebarMenuBadge>{child.badge}</SidebarMenuBadge>}
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
   )
 }
 
