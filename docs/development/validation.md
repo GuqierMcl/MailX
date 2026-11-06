@@ -999,3 +999,9 @@ Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Ins
 服务商选择器、徽标与账号头像复用现有 `logo` 元数据及账号图标开关。现有 3 个服务商 / 头像 / 添加账号测试文件共 94 项通过，覆盖 iCloud 的本地图片、默认开启与关闭回退、添加并保存图标偏好；`bun run lint`、`bun run build`（含 TypeScript）及 `git diff --check` 通过。生产构建输出 `icloud-mail-CSkDyzeG.png`，与源码图片字节一致，应用运行时无需热链官网；保留既有 chunk 大小提示。
 
 实现完成后委派未参与实现的独立子代理审查整个 PR。复核确认 iCloud 端点、域名、引导与图标集中在前端服务商登记中，公共表单按中立凭证元数据工作；`core/src` 没有本次改动，iCloud 沿用 `StandardCompatibility`，同步、发送和存储没有新增品牌特判；桌面端只扩展官方帮助白名单。审查发现的账号配置文档旧图标描述已修正并通过复核，无剩余阻塞发现。真实 iCloud 认证与收发、服务器副本和三平台桌面验证仍待完成。
+
+### 菜单栏默认值与服务商选择顺序（2026-11-06）
+
+macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `showMenuBarIcon` 的新安装和旧配置使用新默认，已经明确保存为 `false` 的用户偏好保持关闭。macOS 仍保留 Regular 应用身份和 Dock，关闭主窗口后的后台恢复行为没有变化。iCloud 在服务商登记数组中调整到第一项，手动 IMAP/SMTP 保持末项；搜索结果继续保持登记顺序。
+
+自动检查通过：iCloud 首项 / 手动入口末项测试、菜单栏默认开启与关闭切换测试共 35 项前端定向测试通过；core settings 39 项通过；类型检查、lint 和 `git diff --check` 通过。未进行本次变更相关的原生 macOS 菜单栏图标或 Dock 行为验收；既有记录中的菜单栏 template 与 Dock/Finder 真机待验项目仍然有效。

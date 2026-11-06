@@ -51,7 +51,7 @@ export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(cli
 export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
 export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
-export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false }, false)
+export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoCheckUpdates: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */
 export const LAYOUT_SAVE_DELAY_MS = 500

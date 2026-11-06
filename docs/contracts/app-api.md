@@ -591,7 +591,7 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 
 `mailx://lifecycle` 向 main 推送同形快照；先订阅再读快照，按 revision 丢弃旧结果。closeRequestId 为 null 或当前待处理请求的编号，重复关窗不建立第二个弹窗。过期或重复提交返回 conflict。后台不可用时不能选择 background；能力在保存期间消失也保留窗口。取消不写偏好；勾选记住后选择后台或退出才原子更新 `general.closeBehavior`，并发送既有 settings-changed 事件。保存失败保留弹窗，不隐藏也不退出。
 
-`general.closeBehavior` 为 `ask`（默认）、`background`、`quit`；`general.showMenuBarIcon` 默认 false，仅 macOS 使用。旧文件自动补默认值，设置仅影响下一次关窗。macOS 的 background 依靠 Dock 恢复，无须菜单栏图标；Windows/Linux 需要托盘入口，Linux 还检查 AppIndicator 运行库与当前桌面宿主。运行库加载失败时主窗口仍可使用，`backgroundAvailable` 为 false。已记住 background 但当前不可用时重新询问，保留原偏好，不静默退出。
+`general.closeBehavior` 为 `ask`（默认）、`background`、`quit`；`general.showMenuBarIcon` 默认 true，仅 macOS 使用。旧文件自动补默认值，已经保存的 `false` 仍保留，设置仅影响下一次关窗。macOS 的 background 依靠 Dock 恢复，无须菜单栏图标；Windows/Linux 需要托盘入口，Linux 还检查 AppIndicator 运行库与当前桌面宿主。运行库加载失败时主窗口仍可使用，`backgroundAvailable` 为 false。已记住 background 但当前不可用时重新询问，保留原偏好，不静默退出。
 
 托盘工作台动作 `mailx://desktop-action` 载荷为 `"settings"` 或 `"compose"`；只有工作台完成监听并报告 ready 后启用菜单项。打开窗口、立即同步和退出由 Rust 宿主执行。普通最小化保留平台原生行为，关窗隐藏不暂停收发任务。
 

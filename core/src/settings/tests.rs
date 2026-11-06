@@ -333,7 +333,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": false, "silentStart": false },
+                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -978,7 +978,7 @@ fn background_preferences_default_without_changing_legacy_language() {
             .get()
             .unwrap();
         assert_eq!(snapshot.settings.general.close_behavior, CloseBehavior::Ask);
-        assert!(!snapshot.settings.general.show_menu_bar_icon);
+        assert!(snapshot.settings.general.show_menu_bar_icon);
         assert_eq!(
             snapshot.settings.general.language,
             general
@@ -988,6 +988,20 @@ fn background_preferences_default_without_changing_legacy_language() {
         );
         assert!(!snapshot.recovered);
     }
+    let explicit_off = serde_json::json!({
+        "version": 1,
+        "settings": {"general": {"language": "en", "showMenuBarIcon": false}}
+    });
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        explicit_off.to_string(),
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(!snapshot.settings.general.show_menu_bar_icon);
 }
 
 #[test]
@@ -1020,14 +1034,14 @@ fn saved_background_preferences_recover_independently() {
             "en",
             true,
             CloseBehavior::Ask,
-            false,
+            true,
         ),
         (
             serde_json::json!({"language": "en", "closeBehavior": "background", "showMenuBarIcon": "yes"}),
             "en",
             true,
             CloseBehavior::Background,
-            false,
+            true,
         ),
     ];
     for (general, language, auto_check_updates, close_behavior, show_menu_bar_icon) in cases {

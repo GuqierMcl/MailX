@@ -53,7 +53,7 @@ A client may send the mail it reads to the AI service it uses, so choose clients
 
 ## Background operation, launch at login and updates
 
-Closing the main window can keep MailX in the background or quit; it asks each time by default, and you can change that in General settings. Launch at login and start silently are both off by default; start silently only applies when the app starts automatically at login. When the system or desktop environment has no usable background entry, the main window appears instead of running with no way to get back.
+Closing the main window can keep MailX in the background or quit; it asks each time by default, and you can change that in General settings. On macOS, the MailX menu bar icon is on by default and can be turned off; the Dock remains a recovery entry when the main window is hidden. Launch at login and start silently are both off by default; start silently only applies when the app starts automatically at login. When the system or desktop environment has no usable background entry, the main window appears instead of running with no way to get back.
 
 The app checks GitHub for new versions, and you can turn automatic checks off or check manually on the About page. macOS, Windows and the AppImage support in-app updates; for deb / rpm, install the new package from the release page. System code signing and update package signing are two different things, and the installers may still trigger a first-run prompt from the system.
 
