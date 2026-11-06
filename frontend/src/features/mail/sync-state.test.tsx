@@ -1,9 +1,10 @@
-import { act, render, screen, waitFor } from '@/test/render'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, Folder } from '@/generated/accounts'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Workbench } from './workbench'
+import { expandAccount } from '@/test/sidebar'
 
 const account = exampleAccount()
 
@@ -35,9 +36,11 @@ describe('folder sync in the workbench', () => {
   it('shows server folders under their system names', async () => {
     const { client } = desktopLike([folder('INBOX', { role: 'inbox' }), folder('Sent Messages', { role: 'sent' }), folder('Receipts')])
     render(<Workbench client={client} />)
-    expect(await screen.findByRole('button', { name: '已发送' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '收件箱' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receipts' })).toBeInTheDocument()
+    await expandAccount(account.displayName)
+    const tree = within(screen.getByRole('button', { name: account.displayName }).closest('li')!)
+    expect(tree.getByRole('button', { name: '已发送' })).toBeInTheDocument()
+    expect(tree.getByRole('button', { name: '收件箱' })).toBeInTheDocument()
+    expect(tree.getByRole('button', { name: 'Receipts' })).toBeInTheDocument()
     expect(screen.queryByText('Sent Messages')).not.toBeInTheDocument()
   })
 
@@ -90,7 +93,7 @@ describe('folder sync in the workbench', () => {
   it('shows unknown counts instead of a verified zero', async () => {
     const { client } = desktopLike([folder('INBOX', { role: 'inbox', countsKnown: false }), folder('Unknown', { countsKnown: false })])
     render(<Workbench client={client} />)
-    await screen.findByRole('button', { name: 'Unknown' })
+    await expandAccount(account.displayName)
     const count = screen.getByRole('button', { name: 'Unknown' }).closest('li')!.querySelector('[aria-label="未读数待刷新"]')
     expect(count).toHaveTextContent('—')
     expect(count).not.toHaveTextContent('0')

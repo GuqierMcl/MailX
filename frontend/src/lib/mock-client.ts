@@ -366,6 +366,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
         (!query.folderId || email.summary.folderId === query.folderId) &&
         (!query.folderRole || folders.some((folder) => folder.id === email.summary.folderId && folder.role === query.folderRole)) &&
+        !(query.excludeFolderRoles ?? []).some((role) => folders.some((folder) => folder.id === email.summary.folderId && folder.role === role)) &&
         // Like the core: archived mail only shows in the archived views and in searches.
         (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
         (query.unread == null || email.summary.isRead === !query.unread) &&

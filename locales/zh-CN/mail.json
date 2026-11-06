@@ -115,7 +115,6 @@
   "draftCount_other": "{{count}} 份草稿",
   "outbox": "发件箱",
   "outboxCount_other": "{{count}} 封未完成的邮件",
-  "mailboxes": "邮箱",
   "noFolders": "暂无文件夹",
   "syncingFolders": "正在同步文件夹…",
   "accounts": "账号",
@@ -135,7 +134,6 @@
   "retryAfterProviderPolicy": "按服务商指引处理后，可手动同步此账号重试。",
   "allDrafts": "全部草稿",
   "allSent": "全部已发送",
-  "allArchive": "全部归档",
   "allJunk": "全部垃圾邮件",
   "allTrash": "全部已删除",
   "allMail": "全部邮件",
@@ -181,9 +179,13 @@
   "archiveFailed": "归档失败",
   "unarchiveFailed": "移回收件箱失败",
   "allArchived": "全部已归档",
-  "archivedFolder": "已归档",
   "archivedMarker": "已归档",
   "agentArchived_other": "{{source}} 已在本机归档 {{count}} 封邮件",
   "agentUnarchived_other": "{{source}} 已在本机将 {{count}} 封邮件移回收件箱",
-  "undoArchiveFailed": "无法撤销此次归档操作"
+  "undoArchiveFailed": "无法撤销此次归档操作",
+  "starredView": "星标",
+  "more": "更多",
+  "toggleAccounts": "{{action}}{{folder}}的各账号",
+  "mailboxes": "邮箱",
+  "archivedFolder": "已归档"
 }

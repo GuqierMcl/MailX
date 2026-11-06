@@ -13,6 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- The sidebar now groups Inbox, Starred, Drafts and Sent across all accounts at the top, with Archive, Junk and Trash under More and each account listed below a row on demand; accounts below start collapsed and still hold all their folders. / 侧栏顶部按类型汇总所有账号的收件箱、星标、草稿和已发送，归档、垃圾邮件和已删除收在“更多”里，并可按账号展开；下方各账号默认折叠，展开后仍是完整的文件夹。
 - Automatic sync keeps sidebar account rows quiet and unread counts visible; manual refresh shows progress only on the refresh button you use, newly added accounts get a subdued first-fetch hint, and sync problems keep static warnings. / 自动同步时侧栏账号行保持安静并保留未读数；手动刷新只在使用的刷新按钮上显示进度，新接入账号首次获取内容时显示弱化提示，同步问题继续保留静态警示。
 
 ### 🩹 Fixed

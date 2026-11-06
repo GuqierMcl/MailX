@@ -6,6 +6,7 @@ export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
     accountIds: null,
     folderId: null,
     folderRole: null,
+    excludeFolderRoles: [],
     archive: null,
     text: null,
     unread: null,
