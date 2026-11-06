@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- An iCloud Mail entry fills in encrypted IMAP / SMTP settings for @icloud.com, @me.com and @mac.com, with the official bundled Mail icon, app-specific password guidance and separate username settings. / 新增 iCloud 邮箱添加入口，为 @icloud.com、@me.com 和 @mac.com 预填加密收发服务器，采用本地打包的官方 Mail 图标，提供应用专用密码指引与收发独立用户名设置。
+
 ### ✨ Optimization
 
 - The sidebar now groups Inbox, Starred, Drafts and Sent across all accounts at the top, with Archive, Junk and Trash under More and each account listed below a row on demand; accounts below start collapsed and still hold all their folders. / 侧栏顶部按类型汇总所有账号的收件箱、星标、草稿和已发送，归档、垃圾邮件和已删除收在“更多”里，并可按账号展开；下方各账号默认折叠，展开后仍是完整的文件夹。 ([#94](https://github.com/GuqierMcl/MailX/pull/94))

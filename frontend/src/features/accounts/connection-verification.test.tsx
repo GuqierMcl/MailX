@@ -5,7 +5,7 @@ import type { AccountConnectionVerification } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { ConnectionVerification } from './connection-verification'
 import { exampleAccount, testClient } from './test-fixtures'
-import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 function report(accountId: string, revision: number): AccountConnectionVerification {
   return {
@@ -46,6 +46,25 @@ describe('account connection verification', () => {
     await userEvent.click(screen.getByRole('button', { name: '如何获取授权码' }))
     expect(client.openProviderHelp).toHaveBeenCalledWith(provider.id)
     expect(screen.queryByText('登录验证通过，尚未测试实际投递。')).not.toBeInTheDocument()
+  })
+
+  it('offers iCloud app-password recovery when IMAP authentication fails without retrying or sending', async () => {
+    const account = exampleAccount({ providerId: 'icloud' })
+    const client = testClient([account])
+    client.verifyAccountConnection.mockResolvedValue({
+      ...report(account.id, account.revision),
+      imap: { status: 'failed', stage: 'authentication', code: 'authentication' },
+    })
+    render(<ConnectionVerification account={account} client={client} />)
+    await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
+    expect(await screen.findByText('登录验证未通过')).toBeInTheDocument()
+    expect(within(screen.getByRole('status')).getAllByText('登录成功')).toHaveLength(1)
+    expect(screen.getByText(ICLOUD_PROVIDER.setup!.authenticationHelp)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '如何获取授权码' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '如何生成应用专用密码' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith('icloud')
+    expect(client.verifyAccountConnection).toHaveBeenCalledOnce()
+    expect(client.queueSend).not.toHaveBeenCalled()
   })
 
   it.each([NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER])('explains a $id mailbox policy refusal separately from a rejected authorization code', async (provider) => {

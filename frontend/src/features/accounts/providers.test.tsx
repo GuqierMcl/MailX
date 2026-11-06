@@ -1,7 +1,7 @@
 import { render, screen } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { filterProviders, GENERIC_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
+import { filterProviders, GENERIC_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
   it('labels a manually configured account as IMAP/SMTP', () => {
@@ -53,6 +53,29 @@ describe('mail providers', () => {
       expect(image.getAttribute('src')).not.toMatch(/^https?:/)
     }
     expect(screen.getByText('139 邮箱')).toBeInTheDocument()
+  })
+
+  it.each(['iCloud', 'ICLOUD.COM', 'ME.COM', 'MAC.COM', 'Apple', '苹果邮箱'])('finds the iCloud entry for %s', (query) => {
+    expect(filterProviders(PROVIDERS, query)).toEqual([ICLOUD_PROVIDER])
+    expect(providerOf('icloud')).toBe(ICLOUD_PROVIDER)
+  })
+
+  it('uses the iCloud TLS endpoints and a bundled official Mail mark', () => {
+    expect(ICLOUD_PROVIDER.preset).toEqual({
+      domains: ['icloud.com', 'me.com', 'mac.com'],
+      imap: { host: 'imap.mail.me.com', port: 993, tls: 'implicit' },
+      smtp: { host: 'smtp.mail.me.com', port: 587, tls: 'startTls' },
+    })
+    const { container } = render(<><ProviderIcon provider={ICLOUD_PROVIDER} /><ProviderBadge providerId="icloud" /></>)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', ICLOUD_PROVIDER.logo)
+      expect(image).toHaveClass('object-contain')
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+    }
+    expect(container.querySelector('svg')).toBeNull()
+    expect(screen.getByText('iCloud 邮箱')).toBeInTheDocument()
   })
 
   it('gives 163, 126 and yeah.net distinct bundled logos in the provider list', () => {

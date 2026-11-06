@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
-import { providerEmailRequired, providerOf, type MailProvider } from './providers'
+import { providerCredentialText, providerEmailRequired, providerOf, type MailProvider } from './providers'
 import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 import { ConnectionVerificationReport } from './connection-verification'
 
@@ -117,13 +117,13 @@ function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
   )
 }
 
-function PasswordField({ id, label, value, onChange, canKeep, error, authorizationCode = false }: {
+function PasswordField({ id, label, value, onChange, canKeep, error, placeholder }: {
   id: string
   label: string
   value: SecretDraft
   onChange(value: SecretDraft): void
   canKeep: boolean
-  authorizationCode?: boolean
+  placeholder?: string
   error: ClientFailure | null
 }) {
   useTranslation()
@@ -143,7 +143,7 @@ function PasswordField({ id, label, value, onChange, canKeep, error, authorizati
         <Field data-invalid={invalid}>
           <FieldLabel htmlFor={id}>{label}</FieldLabel>
           <Input id={id} type="password" value={value.value} onChange={(event) => onChange({ ...value, value: event.target.value })}
-            autoComplete="new-password" autoCapitalize="none" spellCheck={false} placeholder={id === 'proxyPassword' ? t('accounts:enterProxyPassword') : authorizationCode ? t('accounts:enterAuthorizationCode') : t('accounts:enterPassword')}
+            autoComplete="new-password" autoCapitalize="none" spellCheck={false} placeholder={placeholder ?? t('accounts:enterPassword')}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined} />
           {invalid && <FieldError id={`${id}-error`}>{errorText(error)}</FieldError>}
         </Field>
@@ -164,7 +164,7 @@ export function ConnectionForm({
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
   const setup = provider.setup
-  const authorizationCode = !!setup
+  const credentialText = providerCredentialText(setup)
   const errorContext = !account && provider.preset ? { emailAddress: providerEmailRequired(provider) } : undefined
   const [draft, setDraft] = useState(() => resume ?? initialDraft(account, provider))
   const [advanced, setAdvanced] = useState(!!account || !!resume)
@@ -288,10 +288,10 @@ export function ConnectionForm({
               </RadioGroup>
               {account && !sameMode && <FieldDescription>{t('accounts:authenticationChanged')}</FieldDescription>}</>)
   const passwordFields = (<>{draft.mode === 'shared'
-                ? <PasswordField id="sharedPassword" label={t(authorizationCode ? 'accounts:authorizationCode' : 'accounts:sharedPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
+                ? <PasswordField id="sharedPassword" label={credentialText.shared} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                 : <>
-                    <PasswordField id="imapPassword" label={t(authorizationCode ? 'accounts:incomingAuthorizationCode' : 'accounts:incomingPassword')} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} authorizationCode={authorizationCode} />
-                    <PasswordField id="smtpPassword" label={t(authorizationCode ? 'accounts:outgoingAuthorizationCode' : 'accounts:outgoingPassword')} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} authorizationCode={authorizationCode} />
+                    <PasswordField id="imapPassword" label={credentialText.incoming} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
+                    <PasswordField id="smtpPassword" label={credentialText.outgoing} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                   </>}</>)
   const routeFields = (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
               <Field>
@@ -325,7 +325,7 @@ export function ConnectionForm({
                 </Field>
                 {draft.proxyAuth && <>
                   <TextField id="proxyUsername" label={t('accounts:proxyUsername')} value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
-                  <PasswordField id="proxyPassword" label={t('accounts:proxyPassword')} value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} />
+                  <PasswordField id="proxyPassword" label={t('accounts:proxyPassword')} value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} placeholder={t('accounts:enterProxyPassword')} />
                 </>}
                 <Field orientation="horizontal">
                   <FieldContent>
@@ -351,7 +351,7 @@ export function ConnectionForm({
           {setup && onOpenHelp && <Button variant="link" className="mt-1 h-auto w-fit px-0" disabled={saving} onClick={() => {
             setHelpFailed(false)
             void onOpenHelp().catch(() => setHelpFailed(true))
-          }}>{t('accounts:getAuthorizationCode')}</Button>}
+          }}>{credentialText.help}</Button>}
           {helpFailed && <FieldDescription role="alert">{t('accounts:helpOpenFailed')}</FieldDescription>}
         </Alert>
         {needsTrust && <Alert variant="destructive"><AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle><AlertDescription>{t('accounts:confirmChangedCredentials')}</AlertDescription></Alert>}
@@ -368,7 +368,7 @@ export function ConnectionForm({
             <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={setup?.emailPlaceholder ?? "you@example.com"} inputMode="email" error={error} errorContext={errorContext} />
           </SettingsGroup>
           {setup && (
-            <SettingsGroup title={t('accounts:authorizationCode')} description={setup.authorizationCodeHint}>
+            <SettingsGroup title={credentialText.shared} description={setup.credentialHint}>
               {passwordFields}
               {setup.rangeHint && <FieldDescription>{setup.rangeHint}</FieldDescription>}
             </SettingsGroup>

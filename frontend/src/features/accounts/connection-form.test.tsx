@@ -6,7 +6,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import type { AccountDraft } from './account-draft'
 import { ConnectionForm } from './connection-form'
 import { exampleAccount } from './test-fixtures'
-import { MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
+import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, type MailProvider } from './providers'
 
 type Submit = (connection: ConnectionInput, draft: AccountDraft) => Promise<void> | void
 
@@ -72,7 +72,7 @@ describe('connection form', () => {
     })
   })
 
-  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
+  it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, ICLOUD_PROVIDER])('keeps saved $id endpoints, login identities, credentials and proxy instead of reapplying its preset', async (provider) => {
     const account = exampleAccount({
       providerId: provider.id, emailAddress: `synthetic@${provider.preset!.domains[0]}`,
       imap: { host: 'imap.custom.example', port: 1993, tls: 'implicit', username: 'receive-identity@qq.com' },
@@ -94,6 +94,17 @@ describe('connection form', () => {
       imap: account.imap, smtp: account.smtp, route: account.route,
       authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     })
+  })
+
+  it('uses app-password labels and placeholders for separate iCloud credentials', async () => {
+    renderForm(null, vi.fn(), ICLOUD_PROVIDER)
+    expect(screen.getByLabelText('应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+    expect(screen.queryByLabelText('授权码')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('高级设置'))
+    await userEvent.click(screen.getByRole('radio', { name: '收发分别设置密码' }))
+    expect(screen.getByLabelText('收信应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+    expect(screen.getByLabelText('发信应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+    expect(screen.queryByLabelText('收信授权码')).not.toBeInTheDocument()
   })
 
   it.each([QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER])('opens $id advanced settings and focuses a hidden field rejected by the backend', async (provider) => {
@@ -119,7 +130,7 @@ describe('connection form', () => {
   it('lets a 139 user explicitly replace each login name without changing the mailbox address', async () => {
     const { submit } = renderForm(null, vi.fn(), MAIL_139_PROVIDER)
     expect(screen.getByText(MAIL_139_PROVIDER.setup!.emailHint)).toHaveTextContent('高级设置')
-    expect(screen.getByText(MAIL_139_PROVIDER.setup!.authorizationCodeHint)).toHaveTextContent('90 天')
+    expect(screen.getByText(MAIL_139_PROVIDER.setup!.credentialHint)).toHaveTextContent('90 天')
     fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'synthetic@139.com' } })
     fireEvent.change(screen.getByLabelText('授权码'), { target: { value: 'synthetic-code' } })
     await userEvent.click(screen.getByText('高级设置'))
