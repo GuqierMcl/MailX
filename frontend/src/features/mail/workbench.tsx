@@ -29,6 +29,7 @@ import { AddAccountDialog } from '@/features/accounts/add-account-dialog'
 import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import { useDebouncedLayoutSave, useSettings } from '@/features/settings/settings-queries'
 import { AvatarSourceProvider } from './sender-avatar'
+import { MailRail } from './mail-rail'
 import { MailSidebar } from './mail-sidebar'
 import { ReaderToggle } from './reader-toggle'
 import { folderLabel, mailboxTitle, STARRED_EXCLUDED_ROLES, type Mailbox } from './mailbox'
@@ -98,6 +99,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const settingsQuery = useSettings(client)
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
+  const navCollapsed = settingsQuery.data?.settings.layout.navCollapsed ?? false
   const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
@@ -440,29 +442,30 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (next !== listWidth) saveLayout({ listWidth: next })
   }
 
+  // What the full sidebar and its icon rail both show.
+  const sidebarProps = {
+    accounts: displayAccounts,
+    folders,
+    syncStates: currentSyncStates,
+    mailbox: activeMailbox,
+    onSelect: selectMailbox,
+    onOpenAccounts: () => setAccountsTarget({}),
+    onOpenSettings: () => setSettings({ section: 'general' }),
+    onCompose: () => void compose.compose(),
+    draftCount,
+    outboxCount,
+  }
+
   return (
     <TooltipProvider>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
       <ShellLayout
         navLabel={t('mail:mailboxNavigation')}
         navWidth={navWidth}
-        onNavWidthChange={(width) => saveLayout({ navWidth: width })}
-        nav={(
-          <MailSidebar
-            accounts={displayAccounts}
-            folders={folders}
-            loading={treeLoading}
-            syncStates={currentSyncStates}
-            mailbox={activeMailbox}
-            onSelect={selectMailbox}
-            onOpenAccounts={() => setAccountsTarget({})}
-            onOpenSettings={() => setSettings({ section: 'general' })}
-            onCompose={() => void compose.compose()}
-            draftCount={draftCount}
-            outboxCount={outboxCount}
-            onRefresh={(accountId) => client.refreshSync(accountId)}
-          />
-        )}
+        navCollapsed={navCollapsed}
+        onNavChange={saveLayout}
+        nav={<MailSidebar {...sidebarProps} loading={treeLoading} onRefresh={(accountId) => client.refreshSync(accountId)} />}
+        rail={<MailRail {...sidebarProps} />}
       >
         <TitleBarActions side="center">
           <MailSearch value={mailView ? search : ''} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />

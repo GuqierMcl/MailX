@@ -10,7 +10,6 @@ import {
   AtSignIcon,
   Delete02Icon,
   File01Icon,
-  Folder01Icon,
   InboxIcon,
   MailUpload01Icon,
   MoreHorizontalIcon,
@@ -46,42 +45,7 @@ import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { formatFullTime } from './format'
 import { useManualSync } from './use-manual-sync'
-
-/** Shown in the tooltip; the shortcut itself is handled by the workbench. */
-const COMPOSE_SHORTCUT = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘N' : 'Ctrl N'
-
-/**
- * Icons of the folders under an account. Server drafts and archive folders look
- * like any other folder there: the top's 草稿 and 归档 are MailX's local views.
- */
-const ROLE_ICONS: Record<FolderRole, IconSvgElement> = {
-  inbox: InboxIcon,
-  drafts: Folder01Icon,
-  sent: SentIcon,
-  archive: Folder01Icon,
-  junk: SpamIcon,
-  trash: Delete02Icon,
-  other: Folder01Icon,
-}
-
-type MailSidebarProps = {
-  accounts: Account[]
-  folders: Folder[]
-  loading: boolean
-  /** Latest sync state by account id; missing means no sync has reported yet. */
-  syncStates: Record<string, AccountSyncState>
-  mailbox: Mailbox
-  onSelect: (mailbox: Mailbox) => void
-  onOpenAccounts: () => void
-  onOpenSettings: () => void
-  onCompose: () => void
-  /** Unfinished drafts; the entry is always there. */
-  draftCount: number
-  /** Unfinished sends (queued, sending, failed, unknown); the entry only appears when there are some. */
-  outboxCount: number
-  /** Starts the account's next sync round now. */
-  onRefresh: (accountId: string) => Promise<void>
-}
+import { COMPOSE_SHORTCUT, ROLE_ICONS, type MailSidebarProps } from './sidebar-shared'
 
 export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onCompose, draftCount, outboxCount, onRefresh }: MailSidebarProps) {
   useTranslation()
@@ -223,11 +187,15 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}>
+                {/* Drafts never clear themselves, so a standing number would turn into
+                    noise. The count stays in the tooltip and the drafts view's own header. */}
+                <SidebarMenuButton
+                  isActive={mailbox.kind === 'drafts'} onClick={() => onSelect({ kind: 'drafts' })}
+                  title={draftCount > 0 ? `${t('mail:drafts')} · ${t('mail:draftCount', { count: draftCount })}` : undefined}
+                >
                   <HugeiconsIcon icon={File01Icon} />
                   <span>{t('mail:drafts')}</span>
                 </SidebarMenuButton>
-                {draftCount > 0 && <SidebarMenuBadge aria-label={t('mail:draftCount', { count: draftCount })}>{draftCount}</SidebarMenuBadge>}
               </SidebarMenuItem>
               {roleRow('sent', SentIcon, t('mail:sent'))}
               {outboxCount > 0 && (

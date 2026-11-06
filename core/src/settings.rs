@@ -190,12 +190,15 @@ impl NotificationSettings {
 pub struct LayoutSettings {
     /// Width of the navigation sidebar, `220..=420`.
     pub nav_width: u32,
+    /// The navigation sidebar is folded to its icon rail. A narrow window may
+    /// show the rail on its own without changing this.
+    pub nav_collapsed: bool,
     /// Width of the message list beside the reader, `300..=2000`, applied when
     /// the window opens. In a window that is too narrow for it, list and reader
     /// shrink together, each down to its own minimum.
     pub list_width: u32,
-    /// The reader beside the message list is folded away. Unlike the sidebar,
-    /// this survives a restart: the window comes back as it was left.
+    /// The reader beside the message list is folded away. Like the sidebar's
+    /// rail, this survives a restart: the window comes back as it was left.
     pub reader_collapsed: bool,
     /// Display order only; unknown account ids are ignored by the UI.
     #[serde(deserialize_with = "deserialize_account_order")]
@@ -206,6 +209,7 @@ impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
             nav_width: NAV_WIDTH_DEFAULT,
+            nav_collapsed: false,
             list_width: LIST_WIDTH_DEFAULT,
             reader_collapsed: false,
             account_order: Vec::new(),
@@ -253,6 +257,8 @@ pub struct LayoutSettingsPatch {
     #[ts(optional)]
     pub nav_width: Option<u32>,
     #[ts(optional)]
+    pub nav_collapsed: Option<bool>,
+    #[ts(optional)]
     pub list_width: Option<u32>,
     #[ts(optional)]
     pub reader_collapsed: Option<bool>,
@@ -265,6 +271,7 @@ impl LayoutSettingsPatch {
     fn merge(self, current: &LayoutSettings) -> LayoutSettings {
         LayoutSettings {
             nav_width: self.nav_width.unwrap_or(current.nav_width),
+            nav_collapsed: self.nav_collapsed.unwrap_or(current.nav_collapsed),
             list_width: self.list_width.unwrap_or(current.list_width),
             reader_collapsed: self.reader_collapsed.unwrap_or(current.reader_collapsed),
             account_order: self
@@ -278,6 +285,7 @@ impl From<LayoutSettings> for LayoutSettingsPatch {
     fn from(settings: LayoutSettings) -> Self {
         Self {
             nav_width: Some(settings.nav_width),
+            nav_collapsed: Some(settings.nav_collapsed),
             list_width: Some(settings.list_width),
             reader_collapsed: Some(settings.reader_collapsed),
             account_order: Some(settings.account_order),
@@ -528,6 +536,7 @@ impl AppSettings {
             mcp: self.mcp,
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
+                nav_collapsed: self.layout.nav_collapsed,
                 list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
                 reader_collapsed: self.layout.reader_collapsed,
                 account_order: self.layout.normalized_order().unwrap_or_default(),
