@@ -64,6 +64,23 @@ describe('command palette', () => {
     expect(await screen.findByRole('heading', { level: 2, name: '第三季度产品路线图评审' })).toBeInTheDocument()
   })
 
+  it('offers the same views as the top of the sidebar, before the folders', async () => {
+    const { palette } = await openPalette()
+    const jumps = within(palette).getAllByRole('option').map((option) => option.textContent ?? '')
+    const views = ['全部收件箱', '星标', '草稿', '全部已发送', '全部已归档', '全部垃圾邮件', '全部已删除']
+    expect(jumps.filter((label) => views.includes(label))).toEqual(views)
+    expect(jumps.indexOf('全部已删除')).toBeLessThan(jumps.findIndex((label) => label.includes(' · ')))
+    // A server archive folder keeps its own name, apart from the local archive.
+    expect(jumps).toContain('工作邮箱 · 归档')
+  })
+
+  it('jumps to starred mail across accounts', async () => {
+    const { input } = await openPalette()
+    await userEvent.type(input, '星标')
+    await userEvent.click(await screen.findByRole('option', { name: '星标' }))
+    expect(await screen.findByRole('heading', { name: '星标' })).toBeInTheDocument()
+  })
+
   it('jumps to a mailbox', async () => {
     const { input } = await openPalette()
     await userEvent.type(input, '已发送')

@@ -9,6 +9,9 @@ afterEach(() => {
   void i18n.changeLanguage('zh-CN')
   localStorage.removeItem('mailx.language')
   localStorage.removeItem('mailx.mock.settings')
+  // Remembered sidebar folding must not leak from one test into the next.
+  localStorage.removeItem('mailx.sidebar.expanded')
+  localStorage.removeItem('mailx.sidebar.collapsed')
   testViewport.height = 10000
 })
 

@@ -71,7 +71,11 @@ describe('compose entry points', () => {
 
   it('uses the account of the folder being viewed', async () => {
     const { client } = setup()
-    await userEvent.click(await screen.findByRole('button', { name: '收件箱' }))
+    await screen.findByRole('list', { name: '邮件列表' })
+    // One account: the sidebar's 收件箱 is the view across accounts, so open the folder itself.
+    await userEvent.click(screen.getByRole('button', { name: '搜索邮件' }))
+    await userEvent.click(await screen.findByRole('option', { name: `${account.displayName} · 收件箱` }))
+    await screen.findByRole('heading', { name: '收件箱' })
     await userEvent.click(screen.getByRole('button', { name: '写邮件' }))
     await waitFor(() => expect(client.createDraft).toHaveBeenCalledWith(expect.objectContaining({ accountId: account.id })))
   })

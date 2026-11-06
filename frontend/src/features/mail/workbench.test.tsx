@@ -49,12 +49,13 @@ describe('workbench', () => {
   it('narrows to one folder, filters unread and searches', async () => {
     await renderWorkbench()
     const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
-    const sent = screen.getAllByRole('button', { name: '已发送' })[0]
-    await userEvent.click(sent)
+    const sentRow = screen.getByRole('button', { name: '已发送' }).closest('li')!
+    await userEvent.click(within(sentRow).getByRole('button', { name: '展开已发送的各账号' }))
+    await userEvent.click(within(sentRow).getByRole('button', { name: '工作邮箱' }))
     expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
     await waitFor(() => expect(rows()).toHaveLength(2)) // one server copy plus the mock's local-only copy
 
-    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    await userEvent.click(screen.getByRole('button', { name: '收件箱' }))
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))
     await waitFor(() => {
       for (const row of rows()) expect(within(row).getByLabelText('未读')).toBeInTheDocument()

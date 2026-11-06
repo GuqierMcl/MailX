@@ -3,8 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
+  Archive03Icon,
   AtSignIcon,
   Cancel01Icon,
+  Delete02Icon,
+  File01Icon,
   Folder01Icon,
   InboxIcon,
   Mail01Icon,
@@ -12,12 +15,15 @@ import {
   PencilEdit02Icon,
   RefreshIcon,
   Search01Icon,
+  SentIcon,
   Settings01Icon,
   SidebarLeftIcon,
+  SpamIcon,
+  StarIcon,
   UserAdd01Icon,
 } from '@hugeicons/core-free-icons'
 import { useQuery } from '@tanstack/react-query'
-import type { Account, EmailSummary, Folder, FolderRole, ThemeMode } from '@/generated/accounts'
+import type { Account, EmailListQuery, EmailSummary, Folder, ThemeMode } from '@/generated/accounts'
 import {
   Command,
   CommandDialog,
@@ -49,8 +55,8 @@ export type CommandPaletteProps = {
   scope: string
   /** The search currently applied to the message list. */
   search: string
-  folderId: string | null
-  folderRole: FolderRole | null
+  /** The current list's scope (folder, role, archive, starred), without its text or unread filter. */
+  scopeQuery: Partial<EmailListQuery>
   sourceIdentity: string
   accounts: Account[]
   folders: Folder[]
@@ -81,7 +87,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 }
 
 function PaletteBody({
-  client, onOpenChange, scope, search, folderId, folderRole, sourceIdentity, accounts, folders,
+  client, onOpenChange, scope, search, scopeQuery, sourceIdentity, accounts, folders,
   onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose,
 }: CommandPaletteProps) {
   useTranslation()
@@ -98,7 +104,7 @@ function PaletteBody({
     return () => clearTimeout(timer)
   }, [text])
 
-  const query = emailQuery({ folderId, folderRole, text: debounced, limit: RESULT_LIMIT })
+  const query = emailQuery({ ...scopeQuery, text: debounced, limit: RESULT_LIMIT })
   const results = useQuery({
     queryKey: [...mailKeys.all, 'palette', sourceIdentity, query],
     queryFn: () => client.listEmails(query),
@@ -115,8 +121,18 @@ function PaletteBody({
   const accountPosition = new Map(accounts.map((account, index) => [account.id, index]))
   const orderedFolders = [...folders].sort((left, right) =>
     (accountPosition.get(left.accountId) ?? accounts.length) - (accountPosition.get(right.accountId) ?? accounts.length))
+  // The same views, in the same order, as the top of the sidebar.
+  const views: [string, string, Entry['icon'], Mailbox][] = [
+    ['inbox', t('mail:allInboxes'), InboxIcon, { kind: 'unified', role: 'inbox' }],
+    ['starred', t('mail:starredView'), StarIcon, { kind: 'starred' }],
+    ['drafts', t('mail:drafts'), File01Icon, { kind: 'drafts' }],
+    ['sent', t('mail:allSent'), SentIcon, { kind: 'unified', role: 'sent' }],
+    ['archived', t('mail:allArchived'), Archive03Icon, { kind: 'archived', accountId: null }],
+    ['junk', t('mail:allJunk'), SpamIcon, { kind: 'unified', role: 'junk' }],
+    ['trash', t('mail:allTrash'), Delete02Icon, { kind: 'unified', role: 'trash' }],
+  ]
   const jumps: Entry[] = [
-    { id: 'jump:unified', title: t('mail:allInboxes'), icon: InboxIcon, run: () => onSelectMailbox({ kind: 'unified', role: 'inbox' }) },
+    ...views.map(([id, title, icon, mailbox]): Entry => ({ id: `jump:view:${id}`, title, icon, run: () => onSelectMailbox(mailbox) })),
     ...orderedFolders.filter((folder) => folder.selectable).map((folder): Entry => {
       const account = accounts.find((item) => item.id === folder.accountId)
       return {

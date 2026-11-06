@@ -10,6 +10,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
+import { expandAccount } from '@/test/sidebar'
 
 const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }
 const account = exampleAccount()
@@ -148,12 +149,12 @@ describe('synced inbox headers', () => {
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('邮件 before')
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
-    await screen.findByRole('heading', { name: '已发送' })
+    await screen.findByRole('heading', { name: '全部已发送' })
 
     // New inbox mail arrives while Sent is on screen.
     client.listEmails.mockResolvedValue(page([email('after'), email('before')]))
     idle()
-    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    await userEvent.click(screen.getByRole('button', { name: '收件箱' }))
     expect(await screen.findByText('邮件 after')).toBeInTheDocument()
   })
 
@@ -162,9 +163,9 @@ describe('synced inbox headers', () => {
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByText('邮件 cached')
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
-    await screen.findByRole('heading', { name: '已发送' })
+    await screen.findByRole('heading', { name: '全部已发送' })
     const calls = client.listEmails.mock.calls.length
-    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    await userEvent.click(screen.getByRole('button', { name: '收件箱' }))
     expect(screen.getByText('邮件 cached')).toBeInTheDocument()
     expect(client.listEmails).toHaveBeenCalledTimes(calls)
   })
@@ -234,8 +235,7 @@ describe('synced inbox headers', () => {
     const pendingAll = deferred<EmailPage>()
     client.listEmails.mockImplementation((query) => query.unread ? Promise.resolve(page([email('unread')])) : pendingAll.promise)
     render(withTitleBar(<Workbench client={client} />))
-    await screen.findByRole('button', { name: '收件箱' })
-    await userEvent.click(screen.getByRole('tab', { name: '未读' }))
+    await userEvent.click(await screen.findByRole('tab', { name: '未读' }))
     await screen.findByRole('list', { name: '邮件列表' })
     await act(async () => pendingAll.resolve(page([email('old', { isRead: true })])))
     expect(rows()).toHaveLength(1)
@@ -273,7 +273,7 @@ describe('synced inbox headers', () => {
     expect(await screen.findByText('正在同步邮件…')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
     expect(await screen.findByText('等待同步邮件…')).toBeInTheDocument()
-    expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: 'sent', folderRole: null }))
+    expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: null, folderRole: 'sent' }))
     emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent', { phase: 'failed', failure: { code: 'protocol', message: '此文件夹暂时不可用。', detail: null, willRetry: true } })] }))
     expect(await screen.findByText('邮件同步失败')).toBeInTheDocument()
     expect(screen.getByText('邮箱服务器返回了无法识别的回复。')).toBeInTheDocument()
@@ -281,7 +281,7 @@ describe('synced inbox headers', () => {
     expect(await screen.findByText('这里还没有邮件')).toBeInTheDocument()
     // Incomplete coverage alone cannot label an idle folder as still syncing.
     expect(screen.queryByText('正在同步邮件…')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '全部收件箱' }))
+    await userEvent.click(screen.getByRole('button', { name: '收件箱' }))
     expect(await screen.findByText('这里还没有邮件')).toBeInTheDocument()
   })
 
@@ -424,8 +424,7 @@ describe('synced inbox headers', () => {
     // The initial account identity is not known yet, so this event cannot be accepted.
     emit(fresh)
     await act(async () => oldFolders.resolve([]))
-    expect(await screen.findByRole('button', { name: '已发送' })).toBeInTheDocument()
-    expect(client.listFolders).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2))
     emit({ ...fresh, sequence: 21 })
     expect(client.listFolders).toHaveBeenCalledTimes(2)
     expect(client.listSyncStates).toHaveBeenCalledTimes(2)
@@ -440,6 +439,7 @@ describe('synced inbox headers', () => {
       folders: [exampleFolderSyncState('inbox', { dataRevision: 1 }), exampleFolderSyncState('archive', { dataRevision: 1 })],
     })])
     render(withTitleBar(<Workbench client={client} />))
+    await expandAccount(account.displayName)
     await screen.findByRole('button', { name: 'Removed' })
     await screen.findByText('邮件 before-restart')
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
@@ -480,9 +480,11 @@ describe('synced inbox headers', () => {
     const { client, emit } = setup([sentMail])
     client.listEmails.mockImplementation(async (query) => page(query.folderId === 'sent' ? [sentMail] : []))
     render(withTitleBar(<Workbench client={client} />))
-    await screen.findByRole('button', { name: '已发送' })
-    await userEvent.click(screen.getByRole('button', { name: '已发送' }))
-    await screen.findByRole('list', { name: '邮件列表' })
+    await expandAccount(account.displayName)
+    const tree = within(screen.getByRole('button', { name: account.displayName }).closest('li')!)
+    await userEvent.click(tree.getByRole('button', { name: '已发送' }))
+    await screen.findByRole('heading', { name: '已发送' })
+    await waitFor(() => expect(rows()).toHaveLength(1))
     await userEvent.click(rows()[0])
     await screen.findByRole('heading', { name: sentMail.subject })
     client.listFolders.mockResolvedValue([inbox, { ...inbox, id: 'sent', name: 'Sent', role: 'sent', selectable: false }])
@@ -493,20 +495,20 @@ describe('synced inbox headers', () => {
     expect(listedRows()).toHaveLength(0)
     // ...but the reader is not part of the list, so the message stays open.
     expect(screen.getByRole('heading', { name: sentMail.subject })).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '已发送' }))
-    expect(screen.getByRole('heading', { name: '全部收件箱' })).toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('button', { name: '已发送' })[0])
+    expect(await screen.findByRole('heading', { name: '全部已发送' })).toBeInTheDocument()
   })
 
   it('keeps the open message when the user switches to another mailbox', async () => {
     const opened = email('keep-me')
     const { client } = setup([opened])
-    client.listEmails.mockImplementation(async (query) => page(query.folderId === 'sent' ? [] : [opened]))
+    client.listEmails.mockImplementation(async (query) => page(query.folderRole === 'sent' ? [] : [opened]))
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(rows()[0])
     await screen.findByRole('heading', { name: opened.subject })
     await userEvent.click(screen.getByRole('button', { name: '已发送' }))
-    await screen.findByRole('heading', { name: '已发送' })
+    await screen.findByRole('heading', { name: '全部已发送' })
     expect(listedRows()).toHaveLength(0)
     expect(screen.getByRole('heading', { name: opened.subject })).toBeInTheDocument()
   })
@@ -594,12 +596,12 @@ describe('clicked notifications', () => {
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
-    await screen.findByRole('heading', { name: '已发送' })
+    await screen.findByRole('heading', { name: '全部已发送' })
 
     click({ accountId: account.id, emailId: arrived.id })
     expect(await screen.findByRole('heading', { name: '新到的周报' })).toBeInTheDocument()
     // The list is left where the user put it.
-    expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '全部已发送' })).toBeInTheDocument()
   })
 
   it("shows the account's inbox for a notification about several messages", async () => {
@@ -607,7 +609,7 @@ describe('clicked notifications', () => {
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await userEvent.click(screen.getByRole('button', { name: /已发送/ }))
-    await screen.findByRole('heading', { name: '已发送' })
+    await screen.findByRole('heading', { name: '全部已发送' })
 
     click({ accountId: account.id, emailId: null })
     await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ folderId: inbox.id })))

@@ -236,6 +236,12 @@ accountIds: Array<string> | null, folderId: string | null,
  */
 folderRole: FolderRole | null,
 /**
+ * Folders with these roles are left out, e.g. junk and trash in the
+ * Starred view. Only narrows the result; an explicit `folder_role` is
+ * not affected by it. Empty (the default) excludes nothing.
+ */
+excludeFolderRoles: Array<FolderRole>,
+/**
  * `None` hides archived messages, except in a text search, which finds them.
  */
 archive: ArchiveScope | null, text: string | null, unread: boolean | null,

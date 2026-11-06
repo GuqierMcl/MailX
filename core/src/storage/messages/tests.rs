@@ -2448,8 +2448,13 @@ fn excluded_folder_roles_never_appear_but_an_explicit_role_still_wins() {
             [expected]
         );
     }
-    // The exclusion is not part of the IPC shape.
+    // The IPC shape carries the exclusion (the Starred view), and omitting it excludes nothing.
     let query: EmailListQuery =
-        serde_json::from_value(json!({ "excludeFolderRoles": ["inbox"] })).unwrap();
+        serde_json::from_value(json!({ "excludeFolderRoles": ["junk", "trash"] })).unwrap();
+    assert_eq!(
+        query.exclude_folder_roles,
+        [FolderRole::Junk, FolderRole::Trash]
+    );
+    let query: EmailListQuery = serde_json::from_value(json!({})).unwrap();
     assert!(query.exclude_folder_roles.is_empty());
 }

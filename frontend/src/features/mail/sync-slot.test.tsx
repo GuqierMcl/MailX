@@ -35,7 +35,8 @@ function sidebar(sync: AccountSyncState | undefined, onRefresh = vi.fn().mockRes
   return onRefresh
 }
 
-const accountRow = () => screen.getByRole('button', { name: account.displayName }).closest('li')!
+const accountRow = () => screen.getByTitle(account.emailAddress).closest('li')!
+/** The top 收件箱 row; the account tree starts collapsed. */
 const folderRow = () => screen.getByRole('button', { name: '收件箱' }).closest('li')!
 const syncSlot = () => within(accountRow().querySelector<HTMLElement>('[data-slot="account-sync"]')!)
 
@@ -109,9 +110,7 @@ describe('account sync indicator', () => {
     }))
     expect(within(folderRow()).getByText('3')).toBeInTheDocument()
     expect(within(folderRow()).queryByRole('button', { name: /同步/ })).not.toBeInTheDocument()
-    const unified = screen.getByRole('button', { name: '全部收件箱' }).closest('li')!
-    expect(within(unified).queryByRole('button', { name: /同步/ })).not.toBeInTheDocument()
-    expect(within(unified).queryByRole('status')).not.toBeInTheDocument()
+    expect(within(folderRow()).queryByRole('status')).not.toBeInTheDocument()
     // A busy account exposes a static, unavailable action for status inspection.
     expect(screen.queryAllByRole('button', { name: /立即同步/ })).toHaveLength(0)
     expect(screen.getAllByRole('button', { name: /正在同步/ })).toHaveLength(1)
@@ -127,7 +126,8 @@ describe('account sync indicator', () => {
 describe('junk folder badge', () => {
   const junk: Folder = { ...inbox, id: 'junk', name: 'Junk', role: 'junk', unreadCount: 6, totalCount: 9, archivedCount: 0, archivedUnreadCount: 0 }
 
-  function renderWith(folders: Folder[], mailbox: Parameters<typeof MailSidebar>[0]['mailbox'] = { kind: 'unified', role: 'inbox' }) {
+  // Junk is under 更多, open here so its row can be inspected.
+  function renderWith(folders: Folder[], mailbox: Parameters<typeof MailSidebar>[0]['mailbox'] = { kind: 'unified', role: 'junk' }) {
     render(
       <TooltipProvider>
         <MailSidebar accounts={[account]} folders={folders} loading={false} syncStates={{}} mailbox={mailbox}
@@ -141,12 +141,9 @@ describe('junk folder badge', () => {
     const junkRow = screen.getByRole('button', { name: '垃圾邮件' }).closest('li')!
     expect(within(junkRow).getByLabelText('有未读邮件')).toBeInTheDocument()
     expect(within(junkRow).queryByText('6')).not.toBeInTheDocument()
-    // Inbox 3 unread: the account row shows 3 (not 9) and the unified inbox shows 3.
-    const accountRowCount = within(screen.getByRole('button', { name: account.displayName }).closest('li')!)
-    expect(accountRowCount.queryByText('9')).not.toBeInTheDocument()
-    expect(accountRowCount.getAllByText('3').length).toBeGreaterThan(0)
-    const unified = screen.getByRole('button', { name: '全部收件箱' }).closest('li')!
-    expect(within(unified).getByText('3')).toBeInTheDocument()
+    // Inbox 3 unread: the account row and the top inbox show 3, not 9.
+    expect(within(syncSlot().getByText('3').closest('[data-slot="account-sync"]') as HTMLElement).queryByText('9')).not.toBeInTheDocument()
+    expect(within(folderRow()).getByText('3')).toBeInTheDocument()
   })
 
   it('shows nothing for junk with no unread mail and no number for an unread-only junk account', () => {

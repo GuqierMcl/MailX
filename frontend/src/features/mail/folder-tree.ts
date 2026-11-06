@@ -53,18 +53,33 @@ export function buildFolderTree(folders: Folder[]): FolderNode[] {
   return build(null)
 }
 
-/** Remembers which accounts and folders the user collapsed; everything starts expanded. */
-const STORAGE_KEY = 'mailx.sidebar.collapsed'
-
-export function loadCollapsed(): Set<string> {
+function loadIds(key: string): Set<string> {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
     return new Set(Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [])
   } catch {
     return new Set()
   }
 }
 
+/** Remembers which folders with subfolders the user collapsed; they start expanded. */
+const COLLAPSED_KEY = 'mailx.sidebar.collapsed'
+
+export function loadCollapsed(): Set<string> {
+  return loadIds(COLLAPSED_KEY)
+}
+
 export function saveCollapsed(collapsed: Set<string>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]))
+}
+
+/** Remembers which accounts and top rows (收件箱's accounts, 更多, ...) the user opened; they start collapsed. */
+const EXPANDED_KEY = 'mailx.sidebar.expanded'
+
+export function loadExpanded(): Set<string> {
+  return loadIds(EXPANDED_KEY)
+}
+
+export function saveExpanded(expanded: Set<string>) {
+  localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]))
 }
