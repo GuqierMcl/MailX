@@ -134,12 +134,12 @@ describe('compose entry points', () => {
 })
 
 describe('drafts and outbox navigation', () => {
-  it('always lists 草稿 with a count, and hides 发件箱 while nothing is unfinished', async () => {
+  it('always lists 草稿 without a standing number, and hides 发件箱 while nothing is unfinished', async () => {
     setup({ drafts: [draft()] })
     await screen.findByRole('list', { name: '邮件列表' })
-    const drafts = screen.getByRole('button', { name: '草稿' })
-    expect(drafts).toBeInTheDocument()
-    await waitFor(() => expect(within(drafts.closest('li')!).getByLabelText('1 份草稿')).toBeInTheDocument())
+    // The count is in the row's tooltip, not a badge that never clears itself.
+    await waitFor(() => expect(screen.getByRole('button', { name: '草稿' })).toHaveAttribute('title', '草稿 · 1 份草稿'))
+    expect(screen.getByRole('button', { name: '草稿' }).closest('li')).not.toHaveTextContent('1')
     expect(screen.queryByRole('button', { name: '发件箱' })).not.toBeInTheDocument()
   })
 

@@ -5,39 +5,48 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { SidebarLeft01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { NAV_DEFAULT, NAV_MAX, NAV_MIN, clampNavWidth } from './nav-width'
+import { NAV_DEFAULT, NAV_MAX, NAV_MIN, NAV_RAIL, NAV_SNAP, clampNavWidth } from './nav-width'
+
+/** Where the sidebar is headed: its full width, and whether it is folded to the rail. */
+export type NavSize = { width: number; folded: boolean }
 
 type NavRailProps = {
-  open: boolean
+  /** Folded to the icon rail rather than showing the full sidebar. */
+  folded: boolean
   label: string
   width: number
   resizing: boolean
   onResizeStart: () => void
-  onResize: (width: number) => void
-  /** Called once a drag or keyboard adjustment settles, with the final width. */
-  onResizeEnd: (width: number) => void
+  onResize: (size: NavSize) => void
+  /** Called once a drag or keyboard adjustment settles, with the final size. */
+  onResizeEnd: (size: NavSize) => void
+  /** The full sidebar. */
   children: ReactNode
+  /** The folded sidebar: one column of icons. */
+  rail: ReactNode
 }
 
 /**
- * The navigation column on the canvas. Collapsed, only the 0.5rem gutter
- * stays so the island keeps its margin from the window edge. The gutter on
- * the right doubles as the resize handle.
+ * The navigation column on the canvas, either the full sidebar or its icon
+ * rail. The 0.5rem gutter on the right doubles as the resize handle: dragging
+ * the sidebar below `NAV_SNAP` folds it, and dragging the rail past it opens it.
  */
-export function NavRail({ open, label, width, resizing, onResizeStart, onResize, onResizeEnd, children }: NavRailProps) {
+export function NavRail({ folded, label, width, resizing, onResizeStart, onResize, onResizeEnd, children, rail }: NavRailProps) {
   useTranslation()
-  const drag = useRef<{ x: number; width: number; last: number } | null>(null)
+  const drag = useRef<{ x: number; from: number; last: NavSize } | null>(null)
 
   const start = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    drag.current = { x: event.clientX, width, last: width }
+    drag.current = { x: event.clientX, from: folded ? NAV_RAIL : width, last: { width, folded } }
     onResizeStart()
   }
   const move = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return
-    drag.current.last = clampNavWidth(drag.current.width + event.clientX - drag.current.x)
+    const raw = drag.current.from + event.clientX - drag.current.x
+    // Folding keeps the width the sidebar opens at again.
+    drag.current.last = raw < NAV_SNAP ? { width, folded: true } : { width: clampNavWidth(raw), folded: false }
     onResize(drag.current.last)
   }
   const end = () => {
@@ -48,60 +57,60 @@ export function NavRail({ open, label, width, resizing, onResizeStart, onResize,
   }
   const key = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.shiftKey ? 32 : 8
-    if (event.key === 'ArrowLeft') onResize(clampNavWidth(width - step))
-    else if (event.key === 'ArrowRight') onResize(clampNavWidth(width + step))
-    else if (event.key === 'Home') onResize(NAV_MIN)
-    else if (event.key === 'End') onResize(NAV_MAX)
+    let next: NavSize
+    if (folded) {
+      if (event.key === 'ArrowRight') next = { width, folded: false }
+      else if (event.key === 'End') next = { width: NAV_MAX, folded: false }
+      else return
+    } else if (event.key === 'ArrowLeft') next = width <= NAV_MIN ? { width, folded: true } : { width: clampNavWidth(width - step), folded: false }
+    else if (event.key === 'ArrowRight') next = { width: clampNavWidth(width + step), folded: false }
+    else if (event.key === 'Home') next = { width: NAV_MIN, folded: false }
+    else if (event.key === 'End') next = { width: NAV_MAX, folded: false }
     else return
     event.preventDefault()
+    onResize(next)
   }
   const keyUp = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) onResizeEnd(width)
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) onResizeEnd({ width, folded })
   }
 
   return (
     <nav
       aria-label={label}
       data-slot="nav-rail"
-      data-state={open ? 'expanded' : 'collapsed'}
-      style={{ width: open ? width + 8 : 8 }}
+      data-state={folded ? 'collapsed' : 'expanded'}
+      style={{ width: (folded ? NAV_RAIL : width) + 8 }}
       className={cn(
         'relative shrink-0 text-sidebar-foreground transition-[width] duration-200 ease-linear motion-reduce:transition-none',
         resizing && 'transition-none',
       )}
     >
-      <div
-        inert={!open}
-        style={{ width }}
-        className={cn('flex h-full flex-col overflow-hidden transition-opacity duration-200', !open && 'opacity-0')}
-      >
-        {children}
+      <div style={{ width: folded ? NAV_RAIL : width }} className="flex h-full flex-col overflow-hidden">
+        {folded ? rail : children}
       </div>
-      {open && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t('common:resizeSidebar')}
-          aria-valuemin={NAV_MIN}
-          aria-valuemax={NAV_MAX}
-          aria-valuenow={width}
-          tabIndex={0}
-          className="group/handle absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none outline-hidden"
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerCancel={end}
-          onLostPointerCapture={end}
-          onDoubleClick={() => {
-            onResize(NAV_DEFAULT)
-            onResizeEnd(NAV_DEFAULT)
-          }}
-          onKeyDown={key}
-          onKeyUp={keyUp}
-        >
-          <div className="mx-auto h-full w-px transition-colors group-hover/handle:bg-foreground/20 group-focus-visible/handle:bg-ring group-active/handle:bg-foreground/30" />
-        </div>
-      )}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t('common:resizeSidebar')}
+        aria-valuemin={NAV_RAIL}
+        aria-valuemax={NAV_MAX}
+        aria-valuenow={folded ? NAV_RAIL : width}
+        tabIndex={0}
+        className="group/handle absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none outline-hidden"
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onLostPointerCapture={end}
+        onDoubleClick={() => {
+          onResize({ width: NAV_DEFAULT, folded: false })
+          onResizeEnd({ width: NAV_DEFAULT, folded: false })
+        }}
+        onKeyDown={key}
+        onKeyUp={keyUp}
+      >
+        <div className="mx-auto h-full w-px transition-colors group-hover/handle:bg-foreground/20 group-focus-visible/handle:bg-ring group-active/handle:bg-foreground/30" />
+      </div>
     </nav>
   )
 }

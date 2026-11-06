@@ -347,14 +347,19 @@ export type LayoutSettings = {
  */
 navWidth: number,
 /**
+ * The navigation sidebar is folded to its icon rail. A narrow window may
+ * show the rail on its own without changing this.
+ */
+navCollapsed: boolean,
+/**
  * Width of the message list beside the reader, `300..=2000`, applied when
  * the window opens. In a window that is too narrow for it, list and reader
  * shrink together, each down to its own minimum.
  */
 listWidth: number,
 /**
- * The reader beside the message list is folded away. Unlike the sidebar,
- * this survives a restart: the window comes back as it was left.
+ * The reader beside the message list is folded away. Like the sidebar's
+ * rail, this survives a restart: the window comes back as it was left.
  */
 readerCollapsed: boolean,
 /**
@@ -362,7 +367,7 @@ readerCollapsed: boolean,
  */
 accountOrder: Array<string>, };
 
-export type LayoutSettingsPatch = { navWidth?: number, listWidth?: number, readerCollapsed?: boolean, accountOrder?: Array<string>, };
+export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, accountOrder?: Array<string>, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 

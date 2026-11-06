@@ -196,5 +196,6 @@
   "more": "More",
   "toggleAccounts": "{{action}} {{folder}} by account",
   "mailboxes": "Mailboxes",
-  "archivedFolder": "Archived"
+  "archivedFolder": "Archived",
+  "railUnread": "{{label}} · {{count}} unread"
 }

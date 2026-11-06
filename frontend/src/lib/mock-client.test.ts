@@ -15,7 +15,7 @@ describe('mock account display preferences', () => {
     await main.updateSettings({ layout: { navWidth: 310, listWidth: 550, readerCollapsed: true } })
     await otherWindow.updateSettings({ layout: { accountOrder: [ids[1].toUpperCase(), ` ${ids[0]} `, ids[1]] } })
     const snapshot = await main.updateSettings({ layout: { listWidth: 600 } })
-    expect(snapshot.settings.layout).toEqual({ navWidth: 310, listWidth: 600, readerCollapsed: true, accountOrder: [ids[1], ids[0]] })
+    expect(snapshot.settings.layout).toEqual({ navWidth: 310, navCollapsed: false, listWidth: 600, readerCollapsed: true, accountOrder: [ids[1], ids[0]] })
     expect(await main.listAccounts()).toEqual(accounts)
 
     const content = { to: [], cc: [], bcc: [], subject: '', bodyHtml: '' }
@@ -39,7 +39,7 @@ describe('mock account display preferences', () => {
     const snapshot = await createMockClient().getSettings()
     localStorage.setItem('mailx.mock.settings', JSON.stringify({ ...snapshot, settings: { ...snapshot.settings,
       layout: { navWidth: 330, listWidth: 560, readerCollapsed: true } } }))
-    expect((await createMockClient().getSettings()).settings.layout).toEqual({ navWidth: 330, listWidth: 560, readerCollapsed: true, accountOrder: [] })
+    expect((await createMockClient().getSettings()).settings.layout).toEqual({ navWidth: 330, navCollapsed: false, listWidth: 560, readerCollapsed: true, accountOrder: [] })
   })
 })
 

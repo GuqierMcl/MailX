@@ -344,7 +344,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "previewLines": "one"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },
+                "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },
                 "notifications": {
                     "enabled": true,
                     "showPreview": true,
@@ -554,6 +554,7 @@ fn list_width_defaults_persists_alongside_nav_width_and_is_validated() {
         .patch(SettingsPatch {
             layout: Some(LayoutSettingsPatch {
                 nav_width: Some(280),
+                nav_collapsed: Some(true),
                 list_width: Some(520),
                 reader_collapsed: Some(true),
                 ..LayoutSettingsPatch::default()
@@ -568,8 +569,9 @@ fn list_width_defaults_persists_alongside_nav_width_and_is_validated() {
         .settings
         .layout;
     assert_eq!((reloaded.nav_width, reloaded.list_width), (280, 520));
-    // The folded reader is restored too.
+    // The folded reader and the sidebar's icon rail are restored too.
     assert!(reloaded.reader_collapsed);
+    assert!(reloaded.nav_collapsed);
     assert!(file_text(&directory, SETTINGS_FILE_NAME).contains("\"listWidth\": 520"));
 
     for width in [0, 299, 2001] {
@@ -604,8 +606,9 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
         .settings
         .layout;
     assert_eq!((layout.nav_width, layout.list_width), (300, 420));
-    // Settings from before the option existed start with the reader shown.
+    // Settings from before the options existed start with the reader and the full sidebar shown.
     assert!(!layout.reader_collapsed);
+    assert!(!layout.nav_collapsed);
     assert!(layout.account_order.is_empty());
 
     fs::write(

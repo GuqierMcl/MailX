@@ -187,5 +187,6 @@
   "more": "更多",
   "toggleAccounts": "{{action}}{{folder}}的各账号",
   "mailboxes": "邮箱",
-  "archivedFolder": "已归档"
+  "archivedFolder": "已归档",
+  "railUnread": "{{label}} · {{count}} 封未读"
 }
