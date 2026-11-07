@@ -84,6 +84,48 @@ describe('starred messages', () => {
 })
 
 describe('row actions', () => {
+  it.each([
+    ['one', false], ['one', true], ['none', false], ['none', true],
+  ] as const)('hides actions after a pointer read toggle and leaving the row (%s, read=%s)', async (previewLines, isRead) => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+    const target = email('a', { isRead, isStarred: true })
+    const onFlag = vi.fn()
+    render(
+      <EmailList
+        title="全部收件箱" emails={[target]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines={previewLines}
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        onFlag={onFlag} onArchive={vi.fn()} onDelete={vi.fn()} canArchive={() => true}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+    await user.hover(row)
+    const readToggle = within(row).getByRole('button', { name: isRead ? '标为未读' : '标为已读' })
+    await user.click(readToggle)
+    expect(onFlag).toHaveBeenCalledWith(target, 'read', !isRead)
+    expect(readToggle).toHaveFocus()
+    await user.unhover(readToggle)
+    await waitFor(() => expect(within(row).queryByRole('button', { name: '归档' })).not.toBeInTheDocument())
+    expect(within(row).queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+    expect(within(row).getByLabelText('已加星标')).toBeInTheDocument()
+
+    // Returning with the keyboard must reveal the controls again.
+    act(() => within(row).getByRole('button', { name: /GitHub/ }).focus())
+    await user.tab()
+    const keyboardAction = within(row).getByRole('button', {
+      name: previewLines === 'none' ? (isRead ? '标为未读' : '标为已读') : '取消星标',
+    })
+    expect(keyboardAction).toHaveFocus()
+    await user.hover(row)
+    await user.unhover(row)
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 200)))
+    expect(within(row).getByRole('button', { name: '归档' })).toBeInTheDocument()
+    expect(keyboardAction).toHaveFocus()
+  })
+
   it.each(['one', 'none'] as const)('exposes all actions without opening the message with preview setting %s', async (previewLines) => {
     const { default: userEvent } = await import('@testing-library/user-event')
     const target = email('a', { isRead: false })

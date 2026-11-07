@@ -62,6 +62,8 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
   const [actionsMounted, setActionsMounted] = useState(false)
   const [actionsVisible, setActionsVisible] = useState(false)
   const wantsActionsVisible = useRef(false)
+  const pointerDown = useRef(false)
+  const keyboardFocus = useRef(false)
   const hideTimer = useRef<number | null>(null)
   const clearHideTimer = () => {
     if (hideTimer.current !== null) {
@@ -146,11 +148,31 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
       style={style}
       onMouseEnter={showActions}
       onMouseLeave={(event) => {
-        if (!event.currentTarget.contains(document.activeElement)) hideActions()
+        pointerDown.current = false
+        if (!keyboardFocus.current || !event.currentTarget.contains(document.activeElement)) hideActions()
       }}
-      onFocusCapture={showActions}
+      onPointerDownCapture={() => {
+        pointerDown.current = true
+        keyboardFocus.current = false
+      }}
+      onPointerUpCapture={() => { pointerDown.current = false }}
+      onPointerCancelCapture={() => { pointerDown.current = false }}
+      onFocusCapture={() => {
+        // A pointer click leaves DOM focus behind, but only keyboard focus
+        // should keep quick actions open once the pointer leaves the row.
+        keyboardFocus.current = !pointerDown.current
+        showActions()
+      }}
+      onKeyDownCapture={() => {
+        keyboardFocus.current = true
+        showActions()
+      }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) hideActions()
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          keyboardFocus.current = false
+          pointerDown.current = false
+          hideActions()
+        }
       }}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('[data-row-action]')) return
