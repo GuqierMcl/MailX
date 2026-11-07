@@ -16,7 +16,9 @@
 | 发送队列、撤销发送、离线排队 | 定时发送 |
 | 写信附件与转发原邮件普通附件（第 16 节） | 回复 / 转发保留原邮件的内嵌图片 |
 | 工具栏插入与粘贴图片、`cid:` 内嵌发送（第 16.11 节） | 图片缩放手柄、拖到正文区直接内嵌 |
-| 本地已发送副本；服务器已保存时按 Message-ID 对上 | IMAP APPEND 追加到服务器、OAuth（XOAUTH2）发信 |
+| 本地已发送副本；服务器已保存时按 Message-ID 对上 | IMAP APPEND 追加到服务器、生产 OAuth 服务商接入 |
+
+SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 回退；密码凭证继续使用原有认证机制。OAuth token 在连接前经账号内刷新协调器取得，认证和后续回复均避免持久化服务端回显的 bearer 内容；现有 TLS、路由、信任和 DATA 后不自动重发规则保持适用。生产 OAuth 注册表为空，当前添加账号流程仍只开放密码类认证，不能据此宣称任何 OAuth 服务商可用。
 
 转发包含正文和原邮件的普通附件，附件在创建草稿时预填，可自行移除；原邮件的内嵌图片仍不保留。超限时保留草稿与附件并阻止发送，用户删减后可发送，详见第 16.8 节。
 
@@ -192,10 +194,11 @@
 
 ### 第 3 步的实现（`core/src/send/`、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`）
 
+- OAuth 发送在领取队列项与增加 `attempts` 前取得有效 token；需要重新授权或授权网络暂时不可用时保持 `queued`，记录 `authorizationRequired` / `authorizationUnavailable` 并等待唤醒或有界重试，不消耗 SMTP 尝试次数。恢复授权会发出解除阻塞事件，授权等待时长不计入已开始的 24 小时重试预算。用户主动“立即重试”会重启该预算；明确重新发送创建新行，启动恢复保留原窗口及未结束的授权暂停时段。
 - **每账号一个串行 worker**（`send::worker::OutboxManager`）：循环为“取下一项并解析登录计划（持锁、短事务）→ 不持锁发送 → 短事务记录结果”。启动时、新入队、撤销、立即重试、账号连接更新时唤醒；没有到期项时睡到最早的 `max(not_before, next_attempt_at)`，最长睡 60 秒（系统时钟被调整时不会长期滞留）。账号被删除时 worker 退出。
 - **竞争点是一条带条件的 `UPDATE`**：worker 的 `queued → sending` 与 `cancel` 的 `queued → canceled` 都带 `WHERE state = 'queued'`，同一行只能有一个成功；输家得到 `alreadySending`（撤销时已在发送）或 `conflict`（已处于其他状态）。取走时 `attempts` 加一。
 - **`DataStarted` 钩子**在 `spawn_blocking` 里写 `data_started_at`，提交后才返回 `Ok`；写失败或该行已不是 `sending` 时返回 `Err`，会话按 `dataMarkFailed` 在正文前停止。
-- **结果映射**（`send::schedule`）：`Transient` → `queued`，`next_attempt_at = now + 30s / 1m / 2m / 5m / 10m，之后每 30m`（以第 n 次尝试失败计）；`now - first_queued_at > 24h` 时转 `failed`，原因码 `retryExhausted`（保留最后一次的服务器回复文本）。`Permanent`、`RecipientsRejected`（全部被拒地址写入 `last_error.rejected`）、`RejectedAfterData` → `failed`；`Accepted` → `accepted`；`Unknown` → `unknown`（原因码 `unknown`，文本为 `timeout` / `connectionLost` / `malformedReply`）。凭证未受信或缺失、认证被拒都是 `Permanent`，不会空转重试。
+- **结果映射**（`send::schedule`）：`Transient` → `queued`，`next_attempt_at = now + 30s / 1m / 2m / 5m / 10m，之后每 30m`（以第 n 次尝试失败计）；首次实际投递时开始 `retry_started_at`，扣除授权阻塞时段后的重试预算超过 24 小时时转 `failed`，原因码 `retryExhausted`（保留最后一次的服务器回复文本）。`Permanent`、`RecipientsRejected`（全部被拒地址写入 `last_error.rejected`）、`RejectedAfterData` → `failed`；`Accepted` → `accepted`；`Unknown` → `unknown`（原因码 `unknown`，文本为 `timeout` / `connectionLost` / `malformedReply`）。凭证未受信或缺失、认证被拒都是 `Permanent`，不会空转重试。
 - **账号变更**：每次取项之前，把信封发件人与当前账号地址（大小写不敏感）不同的 `queued` 项转为 `failed`（`accountChanged`）；取项后若登录计划里的地址又变了，同样失败。只改服务器、用户名、路由或凭证的更新不使项失败，下一次尝试直接用新的计划。账号被删除时队列随外键级联删除（草稿同理）。
 - **与第 2 节原文的差异**：`DraftLocked` 用单独的错误码，而不是复用 `conflict`；`drafts` 删除也被锁拒绝。重启恢复在 `MailxCore::open` 里于任何 worker 启动前完成，并为每个变化发出 `Outbox` 事件。
 - **`unknown` 的处理**：`resolve_unknown(MarkSent)` 把该行变为 `accepted`（`accepted_at` 为标记时间，无服务器回复，草稿删除）；`Resend` 在同一事务里插入一行新 `queued`（相同 Message-ID、MIME、信封，`attempts` 0，`first_queued_at` 为现在，立即可发），并把旧行标记 `resolution = 'resent'`、`superseded_by` 指向新行。已标记的 `unknown` 不再算“存活”，不锁草稿、不出现在默认的发件箱列表。同一 `clientMutationId` 重放返回同一结果，换一种处理方式返回 `conflict`。`failed` 项的“重新发送”就是对可编辑的草稿再次 `queue_send`，生成新的 Message-ID。

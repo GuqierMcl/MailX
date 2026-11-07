@@ -8,6 +8,7 @@
 
 pub mod accounts;
 mod app;
+pub mod auth;
 pub mod drafts;
 pub mod error;
 pub mod events;
@@ -29,11 +30,12 @@ pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use app::{
     AccountConnectionVerification, Activity, ArchiveOutcome, AttachmentFile, AttachmentInfo,
-    AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
-    CancelDraftVerification, ConnectionVerificationCode, ConnectionVerificationStage,
-    ConnectionVerificationStatus, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
-    FlagChange, MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus,
-    VerifyAccountConnection, VerifyDraftConnection,
+    AvatarImage, AvatarKind, BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding,
+    BodyDocument, BodyLinks, CancelConnectionVerification, CancelDraftVerification,
+    ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
+    DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagChange, MailxCore,
+    MessageFlag, OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest,
+    ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

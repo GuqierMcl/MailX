@@ -33,5 +33,15 @@
   "tooManyAttachments": "Too many attachments.",
   "unsupportedImage": "This image can't be inserted inline. Add it as a regular attachment instead.",
   "confirmationRequired": "Deleting forever needs your confirmation first.",
-  "alreadyDeleting": "Deleting has started and can no longer be undone."
+  "alreadyDeleting": "Deleting has started and can no longer be undone.",
+  "oauthNetwork": "Cannot connect to the authorization service. Check your network and account proxy, then retry.",
+  "oauthTimeout": "The authorization service timed out. Try again later.",
+  "oauthAuthorizationDenied": "Mailbox access was not authorized. You can start authorization again.",
+  "oauthSessionExpired": "This authorization session is no longer valid. Start authorization again.",
+  "oauthInvalidResponse": "The authorization response or callback was invalid. No authorization was saved.",
+  "oauthReauthorizationRequired": "Mailbox authorization is no longer valid. Sign in again.",
+  "oauthProxy": "Cannot reach the authorization service through the account proxy. Check proxy settings.",
+  "oauthTls": "Cannot establish a secure connection to the authorization service. Check your network settings.",
+  "oauthRateLimited": "The authorization service is limiting requests. Try again later.",
+  "oauthServerUnavailable": "The authorization service is temporarily unavailable. Try again later."
 }

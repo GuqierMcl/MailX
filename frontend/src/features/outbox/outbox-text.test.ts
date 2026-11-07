@@ -10,6 +10,8 @@ describe('outbox display text', () => {
     await i18n.changeLanguage('en')
     expect(STATE_LABELS.queued).toBe('Waiting to send')
     expect(reasonText('network')).toBe('The network connection was interrupted')
+    expect(reasonText('authorizationRequired')).toBe('Mailbox authorization has expired. Sign in again to resume sending.')
+    expect(reasonText('authorizationUnavailable')).toBe('Waiting for mailbox authorization. Sending will resume automatically.')
     expect(reasonText('constructor')).toBe('Send failed')
     expect(reasonText(null)).toBe('Unknown reason')
   })

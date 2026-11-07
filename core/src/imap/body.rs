@@ -34,6 +34,8 @@ pub(crate) async fn open_body_session(
     route: &NetRoute,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
+    let resolved = super::resolve_login(route, login).await?;
+    let login = &resolved;
     let guard = ReceiveGuard::default();
     let result = async {
         // Unlike header sync, the body connection keeps its receive gate for

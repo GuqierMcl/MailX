@@ -37,20 +37,23 @@ use tokio::time::timeout;
 use crate::accounts::types::TlsMode;
 use crate::mail::compatibility::ProviderCompatibility;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
+#[cfg(test)]
 use crate::secrets::SecretValue;
 
 /// Upper bound for one command round trip (docs/architecture/mail-sync.md §2);
 /// a server that stalls longer is treated as gone.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub(crate) use crate::auth::credential::ProtocolCredential;
+
 /// Server and credentials for one IMAP login.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ImapLogin {
     pub host: String,
     pub port: u16,
     pub tls: TlsMode,
     pub username: String,
-    pub password: SecretValue,
+    pub credential: ProtocolCredential,
 }
 
 /// A folder as the server lists it.
@@ -236,6 +239,8 @@ pub(crate) async fn open_session(
     route: &NetRoute,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
+    let resolved = resolve_login(route, login).await?;
+    let login = &resolved;
     let guard = body::ReceiveGuard::default();
     let result = async {
         let (client, gate) = connect_client(route, login, &guard).await?;
@@ -249,6 +254,22 @@ pub(crate) async fn open_session(
     guard.check(result)
 }
 
+async fn resolve_login(route: &NetRoute, login: &ImapLogin) -> Result<ImapLogin, ImapError> {
+    let mut resolved = login.clone();
+    resolved.credential = login
+        .credential
+        .resolve(route)
+        .await
+        .map_err(|error| match error {
+            crate::auth::OAuthError::ReauthenticationRequired
+            | crate::auth::OAuthError::AuthorizationDenied => {
+                ImapError::Authentication("OAuth reauthentication required".into())
+            }
+            crate::auth::OAuthError::Timeout => ImapError::Timeout,
+            _ => ImapError::Protocol("OAuth credential preparation failed".into()),
+        })?;
+    Ok(resolved)
+}
 /// Transport setup shared with the dedicated body connection. Every plaintext
 /// authentication phase is bounded, including unsolicited policy rejections.
 async fn connect_client(
@@ -279,6 +300,18 @@ async fn connect_client(
             Ok((Client::new(stream), gate))
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn test_network_session(
+    route: &NetRoute,
+    login: &ImapLogin,
+    tls: std::sync::Arc<rustls::ClientConfig>,
+) -> Result<Session, ImapError> {
+    let login = resolve_login(route, login).await?;
+    let stream = net::connect(route, &login.host, login.port).await?;
+    let stream = net::upgrade_tls_with(stream, &login.host, tls).await?;
+    test_session(stream, &login).await
 }
 
 /// The production connection entry remains `open_session`; tests can supply an
@@ -351,18 +384,74 @@ async fn authenticate(
     client: Client<BoxedStream>,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
-    let inner = timeout(
-        COMMAND_TIMEOUT,
-        client.login(&login.username, login.password.expose_secret()),
-    )
-    .await
-    .map_err(|_| ImapError::Timeout)?
-    .map_err(|(error, _)| match error {
-        error if policy::library_rejection(&error) => ImapError::ProviderPolicy,
-        ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => {
-            ImapError::Authentication("credentials were rejected".into())
+    let secret = login
+        .credential
+        .secret()
+        .map_err(|_| ImapError::Authentication("OAuth credential unresolved".into()))?;
+    struct Xoauth2<'a> {
+        username: &'a str,
+        token: &'a str,
+        sent: bool,
+    }
+    impl async_imap::Authenticator for Xoauth2<'_> {
+        type Response = String;
+        fn process(&mut self, _challenge: &[u8]) -> String {
+            if self.sent {
+                // XOAUTH2 error challenges require an empty response before
+                // the server sends the final tagged authentication failure.
+                String::new()
+            } else {
+                self.sent = true;
+                format!(
+                    "user={}\x01auth=Bearer {}\x01\x01",
+                    self.username, self.token
+                )
+            }
         }
-        other => ImapError::from(other),
+    }
+    let result = timeout(COMMAND_TIMEOUT, async {
+        match &login.credential {
+            ProtocolCredential::ManagedOAuth2(_) => Err((
+                ImapProtocolError::No("OAuth credential unresolved".into()),
+                client,
+            )),
+            ProtocolCredential::Password(_) => {
+                client.login(&login.username, secret.expose_secret()).await
+            }
+            ProtocolCredential::OAuth2(_) | ProtocolCredential::OAuth2Guarded(_, _) => {
+                client
+                    .authenticate(
+                        "XOAUTH2",
+                        Xoauth2 {
+                            username: &login.username,
+                            token: secret.expose_secret(),
+                            sent: false,
+                        },
+                    )
+                    .await
+            }
+        }
+    })
+    .await
+    .map_err(|_| ImapError::Timeout)?;
+    let inner = result.map_err(|(error, _)| {
+        if login.credential.is_oauth() {
+            // All library error payloads are untrusted, including malformed
+            // challenges. Preserve transport/protocol failures as retryable.
+            return match error {
+                ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => {
+                    ImapError::Authentication("OAuth authentication failed".into())
+                }
+                _ => ImapError::Protocol("OAuth authentication exchange failed".into()),
+            };
+        }
+        match error {
+            error if policy::library_rejection(&error) => ImapError::ProviderPolicy,
+            ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => {
+                ImapError::Authentication("credentials were rejected".into())
+            }
+            other => ImapError::from(other),
+        }
     })?;
 
     let mut session = Session {
@@ -1123,13 +1212,109 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn xoauth2_challenge_handshake_completes_success_and_failure() {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        for rejected in [false, true] {
+            let (client, server) = tokio::io::duplex(4096);
+            let mut login = login();
+            login.credential =
+                ProtocolCredential::OAuth2(SecretValue::new("oauth-test-token".into()));
+            let username = login.username.clone();
+            let peer = tokio::spawn(async move {
+                let mut server = BufReader::new(server);
+                server.get_mut().write_all(b"* OK ready\r\n").await.unwrap();
+                let mut line = String::new();
+                server.read_line(&mut line).await.unwrap();
+                let (tag, command) = line.trim_end().split_once(' ').unwrap();
+                let tag = tag.to_owned();
+                assert_eq!(command, "AUTHENTICATE XOAUTH2");
+                server.get_mut().write_all(b"+\r\n").await.unwrap();
+                line.clear();
+                server.read_line(&mut line).await.unwrap();
+                assert_eq!(
+                    STANDARD.decode(line.trim_end()).unwrap(),
+                    format!("user={username}\x01auth=Bearer oauth-test-token\x01\x01").as_bytes()
+                );
+                if rejected {
+                    server
+                        .get_mut()
+                        .write_all(b"+ eyJzdGF0dXMiOiI0MDEifQ==\r\n")
+                        .await
+                        .unwrap();
+                    line.clear();
+                    server.read_line(&mut line).await.unwrap();
+                    assert_eq!(line, "\r\n");
+                    server
+                        .get_mut()
+                        .write_all(format!("{tag} NO oauth-test-token echoed\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                } else {
+                    server
+                        .get_mut()
+                        .write_all(format!("{tag} OK authenticated\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    line.clear();
+                    server.read_line(&mut line).await.unwrap();
+                    let (tag, command) = line.trim_end().split_once(' ').unwrap();
+                    assert_eq!(command, "CAPABILITY");
+                    server
+                        .get_mut()
+                        .write_all(
+                            format!("* CAPABILITY IMAP4rev1\r\n{tag} OK done\r\n").as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            });
+            let result = test_session(Box::new(client), &login).await;
+            assert_eq!(result.is_err(), rejected);
+            if let Err(error) = result {
+                assert!(!format!("{error:?}").contains("oauth-test-token"));
+            }
+            peer.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn xoauth2_malformed_challenges_and_disconnects_remain_retryable() {
+        for reply in [Some("+ oauth-test-token-invalid-base64!\r\n"), None] {
+            let (client, server) = tokio::io::duplex(4096);
+            let mut login = login();
+            login.credential =
+                ProtocolCredential::OAuth2(SecretValue::new("oauth-test-token".into()));
+            let peer = tokio::spawn(async move {
+                let mut server = BufReader::new(server);
+                server.get_mut().write_all(b"* OK ready\r\n").await.unwrap();
+                let mut line = String::new();
+                server.read_line(&mut line).await.unwrap();
+                assert!(line.contains("AUTHENTICATE XOAUTH2"));
+                if let Some(reply) = reply {
+                    server.get_mut().write_all(reply.as_bytes()).await.unwrap();
+                }
+            });
+            let error = match test_session(Box::new(client), &login).await {
+                Ok(_) => panic!("unexpected authentication success"),
+                Err(error) => error,
+            };
+            assert!(matches!(error, ImapError::Protocol(_)), "{error:?}");
+            assert!(!format!("{error:?}").contains("oauth-test-token"));
+            peer.await.unwrap();
+        }
+    }
+
     fn login() -> ImapLogin {
         ImapLogin {
             host: "imap.example.com".into(),
             port: 993,
             tls: TlsMode::Implicit,
             username: "lin@example.com".into(),
-            password: SecretValue::new("app \"pass\"".into()),
+            credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+                "app \"pass\"".into(),
+            )),
         }
     }
 

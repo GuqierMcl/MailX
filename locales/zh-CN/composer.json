@@ -222,7 +222,9 @@
     "accountChanged": "发件账号的地址已更改，这封邮件不会自动发出",
     "unknown": "发送过程中连接中断，服务器可能已收到这封邮件",
     "unspecified": "原因不明",
-    "snapshotMissing": "这封邮件的附件副本已丢失，请重新编辑后再发送。"
+    "snapshotMissing": "这封邮件的附件副本已丢失，请重新编辑后再发送。",
+    "authorizationRequired": "邮箱授权已失效，请重新授权后继续发送。",
+    "authorizationUnavailable": "正在等待邮箱授权恢复，恢复后会自动继续发送。"
   },
   "recipient": {
     "invalid": "地址无效：{{address}}",

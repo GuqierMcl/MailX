@@ -116,7 +116,7 @@ impl Storage {
         let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon FROM accounts WHERE id=?1", [id], |r| {
             Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?))
         }).optional()?.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
-        let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json FROM auth_profiles WHERE account_id=?1 AND kind='password'")?;
+        let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json,oauth_binding_json FROM auth_profiles WHERE account_id=?1")?;
         let records = profile_statement
             .query_map([id], |r| {
                 Ok((
@@ -124,17 +124,19 @@ impl Storage {
                     r.get::<_, u32>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let profiles: Vec<AuthRecord> = records
             .into_iter()
-            .map(|(id, generation, secret_ref, trust)| {
+            .map(|(id, generation, secret_ref, trust, oauth)| {
                 Ok(AuthRecord {
                     id,
                     generation,
                     secret_ref,
                     trusted_endpoints: decode(&trust)?,
+                    oauth: oauth.map(|value| decode(&value)).transpose()?,
                 })
             })
             .collect::<Result<_, AppError>>()?;
@@ -162,17 +164,18 @@ impl Storage {
                 .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?
                 .summary(&TrustEndpoint::mail(protocol, connection)))
         };
-        let authentication = PasswordAuthenticationSummary {
-            mode: if imap_id == smtp_id {
-                AuthenticationMode::Shared
-            } else {
-                AuthenticationMode::Separate
-            },
-            imap: find(&imap_id, "imap", &imap)?,
-            smtp: find(&smtp_id, "smtp", &smtp)?,
-        };
+        let authentication =
+            AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
+                mode: if imap_id == smtp_id {
+                    AuthenticationMode::Shared
+                } else {
+                    AuthenticationMode::Separate
+                },
+                imap: find(&imap_id, "imap", &imap)?,
+                smtp: find(&smtp_id, "smtp", &smtp)?,
+            });
         let (route_revision, route, proxy_secret) = self.load_route(id)?;
-        Ok(Snapshot {
+        let mut snapshot = Snapshot {
             account: Account {
                 id: id.into(),
                 revision: basic.0,
@@ -199,7 +202,18 @@ impl Storage {
             },
             profiles,
             proxy_secret,
-        })
+        };
+        if let Some(binding) = snapshot.profiles.iter().find_map(|p| p.oauth.as_ref()) {
+            let imap = snapshot
+                .profile(&imap_id)
+                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+            let smtp = snapshot
+                .profile(&smtp_id)
+                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+            snapshot.account.authentication =
+                crate::accounts::oauth::summary(binding, imap, smtp, &snapshot.account);
+        }
+        Ok(snapshot)
     }
 
     fn load_route(&self, id: &str) -> Result<(u32, RouteConfig, Option<ProxySecret>), AppError> {
@@ -339,11 +353,11 @@ impl Storage {
             [&account.id],
         )?;
         for profile in &snapshot.profiles {
-            tx.execute("INSERT INTO auth_profiles(id,account_id,kind,config_version,generation,secret_ref,trusted_endpoints_json) VALUES (?1,?2,'password',1,?3,?4,?5)",params![profile.id,account.id,profile.generation,profile.secret_ref,encode(&profile.trusted_endpoints)?])?;
+            tx.execute("INSERT INTO auth_profiles(id,account_id,kind,config_version,generation,secret_ref,trusted_endpoints_json,oauth_binding_json) VALUES (?1,?2,?6,1,?3,?4,?5,?7)",params![profile.id,account.id,profile.generation,profile.secret_ref,encode(&profile.trusted_endpoints)?,if profile.oauth.is_some() { "oauth2" } else { "password" },profile.oauth.as_ref().map(encode).transpose()?])?;
         }
         for (protocol, config, auth_id) in [
-            ("imap", &account.imap, &account.authentication.imap.id),
-            ("smtp", &account.smtp, &account.authentication.smtp.id),
+            ("imap", &account.imap, &account.authentication.imap().id),
+            ("smtp", &account.smtp, &account.authentication.smtp().id),
         ] {
             tx.execute("INSERT INTO mail_connections(account_id,protocol,host,port,tls,username,auth_profile_id) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![account.id,protocol,config.host,config.port,enum_name(&config.tls)?,config.username,auth_id])?;
         }

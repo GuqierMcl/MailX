@@ -62,6 +62,7 @@ pub(crate) struct FrozenDraft {
 /// What the worker needs to attempt one item.
 pub(crate) struct ClaimedJob {
     pub item: OutboxItem,
+    pub retry_started_at: DateTime<Utc>,
     /// The frozen MIME bytes; `None` when the row has no snapshot (released or lost).
     pub snapshot: Option<StoredBlob>,
     pub blobs: BlobStore,
@@ -585,7 +586,7 @@ impl Storage {
             };
             let rows = tx.execute(
                 "UPDATE outbox SET state = 'sending', attempts = attempts + 1,
-                    next_attempt_at = NULL, updated_at = ?2
+                    next_attempt_at = NULL, retry_started_at = COALESCE(retry_started_at, ?2), updated_at = ?2
                  WHERE id = ?1 AND state = 'queued'",
                 params![id, stamp_now],
             )?;
@@ -598,6 +599,12 @@ impl Storage {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?;
             let item = item_in(&tx, &id)?;
+            let retry_started: String = tx.query_row(
+                "SELECT retry_started_at FROM outbox WHERE id=?1",
+                [&id],
+                |row| row.get(0),
+            )?;
+            let retry_started_at = crate::send::clock::parse_stamp(&retry_started).unwrap_or(now);
             tx.commit()?;
             let changed = Changed {
                 item: item.clone(),
@@ -606,6 +613,7 @@ impl Storage {
             return Ok((
                 Claim::Job(Box::new(ClaimedJob {
                     item,
+                    retry_started_at,
                     snapshot: hash
                         .zip(size.and_then(|size| u64::try_from(size).ok()))
                         .map(|(sha256, size)| StoredBlob { sha256, size }),
@@ -788,7 +796,7 @@ impl Storage {
     pub(crate) fn retry_now(&self, id: &str, now: DateTime<Utc>) -> Result<OutboxItem, AppError> {
         let tx = self.db.unchecked_transaction()?;
         let rows = tx.execute(
-            "UPDATE outbox SET next_attempt_at = NULL, updated_at = ?2
+            "UPDATE outbox SET next_attempt_at = NULL, retry_started_at = ?2, authorization_blocked_at = CASE WHEN authorization_blocked_at IS NOT NULL THEN ?2 ELSE NULL END, updated_at = ?2
              WHERE id = ?1 AND state = 'queued'",
             params![id, stamp(now)],
         )?;

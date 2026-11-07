@@ -936,6 +936,13 @@ pub(crate) fn request_quit(app: &AppHandle) {
                 && core.as_ref().is_none_or(|core| core.shutdown_idle())
                 && lifecycle.complete_quit(generation)
             {
+                if let Some(core) = &core {
+                    // This coordinator runs on a dedicated OS thread. Keep
+                    // the async runtime alive until OAuth refresh writes settle.
+                    if tauri::async_runtime::block_on(core.settle_oauth_authorizations()).is_err() {
+                        eprintln!("OAuth credential persistence did not settle before exit.");
+                    }
+                }
                 app.exit(0);
                 return;
             }

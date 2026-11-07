@@ -194,7 +194,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       setError({ key: 'composer:validation.senderUnavailable' })
       return null
     }
-    if (sender.authentication.smtp.trust !== 'trusted' || !sender.authentication.smtp.passwordConfigured) {
+    if (sender.authentication.smtp.trust !== 'trusted' || !(sender.authentication.kind === 'password' ? sender.authentication.smtp.passwordConfigured : sender.authentication.state === 'connected' && sender.authentication.smtp.credentialConfigured)) {
       setError({ key: 'composer:validation.credentials' })
       return null
     }

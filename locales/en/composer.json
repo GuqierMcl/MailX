@@ -225,7 +225,9 @@
     "accountChanged": "The sending account’s address changed. This message will not be sent automatically.",
     "unknown": "The connection was interrupted while sending. The server may have received this message.",
     "unspecified": "Unknown reason",
-    "snapshotMissing": "The attachment copies for this message are gone. Recompose and send again."
+    "snapshotMissing": "The attachment copies for this message are gone. Recompose and send again.",
+    "authorizationRequired": "Mailbox authorization has expired. Sign in again to resume sending.",
+    "authorizationUnavailable": "Waiting for mailbox authorization. Sending will resume automatically."
   },
   "recipient": {
     "invalid": "Invalid address: {{address}}",

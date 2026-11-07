@@ -11,7 +11,13 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
+
 ### ✨ Optimization
+
+- Manual retry starts a fresh delivery retry window, and waiting for mailbox authorization preserves queued messages without spending delivery attempts. / 手动立即重试会重新开始投递重试窗口，等待邮箱授权时保留排队邮件且不消耗投递次数。
 
 - Draft previews show saved rich-text formatting and inline images, follow the message theme and update after saving, with file attachments listed separately. / 草稿预览保留已保存的富文本格式和内嵌图片，跟随正文主题并在保存后更新，普通文件附件单独列出。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - A refresh button beside the title-bar sidebar toggle refreshes all accounts, with progress shown only for a manual refresh while automatic sync stays quiet. / 标题栏侧栏折叠按钮右侧新增刷新按钮，可刷新全部邮箱；仅手动刷新显示进度，自动同步保持安静。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))

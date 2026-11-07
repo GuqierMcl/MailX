@@ -32,6 +32,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
 
 use crate::accounts::types::TlsMode;
+use crate::auth::credential::ProtocolCredential;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
 use crate::secrets::SecretValue;
 use message::SmtpEnvelope;
@@ -44,13 +45,13 @@ const EHLO_NAME: &str = "[127.0.0.1]";
 
 /// Server and credentials for one SMTP login. The trust check against the
 /// auth profile has already happened when this is built (`SmtpPlan`).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct SmtpLogin {
     pub host: String,
     pub port: u16,
     pub tls: TlsMode,
     pub username: String,
-    pub password: SecretValue,
+    pub credential: ProtocolCredential,
 }
 
 /// Per-step budgets. Defaults follow RFC 5321 §4.5.3.2.
@@ -311,12 +312,14 @@ pub(crate) async fn send_with_tls(
 
 struct Conn {
     reader: BufReader<BoxedStream>,
+    suppress_reply_text: bool,
 }
 
 impl Conn {
     fn new(stream: BoxedStream) -> Self {
         Self {
             reader: BufReader::new(stream),
+            suppress_reply_text: false,
         }
     }
 
@@ -330,9 +333,15 @@ impl Conn {
             }
             read_reply(&mut self.reader).await
         };
-        timeout(budget, attempt)
+        let mut reply = timeout(budget, attempt)
             .await
-            .map_err(|_| IoFail::Timeout)?
+            .map_err(|_| IoFail::Timeout)??;
+        if self.suppress_reply_text {
+            // OAuth servers may echo bearer credentials in raw or encoded form
+            // during any later command, even successful delivery replies.
+            reply.lines = vec!["Server response".into()];
+        }
+        Ok(reply)
     }
 
     async fn command(&mut self, line: &str, budget: Duration) -> Result<Reply, IoFail> {
@@ -472,8 +481,13 @@ async fn authenticate(
     caps: &Capabilities,
     budget: Duration,
 ) -> Result<(), SmtpOutcome> {
+    conn.suppress_reply_text = login.credential.is_oauth();
     let supports = |name: &str| caps.auth.iter().any(|mechanism| mechanism == name);
-    let password = login.password.expose_secret();
+    let secret = login
+        .credential
+        .secret()
+        .map_err(|_| permanent(FailureReason::CredentialMissing))?;
+    let password = secret.expose_secret();
     let done = |reply: Reply| -> Result<(), SmtpOutcome> {
         match reply.code {
             235 => Ok(()),
@@ -481,7 +495,7 @@ async fn authenticate(
                 let failure = PreDataFailure {
                     reason: FailureReason::AuthRejected,
                     code: Some(code),
-                    text: Some(sanitize(&reply.text(), &login.password)),
+                    text: Some(sanitize(&reply.text(), secret)),
                 };
                 // 454 and friends are temporary; everything else is a verdict on the credentials.
                 Err(if code / 100 == 4 {
@@ -493,9 +507,29 @@ async fn authenticate(
                     SmtpOutcome::Permanent(failure)
                 })
             }
-            _ => Err(unexpected(&reply, &login.password)),
+            _ => Err(unexpected(&reply, secret)),
         }
     };
+    if login.credential.is_oauth() {
+        if !supports("XOAUTH2") {
+            return Err(permanent(FailureReason::AuthUnavailable));
+        }
+        let token = STANDARD.encode(format!(
+            "user={}\x01auth=Bearer {password}\x01\x01",
+            login.username
+        ));
+        let mut reply = conn
+            .command(&format!("AUTH XOAUTH2 {token}"), budget)
+            .await
+            .map_err(io_outcome)?;
+        if reply.code == 334 {
+            // Complete the failed SASL exchange without repeating the token.
+            reply = conn.command("", budget).await.map_err(io_outcome)?;
+        }
+        // Never retain OAuth server text: it may echo raw or encoded tokens.
+        reply.lines = vec!["OAuth authentication response".into()];
+        return done(reply);
+    }
     if supports("PLAIN") {
         let token = STANDARD.encode(format!("\0{}\0{password}", login.username));
         let reply = conn
@@ -541,13 +575,37 @@ pub(crate) async fn verify_connection(
     Ok(())
 }
 
+async fn resolve_login(route: &NetRoute, login: &SmtpLogin) -> Result<SmtpLogin, SmtpOutcome> {
+    use crate::auth::OAuthError;
+    let mut resolved = login.clone();
+    resolved.credential = login
+        .credential
+        .resolve(route)
+        .await
+        .map_err(|error| match error {
+            OAuthError::ReauthenticationRequired | OAuthError::AuthorizationDenied => {
+                permanent(FailureReason::AuthRejected)
+            }
+            OAuthError::Proxy => transient(FailureReason::Proxy),
+            OAuthError::Tls => transient(FailureReason::TlsVerification),
+            OAuthError::Timeout => transient(FailureReason::Timeout),
+            OAuthError::Storage => transient(FailureReason::SecretStore),
+            _ => transient(FailureReason::Protocol),
+        })?;
+    Ok(resolved)
+}
 async fn authenticated_connection(
     route: &NetRoute,
     login: &SmtpLogin,
     timeouts: &Timeouts,
     tls: &TlsSource,
 ) -> Result<(Conn, Capabilities), SmtpOutcome> {
-    let secret = &login.password;
+    let resolved = resolve_login(route, login).await?;
+    let login = &resolved;
+    let secret = login
+        .credential
+        .secret()
+        .map_err(|_| permanent(FailureReason::CredentialMissing))?;
 
     let stream = net::connect(route, &login.host, login.port)
         .await
@@ -676,7 +734,12 @@ async fn session(
     if envelope.recipients.is_empty() || !mime.is_ascii() {
         return Err(bare(permanent(FailureReason::InvalidMessage)));
     }
-    let secret = &login.password;
+    let resolved = resolve_login(route, login).await.map_err(bare)?;
+    let login = &resolved;
+    let secret = login
+        .credential
+        .secret()
+        .map_err(|_| bare(permanent(FailureReason::CredentialMissing)))?;
     let (mut conn, caps) = authenticated_connection(route, login, timeouts, tls)
         .await
         .map_err(bare)?;

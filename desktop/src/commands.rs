@@ -209,6 +209,100 @@ pub(crate) async fn accounts_update_connection(
     }))
 }
 
+/// Starts only reviewed registrations and opens the trusted authorization URL
+/// directly in the system browser. The frontend receives only an opaque handle.
+#[tauri::command]
+pub(crate) async fn accounts_oauth_begin(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::OAuthSessionHandle>, ()> {
+    use tauri_plugin_opener::OpenerExt;
+    let args = authorize(&window, "accounts_oauth_begin")
+        .and_then(|_| parse::<WriteArgs<mailx_core::BeginOAuthAccount>>(request.body()));
+    let result = async {
+        let args = args?;
+        let core = state.core()?;
+        let start = core.begin_oauth_account(args.request).await?;
+        if window
+            .opener()
+            .open_url(start.authorization_url, None::<&str>)
+            .is_err()
+        {
+            let _ = core.cancel_oauth_account(mailx_core::OAuthSessionRequest {
+                session_id: start.session_id,
+            });
+            return Err(AppError::new(ErrorCode::Internal));
+        }
+        Ok(mailx_core::OAuthSessionHandle {
+            session_id: start.session_id,
+        })
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_oauth_reauthorize(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::OAuthSessionHandle>, ()> {
+    use tauri_plugin_opener::OpenerExt;
+    let args = authorize(&window, "accounts_oauth_reauthorize")
+        .and_then(|_| parse::<WriteArgs<mailx_core::BeginOAuthReauthorization>>(request.body()));
+    let result = async {
+        let args = args?;
+        let core = state.core()?;
+        let start = core.begin_oauth_reauthorization(args.request).await?;
+        if window
+            .opener()
+            .open_url(start.authorization_url, None::<&str>)
+            .is_err()
+        {
+            let _ = core.cancel_oauth_account(mailx_core::OAuthSessionRequest {
+                session_id: start.session_id,
+            });
+            return Err(AppError::new(ErrorCode::Internal));
+        }
+        Ok(mailx_core::OAuthSessionHandle {
+            session_id: start.session_id,
+        })
+    }
+    .await;
+    Ok(respond(result))
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_oauth_finish(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Account>, ()> {
+    let args = authorize(&window, "accounts_oauth_finish")
+        .and_then(|_| parse::<WriteArgs<mailx_core::OAuthSessionRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.finish_oauth_account(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn accounts_oauth_cancel(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "accounts_oauth_cancel")
+        .and_then(|_| parse::<WriteArgs<mailx_core::OAuthSessionRequest>>(request.body()));
+    Ok(respond(args.and_then(|args| {
+        state.core()?.cancel_oauth_account(args.request)
+    })))
+}
+
 /// Authentication-only checks for the selected saved connection.
 #[tauri::command]
 pub(crate) async fn accounts_verify_connection(

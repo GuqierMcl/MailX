@@ -1013,3 +1013,24 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 桌面协议测试覆盖富文本投影、CID 图片与外链绑定、无远程图片、来源 / 账号 / 草稿版本隔离、保存 / 删除 / 连接变更 / 释放后的旧资源拒绝、缺失图片占位、旧纯文本草稿与窗口权限。桌面测试 147 项通过，2 项既有测试忽略；不等同于原生 WebView 实机验证。
 - 本机前端全量测试 86 个文件、962 项通过；Rust 全工作区测试 1,071 项通过、5 项既有忽略；类型检查、Lint、构建、i18n、DTO 一致性、版本一致性检查和 Rust 格式 / workspace 全目标 Clippy 通过。独立子代理只读审查通过，未发现阻塞问题。
 - 浏览器合成草稿核对浅深主题下的标题、粗体、列表、引用、颜色、高亮、对齐与普通附件布局。此浏览器预览使用开发适配，不代替 Rust 渲染器的实际桌面显示验证；本轮未做三平台 Tauri 原生窗口、真实草稿图片与系统外链打开手测。
+
+
+### 通用 OAuth 基础的验证边界
+
+当前生产 OAuth 注册及身份适配器表为空，没有真实 OAuth 服务商可供添加。受控 HTTP / IMAP / SMTP 和 SecretStore 测试用于验证通用基础；它们不能证明 Gmail、Outlook、租户策略、公开应用资格、系统浏览器回调或真实原生凭据库轮换已通过。
+
+可重复检查按职责执行：
+
+- `cargo test -p mailx-core --lib xoauth2`：成功握手、错误挑战后的空响应、畸形挑战 / 断线的可重试错误分类，以及后续 SMTP 回复回显 raw / Base64 bearer 时的脱敏。
+- `cargo test -p mailx-core --lib authentication_contract_tests`：旧密码快照兼容读取、显式认证联合类型，以及 OAuth 摘要不含密码 / token 字段。
+- `cargo test -p mailx-core --lib unknown_provider_begin_and_reauthorization`：未知注册在账号访问和授权副作用之前返回 `unsupported`；服务商身份、PKCE、刷新、路由与持久化边界由 `core/src/auth/` 和账号 OAuth 受控测试分别覆盖。
+- `cargo test -p mailx-desktop window_access`：新增授权会话命令只对可信 main 窗口开放，并核对 handler、生成权限与 capability 表一致。
+- 前端账号、连接表单与写信测试检查显式认证类型、OAuth 不出现密码编辑器、已有密码行为与发信凭证判断；DTO 仍通过 `bun run types:generate` / `types:check` 生成与核对。
+
+2026-11-08 本地检查：`bun run typecheck`、`bun run lint`、`bun run i18n:check` 和 DTO 生成通过；连接表单、账号草稿、账号设置和写信四个 Vitest 文件共 143 项通过。`cargo test -p mailx-core --lib oauth` 的 20 项通过，覆盖稳定 / 轮换 refresh token 的受控全链路、重授权身份与版本、移除、关闭阶段、到期清理和 XOAUTH2；`cargo test -p mailx-desktop window_access` 的 9 项通过。`cargo check -p mailx-desktop` 通过。以上证明本机自动检查及受控测试，不代表已启动真实 OAuth 浏览器、完成真实提供商授权或全平台凭据库轮换。
+
+2026-11-08 工作区复验：`bun run check` 通过，包含版本脚本 48 项、前端 86 个文件 / 963 项测试，以及 DTO、类型、lint、i18n、构建与工作区检查；最终前端 typecheck / lint / build / i18n 亦复验通过。工作区 Rust 格式、全部 target 的 Clippy `-D warnings` 通过，`bun run rust:test` 共 1122 项通过、0 项失败、5 项既有忽略项（core 单元 891、账号集成 39、desktop 147、bridge 两组各 6、MCP server 17、端到端 16）。该次完整 Rust 运行在最后的“退出持久化 owner 尚未调度时取消等待者”窄窗补丁前启动，不据此声称补丁后的新完整总数。
+
+通用 OAuth 定向复验还覆盖同 grant 多 resource / scope 缓存、已完成授权被取消的竞态、存储 apply 失败后的同进程 journal 恢复、在途轮换写入与补偿删除失败的持久清理意图、关门后旧 plan、取消退出等待者、退出时有限密钥库重试、客户端及绑定同时被篡改，以及邮件端点与信任记录同时被篡改的缓存 / 重启路径。`cargo test -p mailx-core --lib oauth --locked` 的 27 项通过；发件箱授权等待文案定向测试 2 项通过。上述受控结果不扩展真实服务商或平台验证范围。
+
+最后退出 owner 排队窄窗补丁后，工作区格式、全部 target 的 Clippy `-D warnings` 与 `bun run types:check` 再次通过；`cargo test -p mailx-core --lib auth:: --locked` 的 40 项通过（853 项被过滤）。该复验包含尚未调度的持久化 owner 在等待者取消后仍计入 active、已开始的真实密钥库写入不会提前被视为 drained；独立只读审查最终通过，未留阻断项。完整前端仍为上述 963 项，完整工作区 Rust 仍引用上述实际运行的 1122 项 / 5 项忽略，不将定向结果冒充新增全量运行。

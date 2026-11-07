@@ -241,7 +241,9 @@ async fn run_with(
         port: 993,
         tls: crate::accounts::types::TlsMode::Implicit,
         username: "lin".into(),
-        password: SecretValue::new("synthetic-password".into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+            "synthetic-password".into(),
+        )),
     };
     let mut session = imap::test_session(Box::new(client), &login).await.unwrap();
     let targets = fixture
@@ -584,7 +586,9 @@ async fn scripted_session(script: Script) -> (Session, JoinHandle<()>) {
         port: 993,
         tls: crate::accounts::types::TlsMode::Implicit,
         username: "lin".into(),
-        password: SecretValue::new("synthetic-password".into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+            "synthetic-password".into(),
+        )),
     };
     let session = imap::test_session(Box::new(client), &login).await.unwrap();
     (session, server)

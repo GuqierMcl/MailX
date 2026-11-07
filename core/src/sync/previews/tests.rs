@@ -182,7 +182,9 @@ async fn preview_session_validity(
         port: 993,
         tls: TlsMode::Implicit,
         username: "fixture".into(),
-        password: SecretValue::new("synthetic-password".into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+            "synthetic-password".into(),
+        )),
     };
     let session = imap::test_body_session(Box::new(client), &login)
         .await

@@ -14,7 +14,6 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use super::Clock;
-use super::clock::parse_stamp;
 use super::schedule::{self, Transition};
 use super::types::{OutboxChanged, OutboxError};
 use crate::accounts::{AccountService, Next};
@@ -266,12 +265,69 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
         let Some(service) = shared.service.upgrade() else {
             return;
         };
+        let admission_id = account_id.clone();
+        let admission = blocking(&service, move |service| {
+            service.oauth_send_admission(&admission_id)
+        })
+        .await;
+        let admission_revision = match admission {
+            Ok(Some((revision, plan))) => {
+                if let Err(error) = plan.login.credential.resolve(&plan.route).await {
+                    let reason = match error {
+                        crate::auth::OAuthError::ReauthenticationRequired
+                        | crate::auth::OAuthError::AuthorizationDenied => "authorizationRequired",
+                        _ => "authorizationUnavailable",
+                    };
+                    let id = account_id.clone();
+                    let now = clock.now();
+                    if let Ok(changed) = blocking(&service, move |service| {
+                        service.record_oauth_send_blocked(&id, reason, now)
+                    })
+                    .await
+                    {
+                        shared.announce(changed);
+                    }
+                    drop(service);
+                    tokio::select! { () = tokio::time::sleep(Duration::from_secs(60)) => {}, () = wake.notified() => {} }
+                    continue;
+                }
+                Some(revision)
+            }
+            Ok(None) => None,
+            Err(error) if error.code == ErrorCode::NotFound => return,
+            Err(_) => {
+                let id = account_id.clone();
+                let now = clock.now();
+                if let Ok(changed) = blocking(&service, move |service| {
+                    service.record_oauth_send_blocked(&id, "authorizationUnavailable", now)
+                })
+                .await
+                {
+                    shared.announce(changed);
+                }
+                drop(service);
+                tokio::select! { () = tokio::time::sleep(Duration::from_secs(60)) => {}, () = wake.notified() => {} }
+                continue;
+            }
+        };
         let id = account_id.clone();
         let now = clock.now();
         let claiming = shared.clone();
         let step = blocking(&service, move |service| {
             claiming.claim(|| {
-                let step = service.outbox_step(&id, now)?;
+                if admission_revision
+                    .is_some_and(|revision| service.revision(&id).ok() != Some(revision))
+                {
+                    return Err(AppError::new(ErrorCode::Conflict));
+                }
+                let mut resumed = if admission_revision.is_some() {
+                    service.clear_oauth_send_blocked(&id, now)?
+                } else {
+                    Vec::new()
+                };
+                let mut step = service.outbox_step(&id, now)?;
+                resumed.append(&mut step.changed);
+                step.changed = resumed;
                 let sending = matches!(&step.next, Next::Job { .. });
                 Ok((step, sending))
             })
@@ -345,8 +401,7 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                         }
                     },
                 };
-                let first_queued =
-                    parse_stamp(&job.item.first_queued_at).unwrap_or_else(|| clock.now());
+                let first_queued = job.retry_started_at;
                 record(
                     &shared,
                     &service,

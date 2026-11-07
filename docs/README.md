@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**桌面收发、本地全文搜索与本地 MCP 已有实现；内置 AI、OAuth 与服务器 Web 宿主为后续规划**。此目录记录产品行为、架构边界、开发流程和设计依据，接口与技术选型仍可演化。平台、服务商、客户端的具体测试结果统一记录在[验证策略](development/validation.md)，发布状态以 [CHANGELOG](../CHANGELOG.md) 与 [GitHub Releases](https://github.com/GuqierMcl/MailX/releases) 为准。
+状态：**桌面收发、本地全文搜索与本地 MCP 已有实现；通用 OAuth 基础已有实现但生产服务商未开放；内置 AI 与服务器 Web 宿主为后续规划**。此目录记录产品行为、架构边界、开发流程和设计依据，接口与技术选型仍可演化。平台、服务商、客户端的具体测试结果统一记录在[验证策略](development/validation.md)，发布状态以 [CHANGELOG](../CHANGELOG.md) 与 [GitHub Releases](https://github.com/GuqierMcl/MailX/releases) 为准。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 

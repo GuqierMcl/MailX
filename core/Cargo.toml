@@ -12,6 +12,7 @@ publish.workspace = true
 ammonia = "4"
 async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 base64 = "0.22"
+oauth2 = { version = "5", default-features = false, features = ["timing-resistant-secret-traits"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cssparser = "0.37"
 ego-tree = "0.11"
@@ -40,7 +41,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 tokio-socks = "0.5"
 tower-service = "0.3"
 ts-rs = { version = "11", features = ["serde-compat", "no-serde-warnings"] }
-url = "2"
+url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
 resvg = { version = "0.48.1", default-features = false }

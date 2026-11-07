@@ -27,16 +27,17 @@ export type AccountDraft = {
 }
 
 export function initialDraft(account: Account | null, provider?: MailProvider): AccountDraft {
+  const password = account?.authentication.kind === 'password' ? account.authentication : null
   const proxy = account?.route.kind === 'custom' ? account.route : null
   const secret = (configured?: boolean): SecretDraft => ({ replace: !configured, value: '' })
   return {
     emailAddress: account?.emailAddress ?? '',
     imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
     smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
-    mode: account?.authentication.mode ?? 'shared',
-    sharedPassword: secret(account?.authentication.imap.passwordConfigured),
-    imapPassword: secret(account?.authentication.imap.passwordConfigured),
-    smtpPassword: secret(account?.authentication.smtp.passwordConfigured),
+    mode: password?.mode ?? 'shared',
+    sharedPassword: secret(password?.imap.passwordConfigured),
+    imapPassword: secret(password?.imap.passwordConfigured),
+    smtpPassword: secret(password?.smtp.passwordConfigured),
     routeKind: account?.route.kind ?? 'direct',
     proxyKind: proxy?.proxyKind ?? 'socks5',
     proxyHost: proxy?.host ?? '',
@@ -111,7 +112,9 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
   }
   const imap = connection(draft.imap, 'imap', emailAddress)
   const smtp = connection(draft.smtp, 'smtp', emailAddress)
-  const authentication: ConnectionInput['authentication'] = draft.mode === 'shared'
+  const authentication: ConnectionInput['authentication'] = account?.authentication.kind === 'oauth2'
+    ? { kind: 'oauth2', configuration: account.authentication.configuration }
+    : draft.mode === 'shared'
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
   let route: ConnectionInput['route'] = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }

@@ -276,3 +276,14 @@ describe('connection form', () => {
     expect(submit.mock.calls[0][0].route).toMatchObject({ host: 'other.example.com', imageProxyDns: true, confirmImageProxyDns: true })
   })
 })
+
+
+it('keeps OAuth authorization separate from password editors', async () => {
+  const endpoint = { id: 'oauth-profile', generation: 1, credentialConfigured: true, trust: 'trusted' as const }
+  const account = exampleAccount({ authentication: { kind: 'oauth2', configuration: { providerId: 'reviewed-provider', issuer: 'https://issuer.example', clientRegistrationId: 'registration', authorizationSubject: 'subject', targetMailboxResource: null }, state: 'connected', imap: endpoint, smtp: endpoint } })
+  const { submit } = renderForm(account)
+  expect(document.querySelector('input[type="password"]')).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存更改' })).not.toBeInTheDocument()
+  expect(screen.getByText('此账号需要通过 OAuth 授权更新连接设置，当前无法在此编辑。')).toBeInTheDocument()
+  expect(submit).not.toHaveBeenCalled()
+})

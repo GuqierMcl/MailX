@@ -222,7 +222,9 @@ pub(crate) async fn session_for(
         port: 993,
         tls: crate::accounts::types::TlsMode::Implicit,
         username: "fixture".into(),
-        password: SecretValue::new("synthetic-password".into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+            "synthetic-password".into(),
+        )),
     };
     let session = imap::test_body_session(Box::new(client), &login)
         .await

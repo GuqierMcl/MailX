@@ -26,6 +26,26 @@ pub enum ErrorCode {
     TooManyAttachments,
     UnsupportedImage,
     Unsupported,
+    #[serde(rename = "oauthNetwork")]
+    OAuthNetwork,
+    #[serde(rename = "oauthProxy")]
+    OAuthProxy,
+    #[serde(rename = "oauthTls")]
+    OAuthTls,
+    #[serde(rename = "oauthRateLimited")]
+    OAuthRateLimited,
+    #[serde(rename = "oauthServerUnavailable")]
+    OAuthServerUnavailable,
+    #[serde(rename = "oauthTimeout")]
+    OAuthTimeout,
+    #[serde(rename = "oauthAuthorizationDenied")]
+    OAuthAuthorizationDenied,
+    #[serde(rename = "oauthSessionExpired")]
+    OAuthSessionExpired,
+    #[serde(rename = "oauthInvalidResponse")]
+    OAuthInvalidResponse,
+    #[serde(rename = "oauthReauthorizationRequired")]
+    OAuthReauthorizationRequired,
     StorageUnavailable,
     StorageIncompatible,
     AlreadyOpen,
@@ -62,6 +82,16 @@ impl AppError {
             ErrorCode::TooManyAttachments => "附件数量已达上限。",
             ErrorCode::UnsupportedImage => "不支持该图片，仅支持 PNG、JPEG、GIF 和 WebP 静态图片。",
             ErrorCode::Unsupported => "当前版本尚不支持此认证方式。",
+            ErrorCode::OAuthProxy => "无法通过账号代理连接授权服务，请检查代理设置。",
+            ErrorCode::OAuthTls => "无法与授权服务建立安全连接，请检查网络设置。",
+            ErrorCode::OAuthRateLimited => "授权服务暂时限制请求，请稍后重试。",
+            ErrorCode::OAuthServerUnavailable => "授权服务暂不可用，请稍后重试。",
+            ErrorCode::OAuthNetwork => "授权服务连接失败，请检查网络与账号代理后重试。",
+            ErrorCode::OAuthTimeout => "授权服务连接超时，请稍后重试。",
+            ErrorCode::OAuthAuthorizationDenied => "未授予邮箱访问权限，可以重新发起授权。",
+            ErrorCode::OAuthSessionExpired => "授权会话已失效，请重新发起授权。",
+            ErrorCode::OAuthInvalidResponse => "授权服务响应或回调无效，未保存授权。",
+            ErrorCode::OAuthReauthorizationRequired => "邮箱授权已失效，请重新授权。",
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",
             ErrorCode::AlreadyOpen => "此数据目录已由另一个 MailX 实例打开。",

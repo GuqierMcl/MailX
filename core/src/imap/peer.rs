@@ -102,7 +102,7 @@ where
         port: 993,
         tls: TlsMode::Implicit,
         username: "lin@example.com".into(),
-        password: SecretValue::new("secret".into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new("secret".into())),
     };
     let session = test_session(Box::new(client), &login).await.unwrap();
     (session, task)
