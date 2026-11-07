@@ -97,6 +97,14 @@ export function accentForeground(hex: string) {
   return onWhite >= onNearBlack ? '#ffffff' : '#171717'
 }
 
+/** A pale selection wash needs enough hue and luminance to survive mixing
+ * with both light and dark surfaces. Other accents keep the CSS blue fallback. */
+function hasDistinctSelectionTint(hex: string) {
+  const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16))
+  const luminance = relativeLuminance(hex)
+  return Math.max(...channels) - Math.min(...channels) >= 32 && luminance >= 0.08 && luminance <= 0.8
+}
+
 const ACCENT_PROPERTIES = ['--primary', '--ring', '--sidebar-primary', '--sidebar-ring']
 const ACCENT_FOREGROUND_PROPERTIES = ['--primary-foreground', '--sidebar-primary-foreground']
 
@@ -123,12 +131,18 @@ function applyTheme(theme: ThemeMode) {
 export function applyAppearance(appearance: AppearanceSettings) {
   const style = document.documentElement.style
   applyTheme(appearance.theme)
-  if (/^#[0-9a-f]{6}$/i.test(appearance.accentColor)) {
+  const hasAccent = /^#[0-9a-f]{6}$/i.test(appearance.accentColor)
+  if (hasAccent) {
     const foreground = accentForeground(appearance.accentColor)
     for (const property of ACCENT_PROPERTIES) style.setProperty(property, appearance.accentColor)
     for (const property of ACCENT_FOREGROUND_PROPERTIES) style.setProperty(property, foreground)
   } else {
     for (const property of [...ACCENT_PROPERTIES, ...ACCENT_FOREGROUND_PROPERTIES]) style.removeProperty(property)
+  }
+  if (hasAccent && hasDistinctSelectionTint(appearance.accentColor)) {
+    style.setProperty('--mail-selection-accent', appearance.accentColor)
+  } else {
+    style.removeProperty('--mail-selection-accent')
   }
   style.setProperty('--app-font-sans', fontFamilyCss(appearance.interfaceFont))
   style.fontSize = ROOT_FONT_SIZE[appearance.fontSize] ?? ''

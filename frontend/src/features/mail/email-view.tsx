@@ -8,7 +8,6 @@ import {
   Cancel01Icon,
   Delete02Icon,
   Forward01Icon,
-  Mail01Icon,
   MailOpen01Icon,
   MailReply01Icon,
   MailReplyAll01Icon,
@@ -38,8 +37,26 @@ import { BodyDocument, BodySkeleton } from './body-document'
 import { displayName, formatFullTime } from './format'
 import { LocalOnlyMarker } from './local-only-marker'
 import { SenderAvatar } from './sender-avatar'
+import { ReadStatusButton } from './read-status-button'
 import { useCloseOnEscape } from './use-close-on-escape'
 import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
+
+export function RemoveLocalCopyDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('mail:removeLocalCopyTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('mail:removeLocalCopyDescription')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('mail:cancel')}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>{t('mail:removeLocalCopyConfirm')}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
 
 type EmailViewProps = {
   client: MailxClient
@@ -154,13 +171,11 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete,
         ))}
       </div>
       {!localOnly && <div className="flex items-center gap-1 not-first:ml-3">
-        <IconButton
+        <ReadStatusButton
           disabled={!summary}
-          label={summary?.isRead === false ? t('mail:markRead') : t('mail:markUnread')}
+          isRead={summary?.isRead ?? true}
           onClick={() => summary && onFlag(summary, 'read', !summary.isRead)}
-        >
-          <HugeiconsIcon icon={summary?.isRead === false ? MailOpen01Icon : Mail01Icon} />
-        </IconButton>
+        />
         <IconButton
           disabled={!summary}
           label={summary?.isStarred ? t('mail:unstar') : t('mail:star')}
@@ -175,18 +190,11 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete,
         <HugeiconsIcon icon={Cancel01Icon} />
       </IconButton>
       {summary && onRemoveLocal && (
-        <AlertDialog open={confirmingRemove} onOpenChange={setConfirmingRemove}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('mail:removeLocalCopyTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>{t('mail:removeLocalCopyDescription')}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('mail:cancel')}</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={() => onRemoveLocal(summary)}>{t('mail:removeLocalCopyConfirm')}</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <RemoveLocalCopyDialog
+          open={confirmingRemove}
+          onOpenChange={setConfirmingRemove}
+          onConfirm={() => onRemoveLocal(summary)}
+        />
       )}
     </div>
   )

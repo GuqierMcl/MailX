@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/components/ui/toast'
 import { errorText } from '@/i18n/errors'
-import type { AccountSyncState } from '@/generated/accounts'
+import type { Account, AccountSyncState } from '@/generated/accounts'
 
 const START_TIMEOUT_MS = 15_000
 
-type Request = { baseline: AccountSyncState | undefined }
+type Target = { id: string; source?: string; sync: AccountSyncState | undefined }
+type Request = { id: string; source?: string; baseline: AccountSyncState | undefined }
 type ActiveRequest = { timer: ReturnType<typeof setTimeout> | undefined }
 
 function finished(request: Request, sync: AccountSyncState | undefined) {
@@ -21,53 +22,81 @@ function finished(request: Request, sync: AccountSyncState | undefined) {
 
 /** Only a refresh requested in this view makes the account show progress. */
 export function useManualSync(sync: AccountSyncState | undefined, onRefresh: () => Promise<void>) {
-  const [request, setRequest] = useState<Request | null>(null)
-  const active = useRef<ActiveRequest | null>(null)
-  const refreshing = request !== null && !finished(request, sync)
+  return useManualSyncTargets([{ id: 'account', sync }], onRefresh, false)
+}
+
+/** Accounts already running join the wait without queuing another sync round. */
+export function useManualSyncAll(
+  accounts: readonly Pick<Account, 'id' | 'mailboxSourceId'>[],
+  syncStates: Record<string, AccountSyncState>,
+  onRefresh: (accountId: string) => Promise<void>,
+) {
+  return useManualSyncTargets(accounts.map((account) => ({
+    id: account.id,
+    source: account.mailboxSourceId,
+    sync: syncStates[account.id],
+  })), onRefresh, true)
+}
+
+function useManualSyncTargets(targets: Target[], onRefresh: (id: string) => Promise<void>, includeRunning: boolean) {
+  const [requests, setRequests] = useState<Request[]>([])
+  const active = useRef(new Map<string, ActiveRequest>())
+  const pending = requests.filter((request) => {
+    const target = targets.find((target) => target.id === request.id)
+    return target && target.source === request.source && !finished(request, target.sync)
+  })
+  const refreshing = pending.length > 0
 
   // A newer terminal snapshot ends this request even if its IPC response is
   // still pending. Clearing the request also prevents the next automatic round
   // from bringing its indicator back. This is derived state, adjusted on render.
-  if (request && !refreshing) setRequest(null)
+  if (pending.length !== requests.length) setRequests(pending)
+
+  useEffect(() => {
+    for (const [id, current] of active.current) {
+      if (!pending.some((request) => request.id === id)) {
+        clearTimeout(current.timer)
+        active.current.delete(id)
+      } else if (targets.find((target) => target.id === id)?.sync?.phase === 'syncing') {
+        // Bound only the wait for a worker to start, never a running sync round.
+        clearTimeout(current.timer)
+        current.timer = undefined
+      }
+    }
+  }, [pending, targets])
 
   useEffect(() => {
     const current = active.current
-    if (!current) return
-    if (!refreshing) {
-      clearTimeout(current.timer)
-      active.current = null
-    } else if (sync?.phase === 'syncing') {
-      // Bound only the wait for a worker to start, never a running sync round.
-      clearTimeout(current.timer)
-      current.timer = undefined
+    return () => {
+      for (const request of current.values()) clearTimeout(request.timer)
+      current.clear()
     }
-  }, [refreshing, sync])
-
-  useEffect(() => () => {
-    clearTimeout(active.current?.timer)
-    active.current = null
   }, [])
 
   const refresh = useCallback(() => {
-    if (active.current || sync?.phase === 'syncing') return
-    const next = { baseline: sync }
-    const current: ActiveRequest = { timer: undefined }
-    const end = () => {
-      if (active.current !== current) return false
-      clearTimeout(current.timer)
-      active.current = null
-      setRequest(null)
-      return true
+    if (active.current.size > 0) return
+    const next = targets.filter((target) => includeRunning || target.sync?.phase !== 'syncing')
+    setRequests(next.map((target) => ({ id: target.id, source: target.source, baseline: target.sync })))
+    for (const target of next) {
+      const current: ActiveRequest = { timer: undefined }
+      const end = () => {
+        if (active.current.get(target.id) !== current) return false
+        clearTimeout(current.timer)
+        active.current.delete(target.id)
+        setRequests((requests) => requests.filter((request) => request.id !== target.id))
+        return true
+      }
+      active.current.set(target.id, current)
+      if (target.sync?.phase === 'syncing') continue
+      current.timer = setTimeout(end, START_TIMEOUT_MS)
+      // refreshSync acknowledges a wake-up, rather than the completed round.
+      // Each account settles independently; a rejected request must not hide
+      // progress for the other accounts that are still syncing.
+      void Promise.resolve().then(() => onRefresh(target.id)).catch((error: unknown) => {
+        if (end()) toast.error(errorText(error))
+      })
     }
-    current.timer = setTimeout(end, START_TIMEOUT_MS)
-    active.current = current
-    setRequest(next)
-    // refreshSync acknowledges a wake-up, rather than the completed round.
-    // Its resolution must not turn off progress before a terminal event arrives.
-    void Promise.resolve().then(onRefresh).catch((error: unknown) => {
-      if (end()) toast.error(errorText(error))
-    })
-  }, [sync, onRefresh])
+  }, [targets, includeRunning, onRefresh])
 
   return { refreshing, refresh }
 }

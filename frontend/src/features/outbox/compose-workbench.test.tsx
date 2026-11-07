@@ -8,6 +8,8 @@ import type { Draft, DraftChanged, DraftSummary, EmailDetail, EmailSummary, Fold
 import { MailxClientError } from '@/lib/mailx-client'
 import { withTitleBar } from '@/test/title-bar'
 
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, convertFileSrc: () => 'mailx-body://localhost/' }))
+
 const account = exampleAccount()
 const inbox: Folder = { id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 1, archivedCount: 0, archivedUnreadCount: 0 }
 const mail: EmailSummary = {
@@ -182,7 +184,8 @@ describe('drafts and outbox navigation', () => {
     expect(draftRow).toHaveTextContent('草稿主题')
     await userEvent.click(draftRow)
     expect(await screen.findByRole('heading', { level: 2, name: '草稿主题' })).toBeInTheDocument()
-    expect(screen.getByRole('article')).toHaveTextContent('草稿正文')
+    expect(await within(screen.getByRole('article')).findByTitle('邮件 HTML 正文')).toHaveAttribute('sandbox', '')
+    expect(client.prepareDraftBody).toHaveBeenCalledWith(d.id, d.revision)
     const edit = screen.getByRole('button', { name: '继续编辑' })
     for (let i = 0; i < 40 && document.activeElement !== edit; i++) await userEvent.tab()
     expect(await screen.findByText('继续编辑')).toBeInTheDocument()

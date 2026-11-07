@@ -31,9 +31,9 @@ pub use app::{
     AccountConnectionVerification, Activity, ArchiveOutcome, AttachmentFile, AttachmentInfo,
     AvatarImage, AvatarKind, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
     CancelDraftVerification, ConnectionVerificationCode, ConnectionVerificationStage,
-    ConnectionVerificationStatus, DraftConnectionVerification, EmailFlagResult, FlagChange,
-    MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus, VerifyAccountConnection,
-    VerifyDraftConnection,
+    ConnectionVerificationStatus, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
+    FlagChange, MailxCore, MessageFlag, ProtocolVerification, RemoteImageStatus,
+    VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

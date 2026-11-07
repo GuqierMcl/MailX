@@ -3,6 +3,8 @@ use tempfile::TempDir;
 
 use super::*;
 
+mod drafts;
+
 const APP_ORIGIN: &str = "tauri://localhost";
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
@@ -1059,7 +1061,11 @@ async fn changing_an_accounts_connection_revokes_its_readers_and_confirmations()
     assert!(protocol.resolve(&ids[0], &first.document_token).is_err());
     assert!(protocol.resolve(&ids[1], &second.document_token).is_err());
     assert!(protocol.confirmations.lock().unwrap().is_empty());
-    assert!(core.body_image_status(retained).await.is_err());
+    assert!(
+        core.body_image_status(retained.email().unwrap())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { EmailDetail, EmailPage, EmailSummary, Folder, OutboxChanged, SentCopiesChanged } from '@/generated/accounts'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { MailxClientError } from '@/lib/mailx-client'
+import { Toaster } from '@/components/ui/toast'
 import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 
@@ -57,7 +58,7 @@ function setup() {
 }
 
 async function openSentCopy(client: ReturnType<typeof setup>['client']) {
-  render(withTitleBar(<Workbench client={client} />))
+  render(withTitleBar(<><Workbench client={client} /><Toaster /></>))
   await userEvent.click((await screen.findAllByRole('button', { name: '已发送' }))[0])
   const list = await screen.findByRole('list', { name: '邮件列表' })
   const row = within(list).getAllByRole('listitem')[0]
@@ -73,7 +74,7 @@ describe('local sent copies in the Sent folder', () => {
     await openSentCopy(client)
     expect(screen.queryByRole('button', { name: /标为(已读|未读)/ })).not.toBeInTheDocument()
     const before = client.listEmails.mock.calls.length
-    await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '从本机移除' }))
     await userEvent.click(await screen.findByRole('button', { name: '移除' }))
     expect(client.removeLocalCopy).toHaveBeenCalledExactlyOnceWith(localCopy.id)
     await waitFor(() => expect(client.listEmails.mock.calls.length).toBeGreaterThan(before))
@@ -81,11 +82,37 @@ describe('local sent copies in the Sent folder', () => {
     expect(screen.getAllByText('未选择邮件').length).toBeGreaterThan(0)
   })
 
+  it('offers the same confirmed removal from the list action rail', async () => {
+    const { client, drop } = setup()
+    client.removeLocalCopy.mockImplementation(async () => { drop() })
+    await openSentCopy(client)
+    const list = screen.getByRole('list', { name: '邮件列表' })
+    const row = within(list).getAllByRole('listitem')[0]
+    await userEvent.hover(row)
+    await userEvent.click(within(row).getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(await screen.findByRole('button', { name: '移除' }))
+    expect(client.removeLocalCopy).toHaveBeenCalledExactlyOnceWith(localCopy.id)
+  })
+
+  it('shows a toast when a list removal fails without an open reader', async () => {
+    const { client } = setup()
+    client.removeLocalCopy.mockRejectedValue(new MailxClientError({ code: 'notFound', message: '内容不存在。', field: null }))
+    render(withTitleBar(<><Workbench client={client} /><Toaster /></>))
+    await userEvent.click((await screen.findAllByRole('button', { name: '已发送' }))[0])
+    const list = await screen.findByRole('list', { name: '邮件列表' })
+    const row = within(list).getAllByRole('listitem')[0]
+    await userEvent.hover(row)
+    await userEvent.click(within(row).getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(await screen.findByRole('button', { name: '移除' }))
+    expect((await screen.findAllByText('从本机移除失败')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/内容不存在/)).length).toBeGreaterThan(0)
+  })
+
   it('keeps the reader and shows the error when the removal fails', async () => {
     const { client } = setup()
     client.removeLocalCopy.mockRejectedValue(new MailxClientError({ code: 'notFound', message: '内容不存在。', field: null }))
     await openSentCopy(client)
-    await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '从本机移除' }))
     await userEvent.click(await screen.findByRole('button', { name: '移除' }))
     expect(await screen.findByText(/内容不存在/)).toBeInTheDocument()
   })
@@ -116,7 +143,7 @@ describe('local sent copies in the Sent folder', () => {
     const { client, drop, emitSentCopies } = setup()
     client.removeLocalCopy.mockImplementation(async () => { drop(); await emitSentCopies() })
     await openSentCopy(client)
-    await userEvent.click(screen.getByRole('button', { name: '从本机移除' }))
+    await userEvent.click(within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '从本机移除' }))
     await userEvent.click(await screen.findByRole('button', { name: '移除' }))
     await waitFor(() => expect(screen.queryByRole('heading', { level: 2, name: localCopy.subject })).not.toBeInTheDocument())
     // "已发送" remains as the sidebar button and the list title; a toast would be other plain text.

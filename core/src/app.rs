@@ -40,6 +40,7 @@ mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
+mod draft_bodies;
 mod flags;
 mod organize;
 mod verification;
@@ -47,6 +48,7 @@ pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
+pub use draft_bodies::DraftBodyBinding;
 pub use flags::{FlagChange, MessageFlag};
 pub use organize::{ArchiveOutcome, EmailFlagResult};
 pub use verification::{

@@ -13,6 +13,8 @@ mod html;
 mod images;
 mod plain;
 
+pub(crate) use html::sanitize as sanitize_document;
+
 pub use html::{
     ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
 };

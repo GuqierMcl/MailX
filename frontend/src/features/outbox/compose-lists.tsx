@@ -20,7 +20,7 @@ function Row({ selected, onSelect, children }: RowProps) {
       onClick={onSelect}
       className={cn(
         'flex w-full flex-col items-start gap-1 rounded-lg px-3 py-3 text-left text-sm transition-colors hover:bg-foreground/5',
-        selected && 'bg-background shadow-xs hover:bg-background',
+        selected && 'mail-selected',
       )}
     >
       {children}

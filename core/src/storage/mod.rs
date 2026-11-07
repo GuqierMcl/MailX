@@ -103,6 +103,15 @@ impl Storage {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub(crate) fn account_revision(&self, id: &str) -> Result<u32, AppError> {
+        self.db
+            .query_row("SELECT revision FROM accounts WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))
+    }
+
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
         let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon FROM accounts WHERE id=?1", [id], |r| {
             Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?))

@@ -23,9 +23,13 @@ Changing or resetting your Apple Account password revokes all app-specific passw
 
 The first sync of each folder starts from the last 30 days and fills up to the newest 1,000 message headers in that window per round, keeping previously cached history. This is not a full download of the mailbox. Accounts that support IMAP IDLE listen for inbox changes; other folders and accounts without IDLE keep polling.
 
-Automatic sync runs quietly: account rows keep their unread counts without a loading animation. When you refresh manually, only the refresh button you use shows progress. A newly added account shows a subdued text hint while first fetching browsable content; accounts with cached content do not repeat that hint on normal startup. Sync problems still show a static warning so you can check the account.
+Automatic sync runs quietly: account rows keep their unread counts without a loading animation. Use the refresh button immediately to the right of the sidebar toggle in the title bar to refresh all accounts, or the refresh button on an account row to refresh just that account. When you refresh manually, only the refresh button you use shows progress. A newly added account shows a subdued text hint while first fetching browsable content; accounts with cached content do not repeat that hint on normal startup. Sync problems still show a static warning so you can check the account.
 
 Opening a message downloads and caches its body, so cached content can be read offline later. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
+
+Hover or focus a message with the keyboard to show quick actions. After a mouse click, moving the pointer away hides the actions again. With body previews enabled, the left column has star at the top, read status in the middle, and archive or restore at the bottom; a starred message keeps its yellow star visible. Delete stays at the upper right. Turning body previews off puts star and archive actions back at the upper right to keep the compact rows easy to use. The small read-status ring also appears in the reading toolbar: an empty ring means read, and a ring with a blue dot means unread. Local sent copies offer a confirmed removal from this device instead.
+
+The open message, draft or outbox item keeps a blue selection background after the pointer leaves, with separate tones for light and dark themes. Custom accent colors also tint the selection background; nearly gray, very light or very dark colors use the default blue highlight instead so it stays distinct, while your main accent color stays as set. Hovering another row keeps the open item highlighted.
 
 Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under More → Archive or under Archived in the account, and it is unchanged for other clients. A server folder that is itself called Archive stays under its account with the server's name. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
 
@@ -34,6 +38,8 @@ Remote images ask first by default, and attachments can be saved as local files.
 ## Composing and sending
 
 New mail, reply, reply all and forward use a separate compose window, and drafts save locally as you type. You can attach files, insert pictures or paste screenshots; attachments and inline images together default to a 20 MiB limit, and providers may impose a lower one. Drafts do not sync to other clients.
+
+Open Drafts in the sidebar and select a draft to preview its saved formatting and inline images in the reading pane. The preview follows your message theme setting and updates after the draft saves; file attachments are listed separately. Use Continue editing to reopen the compose window, or Delete to discard the draft.
 
 Check the recipients, sending account, body and attachments, then confirm sending with the second click as prompted. For an undo window, choose 5, 10, 20 or 30 seconds in Settings → Sending; the default waits not at all. Undo only applies to items still waiting in the queue and cannot recall mail the server has accepted.
 

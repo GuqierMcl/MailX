@@ -379,6 +379,32 @@ pub(crate) async fn drafts_get(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareDraftBodyArgs {
+    draft_id: String,
+    expected_revision: u32,
+}
+
+#[tauri::command]
+pub(crate) async fn drafts_prepare_body(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    protocol: State<'_, std::sync::Arc<crate::body_protocol::BodyProtocol>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<crate::body_protocol::PreparedBody>, ()> {
+    let args = authorize(&window, "drafts_prepare_body")
+        .and_then(|_| parse::<PrepareDraftBodyArgs>(request.body()));
+    let result = async {
+        let args = args?;
+        protocol
+            .prepare_draft(&state.core()?, args.draft_id, args.expected_revision)
+            .await
+    }
+    .await;
+    Ok(respond(result))
+}
+
 #[tauri::command]
 pub(crate) async fn drafts_update(
     window: WebviewWindow,

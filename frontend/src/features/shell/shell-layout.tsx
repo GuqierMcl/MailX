@@ -15,6 +15,8 @@ type ShellLayoutProps = {
   navWidth: number
   /** The saved choice to fold the sidebar to its rail. */
   navCollapsed: boolean
+  /** Page actions beside the sidebar toggle in the title bar. */
+  navActions?: ReactNode
   /** Called when the user settles on a width or folds the sidebar; the caller persists it. */
   onNavChange: (change: { navWidth?: number; navCollapsed?: boolean }) => void
   children: ReactNode
@@ -41,7 +43,7 @@ function useNarrowWindow() {
  * user's choice is saved; a narrow window shows the rail on its own, and opening
  * the sidebar there lasts only until the window widens, leaving the choice as it was.
  */
-export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, onNavChange, children }: ShellLayoutProps) {
+export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navActions, onNavChange, children }: ShellLayoutProps) {
   const narrow = useNarrowWindow()
   const [narrowOpen, setNarrowOpen] = useState(false)
   const [wasNarrow, setWasNarrow] = useState(narrow)
@@ -102,6 +104,7 @@ export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, onNav
     <div data-slot="shell-layout" className="flex h-full min-h-0 pr-2 pb-2">
       <TitleBarActions side="leading">
         <NavRailTrigger open={!folded} onToggle={toggleNav} />
+        {navActions}
       </TitleBarActions>
       <NavRail
         folded={folded}

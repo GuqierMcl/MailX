@@ -97,6 +97,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     createDraftFrom: vi.fn<MailxClient['createDraftFrom']>().mockRejectedValue(new Error('unused')),
     listDrafts: vi.fn<MailxClient['listDrafts']>().mockResolvedValue([]),
     getDraft: vi.fn<MailxClient['getDraft']>().mockRejectedValue(new Error('unused')),
+    prepareDraftBody: vi.fn<MailxClient['prepareDraftBody']>().mockResolvedValue({ documentToken: 'test-draft-document' }),
     updateDraft: vi.fn<MailxClient['updateDraft']>().mockRejectedValue(new Error('unused')),
     deleteDraft: vi.fn<MailxClient['deleteDraft']>().mockResolvedValue(undefined),
     addAttachments: vi.fn<MailxClient['addAttachments']>().mockResolvedValue(null),

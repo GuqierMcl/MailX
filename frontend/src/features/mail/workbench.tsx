@@ -5,8 +5,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AccountSyncState } from '@/generated/accounts'
+import type { AccountSyncState, EmailSummary } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/toast'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { usePanelRef } from 'react-resizable-panels'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -16,7 +17,7 @@ import { mailKeys } from '@/lib/query-client'
 import { EmailList, type ListFilter } from './email-list'
 import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
-import { EmailView } from './email-view'
+import { EmailView, RemoveLocalCopyDialog } from './email-view'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
 import { clampListWidth, LIST_DEFAULT, LIST_MIN, READER_MIN } from '@/features/shell/layout-defaults'
@@ -32,6 +33,7 @@ import { AvatarSourceProvider } from './sender-avatar'
 import { MailRail } from './mail-rail'
 import { MailSidebar } from './mail-sidebar'
 import { ReaderToggle } from './reader-toggle'
+import { RefreshAllButton } from './refresh-all-button'
 import { folderLabel, mailboxTitle, STARRED_EXCLUDED_ROLES, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
@@ -324,8 +326,22 @@ export function Workbench({ client }: { client: MailxClient }) {
     client.removeLocalCopy(email.id).then(() => {
       setOpened((current) => current?.id === email.id ? null : current)
       void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
-    }).catch((error: unknown) => setRemoveError(errorText(error)))
-  }, [client, queryClient])
+    }).catch((error: unknown) => {
+      const message = errorText(error)
+      const readerCanShowError = openedState?.id === email.id && !readerCollapsed
+      if (readerCanShowError) setRemoveError(message)
+      else {
+        toast.error(t('mail:removeLocalCopyFailed'), { description: message })
+      }
+    })
+  }, [client, openedState, queryClient, readerCollapsed])
+  const [removeLocalChoice, setRemoveLocalChoice] = useState<EmailSummary | null>(null)
+  const requestRemoveLocal = useCallback((email: EmailSummary) => setRemoveLocalChoice(email), [setRemoveLocalChoice])
+  const confirmRemoveLocal = useCallback(() => {
+    const email = removeLocalChoice
+    setRemoveLocalChoice(null)
+    if (email) removeLocalCopy(email)
+  }, [removeLocalChoice, removeLocalCopy, setRemoveLocalChoice])
   const deleteEmail = useDeleteEmail(client, folders, useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
   }, []))
@@ -463,6 +479,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         navLabel={t('mail:mailboxNavigation')}
         navWidth={navWidth}
         navCollapsed={navCollapsed}
+        navActions={<RefreshAllButton accounts={accounts} syncStates={currentSyncStates} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         onNavChange={saveLayout}
         nav={<MailSidebar {...sidebarProps} loading={treeLoading} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         rail={<MailRail {...sidebarProps} />}
@@ -546,6 +563,11 @@ export function Workbench({ client }: { client: MailxClient }) {
               previewLines={previewLines}
               onFilterChange={setFilter}
               onSelect={openEmail}
+              onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
+              onArchive={(email, archive) => void archiveEmail(email, archive)}
+              onDelete={deleteEmail.request}
+              onRemoveLocal={requestRemoveLocal}
+              canArchive={(email) => canArchive(email, folders)}
               onLoadMore={loadMore}
             />
             )}
@@ -609,6 +631,11 @@ export function Workbench({ client }: { client: MailxClient }) {
       </AvatarSourceProvider>
       {dialog}
       <DeleteForGoodDialog {...deleteEmail.confirmation} />
+      <RemoveLocalCopyDialog
+        open={removeLocalChoice !== null}
+        onOpenChange={(open) => { if (!open) setRemoveLocalChoice(null) }}
+        onConfirm={confirmRemoveLocal}
+      />
     </TooltipProvider>
   )
 }

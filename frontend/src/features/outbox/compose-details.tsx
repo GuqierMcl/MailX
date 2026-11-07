@@ -26,15 +26,17 @@ import { formatFullTime } from '@/features/mail/format'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { composeKeys } from '@/lib/query-client'
 import { errorSummary, recipientsPreview, STATE_LABELS } from './outbox-text'
+import { DraftBodyPreview } from './draft-body-preview'
+import { DraftAttachmentList } from './draft-attachment-list'
 
 const addressText = (list: MailAddress[]) => list.map((item) => (item.name ? `${item.name} <${item.address}>` : item.address)).join('，')
 
-function Frame({ children, actions }: { children: React.ReactNode; actions: React.ReactNode }) {
+function Frame({ children, actions, scrollable = true }: { children: React.ReactNode; actions: React.ReactNode; scrollable?: boolean }) {
   useTranslation('composer')
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3" role="toolbar" aria-label={t('composer:detail.actions')}>{actions}</div>
-      <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
+      {scrollable ? <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea> : children}
     </div>
   )
 }
@@ -98,8 +100,10 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
 
   // Deleted from the composer window or by the queue: drop the selection instead of showing "不存在".
   useEffect(() => client.onDrafts((change) => {
-    if (change.draftId === draftId && change.change === 'deleted') onGone()
-  }), [client, draftId, onGone])
+    if (change.draftId !== draftId) return
+    if (change.change === 'deleted') onGone()
+    else void queryClient.invalidateQueries({ queryKey: [...composeKeys.drafts(), draftId] })
+  }), [client, draftId, onGone, queryClient])
 
   if (draft.isError) {
     return clientFailureCode(draft.error) === 'notFound'
@@ -109,7 +113,7 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
   const data = draft.data
   const account = accounts.find((row) => row.id === data?.accountId)
   return (
-    <Frame actions={(
+    <Frame scrollable={false} actions={(
       <>
         <IconButton label={t('composer:action.continueEditing')} disabled={!data} onClick={() => onEdit(draftId)}>
           <HugeiconsIcon icon={PencilEdit02Icon} />
@@ -120,16 +124,25 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
       </>
     )}>
       {data && (
-        <article className="flex animate-in flex-col gap-4 p-4 duration-150 fade-in-0">
-          <h2 className="text-lg font-semibold">{data.subject || t('composer:list.noSubject')}</h2>
-          <div className="grid gap-0.5 text-xs text-muted-foreground">
-            {account && <div>{t('composer:detail.from')}{account.senderName ? `${account.senderName} <${account.emailAddress}>` : account.emailAddress}</div>}
-            <div>{t('composer:detail.to')}{data.to.length ? addressText(data.to) : t('composer:detail.none')}</div>
-            {data.cc.length > 0 && <div>{t('composer:detail.cc')}{addressText(data.cc)}</div>}
-            {data.bcc.length > 0 && <div>{t('composer:detail.bcc')}{addressText(data.bcc)}</div>}
-            <div>{t('composer:detail.modified')}{formatFullTime(data.updatedAt)}</div>
+        <article className="flex min-h-0 flex-1 animate-in flex-col overflow-hidden duration-150 fade-in-0">
+          <ScrollArea className="max-h-[35%] shrink-0">
+            <header className="flex flex-col gap-4 p-4">
+              <h2 className="text-lg font-semibold">{data.subject || t('composer:list.noSubject')}</h2>
+              <div className="grid gap-0.5 break-words text-xs text-muted-foreground">
+                {account && <div>{t('composer:detail.from')}{account.senderName ? `${account.senderName} <${account.emailAddress}>` : account.emailAddress}</div>}
+                <div>{t('composer:detail.to')}{data.to.length ? addressText(data.to) : t('composer:detail.none')}</div>
+                {data.cc.length > 0 && <div>{t('composer:detail.cc')}{addressText(data.cc)}</div>}
+                {data.bcc.length > 0 && <div>{t('composer:detail.bcc')}{addressText(data.bcc)}</div>}
+                <div>{t('composer:detail.modified')}{formatFullTime(data.updatedAt)}</div>
+              </div>
+            </header>
+          </ScrollArea>
+          <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
+            {data.bodyText.trim() || /<img\b/i.test(data.bodyHtml)
+              ? <DraftBodyPreview client={client} draft={data} onRefresh={() => { void draft.refetch() }} />
+              : <p className="text-muted-foreground">{t('composer:detail.emptyBody')}</p>}
           </div>
-          <p className="text-sm break-words whitespace-pre-wrap">{data.bodyText || t('composer:detail.emptyBody')}</p>
+          <DraftAttachmentList attachments={data.attachments} />
         </article>
       )}
       <AlertDialog open={confirming} onOpenChange={setConfirming}>

@@ -177,6 +177,8 @@ export interface MailxClient {
   createDraftFrom(request: CreateDraftFromRequest): Promise<Draft>
   listDrafts(accountId?: string | null): Promise<DraftSummary[]>
   getDraft(id: string): Promise<Draft>
+  /** Main window. Isolated, read-only preview of this saved revision; no remote images. */
+  prepareDraftBody(draftId: string, expectedRevision: number): Promise<{ documentToken: string }>
   /** Fails with `conflict` unless `expectedRevision` is current; `draftLocked` while a queue item holds the draft. */
   updateDraft(request: UpdateDraftRequest): Promise<Draft>
   deleteDraft(id: string): Promise<void>
@@ -457,6 +459,7 @@ export function createDesktopClient(): MailxClient {
     createDraftFrom: (request) => call<Draft>('drafts_create_from', { request }),
     listDrafts: (accountId = null) => call<DraftSummary[]>('drafts_list', { accountId }),
     getDraft: (id) => call<Draft>('drafts_get', { id }),
+    prepareDraftBody: (draftId, expectedRevision) => call('drafts_prepare_body', { draftId, expectedRevision }),
     updateDraft: (request) => call<Draft>('drafts_update', { request }),
     deleteDraft: (id) => call<void>('drafts_delete', { id }),
     addAttachments: (draftId, expectedRevision) => call<Draft | null>('attachments_add', { request: { draftId, expectedRevision } }),

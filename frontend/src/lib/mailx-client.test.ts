@@ -123,6 +123,7 @@ describe('drafts and sending commands', () => {
     await client.listDrafts()
     await client.listDrafts('a')
     await client.getDraft('d')
+    await client.prepareDraftBody('d', 7)
     await client.deleteDraft('d')
     await client.queueSend({ draftId: 'd', expectedRevision: 2, clientMutationId: 'q' })
     await client.listOutbox()
@@ -140,6 +141,7 @@ describe('drafts and sending commands', () => {
       ['drafts_list', { accountId: null }],
       ['drafts_list', { accountId: 'a' }],
       ['drafts_get', { id: 'd' }],
+      ['drafts_prepare_body', { draftId: 'd', expectedRevision: 7 }],
       ['drafts_delete', { id: 'd' }],
       ['outbox_queue_send', { draftId: 'd', expectedRevision: 2, clientMutationId: 'q' }],
       ['outbox_list', { accountId: null, includeAll: false }],

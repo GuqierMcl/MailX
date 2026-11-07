@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,8 @@ import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ImageFetchError, RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
-import { useSettings, useUpdateSecurity } from '@/features/settings/settings-queries'
+import { useUpdateSecurity } from '@/features/settings/settings-queries'
+import { useBodyEnvironment } from './use-body-environment'
 
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
   ? lazy(() => import('./development-body')) : null
@@ -23,27 +24,13 @@ function bodyDocumentUrl(emailId: string, documentToken: string, dark: boolean) 
   return url.href
 }
 
-function subscribeVisibility(listener: () => void) {
-  document.addEventListener('visibilitychange', listener)
-  return () => document.removeEventListener('visibilitychange', listener)
-}
-
-function subscribeAppTheme(listener: () => void) {
-  const observer = new MutationObserver(listener)
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-  return () => observer.disconnect()
-}
-
 export function BodyDocument({ client, emailId, hasRemoteImages = false }: { client: MailxClient; emailId: string; hasRemoteImages?: boolean }) {
-  const visible = useSyncExternalStore(subscribeVisibility, () => document.visibilityState !== 'hidden')
-  const settings = useSettings(client)
-  const appDark = useSyncExternalStore(subscribeAppTheme, () => document.documentElement.classList.contains('dark'))
+  const { visible, settings, dark } = useBodyEnvironment(client)
   const [version, setVersion] = useState(0)
   if (!visible) return null
   if (settings.isPending) return <BodySkeleton />
   // A settings read failure never silently grants remote access.
   const policy = settings.data?.settings.security.remoteImages ?? 'ask'
-  const dark = appDark && (settings.data?.settings.appearance.mailTheme ?? 'follow') === 'follow'
   return <Reader key={`${emailId}:${version}:${policy}:${dark}`} client={client} emailId={emailId} policy={policy} dark={dark}
     hasRemoteImages={hasRemoteImages} onReload={() => setVersion((value) => value + 1)} />
 }
@@ -71,12 +58,13 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
       </div>}
     {update.isError && <Alert variant="destructive"><AlertTitle>{t('mail:settingsSaveFailed')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
-      <DocumentSession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
+      <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
   </div>
 }
 
-function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, onReload }: {
-  client: MailxClient; emailId: string; allowImages: boolean; hasRemoteImages: boolean; dark: boolean; onReload: () => void
+/** The host binds this read-only session to either a saved draft revision or an email. */
+export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, dark, draftRevision, onReload }: {
+  client: MailxClient; emailId: string; allowImages?: boolean; hasRemoteImages?: boolean; dark: boolean; draftRevision?: number; onReload: () => void
 }) {
   useTranslation()
   const [documentToken, setDocumentToken] = useState<string | null>(null)
@@ -103,7 +91,10 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
         if (live && active.current) setError(clientFailure(failure))
       })
     })
-    void client.prepareBody(emailId, allowImages).then((prepared) => {
+    const preparation = draftRevision === undefined
+      ? client.prepareBody(emailId, allowImages)
+      : client.prepareDraftBody(emailId, draftRevision)
+    void preparation.then((prepared) => {
       if (!live) { release(prepared.documentToken); return }
       currentToken.current = prepared.documentToken
       setDocumentToken(prepared.documentToken)
@@ -115,7 +106,7 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
       if (currentToken.current) release(currentToken.current)
       currentToken.current = null
     }
-  }, [client, emailId, allowImages])
+  }, [client, emailId, allowImages, draftRevision])
 
   useEffect(() => {
     if (!cooldown) return
@@ -172,7 +163,9 @@ function DocumentSession({ client, emailId, allowImages, hasRemoteImages, dark, 
   const reasons = [...new Set(failedImages.map((status) => status.error).filter((reason): reason is ImageFetchError => reason !== null))]
 
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
-    {error && <Alert variant="destructive"><AlertTitle>{t('mail:bodyOrLinkFailed')}</AlertTitle><AlertDescription>{errorText(error)}</AlertDescription></Alert>}
+    {error && <Alert variant="destructive"><AlertTitle>{t('mail:bodyOrLinkFailed')}</AlertTitle><AlertDescription>{errorText(error)}</AlertDescription>
+      {!documentToken && <Button size="sm" variant="outline" onClick={onReload}>{t('mail:retry')}</Button>}
+    </Alert>}
     {failedImages.length > 0 && <div role="status" aria-label={t('mail:imageLoadingStatus')} className="flex shrink-0 items-center gap-3 rounded-md bg-muted px-3 py-2 text-xs">
       <span className="min-w-0 flex-1">{t('mail:imageFailureCount', { count: failedImages.length })} · {reasons.map((reason) => IMAGE_FAILURES[reason]).join('；')}</span>
       <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>{t('mail:retryImages')}</Button>
