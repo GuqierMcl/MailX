@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
-import { testClient } from '@/features/accounts/test-fixtures'
+import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { searchFor } from '@/test/search'
 import { withTitleBar } from '@/test/title-bar'
 import { LifecycleProvider } from '@/features/lifecycle/lifecycle-provider'
@@ -16,6 +16,24 @@ async function renderWorkbench() {
 }
 
 describe('workbench', () => {
+  it('refreshes every account from beside the sidebar toggle, including with the sidebar folded', async () => {
+    const accounts = [exampleAccount(), exampleAccount({ id: 'account-b', mailboxSourceId: 'source-b' })]
+    const client = testClient(accounts)
+    render(withTitleBar(<Workbench client={client} />))
+    await screen.findByRole('navigation', { name: '邮箱导航' })
+    const toggle = screen.getByRole('button', { name: '收起侧边栏' })
+    const refresh = screen.getByRole('button', { name: '立即同步全部账号' })
+    expect(within(toggle.parentElement!).getAllByRole('button')).toEqual([toggle, refresh])
+
+    await userEvent.click(toggle)
+    expect(screen.getByRole('button', { name: '展开侧边栏' })).toBeInTheDocument()
+    await userEvent.click(refresh)
+    await userEvent.click(refresh)
+    await waitFor(() => expect(client.refreshSync.mock.calls).toEqual(accounts.map((account) => [account.id])))
+    expect(refresh).toHaveAccessibleName('正在同步全部账号')
+    expect(refresh).toHaveAttribute('aria-disabled', 'true')
+  })
+
   it('uses the saved sidebar order while a new draft still resolves its original default account', async () => {
     const opened: string[] = []
     const client = createMockClient({ onOpenComposer: (draft) => { opened.push(draft.accountId) } })

@@ -13,8 +13,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- Message cards reveal read, star, archive and delete actions on hover or keyboard focus, using a small read-status ring and floating icons with a subtle opacity fade. / 邮件卡片悬停或键盘聚焦时显示已读、星标、归档和删除快捷操作，采用小型状态环与轻微淡入淡出的悬浮图标。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
+- A refresh button beside the title-bar sidebar toggle refreshes all accounts, with progress shown only for a manual refresh while automatic sync stays quiet. / 标题栏侧栏折叠按钮右侧新增刷新按钮，可刷新全部邮箱；仅手动刷新显示进度，自动同步保持安静。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
+- Message cards show star, read and archive controls in a left column when previews are enabled, with deletion at the upper right, compact controls when previews are off and a subtle hover or focus fade. / 邮件卡片开启正文预览时，星标、已读与归档操作在左侧竖排，删除保留在右上角；关闭预览时保留紧凑布局，悬停或聚焦时以轻微淡入淡出显示操作。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - Message cards bring the read-status dot closer to the avatar, and the reading toolbar uses the same empty ring for read messages and blue-dot ring for unread messages. / 邮件卡片收紧状态点与头像的间距，阅读区工具栏使用相同的空环表示已读、蓝点加环表示未读。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
+- The open message, draft or outbox item keeps a clearer selection background in blue or a custom accent across light and dark themes, falling back to blue for colors that make selection hard to distinguish. / 当前打开的邮件、草稿或发件箱项目持续显示更清晰的蓝色或自定义强调色淡底，适配浅深主题，难以区分选中状态的颜色会回退为蓝色。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 
 ## [0.1.1] - 2026-11-06
 

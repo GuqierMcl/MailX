@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AccountSyncState } from '@/generated/accounts'
 import { exampleSyncState } from '@/features/accounts/test-fixtures'
 import { toast } from '@/components/ui/toast'
-import { useManualSync } from './use-manual-sync'
+import { useManualSync, useManualSyncAll } from './use-manual-sync'
 
 vi.mock('@/components/ui/toast', () => ({ toast: { error: vi.fn() } }))
 
@@ -143,5 +143,122 @@ describe('manual account sync feedback', () => {
     expect(vi.getTimerCount()).toBe(0)
     await act(async () => response.reject(new Error('already unmounted')))
     expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+type AllSyncProps = {
+  accounts: { id: string; mailboxSourceId: string }[]
+  syncStates: Record<string, AccountSyncState>
+}
+
+function setupAll(
+  syncStates: Record<string, AccountSyncState> = { a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b' }) },
+  onRefresh = vi.fn<(accountId: string) => Promise<void>>().mockResolvedValue(undefined),
+) {
+  const accounts = ['a', 'b'].map((id) => ({ id, mailboxSourceId: `source-${id}` }))
+  return { accounts, onRefresh, ...renderHook<ReturnType<typeof useManualSyncAll>, AllSyncProps>(
+    ({ accounts, syncStates }) => useManualSyncAll(accounts, syncStates, onRefresh),
+    { initialProps: { accounts, syncStates } },
+  ) }
+}
+
+describe('manual all-account sync feedback', () => {
+  it('keeps automatic rounds quiet and does nothing without accounts', async () => {
+    const view = setupAll({ a: state({ accountId: 'a', phase: 'syncing' }) })
+    expect(view.result.current.refreshing).toBe(false)
+    view.rerender({ accounts: view.accounts, syncStates: { a: state({ accountId: 'a', sequence: 2 }) } })
+    expect(view.result.current.refreshing).toBe(false)
+    view.rerender({ accounts: [], syncStates: {} })
+    await act(async () => view.result.current.refresh())
+    expect(view.onRefresh).not.toHaveBeenCalled()
+    expect(view.result.current.refreshing).toBe(false)
+  })
+
+  it('waits for every account to finish, rejects duplicate clicks, and stays quiet afterwards', async () => {
+    const view = setupAll()
+    await act(async () => {
+      view.result.current.refresh()
+      view.result.current.refresh()
+    })
+    expect(view.onRefresh.mock.calls).toEqual([['a'], ['b']])
+    expect(view.result.current.refreshing).toBe(true)
+    // Neither the wake-up responses nor just one completed account finishes the batch.
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a', sequence: 2 }), b: state({ accountId: 'b', mailboxSourceId: 'source-b' }),
+    } })
+    expect(view.result.current.refreshing).toBe(true)
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a', sequence: 2 }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', phase: 'failed', sequence: 2 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a', phase: 'syncing', sequence: 3 }),
+      b: state({ accountId: 'b', mailboxSourceId: 'source-b', phase: 'syncing', sequence: 3 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+  })
+
+  it('reports a rejected request while continuing to wait for the other account', async () => {
+    const onRefresh = vi.fn<(accountId: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('wake-up rejected')).mockResolvedValue(undefined)
+    const view = setupAll(undefined, onRefresh)
+    await act(async () => view.result.current.refresh())
+    expect(view.onRefresh.mock.calls).toEqual([['a'], ['b']])
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(view.result.current.refreshing).toBe(true)
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', sequence: 2 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+  })
+
+  it('joins an account already syncing without queuing another round', async () => {
+    const view = setupAll({
+      a: state({ accountId: 'a', phase: 'syncing' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b' }),
+    })
+    await act(async () => view.result.current.refresh())
+    expect(view.onRefresh.mock.calls).toEqual([['b']])
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a', phase: 'syncing' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', sequence: 2 }),
+    } })
+    expect(view.result.current.refreshing).toBe(true)
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a', sequence: 2 }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', sequence: 2 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+  })
+
+  it.each(['removed', 'source replaced'] as const)('stops waiting for an account that is %s', async (change) => {
+    const view = setupAll()
+    await act(async () => view.result.current.refresh())
+    const accounts = change === 'removed'
+      ? view.accounts.filter((account) => account.id !== 'a')
+      : view.accounts.map((account) => account.id === 'a' ? { ...account, mailboxSourceId: 'new-source' } : account)
+    view.rerender({ accounts, syncStates: {
+      a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b' }),
+    } })
+    expect(view.result.current.refreshing).toBe(true)
+    view.rerender({ accounts, syncStates: {
+      a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', sequence: 2 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+  })
+
+  it('times out only accounts that never started and keeps waiting for running accounts', async () => {
+    vi.useFakeTimers()
+    const view = setupAll()
+    await act(async () => view.result.current.refresh())
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', phase: 'syncing', sequence: 2 }),
+    } })
+    act(() => vi.advanceTimersByTime(60_000))
+    expect(view.result.current.refreshing).toBe(true)
+    // A timed-out account cannot hold up the account that actually started.
+    view.rerender({ accounts: view.accounts, syncStates: {
+      a: state({ accountId: 'a' }), b: state({ accountId: 'b', mailboxSourceId: 'source-b', sequence: 3 }),
+    } })
+    expect(view.result.current.refreshing).toBe(false)
+    await act(async () => view.result.current.refresh())
+    expect(view.onRefresh.mock.calls).toEqual([['a'], ['b'], ['a'], ['b']])
   })
 })

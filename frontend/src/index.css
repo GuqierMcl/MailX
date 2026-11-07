@@ -30,6 +30,9 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
+  --mail-selection-accent: var(--color-blue-500);
+  --mail-selection: color-mix(in oklab, var(--mail-selection-accent) 18%, var(--background));
+  --mail-selection-muted-foreground: oklch(0.43 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
@@ -101,6 +104,7 @@ html[data-translucent].dark .app-canvas {
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
+  --color-mail-selection: var(--mail-selection);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -138,6 +142,9 @@ html[data-translucent].dark .app-canvas {
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
+  --mail-selection-accent: var(--color-blue-300);
+  --mail-selection: color-mix(in oklab, var(--mail-selection-accent) 22%, var(--background));
+  --mail-selection-muted-foreground: oklch(0.708 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -155,6 +162,13 @@ html[data-translucent].dark .app-canvas {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* The opened row stays distinct from hover, including while focus is in the
+   reader. Outside the utility layer so hover/focus utilities cannot erase it. */
+.mail-selected {
+  background-color: var(--mail-selection);
+  --muted-foreground: var(--mail-selection-muted-foreground);
 }
 
 /* Base UI hides native scrollbars under its own with an injected <style> tag,

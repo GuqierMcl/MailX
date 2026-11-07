@@ -39,6 +39,7 @@
   "addAccount": "Add email account",
   "appearanceCommand": "Appearance: {{theme}}",
   "syncAllAccounts": "Sync all accounts now",
+  "syncingAllAccounts": "Syncing all accounts",
   "collapseSidebar": "Collapse sidebar",
   "expandSidebar": "Expand sidebar",
   "clearSearchTerm": "Clear search “{{search}}”",

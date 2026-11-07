@@ -46,6 +46,7 @@ describe('applyAppearance', () => {
     applyAppearance({ theme: 'dark', accentColor: '#facc15', interfaceFont: 'Georgia', mailFont: '', mailTheme: 'follow', fontSize: 'large', previewLines: 'one' })
     expect(root()).toHaveClass('dark')
     expect(root().style.getPropertyValue('--primary')).toBe('#facc15')
+    expect(root().style.getPropertyValue('--mail-selection-accent')).toBe('#facc15')
     expect(root().style.getPropertyValue('--primary-foreground')).toBe('#171717')
     expect(root().style.getPropertyValue('--app-font-sans')).toBe('"Georgia", sans-serif')
     expect(root().style.fontSize).toBe('17px')
@@ -53,12 +54,30 @@ describe('applyAppearance', () => {
     applyAppearance(DEFAULT_APPEARANCE)
     expect(root()).not.toHaveClass('dark')
     expect(root().style.getPropertyValue('--primary')).toBe('')
+    expect(root().style.getPropertyValue('--mail-selection-accent')).toBe('')
     expect(root().style.fontSize).toBe('')
   })
 
   it('picks readable text for light and dark accents', () => {
     expect(accentForeground('#1d4ed8')).toBe('#ffffff')
     expect(accentForeground('#fde047')).toBe('#171717')
+  })
+
+  it.each([
+    { theme: 'light', accentColor: '#ffffff' },
+    { theme: 'dark', accentColor: '#000000' },
+    { theme: 'light', accentColor: '#808080' },
+    { theme: 'dark', accentColor: '#6b7280' },
+    { theme: 'light', accentColor: '#ffff70' },
+    { theme: 'dark', accentColor: '#220000' },
+  ] as const)('keeps a visible selection fallback for $accentColor in $theme mode without changing the chosen accent', (appearance) => {
+    applyAppearance({ ...DEFAULT_APPEARANCE, accentColor: '#2563eb' })
+    expect(root().style.getPropertyValue('--mail-selection-accent')).toBe('#2563eb')
+
+    applyAppearance({ ...DEFAULT_APPEARANCE, ...appearance })
+    expect(root().style.getPropertyValue('--primary')).toBe(appearance.accentColor)
+    // Removing an earlier override restores the light/dark blue token in CSS.
+    expect(root().style.getPropertyValue('--mail-selection-accent')).toBe('')
   })
 })
 

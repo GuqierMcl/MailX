@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@/test/render'
+import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
 import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount } from '@/features/accounts/test-fixtures'
 import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
@@ -65,15 +65,15 @@ describe('which mailbox a message belongs to', () => {
 })
 
 describe('starred messages', () => {
-  it('show a yellow filled star before the subject, not after it', () => {
-    const [row] = renderList([email('a', { isStarred: true, hasAttachment: true })], null)
+  it.each(['one', 'none'] as const)('show one persistent yellow star with preview setting %s', (previewLines) => {
+    const [row] = renderList([email('a', { isStarred: true, hasAttachment: true })], null, previewLines)
     const star = within(row).getByLabelText('已加星标')
     const subject = within(row).getByText('主题 a')
     expect(star).toHaveClass('text-amber-500')
     expect(star.getAttribute('fill')).toBe('currentColor')
-    // Document order: star, then subject, then the attachment icon.
+    // The compact row keeps its subject marker; taller rows move it to the state column.
+    expect(subject.parentElement!.contains(star)).toBe(previewLines === 'none')
     const attachment = within(row).getByLabelText('有附件')
-    expect(star.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(subject.compareDocumentPosition(attachment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -84,7 +84,7 @@ describe('starred messages', () => {
 })
 
 describe('row actions', () => {
-  it('keeps read state at the left and exposes the action rail without opening the message', async () => {
+  it.each(['one', 'none'] as const)('exposes all actions without opening the message with preview setting %s', async (previewLines) => {
     const { default: userEvent } = await import('@testing-library/user-event')
     const target = email('a', { isRead: false })
     const onSelect = vi.fn()
@@ -96,7 +96,7 @@ describe('row actions', () => {
         title="全部收件箱" emails={[target]} accounts={null} loading={false}
         syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
         hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
-        filter="all" search="" selectedId={null} previewLines="one"
+        filter="all" search="" selectedId={null} previewLines={previewLines}
         onFilterChange={vi.fn()} onSelect={onSelect} onLoadMore={vi.fn()}
         onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} canArchive={() => true}
       />,
@@ -115,6 +115,45 @@ describe('row actions', () => {
     expect(onFlag).toHaveBeenCalledWith(target, 'starred', true)
     expect(onArchive).toHaveBeenCalledWith(target, true)
     expect(onDelete).toHaveBeenCalledWith(target)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('keeps a starred action visible at rest and follows the vertical order with the keyboard', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const target = email('a', { isRead: false, isStarred: true })
+    const onSelect = vi.fn()
+    const onFlag = vi.fn()
+    const onArchive = vi.fn()
+    render(
+      <EmailList
+        title="全部收件箱" emails={[target]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={target.id} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={onSelect} onLoadMore={vi.fn()}
+        onFlag={onFlag} onArchive={onArchive} onDelete={vi.fn()} canArchive={() => true}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+    const star = within(row).getByRole('button', { name: '取消星标', pressed: true })
+    expect(within(row).getAllByLabelText('已加星标')).toHaveLength(1)
+    expect(within(row).queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
+
+    // Start on the message, then Tab through the visible top-to-bottom actions.
+    act(() => within(row).getByRole('button', { name: /GitHub/ }).focus())
+    await waitFor(() => expect(within(row).getByRole('button', { name: '标为已读' })).toBeInTheDocument())
+    await userEvent.tab()
+    expect(star).toHaveFocus()
+    await userEvent.keyboard(' ')
+    expect(onFlag).toHaveBeenCalledWith(target, 'starred', false)
+    await userEvent.tab()
+    expect(within(row).getByRole('button', { name: '标为已读' })).toHaveFocus()
+    await userEvent.tab()
+    expect(within(row).getByRole('button', { name: '归档' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    expect(onArchive).toHaveBeenCalledWith(target, true)
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(row).toHaveAttribute('aria-current', 'true')
   })
 
   it('does not offer server flag or delete actions for a local-only copy', () => {

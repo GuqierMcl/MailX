@@ -33,6 +33,7 @@ import { AvatarSourceProvider } from './sender-avatar'
 import { MailRail } from './mail-rail'
 import { MailSidebar } from './mail-sidebar'
 import { ReaderToggle } from './reader-toggle'
+import { RefreshAllButton } from './refresh-all-button'
 import { folderLabel, mailboxTitle, STARRED_EXCLUDED_ROLES, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
@@ -478,6 +479,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         navLabel={t('mail:mailboxNavigation')}
         navWidth={navWidth}
         navCollapsed={navCollapsed}
+        navActions={<RefreshAllButton accounts={accounts} syncStates={currentSyncStates} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         onNavChange={saveLayout}
         nav={<MailSidebar {...sidebarProps} loading={treeLoading} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         rail={<MailRail {...sidebarProps} />}

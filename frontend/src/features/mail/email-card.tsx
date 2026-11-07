@@ -56,6 +56,9 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
   const canDelete = Boolean(onDelete) && !email.localOnly
   const canRemoveLocal = Boolean(onRemoveLocal) && email.localOnly
   const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal
+  // The shortest rows cannot fit three comfortable targets beside the avatar.
+  const verticalActions = previewLines !== 'none'
+  const hasCornerActions = canDelete || canRemoveLocal || (!verticalActions && (canChangeFlags || canChangeArchive))
   const [actionsMounted, setActionsMounted] = useState(false)
   const [actionsVisible, setActionsVisible] = useState(false)
   const wantsActionsVisible = useRef(false)
@@ -103,6 +106,35 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
     'transition-opacity duration-150 ease-out motion-reduce:transition-none',
     actionsVisible ? 'opacity-100' : 'opacity-0',
   )
+  const starButton = (
+    <IconButton
+      data-row-action
+      label={email.isStarred ? t('mail:unstar') : t('mail:star')}
+      aria-pressed={email.isStarred}
+      className={cn(
+        QUICK_ACTION_CLASS,
+        verticalActions && 'size-6 min-h-[24px] min-w-[24px]',
+        email.isStarred && 'text-amber-500 hover:text-amber-500',
+      )}
+      onClick={() => onFlag?.(email, 'starred', !email.isStarred)}
+    >
+      <HugeiconsIcon icon={StarIcon} aria-label={verticalActions && email.isStarred ? t('mail:starred') : undefined} fill={email.isStarred ? 'currentColor' : 'none'} />
+    </IconButton>
+  )
+  const archiveButton = (
+    <IconButton
+      data-row-action
+      label={email.archived ? t('mail:unarchive') : t('mail:archive')}
+      className={cn(QUICK_ACTION_CLASS, verticalActions && 'size-6 min-h-[24px] min-w-[24px]')}
+      onClick={() => onArchive?.(email, !email.archived)}
+    >
+      <HugeiconsIcon icon={email.archived ? ArchiveRestoreIcon : Archive02Icon} />
+    </IconButton>
+  )
+  const starMarker = email.isStarred && (
+    <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
+  )
+  const hideTime = hasCornerActions && actionsVisible
   return (
     <div
       ref={ref}
@@ -126,7 +158,7 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
       }}
       className={cn(
         'group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5 focus-within:bg-foreground/5',
-        selected && 'bg-background shadow-xs hover:bg-background focus-within:bg-background',
+        selected && 'mail-selected',
       )}
     >
       <button
@@ -136,7 +168,7 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
         <SenderAvatar sender={counterpart} accountId={email.accountId} />
         <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
           <div className="flex w-full flex-col gap-1">
-            <div className={cn('flex items-center gap-2', hasActions ? 'pr-24' : 'pr-16')}>
+            <div className={cn('flex items-center gap-2', !verticalActions && hasActions ? 'pr-24' : 'pr-16')}>
               {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
                   muted, and gives way to the sender before the time ever does. */}
               <span className="flex min-w-0 items-baseline gap-1.5">
@@ -153,9 +185,7 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
             </div>
             {/* The blue dot is the only visual read-state marker in the row. */}
             <div className="flex items-center gap-1.5 text-xs text-foreground/75">
-              {email.isStarred && (
-                <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
-              )}
+              {!verticalActions && starMarker}
               <span className="truncate">{email.subject || t('mail:noSubject')}</span>
               {email.hasAttachment && (
                 <HugeiconsIcon icon={Attachment01Icon} aria-label={t('mail:hasAttachment')} className="size-3.5 shrink-0 text-muted-foreground" />
@@ -170,52 +200,46 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
           )}
         </div>
       </button>
-      {/* The left slot is always fixed. The blue dot is the only read-state marker;
-          its neutral ring appears only while the same slot is an action button.
-          It follows the main button in the DOM so keyboard focus reaches it next. */}
-      <ReadStatusButton
-        data-row-action
-        isRead={email.isRead}
-        interactive={canChangeFlags && actionsMounted}
-        className="order-1"
-        ringClassName={actionVisibility}
-        onClick={() => onFlag?.(email, 'read', !email.isRead)}
-      />
+      {/* This slot stays centred beside the avatar. Its absolute actions use the
+          space above and below without changing row height or text width.
+          DOM order keeps the main message first, then star, read and archive. */}
+      <div data-slot="email-state-actions" className="relative order-1 flex size-7 shrink-0 items-center justify-center">
+        {verticalActions && (
+          <div className="absolute inset-x-0 -top-6.5 flex h-6 items-center justify-center">
+            {canChangeFlags && (actionsMounted || email.isStarred) ? (
+              <span className={email.isStarred ? undefined : actionVisibility}>{starButton}</span>
+            ) : starMarker}
+          </div>
+        )}
+        <ReadStatusButton
+          data-row-action
+          isRead={email.isRead}
+          interactive={canChangeFlags && actionsMounted}
+          ringClassName={actionVisibility}
+          onClick={() => onFlag?.(email, 'read', !email.isRead)}
+        />
+        {verticalActions && canChangeArchive && actionsMounted && (
+          <div className={cn('absolute inset-x-0 top-7.5 flex h-6 items-center justify-center', actionVisibility)}>
+            {archiveButton}
+          </div>
+        )}
+      </div>
       <div className="order-3 absolute top-2 right-3 flex h-7 items-center justify-end">
         <time
           dateTime={email.receivedAt}
-          aria-hidden={actionsVisible || undefined}
+          aria-hidden={hideTime || undefined}
           className={cn(
             'shrink-0 text-xs transition-opacity duration-150 ease-out motion-reduce:transition-none',
-            actionsVisible ? 'opacity-0' : 'opacity-100',
+            hideTime ? 'opacity-0' : 'opacity-100',
             selected ? 'text-foreground' : 'text-muted-foreground',
           )}
         >
           {formatListTime(email.receivedAt)}
         </time>
-        {hasActions && actionsMounted && (
+        {hasCornerActions && actionsMounted && (
           <div className={cn('absolute right-0 flex items-center gap-0.5', actionVisibility)}>
-            {canChangeFlags && (
-              <IconButton
-                data-row-action
-                label={email.isStarred ? t('mail:unstar') : t('mail:star')}
-                aria-pressed={email.isStarred}
-                className={cn(QUICK_ACTION_CLASS, email.isStarred && 'text-amber-500 hover:text-amber-500')}
-                onClick={() => onFlag?.(email, 'starred', !email.isStarred)}
-              >
-                <HugeiconsIcon icon={StarIcon} fill={email.isStarred ? 'currentColor' : 'none'} />
-              </IconButton>
-            )}
-            {canChangeArchive && (
-              <IconButton
-                data-row-action
-                label={email.archived ? t('mail:unarchive') : t('mail:archive')}
-                className={QUICK_ACTION_CLASS}
-                onClick={() => onArchive?.(email, !email.archived)}
-              >
-                <HugeiconsIcon icon={email.archived ? ArchiveRestoreIcon : Archive02Icon} />
-              </IconButton>
-            )}
+            {!verticalActions && canChangeFlags && starButton}
+            {!verticalActions && canChangeArchive && archiveButton}
             {canDelete && (
               <IconButton
                 data-row-action
