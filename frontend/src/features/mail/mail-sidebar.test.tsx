@@ -142,7 +142,7 @@ describe('sidebar unread numbers follow read changes', () => {
     await waitFor(() => expect(numberIn(workInbox())).toBe((before.work ?? 0) - 1 || null))
     expect(numberIn(inbox())).toBe((before.all ?? 0) - 1 || null)
 
-    await userEvent.click(await screen.findByRole('button', { name: '标为未读' }))
+    await userEvent.click(within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '标为未读' }))
     await waitFor(() => expect(numberIn(workInbox())).toBe(before.work))
     expect(numberIn(inbox())).toBe(before.all)
   })
@@ -157,8 +157,7 @@ describe('sidebar unread numbers follow read changes', () => {
     const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
     const before = rows().length
     await userEvent.click(rows()[0])
-    // The sidebar has rows named 归档 too; the reader's button is the one outside it.
-    const archiveButton = () => screen.getAllByRole('button', { name: '归档' }).find((button) => !button.closest('nav'))!
+    const archiveButton = () => within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '归档' })
     await waitFor(() => expect(archiveButton()).toBeEnabled())
     await userEvent.click(archiveButton())
     await waitFor(() => expect(rows()).toHaveLength(before - 1))
@@ -168,7 +167,7 @@ describe('sidebar unread numbers follow read changes', () => {
     await waitFor(() => expect(rows()).toHaveLength(1))
     expect(within(rows()[0]).getByText('已归档')).toBeInTheDocument()
     await userEvent.click(rows()[0])
-    expect(await screen.findByRole('button', { name: '移回收件箱' })).toBeInTheDocument()
+    expect(within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '移回收件箱' })).toBeInTheDocument()
 
     await userEvent.click(within(archive()).getByRole('button', { name: '归档' }))
     expect(screen.getByRole('heading', { name: '全部已归档' })).toBeInTheDocument()

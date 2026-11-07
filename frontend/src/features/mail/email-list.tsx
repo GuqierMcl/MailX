@@ -3,8 +3,8 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Attachment01Icon, InboxIcon, Search01Icon, StarIcon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary, PreviewLines, SnippetSegment } from '@/generated/accounts'
+import { InboxIcon, Search01Icon } from '@hugeicons/core-free-icons'
+import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -12,10 +12,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { displayName, formatListTime, recipientsLabel } from './format'
-import { LocalOnlyMarker } from './local-only-marker'
-import { isGivenUp, useGaveUpVersion } from './preview-gave-up'
-import { SenderAvatar } from './sender-avatar'
+import { EmailCard } from './email-card'
+import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
 
 export type ListFilter = 'all' | 'unread'
@@ -51,6 +49,16 @@ type EmailListProps = {
   previewLines: PreviewLines
   /** Asks for the previews of the listed rows; the complete wanted set every time. */
   onRequestPreviews?: (emailIds: string[]) => void
+  /** Changes a message read or starred flag from the row action rail. */
+  onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
+  /** Archives or restores a message when the current row can be changed locally. */
+  onArchive?: (email: EmailSummary, archive: boolean) => void
+  /** Deletes a server message through the existing undo / confirmation flow. */
+  onDelete?: (email: EmailSummary) => void
+  /** Requests confirmation before removing a local-only sent copy. */
+  onRemoveLocal?: (email: EmailSummary) => void
+  /** Whether local archive is available for this message's current folder. */
+  canArchive?: (email: EmailSummary) => boolean
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
@@ -77,7 +85,7 @@ export function EmailList(props: EmailListProps) {
   )
 }
 
-function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -146,6 +154,7 @@ function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, er
   return (
     <VirtualRows
       sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
+      onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
     />
@@ -177,6 +186,11 @@ type VirtualRowsProps = {
   selectedId: string | null
   previewLines: PreviewLines
   onRequestPreviews?: (emailIds: string[]) => void
+  onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
+  onArchive?: (email: EmailSummary, archive: boolean) => void
+  onDelete?: (email: EmailSummary) => void
+  onRemoveLocal?: (email: EmailSummary) => void
+  canArchive?: (email: EmailSummary) => boolean
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
@@ -188,7 +202,7 @@ type VirtualRowsProps = {
   onLoadMore: () => void
 }
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // The selected and the focused row stay mounted however far they scroll away,
@@ -282,7 +296,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
         {virtualItems.map((item) => {
           const email = emails[item.index]
           return (
-            <EmailRow
+            <EmailCard
               key={item.key}
               ref={virtualizer.measureElement}
               index={item.index}
@@ -293,6 +307,11 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
               account={accounts?.find((account) => account.id === email.accountId) ?? null}
               selected={email.id === selectedId}
               previewLines={previewLines}
+              onFlag={onFlag}
+              onArchive={onArchive}
+              onDelete={onDelete}
+              onRemoveLocal={onRemoveLocal}
+              canArchive={canArchive}
               onSelect={() => onSelect(email)}
             />
           )
@@ -310,119 +329,5 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
         <p className="px-3 pb-3 text-center text-xs text-muted-foreground">{t('mail:syncCoverageLimited')}</p>
       )}
     </ScrollArea>
-  )
-}
-
-const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
-  one: 'line-clamp-1',
-  two: 'line-clamp-2',
-  three: 'line-clamp-3',
-}
-
-const PREVIEW_HEIGHT: Record<Exclude<PreviewLines, 'none'>, string> = {
-  one: 'h-4',
-  two: 'h-8',
-  three: 'h-12',
-}
-
-/**
- * What the preview slot shows. A row still waiting for its preview says so on the
- * first line; failed rows and rows given up on stay blank. A downloaded body is
- * always a ready preview.
- */
-function previewText(email: EmailSummary) {
-  if (email.bodyState === 'ready' || email.previewState === 'ready') return email.preview
-  if (email.previewState === 'missing' && !isGivenUp(email.id)) return t('mail:previewLoading')
-  return ''
-}
-
-/** Hits are marked with a faint wash and a stronger text color, never a border; segments are plain text. */
-function SnippetText({ segments }: { segments: SnippetSegment[] }) {
-  return segments.map((segment, index) => segment.hit
-    ? <mark key={index} className="rounded-xs bg-foreground/10 text-foreground">{segment.text}</mark>
-    : <span key={index}>{segment.text}</span>)
-}
-
-type EmailRowProps = {
-  email: EmailSummary
-  sentView: boolean
-  account: Account | null
-  selected: boolean
-  previewLines: PreviewLines
-  index: number
-  count: number
-  style: React.CSSProperties
-  ref: React.Ref<HTMLButtonElement>
-  onSelect: () => void
-}
-
-function EmailRow({ email, sentView, account, selected, previewLines, index, count, style, ref, onSelect }: EmailRowProps) {
-  useTranslation()
-  // In a sent view the row is about who the mail went to. The avatar follows
-  // the same person, so it never shows the account owner on every row.
-  const counterpart = sentView ? email.to.addresses[0] ?? email.from : email.from
-  return (
-    <button
-      ref={ref}
-      type="button"
-      role="listitem"
-      aria-setsize={count}
-      aria-posinset={index + 1}
-      data-index={index}
-      style={style}
-      aria-current={selected ? 'true' : undefined}
-      onClick={onSelect}
-      className={cn(
-        'absolute inset-x-3 flex items-center gap-3 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5',
-        selected && 'bg-background shadow-xs hover:bg-background',
-      )}
-    >
-      {/* Avatar and unread marker are centered on the row; the marker has a
-          column of its own at the far left, so every dot sits on the same line
-          however long the sender is. A fixed blue, not the accent color: a red
-          or amber accent would read as an error or clash with the star. */}
-      <span className="-mr-1.5 flex w-2 shrink-0 justify-center">
-        {!email.isRead && <span aria-label={t('mail:unread')} className="size-2 rounded-full bg-blue-500 dark:bg-blue-400" />}
-      </span>
-      <SenderAvatar sender={counterpart} accountId={email.accountId} />
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
-        <div className="flex w-full flex-col gap-1">
-          <div className="flex items-center gap-2">
-            {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
-                muted, and gives way to the sender before the time ever does. */}
-            <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className={cn('truncate', email.isRead ? 'font-normal' : 'font-semibold')}>{sentView ? recipientsLabel(email.to) : displayName(email.from)}</span>
-              {account && (
-                <>
-                  <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
-                  <span className="min-w-0 truncate text-xs text-muted-foreground" title={account.emailAddress}>{account.displayName}</span>
-                </>
-              )}
-            </span>
-            {email.localOnly && <LocalOnlyMarker className="ml-auto" />}
-            {email.archived && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t('mail:archivedMarker')}</span>}
-            <span className={cn(email.localOnly || email.archived ? 'shrink-0' : 'ml-auto shrink-0', 'text-xs', selected ? 'text-foreground' : 'text-muted-foreground')}>
-              {formatListTime(email.receivedAt)}
-            </span>
-          </div>
-          {/* Unread is told by weight too, never by the dot's color alone. */}
-          <div className={cn('flex items-center gap-1.5 text-xs', email.isRead ? 'font-normal text-foreground/75' : 'font-semibold')}>
-            {email.isStarred && (
-              <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
-            )}
-            <span className="truncate">{email.subject || t('mail:noSubject')}</span>
-            {email.hasAttachment && (
-              <HugeiconsIcon icon={Attachment01Icon} aria-label={t('mail:hasAttachment')} className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-          </div>
-        </div>
-        {/* The slot is always reserved, even without a preview, so every row has one height. */}
-        {previewLines !== 'none' && (
-          <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>
-            {email.matchSnippet ? <SnippetText segments={email.matchSnippet} /> : previewText(email)}
-          </p>
-        )}
-      </div>
-    </button>
   )
 }

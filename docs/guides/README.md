@@ -27,6 +27,8 @@ Automatic sync runs quietly: account rows keep their unread counts without a loa
 
 Opening a message downloads and caches its body, so cached content can be read offline later. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
 
+Hover or focus a message to show quick actions for starring, archiving or restoring, and deleting. The small ring at the left toggles read status; the reading toolbar uses the same ring. An empty ring means read, and a ring with a blue dot means unread. Local sent copies offer a confirmed removal from this device instead.
+
 Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under More → Archive or under Archived in the account, and it is unchanged for other clients. A server folder that is itself called Archive stays under its account with the server's name. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
 
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.

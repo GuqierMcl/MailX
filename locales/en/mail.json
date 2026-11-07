@@ -168,6 +168,7 @@
   "removeLocalCopyTitle": "Remove this message from this device?",
   "removeLocalCopyDescription": "This only removes the sent copy stored on this device. It does not affect the server and cannot be undone.",
   "removeLocalCopyConfirm": "Remove",
+  "removeLocalCopyFailed": "Couldn’t remove from this device",
   "cancel": "Cancel",
   "movedToTrash": "Moved to Trash",
   "deletedForGood": "Deleted forever",

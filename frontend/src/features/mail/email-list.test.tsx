@@ -83,6 +83,69 @@ describe('starred messages', () => {
   })
 })
 
+describe('row actions', () => {
+  it('keeps read state at the left and exposes the action rail without opening the message', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const target = email('a', { isRead: false })
+    const onSelect = vi.fn()
+    const onFlag = vi.fn()
+    const onArchive = vi.fn()
+    const onDelete = vi.fn()
+    render(
+      <EmailList
+        title="全部收件箱" emails={[target]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={onSelect} onLoadMore={vi.fn()}
+        onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} canArchive={() => true}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+
+    expect(within(row).getByLabelText('未读')).toBeInTheDocument()
+    await userEvent.hover(row)
+    await userEvent.click(within(row).getByRole('button', { name: '标为已读' }))
+    expect(onFlag).toHaveBeenCalledWith(target, 'read', true)
+    expect(onSelect).not.toHaveBeenCalled()
+
+    await userEvent.click(within(row).getByRole('button', { name: '加星标' }))
+    await userEvent.click(within(row).getByRole('button', { name: '归档' }))
+    await userEvent.click(within(row).getByRole('button', { name: '删除' }))
+    expect(onFlag).toHaveBeenCalledWith(target, 'starred', true)
+    expect(onArchive).toHaveBeenCalledWith(target, true)
+    expect(onDelete).toHaveBeenCalledWith(target)
+  })
+
+  it('does not offer server flag or delete actions for a local-only copy', () => {
+    const [row] = renderList([email('local', { localOnly: true })], null)
+    expect(within(row).queryByRole('button', { name: '标为已读' })).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: '标为未读' })).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: '加星标' })).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+  })
+
+  it('offers local removal through its own confirmation request', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const target = email('local', { localOnly: true })
+    const onRemoveLocal = vi.fn()
+    render(
+      <EmailList
+        title="已发送" sentView emails={[target]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        onRemoveLocal={onRemoveLocal}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+    await userEvent.hover(row)
+    await userEvent.click(within(row).getByRole('button', { name: '从本机移除' }))
+    expect(onRemoveLocal).toHaveBeenCalledWith(target)
+  })
+})
+
 describe('body preview lines', () => {
   const long = email('a', { preview: '第一行内容。'.repeat(40) })
 
