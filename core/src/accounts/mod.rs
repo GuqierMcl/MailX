@@ -54,6 +54,12 @@ impl AccountService {
         self.storage.account_identities()
     }
 
+    /// Durable version only; local readers never need the credential store.
+    pub(crate) fn revision(&self, id: &str) -> Result<u32, AppError> {
+        validate_uuid(id, "accountId")?;
+        self.storage.account_revision(id)
+    }
+
     pub(crate) fn email_address(&self, id: &str) -> Result<String, AppError> {
         validate_uuid(id, "accountId")?;
         self.storage.account_address(id)

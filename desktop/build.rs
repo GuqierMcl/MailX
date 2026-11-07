@@ -56,6 +56,7 @@ fn main() {
             "drafts_create_from",
             "drafts_list",
             "drafts_get",
+            "drafts_prepare_body",
             "drafts_update",
             "attachments_add",
             "attachments_add_dropped",

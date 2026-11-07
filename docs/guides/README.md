@@ -39,6 +39,8 @@ Remote images ask first by default, and attachments can be saved as local files.
 
 New mail, reply, reply all and forward use a separate compose window, and drafts save locally as you type. You can attach files, insert pictures or paste screenshots; attachments and inline images together default to a 20 MiB limit, and providers may impose a lower one. Drafts do not sync to other clients.
 
+Open Drafts in the sidebar and select a draft to preview its saved formatting and inline images in the reading pane. The preview follows your message theme setting and updates after the draft saves; file attachments are listed separately. Use Continue editing to reopen the compose window, or Delete to discard the draft.
+
 Check the recipients, sending account, body and attachments, then confirm sending with the second click as prompted. For an undo window, choose 5, 10, 20 or 30 seconds in Settings → Sending; the default waits not at all. Undo only applies to items still waiting in the queue and cannot recall mail the server has accepted.
 
 The outbox shows queued, failed and unknown outcomes. An unknown outcome means the server may have accepted the message, and MailX will not resend it on its own; check the recipient or the provider's Sent folder first, then decide whether to retry manually. The server accepting an SMTP submission does not mean the recipient received the message.

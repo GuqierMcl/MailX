@@ -17,6 +17,9 @@ use tauri::{
 };
 use uuid::Uuid;
 
+mod source;
+use source::BodySource;
+
 const TOKEN_LIFETIME: Duration = Duration::from_secs(30 * 60);
 const MAX_DOCUMENTS: usize = 128;
 pub(crate) const LINK_EVENT: &str = "mailx://link-request";
@@ -141,7 +144,7 @@ pub(crate) fn navigation(app: &tauri::AppHandle, url: &Url) -> bool {
 #[derive(Clone)]
 struct Document {
     token: String,
-    binding: BodyBinding,
+    binding: BodySource,
     expires_at: Instant,
     remote_images: bool,
     explicit_images: bool,
@@ -388,7 +391,8 @@ impl BodyProtocol {
             .lock()
             .expect("test policy probe lock") = Some((id, canary_origin));
     }
-    fn issue(&self, binding: BodyBinding) -> Result<String, AppError> {
+    fn issue(&self, binding: impl Into<BodySource>) -> Result<String, AppError> {
+        let binding = binding.into();
         let mut documents = self.documents.lock().map_err(|_| missing())?;
         documents.retain(|_, document| {
             if Instant::now() < document.expires_at {
@@ -456,6 +460,18 @@ impl BodyProtocol {
         Ok(prepared)
     }
 
+    pub(crate) async fn prepare_draft(
+        &self,
+        core: &MailxCore,
+        draft_id: String,
+        expected_revision: u32,
+    ) -> Result<PreparedBody, AppError> {
+        let binding = core.prepare_draft_body(draft_id, expected_revision).await?;
+        Ok(PreparedBody {
+            document_token: self.issue(BodySource::Draft(binding))?,
+        })
+    }
+
     fn set_base_css(&self, css: String) {
         if let Ok(mut current) = self.base_css.lock() {
             *current = css;
@@ -521,7 +537,7 @@ impl BodyProtocol {
             Ok(document)
         };
         let document = allowed()?;
-        let statuses = core.body_image_status(document.binding).await?;
+        let statuses = core.body_image_status(document.binding.email()?).await?;
         allowed()?;
         Ok(statuses)
     }
@@ -535,7 +551,7 @@ impl BodyProtocol {
     ) -> Result<PreparedBody, AppError> {
         self.image_status(core, id, token, policy).await?;
         let previous = self.resolve(id, token)?;
-        let binding = core.body_retry_images(previous.binding).await?;
+        let binding = core.body_retry_images(previous.binding.email()?).await?;
         let next = Uuid::new_v4().to_string();
         {
             let mut documents = self.documents.lock().map_err(|_| missing())?;
@@ -554,7 +570,7 @@ impl BodyProtocol {
                 next.clone(),
                 Document {
                     token: next.clone(),
-                    binding,
+                    binding: binding.into(),
                     expires_at: Instant::now() + TOKEN_LIFETIME,
                     remote_images: true,
                     explicit_images: current.explicit_images,
@@ -657,7 +673,7 @@ impl BodyProtocol {
             Route::Document { id, token, dark } => {
                 let document = self.resolve(&id, &token)?;
                 let allow_remote = document.remote_images;
-                let document = core.body_document_bound(document.binding).await?;
+                let html = document.binding.document(core).await?;
                 self.resolve(&id, &token)?;
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
@@ -676,9 +692,9 @@ impl BodyProtocol {
                     })
                 };
                 let html = if self.numbered_links {
-                    render::bind_numbered_resources(&document.html, resolve)
+                    render::bind_numbered_resources(&html, resolve)
                 } else {
-                    render::bind_resources(&document.html, resolve)
+                    render::bind_resources(&html, resolve)
                 };
                 let html = format!(
                     "<!doctype html><html><head><meta charset=\"utf-8\"><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
@@ -718,7 +734,9 @@ impl BodyProtocol {
                 if !document.remote_images {
                     return Err(missing());
                 }
-                let image = core.body_remote_image(document.binding, index).await?;
+                let image = core
+                    .body_remote_image(document.binding.email()?, index)
+                    .await?;
                 if !self.resolve(&id, &token)?.remote_images {
                     return Err(missing());
                 }
@@ -735,7 +753,8 @@ impl BodyProtocol {
             }
             Route::Part { id, cid, token } => {
                 let document = self.resolve(&id, &token)?;
-                let image = core.body_part(document.binding, cid).await?;
+                let image = document.binding.part(core, cid).await?;
+                self.resolve(&id, &token)?;
                 Ok((
                     response(
                         StatusCode::OK,
@@ -774,13 +793,12 @@ impl BodyProtocol {
         token: String,
     ) -> Result<BodyLinks, AppError> {
         let document = self.resolve(&id, &token)?;
-        let links = core.body_links(id.clone(), Some(document.binding)).await?;
+        let links = document.binding.links(core).await?;
         self.resolve(&id, &token)?;
         Ok(BodyLinks {
             document_token: token,
             links: if self.numbered_links {
                 links
-                    .links
                     .into_iter()
                     .enumerate()
                     .map(|(index, url)| ListedLink {
@@ -816,9 +834,7 @@ impl BodyProtocol {
         id: String,
         index: usize,
     ) -> Result<LinkRequest, AppError> {
-        let url = core
-            .body_link(id.clone(), index, Some(document.binding.clone()))
-            .await?;
+        let url = document.binding.link(core, index).await?;
         self.resolve(&id, &document.token)?;
         let request_id = Uuid::new_v4().to_string();
         let document_token = document.token.clone();
@@ -868,9 +884,7 @@ impl BodyProtocol {
             confirmations.remove(&request_id).ok_or_else(missing)?
         };
         self.resolve(&id, &token)?;
-        let url = core
-            .body_link(id.clone(), index, Some(confirmation.document.binding))
-            .await?;
+        let url = confirmation.document.binding.link(core, index).await?;
         self.resolve(&id, &token)?;
         if url != confirmation.url {
             return Err(missing());

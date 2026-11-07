@@ -487,6 +487,11 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
+    prepareDraftBody: async (draftId, expectedRevision) => {
+      const draft = requireDraft(draftId)
+      if (draft.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
+      return { documentToken: crypto.randomUUID() }
+    },
     releaseBody: async () => undefined,
     imageStatus: async () => [],
     retryImages: async () => ({ documentToken: crypto.randomUUID() }),
@@ -1065,7 +1070,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
   })
 }
 
-/** Browser preview only (`?seed=outbox`): one plain draft plus sends that end failed, unknown and retrying. */
+/** Browser preview only (`?seed=outbox`): one rich draft plus sends that end failed, unknown and retrying. */
 export async function seedPreviewOutbox(client: MailxClient) {
   const make = async (to: string, subject: string, bodyText: string) => {
     const draft = await client.createDraft({
@@ -1073,7 +1078,11 @@ export async function seedPreviewOutbox(client: MailxClient) {
     })
     return draft
   }
-  await make('team@example.com', '周会纪要（草稿）', '各位好，\n\n本周的进展如下……')
+  const preview = await client.createDraft({
+    accountId: null, to: [{ name: null, address: 'team@example.com' }], cc: [], bcc: [], subject: '周会纪要（草稿）', clientMutationId: crypto.randomUUID(),
+    bodyHtml: '<h2>本周进展</h2><p>各位好，</p><p>本周已完成 <strong>邮件卡片优化</strong> 和 <span data-color="blue">草稿富文本预览</span>。</p><p><br></p><ul><li><p>状态点与常用操作保持紧凑</p></li><li><p>阅读时保留标题、列表和引用</p></li></ul><p><br></p><blockquote><p>下周重点：<mark data-highlight="yellow">完善阅读体验</mark></p></blockquote><p><br></p><p data-align="right"><em>林伟</em></p>',
+  })
+  await client.addAttachments(preview.id, preview.revision)
   for (const [to, subject] of [['fail@example.com', '报价单'], ['unknown@example.com', '合同终稿'], ['retry@example.com', '会议邀请']] as const) {
     const draft = await make(to, subject, '正文')
     await client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() })

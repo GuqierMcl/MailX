@@ -111,6 +111,7 @@ type EmailPage = {
 | `requestPreviews(emailIds)` | `emails_request_previews`，`{ emailIds: string[] }`（仅 main 窗口） | null；立即返回，结果经 `mailx://email-previews` 推送 |
 | `onEmailPreviews(listener)` | `mailx://email-previews`，`{ items: [{ emailId, preview, previewState }] }` | 取消监听函数 |
 | `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
+| `prepareDraftBody(draftId, expectedRevision)` | `drafts_prepare_body`，`{ draftId, expectedRevision }`（仅 main 窗口） | `{ documentToken }`，绑定当前已保存的草稿版本 |
 | `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
 | `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, loading, error }`，无原始 URL |
 | `retryImages(emailId, documentToken)` | `emails_retry_images`，`{ emailId, documentToken }` | `{ documentToken }`，复用成功图片、清理失败状态、撤销旧令牌 |
@@ -128,6 +129,10 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 下载使用独立的账号路由连接、EXAMINE 和 UID BODY.PEEK[]，不改变服务端已读状态。同一邮件共享 flight，每账号正文串行，账号之间无全局限额。已缓存正文只读本地数据；失败通常以 bodyState=failed 的成功详情返回，前端不能仅靠 Promise rejection 判断失败。邮件不可见时返回 notFound，存储不可写时返回受控错误，不假称已保存失败状态。
 
 每次 HTML 阅读先 prepare，随后用 `new URL(convertFileSrc('', 'mailx-body'))` 设置 pathname `/document/<emailId>` 和 token 查询参数。空 sandbox 的 iframe 只访问该文档；协议 GET 不创建或重绑令牌。离开本次阅读时调用 release，删除令牌、待处理链接授权并释放远程图片内存；迟到的 prepare 结果同样释放，重复 release 无副作用。令牌有效期 30 分钟、最多 128 个，作为清理后备，各自独立；来源、revision、目录、UIDVALIDITY、present 和净化版本变化会令旧绑定失效。桌面保存账号连接成功后还会主动撤销该账号的文档和待处理链接授权，并取消旧阅读的排队/网络图片请求。
+
+草稿预览先调用 `prepareDraftBody`，再以草稿 UUID 作为正文身份加载 `/document/<draftId>?token=…`；`releaseBody` 和链接事件里的 `emailId` 字段在这条路径上同样传草稿 UUID。令牌内部区分邮件与草稿来源，并绑定草稿所属账号、账号连接 revision 和已保存的草稿 `revision`，不能靠同形 UUID 在两类来源间切换。准备时版本不匹配返回 `conflict`；后续正文、内嵌图片和链接读取均复核草稿存在性与版本，草稿保存、删除或账号连接版本变化 / 移除后旧绑定失效，并返回 `notFound`。主窗口收到草稿变更事件后重新获取草稿，并按新版本准备和释放预览；切换草稿、隐藏和意外重载沿用邮件正文的生命周期规则。
+
+草稿 HTML 由核心把已有受限格式转换为发信 HTML，再经过阅读端净化与资源绑定；正文在空 sandbox 内显示，不进入具有 IPC 权限的 DOM。预览保留标题、强调、列表、引用、对齐、固定色板和本地 `cid:` 图片，按正文主题设置显示；不加载远程图片。内嵌图片通过同一令牌下的图片资源读取，`inline_image_preview` 仍仅向写信窗口开放。普通附件在正文外只显示元数据，继续编辑和删除仍由主窗口工具栏提供；此读取流程不修改草稿或触发发送。
 
 `mailx://link-request` 载荷为 `{ emailId, index, url, documentToken, requestId }`。点击正文原位置的链接时，原生导航回调先取消 WebView 跳转，再产生受控事件；WebView2 保留协议 204 后备路径。UI 只接受当前已加载、可见文档的事件，立即提交身份与一次性 requestId 给 links_open，不提交 URL，不再显示编号列表或逐次确认弹窗。宿主重新读取链接并限制 http / https / mailto，由系统浏览器或邮件应用打开；悬停通过链接 title 显示真实地址。重复事件、切换邮件、隐藏或文档意外重载后的旧事件均被丢弃。旧编号接口保留内部兼容，生产模式返回空列表且拒绝 links_request。
 
@@ -182,6 +187,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | --- | --- | --- | --- |
 | `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform`、`window_set_theme` | 是 | 是 | 窗口命令只作用于调用窗口 |
 | `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
+| `drafts_prepare_body { draftId, expectedRevision }` | 是 | 否 | 为已保存版本创建只读正文令牌；HTML、内嵌图片及链接使用隔离正文协议，见“按需正文与外链” |
 | `attachments_add { request: { draftId, expectedRevision } }`、`attachments_add_dropped { request: { draftId, expectedRevision } }`、`attachments_remove { request: { draftId, attachmentId, expectedRevision } }` | 否（`validation`） | 仅自己的草稿 | 请求里没有本地路径：`attachments_add` 由宿主打开系统多选对话框（取消返回 `null`），`attachments_add_dropped` 认领宿主收到的系统文件拖入（`composer://files-dropped` 通知页面，无载荷；没有待认领路径返回 `null`）。均返回最新 `Draft`；已入队的草稿返回 `draftLocked`，revision 不符返回 `conflict`，超限返回 `attachmentTooLarge` / `tooManyAttachments` |
 | `attachments_policy { accountId }` | 否（`validation`） | 是 | 返回 `AttachmentPolicy { maxTotalBytes, maxCount, serverLimitMb }`；`serverLimitMb` 只是提示，核心在添加与入队时仍然裁决 |
 | `drafts_create { request }`、`drafts_create_from { request }`、`drafts_list { accountId? }` | 是 | 否 | 创建在 main 完成；`drafts_create` 由宿主读取 `compose.defaultAccountId` 传给核心；`drafts_create_from` 由宿主读取当前 `effectiveLocale` 生成引用头 |

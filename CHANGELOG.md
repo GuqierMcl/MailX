@@ -13,6 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- Draft previews show saved rich-text formatting and inline images, follow the message theme and update after saving, with file attachments listed separately. / 草稿预览保留已保存的富文本格式和内嵌图片，跟随正文主题并在保存后更新，普通文件附件单独列出。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - A refresh button beside the title-bar sidebar toggle refreshes all accounts, with progress shown only for a manual refresh while automatic sync stays quiet. / 标题栏侧栏折叠按钮右侧新增刷新按钮，可刷新全部邮箱；仅手动刷新显示进度，自动同步保持安静。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - Message cards show star, read and archive controls in a left column when previews are enabled, with deletion at the upper right, compact controls when previews are off and a subtle hover or focus fade. / 邮件卡片开启正文预览时，星标、已读与归档操作在左侧竖排，删除保留在右上角；关闭预览时保留紧凑布局，悬停或聚焦时以轻微淡入淡出显示操作。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - Message cards bring the read-status dot closer to the avatar, and the reading toolbar uses the same empty ring for read messages and blue-dot ring for unread messages. / 邮件卡片收紧状态点与头像的间距，阅读区工具栏使用相同的空环表示已读、蓝点加环表示未读。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))

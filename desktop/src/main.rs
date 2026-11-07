@@ -306,6 +306,7 @@ fn main() {
             compose::drafts_create_from,
             compose::drafts_list,
             compose::drafts_get,
+            compose::drafts_prepare_body,
             compose::drafts_update,
             compose_files::attachments_add,
             compose_files::attachments_add_dropped,

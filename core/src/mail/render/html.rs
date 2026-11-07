@@ -12,7 +12,7 @@ const REMOTE_SLOT: &str = "data-mailx-remote";
 const DATA_SLOT: &str = "data-mailx-data";
 const BODY_MARK: &str = "data-mailx-body";
 
-pub(super) struct Sanitized {
+pub(crate) struct Sanitized {
     pub html: String,
     pub links: Vec<String>,
     pub remote_images_blocked: u32,
@@ -256,7 +256,7 @@ fn body_as_div(value: &str) -> String {
         .replace("</BODY>", "</div>")
 }
 
-pub(super) fn sanitize(value: &str) -> Sanitized {
+pub(crate) fn sanitize(value: &str) -> Sanitized {
     let value = body_as_div(value);
     let mut document = Html::parse_fragment(&value);
     let mut links = Vec::new();
