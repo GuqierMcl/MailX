@@ -13,8 +13,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- Message cards reveal read, star, archive and delete actions on hover or keyboard focus, using a small read-status ring and floating icons with a subtle opacity fade. / 邮件卡片悬停或键盘聚焦时显示已读、星标、归档和删除快捷操作，采用小型状态环与轻微淡入淡出的悬浮图标。
-- Message cards bring the read-status dot closer to the avatar, and the reading toolbar uses the same empty ring for read messages and blue-dot ring for unread messages. / 邮件卡片收紧状态点与头像的间距，阅读区工具栏使用相同的空环表示已读、蓝点加环表示未读。
+- Message cards reveal read, star, archive and delete actions on hover or keyboard focus, using a small read-status ring and floating icons with a subtle opacity fade. / 邮件卡片悬停或键盘聚焦时显示已读、星标、归档和删除快捷操作，采用小型状态环与轻微淡入淡出的悬浮图标。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
+- Message cards bring the read-status dot closer to the avatar, and the reading toolbar uses the same empty ring for read messages and blue-dot ring for unread messages. / 邮件卡片收紧状态点与头像的间距，阅读区工具栏使用相同的空环表示已读、蓝点加环表示未读。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 
 ## [0.1.1] - 2026-11-06
 
