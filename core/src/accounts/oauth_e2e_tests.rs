@@ -4,7 +4,8 @@ use super::*;
 use crate::{
     auth::{
         IdentityVerifier, MailEndpointPolicy, MailLoginPolicy, MailProtocolPolicy, OAuthError,
-        ProviderRegistration, TokenSet, VerifiedIdentity,
+        ProviderRegistration, TokenManager, TokenSet, VerifiedIdentity,
+        credential::ProtocolCredential,
     },
     net::NetRoute,
     secrets::{SecretStore, test_support::MemorySecrets},
@@ -463,4 +464,290 @@ async fn wrong_verified_identity_never_produces_consumable_authorization() {
     assert!(coordinator.finish(&start.session_id).await.is_err());
     assert_eq!(count.load(Ordering::SeqCst), 1);
     server.abort();
+}
+
+/// One refresh-token grant returning `access`; yields the request body.
+async fn refresh_server(access: &'static str) -> (u16, tokio::task::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(stream);
+        let mut line = String::new();
+        let mut len = 0;
+        loop {
+            line.clear();
+            stream.read_line(&mut line).await.unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(value) = line.to_lowercase().strip_prefix("content-length: ") {
+                len = value.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; len];
+        stream.read_exact(&mut body).await.unwrap();
+        // No `expires_in` and no `scope`: both are optional in RFC 6749 §5.1.
+        let response = format!(r#"{{"access_token":"{access}","token_type":"Bearer"}}"#);
+        stream.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).as_bytes()).await.unwrap();
+        String::from_utf8(body).unwrap()
+    });
+    (port, task)
+}
+
+/// A grant whose cached access token is still fresh locally but has been
+/// revoked by the provider.
+fn revoked_manager(token_port: u16, imap: u16, smtp: u16) -> Arc<TokenManager> {
+    let registration = ProviderRegistration {
+        id: "revoked-fixture".into(),
+        issuer: "fixture-issuer".into(),
+        client_id: "public-client".into(),
+        registration_id: "revoked-registration".into(),
+        mail_policy: MailEndpointPolicy {
+            imap: MailProtocolPolicy {
+                host: "localhost".into(),
+                port: imap,
+                tls: crate::TlsMode::Implicit,
+                login: MailLoginPolicy::Fixed("lin".into()),
+            },
+            smtp: MailProtocolPolicy {
+                host: "localhost".into(),
+                port: smtp,
+                tls: crate::TlsMode::Implicit,
+                login: MailLoginPolicy::Fixed("lin".into()),
+            },
+        },
+        authorization_endpoint: Url::parse(&format!("http://127.0.0.1:{token_port}/authorize"))
+            .unwrap(),
+        token_endpoint: Url::parse(&format!("http://127.0.0.1:{token_port}/token")).unwrap(),
+        scopes: vec!["mail".into()],
+        resource: None,
+        allowed_targets: vec![],
+    };
+    let mut manager = TokenManager::new(
+        registration,
+        Arc::new(MemorySecrets::default()),
+        "revoked-grant".into(),
+    )
+    .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    manager
+        .restore(TokenSet {
+            access_token: SecretValue::new("revoked-access".into()),
+            refresh_token: Some(SecretValue::new("still-valid-refresh".into())),
+            expires_at: now + 3600,
+            target: Some(crate::auth::TokenTarget::new(None, vec!["mail".into()])),
+            scopes: vec!["mail".into()],
+        })
+        .unwrap();
+    Arc::new(manager)
+}
+
+/// SMTP server that rejects every bearer except `accepted`.
+async fn rejecting_smtp(
+    tls: Arc<rustls::ServerConfig>,
+    attempts: Vec<&'static str>,
+    accepted: Option<&'static str>,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        for token in attempts {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_rustls::TlsAcceptor::from(tls.clone())
+                .accept(stream)
+                .await
+                .unwrap();
+            let mut stream = BufReader::new(stream);
+            stream
+                .get_mut()
+                .write_all(b"220 fixture\r\n")
+                .await
+                .unwrap();
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            stream
+                .get_mut()
+                .write_all(b"250-fixture\r\n250 AUTH XOAUTH2\r\n")
+                .await
+                .unwrap();
+            line.clear();
+            stream.read_line(&mut line).await.unwrap();
+            let encoded = line.trim().strip_prefix("AUTH XOAUTH2 ").unwrap();
+            assert_eq!(
+                STANDARD.decode(encoded).unwrap(),
+                format!("user=lin\x01auth=Bearer {token}\x01\x01").as_bytes()
+            );
+            if Some(token) == accepted {
+                stream.get_mut().write_all(b"235 ok\r\n").await.unwrap();
+                line.clear();
+                stream.read_line(&mut line).await.unwrap();
+                assert_eq!(line, "QUIT\r\n");
+                stream.get_mut().write_all(b"221 bye\r\n").await.unwrap();
+            } else {
+                stream
+                    .get_mut()
+                    .write_all(b"535 5.7.8 token revoked\r\n")
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+    (port, task)
+}
+
+#[tokio::test]
+async fn smtp_rejection_of_a_locally_fresh_token_refreshes_once_and_retries() {
+    let tls = crate::net::test_support::TestTls::for_names(&["localhost"]);
+    let (token_port, refresh) = refresh_server("replacement-access").await;
+    let (smtp, server) = rejecting_smtp(
+        tls.server.clone(),
+        vec!["revoked-access", "replacement-access"],
+        Some("replacement-access"),
+    )
+    .await;
+    let manager = revoked_manager(token_port, 1, smtp);
+    let login = crate::smtp::SmtpLogin {
+        host: "localhost".into(),
+        port: smtp,
+        tls: crate::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: ProtocolCredential::ManagedOAuth2(manager.clone()),
+    };
+    crate::smtp::verify_connection(
+        &NetRoute::default(),
+        &login,
+        &crate::smtp::Timeouts::for_tests(Duration::from_secs(3)),
+        &crate::smtp::TlsSource::Test(tls.client.clone()),
+    )
+    .await
+    .unwrap();
+    assert!(
+        refresh
+            .await
+            .unwrap()
+            .contains("refresh_token=still-valid-refresh")
+    );
+    server.await.unwrap();
+    assert_eq!(
+        manager.cached_token().unwrap().expose_secret(),
+        "replacement-access"
+    );
+    assert!(!manager.needs_reauthorization());
+}
+
+#[tokio::test]
+async fn smtp_rejection_of_a_refreshed_token_is_reported_without_looping() {
+    let tls = crate::net::test_support::TestTls::for_names(&["localhost"]);
+    let (token_port, refresh) = refresh_server("also-rejected").await;
+    let (smtp, server) = rejecting_smtp(
+        tls.server.clone(),
+        vec!["revoked-access", "also-rejected"],
+        None,
+    )
+    .await;
+    let manager = revoked_manager(token_port, 1, smtp);
+    let login = crate::smtp::SmtpLogin {
+        host: "localhost".into(),
+        port: smtp,
+        tls: crate::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: ProtocolCredential::ManagedOAuth2(manager),
+    };
+    let outcome = crate::smtp::verify_connection(
+        &NetRoute::default(),
+        &login,
+        &crate::smtp::Timeouts::for_tests(Duration::from_secs(3)),
+        &crate::smtp::TlsSource::Test(tls.client.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            &outcome,
+            crate::smtp::SmtpOutcome::Permanent(failure)
+                if failure.reason == crate::smtp::FailureReason::SignInRequired
+        ),
+        "{outcome:?}"
+    );
+    refresh.await.unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn imap_rejection_of_a_locally_fresh_token_refreshes_once_and_retries() {
+    let tls = crate::net::test_support::TestTls::for_names(&["localhost"]);
+    let (token_port, refresh) = refresh_server("replacement-access").await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let imap = listener.local_addr().unwrap().port();
+    let server_tls = tls.server.clone();
+    let server = tokio::spawn(async move {
+        for token in ["revoked-access", "replacement-access"] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_rustls::TlsAcceptor::from(server_tls.clone())
+                .accept(stream)
+                .await
+                .unwrap();
+            let mut stream = BufReader::new(stream);
+            stream.get_mut().write_all(b"* OK ready\r\n").await.unwrap();
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            let tag = line.split_whitespace().next().unwrap().to_owned();
+            assert!(line.contains("AUTHENTICATE XOAUTH2"));
+            stream.get_mut().write_all(b"+ \r\n").await.unwrap();
+            line.clear();
+            stream.read_line(&mut line).await.unwrap();
+            assert_eq!(
+                STANDARD.decode(line.trim()).unwrap(),
+                format!("user=lin\x01auth=Bearer {token}\x01\x01").as_bytes()
+            );
+            if token == "revoked-access" {
+                stream
+                    .get_mut()
+                    .write_all(format!("{tag} NO [AUTHENTICATIONFAILED] revoked\r\n").as_bytes())
+                    .await
+                    .unwrap();
+                continue;
+            }
+            stream
+                .get_mut()
+                .write_all(format!("{tag} OK authenticated\r\n").as_bytes())
+                .await
+                .unwrap();
+            line.clear();
+            stream.read_line(&mut line).await.unwrap();
+            let tag = line.split_whitespace().next().unwrap();
+            stream
+                .get_mut()
+                .write_all(format!("* CAPABILITY IMAP4rev1\r\n{tag} OK done\r\n").as_bytes())
+                .await
+                .unwrap();
+        }
+    });
+    let manager = revoked_manager(token_port, imap, 1);
+    let login = crate::imap::ImapLogin {
+        host: "localhost".into(),
+        port: imap,
+        tls: crate::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: ProtocolCredential::ManagedOAuth2(manager.clone()),
+    };
+    let _session =
+        crate::imap::test_network_session(&NetRoute::default(), &login, tls.client.clone())
+            .await
+            .unwrap();
+    assert!(
+        refresh
+            .await
+            .unwrap()
+            .contains("refresh_token=still-valid-refresh")
+    );
+    server.await.unwrap();
+    assert_eq!(
+        manager.cached_token().unwrap().expose_secret(),
+        "replacement-access"
+    );
 }

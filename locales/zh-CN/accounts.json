@@ -220,8 +220,8 @@
   "removingAccount": "正在移除…",
   "accountRemoved": "账号已移除",
   "credentialCleanupPending": "账号已从本机移除。部分凭证暂未清理，应用会在凭据库可用后重试。",
-  "oauthManagedCredentials": "此账号单独管理 OAuth 授权，不使用密码。",
+  "oauthManagedCredentials": "此账号通过邮箱服务商登录，不需要输入密码。",
   "oauthConnected": "已连接",
   "oauthNeedsReauthorization": "需要重新登录",
-  "oauthConnectionUnavailable": "此账号需要通过 OAuth 授权更新连接设置，当前无法在此编辑。"
+  "oauthConnectionUnavailable": "此账号通过邮箱服务商登录，暂时不能在这里修改连接设置。"
 }

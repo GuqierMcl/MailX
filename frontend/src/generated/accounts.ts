@@ -290,7 +290,7 @@ body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 
-export type SyncFailureCode = "authentication" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
+export type SyncFailureCode = "authentication" | "signInRequired" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**

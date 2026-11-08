@@ -325,7 +325,7 @@ pub(crate) async fn push_deletions(
 fn failed_round(error: ImapError, waiting: usize) -> RoundEnd {
     match error {
         ImapError::ProviderPolicy => RoundEnd::ProviderPolicy,
-        ImapError::Authentication(_) => RoundEnd::Blocked,
+        ImapError::Authentication(_) | ImapError::SignInRequired => RoundEnd::Blocked,
         _ => RoundEnd::Retry(WriteBackReport {
             waiting,
             ..WriteBackReport::default()

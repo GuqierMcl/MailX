@@ -156,7 +156,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
 与设计的差异与限制：
 
 - **代理认证失败与其他代理错误不区分**：`net` 目前把 SOCKS5 / HTTP CONNECT 的失败都报为 `NetError::Proxy(字符串)`，没有结构化原因，所以会话一律按临时失败（`proxy`）处理；第 3 步若要对代理认证失败给出永久失败，需先让 `net` 报告结构化原因。
-- `AUTH` 回复 4xx 视为临时服务器错误，5xx 为 `authRejected`。
+- `AUTH` 回复 4xx 视为临时服务器错误，5xx 为 `authRejected`。OAuth 账号刷新后的新 token 仍被 5xx 拒绝时记为 `signInRequired`（提示用户重新登录）；领取后才发现需要重新授权也记为可重试的 `signInRequired`。
 - `EHLO` 使用地址字面量 `[127.0.0.1]` 作为客户端标识，避免泄露本机主机名；未支持 `SMTPUTF8`，非 ASCII 的信封地址在第 1 步校验时已被拒绝，MIME 必须是纯 ASCII（由 lettre 对非 ASCII 内容做 QP / base64），否则 `invalidMessage`。
 - 没有实现 PIPELINING；命令逐条等待回复，以便逐个记录 RCPT 结果。
 - 服务器声明 `SIZE` 时，MAIL FROM 附带 `SIZE=` 并在发送前比较；比较的是 MIME 字节数，未计点填充后的开销。
@@ -194,7 +194,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
 
 ### 第 3 步的实现（`core/src/send/`、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`）
 
-- OAuth 发送在领取队列项与增加 `attempts` 前取得有效 token；需要重新授权或授权网络暂时不可用时保持 `queued`，记录 `authorizationRequired` / `authorizationUnavailable` 并等待唤醒或有界重试，不消耗 SMTP 尝试次数。恢复授权会发出解除阻塞事件，授权等待时长不计入已开始的 24 小时重试预算。用户主动“立即重试”会重启该预算；明确重新发送创建新行，启动恢复保留原窗口及未结束的授权暂停时段。
+- OAuth 发送在领取队列项与增加 `attempts` 前取得有效 token；需要重新授权或授权网络暂时不可用时保持 `queued`，记录 `authorizationRequired` / `authorizationUnavailable` 并等待唤醒或有界重试，不消耗 SMTP 尝试次数。只在该账号确有到期项时才检查授权，退出暂停领取期间不刷新 token；凭证缺失、无法解码或不再受信记为 `authorizationRequired`，只有本机存储 / 凭据库暂时故障或授权服务网络不可用才记为 `authorizationUnavailable`。领取后才发现需要重新授权的竞态按可重试失败处理，不让邮件永久失败。恢复授权会发出解除阻塞事件，授权等待时长不计入已开始的 24 小时重试预算。用户主动“立即重试”会重启该预算；明确重新发送创建新行，启动恢复保留原窗口及未结束的授权暂停时段。
 - **每账号一个串行 worker**（`send::worker::OutboxManager`）：循环为“取下一项并解析登录计划（持锁、短事务）→ 不持锁发送 → 短事务记录结果”。启动时、新入队、撤销、立即重试、账号连接更新时唤醒；没有到期项时睡到最早的 `max(not_before, next_attempt_at)`，最长睡 60 秒（系统时钟被调整时不会长期滞留）。账号被删除时 worker 退出。
 - **竞争点是一条带条件的 `UPDATE`**：worker 的 `queued → sending` 与 `cancel` 的 `queued → canceled` 都带 `WHERE state = 'queued'`，同一行只能有一个成功；输家得到 `alreadySending`（撤销时已在发送）或 `conflict`（已处于其他状态）。取走时 `attempts` 加一。
 - **`DataStarted` 钩子**在 `spawn_blocking` 里写 `data_started_at`，提交后才返回 `Ok`；写失败或该行已不是 `sending` 时返回 `Err`，会话按 `dataMarkFailed` 在正文前停止。

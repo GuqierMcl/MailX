@@ -34,19 +34,20 @@ pub(crate) async fn open_body_session(
     route: &NetRoute,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
-    let resolved = super::resolve_login(route, login).await?;
-    let login = &resolved;
-    let guard = ReceiveGuard::default();
-    let result = async {
-        // Unlike header sync, the body connection keeps its receive gate for
-        // EXAMINE and MIME transfer as well as authentication.
-        let (client, _gate) = super::connect_client(route, login, &guard).await?;
-        let mut session = super::authenticate(client, login).await?;
-        session.body_guard = Some(guard.clone());
-        Ok(session)
-    }
-    .await;
-    guard.check(result)
+    super::with_resolved_login(route, login, |login| async move {
+        let guard = ReceiveGuard::default();
+        let result = async {
+            // Unlike header sync, the body connection keeps its receive gate for
+            // EXAMINE and MIME transfer as well as authentication.
+            let (client, _gate) = super::connect_client(route, &login, &guard).await?;
+            let mut session = super::authenticate(client, &login).await?;
+            session.body_guard = Some(guard.clone());
+            Ok(session)
+        }
+        .await;
+        guard.check(result)
+    })
+    .await
 }
 
 #[cfg(test)]

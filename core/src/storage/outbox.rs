@@ -556,6 +556,21 @@ impl Storage {
 
     /// Takes the earliest due queued item into `sending`, or says when to look
     /// again. Only a still-`queued` row can be taken.
+    /// Whether `claim_next` at `now` would find a message to send.
+    pub(crate) fn has_due_outbox(
+        &self,
+        account_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<bool, AppError> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outbox
+             WHERE account_id = ?1 AND state = 'queued' AND not_before <= ?2
+               AND (next_attempt_at IS NULL OR next_attempt_at <= ?2))",
+            params![account_id, stamp(now)],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn claim_next(
         &mut self,
         account_id: &str,

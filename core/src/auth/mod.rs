@@ -530,9 +530,30 @@ impl TokenManager {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
     pub(crate) fn invalidate(&self) -> bool {
-        !self
+        let first = !self
             .invalidated
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+            .swap(true, std::sync::atomic::Ordering::SeqCst);
+        // An invalidated grant never issues another bearer; drop the cached
+        // copies so retired managers do not keep them in memory.
+        if let Ok(mut cached) = self.cached.write() {
+            cached.clear();
+        }
+        // Owned refresh/persistence work rechecks validity under this lock
+        // and never reads the grant after invalidation; if it is busy, that
+        // work releases it shortly and the manager is dropped once drained.
+        if let Ok(mut tokens) = self.tokens.try_lock() {
+            *tokens = None;
+        }
+        first
+    }
+    /// A mail server rejected `token` although it has not expired locally
+    /// (early revocation, rotation or a shorter server-side lifetime). Forget
+    /// it so the next resolution refreshes instead of replaying the bearer.
+    /// Only the rejected value is removed; a concurrently refreshed token stays.
+    pub(crate) fn reject_access_token(&self, token: &SecretValue) {
+        if let Ok(mut cached) = self.cached.write() {
+            cached.retain(|_, tokens| tokens.access_token.expose_secret() != token.expose_secret());
+        }
     }
     pub(crate) fn is_valid(&self) -> bool {
         !self.invalidated.load(std::sync::atomic::Ordering::SeqCst)

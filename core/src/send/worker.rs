@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use super::Clock;
 use super::schedule::{self, Transition};
 use super::types::{OutboxChanged, OutboxError};
-use crate::accounts::{AccountService, Next};
+use crate::accounts::{AccountService, Next, SendAdmission};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
 use crate::send::types::OutboxState;
@@ -72,6 +72,13 @@ impl Drop for ActiveSend {
 impl Shared {
     /// Runs a queue claim atomically with the shutdown gate. A successful claim
     /// owns its guard until protocol work and durable result recording finish.
+    fn paused(&self) -> bool {
+        self.gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .paused
+    }
+
     fn claim<T>(
         &self,
         take: impl FnOnce() -> Result<(T, bool), AppError>,
@@ -265,41 +272,46 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
         let Some(service) = shared.service.upgrade() else {
             return;
         };
+        if shared.paused() {
+            // Quit is pending: no token refresh or outbox write until resumed.
+            drop(service);
+            wake.notified().await;
+            continue;
+        }
         let admission_id = account_id.clone();
+        let admission_now = clock.now();
         let admission = blocking(&service, move |service| {
-            service.oauth_send_admission(&admission_id)
+            service.oauth_send_admission(&admission_id, admission_now)
         })
         .await;
-        let admission_revision = match admission {
-            Ok(Some((revision, plan))) => {
-                if let Err(error) = plan.login.credential.resolve(&plan.route).await {
-                    let reason = match error {
+        let blocked = match admission {
+            Ok(SendAdmission::NotRequired) => Ok(None),
+            Ok(SendAdmission::Ready { revision, plan }) => {
+                match plan.login.credential.resolve(&plan.route).await {
+                    Ok(_) => Ok(Some(revision)),
+                    Err(
                         crate::auth::OAuthError::ReauthenticationRequired
-                        | crate::auth::OAuthError::AuthorizationDenied => "authorizationRequired",
-                        _ => "authorizationUnavailable",
-                    };
-                    let id = account_id.clone();
-                    let now = clock.now();
-                    if let Ok(changed) = blocking(&service, move |service| {
-                        service.record_oauth_send_blocked(&id, reason, now)
-                    })
-                    .await
-                    {
-                        shared.announce(changed);
-                    }
-                    drop(service);
-                    tokio::select! { () = tokio::time::sleep(Duration::from_secs(60)) => {}, () = wake.notified() => {} }
-                    continue;
+                        | crate::auth::OAuthError::AuthorizationDenied,
+                    ) => Err("authorizationRequired"),
+                    Err(_) => Err("authorizationUnavailable"),
                 }
-                Some(revision)
             }
-            Ok(None) => None,
+            Ok(SendAdmission::Blocked(reason)) => Err(reason),
+            Ok(SendAdmission::Paused) => {
+                drop(service);
+                wake.notified().await;
+                continue;
+            }
             Err(error) if error.code == ErrorCode::NotFound => return,
-            Err(_) => {
+            Err(_) => Err("authorizationUnavailable"),
+        };
+        let admission_revision = match blocked {
+            Ok(revision) => revision,
+            Err(reason) => {
                 let id = account_id.clone();
                 let now = clock.now();
                 if let Ok(changed) = blocking(&service, move |service| {
-                    service.record_oauth_send_blocked(&id, "authorizationUnavailable", now)
+                    service.record_oauth_send_blocked(&id, reason, now)
                 })
                 .await
                 {

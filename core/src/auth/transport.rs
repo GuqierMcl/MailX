@@ -107,13 +107,12 @@ async fn exchange_inner(
     if parsed.token_type() != &oauth2::basic::BasicTokenType::Bearer {
         return Err(OAuthError::InvalidResponse);
     }
-    let scopes: Vec<String> = parsed
-        .scopes()
-        .map(|s| s.iter().map(|s| s.as_str().to_owned()).collect())
-        .unwrap_or_else(|| required_scopes.to_vec());
-    if required_scopes.iter().any(|scope| !scopes.contains(scope)) {
-        return Err(OAuthError::InvalidResponse);
-    }
+    let scopes = granted_scopes(
+        parsed
+            .scopes()
+            .map(|s| s.iter().map(|s| s.as_str().to_owned()).collect()),
+        required_scopes,
+    )?;
     let access = parsed.access_token().secret();
     if access.is_empty() || access.len() > 16384 || access.chars().any(char::is_control) {
         return Err(OAuthError::InvalidResponse);
@@ -129,11 +128,13 @@ async fn exchange_inner(
         Some(s) => Some(SecretValue::new(s.secret().clone())),
         None => previous,
     };
-    let lifetime = parsed
-        .expires_in()
-        .map(|d| d.as_secs())
-        .filter(|n| *n > 0 && *n <= 31_536_000)
-        .ok_or(OAuthError::InvalidResponse)?;
+    // RFC 6749 §5.1 only recommends `expires_in`. Without it, assume a short
+    // lifetime; a mail server rejecting the bearer earlier forces a refresh.
+    let lifetime = match parsed.expires_in().map(|d| d.as_secs()) {
+        None => DEFAULT_TOKEN_LIFETIME_SECS,
+        Some(n) if n > 0 && n <= 31_536_000 => n,
+        Some(_) => return Err(OAuthError::InvalidResponse),
+    };
     Ok(TokenSet {
         access_token: SecretValue::new(access.clone()),
         refresh_token: refresh,
@@ -141,6 +142,36 @@ async fn exchange_inner(
         scopes,
         target: Some(TokenTarget::new(resource, required_scopes.to_vec())),
     })
+}
+
+/// Lifetime assumed when a token response omits `expires_in`.
+const DEFAULT_TOKEN_LIFETIME_SECS: u64 = 30 * 60;
+
+/// Request-level scopes that authorization servers commonly honour without
+/// echoing them in the granted `scope` list (for example Microsoft identity
+/// omits `offline_access`). They never grant mailbox access by themselves.
+const UNECHOED_META_SCOPES: &[&str] = &["offline_access", "openid", "profile", "email"];
+
+/// Validates the granted scope list (RFC 6749 §5.1: omitted means "as
+/// requested"). Every requested resource scope must be granted; requested meta
+/// scopes missing from the echo are kept so stored grants stay self-consistent.
+pub(super) fn granted_scopes(
+    granted: Option<Vec<String>>,
+    required_scopes: &[String],
+) -> Result<Vec<String>, OAuthError> {
+    let Some(mut scopes) = granted else {
+        return Ok(required_scopes.to_vec());
+    };
+    for scope in required_scopes {
+        if scopes.contains(scope) {
+            continue;
+        }
+        if !UNECHOED_META_SCOPES.contains(&scope.as_str()) {
+            return Err(OAuthError::InvalidResponse);
+        }
+        scopes.push(scope.clone());
+    }
+    Ok(scopes)
 }
 
 fn network_error(error: crate::net::NetError) -> OAuthError {

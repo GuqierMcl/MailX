@@ -226,8 +226,9 @@
     "unknown": "The connection was interrupted while sending. The server may have received this message.",
     "unspecified": "Unknown reason",
     "snapshotMissing": "The attachment copies for this message are gone. Recompose and send again.",
-    "authorizationRequired": "Mailbox authorization has expired. Sign in again to resume sending.",
-    "authorizationUnavailable": "Waiting for mailbox authorization. Sending will resume automatically."
+    "authorizationRequired": "Your mailbox sign-in has expired. Sign in again in account settings and sending will continue automatically",
+    "authorizationUnavailable": "Can't confirm your mailbox sign-in right now. Sending will continue automatically",
+    "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings, then send again"
   },
   "recipient": {
     "invalid": "Invalid address: {{address}}",

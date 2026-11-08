@@ -177,14 +177,23 @@ impl AccountService {
             })
             .unwrap_or(true)
     }
+    /// Keep an invalidated manager until its owned refresh/persistence work
+    /// drains. Earlier retirements that already drained are dropped first, so
+    /// the list stays bounded and their in-memory grants are released.
+    fn retire_oauth_manager(&self, key: String, manager: Arc<TokenManager>) {
+        manager.invalidate();
+        if let Ok(mut retired) = self.retired_oauth_managers.lock() {
+            // Invalidated managers never start new secret work, so one that is
+            // drained now stays drained.
+            retired.retain(|(_, previous)| !previous.is_drained());
+            retired.push((key, manager));
+        }
+    }
     pub(super) fn invalidate_oauth_refs(&self, keys: &[String]) {
         if let Ok(mut managers) = self.oauth_managers.lock() {
             for key in keys {
                 if let Some(manager) = managers.remove(key) {
-                    manager.invalidate();
-                    if let Ok(mut retired) = self.retired_oauth_managers.lock() {
-                        retired.push((key.clone(), manager.clone()));
-                    }
+                    self.retire_oauth_manager(key.clone(), manager);
                 }
             }
         }
@@ -192,17 +201,16 @@ impl AccountService {
     pub(super) fn invalidate_account_oauth(&self, account_id: &str) {
         if let Ok(mut managers) = self.oauth_managers.lock() {
             let prefix = format!("mailx/{account_id}/");
-            managers.retain(|key, manager| {
-                if key.starts_with(&prefix) {
-                    manager.invalidate();
-                    if let Ok(mut retired) = self.retired_oauth_managers.lock() {
-                        retired.push((key.clone(), manager.clone()));
-                    }
-                    false
-                } else {
-                    true
+            let keys: Vec<String> = managers
+                .keys()
+                .filter(|key| key.starts_with(&prefix))
+                .cloned()
+                .collect();
+            for key in keys {
+                if let Some(manager) = managers.remove(&key) {
+                    self.retire_oauth_manager(key, manager);
                 }
-            });
+            }
         }
     }
     pub(super) fn protocol_credential(
@@ -815,6 +823,60 @@ mod tests {
             )
             .unwrap()
             .0
+    }
+    #[test]
+    fn send_admission_is_skipped_when_idle_and_reports_unrecoverable_grants_as_required() {
+        use crate::accounts::SendAdmission;
+        let (_dir, mut service, account, secrets) = fixture();
+        let now = chrono::Utc::now();
+        // Nothing due: no snapshot load, plan or token work.
+        assert!(matches!(
+            service.oauth_send_admission(&account.id, now).unwrap(),
+            SendAdmission::NotRequired
+        ));
+        queued(&mut service, &account, now);
+        assert!(matches!(
+            service.oauth_send_admission(&account.id, now).unwrap(),
+            SendAdmission::Ready { revision: 1, .. }
+        ));
+        // A missing grant never recovers by itself: ask for reauthorization
+        // instead of promising an automatic resume.
+        let key = service.storage.load(&account.id).unwrap().profiles[0]
+            .secret_ref
+            .clone();
+        service.invalidate_oauth_refs(std::slice::from_ref(&key));
+        secrets.delete(&key).unwrap();
+        assert!(matches!(
+            service.oauth_send_admission(&account.id, now).unwrap(),
+            SendAdmission::Blocked("authorizationRequired")
+        ));
+        secrets
+            .set(&key, &SecretValue::new("not a token set".into()))
+            .unwrap();
+        assert!(matches!(
+            service.oauth_send_admission(&account.id, now).unwrap(),
+            SendAdmission::Blocked("authorizationRequired")
+        ));
+        service.oauth_managers_for_shutdown();
+        assert!(matches!(
+            service.oauth_send_admission(&account.id, now).unwrap(),
+            SendAdmission::Paused
+        ));
+    }
+    #[test]
+    fn retired_managers_are_released_once_drained() {
+        let (_dir, service, account, _) = fixture();
+        let key = service.storage.load(&account.id).unwrap().profiles[0]
+            .secret_ref
+            .clone();
+        for _ in 0..5 {
+            service.sync_plan(&account.id).unwrap();
+            service.invalidate_oauth_refs(std::slice::from_ref(&key));
+        }
+        let retired = service.retired_oauth_managers.lock().unwrap();
+        assert_eq!(retired.len(), 1);
+        assert!(!retired[0].1.is_valid());
+        assert!(retired[0].1.cached_token().is_none());
     }
     #[test]
     fn authorization_wait_keeps_queue_and_attempts_and_pauses_an_existing_retry_window() {

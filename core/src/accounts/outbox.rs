@@ -36,6 +36,21 @@ pub(crate) enum Next {
     },
 }
 
+/// Outcome of [`AccountService::oauth_send_admission`].
+pub(crate) enum SendAdmission {
+    /// Password account, or nothing due: claim without an OAuth precheck.
+    NotRequired,
+    /// Resolve this plan's credential before claiming at this account revision.
+    Ready {
+        revision: u32,
+        plan: crate::smtp::SmtpPlan,
+    },
+    /// Keep queued messages waiting with this outbox reason.
+    Blocked(&'static str),
+    /// OAuth shutdown has begun; touch neither the network nor the outbox.
+    Paused,
+}
+
 pub(crate) struct Step {
     /// State changes made while looking, for the host.
     pub changed: Vec<Changed>,
@@ -430,17 +445,46 @@ impl AccountService {
         Ok(Some(changed))
     }
 
+    /// Decides whether the worker may claim for this account. Only OAuth
+    /// accounts with a due message pay for a snapshot load and plan; password
+    /// accounts and idle outboxes return `NotRequired` after one cheap query.
     pub(crate) fn oauth_send_admission(
         &self,
         id: &str,
-    ) -> Result<Option<(u32, crate::smtp::SmtpPlan)>, AppError> {
+        now: DateTime<Utc>,
+    ) -> Result<SendAdmission, AppError> {
+        if !self.storage.has_due_outbox(id, now)? {
+            return Ok(SendAdmission::NotRequired);
+        }
         let account = self.storage.load(id)?.account;
         if !account.authentication.is_oauth() {
-            return Ok(None);
+            return Ok(SendAdmission::NotRequired);
         }
-        self.smtp_plan(id)
-            .map(|plan| Some((account.revision, plan)))
-            .map_err(|_| AppError::new(ErrorCode::SecretMissing))
+        if self.oauth_shutdown {
+            return Ok(SendAdmission::Paused);
+        }
+        match self.smtp_plan(id) {
+            Ok(plan) => Ok(SendAdmission::Ready {
+                revision: account.revision,
+                plan,
+            }),
+            // Missing, undecodable or no longer trusted grants never recover on
+            // their own: the user must reauthorize the mailbox.
+            Err(PlanError::CredentialMissing | PlanError::CredentialUntrusted) => {
+                Ok(SendAdmission::Blocked("authorizationRequired"))
+            }
+            Err(PlanError::Account(error))
+                if matches!(
+                    error.code,
+                    ErrorCode::SecretMissing | ErrorCode::Unsupported
+                ) =>
+            {
+                Ok(SendAdmission::Blocked("authorizationRequired"))
+            }
+            Err(PlanError::Account(error)) if error.code == ErrorCode::NotFound => Err(error),
+            // Store or keychain trouble may clear without user action.
+            Err(PlanError::Account(_)) => Ok(SendAdmission::Blocked("authorizationUnavailable")),
+        }
     }
     pub(crate) fn record_oauth_send_blocked(
         &self,

@@ -1042,3 +1042,75 @@ async fn an_unpolled_shutdown_owner_is_registered_before_its_waiter_can_be_cance
         .unwrap();
     assert!(store.get("queued-shutdown").unwrap().is_some());
 }
+
+#[test]
+fn granted_scope_echo_may_omit_meta_scopes_but_not_resource_scopes() {
+    let required = vec!["mail".to_owned(), "offline_access".to_owned()];
+    assert_eq!(
+        transport::granted_scopes(None, &required).unwrap(),
+        required
+    );
+    let granted = transport::granted_scopes(Some(vec!["mail".into()]), &required).unwrap();
+    assert!(granted.contains(&"mail".to_owned()));
+    assert!(granted.contains(&"offline_access".to_owned()));
+    assert_eq!(
+        transport::granted_scopes(Some(vec!["offline_access".into()]), &required),
+        Err(OAuthError::InvalidResponse)
+    );
+}
+
+#[tokio::test]
+async fn missing_expires_in_uses_a_short_default_lifetime() {
+    let (port, server) =
+        server(r#"{"access_token":"access","refresh_token":"refresh","token_type":"Bearer"}"#)
+            .await;
+    let tokens = transport::exchange(
+        &NetRoute::default(),
+        &registration(port).token_endpoint,
+        "grant_type=refresh_token".into(),
+        None,
+        &["mail".into()],
+    )
+    .await
+    .unwrap();
+    let lifetime = tokens.expires_at - now();
+    assert!((1700..=1800).contains(&lifetime), "{lifetime}");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn rejected_access_token_is_forgotten_and_the_next_resolution_refreshes() {
+    use crate::secrets::test_support::MemorySecrets;
+    let (port, server) =
+        server(r#"{"access_token":"replacement","token_type":"Bearer","expires_in":3600}"#).await;
+    let mut manager = TokenManager::new(
+        registration(port),
+        Arc::new(MemorySecrets::default()),
+        "rejected-grant".into(),
+    )
+    .unwrap();
+    manager
+        .restore(TokenSet {
+            access_token: SecretValue::new("revoked".into()),
+            refresh_token: Some(SecretValue::new("refresh".into())),
+            expires_at: now() + 3600,
+            target: Some(TokenTarget::new(None, vec!["mail".into()])),
+            scopes: vec!["mail".into()],
+        })
+        .unwrap();
+    let manager = Arc::new(manager);
+    // An unrelated value leaves the cache alone.
+    manager.reject_access_token(&SecretValue::new("other".into()));
+    assert_eq!(manager.cached_token().unwrap().expose_secret(), "revoked");
+    let credential = credential::ProtocolCredential::ManagedOAuth2(manager.clone())
+        .resolve(&NetRoute::default())
+        .await
+        .unwrap();
+    assert!(credential.reject());
+    assert!(manager.cached_token().is_none());
+    let token = manager.access_token(&NetRoute::default()).await.unwrap();
+    assert_eq!(token.expose_secret(), "replacement");
+    assert!(server.await.unwrap().contains("refresh_token=refresh"));
+    // Password credentials have nothing to refresh.
+    assert!(!credential::ProtocolCredential::Password(SecretValue::new("p".into())).reject());
+}

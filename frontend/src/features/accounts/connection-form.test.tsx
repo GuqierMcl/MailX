@@ -284,6 +284,6 @@ it('keeps OAuth authorization separate from password editors', async () => {
   const { submit } = renderForm(account)
   expect(document.querySelector('input[type="password"]')).toBeNull()
   expect(screen.queryByRole('button', { name: '保存更改' })).not.toBeInTheDocument()
-  expect(screen.getByText('此账号需要通过 OAuth 授权更新连接设置，当前无法在此编辑。')).toBeInTheDocument()
+  expect(screen.getByText('此账号通过邮箱服务商登录，暂时不能在这里修改连接设置。')).toBeInTheDocument()
   expect(submit).not.toHaveBeenCalled()
 })

@@ -124,6 +124,9 @@ pub(crate) enum FailureReason {
     /// The server offers no AUTH mechanism MailX supports.
     AuthUnavailable,
     AuthRejected,
+    /// An OAuth mailbox must be signed in again: the grant needs
+    /// reauthorization, or the server refused a freshly refreshed token.
+    SignInRequired,
     MessageTooLarge,
     CredentialUntrusted,
     CredentialMissing,
@@ -148,6 +151,7 @@ impl fmt::Display for FailureReason {
             Self::TlsUnavailable => "tlsUnavailable",
             Self::AuthUnavailable => "authUnavailable",
             Self::AuthRejected => "authRejected",
+            Self::SignInRequired => "signInRequired",
             Self::MessageTooLarge => "messageTooLarge",
             Self::CredentialUntrusted => "credentialUntrusted",
             Self::CredentialMissing => "credentialMissing",
@@ -570,7 +574,7 @@ pub(crate) async fn verify_connection(
     timeouts: &Timeouts,
     tls: &TlsSource,
 ) -> Result<(), SmtpOutcome> {
-    let (mut conn, _) = authenticated_connection(route, login, timeouts, tls).await?;
+    let (mut conn, _, _) = authenticated_connection(route, login, timeouts, tls).await?;
     conn.quit(timeouts.quit).await;
     Ok(())
 }
@@ -583,25 +587,65 @@ async fn resolve_login(route: &NetRoute, login: &SmtpLogin) -> Result<SmtpLogin,
         .resolve(route)
         .await
         .map_err(|error| match error {
+            // Not a verdict on the message: keep it queued so the outbox
+            // admission can hold it as "authorization required" until the
+            // mailbox is reauthorized.
             OAuthError::ReauthenticationRequired | OAuthError::AuthorizationDenied => {
-                permanent(FailureReason::AuthRejected)
+                transient(FailureReason::SignInRequired)
             }
             OAuthError::Proxy => transient(FailureReason::Proxy),
             OAuthError::Tls => transient(FailureReason::TlsVerification),
             OAuthError::Timeout => transient(FailureReason::Timeout),
+            OAuthError::Network => transient(FailureReason::Network),
             OAuthError::Storage => transient(FailureReason::SecretStore),
             _ => transient(FailureReason::Protocol),
         })?;
     Ok(resolved)
 }
+
+/// Resolves the credential once and authenticates. When the server refuses an
+/// OAuth bearer that is still fresh locally, that bearer is dropped from the
+/// token cache and the login is retried exactly once with a refreshed token.
+/// Returns the resolved login actually used, for redacting later replies.
 async fn authenticated_connection(
     route: &NetRoute,
     login: &SmtpLogin,
     timeouts: &Timeouts,
     tls: &TlsSource,
-) -> Result<(Conn, Capabilities), SmtpOutcome> {
+) -> Result<(Conn, Capabilities, SmtpLogin), SmtpOutcome> {
     let resolved = resolve_login(route, login).await?;
-    let login = &resolved;
+    match connect_and_authenticate(route, &resolved, timeouts, tls).await {
+        Ok((conn, caps)) => Ok((conn, caps, resolved)),
+        Err(SmtpOutcome::Permanent(PreDataFailure {
+            reason: FailureReason::AuthRejected,
+            ..
+        })) if resolved.credential.reject() => {
+            let retried = resolve_login(route, login).await?;
+            match connect_and_authenticate(route, &retried, timeouts, tls).await {
+                Ok((conn, caps)) => Ok((conn, caps, retried)),
+                // Even a fresh token is refused: only signing in again helps.
+                Err(SmtpOutcome::Permanent(PreDataFailure {
+                    reason: FailureReason::AuthRejected,
+                    code,
+                    text,
+                })) => Err(SmtpOutcome::Permanent(PreDataFailure {
+                    reason: FailureReason::SignInRequired,
+                    code,
+                    text,
+                })),
+                Err(outcome) => Err(outcome),
+            }
+        }
+        Err(outcome) => Err(outcome),
+    }
+}
+
+async fn connect_and_authenticate(
+    route: &NetRoute,
+    login: &SmtpLogin,
+    timeouts: &Timeouts,
+    tls: &TlsSource,
+) -> Result<(Conn, Capabilities), SmtpOutcome> {
     let secret = login
         .credential
         .secret()
@@ -734,15 +778,13 @@ async fn session(
     if envelope.recipients.is_empty() || !mime.is_ascii() {
         return Err(bare(permanent(FailureReason::InvalidMessage)));
     }
-    let resolved = resolve_login(route, login).await.map_err(bare)?;
-    let login = &resolved;
+    let (mut conn, caps, login) = authenticated_connection(route, login, timeouts, tls)
+        .await
+        .map_err(bare)?;
     let secret = login
         .credential
         .secret()
         .map_err(|_| bare(permanent(FailureReason::CredentialMissing)))?;
-    let (mut conn, caps) = authenticated_connection(route, login, timeouts, tls)
-        .await
-        .map_err(bare)?;
     let advertised_size = caps.size;
     let with_size = |outcome| Attempt {
         outcome,

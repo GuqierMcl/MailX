@@ -81,6 +81,9 @@ pub(crate) enum ImapError {
     Net(NetError),
     /// The server rejected the username or password.
     Authentication(String),
+    /// An OAuth mailbox sign-in is no longer usable: the grant needs
+    /// reauthorization, or the server refused a freshly refreshed token.
+    SignInRequired,
     /// A recognized provider security policy rejected access. Never contains server text.
     ProviderPolicy,
     /// The server does not support a required step, such as STARTTLS.
@@ -101,6 +104,7 @@ impl fmt::Display for ImapError {
         match self {
             Self::Net(error) => error.fmt(formatter),
             Self::Authentication(reason) => write!(formatter, "login rejected: {reason}"),
+            Self::SignInRequired => formatter.write_str("mailbox sign-in needs to be renewed"),
             Self::ProviderPolicy => formatter.write_str("provider security policy rejected access"),
             Self::Unsupported(reason) => write!(formatter, "unsupported by server: {reason}"),
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
@@ -239,19 +243,42 @@ pub(crate) async fn open_session(
     route: &NetRoute,
     login: &ImapLogin,
 ) -> Result<Session, ImapError> {
+    with_resolved_login(route, login, |login| async move {
+        let guard = body::ReceiveGuard::default();
+        let result = async {
+            let (client, gate) = connect_client(route, &login, &guard).await?;
+            let result = authenticate(client, &login).await;
+            // Header synchronization has its own command collectors. Keep this
+            // receive gate only for greeting/login, whose library parser drops BYE.
+            gate.disable();
+            result
+        }
+        .await;
+        guard.check(result)
+    })
+    .await
+}
+
+/// Resolves the credential and runs one connection attempt. When the server
+/// refuses an OAuth bearer that is still fresh locally, that bearer is dropped
+/// from the token cache and the attempt is repeated once with a refreshed token.
+pub(super) async fn with_resolved_login<T, F, Fut>(
+    route: &NetRoute,
+    login: &ImapLogin,
+    attempt: F,
+) -> Result<T, ImapError>
+where
+    F: Fn(ImapLogin) -> Fut,
+    Fut: std::future::Future<Output = Result<T, ImapError>>,
+{
     let resolved = resolve_login(route, login).await?;
-    let login = &resolved;
-    let guard = body::ReceiveGuard::default();
-    let result = async {
-        let (client, gate) = connect_client(route, login, &guard).await?;
-        let result = authenticate(client, login).await;
-        // Header synchronization has its own command collectors. Keep this
-        // receive gate only for greeting/login, whose library parser drops BYE.
-        gate.disable();
-        result
+    let credential = resolved.credential.clone();
+    match attempt(resolved).await {
+        Err(ImapError::SignInRequired) if credential.reject() => {
+            attempt(resolve_login(route, login).await?).await
+        }
+        other => other,
     }
-    .await;
-    guard.check(result)
 }
 
 async fn resolve_login(route: &NetRoute, login: &ImapLogin) -> Result<ImapLogin, ImapError> {
@@ -262,10 +289,19 @@ async fn resolve_login(route: &NetRoute, login: &ImapLogin) -> Result<ImapLogin,
         .await
         .map_err(|error| match error {
             crate::auth::OAuthError::ReauthenticationRequired
-            | crate::auth::OAuthError::AuthorizationDenied => {
-                ImapError::Authentication("OAuth reauthentication required".into())
-            }
+            | crate::auth::OAuthError::AuthorizationDenied => ImapError::SignInRequired,
+            // Keep route failures distinct so sync reports the real cause,
+            // matching the SMTP mapping. Messages never contain peer text.
             crate::auth::OAuthError::Timeout => ImapError::Timeout,
+            crate::auth::OAuthError::Proxy => ImapError::Net(NetError::Proxy(
+                "could not reach the email provider's sign-in service".into(),
+            )),
+            crate::auth::OAuthError::Tls => ImapError::Net(NetError::Tls(
+                "could not open a secure connection to the email provider's sign-in service".into(),
+            )),
+            crate::auth::OAuthError::Network => ImapError::Net(NetError::Connect(
+                "could not reach the email provider's sign-in service".into(),
+            )),
             _ => ImapError::Protocol("OAuth credential preparation failed".into()),
         })?;
     Ok(resolved)
@@ -308,10 +344,15 @@ pub(crate) async fn test_network_session(
     login: &ImapLogin,
     tls: std::sync::Arc<rustls::ClientConfig>,
 ) -> Result<Session, ImapError> {
-    let login = resolve_login(route, login).await?;
-    let stream = net::connect(route, &login.host, login.port).await?;
-    let stream = net::upgrade_tls_with(stream, &login.host, tls).await?;
-    test_session(stream, &login).await
+    with_resolved_login(route, login, |login| {
+        let tls = tls.clone();
+        async move {
+            let stream = net::connect(route, &login.host, login.port).await?;
+            let stream = net::upgrade_tls_with(stream, &login.host, tls).await?;
+            test_session(stream, &login).await
+        }
+    })
+    .await
 }
 
 /// The production connection entry remains `open_session`; tests can supply an
@@ -387,7 +428,7 @@ async fn authenticate(
     let secret = login
         .credential
         .secret()
-        .map_err(|_| ImapError::Authentication("OAuth credential unresolved".into()))?;
+        .map_err(|_| ImapError::SignInRequired)?;
     struct Xoauth2<'a> {
         username: &'a str,
         token: &'a str,
@@ -439,9 +480,7 @@ async fn authenticate(
             // All library error payloads are untrusted, including malformed
             // challenges. Preserve transport/protocol failures as retryable.
             return match error {
-                ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => {
-                    ImapError::Authentication("OAuth authentication failed".into())
-                }
+                ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => ImapError::SignInRequired,
                 _ => ImapError::Protocol("OAuth authentication exchange failed".into()),
             };
         }

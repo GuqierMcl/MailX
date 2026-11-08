@@ -226,7 +226,10 @@ where
 fn disables(error: &ImapError) -> bool {
     matches!(
         error,
-        ImapError::ProviderPolicy | ImapError::Authentication(_) | ImapError::Unsupported(_)
+        ImapError::ProviderPolicy
+            | ImapError::Authentication(_)
+            | ImapError::SignInRequired
+            | ImapError::Unsupported(_)
     )
 }
 

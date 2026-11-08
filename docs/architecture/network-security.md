@@ -38,7 +38,7 @@ SMTP 当前使用手写会话（`core/src/smtp/`），`lettre` 仅用于 MIME �
 
 OAuth 通用基础采用授权码 + PKCE，检查一次性 `state`、回调来源 / 路径、重复参数与时限，临时监听器只绑定 IPv4 loopback。授权地址来自受信注册，不能由邮件、前端或 MCP 提供。生产服务商及身份适配器注册表为空，未知提供商在任何监听或浏览器副作用之前拒绝；公开应用注册与服务商身份验证仍是开放依赖。桌面不把公开客户端的 client secret 当作秘密。
 
-刷新按 grant 协调并发和持久化，新 token 不在保存成功前交付连接；账号移除使协调器失效。token 交换和身份查询使用有界 HTTP 解析，禁止重定向到其他端点；协议凭证显式区分密码与 OAuth。IMAP XOAUTH2 拒绝只返回固定认证错误，断线与畸形挑战仍保留可重试协议失败类别；SMTP 从 OAuth AUTH 开始抑制所有服务器回复文字，避免 raw / Base64 bearer 凭证被回显到成功结果、发件箱错误或日志。临时网络故障不等同明确撤销。详见[账号 OAuth 边界](account-configuration.md#5-通用-oauth-基础与开放边界)。
+刷新按 grant 协调并发和持久化，新 token 不在保存成功前交付连接；账号移除使协调器失效。token 交换和身份查询使用有界 HTTP 解析，禁止重定向到其他端点；协议凭证显式区分密码与 OAuth。IMAP XOAUTH2 拒绝只返回固定认证错误，断线与畸形挑战仍保留可重试协议失败类别；SMTP 从 OAuth AUTH 开始抑制所有服务器回复文字，避免 raw / Base64 bearer 凭证被回显到成功结果、发件箱错误或日志。临时网络故障不等同明确撤销。邮件服务器拒绝本地仍有效的 bearer 时，该值从缓存移除并刷新重试一次，不会被反复重放。刷新 token 时的代理、TLS 与网络故障在 IMAP 和 SMTP 中都保留各自的失败类别。详见[账号 OAuth 边界](account-configuration.md#5-通用-oauth-基础与开放边界)。
 
 ## 4. SecretStore
 

@@ -509,7 +509,9 @@ fn imap_failure(error: ImapError) -> ProtocolVerification {
         ImapError::Net(NetError::Tls(_)) => (S::Tls, C::Tls),
         ImapError::Net(NetError::Connect(_)) => (S::Connection, C::Network),
         ImapError::Timeout | ImapError::Net(NetError::Timeout) => (S::Connection, C::Timeout),
-        ImapError::Authentication(_) => (S::Authentication, C::Authentication),
+        ImapError::Authentication(_) | ImapError::SignInRequired => {
+            (S::Authentication, C::Authentication)
+        }
         ImapError::ProviderPolicy => (S::Authentication, C::ProviderPolicy),
         ImapError::Unsupported(_) => (S::Connection, C::Unsupported),
         _ => (S::Mailbox, C::Protocol),
@@ -528,7 +530,9 @@ fn smtp_failure(outcome: SmtpOutcome) -> ProtocolVerification {
             FailureReason::TlsVerification | FailureReason::TlsUnavailable => (S::Tls, C::Tls),
             FailureReason::Timeout => (S::Connection, C::Timeout),
             FailureReason::Connect | FailureReason::Network => (S::Connection, C::Network),
-            FailureReason::AuthRejected => (S::Authentication, C::Authentication),
+            FailureReason::AuthRejected | FailureReason::SignInRequired => {
+                (S::Authentication, C::Authentication)
+            }
             FailureReason::AuthUnavailable => (S::Authentication, C::AuthUnavailable),
             _ => (S::Connection, C::Protocol),
         },

@@ -220,8 +220,8 @@
   "removingAccount": "Removing…",
   "accountRemoved": "Account removed",
   "credentialCleanupPending": "The account was removed locally. Some credentials could not be cleared yet; the app will retry when the credential store is available.",
-  "oauthManagedCredentials": "OAuth authorization is managed separately. Passwords are not used for this account.",
+  "oauthManagedCredentials": "This account signs in through your email provider. No password is needed.",
   "oauthConnected": "Connected",
   "oauthNeedsReauthorization": "Sign in again",
-  "oauthConnectionUnavailable": "This account requires OAuth authorization to update its connection settings. Editing is currently unavailable here."
+  "oauthConnectionUnavailable": "This account signs in through your email provider. Its connection settings can't be changed here yet."
 }

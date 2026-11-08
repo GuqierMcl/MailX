@@ -55,6 +55,10 @@ fn error(error: crate::auth::OAuthError) -> AppError {
         OAuthError::Random => ErrorCode::Internal,
     })
 }
+/// Upper bound for quit-time OAuth settlement, after the host has committed
+/// to exiting. Persistence retries take a few seconds at most when healthy.
+const OAUTH_SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
 impl MailxCore {
     pub async fn begin_oauth_account(
         &self,
@@ -127,15 +131,23 @@ impl MailxCore {
     }
     /// Called after an irreversible host quit decision, while its async runtime
     /// is still alive. Stop new refresh users, then let owned refresh persistence
-    /// settle before the host tears down its runtime.
+    /// settle before the host tears down its runtime. The whole step is bounded:
+    /// a hung keychain write or prompt must not keep the app from exiting.
     pub async fn settle_oauth_authorizations(&self) -> Result<(), AppError> {
+        tokio::time::timeout(OAUTH_SETTLE_LIMIT, self.settle_oauth_authorizations_inner())
+            .await
+            .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?
+    }
+    async fn settle_oauth_authorizations_inner(&self) -> Result<(), AppError> {
         self.oauth_sessions.shutdown();
         let mut stopped = self.outbox.shutdown();
         stopped.extend(self.sync.shutdown());
         stopped.extend(self.bodies.shutdown());
         stopped.extend(self.previews.shutdown());
+        // Abort handles cannot be awaited; poll with a timer instead of
+        // spinning so the coordinator thread does not burn a core.
         while stopped.iter().any(|task| !task.is_finished()) {
-            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         let service = self.service.clone();
         let managers = tokio::task::spawn_blocking(move || {
@@ -148,11 +160,11 @@ impl MailxCore {
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))??;
-        let mut failed = false;
-        for manager in managers {
-            failed |= manager.settle_persistence().await.is_err();
-        }
-        if failed {
+        let settled = futures_util::future::join_all(
+            managers.iter().map(|manager| manager.settle_persistence()),
+        )
+        .await;
+        if settled.iter().any(Result::is_err) {
             Err(AppError::new(ErrorCode::StorageUnavailable))
         } else {
             Ok(())

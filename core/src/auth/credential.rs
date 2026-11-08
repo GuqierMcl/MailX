@@ -40,6 +40,17 @@ impl ProtocolCredential {
             Self::ManagedOAuth2(_) => Err(super::OAuthError::InvalidResponse),
         }
     }
+    /// The mail server refused this resolved bearer. Returns whether resolving
+    /// the original managed credential again can produce a different token.
+    pub(crate) fn reject(&self) -> bool {
+        match self {
+            Self::OAuth2Guarded(secret, manager) => {
+                manager.reject_access_token(secret);
+                manager.is_valid() && !manager.needs_reauthorization()
+            }
+            _ => false,
+        }
+    }
     pub(crate) fn is_oauth(&self) -> bool {
         matches!(
             self,
