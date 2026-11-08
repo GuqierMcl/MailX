@@ -35,6 +35,11 @@ if (mode === 'build') {
     app: { security: { csp: original.app.security.csp } },
     bundle: { active: false },
   }));
+  // The overridden beforeBuildCommand skips the MCP sidecar, but the desktop build
+  // script still requires desktop/binaries/mailx-mcp-<triple>; the harness never runs it.
+  const sidecar = spawnSync(bun, ['scripts/mcp-sidecar.mjs', '--placeholder'], { cwd: root, stdio: 'inherit' });
+  if (sidecar.error) throw sidecar.error;
+  if (sidecar.status !== 0) process.exit(sidecar.status ?? 1);
   const build = spawnSync(bun, ['run', 'tauri', 'build', '--debug', '--no-bundle', '--features', 'body-webview-test', '--config', configuration], { cwd: root, stdio: 'inherit' });
   if (build.error) throw build.error;
   process.exit(build.status ?? 1);
