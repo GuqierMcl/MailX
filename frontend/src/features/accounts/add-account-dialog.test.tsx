@@ -5,7 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
-import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
+import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -163,6 +163,34 @@ describe('add account wizard', () => {
     expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
     expect(within(dialog).getByRole('switch', { name: '使用服务商图标' })).toBeChecked()
     expect(within(dialog).getByLabelText('账号名称').parentElement!.querySelector('img')).toHaveAttribute('src', ICLOUD_PROVIDER.logo)
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ ...expected, useProviderIcon: true })
+  })
+
+  it.each(['Synthetic@GMAIL.COM', 'synthetic@googlemail.com'])('tests and saves %s with the Gmail endpoints and an app password', async (emailAddress) => {
+    const { client, dialog, onCreated } = renderDialog()
+    await chooseProvider(dialog, GMAIL_PROVIDER)
+    expect(within(dialog).getByLabelText('应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')
+    expect(within(dialog).getByText(GMAIL_PROVIDER.setup!.description)).toHaveTextContent('两步验证')
+    expect(within(dialog).getByText(GMAIL_PROVIDER.setup!.credentialHint)).toHaveTextContent('去掉中间的空格')
+    await userEvent.click(within(dialog).getByRole('button', { name: '如何生成应用专用密码' }))
+    expect(client.openProviderHelp).toHaveBeenCalledWith('gmail')
+    fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: emailAddress } })
+    fireEvent.change(within(dialog).getByLabelText('应用专用密码'), { target: { value: 'abcdefghijklmnop' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '测试登录' }))
+    expect(await within(dialog).findByText('登录验证通过，尚未测试实际投递。')).toBeInTheDocument()
+    const expected = {
+      emailAddress, providerId: 'gmail',
+      imap: { host: 'imap.gmail.com', port: 993, tls: 'implicit', username: emailAddress },
+      smtp: { host: 'smtp.gmail.com', port: 465, tls: 'implicit', username: emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'abcdefghijklmnop' } },
+      route: { kind: 'direct' },
+    }
+    expect(client.verifyDraftConnection.mock.calls[0][0]).toEqual(expected)
+    await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+    expect(await within(dialog).findByLabelText('账号名称')).toHaveValue(emailAddress)
+    expect(within(dialog).getByLabelText('账号名称').parentElement!.querySelector('img')).toHaveAttribute('src', GMAIL_PROVIDER.logo)
     await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     expect(client.createAccount.mock.calls[0][0].config).toMatchObject({ ...expected, useProviderIcon: true })

@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- A Gmail entry, listed first with iCloud second, fills in encrypted IMAP / SMTP settings for @gmail.com and @googlemail.com, with the official bundled Gmail icon and step-by-step app password guidance. / 新增 Gmail 添加入口并排在服务商列表首位、iCloud 第二，为 @gmail.com 和 @googlemail.com 预填加密收发服务器，采用本地打包的官方 Gmail 图标，并提供应用专用密码的分步指引。
+
 ### ✨ Optimization
 
 - Draft previews show saved rich-text formatting and inline images, follow the message theme and update after saving, with file attachments listed separately. / 草稿预览保留已保存的富文本格式和内嵌图片，跟随正文主题并在保存后更新，普通文件附件单独列出。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))

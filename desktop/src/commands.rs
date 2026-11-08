@@ -284,6 +284,7 @@ fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
         "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
         "139" => Ok("https://help.mail.10086.cn/statichtml/22/Content/1234606.html"),
         "icloud" => Ok("https://support.apple.com/en-us/102654"),
+        "gmail" => Ok("https://support.google.com/accounts/answer/185833"),
         "netease163" | "netease126" | "neteaseYeah" => Ok(
             "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
         ),
@@ -1087,6 +1088,10 @@ mod tests {
             provider_help_url("icloud").unwrap(),
             "https://support.apple.com/en-us/102654"
         );
+        assert_eq!(
+            provider_help_url("gmail").unwrap(),
+            "https://support.google.com/accounts/answer/185833"
+        );
         for provider in ["netease163", "netease126", "neteaseYeah"] {
             assert_eq!(
                 provider_help_url(provider).unwrap(),
@@ -1107,13 +1112,17 @@ mod tests {
             "icloud.com",
             "icloud/../",
             "ICLOUD",
+            "gmail.com",
+            "gmail/../",
+            "GMAIL",
+            "google",
         ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
                 AppError::validation("providerId")
             );
         }
-        for provider in ["139", "icloud"] {
+        for provider in ["139", "icloud", "gmail"] {
             assert!(
                 parse::<ProviderHelpArgs>(&InvokeBody::Json(
                     json!({"providerId":provider, "url":"https://attacker.invalid"})

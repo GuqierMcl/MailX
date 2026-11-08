@@ -1,11 +1,12 @@
 import { render, screen } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { filterProviders, GENERIC_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
+import { filterProviders, GENERIC_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
-  it('puts iCloud first and manual setup last in the default provider list', () => {
-    expect(PROVIDERS[0]).toBe(ICLOUD_PROVIDER)
+  it('puts Gmail first, iCloud second and manual setup last in the default provider list', () => {
+    expect(PROVIDERS[0]).toBe(GMAIL_PROVIDER)
+    expect(PROVIDERS[1]).toBe(ICLOUD_PROVIDER)
     expect(PROVIDERS.at(-1)).toBe(GENERIC_PROVIDER)
   })
 
@@ -81,6 +82,29 @@ describe('mail providers', () => {
     }
     expect(container.querySelector('svg')).toBeNull()
     expect(screen.getByText('iCloud 邮箱')).toBeInTheDocument()
+  })
+
+  it.each(['Gmail', 'GMAIL.COM', 'googlemail.com', 'Google', '谷歌邮箱'])('finds the Gmail entry for %s', (query) => {
+    expect(filterProviders(PROVIDERS, query)).toEqual([GMAIL_PROVIDER])
+    expect(providerOf('gmail')).toBe(GMAIL_PROVIDER)
+  })
+
+  it('uses the Gmail TLS endpoints, app-password copy and a bundled official mark', () => {
+    expect(GMAIL_PROVIDER.preset).toEqual({
+      domains: ['gmail.com', 'googlemail.com'],
+      imap: { host: 'imap.gmail.com', port: 993, tls: 'implicit' },
+      smtp: { host: 'smtp.gmail.com', port: 465, tls: 'implicit' },
+    })
+    expect(GMAIL_PROVIDER.setup?.credentialKind).toBe('appPassword')
+    const { container } = render(<><ProviderIcon provider={GMAIL_PROVIDER} /><ProviderBadge providerId="gmail" /></>)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', GMAIL_PROVIDER.logo)
+      expect(image).toHaveClass('object-contain')
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+    }
+    expect(screen.getByText('Gmail')).toBeInTheDocument()
   })
 
   it('gives 163, 126 and yeah.net distinct bundled logos in the provider list', () => {
