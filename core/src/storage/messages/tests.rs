@@ -2458,3 +2458,174 @@ fn excluded_folder_roles_never_appear_but_an_explicit_role_still_wins() {
     let query: EmailListQuery = serde_json::from_value(json!({})).unwrap();
     assert!(query.exclude_folder_roles.is_empty());
 }
+
+/// What `select_emails` must return for a query: the listed rows, in order.
+fn assert_selection_matches_list(f: &Fixture, query: EmailListQuery) {
+    let page = f
+        .service
+        .list_emails(&EmailListQuery {
+            limit: Some(200),
+            ..query.clone()
+        })
+        .unwrap();
+    assert!(page.next_cursor.is_none(), "test data fits one page");
+    // Page size and cursor are ignored.
+    let selection = f
+        .service
+        .select_emails(&EmailListQuery {
+            limit: Some(1),
+            cursor: Some("not a cursor".into()),
+            ..query.clone()
+        })
+        .unwrap();
+    assert!(!selection.truncated);
+    let expected: Vec<_> = page
+        .items
+        .iter()
+        .map(|item| crate::mail::SelectedEmail {
+            id: item.id.clone(),
+            account_id: item.account_id.clone(),
+            folder_id: item.folder_id.clone(),
+            is_read: item.is_read,
+            is_starred: item.is_starred,
+            archived: item.archived,
+            local_only: item.local_only,
+        })
+        .collect();
+    assert_eq!(selection.items, expected, "{query:?}");
+}
+
+#[test]
+fn selection_matches_the_list_for_every_filter() {
+    let mut f = setup();
+    let mut records: Vec<_> = (1..=6)
+        .map(|uid| MessageRecord {
+            received_at: format!("2026-10-1{uid}T09:00:00.000Z"),
+            is_read: uid % 2 == 0,
+            is_flagged: uid % 3 == 0,
+            ..record(uid)
+        })
+        .collect();
+    records[0].subject = "needle report".into();
+    put(&mut f, &records);
+    put_sent(
+        &mut f,
+        &[
+            server_sent(11, "2026-10-18T09:00:00.000Z"),
+            server_sent(12, "2026-10-18T11:00:00.000Z"),
+        ],
+    );
+    local_copy(&f, 1, "2026-10-18T10:00:00.000Z", "needle local", 0);
+    local_copy(&f, 2, "2026-10-18T12:00:00.000Z", "other local", 1);
+    let archived = message_id(&f, 2);
+    f.service
+        .archive_messages(std::slice::from_ref(&archived))
+        .unwrap();
+
+    let queries = [
+        EmailListQuery::default(),
+        inbox_query(),
+        sent_query(&f),
+        EmailListQuery {
+            unread: Some(true),
+            ..Default::default()
+        },
+        EmailListQuery {
+            unread: Some(false),
+            ..Default::default()
+        },
+        EmailListQuery {
+            starred: Some(true),
+            ..Default::default()
+        },
+        EmailListQuery {
+            has_attachment: Some(true),
+            ..sent_query(&f)
+        },
+        EmailListQuery {
+            text: Some("needle".into()),
+            ..Default::default()
+        },
+        EmailListQuery {
+            archive: Some(ArchiveScope::Only),
+            ..inbox_query()
+        },
+        EmailListQuery {
+            archive: Some(ArchiveScope::Include),
+            ..inbox_query()
+        },
+        EmailListQuery {
+            exclude_folder_roles: vec![FolderRole::Sent],
+            ..Default::default()
+        },
+        EmailListQuery {
+            received_after: Some("2026-10-14T00:00:00.000Z".into()),
+            ..Default::default()
+        },
+    ];
+    for query in queries {
+        assert_selection_matches_list(&f, query);
+    }
+    // The archived row and local copies carry their markers.
+    let all = f
+        .service
+        .select_emails(&EmailListQuery {
+            archive: Some(ArchiveScope::Include),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        all.items
+            .iter()
+            .any(|item| item.id == archived && item.archived)
+    );
+    assert_eq!(all.items.iter().filter(|item| item.local_only).count(), 2);
+    // Invalid query values are refused the same way as for the list.
+    assert_eq!(
+        f.service
+            .select_emails(&EmailListQuery {
+                folder_id: Some("x".into()),
+                ..Default::default()
+            })
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
+}
+
+#[test]
+fn selection_stops_at_five_hundred_and_says_so() {
+    let mut f = setup();
+    let rows: Vec<_> = (1..=501).map(record).collect();
+    put(&mut f, &rows);
+    let selection = f.service.select_emails(&inbox_query()).unwrap();
+    assert!(selection.truncated);
+    assert_eq!(selection.items.len(), 500);
+    assert!(
+        selection
+            .items
+            .windows(2)
+            .all(|pair| pair[0].id > pair[1].id)
+    );
+    let first_page = f
+        .service
+        .list_emails(&EmailListQuery {
+            limit: Some(200),
+            ..inbox_query()
+        })
+        .unwrap();
+    assert_eq!(
+        selection.items[..200]
+            .iter()
+            .map(|item| &item.id)
+            .collect::<Vec<_>>(),
+        first_page
+            .items
+            .iter()
+            .map(|item| &item.id)
+            .collect::<Vec<_>>()
+    );
+    let exact = f.service.select_emails_up_to(&inbox_query(), 501).unwrap();
+    assert!(!exact.truncated);
+    assert_eq!(exact.items.len(), 501);
+}

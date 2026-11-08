@@ -448,3 +448,65 @@ fn search_finds_archived_mail_and_marks_it() {
         .collect();
     assert_eq!(archived, ["Subject 1"]);
 }
+
+#[test]
+fn partial_archive_skips_non_inbox_and_missing_ids_and_restores_only_what_it_changed() {
+    let mut f = setup(true);
+    let one = id(&f, &f.inbox, 1);
+    let two = id(&f, &f.inbox, 2);
+    let trashed = id(&f, &f.trash, 8);
+    let local = format!("local-sent:{}", Uuid::new_v4());
+    let change = f
+        .service
+        .change_archive(
+            &[
+                trashed.clone(),
+                one.clone(),
+                local.clone(),
+                one.clone(),
+                two.clone(),
+                "missing".into(),
+            ],
+            true,
+            true,
+        )
+        .unwrap();
+    assert_eq!(change.skipped_ids, vec![trashed, local, "missing".into()]);
+    assert_eq!(change.processed_count, 2);
+    assert_eq!(change.entries.len(), 2);
+    assert_eq!(list(&f, FolderRole::Inbox, None), vec!["Subject 3"]);
+    // A message archived earlier is untouched by restoring this batch.
+    let three = id(&f, &f.inbox, 3);
+    f.service.archive_messages(&[three]).unwrap();
+    f.service.restore_archive(&change.entries).unwrap();
+    let mut inbox = list(&f, FolderRole::Inbox, None);
+    inbox.sort();
+    assert_eq!(inbox, vec!["Subject 1", "Subject 2"]);
+}
+
+#[test]
+fn partial_archive_with_nothing_usable_is_not_found_and_strict_is_unchanged() {
+    let mut f = setup(true);
+    let one = id(&f, &f.inbox, 1);
+    let trashed = id(&f, &f.trash, 8);
+    assert_eq!(
+        f.service
+            .change_archive(&[trashed.clone(), "missing".into()], true, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        f.service
+            .change_archive(&[one.clone(), trashed], true, false)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    let rows: i64 =
+        f.db.query_row("SELECT COUNT(*) FROM message_archives", [], |r| r.get(0))
+            .unwrap();
+    assert_eq!(rows, 0);
+    let strict = f.service.change_archive(&[one], true, false).unwrap();
+    assert!(strict.skipped_ids.is_empty());
+}

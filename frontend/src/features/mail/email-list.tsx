@@ -12,7 +12,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { EmailCard } from './email-card'
+import { EmailCard, type RowClick } from './email-card'
+import { SelectionHeader, type SelectionActions } from './selection-header'
+import { escapeBelongsToSomethingElse } from './use-close-on-escape'
+import type { ListSelection } from './use-list-selection'
 import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
 
@@ -62,11 +65,17 @@ type EmailListProps = {
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
+  /** Multi-select; without it the list has no "Select" entry. */
+  selection?: ListSelection
+  /** What the selection header does with the picked messages. */
+  selectionActions?: SelectionActions
 }
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
-  const { title, filter, onFilterChange } = props
+  const { title, filter, onFilterChange, selection, selectionActions } = props
+  const selecting = Boolean(selection?.active && selectionActions)
+  useSelectionKeys(selecting ? selection : undefined, selectionActions)
   return (
     <Tabs
       value={filter}
@@ -74,18 +83,54 @@ export function EmailList(props: EmailListProps) {
       className="flex h-full min-h-0 flex-col gap-0"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <h1 className="truncate text-base font-semibold">{title}</h1>
-        <TabsList className="ml-auto">
-          <TabsTrigger value="all">{t('mail:all')}</TabsTrigger>
-          <TabsTrigger value="unread">{t('mail:unread')}</TabsTrigger>
-        </TabsList>
+        {selecting && selection && selectionActions ? (
+          <>
+            <h1 className="sr-only">{title}</h1>
+            <SelectionHeader selection={selection} actions={selectionActions} />
+          </>
+        ) : (
+          <>
+            <h1 className="truncate text-base font-semibold">{title}</h1>
+            {selection && selectionActions && (
+              <Button variant="ghost" size="sm" className="ml-auto" onClick={selection.enter}>{t('mail:select')}</Button>
+            )}
+            <TabsList className={selection && selectionActions ? undefined : 'ml-auto'}>
+              <TabsTrigger value="all">{t('mail:all')}</TabsTrigger>
+              <TabsTrigger value="unread">{t('mail:unread')}</TabsTrigger>
+            </TabsList>
+          </>
+        )}
       </div>
-      <EmailRows {...props} />
+      {selecting && selection?.truncated && (
+        <p className="-mt-1 shrink-0 px-4 pb-1 text-xs text-muted-foreground">{t('mail:selectionLimit')}</p>
+      )}
+      <EmailRows {...props} selection={selectionActions ? selection : undefined} />
     </Tabs>
   )
 }
 
-function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+/** Esc leaves selection mode; Cmd/Ctrl+A selects everything in scope, outside text fields. */
+function useSelectionKeys(selection: ListSelection | undefined, actions: SelectionActions | undefined) {
+  const exit = selection?.exit
+  const selectAll = actions?.onSelectAll
+  useEffect(() => {
+    if (!exit || !selectAll) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (escapeBelongsToSomethingElse(event)) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        exit()
+      } else if (event.key.toLowerCase() === 'a' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        selectAll()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [exit, selectAll])
+}
+
+function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -157,6 +202,7 @@ function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, er
       onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
+      selection={selection}
     />
   )
 }
@@ -200,9 +246,11 @@ type VirtualRowsProps = {
   searchHint: string | null
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
+  /** Present while picking messages. */
+  selection?: ListSelection
 }
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // The selected and the focused row stay mounted however far they scroll away,
@@ -266,6 +314,17 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   usePreviewRequests(onRequestPreviews, rendered, previewLines)
   useGaveUpVersion()
 
+  // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
+  // with only that row. Inside, a click toggles and Shift picks the range.
+  const clickRow = (email: EmailSummary, intent: RowClick) => {
+    if (!selection) onSelect(email)
+    else if (!selection.active) {
+      if (intent.toggle || intent.range) selection.start(email)
+      else onSelect(email)
+    } else if (intent.range) selection.extend(email, emails)
+    else selection.toggle(email)
+  }
+
   return (
     <ScrollArea
       viewportRef={viewportRef}
@@ -312,7 +371,9 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
               onDelete={onDelete}
               onRemoveLocal={onRemoveLocal}
               canArchive={canArchive}
-              onSelect={() => onSelect(email)}
+              selectionMode={selection?.active ?? false}
+              picked={selection?.isSelected(email.id) ?? false}
+              onSelect={(intent) => clickRow(email, intent)}
             />
           )
         })}

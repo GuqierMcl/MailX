@@ -41,6 +41,8 @@ The open message, draft or outbox item keeps a blue selection background after t
 
 Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under More → Archive or under Archived in the account, and it is unchanged for other clients. A server folder that is itself called Archive stays under its account with the server's name. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
 
+To act on several messages at once, click Select above the message list, or Cmd/Ctrl-click or Shift-click a message. Selected messages get a blue outline with a check in the corner. Click to add or remove a message, Shift-click to select a run of messages, or use Select all to pick every message in the current list, up to 500 at a time. The buttons at the top then mark the selection read or unread, star it, archive it or delete it. Deleting and archiving can be undone; messages that could not be handled stay selected so you can see which ones. Click Done or press Esc to finish.
+
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
 ## Composing and sending

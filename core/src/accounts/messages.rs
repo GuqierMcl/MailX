@@ -6,7 +6,7 @@ use super::{AccountService, validate_email_id, validate_uuid};
 pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
 use crate::{
     AppError,
-    mail::{EmailDetail, EmailListQuery, EmailPage},
+    mail::{EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_SELECTION},
     storage::messages::{PageCursor, ValidatedEmailQuery},
     sync::headers::MessageRecord,
 };
@@ -50,6 +50,26 @@ impl AccountService {
 
     pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
         self.storage.list_emails(&validate_query(query)?)
+    }
+
+    /// The first [`MAX_SELECTION`] messages `list_emails` would show for the
+    /// query, in the same order; its `limit` and `cursor` are ignored.
+    pub fn select_emails(&self, query: &EmailListQuery) -> Result<EmailSelection, AppError> {
+        self.select_emails_up_to(query, MAX_SELECTION)
+    }
+
+    pub(crate) fn select_emails_up_to(
+        &self,
+        query: &EmailListQuery,
+        limit: u32,
+    ) -> Result<EmailSelection, AppError> {
+        let query = EmailListQuery {
+            limit: None,
+            cursor: None,
+            ..query.clone()
+        };
+        let validated = validate_query(&query)?;
+        self.storage.select_emails(&validated.query, limit)
     }
 
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {

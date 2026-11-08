@@ -1027,3 +1027,13 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 本机 macOS 检查通过：`bun run check`（版本检查与测试、927 条双语资源、Rust DTO 一致性、类型检查、lint、86 个前端测试文件 / 978 项测试、生产构建与 Rust workspace check，保留既有 chunk 大小提示）；`cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments`、`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`。新增前端回归覆盖搜索别名、端点与 TLS、近似域拒绝、两种域名的默认用户名、应用专用密码原值保留、添加前测试登录与保存、帮助入口和图标。
 
 没有使用真实 Gmail 凭据、登录邮箱或发送邮件；应用专用密码登录（含带空格输入）、收读发、标签导致的多文件夹重复、删除与归档、服务器已发送副本对账、IDLE、密码修改后的恢复及三平台桌面行为仍待验证。预设存在和上述自动检查不能代替这些验证。
+
+<a id="batch-mail-actions"></a>
+
+## 36. 邮件列表多选与批量处理（2026-11-08）
+
+实现以 `28cddca` 为基线。界面行为见[界面设计 · 多选](../architecture/ui-design.md#多选已实现实机未验证)，接口见[批量处理](../contracts/app-api.md#批量处理主窗口)。核心删除与归档新增“跳过不可处理邮件并返回 id”的模式，仅主窗口使用；MCP 工具仍为整批校验，输出不变。新增 `emails_set_flags` 与 `emails_select`（与列表同条件、同顺序，最多 500 封）；没有数据库迁移。
+
+自动测试覆盖：部分删除（跳过按输入顺序、全部跳过为 `notFound` 且不改状态、永久删除仍需确认、撤销只恢复实际处理的邮件、严格模式不变）、部分归档与撤销回执、逐封标记结果与数量上限、全选与列表在 12 组查询下结果一致及 501 封时截断；前端覆盖选择状态（切换、Shift 连选、未进入多选时修饰键只选被点的一封、范围变化清空、消失的邮件剔除）、标题栏状态、全选截断提示、部分失败保持选中与单条提示、永久删除数量确认、混合状态按钮文案。
+
+本机 macOS 检查通过：`bun run check`（前端 88 个测试文件 / 998 项测试）、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。浏览器 mock 预览以无头 Chrome 截图核对浅深主题下的选中描边、淡底、右上角勾与悬停描边。项目维护者已在 macOS 桌面版手动测试多选与批量操作，未发现问题；Windows / Linux 桌面与其余服务商组合尚未验证。

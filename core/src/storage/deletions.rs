@@ -25,6 +25,8 @@ pub(crate) struct ScheduledDeletion {
     pub(crate) permanent: bool,
     /// Accounts whose worker has new work, without repeats.
     pub(crate) account_ids: Vec<String>,
+    /// Ids a `partial` request skipped, in input order.
+    pub(crate) skipped_ids: Vec<String>,
 }
 
 /// A due deletion as the write-back worker needs it.
@@ -71,10 +73,15 @@ impl Storage {
     /// A message outside Trash goes to the account's Trash folder. One already
     /// in Trash, or in an account without one, is expunged for good, which is
     /// refused unless the caller says the user confirmed it.
-    pub(crate) fn schedule_deletion(
+    ///
+    /// Without `partial` any message that cannot be deleted fails the whole
+    /// request with `notFound`. With it such messages are skipped and listed;
+    /// only when every one is skipped is the request `notFound`.
+    pub(crate) fn schedule_deletion_with(
         &mut self,
         message_ids: &[String],
         confirmed_permanent: bool,
+        partial: bool,
         now: DateTime<Utc>,
         delay: Duration,
     ) -> Result<ScheduledDeletion, AppError> {
@@ -92,6 +99,7 @@ impl Storage {
         let due_at = now + delay;
         let mut permanent_any = false;
         let mut account_ids: Vec<String> = Vec::new();
+        let mut skipped_ids: Vec<String> = Vec::new();
         for id in ids {
             // Only a message the user can see, from the server generation the
             // cursor still trusts, can be deleted; one already waiting for
@@ -120,6 +128,10 @@ impl Storage {
                 )
                 .optional()?;
             let Some((account_id, source_id, folder_id, role, uid_validity, uid)) = row else {
+                if partial {
+                    skipped_ids.push(id.to_owned());
+                    continue;
+                }
                 return Err(AppError::new(ErrorCode::NotFound));
             };
             let trash: Option<String> = if role == "trash" {
@@ -164,12 +176,17 @@ impl Storage {
                 account_ids.push(account_id);
             }
         }
+        if account_ids.is_empty() {
+            // Everything was skipped: nothing to schedule or undo.
+            return Err(AppError::new(ErrorCode::NotFound));
+        }
         tx.commit()?;
         Ok(ScheduledDeletion {
             batch_id,
             due_at,
             permanent: permanent_any,
             account_ids,
+            skipped_ids,
         })
     }
 

@@ -42,6 +42,8 @@ import type {
   UpdateConnectionRequest,
   UpdateProfileRequest,
   RemoveAccountRequest,
+  EmailSelection,
+  FlagBatchOutcome,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
@@ -104,18 +106,24 @@ export interface MailxClient {
    * Hides the emails at once and deletes them on the server once `undoUntil`
    * passes: into Trash, or for good when they already are in Trash or the
    * account has none. Deleting for good fails with `confirmationRequired`
-   * unless `confirmedPermanent` says the user agreed.
+   * unless `confirmedPermanent` says the user agreed. With `partial`, ids that
+   * cannot be deleted are skipped (`skippedIds`) instead of refusing the batch.
    */
-  deleteEmails(emailIds: string[], confirmedPermanent: boolean): Promise<EmailDeletion>
+  deleteEmails(emailIds: string[], confirmedPermanent: boolean, partial?: boolean): Promise<EmailDeletion>
   /** Takes a deletion back before it reaches the server; `alreadyDeleting` after. */
   undoDelete(batchId: string): Promise<void>
   /**
    * Archives inbox emails on this device only (the server is not touched);
    * the whole batch is refused unless every id is a visible inbox email.
+   * With `partial`, ids that cannot be archived are skipped (`skippedIds`) instead.
    */
-  archiveEmails(emailIds: string[]): Promise<ArchiveOutcome>
-  /** Moves locally archived emails back to the inbox. */
-  unarchiveEmails(emailIds: string[]): Promise<ArchiveOutcome>
+  archiveEmails(emailIds: string[], partial?: boolean): Promise<ArchiveOutcome>
+  /** Moves locally archived emails back to the inbox; `partial` as for archiving. */
+  unarchiveEmails(emailIds: string[], partial?: boolean): Promise<ArchiveOutcome>
+  /** Read / starred for up to 500 messages at once; each reports its own outcome. */
+  setFlags(emailIds: string[], flag: 'read' | 'starred', wanted: boolean): Promise<FlagBatchOutcome>
+  /** The first 500 messages a list query matches (same order), for selecting them all. */
+  selectEmails(query: EmailListQuery): Promise<EmailSelection>
   /** Restores only an archive operation's changes; newer changes are never overwritten. */
   undoArchive(undoToken: string): Promise<void>
   /** Committed local flag/archive changes, including those made by agents. */
@@ -384,10 +392,12 @@ export function createDesktopClient(): MailxClient {
         .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
       return () => { disposed = true; unlisten?.() }
     },
-    deleteEmails: (emailIds, confirmedPermanent) => call<EmailDeletion>('emails_delete', { emailIds, confirmedPermanent }),
+    deleteEmails: (emailIds, confirmedPermanent, partial = false) => call<EmailDeletion>('emails_delete', { emailIds, confirmedPermanent, partial }),
     undoDelete: (batchId) => call<void>('emails_undo_delete', { batchId }),
-    archiveEmails: (emailIds) => call<ArchiveOutcome>('emails_archive', { emailIds }),
-    unarchiveEmails: (emailIds) => call<ArchiveOutcome>('emails_unarchive', { emailIds }),
+    archiveEmails: (emailIds, partial = false) => call<ArchiveOutcome>('emails_archive', { emailIds, partial }),
+    unarchiveEmails: (emailIds, partial = false) => call<ArchiveOutcome>('emails_unarchive', { emailIds, partial }),
+    setFlags: (emailIds, flag, wanted) => call<FlagBatchOutcome>('emails_set_flags', { emailIds, flag, wanted }),
+    selectEmails: (query) => call<EmailSelection>('emails_select', { query }),
     undoArchive: (undoToken) => call<void>('emails_undo_archive', { undoToken }),
     onMailStateChanged: (listener) => subscribe<MailStateChanged>('mailx://mail-state-changed', listener),
     onDeletions(listener) {
