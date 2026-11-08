@@ -1037,3 +1037,13 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 自动测试覆盖：部分删除（跳过按输入顺序、全部跳过为 `notFound` 且不改状态、永久删除仍需确认、撤销只恢复实际处理的邮件、严格模式不变）、部分归档与撤销回执、逐封标记结果与数量上限、全选与列表在 12 组查询下结果一致及 501 封时截断；前端覆盖选择状态（切换、Shift 连选、未进入多选时修饰键只选被点的一封、范围变化清空、消失的邮件剔除）、标题栏状态、全选截断提示、部分失败保持选中与单条提示、永久删除数量确认、混合状态按钮文案。
 
 本机 macOS 检查通过：`bun run check`（前端 88 个测试文件 / 998 项测试）、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。浏览器 mock 预览以无头 Chrome 截图核对浅深主题下的选中描边、淡底、右上角勾与悬停描边。项目维护者已在 macOS 桌面版手动测试多选与批量操作，未发现问题；Windows / Linux 桌面与其余服务商组合尚未验证。
+
+## 37. v0.1.2 发布检查（2026-11-08）
+
+候选提交为 `cadc30a`（[#103](https://github.com/GuqierMcl/MailX/pull/103)），在 `v0.1.1` 之后纳入 #98、#100、#101、#102；没有数据库迁移。`bun run version:check --release` 通过，发版 PR 的三平台 CI（[42480978121](https://github.com/GuqierMcl/MailX/actions/runs/42480978121)）通过。
+
+手动 `Body WebView` 工作流自 MCP 附带程序合入后三平台均失败（例如 [42234517650](https://github.com/GuqierMcl/MailX/actions/runs/42234517650)，`v0.1.1` 发布前也未通过）。原因是测试构建覆盖了 `beforeBuildCommand`，未生成 `desktop/binaries/mailx-mcp-<triple>`，且 `body-webview-test` 特性下 MCP 打开邮件的回调引用了被裁掉的通知模块；[#102](https://github.com/GuqierMcl/MailX/pull/102) 修复后，main 上的 [42480965475](https://github.com/GuqierMcl/MailX/actions/runs/42480965475) 在 macOS、Windows、Linux 均通过，本机 macOS 也通过 `instrumented` 检查。
+
+标签触发的 [Release 42481949340](https://github.com/GuqierMcl/MailX/actions/runs/42481949340) 版本校验与四平台构建全部成功；草稿含 15 个文件，文件名版本均为 `0.1.2`，`SHA256SUMS.txt` 15 行，`latest.json` 版本为 `0.1.2` 且包含 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64`。维护者确认草稿后以正式版（未勾 Pre-release）发布，发布后 `releases/latest/download/latest.json` 返回 `0.1.2`。
+
+本节未记录候选安装包的逐平台冒烟与从 `0.1.1` 应用内更新的结果；Windows / Linux 安装包、各服务商组合与更新路径仍以后续实测补充为准。
