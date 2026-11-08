@@ -1013,3 +1013,17 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 桌面协议测试覆盖富文本投影、CID 图片与外链绑定、无远程图片、来源 / 账号 / 草稿版本隔离、保存 / 删除 / 连接变更 / 释放后的旧资源拒绝、缺失图片占位、旧纯文本草稿与窗口权限。桌面测试 147 项通过，2 项既有测试忽略；不等同于原生 WebView 实机验证。
 - 本机前端全量测试 86 个文件、962 项通过；Rust 全工作区测试 1,071 项通过、5 项既有忽略；类型检查、Lint、构建、i18n、DTO 一致性、版本一致性检查和 Rust 格式 / workspace 全目标 Clippy 通过。独立子代理只读审查通过，未发现阻塞问题。
 - 浏览器合成草稿核对浅深主题下的标题、粗体、列表、引用、颜色、高亮、对齐与普通附件布局。此浏览器预览使用开发适配，不代替 Rust 渲染器的实际桌面显示验证；本轮未做三平台 Tauri 原生窗口、真实草稿图片与系统外链打开手测。
+
+<a id="gmail-app-password"></a>
+
+## 35. Gmail 应用专用密码预设（2026-11-08）
+
+实现以 `851a185` 为主干基线，新增 `gmail` 入口，精确接受 `gmail.com` / `googlemail.com`，预填 `imap.gmail.com:993` 与 `smtp.gmail.com:465` 隐式 TLS，收发共享应用专用密码，用户名默认完整邮箱地址。复用 `appPassword` 凭证文案；桌面与浏览器 mock 只把精确的 `gmail` 映射到 Google 应用专用密码帮助，拒绝近似 ID 与任意 URL。服务商列表调整为 Gmail 第一、iCloud 第二，手动 IMAP/SMTP 仍为末项，README 与用户指南按同一顺序排列。未修改 `core/src`，`imap.gmail.com` 沿用标准兼容策略；没有新增认证类型或数据库迁移。接入方式比较与 OAuth 条件见 [Gmail 接入评估](../reference/gmail-integration.md)。
+
+公开端点探测（2026-11-08 15:37，Asia/Shanghai，本机 macOS，Python 标准库，默认信任链）只执行 CAPABILITY / EHLO / STARTTLS / QUIT，未登录：IMAP 993 与 SMTP 465 隐式 TLS 成功，587 STARTTLS 成功；IMAP 未公告 LOGINDISABLED，SMTP 公告 `AUTH LOGIN PLAIN`。完整公告见评估文档；探测不代替 MailX 网络栈与真实认证。
+
+图标为 Gmail 产品页导航引用的官方静态 SVG，本地文件与原件字节一致，来源与 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md#gmail)。以无头 Chrome 渲染 14 / 18 / 20 / 24 / 32 / 40 px 在白色与深灰背景下的显示，图形完整、比例正确、无裁切。文件小于 Vite 内联阈值，生产构建以 `data:` 图片打包进主脚本，桌面 CSP 的 `img-src` 允许 `data:`，运行时不访问 Google 站点。
+
+本机 macOS 检查通过：`bun run check`（版本检查与测试、927 条双语资源、Rust DTO 一致性、类型检查、lint、86 个前端测试文件 / 978 项测试、生产构建与 Rust workspace check，保留既有 chunk 大小提示）；`cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments`、`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`。新增前端回归覆盖搜索别名、端点与 TLS、近似域拒绝、两种域名的默认用户名、应用专用密码原值保留、添加前测试登录与保存、帮助入口和图标。
+
+没有使用真实 Gmail 凭据、登录邮箱或发送邮件；应用专用密码登录（含带空格输入）、收读发、标签导致的多文件夹重复、删除与归档、服务器已发送副本对账、IDLE、密码修改后的恢复及三平台桌面行为仍待验证。预设存在和上述自动检查不能代替这些验证。

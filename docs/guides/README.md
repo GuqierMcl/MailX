@@ -7,9 +7,17 @@ This page covers the basics of the desktop app. Published installers are listed 
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
-2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for QQ Mail / Foxmail, 163, 126, yeah.net, 139 and iCloud; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
+2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. To give the mail more room, collapse the sidebar from the title bar or with Cmd/Ctrl+B: it becomes a narrow column of icons with the same places, tooltips that show unread counts, and menus for More and each account. Your choice is remembered. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
+
+### Gmail
+
+Turn on [2-Step Verification](https://support.google.com/accounts/answer/185839) for your Google Account, then create an [app password](https://support.google.com/accounts/answer/185833) on the App passwords page of your Google Account. Google shows a 16-character password in groups; remove the spaces when you paste it into MailX. IMAP is always on in Gmail, so there is nothing to enable in Gmail settings.
+
+Choose Gmail for a `@gmail.com` or `@googlemail.com` address. MailX fills in `imap.gmail.com:993` and `smtp.gmail.com:465`, both with implicit TLS, sharing the app password. Both usernames are your full email address.
+
+Changing your Google Account password turns off all app passwords; create a new one and update the account connection in MailX. App passwords aren't available if you use only security keys for 2-Step Verification, have Advanced Protection, or use a work or school account. MailX doesn't offer Google sign-in in the browser yet, so these accounts can't be added for now. Gmail uses labels, so the same message can appear in several folders; how this shows up in MailX hasn't been fully checked with real accounts.
 
 ### iCloud Mail
 

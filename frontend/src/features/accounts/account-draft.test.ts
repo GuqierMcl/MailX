@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeDraft, draftToConnection, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -127,6 +127,27 @@ describe('iCloud provider domain and credential boundaries', () => {
       providerId: 'icloud', emailAddress: 'Synthetic@ME.COM',
       imap: { username: 'Synthetic' }, smtp: { username: 'synthetic@icloud.com' },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: ' abcd-efgh-ijkl-mnop ' } },
+    })
+  })
+})
+
+describe('Gmail provider domain and credential boundaries', () => {
+  it.each(['sub.gmail.com', 'gmail.com.evil', 'evilgmail.com', 'google.com', 'googlemail.com.evil', 'example.com'])('rejects %s before submitting a credential', (domain) => {
+    const draft = initialDraft(null, GMAIL_PROVIDER)
+    draft.emailAddress = `synthetic@${domain}`
+    draft.sharedPassword.value = 'abcdefghijklmnop'
+    expect(() => draftToConnection(draft, null, GMAIL_PROVIDER)).toThrow(MailxClientError)
+  })
+
+  it.each(['Synthetic@GMAIL.com', 'synthetic@googlemail.com'])('fills full-address logins for %s and keeps the app password as entered', (emailAddress) => {
+    const draft = initialDraft(null, GMAIL_PROVIDER)
+    draft.emailAddress = emailAddress
+    draft.sharedPassword.value = 'abcd efgh ijkl mnop'
+    expect(draftToConnection(draft, null, GMAIL_PROVIDER)).toMatchObject({
+      providerId: 'gmail', emailAddress,
+      imap: { host: 'imap.gmail.com', port: 993, tls: 'implicit', username: emailAddress },
+      smtp: { host: 'smtp.gmail.com', port: 465, tls: 'implicit', username: emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'abcd efgh ijkl mnop' } },
     })
   })
 })
