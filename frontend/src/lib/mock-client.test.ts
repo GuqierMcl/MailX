@@ -390,3 +390,38 @@ describe('mock local archive', () => {
     expect((await client.listEmails(inboxQuery('only'))).items).toHaveLength(0)
   })
 })
+
+describe('mock batch actions for the list selection', () => {
+  const inboxQuery = emailQuery({ folderRole: 'inbox', limit: 2 })
+
+  it('selects the same messages as the list, ignoring paging', async () => {
+    const client = createMockClient()
+    const listed = await client.listEmails({ ...inboxQuery, limit: 500 })
+    const selection = await client.selectEmails(inboxQuery)
+    expect(selection.items.map((item) => item.id)).toEqual(listed.items.map((item) => item.id))
+    expect(selection.truncated).toBe(false)
+    expect(Object.keys(selection.items[0]).sort()).toEqual(['accountId', 'archived', 'folderId', 'id', 'isRead', 'isStarred', 'localOnly'])
+  })
+
+  it('skips what it cannot delete or archive when asked to, and refuses when nothing is left', async () => {
+    const client = createMockClient()
+    const [first, second] = (await client.listEmails(inboxQuery)).items
+    const archived = await client.archiveEmails([first.id, 'missing'], true)
+    expect(archived).toMatchObject({ processedCount: 1, skippedIds: ['missing'] })
+    await expect(client.archiveEmails(['missing'], true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    const deletion = await client.deleteEmails([second.id, 'missing'], true, true)
+    expect(deletion.skippedIds).toEqual(['missing'])
+    await expect(client.deleteEmails([second.id], true, true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+  })
+
+  it('reports each flag change on its own', async () => {
+    const client = createMockClient()
+    const [first] = (await client.listEmails(inboxQuery)).items
+    const outcome = await client.setFlags([first.id, 'missing', first.id], 'read', !first.isRead)
+    expect(outcome.results).toEqual([
+      { emailId: first.id, outcome: 'queued', code: null },
+      { emailId: 'missing', outcome: 'failed', code: 'notFound' },
+    ])
+    await expect(client.setFlags([], 'read', true)).rejects.toMatchObject({ failure: { code: 'validation' } })
+  })
+})

@@ -33,6 +33,8 @@
   --mail-selection-accent: var(--color-blue-500);
   --mail-selection: color-mix(in oklab, var(--mail-selection-accent) 18%, var(--background));
   --mail-selection-muted-foreground: oklch(0.43 0 0);
+  /* A picked row in the list's selection mode: a faint wash under the accent border. */
+  --mail-pick: color-mix(in oklab, var(--mail-selection-accent) 8%, var(--background));
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
@@ -145,6 +147,7 @@ html[data-translucent].dark .app-canvas {
   --mail-selection-accent: var(--color-blue-300);
   --mail-selection: color-mix(in oklab, var(--mail-selection-accent) 22%, var(--background));
   --mail-selection-muted-foreground: oklch(0.708 0 0);
+  --mail-pick: color-mix(in oklab, var(--mail-selection-accent) 10%, var(--background));
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -169,6 +172,35 @@ html[data-translucent].dark .app-canvas {
 .mail-selected {
   background-color: var(--mail-selection);
   --muted-foreground: var(--mail-selection-muted-foreground);
+}
+
+/* Selection mode rows: an inset border (row size never changes), a faint wash
+   and a corner check when picked; a lighter border on hover when not. */
+.mail-pick {
+  transition: box-shadow 150ms ease-out, background-color 150ms ease-out;
+}
+.mail-pick:hover:not([data-picked]) {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--mail-selection-accent) 40%, transparent);
+}
+.mail-pick[data-picked] {
+  background-color: var(--mail-pick);
+  box-shadow: inset 0 0 0 1.5px var(--mail-selection-accent);
+}
+.mail-pick-mark {
+  background-color: var(--mail-selection-accent);
+  color: var(--background);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.mail-pick[data-picked] > .mail-pick-mark {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mail-pick,
+  .mail-pick-mark {
+    transition: none;
+  }
 }
 
 /* Base UI hides native scrollbars under its own with an injected <style> tag,

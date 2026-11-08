@@ -305,3 +305,155 @@ async fn archive_event_bounds_id_hints_but_counts_every_shared_copy() {
     assert_eq!(events[0].email_ids.len(), 500);
     assert_eq!(events[0].account_ids.len(), 1);
 }
+
+#[tokio::test]
+async fn partial_archive_reports_skips_and_its_undo_covers_only_processed_mail() {
+    let f = fixture();
+    let missing = uuid::Uuid::new_v4().to_string();
+    let local = format!("local-sent:{}", uuid::Uuid::new_v4());
+    let result = f
+        .core
+        .change_email_archive_partial(
+            &[
+                missing.clone(),
+                f.ids[0].clone(),
+                local.clone(),
+                f.ids[1].clone(),
+            ],
+            true,
+            true,
+            MailChangeSource::User,
+        )
+        .unwrap();
+    assert_eq!(result.skipped_ids, vec![missing.clone(), local]);
+    assert_eq!(result.processed_count, 2);
+    assert_eq!(result.changed_count, 2);
+    assert!(archived(&f, 0) && archived(&f, 1) && !archived(&f, 2));
+    f.core.archive_emails(&[f.ids[2].clone()]).unwrap();
+    f.core
+        .undo_archive(result.undo_token.as_deref().unwrap())
+        .unwrap();
+    assert!(!archived(&f, 0) && !archived(&f, 1) && archived(&f, 2));
+    // Everything skipped changes nothing.
+    assert_eq!(
+        f.core
+            .change_email_archive_partial(&[missing], true, true, MailChangeSource::User)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    // Strict calls never report skips.
+    let strict = f
+        .core
+        .change_email_archive(&[f.ids[0].clone()], true, MailChangeSource::User)
+        .unwrap();
+    assert!(strict.skipped_ids.is_empty());
+}
+
+#[tokio::test]
+async fn partial_delete_reports_skips_and_undo_restores_only_processed_mail() {
+    let f = fixture();
+    let missing = uuid::Uuid::new_v4().to_string();
+    let deletion = f
+        .core
+        .delete_emails_partial(&[f.ids[0].clone(), missing.clone()], true, true)
+        .unwrap();
+    assert_eq!(deletion.skipped_ids, vec![missing.clone()]);
+    assert!(f.core.get_email(&f.ids[0]).is_err());
+    f.core.undo_delete(&deletion.batch_id).unwrap();
+    assert!(f.core.get_email(&f.ids[0]).is_ok());
+    assert_eq!(
+        f.core
+            .delete_emails_partial(std::slice::from_ref(&missing), true, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        f.core
+            .delete_emails(&[f.ids[0].clone(), missing], true)
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert!(f.core.get_email(&f.ids[0]).is_ok());
+}
+
+#[tokio::test]
+async fn batch_flags_report_each_message_once_in_input_order() {
+    let f = fixture();
+    f.db.execute("UPDATE folders SET can_flag = 0", []).unwrap();
+    let missing = uuid::Uuid::new_v4().to_string();
+    let local = format!("local-sent:{}", uuid::Uuid::new_v4());
+    let outcome = f
+        .core
+        .set_emails_flag(
+            &[
+                f.ids[1].clone(),
+                missing.clone(),
+                f.ids[0].clone(),
+                f.ids[1].clone(),
+                local.clone(),
+            ],
+            MessageFlag::Starred,
+            true,
+        )
+        .unwrap();
+    let summary: Vec<_> = outcome
+        .results
+        .iter()
+        .map(|item| (item.email_id.clone(), item.outcome, item.code))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (f.ids[1].clone(), FlagBatchItemOutcome::LocalOnly, None),
+            (
+                missing,
+                FlagBatchItemOutcome::Failed,
+                Some(ErrorCode::NotFound)
+            ),
+            (f.ids[0].clone(), FlagBatchItemOutcome::LocalOnly, None),
+            (
+                local,
+                FlagBatchItemOutcome::Failed,
+                Some(ErrorCode::NotFound)
+            ),
+        ]
+    );
+    let read = f
+        .core
+        .set_emails_flag(&[f.ids[2].clone()], MessageFlag::Read, true)
+        .unwrap();
+    assert_eq!(read.results[0].outcome, FlagBatchItemOutcome::Queued);
+    let again = f
+        .core
+        .set_emails_flag(&[f.ids[2].clone()], MessageFlag::Read, true)
+        .unwrap();
+    assert_eq!(again.results[0].outcome, FlagBatchItemOutcome::Unchanged);
+    assert_eq!(
+        f.core
+            .set_emails_flag(&[], MessageFlag::Read, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
+    let many: Vec<String> = (0..501).map(|n| format!("id-{n}")).collect();
+    assert_eq!(
+        f.core
+            .set_emails_flag(&many, MessageFlag::Read, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
+    // Repeats count once toward the limit.
+    let repeated = vec![f.ids[0].clone(); 600];
+    assert_eq!(
+        f.core
+            .set_emails_flag(&repeated, MessageFlag::Read, true)
+            .unwrap()
+            .results
+            .len(),
+        1
+    );
+}

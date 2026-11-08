@@ -29,7 +29,7 @@ function Harness({ client, folders, target, onHidden }: {
   client: ReturnType<typeof testClient>
   folders: Folder[]
   target: EmailSummary
-  onHidden: (email: EmailSummary) => void
+  onHidden: (email: { id: string }) => void
 }) {
   const remove = useDeleteEmail(client, folders, onHidden)
   return (

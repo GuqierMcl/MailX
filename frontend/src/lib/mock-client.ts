@@ -1,4 +1,5 @@
 import type {
+  EmailListQuery,
   Account,
   AccountRemoval,
   AccountConfigInput,
@@ -194,10 +195,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   outbox.onFailed = unlock
 
   // Local archive: only inbox mail, all or nothing; the server is not involved.
-  function changeArchive(emailIds: string[], archived: boolean, undo = false) {
-    const ids = [...new Set(emailIds)]
-    if (ids.length === 0 || ids.length > 500) throw new MailxClientError({ code: 'validation', message: '一次只能处理 1 到 500 封邮件。', field: null })
-    const picked = ids.map((id) => emails.find((row) => row.summary.id === id && !row.summary.localOnly && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox'))
+  // With `partial`, ids that are not visible inbox mail are skipped and reported instead.
+  function changeArchive(emailIds: string[], archived: boolean, undo = false, partial = false) {
+    const requested = [...new Set(emailIds)]
+    if (requested.length === 0 || requested.length > 500) throw new MailxClientError({ code: 'validation', message: '一次只能处理 1 到 500 封邮件。', field: null })
+    const find = (id: string) => emails.find((row) => row.summary.id === id && !row.summary.localOnly && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox')
+    const skippedIds = partial ? requested.filter((id) => !find(id)) : []
+    const ids = requested.filter((id) => !skippedIds.includes(id))
+    if (ids.length === 0) throw notFound()
+    const picked = ids.map(find)
     if (picked.some((email) => !email)) throw notFound()
     for (const [token, receipt] of archiveReceipts) {
       if (receipt.expires <= Date.now() || receipt.emailIds.some((id) => ids.includes(id))) archiveReceipts.delete(token)
@@ -229,7 +235,54 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       }
       for (const listener of mailStateListeners) listener(event)
     }
-    return { processedCount: ids.length, changedCount: changed.length, undoToken }
+    return { processedCount: ids.length, changedCount: changed.length, undoToken, skippedIds }
+  }
+
+  function applyFlag(emailId: string, flag: 'read' | 'starred', wanted: boolean) {
+    const email = emails.find((row) => row.summary.id === emailId)
+    if (!email) throw notFound()
+    if (email.summary.localOnly) throw new MailxClientError({ code: 'validation', message: '本机副本不能更改标记。', field: null })
+    const key = flag === 'read' ? 'isRead' : 'isStarred'
+    if (email.summary[key] === wanted) return 'unchanged' as const
+    email.summary[key] = wanted
+    // Like the core: a read change moves its folder's unread number in the same
+    // step, and only the folder tree is where a client reads that number from.
+    if (flag === 'read') {
+      const folder = folders.find((row) => row.id === email.summary.folderId)
+      if (email.summary.archived && folder) {
+        // Archived unread mail counts in the archived views, not in the inbox number.
+        folder.archivedUnreadCount = Math.max(0, folder.archivedUnreadCount + (wanted ? -1 : 1))
+      } else if (folder?.countsKnown) folder.unreadCount = Math.max(0, folder.unreadCount + (wanted ? -1 : 1))
+    }
+    // The second account stands in for a server that cannot keep stars.
+    if (flag === 'starred' && email.summary.accountId === accounts[1]?.id) return 'localOnly' as const
+    return 'queued' as const
+  }
+
+  /** Every message a list query matches, newest first, as `emails_list` orders them. */
+  function matchingEmails(query: EmailListQuery) {
+    const terms = query.text?.trim() ? parseSearchTerms(query.text) : []
+    if (!terms) throw new MailxClientError({ code: 'validation', message: '搜索词过多或过长。', field: 'text' })
+    const archiveScope = query.archive ?? (terms.length > 0 ? 'include' : 'exclude')
+    const inScope = emails.filter((email) =>
+      (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
+      (!query.folderId || email.summary.folderId === query.folderId) &&
+      (!query.folderRole || folders.some((folder) => folder.id === email.summary.folderId && folder.role === query.folderRole)) &&
+      !(query.excludeFolderRoles ?? []).some((role) => folders.some((folder) => folder.id === email.summary.folderId && folder.role === role)) &&
+      // Like the core: archived mail only shows in the archived views and in searches.
+      (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
+      (query.unread == null || email.summary.isRead === !query.unread) &&
+      (query.starred == null || email.summary.isStarred === query.starred) &&
+      (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment),
+    )
+    const items = inScope
+      .flatMap((email) => {
+        if (terms.length === 0) return [{ ...email.summary, matchSnippet: null }]
+        const { matched, snippet } = matchEmail(email, terms)
+        return matched ? [{ ...email.summary, matchSnippet: snippet }] : []
+      })
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
+    return { inScope, items }
   }
 
   return {
@@ -361,27 +414,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return () => { previewListeners.delete(listener) }
     },
     async listEmails(query) {
-      const terms = query.text?.trim() ? parseSearchTerms(query.text) : []
-      if (!terms) throw new MailxClientError({ code: 'validation', message: '搜索词过多或过长。', field: 'text' })
-      const archiveScope = query.archive ?? (terms.length > 0 ? 'include' : 'exclude')
-      const inScope = emails.filter((email) =>
-        (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
-        (!query.folderId || email.summary.folderId === query.folderId) &&
-        (!query.folderRole || folders.some((folder) => folder.id === email.summary.folderId && folder.role === query.folderRole)) &&
-        !(query.excludeFolderRoles ?? []).some((role) => folders.some((folder) => folder.id === email.summary.folderId && folder.role === role)) &&
-        // Like the core: archived mail only shows in the archived views and in searches.
-        (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
-        (query.unread == null || email.summary.isRead === !query.unread) &&
-        (query.starred == null || email.summary.isStarred === query.starred) &&
-        (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment),
-      )
-      const items = inScope
-        .flatMap((email) => {
-          if (terms.length === 0) return [{ ...email.summary, matchSnippet: null }]
-          const { matched, snippet } = matchEmail(email, terms)
-          return matched ? [{ ...email.summary, matchSnippet: snippet }] : []
-        })
-        .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
+      const { inScope, items } = matchingEmails(query)
       const offset = query.cursor ? Number(query.cursor) : 0
       const limit = query.limit ?? 50
       const page = items.slice(offset, offset + limit)
@@ -393,6 +426,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           indexedBodies: inScope.filter((email) => email.summary.bodyState === 'ready').length,
           syncedAfter: null, syncedBefore: null, windowCapped: false,
         },
+      }
+    },
+    async selectEmails(query) {
+      const { items } = matchingEmails(query)
+      return {
+        items: items.slice(0, 500).map(({ id, accountId, folderId, isRead, isStarred, archived, localOnly }) =>
+          ({ id, accountId, folderId, isRead, isStarred, archived, localOnly })),
+        truncated: items.length > 500,
       }
     },
     async getEmail(emailId) {
@@ -411,30 +452,30 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       }
       return structuredClone(email)
     },
-    async setFlag(emailId, flag, wanted) {
-      const email = emails.find((row) => row.summary.id === emailId)
-      if (!email) throw notFound()
-      if (email.summary.localOnly) throw new MailxClientError({ code: 'validation', message: '本机副本不能更改标记。', field: null })
-      const key = flag === 'read' ? 'isRead' : 'isStarred'
-      if (email.summary[key] === wanted) return 'unchanged' as const
-      email.summary[key] = wanted
-      // Like the core: a read change moves its folder's unread number in the same
-      // step, and only the folder tree is where a client reads that number from.
-      if (flag === 'read') {
-        const folder = folders.find((row) => row.id === email.summary.folderId)
-        if (email.summary.archived && folder) {
-          // Archived unread mail counts in the archived views, not in the inbox number.
-          folder.archivedUnreadCount = Math.max(0, folder.archivedUnreadCount + (wanted ? -1 : 1))
-        } else if (folder?.countsKnown) folder.unreadCount = Math.max(0, folder.unreadCount + (wanted ? -1 : 1))
+    setFlag: async (emailId, flag, wanted) => applyFlag(emailId, flag, wanted),
+    async setFlags(emailIds, flag, wanted) {
+      const ids = [...new Set(emailIds)]
+      if (ids.length === 0 || ids.length > 500) throw new MailxClientError({ code: 'validation', message: '一次只能处理 1 到 500 封邮件。', field: null })
+      const results = []
+      for (const emailId of ids) {
+        const email = emails.find((row) => row.summary.id === emailId)
+        // Like the core: a local sent copy reports notFound; one failure leaves the rest alone.
+        if (!email || email.summary.localOnly) {
+          results.push({ emailId, outcome: 'failed' as const, code: 'notFound' as const })
+          continue
+        }
+        results.push({ emailId, outcome: applyFlag(emailId, flag, wanted), code: null })
       }
-      // The second account stands in for a server that cannot keep stars.
-      if (flag === 'starred' && email.summary.accountId === accounts[1]?.id) return 'localOnly' as const
-      return 'queued' as const
+      return { results }
     },
     onFlagWriteBack: () => () => undefined,
-    async deleteEmails(emailIds, confirmedPermanent) {
-      const picked = [...new Set(emailIds)].map((id) => emails.find((row) => row.summary.id === id && !row.summary.localOnly))
-      if (picked.length === 0) throw new MailxClientError({ code: 'validation', message: '没有要删除的邮件。', field: null })
+    async deleteEmails(emailIds, confirmedPermanent, partial = false) {
+      const requested = [...new Set(emailIds)]
+      if (requested.length === 0) throw new MailxClientError({ code: 'validation', message: '没有要删除的邮件。', field: null })
+      const find = (id: string) => emails.find((row) => row.summary.id === id && !row.summary.localOnly)
+      const skippedIds = partial ? requested.filter((id) => !find(id)) : []
+      if (partial && skippedIds.length === requested.length) throw notFound()
+      const picked = requested.filter((id) => !skippedIds.includes(id)).map(find)
       // Like the core: outside Trash a message moves there; in Trash, or in an
       // account without one, it goes for good and needs the user's yes.
       const plans = picked.map((email) => {
@@ -458,7 +499,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         }
       }, MOCK_DELETE_UNDO_MS)
       pendingDeletions.set(batchId, { timer, emails: plans.map((plan) => plan.email) })
-      return { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent }
+      return { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent, skippedIds }
     },
     async undoDelete(batchId) {
       const pending = pendingDeletions.get(batchId)
@@ -467,11 +508,11 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       pendingDeletions.delete(batchId)
       emails.push(...pending.emails)
     },
-    async archiveEmails(emailIds) {
-      return changeArchive(emailIds, true)
+    async archiveEmails(emailIds, partial = false) {
+      return changeArchive(emailIds, true, false, partial)
     },
-    async unarchiveEmails(emailIds) {
-      return changeArchive(emailIds, false)
+    async unarchiveEmails(emailIds, partial = false) {
+      return changeArchive(emailIds, false, false, partial)
     },
     async undoArchive(undoToken) {
       const receipt = archiveReceipts.get(undoToken)

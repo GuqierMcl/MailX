@@ -58,6 +58,9 @@ pub struct EmailDeletion {
     /// `true` when the messages are expunged for good instead of going to
     /// Trash (they were in Trash, or the account has none).
     pub permanent: bool,
+    /// Ids skipped by a `partial` request, in input order; always empty
+    /// otherwise.
+    pub skipped_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -152,6 +155,9 @@ pub struct EmailRecipients {
 /// Prefix of the ids of local Sent copies (sending.md section 9.2).
 pub const LOCAL_SENT_PREFIX: &str = "local-sent:";
 
+/// The most messages one "select all" returns, matching the batch action limit.
+pub const MAX_SELECTION: u32 = 500;
+
 /// Which locally archived inbox messages a list contains. This is the local
 /// archive, not the server's `FolderRole::Archive` folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -213,6 +219,29 @@ pub struct EmailPage {
     pub items: Vec<EmailSummary>,
     pub next_cursor: Option<String>,
     pub coverage: Coverage,
+}
+
+/// One message of a "select all": just enough to decide which batch actions
+/// apply and whether deleting needs confirmation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedEmail {
+    pub id: String,
+    pub account_id: String,
+    pub folder_id: String,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub archived: bool,
+    pub local_only: bool,
+}
+
+/// The first messages of a list query, in list order; `truncated` says more
+/// matched than were returned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailSelection {
+    pub items: Vec<SelectedEmail>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

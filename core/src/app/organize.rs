@@ -2,7 +2,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use super::{FlagChange, MailxCore};
+use super::{FlagChange, MailxCore, MessageFlag};
 use crate::events::{CoreEvent, MailChangeSource, MailStateChangeKind, MailStateChanged};
 use crate::storage::archives::{ArchiveEffects, ArchiveEntry, ArchiveKey};
 use crate::{AppError, ErrorCode};
@@ -26,6 +26,36 @@ pub struct ArchiveOutcome {
     pub changed_count: u32,
     /// For the trusted host UI only. Tool results must not expose this token.
     pub undo_token: Option<String>,
+    /// Ids a `partial` request skipped, in input order; always empty otherwise.
+    pub skipped_ids: Vec<String>,
+}
+
+/// What a batch flag change did to one message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub enum FlagBatchItemOutcome {
+    Unchanged,
+    Queued,
+    LocalOnly,
+    /// See the item's `code`; other messages are not affected.
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagBatchItem {
+    pub email_id: String,
+    pub outcome: FlagBatchItemOutcome,
+    /// Set only when `outcome` is `failed`.
+    pub code: Option<ErrorCode>,
+}
+
+/// Per-message results of a batch read / starred change, in input order with
+/// repeated ids reported once.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagBatchOutcome {
+    pub results: Vec<FlagBatchItem>,
 }
 
 struct UndoReceipt {
@@ -153,6 +183,49 @@ impl MailxCore {
         Ok(results)
     }
 
+    /// The user's batch read / starred change from the main window. 1 to 500
+    /// distinct ids (`validation`); each message reports its own result, and
+    /// local Sent copies fail with `notFound`.
+    pub fn set_emails_flag(
+        &self,
+        email_ids: &[String],
+        flag: MessageFlag,
+        wanted: bool,
+    ) -> Result<FlagBatchOutcome, AppError> {
+        let mut ids: Vec<String> = Vec::with_capacity(email_ids.len());
+        for id in email_ids {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        if ids.is_empty() || ids.len() > crate::mail::MAX_SELECTION as usize {
+            return Err(AppError::new(ErrorCode::Validation));
+        }
+        let (read, starred) = match flag {
+            MessageFlag::Read => (Some(wanted), None),
+            MessageFlag::Starred => (None, Some(wanted)),
+        };
+        let results = self
+            .set_email_flags(&ids, read, starred, MailChangeSource::User)?
+            .into_iter()
+            .map(|result| {
+                let (outcome, code) = match result.is_read.or(result.is_starred) {
+                    Some(Ok(FlagChange::Unchanged)) => (FlagBatchItemOutcome::Unchanged, None),
+                    Some(Ok(FlagChange::Queued)) => (FlagBatchItemOutcome::Queued, None),
+                    Some(Ok(FlagChange::LocalOnly)) => (FlagBatchItemOutcome::LocalOnly, None),
+                    Some(Err(error)) => (FlagBatchItemOutcome::Failed, Some(error.code)),
+                    None => (FlagBatchItemOutcome::Failed, Some(ErrorCode::Internal)),
+                };
+                FlagBatchItem {
+                    email_id: result.email_id,
+                    outcome,
+                    code,
+                }
+            })
+            .collect();
+        Ok(FlagBatchOutcome { results })
+    }
+
     /// Change all archive targets atomically. The receipt counts visible
     /// messages changed, including copies sharing the same archive key.
     pub fn change_email_archive(
@@ -161,13 +234,26 @@ impl MailxCore {
         archive: bool,
         source: MailChangeSource,
     ) -> Result<ArchiveOutcome, AppError> {
+        self.change_email_archive_partial(email_ids, archive, false, source)
+    }
+
+    /// Like [`Self::change_email_archive`]; with `partial`, ids that are not
+    /// visible inbox messages are skipped and reported instead of failing the
+    /// batch. The undo receipt covers only the messages actually changed.
+    pub fn change_email_archive_partial(
+        &self,
+        email_ids: &[String],
+        archive: bool,
+        partial: bool,
+        source: MailChangeSource,
+    ) -> Result<ArchiveOutcome, AppError> {
         // Every archive and restoration path takes these locks in this order.
         let mut service = self.accounts()?;
         let mut registry = self
             .archive_undo
             .lock()
             .map_err(|_| AppError::new(ErrorCode::Internal))?;
-        let changed = service.change_archive(email_ids, archive)?;
+        let changed = service.change_archive(email_ids, archive, partial)?;
         // A later explicit operation, even a no-op, supersedes old undo intent.
         registry.invalidate(&changed.touched_keys);
         let undo_token = if !changed.entries.is_empty() {
@@ -179,6 +265,7 @@ impl MailxCore {
             processed_count: changed.processed_count,
             changed_count: changed.effects.changed_count,
             undo_token: undo_token.clone(),
+            skipped_ids: changed.skipped_ids,
         };
         drop(registry);
         drop(service);

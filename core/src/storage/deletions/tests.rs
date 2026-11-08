@@ -450,3 +450,100 @@ fn the_server_count_does_not_bring_back_a_hidden_unread_message() {
         .unwrap();
     assert_eq!(unread(&f), 2);
 }
+
+fn schedule_partial(
+    f: &mut Fixture,
+    ids: &[String],
+    confirmed: bool,
+) -> Result<super::ScheduledDeletion, crate::error::AppError> {
+    f.service
+        .schedule_deletion_with(ids, confirmed, true, now(), Duration::seconds(5))
+}
+
+#[test]
+fn partial_deletion_skips_unusable_ids_in_input_order() {
+    let mut f = setup(true);
+    let inbox = f.inbox.clone();
+    let first = id(&f, &inbox, 1);
+    let second = id(&f, &inbox, 2);
+    let third = id(&f, &inbox, 3);
+    // An id already being deleted and one that does not exist.
+    f.service
+        .schedule_deletion(
+            std::slice::from_ref(&second),
+            false,
+            now(),
+            Duration::seconds(5),
+        )
+        .unwrap();
+    let missing = Uuid::new_v4().to_string();
+    let scheduled = schedule_partial(
+        &mut f,
+        &[
+            missing.clone(),
+            first.clone(),
+            second.clone(),
+            first.clone(),
+            third,
+        ],
+        false,
+    )
+    .unwrap();
+    assert_eq!(scheduled.skipped_ids, vec![missing, second.clone()]);
+    assert!(!scheduled.permanent);
+    assert!(visible(&f, FolderRole::Inbox).is_empty());
+    // Undo restores only what this batch scheduled; the earlier deletion stays.
+    f.service.cancel_deletion(&scheduled.batch_id).unwrap();
+    let mut shown = visible(&f, FolderRole::Inbox);
+    shown.sort();
+    assert_eq!(shown, vec!["Subject 1".to_owned(), "Subject 3".to_owned()]);
+}
+
+#[test]
+fn partial_deletion_with_everything_skipped_is_not_found_and_changes_nothing() {
+    let mut f = setup(true);
+    let before = unread(&f);
+    let error = schedule_partial(&mut f, &[Uuid::new_v4().to_string()], true).unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert_eq!(unread(&f), before);
+    let count: i64 =
+        f.db.query_row("SELECT COUNT(*) FROM message_deletions", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn partial_deletion_still_needs_confirmation_for_a_permanent_message() {
+    let mut f = setup(true);
+    let inbox = f.inbox.clone();
+    let trash = f.trash.clone();
+    let first = id(&f, &inbox, 1);
+    let in_trash = id(&f, &trash, 8);
+    let ids = [Uuid::new_v4().to_string(), first, in_trash];
+    let error = schedule_partial(&mut f, &ids, false).unwrap_err();
+    assert_eq!(error.code, ErrorCode::ConfirmationRequired);
+    assert_eq!(visible(&f, FolderRole::Inbox).len(), 3);
+    let scheduled = schedule_partial(&mut f, &ids, true).unwrap();
+    assert!(scheduled.permanent);
+    assert_eq!(scheduled.skipped_ids, vec![ids[0].clone()]);
+}
+
+#[test]
+fn strict_deletion_still_refuses_the_whole_batch() {
+    let mut f = setup(true);
+    let inbox = f.inbox.clone();
+    let first = id(&f, &inbox, 1);
+    let error = f
+        .service
+        .schedule_deletion(
+            &[first, Uuid::new_v4().to_string()],
+            false,
+            now(),
+            Duration::seconds(5),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert_eq!(visible(&f, FolderRole::Inbox).len(), 3);
+}

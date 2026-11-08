@@ -7,6 +7,7 @@ use crate::error::AppError;
 use crate::storage::deletions::{PendingDeletion, ScheduledDeletion};
 
 impl AccountService {
+    #[cfg(test)]
     pub(crate) fn schedule_deletion(
         &mut self,
         message_ids: &[String],
@@ -14,8 +15,19 @@ impl AccountService {
         now: DateTime<Utc>,
         delay: Duration,
     ) -> Result<ScheduledDeletion, AppError> {
+        self.schedule_deletion_with(message_ids, confirmed_permanent, false, now, delay)
+    }
+
+    pub(crate) fn schedule_deletion_with(
+        &mut self,
+        message_ids: &[String],
+        confirmed_permanent: bool,
+        partial: bool,
+        now: DateTime<Utc>,
+        delay: Duration,
+    ) -> Result<ScheduledDeletion, AppError> {
         self.storage
-            .schedule_deletion(message_ids, confirmed_permanent, now, delay)
+            .schedule_deletion_with(message_ids, confirmed_permanent, partial, now, delay)
     }
 
     pub(crate) fn cancel_deletion(&mut self, batch_id: &str) -> Result<Vec<String>, AppError> {

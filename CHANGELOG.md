@@ -14,6 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🚀 Feature
 
 - A Gmail entry, listed first with iCloud second, fills in encrypted IMAP / SMTP settings for @gmail.com and @googlemail.com, with the official bundled Gmail icon and step-by-step app password guidance. / 新增 Gmail 添加入口并排在服务商列表首位、iCloud 第二，为 @gmail.com 和 @googlemail.com 预填加密收发服务器，采用本地打包的官方 Gmail 图标，并提供应用专用密码的分步指引。 ([#100](https://github.com/GuqierMcl/MailX/pull/100))
+- Select several messages from the message list to mark them read or unread, star, archive or delete them together, with undo for delete and archive and failed messages kept selected. / 邮件列表支持多选，可一次标为已读或未读、加星标、归档或删除，删除与归档可撤销，没能处理的邮件保持选中。
 
 ### ✨ Optimization
 
