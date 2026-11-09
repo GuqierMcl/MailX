@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@/test/render'
+import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { EmailDetail, EmailPage, EmailSummary, Folder } from '@/generated/accounts'
@@ -66,6 +66,19 @@ describe('selecting messages in the list', () => {
     await user.click(toolbar().getByRole('button', { name: '完成' }))
     expect(screen.getByRole('tab', { name: '全部' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('offers the right-click menu outside selection mode only', async () => {
+    const { user } = await setup([email('a'), email('b')])
+    fireEvent.contextMenu(rows()[0])
+    expect(await screen.findByRole('menu', { name: '邮件菜单' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '选择' }))
+    // The selection bar holds the batch actions; a per-message menu would blur what is acted on.
+    fireEvent.contextMenu(rows()[0])
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(toolbar().getByText('点选邮件')).toBeInTheDocument()
   })
 
   it('starts with only the clicked row on Cmd+click, leaves on Esc and shows the opened message again', async () => {

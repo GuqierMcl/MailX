@@ -330,7 +330,11 @@ describe('synced inbox headers', () => {
     await searchFor('邮件')
     await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '邮件' })))
     // The search starts a new query; its first page renders a notification tick after the call.
-    await waitFor(() => expect(rows()).toHaveLength(103))
+    // Until then the previous query's 103 rows are shown dimmed (aria-busy), so wait past them.
+    await waitFor(() => {
+      expect(screen.getByRole('list', { name: '邮件列表' })).not.toHaveAttribute('aria-busy')
+      expect(rows()).toHaveLength(103)
+    })
     await userEvent.click(rows()[102])
     await screen.findByRole('heading', { name: items[102].subject })
     const calls = client.listEmails.mock.calls.length

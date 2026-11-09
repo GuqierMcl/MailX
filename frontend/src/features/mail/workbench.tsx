@@ -589,6 +589,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onDelete={deleteEmail.request}
               onRemoveLocal={requestRemoveLocal}
               canArchive={(email) => canArchive(email, folders)}
+              onRespond={(email, kind) => void compose.respond(email.id, kind)}
               onLoadMore={loadMore}
               selection={selection}
               selectionActions={selectionActions}
