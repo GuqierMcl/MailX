@@ -46,6 +46,8 @@ type EmailCardProps = {
   selectionMode?: boolean
   /** Whether this row is among the picked ones (selection mode only). */
   picked?: boolean
+  /** The list's right-click menu is open for this row: keep the row lit while it is. */
+  menuOpen?: boolean
   /** A click on the row; Cmd/Ctrl asks to toggle it, Shift to pick the range up to it. */
   onSelect: (intent: RowClick) => void
 }
@@ -53,7 +55,7 @@ type EmailCardProps = {
 export type RowClick = { toggle: boolean; range: boolean }
 
 /** A message row with its state slot and quick actions kept outside the main link. */
-export function EmailCard({ email, sentView, account, selected: opened, previewLines, index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, onSelect }: EmailCardProps) {
+export function EmailCard({ email, sentView, account, selected: opened, previewLines, index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
   useTranslation()
   // In a sent view the row is about who the mail went to. The avatar follows
   // the same person, so it never shows the account owner on every row.
@@ -197,6 +199,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         selectionMode
           ? 'mail-pick has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:-outline-offset-1'
           : 'hover:bg-foreground/5',
+        menuOpen && 'bg-foreground/5',
         selected && 'mail-selected',
       )}
     >

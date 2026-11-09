@@ -82,6 +82,8 @@
   "replyAll": "全部回复",
   "forward": "转发",
   "messageActions": "邮件操作",
+  "messageMenu": "邮件菜单",
+  "openMessage": "打开",
   "notImplemented": "{{label}}（尚未实现）",
   "markRead": "标为已读",
   "markUnread": "标为未读",

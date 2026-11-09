@@ -82,6 +82,8 @@
   "replyAll": "Reply all",
   "forward": "Forward",
   "messageActions": "Message actions",
+  "messageMenu": "Message menu",
+  "openMessage": "Open",
   "notImplemented": "{{label}} (not implemented yet)",
   "markRead": "Mark as read",
   "markUnread": "Mark as unread",
