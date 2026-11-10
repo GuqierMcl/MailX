@@ -169,7 +169,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 ### OAuth 专用宿主命令
 
-以下命令仅可信 main 窗口且核心 Ready 时可调用，不授予正文、写信窗口或 MCP。生产受信注册与身份适配器均为空，`accounts_oauth_begin` 当前对所有提供商返回 `unsupported`，不会绑定端口、读取代理凭证或打开浏览器；前端没有可用 OAuth 服务商入口。
+以下命令仅可信 main 窗口且核心 Ready 时可调用，不授予正文、写信窗口或 MCP。生产受信注册目前只有 `microsoft-personal` 与 `microsoft-work`；其他 `providerId`（含空与任意 URL）返回 `unsupported`，不会绑定端口、读取代理凭证或打开浏览器。
 
 | Tauri 命令 | 输入 | 结果 |
 | --- | --- | --- |
@@ -178,7 +178,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `accounts_oauth_finish` | `{ request: { sessionId } }` | 等待回调、交换和身份验证，消费会话内固定目标，创建或重授权账号并返回 `Account` |
 | `accounts_oauth_cancel` | `{ request: { sessionId } }` | 取消监听 / 交换 / 身份验证；重复取消无副作用 |
 
-调用方不提供授权 / token URL、PKCE 秘密、回调内容或已验证主体；输入里的 OAuth 身份提示不作为授权证明，核心以受信注册及验证结果替换。目标邮箱与用户名先按账号规则归一化，并在监听器绑定前核对受信邮件端点 / TLS / 登录身份策略；`configuration.targetMailboxResource` 是已验证邮箱目标，不能作为 token resource 配置。会话最多八个、五分钟有效、完成结果仅能消费一次；到期自动清理监听任务和未消费的已完成授权结果，不依赖前端再次调用。`configuration.issuer` 是验证器返回的已验证 issuer（多租户端点下因租户而异），不是注册项常量。账号摘要的 `authentication` 现在显式带 `kind`：`password` 保留原密码摘要，`oauth2` 使用 `configuration`、`state=connected | needsReauthorization` 和 `imap` / `smtp` 的 `{ id, generation, credentialConfigured, trust }`；所有结果均无 token。旧密码快照可读，写出带 `kind=password`。当前 OAuth 连接编辑不可用；专用重授权接口核对预期 revision 与稳定身份，生产服务商及界面仍未开放。 授权会话的回调路径与授权地址附加参数（`prompt`、`login_hint`、`nonce`）完全由受信注册项决定，调用方不可提供。管理员关闭协议时，同步与验证报告 `providerPolicy`，发信失败原因为 `providerPolicy`，均不含服务器文字。授权错误使用固定结构化码：`oauthNetwork`、`oauthProxy`、`oauthTls`、`oauthTimeout`、`oauthRateLimited`、`oauthServerUnavailable`、`oauthAuthorizationDenied`、`oauthSessionExpired`、`oauthInvalidResponse`、`oauthReauthorizationRequired`，不透传回调、URL、token 或服务端文字；网络与临时服务错误不会被报告为表单参数错误。
+调用方不提供授权 / token URL、PKCE 秘密、回调内容、已验证主体或 IMAP / SMTP 服务器：开始授权时核心用受信注册项的服务器与登录名覆盖请求里的同名字段，所以前端只需提供邮箱地址、网络路由和资料。输入里的 OAuth 身份提示不作为授权证明，核心以受信注册及验证结果替换。目标邮箱与用户名先按账号规则归一化，并在监听器绑定前核对受信邮件端点 / TLS / 登录身份策略；`configuration.targetMailboxResource` 是已验证邮箱目标，不能作为 token resource 配置。会话最多八个、五分钟有效、完成结果仅能消费一次；到期自动清理监听任务和未消费的已完成授权结果，不依赖前端再次调用。`configuration.issuer` 是验证器返回的已验证 issuer（多租户端点下因租户而异），不是注册项常量。账号摘要的 `authentication` 现在显式带 `kind`：`password` 保留原密码摘要，`oauth2` 使用 `configuration`、`state=connected | needsReauthorization` 和 `imap` / `smtp` 的 `{ id, generation, credentialConfigured, trust }`；所有结果均无 token。旧密码快照可读，写出带 `kind=password`。当前 OAuth 连接编辑不可用；专用重授权接口核对预期 revision 与稳定身份，账号设置的“重新登录”调用它。 授权会话的回调路径与授权地址附加参数（`prompt`、`login_hint`、`nonce`）完全由受信注册项决定，调用方不可提供。管理员关闭协议时，同步与验证报告 `providerPolicy`，发信失败原因为 `providerPolicy`，均不含服务器文字。授权错误使用固定结构化码：`oauthNetwork`、`oauthProxy`、`oauthTls`、`oauthTimeout`、`oauthRateLimited`、`oauthServerUnavailable`、`oauthAuthorizationDenied`、`oauthSessionExpired`、`oauthInvalidResponse`、`oauthReauthorizationRequired`，以及 Microsoft 条目的 `oauthMailboxRefused`（该邮箱无法用这次登录打开）、`oauthUsePersonalEntry`（个人账号入了工作条目）、`oauthUseOrganizationEntry`（工作或学校账号入了个人条目），不透传回调、URL、token 或服务端文字；网络与临时服务错误不会被报告为表单参数错误。
 
 ### 桌面窗口命令
 

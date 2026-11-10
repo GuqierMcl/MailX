@@ -72,10 +72,20 @@ QQ 模块位于 `core/src/providers/qq.rs`，仅对实际 IMAP 主机名精确�
 
 ## 4. OAuth 身份与授权策略边界
 
-`core/src/auth/` 提供与品牌无关的授权码 / PKCE、一次性 loopback 会话、按账号路由的 token HTTP、grant 刷新协调、按 resource / scopes 隔离的 access token 缓存及 XOAUTH2。生产 OAuth 服务商列表当前为空；通用实现及本地受控测试不代表任何实际邮箱服务商已可使用 OAuth。
+`core/src/auth/` 提供与品牌无关的授权码 / PKCE、一次性 loopback 会话、按账号路由的 token HTTP、grant 刷新协调、按 resource / scopes 隔离的 access token 缓存及 XOAUTH2。生产 OAuth 服务商列表目前只有 Microsoft 的两个条目（见 4.1）；通用实现及本地受控测试不代表任何实际邮箱服务商已通过真实账号验证。
 
 边界划分：`core/src/auth/` 只放与服务商无关的流程、数据类型和 `OAuthProvider` trait（注册项、身份验证器、可选的拒绝分类钩子）；服务商的客户端 ID、端点、主机、scope 与租户规则只写在 `core/src/providers/`，由 `providers/oauth.rs` 的列表和唯一查找函数提供。同步、发信和存储主流程不出现品牌分支。同一客户端 ID 可有多个注册项（端点不同），以注册项标识区分。
 
 未来服务商适配器负责受信 issuer、固定授权 / token 端点、精确的 IMAP / SMTP host、port、TLS 与登录身份规则、允许的 resource / scope 目标、客户端注册策略以及身份响应的后端验证，输出稳定主体和目标邮箱证据。应用客户端注册项与账号 grant 分开存储；当前没有开放 BYOA 或任意端点配置，授权会话绑定监听器前、创建、恢复和重新授权时，均须校验邮件端点与登录身份策略；恢复持久化客户端项时还必须与受信策略核对端点、客户端 / 注册标识和允许目标，不能仅凭同名 provider 信任数据库中的 URL。邮箱别名、共享邮箱和委派授权必须由适配器明确验证，不由前端传入 subject 证明。
 
 主流程持有凭证与存储，负责有界 HTTP、TLS、代理失败不回退、scope / 到期检查、轮换落盘、grant generation 和移除 / 重授权竞态。具体适配器不自行复制 refresh token、启动独立刷新任务或绕过账号路由；浏览器授权网页的网络路径与后端账号代理分别处理。MCP 不开放客户端注册、授权会话或 token 配置能力。
+### 4.1 Microsoft（`core/src/providers/microsoft.rs`）
+
+Microsoft 的全部知识（客户端 ID、端点、主机、声明、错误码）只在这个文件及其测试里，经 `providers/oauth.rs` 列出；`auth/`、同步、发信与存储保持品牌中立，前端和桌面宿主只通过 `providerId` 与既有命令访问。
+
+- **两个条目，共用一个公共客户端。** `microsoft-personal`（界面“Outlook”）使用 `/consumers/` 端点，SMTP 为 `smtp-mail.outlook.com:587` STARTTLS；`microsoft-work`（界面“Microsoft 365 / Exchange”）使用 `/organizations/` 端点，SMTP 为 `smtp.office365.com:587` STARTTLS。两者 IMAP 都是 `outlook.office365.com:993` 隐式 TLS，登录名为邮箱地址。回调为 `http://127.0.0.1:{port}`，无路径（注册项 `redirectPath` 为空）。
+- **一枚 token 同时用于 IMAP 与 SMTP。** scope 为 `offline_access openid profile email https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send`，不设 resource；授权请求带 `prompt=select_account` 与 `login_hint`。
+- **身份验证。** 先用通用 `id_token` 解析（`aud`、`exp`、`nonce`），再要求 `iss` 等于 `https://login.microsoftonline.com/{tid}/v2.0`，`tid` 与 `oid` 为标准写法的 GUID。个人条目要求 `tid` 为消费者租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，工作条目要求其他租户；入错条目返回 `oauthUsePersonalEntry` / `oauthUseOrganizationEntry`，提示改用对应入口。绑定主体为 `{tid}/{oid}`，issuer 取 `iss`。`email` 与 `preferred_username` 是可变提示，不作证明；邮箱以 XOAUTH2 登录本条目受信 IMAP 端点成功为准，失败返回 `oauthMailboxRefused`。
+- **管理员关闭 SMTP AUTH。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭此协议”。IMAP 只返回通用的 `NO AUTHENTICATE failed`，无法区分，不猜测，也不分类。
+- **Windows 凭据大小。** Microsoft refresh token 常超过 1000 个字符，Windows 由桌面端与服务商无关的分条目包装存放，见[凭据库](secret-vault.md#7-oauth-凭证的大小限制)。
+- **尚未用真实账号验证。** 以上规则由受控测试和 Microsoft 文档支撑；授权、IMAP / SMTP 收发、IDLE 与各类租户策略下的实际表现仍待真实账号确认，见[验证记录](../development/validation.md)和[接入评估](../reference/microsoft-integration.md)。

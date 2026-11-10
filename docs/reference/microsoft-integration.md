@@ -1,6 +1,6 @@
 # Microsoft 365 / Outlook.com（Exchange）接入评估
 
-状态：**未实现**。本文记录用户所说“Exchange”的实际含义、各接入路径的可行性、已完成的 Microsoft Entra 应用注册，以及接入前通用 OAuth 基础需要满足的条件。MailX 当前只有密码类认证，`oauth2` 输入返回 `unsupported`，见[账号配置](../architecture/account-configuration.md#5-oauth-扩展边界)。
+状态：**已实现，尚未用真实微软账号验证**。Outlook（个人）与 Microsoft 365 / Exchange（工作或学校）两个入口通过浏览器登录，走 OAuth + IMAP / SMTP（XOAUTH2）；实现位置、规则和与通用 OAuth 基础的分工见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)与[账号配置](../architecture/account-configuration.md#5-通用-oauth-基础与开放边界)。本文记录用户所说“Exchange”的实际含义、各接入路径的可行性、Microsoft Entra 应用注册，以及接入时的决定与待验证项。
 
 ## 1. “Exchange”指什么
 
@@ -34,18 +34,18 @@ QQ 邮箱、腾讯企业邮等服务商设置里的“Exchange”指 ActiveSync 
 | --- | --- |
 | 应用程序（客户端）ID | `44a7bc3e-d9fd-4af9-90a6-a03b62013b40`；公共客户端，不是机密，可写入客户端；无客户端密钥 |
 | 支持的账户类型 | 任何组织目录中的账户和个人 Microsoft 账户（`AzureADandPersonalMicrosoftAccount`） |
-| 授权端点 | `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` |
-| 令牌端点 | `https://login.microsoftonline.com/common/oauth2/v2.0/token` |
+| 授权端点 | 个人入口 `https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize`，工作入口同路径换成 `/organizations/`（应用注册同时支持个人与组织账号；实现不使用 `/common`，而是按入口固定端点，以便入错入口时能明确提示） |
+| 令牌端点 | 同上，路径为 `/consumers/oauth2/v2.0/token` 与 `/organizations/oauth2/v2.0/token` |
 | 平台 | 移动和桌面应用程序 |
 | 重定向 URI | `http://localhost`、`http://127.0.0.1`；后者只能通过应用清单添加 [S6] |
 | 声明的委托权限 | Office 365 Exchange Online：`IMAP.AccessAsUser.All`、`SMTP.Send`；Microsoft Graph：`offline_access`、`openid`、`email`、`profile` |
-| 请求的 scope | `offline_access openid email profile https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send` [S3] |
+| 请求的 scope | `offline_access openid profile email https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send` [S3]；一枚 token 同时用于 IMAP 与 SMTP，不设 resource |
 | 浏览器授权试跑 | 已成功取得授权码回调 |
 | 所在目录 | 个人 Microsoft 账号的默认目录 |
 
 注册规则对实现的约束：
 
-- 本机回调匹配时只忽略端口，**路径必须与注册值一致**；同时支持个人账号的应用不允许回调地址带查询参数 [S6]。
+- 已注册的重定向 URI 是 `http://localhost` 与 `http://127.0.0.1`，**没有路径**，所以注册项的 `redirectPath` 为空，回调地址是 `http://127.0.0.1:{port}`；同时支持个人账号的应用不允许回调地址带查询参数 [S6]。
 - 微软建议使用 `127.0.0.1` 而非 `localhost`，避免防火墙或网络设置导致回调失败 [S6]。
 - 应用建在个人 Microsoft 账号的目录中，**按微软规定不能进行发布者验证** [S7]。发布者验证需要以组织身份加入 Microsoft AI Cloud Partner Program 并通过审核，在工作或学校账号的目录中注册应用，并设置经 DNS 验证的自有发布者域名（不能是 `*.onmicrosoft.com`）。将来如需验证，要在组织目录中重新注册，客户端 ID 随之改变，已登录账号需重新登录一次。
 
@@ -56,7 +56,9 @@ QQ 邮箱、腾讯企业邮等服务商设置里的“Exchange”指 ActiveSync 
 | 收信 | `outlook.office365.com:993`，隐式 TLS | `AUTHENTICATE XOAUTH2` |
 | 发信 | `smtp.office365.com:587`，STARTTLS | `AUTH XOAUTH2` |
 
-XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_token + "\x01\x01")` [S3]。共享邮箱可用授权用户的令牌、把 `user=` 换成共享邮箱地址 [S3]，当前不在首版范围。Outlook.com 个人账号是否同样使用 `smtp.office365.com`，还是需要 `smtp-mail.outlook.com`，以真实账号验证为准。
+XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_token + "\x01\x01")` [S3]。共享邮箱可用授权用户的令牌、把 `user=` 换成共享邮箱地址 [S3]，当前不在首版范围。
+
+**SMTP 主机因入口而异（实现已按此选择）：** Outlook.com 个人账号按微软的 Outlook.com 设置页使用 `smtp-mail.outlook.com:587`（STARTTLS）；工作或学校账号使用 `smtp.office365.com:587`（STARTTLS）。IMAP 两者相同。这是按文档选择，未用真实账号验证。
 
 ## 5. 对通用 OAuth 基础的要求
 
@@ -70,6 +72,14 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 6. **授权请求附加参数**。支持 `prompt=select_account`（多账号切换）和 `login_hint`（预填邮箱）。
 7. **刷新令牌轮换**。微软每次刷新都可能返回新的刷新令牌，必须先持久化再使用新的访问令牌；所有令牌请求走账号路由，代理失败不回退直连。
 
+### 实现时的决定
+
+- **邮箱以 IMAP 登录求证。** 身份主体取 `{tid}/{oid}`，issuer 取 `id_token` 的 `iss`（必须等于 `https://login.microsoftonline.com/{tid}/v2.0`，`tid`、`oid` 为 GUID）。`email` 与 `preferred_username` 可变，不作证明：验证器用刚取得的 access token，沿账号路由以 XOAUTH2 登录本入口受信的 IMAP 端点（`user=` 为用户要添加的邮箱）后退出，成功才认定该邮箱可由这次授权访问；被拒返回“无法打开邮箱”的提示，网络、代理与超时沿用既有 OAuth 网络错误。此检查在通用层只是 `imap::prove_mailbox_access` 与 `IdentityEvidence.expected_mailbox`，不含微软名称。
+- **个人与工作账号分开。** 两个入口各用 `/consumers/` 与 `/organizations/` 端点；个人入口要求 `tid` 为消费者租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，工作入口要求其他租户，入错时提示改用对应入口。
+- **SMTP AUTH 被组织关闭。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭”；IMAP 只有通用失败，不分类、不猜测。
+- **令牌容量。** 只持久化刷新令牌（已有行为）；Windows 上超过单条目上限的值由与服务商无关的分条目包装存放，见[凭据库 §7](../architecture/secret-vault.md#7-oauth-凭证的大小限制)。
+- **用户界面。** 两个入口放在 Gmail、iCloud 之后，暂用通用图标，不放微软标识（待按[服务商图标维护规范](../../frontend/src/assets/providers/README.md)取得官方原件）。公司自建 Exchange Server 不在“Microsoft 365 / Exchange”入口范围内，帮助文字指引到手动 IMAP/SMTP。
+
 ## 6. 企业租户的限制
 
 - **授权审批**：未经发布者验证的多租户应用，在开启基于风险的升级同意或只允许已验证发布者的租户中，员工无法自行授权，需要管理员批准 [S7]。个人账号不受影响，授权页显示“未验证”。帮助文档需说明如何请管理员为全公司批准。
@@ -80,10 +90,13 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 
 暂不覆盖：自建 Exchange Server 的 EWS 接入（管理员开启了 IMAP / SMTP 时，现有“手动配置 IMAP/SMTP”即可使用）、世纪互联中国版、共享邮箱、Graph 同步。
 
-待真实账号验证：
+仍未用真实账号验证（本次实现只有受控测试，没有可用的微软账号）：
 
 - Microsoft 365 与 Outlook.com 的授权、IMAP 同步、IDLE、SMTP 发信全链路，以及令牌过期后长连接的行为。
-- Outlook.com 的 SMTP 服务器选择。
+- Outlook.com 的 SMTP 服务器：实现按微软设置页选用 `smtp-mail.outlook.com`，需确认它与 `smtp.office365.com` 在 XOAUTH2 下是否都可用。
+- IMAP 登录求证在各类账号下的表现：别名、与登录名不同的邮箱、被管理员关闭 IMAP 时只返回通用失败，此时用户看到“无法打开邮箱”的提示。
+- `prompt=select_account` 与 `login_hint` 在两类账号上的实际行为，以及 `127.0.0.1` 无路径回调在各浏览器与防火墙下是否稳定。
+- Windows 凭据管理器中分条目存放的真实刷新令牌长度与读写。
 - 令牌响应实际回显的 scope 格式与令牌长度。
 - 企业租户禁止自行授权、关闭 IMAP、关闭 SMTP AUTH 时的实际返回与提示。
 - 已发送邮件是否由服务器自动保存到“已发送邮件”，以及与本机已发送副本的对账。

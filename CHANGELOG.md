@@ -13,6 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Add Outlook.com, Hotmail, Live and Microsoft 365 mailboxes by signing in in your browser, without a password. / 通过浏览器登录即可添加 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，无需密码。
 - Right-clicking a message in the list opens a menu with open, reply, reply all, forward, read and star, archive and delete actions, without opening the message. / 在邮件列表中右键点击邮件可打开菜单，提供打开、回复、全部回复、转发、已读与星标、归档和删除操作，且不会打开该邮件。 ([#105](https://github.com/GuqierMcl/MailX/pull/105))
 
 ### ✨ Optimization

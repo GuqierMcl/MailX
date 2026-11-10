@@ -1073,3 +1073,20 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 这些结果只说明中立基础按预期工作，不代表任何服务商、租户策略、真实系统浏览器回调或真实原生凭据库已通过验证。
 
 2026-11-10 本地完整检查：`bun run check` 通过（前端 89 个文件 / 1016 项测试，DTO、类型、lint、i18n、构建与 `cargo check` 均通过）；`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）通过；`bun run rust:test` 共 1163 项通过、0 项失败、5 项既有忽略项（core 单元 931、账号集成 39、desktop 148、bridge 两组各 6、MCP server 17、端到端 16）；`git diff --check` 无输出。仅为本机自动检查，范围见上。
+
+## 38. Microsoft（Outlook / Microsoft 365）浏览器登录
+
+2026-11-10 实现两个入口 `microsoft-personal`（Outlook）与 `microsoft-work`（Microsoft 365 / Exchange）。实现位于 `core/src/providers/microsoft.rs`，规则见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)，选型与决定见[接入评估](../reference/microsoft-integration.md)。**没有使用任何真实微软账号，也没有访问微软服务器**；以下全部是受控测试，不代表真实账号、租户策略、系统浏览器回调或原生凭据库通过验证。
+
+受控测试覆盖：
+
+- `cargo test -p mailx-core --lib providers::`：两个注册项通过 `validate()`，客户端 ID、端点、服务器、scope、空回调路径与 `prompt=select_account` / `login_hint` 与已核对的事实一致；身份验证器检查 `iss` 与 `tid` 对应、`tid` / `oid` 为标准 GUID、个人与工作租户互斥（入错入口返回专用错误且不触发 IMAP 登录）、主体为 `{tid}/{oid}`，邮箱取求证结果而非 `email` 声明；`aud` / `nonce` / 缺少 `id_token` 被拒，IMAP 求证的拒绝与网络错误原样透传；SMTP `535 5.7.139` 才归为管理员关闭，其他状态码、IMAP 响应码均不分类。
+- `cargo test -p mailx-core --lib imap::tests::mailbox_proof`：被拒登录映射为“无法打开邮箱”，代理、TLS、超时与连接失败保持各自的 OAuth 网络类别。
+- `cargo test -p mailx-core --lib auth::`：`mail_connections` 由注册项给出服务器与登录名，且通过目标校验；其余通用 OAuth 测试不变。
+- `cargo test -p mailx-core --lib accounts::oauth`：`sign_in_uses_the_same_route_as_saved_accounts` 固定 `inherit` 与直连在授权、同步、发信三处一致，自定义代理原样带入。
+- `cargo test -p mailx-desktop secret_split`：用强制 1280 个 UTF-16 单元上限的内存 `SecretStore` 验证分条目包装：短值保持单条目且旧值可读，长值拆分并还原，不切断字符，缩短或删除时清理旧段，缺段或长度不符返回错误而不是“无凭证”，写段失败不留下头部，形似头部的明文可原样读回。Windows 专用接线（`cfg(target_os = "windows")`）在 macOS 上只做了人工审阅，没有为 Windows 目标编译或运行。
+- 前端：提供商列表顺序与搜索别名；添加流程只问邮箱、不出现服务器 / 密码 / 测试登录；“在浏览器中登录”调用、等待与取消、关闭弹窗放弃等待；邮箱被拒、入错入口、代理问题回到第 2 步，未允许访问留在第 3 步；账号设置的“重新登录”（需要时醒目、取消、失败提示）；浏览器模拟客户端的成功、拒绝、取消与重新登录路径。
+
+浏览器模拟客户端已目测：搜索 “outlook” 只出现 Outlook 条目并显示帮助，第 2 步只有邮箱地址与“高级设置”，创建账号后账号设置里出现“重新登录”。未操作真实账号。
+
+仍待真实账号验证（清单与背景见接入评估第 7 节）：授权页与回调、IMAP / SMTP 收发与 IDLE、Outlook.com 的 `smtp-mail.outlook.com` 与工作账号的 `smtp.office365.com`、管理员批准与关闭 IMAP / SMTP 时的实际表现、`login_hint` / `prompt` 行为、令牌轮换与过期后的“重新登录”、Windows 凭据管理器中分条目存放的真实刷新令牌，以及三个平台的桌面行为。后续还要补官方 Microsoft 标识（现用通用图标）。
