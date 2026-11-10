@@ -1089,4 +1089,10 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 
 浏览器模拟客户端已目测：搜索 “outlook” 只出现 Outlook 条目并显示帮助，第 2 步只有邮箱地址与“高级设置”，创建账号后账号设置里出现“重新登录”。未操作真实账号。
 
-仍待真实账号验证（清单与背景见接入评估第 7 节）：授权页与回调、IMAP / SMTP 收发与 IDLE、Outlook.com 的 `smtp-mail.outlook.com` 与工作账号的 `smtp.office365.com`、管理员批准与关闭 IMAP / SMTP 时的实际表现、`login_hint` / `prompt` 行为、令牌轮换与过期后的“重新登录”、Windows 凭据管理器中分条目存放的真实刷新令牌，以及三个平台的桌面行为。后续还要补官方 Microsoft 标识（现用通用图标）。
+仍待真实账号验证（清单与背景见接入评估第 7 节）：授权页与回调、IMAP / SMTP 收发与 IDLE、Outlook.com 的 `smtp-mail.outlook.com` 与工作账号的 `smtp.office365.com`、管理员批准与关闭 IMAP / SMTP 时的实际表现、`login_hint` / `prompt` 行为、令牌轮换与过期后的“重新登录”、Windows 凭据管理器中分条目存放的真实刷新令牌，以及三个平台的桌面行为。官方 Outlook 图标与 Microsoft 标识已加入，见下文“图标”。
+
+### 图标（2026-11-10）
+
+“Outlook”入口使用 Microsoft 官方 Outlook 产品图标 `outlook.svg`（48 × 48，8,832 字节），“Microsoft 365 / Exchange”入口使用 Microsoft 登录品牌指南提供的 Microsoft 标识 `microsoft.svg`（21 × 21，343 字节）。来源页面、直接 URL、核验日期、SHA-256、许可条款和不使用 Exchange 产品图标的理由见[图标说明](../../frontend/src/assets/providers/README.md#microsoft-outlook)。已核对两个本地文件与下载原件字节一致、哈希与记录相同，且不含脚本、外部资源或字体依赖。
+
+浏览器预览检查：在 14 / 18 / 20 / 24 / 32 / 40 px、浅色（白）与深色（#1b1b1b）背景下，两个图标图形完整、比例正确（`object-contain`，无滤镜），Outlook 在 14 px 仍可辨认信封与 O 形，Microsoft 四色方块在所有尺寸都清楚；添加账号列表中两行的图标与名称显示正常。前端测试覆盖两个条目登记了不同的本地（非远程）图标，并在图标块与徽标中用 `object-contain` 原样显示。该检查只验证素材显示，不替代原生桌面界面验收，也不构成对 Microsoft 许可条款的法律确认。

@@ -10,11 +10,23 @@ describe('mail providers', () => {
     expect(PROVIDERS.at(-1)).toBe(GENERIC_PROVIDER)
   })
 
-  it('lists the two Microsoft entries right after Gmail and iCloud with the generic icon', () => {
+  it.each([MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER])('shows the bundled official logo, unaltered, for $id', (provider) => {
+    const { container } = render(<><ProviderIcon provider={provider} /><ProviderBadge providerId={provider.id} /></>)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', provider.logo)
+      expect(image).toHaveClass('object-contain')
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+    }
+    expect(MICROSOFT_PERSONAL_PROVIDER.logo).not.toBe(MICROSOFT_WORK_PROVIDER.logo)
+  })
+
+  it('lists the two Microsoft entries right after Gmail and iCloud with their official logos', () => {
     expect(PROVIDERS.slice(2, 4)).toEqual([MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER])
     expect([MICROSOFT_PERSONAL_PROVIDER.id, MICROSOFT_WORK_PROVIDER.id]).toEqual(['microsoft-personal', 'microsoft-work'])
     for (const provider of [MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER]) {
-      expect(provider.logo).toBeUndefined()
+      expect(provider.logo).toBeTruthy()
       expect(provider.preset).toBeUndefined()
       expect(provider.setup).toBeUndefined()
       expect(provider.signIn?.help).toContain('IMAP')

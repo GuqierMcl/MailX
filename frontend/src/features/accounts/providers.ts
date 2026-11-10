@@ -8,6 +8,8 @@ import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
 import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import gmailLogo from '@/assets/providers/gmail.svg'
+import outlookLogo from '@/assets/providers/outlook.svg'
+import microsoftLogo from '@/assets/providers/microsoft.svg'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -232,15 +234,17 @@ export const GMAIL_PROVIDER: MailProvider = {
   },
 }
 
-// Microsoft marks are not bundled yet (see assets/providers/README.md), so both
-// entries use the generic mail icon. The ids are the host's reviewed provider
-// ids and are also stored as the account's `providerId`.
+// The ids are the host's reviewed provider ids and are also stored as the
+// account's `providerId`. Outlook uses Microsoft's product icon; the work entry
+// uses the Microsoft logo, as Microsoft's sign-in guidance asks for work or
+// school accounts (see assets/providers/README.md).
 export const MICROSOFT_PERSONAL_PROVIDER: MailProvider = {
   id: 'microsoft-personal',
   get name() { return t('accounts:microsoftPersonalProviderName') },
   get domain() { return 'outlook.com / hotmail.com / live.com' },
   get description() { return t('accounts:microsoftPersonalProviderDescription') },
   searchAliases: ['Outlook', 'Hotmail', 'Live', 'MSN', 'Microsoft', '微软'],
+  logo: outlookLogo,
   icon: Mail01Icon,
   get signIn(): SignInSetup {
     return {
@@ -259,6 +263,7 @@ export const MICROSOFT_WORK_PROVIDER: MailProvider = {
   get domain() { return t('accounts:microsoftWorkDomain') },
   get description() { return t('accounts:microsoftWorkProviderDescription') },
   searchAliases: ['Exchange', 'Office 365', 'Microsoft 365', 'Microsoft', '微软', '企业邮箱'],
+  logo: microsoftLogo,
   icon: Mail01Icon,
   get signIn(): SignInSetup {
     return {

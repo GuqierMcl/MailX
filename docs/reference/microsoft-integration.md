@@ -78,7 +78,7 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 - **个人与工作账号分开。** 两个入口各用 `/consumers/` 与 `/organizations/` 端点；个人入口要求 `tid` 为消费者租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，工作入口要求其他租户，入错时提示改用对应入口。
 - **SMTP AUTH 被组织关闭。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭”；IMAP 只有通用失败，不分类、不猜测。
 - **令牌容量。** 只持久化刷新令牌（已有行为）；Windows 上超过单条目上限的值由与服务商无关的分条目包装存放，见[凭据库 §7](../architecture/secret-vault.md#7-oauth-凭证的大小限制)。
-- **用户界面。** 两个入口放在 Gmail、iCloud 之后，暂用通用图标，不放微软标识（待按[服务商图标维护规范](../../frontend/src/assets/providers/README.md)取得官方原件）。公司自建 Exchange Server 不在“Microsoft 365 / Exchange”入口范围内，帮助文字指引到手动 IMAP/SMTP。
+- **用户界面。** 两个入口放在 Gmail、iCloud 之后，“Outlook”使用 Microsoft Outlook 产品图标，“Microsoft 365 / Exchange”使用 Microsoft 标识（Fluent 产品图标集没有 Exchange 图标，Microsoft 的登录品牌指南要求工作或学校账号用 Microsoft 标识）；来源、哈希与许可见[服务商图标维护规范](../../frontend/src/assets/providers/README.md#microsoft-outlook)。公司自建 Exchange Server 不在“Microsoft 365 / Exchange”入口范围内，帮助文字指引到手动 IMAP/SMTP。
 
 ## 6. 企业租户的限制
 

@@ -71,9 +71,23 @@
 - 来源页面：[Gmail 产品页](https://workspace.google.com/products/gmail/)，核验日期：2026-11-08。页面导航中 `alt="Gmail"` 的产品图标引用下方原图。
 - 原图：[Gmail 192px SVG](https://www.gstatic.com/images/branding/productlogos/gmail_2026/v2/web/192px.svg)，`content-type: image/svg+xml`，`last-modified: Mon, 09 Mar 2026 22:48:00 GMT`。本地文件与下载原件字节一致；只含路径与内部渐变，没有脚本、外部资源或字体依赖。
 
+## Microsoft Outlook
+
+- 文件：`outlook.svg`，48 × 48 静态 SVG，8,832 字节，直接保存 Microsoft 官方原文件；统一用于浅深主题，透明背景，没有修改路径、渐变或尺寸。用于“Outlook”入口（`microsoft-personal`，Outlook.com、Hotmail、Live 个人邮箱）。
+- 来源页面：Microsoft 365 产品图标，由 Microsoft 的 Fluent UI 文档说明：[`M365ProductIconsImplementation.md`](https://github.com/microsoft/fluentui/blob/master/apps/public-docsite/src/pages/Styles/M365ProductIconsPage/docs/web/M365ProductIconsImplementation.md)（`github.com/microsoft/fluentui`，路径 `apps/public-docsite/src/pages/Styles/M365ProductIconsPage/docs/web/`），其中把网页图标指向 `https://res-1.cdn.office.net/files/fabric-cdn-prod_20251008.001/assets/brand-icons/product/svg/{product}_48x1.svg`。核验日期：2026-11-10。
+- 原图：[`outlook_48x1.svg`](https://res-1.cdn.office.net/files/fabric-cdn-prod_20251008.001/assets/brand-icons/product/svg/outlook_48x1.svg)，`content-type: image/svg+xml`，`last-modified: Thu, 09 Oct 2025 07:37:12 GMT`。本地文件与下载原件字节一致；只含路径与内部渐变，没有脚本、外部资源或字体依赖。
+- 使用条件：依 [Microsoft Fabric Assets License](https://aka.ms/fluentui-assets-license)（`microsoft_fabric_assets_license_agreement_nov_2019.pdf`）第 1(b) 条，可以用这些素材“说明应用与一项或多项 Microsoft 产品和服务集成”；附件 1 允许在不可点击的并列清单中使用图标，旁边须有完整产品名称，图标保持原样、全彩正色版本。MailX 在服务商列表和账号标识里，图标旁边都显示“Outlook”名称，不作改色、反色、裁切或变形，也不让它充当可点击的 Microsoft 标识。许可证条款以原文为准，发布前如需更严格的判断应由权利人确认。
+
+## Microsoft 365 / Exchange（Microsoft 标识）
+
+- 文件：`microsoft.svg`，21 × 21 静态 SVG，343 字节，直接保存 Microsoft 官方原文件（四色方块标识，`<title>MS-SymbolLockup</title>`）；统一用于浅深主题，透明背景，没有修改。用于“Microsoft 365 / Exchange”入口（`microsoft-work`，工作或学校邮箱）。
+- 来源页面：Microsoft Learn [Sign in with Microsoft branding guidelines](https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps)，提供该文件供应用使用，并说明：用户尚未登录时，应称“工作或学校账号”，并用 Microsoft 标识表示这些账号由 Microsoft 管理；不得改动标识。核验日期：2026-11-10。
+- 原图：[`ms-symbollockup_mssymbol_19.svg`](https://learn.microsoft.com/en-us/entra/identity-platform/media/howto-add-branding-in-apps/ms-symbollockup_mssymbol_19.svg)。本地文件与下载原件字节一致，只含四个纯色矩形，没有脚本、外部资源或字体依赖。
+- 为什么这里用公司标识而不是 Exchange 产品图标：本规范通常不让集团标识替代产品图标，但此入口的情况不同。Microsoft 的 Fluent 产品图标集（可用于应用集成的授权来源）没有 Exchange 图标；Microsoft 365 架构图标包只允许用于图表、培训和文档，不能用于应用界面；Fluent 的 `office` 图标是已停用的旧 Office 标识。而 Microsoft 自己的登录品牌指南要求工作或学校账号使用 Microsoft 标识。因此采用该标识，名称仍写“Microsoft 365 / Exchange”，不单独表示 Exchange 产品。若 Microsoft 之后发布适用于应用的 Exchange 或 Microsoft 365 产品图标，应改用并更新本节。
+
 ## 文件核验与维护
 
-QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
+QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -84,5 +98,7 @@ QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30�
 | `mail-139.png` | `2d438d12f0e6bbc1d668d705b817cd1a374e7ffe053eedca16c5a6f15ee1862f` |
 | `icloud-mail.png` | `eb04a20229ea2fe673b7b78bf84213176a8ae765bf5c5ec88ac5c2458585f869` |
 | `gmail.svg` | `0a242131424b796a26247a8edd41d66fa294da6d177897526a19b7e81aedfdb8` |
+| `outlook.svg` | `81bfb24bb128298a9ed0ea6fe8d9ba8cff703b26d6a7cbd18cc4314cecba8f1f` |
+| `microsoft.svg` | `929f48f88c8ca7f3f5d294be47ec4caf51acc28ac25340c19a903125d7ecd84a` |
 
 服务商名称及图形属于各自权利人，与 MailX 自有品牌资源分开维护。
