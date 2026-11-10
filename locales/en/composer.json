@@ -228,7 +228,8 @@
     "snapshotMissing": "The attachment copies for this message are gone. Recompose and send again.",
     "authorizationRequired": "Your mailbox sign-in has expired. Sign in again in account settings and sending will continue automatically",
     "authorizationUnavailable": "Can't confirm your mailbox sign-in right now. Sending will continue automatically",
-    "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings, then send again"
+    "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings, then send again",
+    "providerPolicy": "Your organization has turned off this sign-in method for this mailbox. Ask your administrator to allow IMAP / SMTP access."
   },
   "recipient": {
     "invalid": "Invalid address: {{address}}",

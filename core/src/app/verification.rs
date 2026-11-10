@@ -534,6 +534,7 @@ fn smtp_failure(outcome: SmtpOutcome) -> ProtocolVerification {
                 (S::Authentication, C::Authentication)
             }
             FailureReason::AuthUnavailable => (S::Authentication, C::AuthUnavailable),
+            FailureReason::ProviderPolicy => (S::Authentication, C::ProviderPolicy),
             _ => (S::Connection, C::Protocol),
         },
         _ => (S::Connection, C::Protocol),

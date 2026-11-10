@@ -281,12 +281,14 @@ impl AccountService {
             .ok_or(sync_plan::PlanError::CredentialMissing)?;
         let tokens = TokenSet::decode_secret(&stored)
             .map_err(|_| AppError::new(ErrorCode::SecretMissing))?;
+        let provider = crate::providers::oauth::lookup(&registration.id).ok();
         let mut manager = TokenManager::new(
             registration,
             self.secrets.clone(),
             profile.secret_ref.clone(),
         )
-        .map_err(|_| AppError::new(ErrorCode::Unsupported))?;
+        .map_err(|_| AppError::new(ErrorCode::Unsupported))?
+        .with_provider(provider);
         manager
             .restore(tokens)
             .map_err(|_| AppError::new(ErrorCode::SecretMissing))?;

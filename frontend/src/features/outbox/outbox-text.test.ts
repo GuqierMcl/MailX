@@ -13,6 +13,7 @@ describe('outbox display text', () => {
     expect(reasonText('authorizationRequired')).toBe('Your mailbox sign-in has expired. Sign in again in account settings and sending will continue automatically')
     expect(reasonText('authorizationUnavailable')).toBe("Can't confirm your mailbox sign-in right now. Sending will continue automatically")
     expect(reasonText('signInRequired')).toBe('Your mailbox sign-in has expired. Sign in again in account settings, then send again')
+    expect(reasonText('providerPolicy')).toBe('Your organization has turned off this sign-in method for this mailbox. Ask your administrator to allow IMAP / SMTP access.')
     expect(reasonText('constructor')).toBe('Send failed')
     expect(reasonText(null)).toBe('Unknown reason')
   })

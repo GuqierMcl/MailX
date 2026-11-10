@@ -25,6 +25,7 @@ const REASONS: Record<string, string> = {
   get authUnavailable() { return t('composer:reason.authUnavailable') },
   get authRejected() { return t('composer:reason.authRejected') },
   get signInRequired() { return t('composer:reason.signInRequired') },
+  get providerPolicy() { return t('composer:reason.providerPolicy') },
   get messageTooLarge() { return t('composer:reason.messageTooLarge') },
   get snapshotMissing() { return t('composer:reason.snapshotMissing') },
   get credentialUntrusted() { return t('composer:reason.credentialUntrusted') },

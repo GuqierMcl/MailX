@@ -421,6 +421,19 @@ async fn greet(stream: BoxedStream) -> Result<Client<BoxedStream>, ImapError> {
     }
 }
 
+/// The bracketed response code atom (`[AUTHENTICATIONFAILED]`) from the text
+/// async-imap builds for a NO/BAD. Only the atom is returned, never the human
+/// readable part, and only when it is short upper-case ASCII.
+fn response_code(text: &str) -> Option<String> {
+    let rest = &text[text.find("info: Some(\"[")? + "info: Some(\"[".len()..];
+    let atom: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '-')
+        .collect();
+    let next = rest[atom.len()..].chars().next();
+    (!atom.is_empty() && atom.len() <= 32 && matches!(next, Some(']' | ' '))).then_some(atom)
+}
+
 async fn authenticate(
     client: Client<BoxedStream>,
     login: &ImapLogin,
@@ -480,6 +493,21 @@ async fn authenticate(
             // All library error payloads are untrusted, including malformed
             // challenges. Preserve transport/protocol failures as retryable.
             return match error {
+                // A recognized administrator decision is not a verdict on the
+                // grant: it must not refresh, retry or ask to sign in again.
+                ImapProtocolError::No(ref text) | ImapProtocolError::Bad(ref text)
+                    if login
+                        .credential
+                        .classify_rejection(&crate::auth::MailRejection {
+                            protocol: crate::auth::MailProtocol::Imap,
+                            smtp_code: None,
+                            enhanced_status: None,
+                            imap_code: response_code(text).as_deref(),
+                        })
+                        == Some(crate::auth::RejectionKind::ProtocolDisabledByAdministrator) =>
+                {
+                    ImapError::ProviderPolicy
+                }
                 ImapProtocolError::No(_) | ImapProtocolError::Bad(_) => ImapError::SignInRequired,
                 _ => ImapError::Protocol("OAuth authentication exchange failed".into()),
             };

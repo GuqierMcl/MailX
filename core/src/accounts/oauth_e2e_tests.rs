@@ -766,3 +766,206 @@ async fn imap_rejection_of_a_locally_fresh_token_refreshes_once_and_retries() {
         "replacement-access"
     );
 }
+
+/// A provider whose hook treats SMTP `535 5.7.139` and the IMAP code
+/// `DISABLEDBYADMIN` as an administrator turning the protocol off.
+struct PolicyProvider {
+    registration: ProviderRegistration,
+}
+impl crate::auth::OAuthProvider for PolicyProvider {
+    fn registration(&self) -> &ProviderRegistration {
+        &self.registration
+    }
+    fn identity_verifier(&self) -> Arc<dyn IdentityVerifier> {
+        Arc::new(FixtureIdentity(0))
+    }
+    fn classify_rejection(
+        &self,
+        rejection: &crate::auth::MailRejection<'_>,
+    ) -> Option<crate::auth::RejectionKind> {
+        use crate::auth::{MailProtocol, RejectionKind};
+        let hit = match rejection.protocol {
+            MailProtocol::Smtp => {
+                rejection.smtp_code == Some(535) && rejection.enhanced_status == Some((5, 7, 139))
+            }
+            MailProtocol::Imap => rejection.imap_code == Some("DISABLEDBYADMIN"),
+        };
+        hit.then_some(RejectionKind::ProtocolDisabledByAdministrator)
+    }
+}
+/// A grant with a locally fresh access token, wired to the policy provider.
+fn policy_manager(token_port: u16) -> Arc<TokenManager> {
+    let registration = ProviderRegistration {
+        id: "policy-fixture".into(),
+        client_id: "public-client".into(),
+        registration_id: "policy-registration".into(),
+        mail_policy: MailEndpointPolicy {
+            imap: MailProtocolPolicy {
+                host: "localhost".into(),
+                port: 1,
+                tls: crate::TlsMode::Implicit,
+                login: MailLoginPolicy::Fixed("lin".into()),
+            },
+            smtp: MailProtocolPolicy {
+                host: "localhost".into(),
+                port: 1,
+                tls: crate::TlsMode::Implicit,
+                login: MailLoginPolicy::Fixed("lin".into()),
+            },
+        },
+        authorization_endpoint: Url::parse(&format!("http://127.0.0.1:{token_port}/authorize"))
+            .unwrap(),
+        token_endpoint: Url::parse(&format!("http://127.0.0.1:{token_port}/token")).unwrap(),
+        scopes: vec!["mail".into()],
+        resource: None,
+        allowed_targets: vec![],
+        redirect_path: "/callback".into(),
+        extra_authorize_params: vec![],
+        login_hint: false,
+    };
+    let provider: &'static PolicyProvider = Box::leak(Box::new(PolicyProvider { registration }));
+    let mut manager = TokenManager::new(
+        provider.registration.clone(),
+        Arc::new(MemorySecrets::default()),
+        "policy-grant".into(),
+    )
+    .unwrap()
+    .with_provider(Some(provider));
+    manager
+        .restore(TokenSet {
+            access_token: SecretValue::new("fresh-access".into()),
+            refresh_token: Some(SecretValue::new("still-valid-refresh".into())),
+            expires_at: u64::MAX / 2,
+            target: Some(crate::auth::TokenTarget::new(None, vec!["mail".into()])),
+            scopes: vec!["mail".into()],
+        })
+        .unwrap();
+    Arc::new(manager)
+}
+#[tokio::test]
+async fn smtp_policy_rejection_neither_refreshes_nor_marks_the_grant_for_reauthorization() {
+    let tls = crate::net::test_support::TestTls::for_names(&["localhost"]);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp = listener.local_addr().unwrap().port();
+    let server_tls = tls.server.clone();
+    let server = tokio::spawn(async move {
+        // Exactly one connection: a retry would hang the test on accept.
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = tokio_rustls::TlsAcceptor::from(server_tls)
+            .accept(stream)
+            .await
+            .unwrap();
+        let mut stream = BufReader::new(stream);
+        stream
+            .get_mut()
+            .write_all(b"220 fixture\r\n")
+            .await
+            .unwrap();
+        let mut line = String::new();
+        stream.read_line(&mut line).await.unwrap();
+        stream
+            .get_mut()
+            .write_all(b"250-fixture\r\n250 AUTH XOAUTH2\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        stream.read_line(&mut line).await.unwrap();
+        assert!(line.starts_with("AUTH XOAUTH2 "));
+        stream
+            .get_mut()
+            .write_all(b"535 5.7.139 SECRET-SERVER-TEXT disabled by your organization\r\n")
+            .await
+            .unwrap();
+        stream.get_mut().flush().await.unwrap();
+        // Let the client read the reply before the connection is torn down.
+        line.clear();
+        let _ = stream.read_line(&mut line).await;
+    });
+    // The token endpoint is unreachable on purpose: a refresh attempt would fail
+    // with a network error and be visible below.
+    let manager = policy_manager(9);
+    let login = crate::smtp::SmtpLogin {
+        host: "localhost".into(),
+        port: smtp,
+        tls: crate::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: ProtocolCredential::ManagedOAuth2(manager.clone()),
+    };
+    let outcome = crate::smtp::verify_connection(
+        &NetRoute::default(),
+        &login,
+        &crate::smtp::Timeouts::for_tests(Duration::from_secs(3)),
+        &crate::smtp::TlsSource::Test(tls.client.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            &outcome,
+            crate::smtp::SmtpOutcome::Permanent(failure)
+                if failure.reason == crate::smtp::FailureReason::ProviderPolicy
+                    && failure.code == Some(535)
+                    && failure.text.is_none()
+        ),
+        "{outcome:?}"
+    );
+    server.await.unwrap();
+    assert!(!manager.needs_reauthorization());
+    assert!(manager.is_valid());
+    assert_eq!(
+        manager.cached_token().unwrap().expose_secret(),
+        "fresh-access"
+    );
+    // The same refusal from a server the hook does not recognize keeps the
+    // existing behaviour (see the revoked-token tests above).
+}
+#[tokio::test]
+async fn imap_policy_rejection_is_a_provider_policy_error_without_refresh() {
+    let tls = crate::net::test_support::TestTls::for_names(&["localhost"]);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let imap = listener.local_addr().unwrap().port();
+    let server_tls = tls.server.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = tokio_rustls::TlsAcceptor::from(server_tls)
+            .accept(stream)
+            .await
+            .unwrap();
+        let mut stream = BufReader::new(stream);
+        stream.get_mut().write_all(b"* OK ready\r\n").await.unwrap();
+        let mut line = String::new();
+        stream.read_line(&mut line).await.unwrap();
+        let tag = line.split_whitespace().next().unwrap().to_owned();
+        stream.get_mut().write_all(b"+ \r\n").await.unwrap();
+        line.clear();
+        stream.read_line(&mut line).await.unwrap();
+        stream
+            .get_mut()
+            .write_all(format!("{tag} NO [DISABLEDBYADMIN] SECRET-SERVER-TEXT\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    let manager = policy_manager(9);
+    let login = crate::imap::ImapLogin {
+        host: "localhost".into(),
+        port: imap,
+        tls: crate::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: ProtocolCredential::ManagedOAuth2(manager.clone()),
+    };
+    let error = crate::imap::test_network_session(&NetRoute::default(), &login, tls.client.clone())
+        .await
+        .err()
+        .expect("login must fail");
+    assert!(
+        matches!(error, crate::imap::ImapError::ProviderPolicy),
+        "{error:?}"
+    );
+    assert!(!format!("{error}").contains("SECRET-SERVER-TEXT"));
+    server.await.unwrap();
+    assert!(!manager.needs_reauthorization());
+    assert_eq!(
+        manager.cached_token().unwrap().expose_secret(),
+        "fresh-access"
+    );
+}

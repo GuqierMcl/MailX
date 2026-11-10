@@ -264,6 +264,41 @@ impl ProviderRegistration {
 pub(crate) trait OAuthProvider: Send + Sync {
     fn registration(&self) -> &ProviderRegistration;
     fn identity_verifier(&self) -> Arc<dyn IdentityVerifier>;
+    /// Optionally recognizes a mail server rejection of a fresh bearer as an
+    /// administrator's decision to turn the protocol off. Only structured
+    /// fields are passed in, never server text.
+    fn classify_rejection(&self, _rejection: &MailRejection<'_>) -> Option<RejectionKind> {
+        None
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MailProtocol {
+    Imap,
+    Smtp,
+}
+/// The structured parts of a mail server's refusal of an OAuth login.
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Read by provider rejection hooks, which are added with the first provider"
+    )
+)]
+pub(crate) struct MailRejection<'a> {
+    pub protocol: MailProtocol,
+    /// SMTP reply code.
+    pub smtp_code: Option<u16>,
+    /// RFC 3463 status from the start of an SMTP reply, e.g. `(5, 7, 3)`.
+    pub enhanced_status: Option<(u8, u8, u8)>,
+    /// IMAP response code atom such as `AUTHENTICATIONFAILED`, upper case.
+    pub imap_code: Option<&'a str>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RejectionKind {
+    /// The organization turned this protocol or sign-in method off. Signing in
+    /// again cannot help, so neither a retry nor reauthorization is offered.
+    ProtocolDisabledByAdministrator,
 }
 /// What one token exchange produced, for identity checks. The `id_token` is
 /// held only for the duration of verification and is never persisted or logged.
@@ -599,6 +634,7 @@ type RefreshFuture = futures_util::future::Shared<
 /// rotated refresh credentials are persisted before any new access token escapes.
 pub(crate) struct TokenManager {
     registration: ProviderRegistration,
+    provider: Option<&'static dyn OAuthProvider>,
     store: Arc<dyn SecretStore>,
     key: String,
     tokens: tokio::sync::Mutex<Option<TokenSet>>,
@@ -625,6 +661,7 @@ impl TokenManager {
         registration.validate()?;
         Ok(Self {
             registration,
+            provider: None,
             store,
             key,
             tokens: tokio::sync::Mutex::new(None),
@@ -637,6 +674,17 @@ impl TokenManager {
             pending_persistence: std::sync::atomic::AtomicBool::new(false),
             admission_closed: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+    /// The reviewed provider entry whose rejection hook applies to this grant.
+    pub(crate) fn with_provider(mut self, provider: Option<&'static dyn OAuthProvider>) -> Self {
+        self.provider = provider;
+        self
+    }
+    pub(crate) fn classify_rejection(
+        &self,
+        rejection: &MailRejection<'_>,
+    ) -> Option<RejectionKind> {
+        self.provider?.classify_rejection(rejection)
     }
     /// Restore data already read through the account journal; performs no I/O.
     pub(crate) fn restore(&mut self, tokens: TokenSet) -> Result<(), OAuthError> {

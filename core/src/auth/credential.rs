@@ -51,6 +51,20 @@ impl ProtocolCredential {
             _ => false,
         }
     }
+    /// Lets the provider recognize an administrator-disabled protocol. A
+    /// recognized rejection says nothing about the grant, so callers must not
+    /// refresh, retry or mark it for reauthorization.
+    pub(crate) fn classify_rejection(
+        &self,
+        rejection: &super::MailRejection<'_>,
+    ) -> Option<super::RejectionKind> {
+        match self {
+            Self::OAuth2Guarded(_, manager) | Self::ManagedOAuth2(manager) => {
+                manager.classify_rejection(rejection)
+            }
+            _ => None,
+        }
+    }
     pub(crate) fn is_oauth(&self) -> bool {
         matches!(
             self,

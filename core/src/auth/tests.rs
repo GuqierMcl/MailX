@@ -1523,3 +1523,40 @@ fn stored_grants_hold_no_access_token_and_old_records_are_rejected_safely() {
         Some(OAuthError::Storage)
     );
 }
+#[tokio::test]
+async fn token_endpoint_reports_reauthentication_for_interaction_errors() {
+    for error in [
+        "invalid_grant",
+        "interaction_required",
+        "consent_required",
+        "login_required",
+    ] {
+        let body: &'static str = Box::leak(format!(r#"{{"error":"{error}"}}"#).into_boxed_str());
+        let (port, server) = server_status(body, "400 Bad Request").await;
+        let outcome = transport::exchange(
+            &NetRoute::default(),
+            &registration(port).token_endpoint,
+            "grant_type=refresh_token".into(),
+            None,
+            &["mail".into()],
+        )
+        .await;
+        assert_eq!(
+            outcome.err(),
+            Some(OAuthError::ReauthenticationRequired),
+            "{error}"
+        );
+        server.await.unwrap();
+    }
+    let (port, server) = server_status(r#"{"error":"invalid_client"}"#, "400 Bad Request").await;
+    let outcome = transport::exchange(
+        &NetRoute::default(),
+        &registration(port).token_endpoint,
+        "grant_type=refresh_token".into(),
+        None,
+        &["mail".into()],
+    )
+    .await;
+    assert_eq!(outcome.err(), Some(OAuthError::InvalidResponse));
+    server.await.unwrap();
+}

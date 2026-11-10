@@ -191,10 +191,20 @@ fn network_error(error: crate::net::NetError) -> OAuthError {
 }
 
 /// Maps a token endpoint error to the one case callers act on: the grant can
-/// no longer be used and the user has to sign in again.
+/// no longer be used silently and the user has to sign in again. Everything
+/// else stays an invalid response without echoing server text.
 fn error_kind(error: &oauth2::basic::BasicErrorResponseType) -> OAuthError {
+    use oauth2::basic::BasicErrorResponseType as Kind;
     match error {
-        oauth2::basic::BasicErrorResponseType::InvalidGrant => OAuthError::ReauthenticationRequired,
+        Kind::InvalidGrant => OAuthError::ReauthenticationRequired,
+        Kind::Extension(name)
+            if matches!(
+                name.as_str(),
+                "interaction_required" | "consent_required" | "login_required"
+            ) =>
+        {
+            OAuthError::ReauthenticationRequired
+        }
         _ => OAuthError::InvalidResponse,
     }
 }

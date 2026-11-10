@@ -127,6 +127,10 @@ pub(crate) enum FailureReason {
     /// An OAuth mailbox must be signed in again: the grant needs
     /// reauthorization, or the server refused a freshly refreshed token.
     SignInRequired,
+    /// The provider's hook recognized the refusal as an administrator turning
+    /// SMTP sign-in off. Refreshing or signing in again cannot help, and the
+    /// grant stays valid.
+    ProviderPolicy,
     MessageTooLarge,
     CredentialUntrusted,
     CredentialMissing,
@@ -152,6 +156,7 @@ impl fmt::Display for FailureReason {
             Self::AuthUnavailable => "authUnavailable",
             Self::AuthRejected => "authRejected",
             Self::SignInRequired => "signInRequired",
+            Self::ProviderPolicy => "providerPolicy",
             Self::MessageTooLarge => "messageTooLarge",
             Self::CredentialUntrusted => "credentialUntrusted",
             Self::CredentialMissing => "credentialMissing",
@@ -317,6 +322,9 @@ pub(crate) async fn send_with_tls(
 struct Conn {
     reader: BufReader<BoxedStream>,
     suppress_reply_text: bool,
+    /// RFC 3463 status at the start of the last reply, read before any text
+    /// masking. Only these three numbers survive; the words never do.
+    last_enhanced_status: Option<(u8, u8, u8)>,
 }
 
 impl Conn {
@@ -324,6 +332,7 @@ impl Conn {
         Self {
             reader: BufReader::new(stream),
             suppress_reply_text: false,
+            last_enhanced_status: None,
         }
     }
 
@@ -340,6 +349,11 @@ impl Conn {
         let mut reply = timeout(budget, attempt)
             .await
             .map_err(|_| IoFail::Timeout)??;
+        self.last_enhanced_status = reply
+            .lines
+            .first()
+            .and_then(|line| line.split_ascii_whitespace().next())
+            .and_then(reply::enhanced_status);
         if self.suppress_reply_text {
             // OAuth servers may echo bearer credentials in raw or encoded form
             // during any later command, even successful delivery replies.
@@ -529,6 +543,23 @@ async fn authenticate(
         if reply.code == 334 {
             // Complete the failed SASL exchange without repeating the token.
             reply = conn.command("", budget).await.map_err(io_outcome)?;
+        }
+        if (400..600).contains(&reply.code) {
+            let rejection = crate::auth::MailRejection {
+                protocol: crate::auth::MailProtocol::Smtp,
+                smtp_code: Some(reply.code),
+                enhanced_status: conn.last_enhanced_status,
+                imap_code: None,
+            };
+            if login.credential.classify_rejection(&rejection)
+                == Some(crate::auth::RejectionKind::ProtocolDisabledByAdministrator)
+            {
+                return Err(SmtpOutcome::Permanent(PreDataFailure {
+                    reason: FailureReason::ProviderPolicy,
+                    code: Some(reply.code),
+                    text: None,
+                }));
+            }
         }
         // Never retain OAuth server text: it may echo raw or encoded tokens.
         reply.lines = vec!["OAuth authentication response".into()];
