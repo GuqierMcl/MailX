@@ -310,10 +310,6 @@ async fn resolve_login(route: &NetRoute, login: &ImapLogin) -> Result<ImapLogin,
 /// connects along `route`, signs in with XOAUTH2 as `mailbox` and logs out.
 /// The caller passes only a reviewed server; the bearer never leaves that
 /// connection. A refused login is [`crate::auth::OAuthError::MailboxRefused`].
-#[expect(
-    dead_code,
-    reason = "Called by provider identity verifiers, which are added with the first provider"
-)]
 pub(crate) async fn prove_mailbox_access(
     route: &NetRoute,
     host: &str,

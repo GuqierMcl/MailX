@@ -311,13 +311,6 @@ pub(crate) enum RejectionKind {
 }
 /// What one token exchange produced, for identity checks. The `id_token` is
 /// held only for the duration of verification and is never persisted or logged.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Read by provider identity verifiers, which are added with the first provider"
-    )
-)]
 pub(crate) struct IdentityEvidence<'a> {
     pub access_token: &'a SecretValue,
     pub id_token: Option<&'a SecretValue>,
@@ -326,19 +319,8 @@ pub(crate) struct IdentityEvidence<'a> {
     pub client_id: &'a str,
     /// The address the user asked to add. A verifier may confirm it against
     /// the mail server but must never take it as proof by itself.
-    #[expect(
-        dead_code,
-        reason = "Read by provider identity verifiers, which are added with the first provider"
-    )]
     pub expected_mailbox: &'a str,
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Called by provider identity verifiers, which are added with the first provider"
-    )
-)]
 impl IdentityEvidence<'_> {
     /// Claims of the exchange's `id_token`, checked against the client and nonce.
     pub(crate) fn id_token_claims(&self) -> Result<id_token::IdTokenClaims, OAuthError> {
