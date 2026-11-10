@@ -21,10 +21,9 @@ import { SecurityPane } from './security-pane'
 import { AppearancePane } from './appearance-pane'
 import { NotificationsPane } from './notifications-pane'
 import { ComposePane } from './compose-pane'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { GeneralPane } from './general-pane'
 import { McpPane } from './mcp-pane'
-import { AutoUpdateRow, UpdateStatusRow } from '@/features/updater/about-updates'
+import { AboutPane } from './about-pane'
 
 export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'mcp' | 'about'
 /** Where the dialog opens. */
@@ -86,15 +85,15 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
               <DialogTitle className="text-base font-semibold">{t('settings:title')}</DialogTitle>
             </SidebarHeader>
-            <SidebarContent className="flex-row md:flex-col">
+            <SidebarContent className="min-w-0 flex-row md:flex-col">
               {GROUPS.map((group) => (
-                <SidebarGroup key={group.id} className="py-2 md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
+                <SidebarGroup key={group.id} className="w-auto shrink-0 py-2 md:w-full md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
                   {/* The strip in narrow windows has no room for headings. */}
                   <SidebarGroupLabel className="hidden md:flex">{group.heading}</SidebarGroupLabel>
                   <NavMenu items={group.items} section={section} onSelect={setSection} />
                 </SidebarGroup>
               ))}
-              <SidebarGroup className="py-2 md:mt-auto md:p-2">
+              <SidebarGroup className="w-auto shrink-0 py-2 md:mt-auto md:w-full md:p-2">
                 <NavMenu items={[ABOUT]} section={section} onSelect={setSection} />
               </SidebarGroup>
             </SidebarContent>
@@ -110,7 +109,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
               {section === 'mcp' && <McpPane client={client} />}
-              {section === 'about' && <AboutSection client={client} />}
+              {section === 'about' && <AboutPane client={client} />}
             </div>
           </main>
           <footer className="flex min-w-0 flex-col gap-0.5 bg-sidebar px-4 pt-3 pb-4 md:col-start-1 md:row-start-2">
@@ -123,27 +122,12 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
   )
 }
 
-function AboutSection({ client }: { client: MailxClient }) {
-  useTranslation()
-  return (
-    <SettingsPage>
-      <SettingsGroup title="MailX">
-        <SettingsRow label={t('settings:version')}>
-          <span className="text-sm text-muted-foreground tabular-nums">{__APP_VERSION__}</span>
-        </SettingsRow>
-        <UpdateStatusRow />
-        <AutoUpdateRow client={client} />
-      </SettingsGroup>
-    </SettingsPage>
-  )
-}
-
 function NavMenu({ items, section, onSelect }: { items: { id: SettingsSection; name: string; icon: IconSvgElement }[]; section: SettingsSection; onSelect: (section: SettingsSection) => void }) {
   return (
     <SidebarGroupContent>
       <SidebarMenu className="flex-row md:flex-col">
         {items.map((item) => (
-          <SidebarMenuItem key={item.id}>
+          <SidebarMenuItem key={item.id} className="shrink-0">
             <SidebarMenuButton isActive={item.id === section} onClick={() => onSelect(item.id)}>
               <HugeiconsIcon icon={item.icon} />
               <span>{item.name}</span>

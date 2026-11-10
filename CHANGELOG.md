@@ -18,6 +18,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- The About page now shows the MailX logo and version, with GitHub, problem-report and feature-request templates, and release history together below the update controls. / “关于”页现展示 MailX Logo 与版本，并在更新设置下方集中提供 GitHub、问题反馈和功能建议模板及发布记录入口。
 - Manual retry starts a fresh delivery retry window, and waiting for mailbox authorization preserves queued messages without spending delivery attempts. / 手动立即重试会重新开始投递重试窗口，等待邮箱授权时保留排队邮件且不消耗投递次数。
 
 ### 🔄 Changed

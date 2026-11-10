@@ -91,6 +91,12 @@ Turning Automatic updates off keeps version checks and manual downloads availabl
 
 macOS, Windows and the AppImage support in-app updates. For deb / rpm, Automatic updates is unavailable: use the release page or the package manager you installed MailX with. System code signing and update package signing are two different things, and the installers may still trigger a first-run prompt from the system.
 
+## About and feedback
+
+Settings → About shows the MailX logo and your current version above the update controls. The links below open the [GitHub repository](https://github.com/GuqierMcl/MailX), [problem-report template](https://github.com/GuqierMcl/MailX/issues/new?template=bug_report.md), [feature-request template](https://github.com/GuqierMcl/MailX/issues/new?template=feature_request.md) and [release history](https://github.com/GuqierMcl/MailX/releases) in your system browser. If a link cannot be opened, use the error prompt's Copy link action to open it yourself.
+
+To report a problem or suggest a feature, sign in to GitHub if needed, fill in the template and submit it there. MailX does not automatically fill in your version or system details; include the information requested by the template.
+
 ## Upgrading and keeping your data
 
 The app runs any database migrations it needs at launch; see the release notes of each version for what changes. Older versions usually cannot open a migrated database, so reinstalling an older build is not a way to roll data back.

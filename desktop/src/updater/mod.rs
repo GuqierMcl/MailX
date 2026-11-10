@@ -831,7 +831,7 @@ pub(crate) async fn updater_restart(
     Ok(respond(result))
 }
 
-/// Release-note links open in the system browser, https only.
+/// App and release-note links open in the system browser, https only.
 #[tauri::command]
 pub(crate) async fn updater_open_link(
     window: WebviewWindow,

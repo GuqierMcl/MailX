@@ -40,7 +40,7 @@ describe('the update flow', () => {
     // Notes are elements, including a link that goes back to the host.
     expect(screen.getByText('Faster').closest('strong')).not.toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'link' }))
-    expect(client.openUpdateLink).toHaveBeenCalledWith('https://example.com/x')
+    expect(client.openExternalLink).toHaveBeenCalledWith('https://example.com/x')
 
     await userEvent.click(screen.getByRole('button', { name: '下载更新' }))
     expect(client.downloadUpdate).toHaveBeenCalledOnce()
