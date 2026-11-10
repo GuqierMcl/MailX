@@ -9,6 +9,7 @@
 | [网易 163 / 126 / yeah.net 调研与接入方案](netease-163-126-integration.md) | 三个预设、添加前测试登录、授权码引导与安全策略拒绝诊断已有实现，已有用户真实邮箱手测反馈；完整兼容矩阵待补充。 |
 | [中国移动 139 邮箱调研与接入评估](139-mail-integration.md) | 专用预设、授权码引导、官方图标和帮助入口已有实现，已获用户手测反馈；完整兼容矩阵待补充，注意新授权码 90 天有效期及号码资格限制。 |
 | [Gmail 接入评估](gmail-integration.md) | 应用专用密码预设、双语引导、官方图标和帮助入口已有实现；OAuth（自建 / 官方应用）的条件与缺口已评估，未实现；真实账号与标签语义待验收。 |
+| [Microsoft 365 / Outlook.com（Exchange）接入评估](microsoft-integration.md) | 未实现；选定 OAuth + IMAP / SMTP（XOAUTH2），Entra 公共客户端已注册并试跑授权，记录了通用 OAuth 基础需满足的条件；自建 Exchange 与世纪互联版本暂不覆盖。 |
 | [iCloud 邮箱接入可行性评估](icloud-mail-integration.md) | 专用预设、应用专用密码双语引导及官方帮助入口已有实现；沿用标准兼容策略，真实账号、历史域、别名和自定义域仍待验收。 |
 
 新增调研文档时在本页维护入口，`docs/README.md` 仅介绍本目录的职责，不逐项列出调研主题。
