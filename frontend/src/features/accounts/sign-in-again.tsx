@@ -1,11 +1,12 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { signInNeeded } from './sign-in-state'
 
 type SignInAgainProps = {
   client: MailxClient
@@ -14,17 +15,20 @@ type SignInAgainProps = {
   disabled?: boolean
   /** Shows the prominent warning even when the account itself still reads as connected, e.g. after a stopped sync. */
   required?: boolean
+  /** Other actions shown on the same row as the quiet button, such as removing the account. */
+  trailing?: ReactNode
   onSignedIn: (account: Account) => void
 }
 
 /**
  * Renews the browser sign-in of an existing account. When the account needs it,
- * the block is a prominent warning; otherwise it stays a quiet button so a
- * working sign-in can still be refreshed on purpose.
+ * the block is a prominent warning at the top of the account; otherwise it is a
+ * quiet button among the connection actions, so a working sign-in can still be
+ * refreshed on purpose.
  */
-export function SignInAgain({ client, account, disabled = false, required = false, onSignedIn }: SignInAgainProps) {
+export function SignInAgain({ client, account, disabled = false, required = false, trailing, onSignedIn }: SignInAgainProps) {
   useTranslation()
-  const needed = required || (account.authentication.kind === 'oauth2' && account.authentication.state === 'needsReauthorization')
+  const needed = signInNeeded(account, required)
   const [waiting, setWaiting] = useState(false)
   const [failure, setFailure] = useState<ClientFailure | null>(null)
   const session = useRef<{ id: string | null; canceled: boolean } | null>(null)
@@ -75,7 +79,7 @@ export function SignInAgain({ client, account, disabled = false, required = fals
   }
 
   const actions = waiting
-    ? <Button variant="outline" className="mt-3 w-fit" onClick={cancel}>{t('accounts:cancelSignIn')}</Button>
+    ? <Button variant="outline" className={needed ? 'mt-3 w-fit' : 'w-fit'} onClick={cancel}>{t('accounts:cancelSignIn')}</Button>
     : <Button variant={needed ? 'default' : 'outline'} className={needed ? 'mt-3 w-fit' : 'w-fit'} disabled={disabled || !client.available} onClick={() => void start()}>
       {t('accounts:signInAgain')}
     </Button>
@@ -88,7 +92,12 @@ export function SignInAgain({ client, account, disabled = false, required = fals
           <AlertDescription>{t('accounts:signInAgainNeededDescription')}</AlertDescription>
           {actions}
         </Alert>
-      ) : actions}
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {actions}
+          {trailing}
+        </div>
+      )}
       {waiting && (
         <Alert role="status">
           <AlertTitle>{t('accounts:signInWaitingTitle')}</AlertTitle>

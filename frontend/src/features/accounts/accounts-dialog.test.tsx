@@ -356,6 +356,26 @@ describe('accounts dialog', () => {
       expect(within(dialog).getByRole('button', { name: '重新登录' })).toBeInTheDocument()
     })
 
+    it('puts a routine sign-in renewal among the connection actions, and only a needed one at the top', async () => {
+      const connected = oauthAccount()
+      const { dialog, view } = renderDialog([connected])
+      const remove = await within(dialog).findByRole('button', { name: '移除账号' })
+      const signIn = within(dialog).getByRole('button', { name: '重新登录' })
+      // Same row as removing, below the profile settings, with no warning above the account.
+      expect(signIn.parentElement).toBe(remove.parentElement)
+      expect(within(dialog).getByLabelText('账号名称').compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(within(dialog).queryByText('需要重新登录，这个邮箱才能继续使用')).not.toBeInTheDocument()
+      view.unmount()
+
+      const needed = oauthAccount('needsReauthorization')
+      const second = renderDialog([needed])
+      const warning = await within(second.dialog).findByText('需要重新登录，这个邮箱才能继续使用')
+      const buttons = within(second.dialog).getAllByRole('button', { name: '重新登录' })
+      expect(buttons).toHaveLength(1)
+      expect(warning.compareDocumentPosition(within(second.dialog).getByLabelText('账号名称')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(buttons[0].parentElement).not.toBe(within(second.dialog).getByRole('button', { name: '移除账号' }).parentElement)
+    })
+
     it('offers signing in again instead of editing when the sign-in is no longer valid', async () => {
       const account = oauthAccount()
       for (const code of ['signInRequired', 'credentialMissing'] as const) {
