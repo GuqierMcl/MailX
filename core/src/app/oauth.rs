@@ -51,6 +51,9 @@ fn error(error: crate::auth::OAuthError) -> AppError {
         OAuthError::InvalidResponse | OAuthError::InvalidCallback => {
             ErrorCode::OAuthInvalidResponse
         }
+        OAuthError::MailboxRefused => ErrorCode::OAuthMailboxRefused,
+        OAuthError::UsePersonalEntry => ErrorCode::OAuthUsePersonalEntry,
+        OAuthError::UseOrganizationEntry => ErrorCode::OAuthUseOrganizationEntry,
         OAuthError::InvalidRegistration => ErrorCode::Unsupported,
         OAuthError::Random => ErrorCode::Internal,
     })
@@ -236,6 +239,18 @@ mod tests {
         assert_eq!(
             error(OAuthError::InvalidCallback).code,
             ErrorCode::OAuthInvalidResponse
+        );
+        assert_eq!(
+            error(OAuthError::MailboxRefused).code,
+            ErrorCode::OAuthMailboxRefused
+        );
+        assert_eq!(
+            error(OAuthError::UsePersonalEntry).code,
+            ErrorCode::OAuthUsePersonalEntry
+        );
+        assert_eq!(
+            error(OAuthError::UseOrganizationEntry).code,
+            ErrorCode::OAuthUseOrganizationEntry
         );
     }
     #[tokio::test]

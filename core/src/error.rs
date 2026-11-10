@@ -46,6 +46,15 @@ pub enum ErrorCode {
     OAuthInvalidResponse,
     #[serde(rename = "oauthReauthorizationRequired")]
     OAuthReauthorizationRequired,
+    /// The mail server would not open the mailbox with the new sign-in.
+    #[serde(rename = "oauthMailboxRefused")]
+    OAuthMailboxRefused,
+    /// A personal account was used in the organization entry.
+    #[serde(rename = "oauthUsePersonalEntry")]
+    OAuthUsePersonalEntry,
+    /// An organization account was used in the personal entry.
+    #[serde(rename = "oauthUseOrganizationEntry")]
+    OAuthUseOrganizationEntry,
     StorageUnavailable,
     StorageIncompatible,
     AlreadyOpen,
@@ -94,6 +103,13 @@ impl AppError {
             ErrorCode::OAuthSessionExpired => "这次登录已超时，请重新登录。",
             ErrorCode::OAuthInvalidResponse => "登录没有完成，请重新登录。",
             ErrorCode::OAuthReauthorizationRequired => "邮箱登录已过期，请重新登录。",
+            ErrorCode::OAuthMailboxRefused => {
+                "无法用这个微软账号打开该邮箱。请检查邮箱地址。Outlook.com 请确认已在 Outlook 设置中开启 IMAP；工作或学校邮箱可能需要管理员允许 IMAP。"
+            }
+            ErrorCode::OAuthUsePersonalEntry => "这是个人微软账号，请改用“Outlook”入口添加。",
+            ErrorCode::OAuthUseOrganizationEntry => {
+                "这是工作或学校账号，请改用“Microsoft 365 / Exchange”入口添加。"
+            }
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",
             ErrorCode::AlreadyOpen => "此数据目录已由另一个 MailX 实例打开。",

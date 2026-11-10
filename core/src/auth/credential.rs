@@ -4,13 +4,6 @@ use crate::secrets::SecretValue;
 #[derive(Clone, Debug)]
 pub(crate) enum ProtocolCredential {
     Password(SecretValue),
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Raw tokens are only constructed by protocol fixtures; production resolves managed grants"
-        )
-    )]
     OAuth2(SecretValue),
     OAuth2Guarded(SecretValue, std::sync::Arc<super::TokenManager>),
     ManagedOAuth2(std::sync::Arc<super::TokenManager>),

@@ -33,6 +33,15 @@ pub enum OAuthError {
     AuthorizationDenied,
     ReauthenticationRequired,
     Storage,
+    /// The mail server refused to open the mailbox with the bearer that was
+    /// just issued, so the address or the mailbox's protocol settings are wrong.
+    MailboxRefused,
+    /// The account signed in is a personal one, but the entry is for
+    /// organization accounts.
+    UsePersonalEntry,
+    /// The account signed in belongs to an organization, but the entry is for
+    /// personal accounts.
+    UseOrganizationEntry,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -282,7 +291,7 @@ pub(crate) enum MailProtocol {
     not(test),
     expect(
         dead_code,
-        reason = "Read by provider rejection hooks, which are added with the first provider"
+        reason = "`imap_code` is read only by providers whose IMAP server reports a distinguishable code"
     )
 )]
 pub(crate) struct MailRejection<'a> {
@@ -315,6 +324,13 @@ pub(crate) struct IdentityEvidence<'a> {
     /// The nonce sent in the authorization request, when it carried one.
     pub nonce: Option<&'a str>,
     pub client_id: &'a str,
+    /// The address the user asked to add. A verifier may confirm it against
+    /// the mail server but must never take it as proof by itself.
+    #[expect(
+        dead_code,
+        reason = "Read by provider identity verifiers, which are added with the first provider"
+    )]
+    pub expected_mailbox: &'a str,
 }
 #[cfg_attr(
     not(test),
@@ -517,6 +533,7 @@ impl OAuthSession {
             id_token: id_token.as_ref(),
             nonce: self.nonce.as_deref(),
             client_id: &self.provider.client_id,
+            expected_mailbox,
         };
         let identity =
             tokio::time::timeout(Duration::from_secs(30), verifier.verify(&evidence, route))

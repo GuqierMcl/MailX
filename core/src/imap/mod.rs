@@ -306,6 +306,51 @@ async fn resolve_login(route: &NetRoute, login: &ImapLogin) -> Result<ImapLogin,
         })?;
     Ok(resolved)
 }
+/// Proves that `mailbox` can be opened with a freshly issued OAuth bearer:
+/// connects along `route`, signs in with XOAUTH2 as `mailbox` and logs out.
+/// The caller passes only a reviewed server; the bearer never leaves that
+/// connection. A refused login is [`crate::auth::OAuthError::MailboxRefused`].
+#[expect(
+    dead_code,
+    reason = "Called by provider identity verifiers, which are added with the first provider"
+)]
+pub(crate) async fn prove_mailbox_access(
+    route: &NetRoute,
+    host: &str,
+    port: u16,
+    tls: TlsMode,
+    mailbox: &str,
+    bearer: &crate::secrets::SecretValue,
+) -> Result<(), crate::auth::OAuthError> {
+    let login = ImapLogin {
+        host: host.to_owned(),
+        port,
+        tls,
+        username: mailbox.to_owned(),
+        credential: ProtocolCredential::OAuth2(bearer.clone()),
+    };
+    let session = open_session(route, &login).await.map_err(proof_error)?;
+    // The login already succeeded; a failed goodbye proves nothing more.
+    let _ = session.logout().await;
+    Ok(())
+}
+
+/// A refused login means the mailbox rejected this bearer; everything else
+/// keeps its network meaning so the user can tell "wrong mailbox" from "offline".
+fn proof_error(error: ImapError) -> crate::auth::OAuthError {
+    use crate::auth::OAuthError;
+    match error {
+        ImapError::SignInRequired | ImapError::Authentication(_) | ImapError::ProviderPolicy => {
+            OAuthError::MailboxRefused
+        }
+        ImapError::Net(NetError::Proxy(_)) => OAuthError::Proxy,
+        ImapError::Net(NetError::Tls(_)) => OAuthError::Tls,
+        ImapError::Net(NetError::Timeout) | ImapError::Timeout => OAuthError::Timeout,
+        ImapError::Net(NetError::Connect(_)) => OAuthError::Network,
+        _ => OAuthError::ServerUnavailable,
+    }
+}
+
 /// Transport setup shared with the dedicated body connection. Every plaintext
 /// authentication phase is bounded, including unsolicited policy rejections.
 async fn connect_client(
@@ -1277,6 +1322,37 @@ mod tests {
             text,
             "STATUS: connection was reset by the server or network"
         );
+    }
+
+    #[test]
+    fn mailbox_proof_separates_a_refused_login_from_network_failures() {
+        use crate::auth::OAuthError;
+        for error in [
+            ImapError::SignInRequired,
+            ImapError::Authentication("x".into()),
+            ImapError::ProviderPolicy,
+        ] {
+            assert_eq!(proof_error(error), OAuthError::MailboxRefused);
+        }
+        for (error, expected) in [
+            (
+                ImapError::Net(NetError::Proxy("x".into())),
+                OAuthError::Proxy,
+            ),
+            (ImapError::Net(NetError::Tls("x".into())), OAuthError::Tls),
+            (ImapError::Net(NetError::Timeout), OAuthError::Timeout),
+            (ImapError::Timeout, OAuthError::Timeout),
+            (
+                ImapError::Net(NetError::Connect("x".into())),
+                OAuthError::Network,
+            ),
+            (
+                ImapError::Protocol("x".into()),
+                OAuthError::ServerUnavailable,
+            ),
+        ] {
+            assert_eq!(proof_error(error), expected);
+        }
     }
 
     #[tokio::test]
