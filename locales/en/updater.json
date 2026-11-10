@@ -6,8 +6,6 @@
   "statusDownloading": "Downloading {{version}}…",
   "statusReady": "{{version}} downloaded; restart to install",
   "checkNow": "Check for updates",
-  "autoCheck": "Check for updates automatically",
-  "autoCheckDescription": "Checks after start and every few hours. Off, you can still check here.",
   "checkFailed": "Could not check for updates. Try again later.",
   "downloadFailed": "The download did not finish. Try again.",
   "availableToast": "MailX {{version}} is available",
@@ -33,6 +31,10 @@
   "indicatorAvailable": "MailX {{version}} is available",
   "indicatorDownloading": "Downloading {{version}} ({{percent}}%)",
   "indicatorReady": "Restart to update to {{version}}",
-  "installUnavailable": "This page can only tell you what is new; install the update in the MailX desktop app.",
-  "restartFailed": "Could not restart. Try again."
+  "installUnavailable": "This installation cannot update itself. Download the new version from GitHub, or use the package manager you installed MailX with.",
+  "restartFailed": "Could not restart. Try again.",
+  "autoUpdate": "Automatic updates",
+  "autoUpdateDescription": "Automatically download updates, then remind you to restart or install when you quit. MailX never restarts automatically. Checks continue when this is off.",
+  "installFailed": "The update could not be installed. Retry to prepare it again, or download the installer from GitHub.",
+  "indicatorFailed": "Update to {{version}} needs attention"
 }

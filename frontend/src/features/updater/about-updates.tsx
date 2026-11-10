@@ -7,12 +7,14 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { useSettings, useUpdateGeneral } from '@/features/settings/settings-queries'
 import { SettingsRow } from '@/features/settings/settings-layout'
 import { useUpdater } from './updater-context'
+import { failureText } from './details'
+import { updateVersion } from './types'
 
 /** What the About page says about the last check, with a way to check again. */
 export function UpdateStatusRow() {
   useTranslation()
   const { snapshot, checked, check, openDialog } = useUpdater()
-  const version = snapshot.phase === 'available' || snapshot.phase === 'ready' ? snapshot.version : null
+  const version = updateVersion(snapshot)
   const status = (() => {
     switch (snapshot.phase) {
       case 'checking':
@@ -24,7 +26,7 @@ export function UpdateStatusRow() {
       case 'ready':
         return <span className="text-primary">{t('updater:statusReady', { version: snapshot.version })}</span>
       case 'failed':
-        return <span className="text-destructive">{t(snapshot.stage === 'check' ? 'updater:checkFailed' : 'updater:downloadFailed')}</span>
+        return <span className="text-destructive">{failureText(snapshot.stage)}</span>
       default:
         return checked ? <span className="text-muted-foreground">{t('updater:statusLatest')}</span> : null
     }
@@ -43,17 +45,18 @@ export function UpdateStatusRow() {
   )
 }
 
-/** The switch that stops the start-up and periodic checks; the manual one stays. */
-export function AutoCheckRow({ client }: { client: MailxClient }) {
+/** Checks always run; this switch controls automatic download and installation on quit. */
+export function AutoUpdateRow({ client }: { client: MailxClient }) {
   useTranslation()
+  const { snapshot } = useUpdater()
   const settings = useSettings(client)
   const update = useUpdateGeneral(client)
   const general = settings.data?.settings.general
   return (
-    <SettingsRow label={t('updater:autoCheck')} description={t('updater:autoCheckDescription')} htmlFor="general.autoCheckUpdates">
-      <Switch id="general.autoCheckUpdates" checked={general?.autoCheckUpdates ?? true}
-        disabled={!general || update.isPending}
-        onCheckedChange={(checked: boolean) => update.mutate({ autoCheckUpdates: checked })} />
+    <SettingsRow label={t('updater:autoUpdate')} description={t(snapshot.canInstall ? 'updater:autoUpdateDescription' : 'updater:installUnavailable')} htmlFor="general.autoUpdate">
+      <Switch id="general.autoUpdate" checked={snapshot.canInstall && (general?.autoUpdate ?? true)}
+        disabled={!snapshot.canInstall || !general || update.isPending}
+        onCheckedChange={(checked: boolean) => update.mutate({ autoUpdate: checked })} />
     </SettingsRow>
   )
 }

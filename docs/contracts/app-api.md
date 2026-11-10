@@ -281,11 +281,42 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的六个设置节均为可选，未提交的节保留；`layout` 使用 `LayoutSettingsPatch` 在核心锁内逐字段合并，其他提交的节仍整节替换，其局部修改由前端在发送前与最新已提交值合并。
 
+`general.autoUpdate` 是默认 true 的布尔值，控制桌面自动下载及自动包的退出安装；启动和定时检查固定开启。旧文件缺少新字段且有合法 `general.autoCheckUpdates` 时迁移其布尔值，保留原 false；新字段优先，均缺少时为 true，保存只输出 `autoUpdate`。设置保存成功后宿主按 revision 应用策略：关闭时取消自动下载并解除自动包的退出安装，手动下载的同意不受影响；重新开启可恢复已暂停的自动下载。这是设置文件扩展，不涉及邮件数据库迁移。
+
 语言兼容规则区分三种情况：没有设置文件时默认 `system`；已有合法 v1 文件缺少 `general` 或 `general.language` 时补 `zh-CN`，保留升级前的显示语言；文件中的非法语言字段回到 `system`，保留其他合法设置。IPC 提交不支持的语言返回 `validation`、`field: "general.language"`，不落盘也不改变当前设置。这是设置文件扩展，无邮件数据库迁移。
 
 `SettingsSnapshot` 为 `{ settings, stored, recovered, effectiveLocale, revision }`。`effectiveLocale` 只取 `zh-CN | en`，由偏好与宿主启动时读取的系统语言派生，不持久化、不能提交；中文标签（含简繁体和地区变体）映射到 `zh-CN`，英文、其他语言或读取失败使用 `en`，显式语言优先。系统语言的运行期变化在下次重启生效。`stored=false` 表示磁盘上尚无设置文件；`recovered=true` 表示原文件无法使用，已改名为 `settings.json.bak`，下次保存成功后清除。文件格式、损坏处理与前端首帧缓存见[桌面与 Web](../architecture/desktop-web.md#应用偏好)。
 
 `revision` 是当前宿主进程内的设置版本，从 0 开始，在同一把设置锁内随成功保存递增，失败不递增，不写入文件。所有读取、保存响应与事件补读通过前端统一接收入口，拒绝旧版本覆盖；语言在保存成功后应用，失败保留原语言。各可信窗口先等待监听注册，再首次读取；保存成功后宿主发送 `{ revision }` 失效通知，窗口重新读取完整快照，重新聚焦时补读并重试失败的订阅。事件不承载设置值或凭证，也不替代查询事实。
+
+### 桌面应用内更新
+
+更新由 desktop 管理，不访问账号凭据或账号代理；网络、缓存、重试与退出安装规则见[更新器设计](../architecture/updater.md)。下面命令仅允许本地可信 main 调用，使用 `ApiResult`，拒绝未知参数；composer、正文与 MCP 没有更新权限。
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `getUpdateState()` | `updater_get_state`，空对象 | `UpdateSnapshot` |
+| `checkForUpdates()` | `updater_check`，空对象 | 检查后的 `UpdateSnapshot`；自动更新开启时可能已进入 downloading 或 ready |
+| `downloadUpdate()` | `updater_download`，空对象 | 启动手动下载或失败重试后的 `UpdateSnapshot` |
+| `cancelUpdate()` | `updater_cancel`，空对象 | 取消下载后的 `UpdateSnapshot`；该版本在本次进程中暂停自动下载 |
+| `restartToUpdate()` | `updater_restart`，空对象 | 发起优雅退出后的 `UpdateSnapshot`，不表示安装已完成 |
+| `openUpdateLink(url)` | `updater_open_link`，`{ url: string }` | `null`；只接受有效 HTTPS 链接，由系统浏览器打开 |
+| `onUpdateState(listener)` | `mailx://updater-state` | 取消监听函数；事件携带同形 `UpdateSnapshot` |
+
+`UpdateSnapshot` 平铺包含 `canInstall: boolean`、`installOnQuit: boolean` 与状态字段：
+
+- `phase` 为 `idle | checking | available | downloading | ready | failed`。
+- available / downloading / ready 携带 `version` 与 `current`、`notes: string | null`、`date: number | null`；date 为 Unix 秒，notes 按不可信文本处理。
+- downloading 额外携带 `downloaded: number`、`total: number | null`，未知总量不显示虚假百分比。
+- failed 携带 `stage: check | download | install`。check 的 version 为 null，没有目标说明；download / install 保留目标 version 与完整说明，重试调用 `downloadUpdate()` 重新准备更新。
+- `canInstall` 反映安装能力：macOS、Windows、AppImage 为 true，deb / rpm 为 false；false 时不展示下载、安装或重启控件，调用下载返回 `unsupported`。
+- `installOnQuit` 只在 ready 且当前包已安排退出安装时为 true；自动更新已关闭且包来自自动下载时为 false。前端按此显示“稍后（退出时安装）”或“稍后”，不能只凭 ready 推定安装授权。手动下载包仍保留该次同意。
+
+界面先订阅再查询，拒绝晚于新事件返回的旧初始快照，手动检查响应也不覆盖已经到达的新事件；任何带目标版本的手动结果都可打开详情。自动下载直接进入 downloading，不先推送 available 通知；ready 和上次未完成安装的提示按版本、阶段在本次运行中去重。
+
+后台检查期间收到 `downloadUpdate()` 时保留手动下载意图并显示 checking，检查成功后按手动来源准备目标包，不丢弃点击或被自动策略提前消费；检查失败显示 check 错误。显式下载与正在进行的自动传输重叠时复用该传输，并将同意来源转为手动，后续关闭自动更新不会中止它。
+
+`restartToUpdate()` 在没有就绪包时返回 `validation`，有在途发送时返回 `alreadySending`。成功只是进入现有安全退出协调器，保存失败、取消或超时会取消该轮退出及重启标记，后台隐藏不触发安装。安装尝试未完成且下次仍运行旧版时，宿主恢复 `failed / install`，同一目标不自动重试；跨进程恢复缓存必须先获取新发布清单并重新验签。
 
 ### 后续应用操作草案
 

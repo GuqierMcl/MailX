@@ -14,15 +14,29 @@ function renderAbout(update: UpdateSnapshot) {
 }
 
 describe('the About page', () => {
-  it('has a check button and the automatic check switch, but no last-check time', async () => {
+  it('has a check button and a default-enabled automatic update switch', async () => {
     const { client, dialog } = renderAbout({ canInstall: true, phase: 'idle' })
     expect(within(within(dialog).getByRole('main')).getByText(__APP_VERSION__)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '检查更新' })).toBeInTheDocument()
-    expect(await within(dialog).findByRole('switch', { name: '自动检查更新' })).toBeChecked()
+    expect(await within(dialog).findByRole('switch', { name: '自动更新' })).toBeChecked()
     // A last-check time is deliberately not shown anywhere.
     expect(dialog.textContent).not.toMatch(/上次检查|Last checked/)
-    await userEvent.click(within(dialog).getByRole('switch', { name: '自动检查更新' }))
-    expect(client.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ general: expect.objectContaining({ autoCheckUpdates: false }) }))
+    await userEvent.click(within(dialog).getByRole('switch', { name: '自动更新' }))
+    expect(client.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ general: expect.objectContaining({ autoUpdate: false }) }))
+    expect(within(dialog).getByRole('button', { name: '检查更新' })).toBeEnabled()
+  })
+
+  it.each([
+    { canInstall: false, phase: 'idle' },
+    { canInstall: false, phase: 'failed', stage: 'check', version: null },
+  ] satisfies UpdateSnapshot[])('keeps automatic updates disabled for an unsupported installation in $phase', async (snapshot) => {
+    const { client, dialog } = renderAbout(snapshot)
+    expect(await within(dialog).findByRole('switch', { name: '自动更新' })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(dialog).getByRole('switch', { name: '自动更新' })).not.toBeChecked()
+    expect(within(dialog).getByText('当前安装方式不支持应用内更新，请从 GitHub 下载新版本，或使用安装 MailX 时的包管理器更新。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '检查更新' })).toBeEnabled()
+    await userEvent.click(within(dialog).getByRole('switch', { name: '自动更新' }))
+    expect(client.updateSettings).not.toHaveBeenCalled()
   })
 
   it('says so when a manual check finds nothing', async () => {

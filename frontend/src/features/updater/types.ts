@@ -9,7 +9,7 @@
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'failed'
 
 /** Which step failed, so "retry" can do the right thing. */
-export type UpdateFailureStage = 'check' | 'download'
+export type UpdateFailureStage = 'check' | 'download' | 'install'
 
 /** Release metadata stays available throughout downloading, completion and retry. */
 export type ReleaseDetails = {
@@ -19,7 +19,10 @@ export type ReleaseDetails = {
   date: number | null
 }
 
-export type UpdateSnapshot =
+export type UpdateSnapshot = {
+  /** Whether the prepared update will install on quit; older adapters omit it. */
+  installOnQuit?: boolean
+} & (
   | { canInstall: boolean; phase: 'idle' }
   | { canInstall: boolean; phase: 'checking' }
   | ({ canInstall: boolean; phase: 'available'; version: string } & ReleaseDetails)
@@ -31,7 +34,8 @@ export type UpdateSnapshot =
     stage: 'check'
     version: null
   }
-  | ({ canInstall: boolean; phase: 'failed'; stage: 'download'; version: string } & ReleaseDetails)
+  | ({ canInstall: boolean; phase: 'failed'; stage: 'download' | 'install'; version: string } & ReleaseDetails)
+)
 
 export const IDLE_UPDATE: UpdateSnapshot = { canInstall: false, phase: 'idle' }
 

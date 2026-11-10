@@ -333,7 +333,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "general": { "language": "system", "autoCheckUpdates": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
+                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -925,7 +925,7 @@ fn hand_edited_invalid_compose_values_fall_back_to_defaults() {
 }
 
 #[test]
-fn update_check_preference_defaults_on_and_survives_language_recovery() {
+fn auto_update_defaults_on_and_preserves_legacy_opt_out_during_language_recovery() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join(SETTINGS_FILE_NAME);
     fs::write(
@@ -937,7 +937,7 @@ fn update_check_preference_defaults_on_and_survives_language_recovery() {
         .unwrap()
         .get()
         .unwrap();
-    assert!(legacy.settings.general.auto_check_updates);
+    assert!(legacy.settings.general.auto_update);
 
     for general in [
         r#"{"language":"zh-CN","autoCheckUpdates":false}"#,
@@ -950,7 +950,7 @@ fn update_check_preference_defaults_on_and_survives_language_recovery() {
             .unwrap()
             .get()
             .unwrap();
-        assert!(!snapshot.settings.general.auto_check_updates, "{general}");
+        assert!(!snapshot.settings.general.auto_update, "{general}");
         assert!(!snapshot.recovered);
     }
 
@@ -964,7 +964,66 @@ fn update_check_preference_defaults_on_and_survives_language_recovery() {
         .get()
         .unwrap();
     assert_eq!(snapshot.settings.general.language, "en");
-    assert!(snapshot.settings.general.auto_check_updates);
+    assert!(snapshot.settings.general.auto_update);
+}
+
+#[test]
+fn auto_update_migration_prefers_the_new_field_and_rewrites_only_the_new_name() {
+    for (general, expected) in [
+        (serde_json::json!({}), true),
+        (serde_json::json!({"autoCheckUpdates": true}), true),
+        (serde_json::json!({"autoCheckUpdates": false}), false),
+        (serde_json::json!({"autoUpdate": false}), false),
+        (
+            serde_json::json!({"autoCheckUpdates": false, "autoUpdate": true}),
+            true,
+        ),
+        (
+            serde_json::json!({"autoCheckUpdates": true, "autoUpdate": false}),
+            false,
+        ),
+        (
+            serde_json::json!({"autoCheckUpdates": false, "autoUpdate": "invalid"}),
+            true,
+        ),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let mut general = general;
+        general["language"] = "en".into();
+        general["silentStart"] = true.into();
+        general["closeBehavior"] = "background".into();
+        let value = serde_json::json!({
+            "version": 1,
+            "settings": {"general": general, "appearance": {"theme": "dark"}}
+        });
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert_eq!(snapshot.settings.general.auto_update, expected, "{general}");
+        assert_eq!(snapshot.settings.general.language, "en");
+        assert!(snapshot.settings.general.silent_start);
+        assert_eq!(
+            snapshot.settings.general.close_behavior,
+            CloseBehavior::Background
+        );
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+
+        store.update(snapshot.settings.clone()).unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+        let persisted_general = &persisted["settings"]["general"];
+        assert_eq!(persisted_general["autoUpdate"], expected);
+        assert!(persisted_general.get("autoCheckUpdates").is_none());
+        assert_eq!(
+            SettingsStore::open(directory.path())
+                .unwrap()
+                .get()
+                .unwrap()
+                .settings,
+            snapshot.settings
+        );
+    }
 }
 
 #[test]
@@ -1044,7 +1103,7 @@ fn saved_background_preferences_recover_independently() {
             true,
         ),
     ];
-    for (general, language, auto_check_updates, close_behavior, show_menu_bar_icon) in cases {
+    for (general, language, auto_update, close_behavior, show_menu_bar_icon) in cases {
         let value = serde_json::json!({"version": 1, "settings": {"general": general, "appearance": {"theme": "dark"}}});
         fs::write(directory.path().join(SETTINGS_FILE_NAME), value.to_string()).unwrap();
         let snapshot = SettingsStore::open(directory.path())
@@ -1055,7 +1114,7 @@ fn saved_background_preferences_recover_independently() {
             snapshot.settings.general,
             GeneralSettings {
                 language: language.into(),
-                auto_check_updates,
+                auto_update,
                 close_behavior,
                 show_menu_bar_icon,
                 silent_start: false,
@@ -1068,7 +1127,7 @@ fn saved_background_preferences_recover_independently() {
     let settings = AppSettings {
         general: GeneralSettings {
             language: "invalid".into(),
-            auto_check_updates: false,
+            auto_update: false,
             close_behavior: CloseBehavior::Quit,
             show_menu_bar_icon: true,
             silent_start: true,
@@ -1077,7 +1136,7 @@ fn saved_background_preferences_recover_independently() {
     }
     .sanitized();
     assert_eq!(settings.general.language, "system");
-    assert!(!settings.general.auto_check_updates);
+    assert!(!settings.general.auto_update);
     assert_eq!(settings.general.close_behavior, CloseBehavior::Quit);
     assert!(settings.general.show_menu_bar_icon);
     assert!(settings.general.silent_start);
@@ -1122,7 +1181,7 @@ fn native_close_choice_preserves_current_settings_and_versions_the_commit() {
         .patch(SettingsPatch {
             general: Some(GeneralSettings {
                 language: "en".into(),
-                auto_check_updates: false,
+                auto_update: false,
                 show_menu_bar_icon: true,
                 ..Default::default()
             }),

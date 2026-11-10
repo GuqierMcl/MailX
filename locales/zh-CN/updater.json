@@ -6,8 +6,6 @@
   "statusDownloading": "正在下载 {{version}}…",
   "statusReady": "{{version}} 已下载，重启后安装",
   "checkNow": "检查更新",
-  "autoCheck": "自动检查更新",
-  "autoCheckDescription": "启动后和每隔几小时检查一次；关闭后仍可在这里手动检查。",
   "checkFailed": "无法检查更新，请稍后重试。",
   "downloadFailed": "下载没有完成，请重试。",
   "availableToast": "MailX {{version}} 可用",
@@ -33,6 +31,10 @@
   "indicatorAvailable": "MailX {{version}} 可用",
   "indicatorDownloading": "正在下载 {{version}}（{{percent}}%）",
   "indicatorReady": "重启以更新到 {{version}}",
-  "installUnavailable": "这个界面只能告诉你新版本的内容；请在 MailX 桌面应用中安装更新。",
-  "restartFailed": "无法重启，请重试。"
+  "installUnavailable": "当前安装方式不支持应用内更新，请从 GitHub 下载新版本，或使用安装 MailX 时的包管理器更新。",
+  "restartFailed": "无法重启，请重试。",
+  "autoUpdate": "自动更新",
+  "autoUpdateDescription": "自动下载新版本，完成后提醒你重启，也会在退出时安装。不会自动重启；关闭后仍会检查更新。",
+  "installFailed": "更新未能安装。请重试以重新准备更新，或从 GitHub 下载安装包。",
+  "indicatorFailed": "更新至 {{version}} 需要处理"
 }

@@ -19,15 +19,28 @@ describe('what the user hears about', () => {
     const [notice] = announcements({ ...found, phase: 'checking' }, found, true)
     expect(shouldAnnounce(notice, new Set(), false)).toBe(false)
     const [automatic] = announcements(idle, found, false)
-    expect(shouldAnnounce(automatic, new Set(['0.2.0']), false)).toBe(false)
+    expect(shouldAnnounce(automatic, new Set(['available:0.2.0']), false)).toBe(false)
     expect(shouldAnnounce(automatic, new Set(), false)).toBe(true)
   })
 
   it('announces a finished download only while the modal is closed', () => {
     const [notice] = announcements(found, ready, false)
-    expect(notice).toEqual({ kind: 'ready', version: '0.2.0' })
+    expect(notice).toEqual({ kind: 'ready', version: '0.2.0', manual: false })
     expect(shouldAnnounce(notice, new Set(), true)).toBe(false)
     expect(shouldAnnounce(notice, new Set(), false)).toBe(true)
+    expect(shouldAnnounce(notice, new Set(['ready:0.2.0']), false)).toBe(false)
+    expect(shouldAnnounce(notice, new Set(['available:0.2.0']), false)).toBe(true)
+    expect(shouldAnnounce({ ...notice, manual: true }, new Set(), false)).toBe(false)
+  })
+
+  it('keeps automatic downloading quiet and announces a failed installation once', () => {
+    expect(announcements(idle, { ...found, phase: 'downloading', downloaded: 0, total: null }, false)).toEqual([])
+    const failed: UpdateSnapshot = { ...found, phase: 'failed', stage: 'install' }
+    const [notice] = announcements(idle, failed, false)
+    expect(notice).toEqual({ kind: 'installFailed', version: '0.2.0', manual: false })
+    expect(shouldAnnounce(notice, new Set(), false)).toBe(true)
+    expect(shouldAnnounce(notice, new Set(['installFailed:0.2.0']), false)).toBe(false)
+    expect(announcements(failed, failed, false)).toEqual([])
   })
 
   it('says nothing about idle, checking or failed states', () => {

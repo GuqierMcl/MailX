@@ -1201,6 +1201,7 @@ pub(crate) async fn settings_update(
             if let Ok(snapshot) = &result {
                 emit_settings_changed(&app, snapshot);
                 crate::lifecycle::settings_changed(&app, snapshot);
+                crate::updater::settings_changed(&app, snapshot);
             }
             result
         }
