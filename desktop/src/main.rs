@@ -18,6 +18,8 @@ mod mcp_sidecar;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
+mod secret_split;
+#[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
 #[cfg(not(feature = "body-webview-test"))]
 mod secret_vault;

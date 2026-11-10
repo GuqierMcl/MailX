@@ -12,6 +12,13 @@ compile_error!("MailX needs a native SecretStore adapter on this platform");
 /// Windows and Linux have no such per-item prompt and keep one item per secret.
 pub(crate) fn system_store(service: String) -> Arc<dyn SecretStore> {
     let per_item = SystemSecretStore::new(service);
+    // Windows Credential Manager limits one item to about 1280 characters, less
+    // than some sign-in grants; longer values are split over extra items.
+    #[cfg(target_os = "windows")]
+    let per_item = crate::secret_split::SplitSecretStore::new(
+        Arc::new(per_item),
+        crate::secret_split::WINDOWS_ITEM_LIMIT,
+    );
     #[cfg(target_os = "macos")]
     {
         Arc::new(crate::secret_vault::VaultSecretStore::new(Arc::new(

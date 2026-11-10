@@ -91,4 +91,13 @@
 
 OAuth grant 经 `SecretStore` 保存，Windows 和 Linux 仍是逐条目存储。Windows 凭据管理器单个条目最多 2560 字节，keyring 以 UTF-16 存放，约 1280 个字符（`windows.rs` 在超限时返回 `TooLong`，不会截断）。因此每个 OAuth 条目只保存 refresh token、已授予 scopes 与目标，access token 只在内存中，重启后首次使用先刷新。
 
-剩余限制：单个 refresh token 加上 scopes 与目标的 JSON 仍超过约 1280 个字符时，保存会失败，核心把它报告为存储错误，不截断也不覆盖旧值；该服务商在 Windows 上需要另外设计（例如分条目存放）后才能开放。macOS 单条保险库不受此限，但整体仍随账号数增长。验证使用模拟该上限的 `SecretStore` 替身，尚未在真实 Windows 凭据管理器上实测。
+Microsoft 的 refresh token 常超过 1000 个字符，加上 scopes 与目标后会超过上限，因此 Windows 在系统存储之上加一层通用的分条目包装（`desktop/src/secret_split.rs`，与服务商无关，只在 `cfg(target_os = "windows")` 下接入 `secret_store::system_store`）：
+
+- 不超过 1280 个 UTF-16 单元的值保持原来的单条目格式，已有密码和旧 grant 不受影响。
+- 更长的值按字符边界拆成多段，写入额外条目 `{key}#1`、`{key}#2`……，`{key}` 只放一个小头部（总长度与段数，以不可能出现在密码开头的控制字符起头）。段数上限 128。
+- `set` 先写各段、最后写头部，写段失败时不会留下指向缺段的头部；写完后删除多余的旧段。变短或换成短值时同样清理旧段。
+- `get` 读头部后收齐各段并核对总长度与段数；缺段、长度不符或头部损坏都返回错误，不会当作“没有凭证”。
+- `delete` 先删各段再删头部，中途失败后重试仍能找到头部；头部损坏时只删除 `{key}`。
+- 本身就以头部标记开头的明文值也按拆分格式保存，读回时不会被误认为头部。
+
+macOS 单条保险库不受此限，但整体仍随账号数增长。Linux 的 Secret Service 没有这一限制。验证使用模拟该上限的内存 `SecretStore` 替身，在所有平台上运行；尚未在真实 Windows 凭据管理器上实测，也没有用真实 Microsoft 令牌长度验证。
