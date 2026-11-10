@@ -545,6 +545,11 @@ pub(crate) fn normalize_oauth_request(request: &mut CreateAccountRequest) -> Res
 }
 
 /// Resolve a temporary authorization route without saving proxy/mail secrets.
+/// `Inherit` is the application default route, which is direct until an
+/// app-wide proxy setting exists. Sync and sending resolve it in
+/// `AccountService::image_route` and draft checks in `draft_connection`; when
+/// the default route can become a proxy, all three must change together, and
+/// sign-in must never fall back to direct (see `docs/architecture/network-security.md`).
 pub(crate) fn authorization_route(
     request: &CreateAccountRequest,
 ) -> Result<crate::net::NetRoute, AppError> {
@@ -650,6 +655,32 @@ mod tests {
             .create_oauth(request(), verified("stable-subject"), registration())
             .unwrap();
         (dir, service, account, secrets)
+    }
+    fn request_with_route(route: serde_json::Value) -> CreateAccountRequest {
+        let config = super::super::sync_plan::tests::config(route);
+        serde_json::from_value(json!({"requestId":new_id(),"config":config})).unwrap()
+    }
+    #[test]
+    fn sign_in_uses_the_same_route_as_saved_accounts() {
+        // `inherit` is the app default route, which is direct today; the saved
+        // account's sync and send route resolves it the same way.
+        let (_dir, service, account, _) = fixture();
+        let saved = service.image_route(&account.id).unwrap();
+        assert!(saved.proxy.is_none());
+        for kind in ["direct", "inherit"] {
+            let route = authorization_route(&request_with_route(json!({"kind": kind}))).unwrap();
+            assert!(route.proxy.is_none(), "{kind}");
+            assert!(!route.image_proxy_dns, "{kind}");
+        }
+        // A custom proxy is carried into sign-in; there is no fallback to direct.
+        let route = authorization_route(&request_with_route(json!({
+            "kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":1080,
+            "dns":"proxy","authentication":null,"imageProxyDns":false
+        })));
+        match route {
+            Ok(route) => assert_eq!(route.proxy.as_ref().map(|p| p.port), Some(1080)),
+            Err(error) => panic!("custom route rejected: {error:?}"),
+        }
     }
     #[test]
     fn verified_identity_overrides_untrusted_configuration_and_public_output_has_no_secrets() {
