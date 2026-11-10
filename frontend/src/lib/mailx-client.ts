@@ -286,8 +286,8 @@ export interface MailxClient {
   cancelUpdate(): Promise<UpdateSnapshot>
   /** Quits gracefully, installs, and relaunches. Refused (`alreadySending`) while mail is being sent. */
   restartToUpdate(): Promise<UpdateSnapshot>
-  /** Opens a release-notes link in the system browser; the host accepts `https:` only. */
-  openUpdateLink(url: string): Promise<void>
+  /** Opens an app-provided or release-notes link in the system browser; the host accepts `https:` only. */
+  openExternalLink(url: string): Promise<void>
 
   // --- Local MCP server (docs/contracts/mcp.md). Main window only.
   /** Current status of the local MCP server. */
@@ -570,7 +570,7 @@ export function createDesktopClient(): MailxClient {
     downloadUpdate: () => call<UpdateSnapshot>('updater_download'),
     cancelUpdate: () => call<UpdateSnapshot>('updater_cancel'),
     restartToUpdate: () => call<UpdateSnapshot>('updater_restart'),
-    openUpdateLink: (url) => call<void>('updater_open_link', { url }),
+    openExternalLink: (url) => call<void>('updater_open_link', { url }),
     onUpdateState: (listener) => subscribe<UpdateSnapshot>(HOST_EVENTS.updater, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),

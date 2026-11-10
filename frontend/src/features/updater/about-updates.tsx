@@ -33,10 +33,9 @@ export function UpdateStatusRow() {
   })()
   const busy = snapshot.phase === 'checking' || snapshot.phase === 'downloading'
   return (
-    <SettingsRow label={t('updater:statusLabel')}>
-      {status && (version
-        ? <button type="button" className="text-xs underline-offset-2 hover:underline" onClick={openDialog}>{status}</button>
-        : <span className="text-xs">{status}</span>)}
+    <SettingsRow label={t('updater:statusLabel')} description={status && (version
+      ? <button type="button" className="text-left text-xs underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={openDialog}>{status}</button>
+      : <span role="status">{status}</span>)}>
       {snapshot.phase === 'failed' && snapshot.stage === 'check' && (
         <Button variant="outline" size="sm" onClick={() => void check()}>{t('updater:retry')}</Button>
       )}

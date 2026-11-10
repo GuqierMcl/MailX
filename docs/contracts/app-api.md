@@ -300,7 +300,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `downloadUpdate()` | `updater_download`，空对象 | 启动手动下载或失败重试后的 `UpdateSnapshot` |
 | `cancelUpdate()` | `updater_cancel`，空对象 | 取消下载后的 `UpdateSnapshot`；该版本在本次进程中暂停自动下载 |
 | `restartToUpdate()` | `updater_restart`，空对象 | 发起优雅退出后的 `UpdateSnapshot`，不表示安装已完成 |
-| `openUpdateLink(url)` | `updater_open_link`，`{ url: string }` | `null`；只接受有效 HTTPS 链接，由系统浏览器打开 |
+| `openExternalLink(url)` | `updater_open_link`，`{ url: string }` | `null`；只接受有效 HTTPS 链接，由系统浏览器打开；供关于页项目链接与更新说明共用 |
 | `onUpdateState(listener)` | `mailx://updater-state` | 取消监听函数；事件携带同形 `UpdateSnapshot` |
 
 `UpdateSnapshot` 平铺包含 `canInstall: boolean`、`installOnQuit: boolean` 与状态字段：

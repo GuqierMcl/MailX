@@ -737,7 +737,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     downloadUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
     cancelUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
     restartToUpdate: async () => { throw new MailxClientError({ code: 'unsupported', message: '当前版本尚不支持此认证方式。', field: null }) },
-    openUpdateLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
+    openExternalLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
     // The browser preview has no host: the switch only changes an in-memory status.
     getMcpStatus: async () => structuredClone(mcpStatus),

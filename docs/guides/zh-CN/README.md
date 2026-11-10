@@ -98,6 +98,12 @@ MailX 会在启动后不久及运行期间每六小时检查 GitHub 上的新版
 
 macOS、Windows 与 AppImage 支持应用内更新。deb / rpm 不提供自动更新，请从发布页安装新包，或使用安装 MailX 时的包管理器更新。系统代码签名与更新包签名是两回事，当前安装包仍可能触发系统首次运行提示。
 
+## 关于与反馈
+
+“设置 → 关于”在更新设置上方展示 MailX Logo 与当前版本。下方的链接依次在系统浏览器中打开 [GitHub 仓库](https://github.com/GuqierMcl/MailX)、[问题反馈模板](https://github.com/GuqierMcl/MailX/issues/new?template=bug_report.md)、[功能建议模板](https://github.com/GuqierMcl/MailX/issues/new?template=feature_request.md)和[发布记录](https://github.com/GuqierMcl/MailX/releases)。如果链接无法打开，可使用错误提示中的“复制链接”自行打开。
+
+反馈问题或提出建议时，按需登录 GitHub，填写模板并在那里提交。MailX 不会自动填写版本或系统信息，请按模板要求补充。
+
 ## 升级与数据保留
 
 应用启动时会执行需要的数据库迁移，具体升级变化见对应版本的发布说明。较旧版本通常无法打开迁移后的数据库；不要把重新安装旧程序当成回退数据的方法。

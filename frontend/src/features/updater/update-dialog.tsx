@@ -24,7 +24,7 @@ export function UpdateDialog({ client, snapshot, open, onOpenChange }: {
   const percent = downloadPercent(snapshot)
   const info = 'notes' in snapshot ? snapshot : null
   const date = info ? releaseDate(info.date) : null
-  const openLink = (url: string) => void client.openUpdateLink(url).catch(() => undefined)
+  const openLink = (url: string) => void client.openExternalLink(url).catch(() => undefined)
   const failed = snapshot.phase === 'failed' ? snapshot : null
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
