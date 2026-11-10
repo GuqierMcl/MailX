@@ -4,8 +4,11 @@ import type {
   Account,
   AccountRemoval,
   AccountConnectionVerification,
+  BeginOAuthAccount,
+  BeginOAuthReauthorization,
   ConnectionInput,
   DraftConnectionVerification,
+  OAuthSessionHandle,
   AccountSyncState,
   AppError,
   ApiResult,
@@ -84,6 +87,21 @@ export interface MailxClient {
   /** Opens the fixed, reviewed help page for the selected supported provider. */
   openProviderHelp(providerId: string): Promise<void>
   createAccount(request: CreateAccountRequest): Promise<Account>
+  /**
+   * Starts browser sign-in for a reviewed provider and opens its sign-in page.
+   * Only an opaque session handle comes back; the host never returns URLs or tokens.
+   */
+  beginOAuthAccount(request: BeginOAuthAccount): Promise<OAuthSessionHandle>
+  /**
+   * Waits for the browser sign-in of `sessionId` and returns the saved account
+   * (a new one, or the renewed one after `reauthorizeOAuthAccount`). A session
+   * canceled meanwhile rejects with `oauthSessionExpired`.
+   */
+  finishOAuthAccount(sessionId: string): Promise<Account>
+  /** Abandons a pending sign-in; unknown or finished sessions are ignored. */
+  cancelOAuthAccount(sessionId: string): Promise<void>
+  /** Starts signing an existing OAuth account in again; finish with `finishOAuthAccount`. */
+  reauthorizeOAuthAccount(request: BeginOAuthReauthorization): Promise<OAuthSessionHandle>
   /** Replaces the connection; the account's sync restarts with it right away. */
   updateConnection(request: UpdateConnectionRequest): Promise<Account>
   /** Renames or recolors the account; sync keeps running. */
@@ -376,6 +394,10 @@ export function createDesktopClient(): MailxClient {
     },
     openProviderHelp: (providerId) => call<void>('accounts_open_provider_help', { providerId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
+    beginOAuthAccount: (request) => call<OAuthSessionHandle>('accounts_oauth_begin', { request }),
+    finishOAuthAccount: (sessionId) => call<Account>('accounts_oauth_finish', { request: { sessionId } }),
+    cancelOAuthAccount: (sessionId) => call<void>('accounts_oauth_cancel', { request: { sessionId } }),
+    reauthorizeOAuthAccount: (request) => call<OAuthSessionHandle>('accounts_oauth_reauthorize', { request }),
     updateConnection: (request) => call<Account>('accounts_update_connection', { request }),
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
     removeAccount: (request) => call<AccountRemoval>('accounts_remove', { request }),

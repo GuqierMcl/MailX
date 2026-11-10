@@ -425,3 +425,63 @@ describe('mock batch actions for the list selection', () => {
     await expect(client.setFlags([], 'read', true)).rejects.toMatchObject({ failure: { code: 'validation' } })
   })
 })
+
+describe('mock browser sign-in', () => {
+  const config = (emailAddress: string) => ({
+    displayName: 'Outlook', color: null, senderName: null, useProviderIcon: true, emailAddress, providerId: 'microsoft-personal',
+    imap: { host: '', port: 0, tls: 'implicit' as const, username: '' }, smtp: { host: '', port: 0, tls: 'implicit' as const, username: '' },
+    authentication: { kind: 'oauth2' as const, configuration: { providerId: 'microsoft-personal', issuer: '', clientRegistrationId: '', authorizationSubject: null, targetMailboxResource: null } },
+    route: { kind: 'direct' as const },
+  })
+  beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers(); localStorage.clear() })
+
+  it('creates an OAuth account after a short delay', async () => {
+    const client = createMockClient()
+    const before = (await client.listAccounts()).length
+    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config('lin@outlook.com') } })
+    const finished = client.finishOAuthAccount(sessionId)
+    await vi.advanceTimersByTimeAsync(1000)
+    const account = await finished
+    expect(account.authentication).toMatchObject({ kind: 'oauth2', state: 'connected' })
+    expect(account.providerId).toBe('microsoft-personal')
+    expect((await client.listAccounts()).length).toBe(before + 1)
+  })
+
+  it('fails like the host for a refused mailbox and a denied sign-in', async () => {
+    const client = createMockClient()
+    for (const [address, code] of [['refused@outlook.com', 'oauthMailboxRefused'], ['denied@outlook.com', 'oauthAuthorizationDenied']]) {
+      const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config(address) } })
+      const finished = client.finishOAuthAccount(sessionId)
+      const assertion = expect(finished).rejects.toMatchObject({ failure: { code } })
+      await vi.advanceTimersByTimeAsync(1000)
+      await assertion
+    }
+  })
+
+  it('cancels a pending sign-in and rejects unknown providers', async () => {
+    const client = createMockClient()
+    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-work', request: { requestId: crypto.randomUUID(), config: config('lin@contoso.com') } })
+    const finished = client.finishOAuthAccount(sessionId)
+    const assertion = expect(finished).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
+    await client.cancelOAuthAccount(sessionId)
+    await assertion
+    await expect(client.finishOAuthAccount(sessionId)).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
+    await expect(client.beginOAuthAccount({ providerId: 'other', request: { requestId: crypto.randomUUID(), config: config('x@y.com') } })).rejects.toMatchObject({ failure: { code: 'unsupported' } })
+  })
+
+  it('renews an OAuth account by bumping its revision', async () => {
+    const client = createMockClient()
+    const created = await (async () => {
+      const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config('lin@outlook.com') } })
+      const finished = client.finishOAuthAccount(sessionId)
+      await vi.advanceTimersByTimeAsync(1000)
+      return finished
+    })()
+    const { sessionId } = await client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })
+    const finished = client.finishOAuthAccount(sessionId)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await finished).revision).toBe(created.revision + 1)
+    await expect(client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
+})

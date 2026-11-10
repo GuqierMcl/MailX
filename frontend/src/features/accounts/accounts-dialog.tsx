@@ -25,6 +25,7 @@ import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx
 import { sortAccountsForDisplay } from './account-order'
 import { SortableAccountList } from './sortable-account-list'
 import { ConnectionVerification } from './connection-verification'
+import { SignInAgain } from './sign-in-again'
 import { ProviderAuthHelp } from './provider-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
@@ -247,6 +248,17 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
           <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
         </Alert>
       )}
+      {account.authentication.kind === 'oauth2' && (
+        <SignInAgain
+          client={client}
+          account={account}
+          disabled={removing}
+          onSignedIn={(renewed) => {
+            replace(renewed)
+            onSaved()
+          }}
+        />
+      )}
       <fieldset disabled={removing} className="contents"><ProfileEditor
         client={client}
         account={account}
@@ -439,7 +451,7 @@ function server(protocol: string, connection: Account['imap']) {
 }
 
 function credentials(account: Account, needsTrust: boolean) {
-  if (account.authentication.kind === 'oauth2') return `OAuth 2.0 · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
+  if (account.authentication.kind === 'oauth2') return `${t('accounts:signedInThroughBrowser')} · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
   const mode = account.authentication.mode === 'shared' ? t('accounts:sharedPassword') : t('accounts:separatePasswords')
   const configured = account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured
   return `${mode} · ${needsTrust ? t('accounts:needsConfirmation') : configured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`

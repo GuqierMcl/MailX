@@ -70,6 +70,9 @@ export function ProviderPicker({ selected, query, onQueryChange, onSelect, onAdv
             )
           })}
         </div>
+        {visible.some((provider) => provider.signIn) && (
+          <p className="px-6 pb-6 text-xs text-muted-foreground">{visible.find((provider) => provider.signIn)?.signIn?.help}</p>
+        )}
         {visible.length === 0 && <p role="status" className="px-6 py-8 text-center text-sm text-muted-foreground">{t('accounts:noProvidersFound')}</p>}
       </ScrollArea>
     </>

@@ -3,6 +3,7 @@ import type {
   Account,
   AccountRemoval,
   AccountConfigInput,
+  OAuthSessionHandle,
   Draft,
   InlineImage,
   DraftChanged,
@@ -98,6 +99,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
   const removalListeners = new Set<(removal: AccountRemoval) => void>()
+  const oauthSessions = createOAuthSessions()
   const announceDraft = (change: DraftChanged) => draftListeners.forEach((listener) => listener(structuredClone(change)))
   const clone = <T,>(value: T) => structuredClone(value)
   const MOCK_DELETE_UNDO_MS = 5000
@@ -337,6 +339,32 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       folders.push(...buildFolders(account.id, emails, dataset.customFolders))
       return structuredClone(account)
     },
+    async beginOAuthAccount({ providerId, request }) {
+      if (!OAUTH_PROVIDER_IDS.includes(providerId)) throw new MailxClientError({ code: 'unsupported', message: '', field: null })
+      return oauthSessions.begin({ kind: 'create', providerId, config: request.config })
+    },
+    async reauthorizeOAuthAccount({ providerId, accountId, expectedRevision }) {
+      const account = accounts.find((row) => row.id === accountId)
+      if (!account) throw notFound()
+      if (account.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '', field: null })
+      return oauthSessions.begin({ kind: 'reauthorize', providerId, accountId })
+    },
+    async finishOAuthAccount(sessionId) {
+      const session = await oauthSessions.wait(sessionId)
+      if (session.kind === 'create') {
+        const account = oauthAccountFromConfig(crypto.randomUUID(), 1, session.providerId, session.config)
+        accounts.push(account)
+        folders.push(...buildFolders(account.id, emails, dataset.customFolders))
+        return structuredClone(account)
+      }
+      const index = accounts.findIndex((row) => row.id === session.accountId)
+      if (index < 0) throw notFound()
+      const current = accounts[index]
+      if (current.authentication.kind !== 'oauth2') throw new MailxClientError({ code: 'unsupported', message: '', field: null })
+      accounts[index] = { ...current, revision: current.revision + 1, authentication: { ...current.authentication, state: 'connected' }, updatedAt: new Date().toISOString() }
+      return structuredClone(accounts[index])
+    },
+    async cancelOAuthAccount(sessionId) { oauthSessions.cancel(sessionId) },
     async updateConnection({ accountId, expectedRevision, connection }) {
       const index = accounts.findIndex((row) => row.id === accountId)
       if (index < 0) throw notFound()
@@ -751,6 +779,74 @@ const missing = { code: 'notFound', message: '内容不存在。', field: null }
 
 const WORK = '11111111-1111-4111-8111-111111111111'
 const PERSONAL = '22222222-2222-4222-8222-222222222222'
+
+const OAUTH_PROVIDER_IDS = ['microsoft-personal', 'microsoft-work']
+/** How long the mock "browser sign-in" takes before it succeeds. */
+const OAUTH_DELAY_MS = 600
+
+type OAuthSession =
+  | { kind: 'create'; providerId: string; config: AccountConfigInput }
+  | { kind: 'reauthorize'; providerId: string; accountId: string }
+
+/**
+ * Stands in for the host's sign-in sessions. Finishing succeeds after a short
+ * delay. To exercise failures, use an address starting with `refused` (the
+ * mailbox won't open) or `denied` (access wasn't allowed). Cancel makes a
+ * pending finish fail with `oauthSessionExpired`, as the host does.
+ */
+function createOAuthSessions() {
+  const pending = new Map<string, { session: OAuthSession; abort: () => void }>()
+  return {
+    begin(session: OAuthSession): OAuthSessionHandle {
+      const sessionId = crypto.randomUUID()
+      pending.set(sessionId, { session, abort: () => undefined })
+      return { sessionId }
+    },
+    wait(sessionId: string): Promise<OAuthSession> {
+      const entry = pending.get(sessionId)
+      if (!entry) return Promise.reject(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null }))
+      const address = entry.session.kind === 'create' ? entry.session.config.emailAddress.toLowerCase() : ''
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(sessionId)
+          if (address.startsWith('refused')) reject(new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null }))
+          else if (address.startsWith('denied')) reject(new MailxClientError({ code: 'oauthAuthorizationDenied', message: '', field: null }))
+          else resolve(entry.session)
+        }, OAUTH_DELAY_MS)
+        entry.abort = () => {
+          clearTimeout(timer)
+          reject(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null }))
+        }
+      })
+    },
+    cancel(sessionId: string) {
+      const entry = pending.get(sessionId)
+      pending.delete(sessionId)
+      entry?.abort()
+    },
+  }
+}
+
+function oauthAccountFromConfig(id: string, revision: number, providerId: string, config: AccountConfigInput): Account {
+  const endpoint = (suffix: string) => ({ id: `${id}-${suffix}`, generation: 1, credentialConfigured: true, trust: 'trusted' as const })
+  return {
+    ...accountFromConfig(id, revision, config),
+    providerId,
+    authentication: {
+      kind: 'oauth2',
+      configuration: {
+        providerId,
+        issuer: 'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0',
+        clientRegistrationId: `${providerId}-v1`,
+        authorizationSubject: '00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000001',
+        targetMailboxResource: config.emailAddress,
+      },
+      state: 'connected',
+      imap: endpoint('imap'),
+      smtp: endpoint('smtp'),
+    },
+  }
+}
 
 function accountFromConfig(id: string, revision: number, config: AccountConfigInput): Account {
   const now = new Date().toISOString()

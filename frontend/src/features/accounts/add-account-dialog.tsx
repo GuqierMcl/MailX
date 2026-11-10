@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Account, ConnectionInput } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,8 @@ import { filterProviders, type MailProvider } from './providers'
 const STEP_COUNT = 3
 /** Fields a failed create can blame on the profile step; anything else is the connection's. */
 const PROFILE_FIELDS = new Set(['displayName', 'color', 'senderName', 'useProviderIcon'])
+/** Sign-in failures about the address or how to reach the provider, fixed on the connection step. */
+const CONNECTION_FAILURES = new Set<ClientFailure['code']>(['oauthMailboxRefused', 'oauthUsePersonalEntry', 'oauthUseOrganizationEntry', 'oauthProxy'])
 
 type Step =
   | { kind: 'method'; selected: MailProvider | null }
@@ -61,6 +63,10 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const [nameError, setNameError] = useState<ClientFailure | null>(null)
   const [saveError, setSaveError] = useState<ClientFailure | null>(null)
   const [saving, setSaving] = useState(false)
+  // Browser sign-in: waiting for the user to finish in the browser.
+  const [signingIn, setSigningIn] = useState(false)
+  // The pending host session, and whether the user canceled before it was known.
+  const session = useRef<{ id: string | null; canceled: boolean } | null>(null)
   // One request id per opening, so retrying a create that may have landed is safe.
   const [requestId, setRequestId] = useState('')
 
@@ -84,6 +90,12 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
       setRequestId(crypto.randomUUID())
     }
   }
+
+  // Closing the dialog abandons a sign-in that is still waiting.
+  useEffect(() => {
+    if (!open) cancelSignIn()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the open state matters
+  }, [open])
 
   // Anything typed past the provider list counts as unsaved.
   const unsaved = step.kind === 'profile' || guard.dirty
@@ -111,6 +123,13 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     else if (step.kind === 'profile') showConnection(step.method, step.draft, undefined, 'back')
   }
 
+  function cancelSignIn() {
+    const current = session.current
+    if (!current) return
+    current.canceled = true
+    if (current.id) void client.cancelOAuthAccount(current.id).catch(() => undefined)
+  }
+
   const finish = async () => {
     if (step.kind !== 'profile' || saving) return
     const name = displayName.trim()
@@ -122,13 +141,31 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     setSaving(true)
     guard.setBusy(true)
     setSaveError(null)
+    const browserSignIn = step.method.signIn && step.method.id !== null
+    const mine = { id: null as string | null, canceled: false }
     try {
-      const saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: senderName.trim() || null, useProviderIcon } })
+      const config = { ...step.connection, providerId: step.method.id, displayName: name, color, senderName: senderName.trim() || null, useProviderIcon }
+      let saved: Account
+      if (browserSignIn) {
+        session.current = mine
+        setSigningIn(true)
+        const handle = await client.beginOAuthAccount({ providerId: step.method.id!, request: { requestId, config } })
+        mine.id = handle.sessionId
+        // Canceled while the page was still opening.
+        if (mine.canceled) await client.cancelOAuthAccount(handle.sessionId).catch(() => undefined)
+        saved = await client.finishOAuthAccount(handle.sessionId)
+      } else {
+        saved = await client.createAccount({ requestId, config })
+      }
       guard.setDirty(false)
       onCreated(saved)
     } catch (cause) {
+      // The user canceled: stay on this step without an error.
+      if (mine.canceled) return
       const failure = clientFailure(cause)
-      if (failure.field === 'displayName') setNameError(failure)
+      if (CONNECTION_FAILURES.has(failure.code)) {
+        showConnection(step.method, clearSecrets(step.draft), failure, 'back')
+      } else if (failure.field === 'displayName') setNameError(failure)
       else if (failure.field === 'senderName') setSenderNameError(failure)
       else if (failure.field && !PROFILE_FIELDS.has(failure.field)) {
         // The connection was rejected: go back to it with the error. The
@@ -136,6 +173,8 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
         showConnection(step.method, clearSecrets(step.draft), failure, 'back')
       } else setSaveError(failure)
     } finally {
+      if (session.current === mine) session.current = null
+      setSigningIn(false)
       setSaving(false)
       guard.setBusy(false)
     }
@@ -201,20 +240,31 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
             )}
             {step.kind === 'profile' && (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                <SettingsPage footer={<>
+                <SettingsPage footer={signingIn ? <>
+                  <FieldDescription>{t('accounts:mailboxAddress', { address: step.connection.emailAddress })}</FieldDescription>
+                  <Button variant="outline" onClick={cancelSignIn}>{t('accounts:cancelSignIn')}</Button>
+                </> : <>
                   <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:mailboxAddress', { address: step.connection.emailAddress })}</FieldDescription>
                   <div className="flex shrink-0 gap-2">
                     <Button variant="outline" onClick={back} disabled={saving}>{t('accounts:back')}</Button>
-                    <Button onClick={() => void finish()} disabled={saving || !client.available}>{saving ? t('accounts:savingEllipsis') : t('accounts:finish')}</Button>
+                    <Button onClick={() => void finish()} disabled={saving || !client.available}>
+                      {step.method.signIn ? t('accounts:signInInBrowser') : saving ? t('accounts:savingEllipsis') : t('accounts:finish')}
+                    </Button>
                   </div>
                 </>}>
+                  {signingIn && (
+                    <Alert role="status">
+                      <AlertTitle>{t('accounts:signInWaitingTitle')}</AlertTitle>
+                      <AlertDescription>{t('accounts:signInWaitingDescription')}</AlertDescription>
+                    </Alert>
+                  )}
                   <Alert role="status">
                     <AlertTitle>{t('accounts:nameMailbox')}</AlertTitle>
                     <AlertDescription>{t('accounts:nameMailboxDescription')}</AlertDescription>
                   </Alert>
                   {saveError && (
                     <Alert variant="destructive">
-                      <AlertTitle>{t('accounts:notSaved')}</AlertTitle>
+                      <AlertTitle>{step.method.signIn ? t('accounts:signInFailed') : t('accounts:notSaved')}</AlertTitle>
                       <AlertDescription>{errorText(saveError)}</AlertDescription>
                     </Alert>
                   )}

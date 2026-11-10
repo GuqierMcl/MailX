@@ -5,7 +5,7 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import { exampleAccount, testClient } from './test-fixtures'
 import { AddAccountDialog } from './add-account-dialog'
-import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
+import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, type MailProvider } from './providers'
 
 function renderDialog(client = testClient(), accounts = [exampleAccount({ color: '#2563eb' })]) {
   const onClose = vi.fn()
@@ -612,5 +612,109 @@ describe('add account wizard', () => {
     } finally {
       await act(async () => { await i18n.changeLanguage('zh-CN') })
     }
+  })
+
+  describe('browser sign-in providers', () => {
+    async function toSignInStep(dialog: HTMLElement, provider: MailProvider, address = 'lin@outlook.com') {
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: provider.name } })
+      await userEvent.click(within(dialog).getByRole('radio', { name: provider.name }))
+      await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+      fireEvent.change(within(dialog).getByLabelText('邮箱地址'), { target: { value: address } })
+      await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+      return within(dialog).findByRole('button', { name: '在浏览器中登录' })
+    }
+
+    it('shows the help under the Microsoft entries', async () => {
+      const { dialog } = renderDialog()
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'outlook' } })
+      expect(within(dialog).getByText(/登录前请先在 Outlook 设置中开启 IMAP/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/公司自己搭建的 Exchange 服务器/)).toBeInTheDocument()
+    })
+
+    it('asks only for the address, never for servers or a password', async () => {
+      const { dialog } = renderDialog()
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'outlook' } })
+      await userEvent.click(within(dialog).getByRole('radio', { name: 'Outlook' }))
+      await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+      expect(within(dialog).getByLabelText('邮箱地址')).toBeInTheDocument()
+      expect(within(dialog).getByText('MailX 会在浏览器中打开微软的登录页面。')).toBeInTheDocument()
+      expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
+      expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: '测试登录' })).not.toBeInTheDocument()
+      // The usual network settings stay available.
+      await userEvent.click(within(dialog).getByText('高级设置'))
+      expect(within(dialog).getByLabelText('连接方式')).toBeInTheDocument()
+    })
+
+    it.each([[MICROSOFT_PERSONAL_PROVIDER, 'lin@outlook.com'], [MICROSOFT_WORK_PROVIDER, 'lin@contoso.com']])('signs in through the browser for %s without creating a password account', async (provider, address) => {
+      const { client, dialog, onCreated } = renderDialog()
+      const signIn = await toSignInStep(dialog, provider, address)
+      expect(client.verifyDraftConnection).not.toHaveBeenCalled()
+      expect(within(dialog).queryByRole('button', { name: '完成' })).not.toBeInTheDocument()
+      await userEvent.click(signIn)
+      await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+      expect(client.createAccount).not.toHaveBeenCalled()
+      expect(client.beginOAuthAccount).toHaveBeenCalledOnce()
+      const { providerId, request } = client.beginOAuthAccount.mock.calls[0][0]
+      expect(providerId).toBe(provider.id)
+      expect(request.config).toMatchObject({ emailAddress: address, providerId: provider.id, authentication: { kind: 'oauth2' }, route: { kind: 'direct' } })
+      expect(client.finishOAuthAccount).toHaveBeenCalledWith('dddddddd-dddd-4ddd-8ddd-dddddddddddd')
+    })
+
+    it('shows a waiting state while the browser is open and cancels the session on request', async () => {
+      const client = testClient()
+      let release: (reason: unknown) => void = () => undefined
+      client.finishOAuthAccount.mockImplementation(() => new Promise((_resolve, reject) => { release = reject }))
+      client.cancelOAuthAccount.mockImplementation(async () => { release(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null })) })
+      const { dialog, onCreated } = renderDialog(client)
+      await userEvent.click(await toSignInStep(dialog, MICROSOFT_PERSONAL_PROVIDER))
+      expect(await within(dialog).findByText('请在浏览器中完成登录')).toBeInTheDocument()
+      await userEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(client.cancelOAuthAccount).toHaveBeenCalledWith('dddddddd-dddd-4ddd-8ddd-dddddddddddd'))
+      await waitFor(() => expect(within(dialog).queryByText('请在浏览器中完成登录')).not.toBeInTheDocument())
+      // Canceling is not an error, and the user can try again.
+      expect(within(dialog).queryByText('登录没有成功')).not.toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '在浏览器中登录' })).toBeEnabled()
+      expect(onCreated).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['oauthMailboxRefused', '无法用这个微软账号打开该邮箱'],
+      ['oauthUsePersonalEntry', '请改用“Outlook”入口添加'],
+      ['oauthUseOrganizationEntry', '请改用“Microsoft 365 / Exchange”入口添加'],
+    ] as const)('returns to the address step with a plain message for %s', async (code, text) => {
+      const client = testClient()
+      client.finishOAuthAccount.mockRejectedValue(new MailxClientError({ code, message: '', field: null }))
+      const { dialog, onCreated } = renderDialog(client)
+      await userEvent.click(await toSignInStep(dialog, MICROSOFT_PERSONAL_PROVIDER))
+      expect(await within(dialog).findByText(new RegExp(text))).toBeInTheDocument()
+      expect(within(dialog).getByText('第 2 步，共 3 步')).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('邮箱地址')).toBeInTheDocument()
+      expect(within(dialog).getByText('登录没有成功')).toBeInTheDocument()
+      expect(onCreated).not.toHaveBeenCalled()
+    })
+
+    it('stays on the last step when the user did not allow access, so signing in again is one click', async () => {
+      const client = testClient()
+      client.finishOAuthAccount.mockRejectedValue(new MailxClientError({ code: 'oauthAuthorizationDenied', message: '', field: null }))
+      const { dialog } = renderDialog(client)
+      await userEvent.click(await toSignInStep(dialog, MICROSOFT_PERSONAL_PROVIDER))
+      expect(await within(dialog).findByText(/登录时没有允许 MailX 访问邮箱/)).toBeInTheDocument()
+      expect(within(dialog).getByText('第 3 步，共 3 步')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '在浏览器中登录' })).toBeEnabled()
+    })
+
+    it('abandons a pending sign-in when the dialog is closed', async () => {
+      const client = testClient()
+      client.finishOAuthAccount.mockImplementation(() => new Promise(() => undefined))
+      const onClose = vi.fn()
+      const props = { client, accounts: [exampleAccount({ color: '#2563eb' })], onClose, onCreated: vi.fn() }
+      const view = render(<AddAccountDialog {...props} open />)
+      const dialog = screen.getByRole('dialog', { name: '添加邮箱账号' })
+      await userEvent.click(await toSignInStep(dialog, MICROSOFT_WORK_PROVIDER, 'lin@contoso.com'))
+      await within(dialog).findByText('请在浏览器中完成登录')
+      view.rerender(<AddAccountDialog {...props} open={false} />)
+      await waitFor(() => expect(client.cancelOAuthAccount).toHaveBeenCalledWith('dddddddd-dddd-4ddd-8ddd-dddddddddddd'))
+    })
   })
 })

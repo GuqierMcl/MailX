@@ -97,6 +97,8 @@ function connection(value: ConnectionDraft, protocol: 'imap' | 'smtp', emailAddr
   return { ...value, host: host(value.host, `${protocol}.host`), port: port(value.port, `${protocol}.port`), username }
 }
 
+const PLACEHOLDER_SERVER: ConnectionConfig = { host: '', port: 0, tls: 'implicit', username: '' }
+
 function secret(value: SecretDraft, field: string): SecretUpdate {
   if (!value.replace) return { action: 'keep' }
   if (!value.value) invalid(field, t('accounts:passwordRequired'))
@@ -110,9 +112,14 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
   if (!account && provider?.preset && !provider.preset.domains.includes(emailAddress.split('@')[1].toLowerCase())) {
     invalid('emailAddress', providerEmailRequired(provider))
   }
-  const imap = connection(draft.imap, 'imap', emailAddress)
-  const smtp = connection(draft.smtp, 'smtp', emailAddress)
-  const authentication: ConnectionInput['authentication'] = account?.authentication.kind === 'oauth2'
+  const browserSignIn = !account && provider?.signIn
+  // For browser sign-in the host replaces the servers and the sign-in details
+  // with its reviewed list; these placeholders only satisfy the request shape.
+  const imap = browserSignIn ? PLACEHOLDER_SERVER : connection(draft.imap, 'imap', emailAddress)
+  const smtp = browserSignIn ? PLACEHOLDER_SERVER : connection(draft.smtp, 'smtp', emailAddress)
+  const authentication: ConnectionInput['authentication'] = browserSignIn
+    ? { kind: 'oauth2', configuration: { providerId: provider.id ?? '', issuer: '', clientRegistrationId: '', authorizationSubject: null, targetMailboxResource: null } }
+    : account?.authentication.kind === 'oauth2'
     ? { kind: 'oauth2', configuration: account.authentication.configuration }
     : draft.mode === 'shared'
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }

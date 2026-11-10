@@ -164,6 +164,8 @@ export function ConnectionForm({
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
   const setup = provider.setup
+  // New accounts of a browser sign-in provider only need the address and a route.
+  const browserSignIn = account ? undefined : provider.signIn
   const credentialText = providerCredentialText(setup)
   const errorContext = !account && provider.preset ? { emailAddress: providerEmailRequired(provider) } : undefined
   const [draft, setDraft] = useState(() => resume ?? initialDraft(account, provider))
@@ -339,11 +341,44 @@ export function ConnectionForm({
               </>}
           </SettingsGroup>)
 
-  if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>OAuth 2.0</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
+  if (browserSignIn) {
+    return (
+      <SettingsPage footer={<>
+        <FieldDescription>{t('accounts:browserSignInNote')}</FieldDescription>
+        <div className="flex shrink-0 gap-2">
+          {onBack && <Button variant="outline" onClick={onBack} disabled={saving}>{t('accounts:back')}</Button>}
+          <Button onClick={() => { void save() }} disabled={saving || unavailable}>{saving ? submittingLabel : submitLabel}</Button>
+        </div>
+      </>}>
+        <Alert role="status">
+          <AlertTitle>{intro.title}</AlertTitle>
+          <AlertDescription>{intro.description}</AlertDescription>
+        </Alert>
+        {error && (
+          <Alert variant="destructive">
+            <AlertTitle>{t('accounts:signInFailed')}</AlertTitle>
+            <AlertDescription>{errorText(error)}</AlertDescription>
+          </Alert>
+        )}
+        <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
+          <SettingsGroup title={t('accounts:emailAddress')} description={browserSignIn.emailHint}>
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)}
+              placeholder={browserSignIn.emailPlaceholder} inputMode="email" error={error} />
+          </SettingsGroup>
+          <details open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}>
+            <summary className="cursor-pointer rounded-md py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">{t('accounts:advancedSettings')}</summary>
+            <div className="flex flex-col gap-6 pt-4">{routeFields}</div>
+          </details>
+        </FieldSet>
+      </SettingsPage>
+    )
+  }
+
+  if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>{t('accounts:signedInThroughBrowser')}</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
 
   return (
     <SettingsPage footer={<>
-      <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
+      <FieldDescription>{browserSignIn ? t('accounts:browserSignInNote') : saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
       <div className="flex shrink-0 gap-2">
         {onBack && <Button variant="outline" onClick={() => { resetTest(); onBack() }} disabled={saving}>{t('accounts:back')}</Button>}
         <Button onClick={() => { void save() }} disabled={saving || unavailable}>{saving ? submittingLabel : submitLabel}</Button>
@@ -361,8 +396,8 @@ export function ConnectionForm({
         {needsTrust && <Alert variant="destructive"><AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle><AlertDescription>{t('accounts:confirmChangedCredentials')}</AlertDescription></Alert>}
         {error && (
           <Alert variant="destructive">
-            <AlertTitle>{testError ? t('accounts:loginTestFailed') : error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
-            <AlertDescription>{errorText(error, errorContext)}  {!testError && t('accounts:passwordsCleared')}</AlertDescription>
+            <AlertTitle>{browserSignIn ? t('accounts:signInFailed') : testError ? t('accounts:loginTestFailed') : error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
+            <AlertDescription>{errorText(error, errorContext)}  {!testError && !browserSignIn && t('accounts:passwordsCleared')}</AlertDescription>
             {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
               <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
           </Alert>

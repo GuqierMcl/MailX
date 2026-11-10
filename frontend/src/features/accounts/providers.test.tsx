@@ -1,13 +1,35 @@
 import { render, screen } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { filterProviders, GENERIC_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
+import { filterProviders, GENERIC_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
 
 describe('mail providers', () => {
   it('puts Gmail first, iCloud second and manual setup last in the default provider list', () => {
     expect(PROVIDERS[0]).toBe(GMAIL_PROVIDER)
     expect(PROVIDERS[1]).toBe(ICLOUD_PROVIDER)
     expect(PROVIDERS.at(-1)).toBe(GENERIC_PROVIDER)
+  })
+
+  it('lists the two Microsoft entries right after Gmail and iCloud with the generic icon', () => {
+    expect(PROVIDERS.slice(2, 4)).toEqual([MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER])
+    expect([MICROSOFT_PERSONAL_PROVIDER.id, MICROSOFT_WORK_PROVIDER.id]).toEqual(['microsoft-personal', 'microsoft-work'])
+    for (const provider of [MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER]) {
+      expect(provider.logo).toBeUndefined()
+      expect(provider.preset).toBeUndefined()
+      expect(provider.setup).toBeUndefined()
+      expect(provider.signIn?.help).toContain('IMAP')
+    }
+  })
+
+  it.each([
+    ['outlook', MICROSOFT_PERSONAL_PROVIDER], ['Hotmail', MICROSOFT_PERSONAL_PROVIDER], ['live', MICROSOFT_PERSONAL_PROVIDER], ['msn', MICROSOFT_PERSONAL_PROVIDER],
+    ['exchange', MICROSOFT_WORK_PROVIDER], ['office 365', MICROSOFT_WORK_PROVIDER], ['企业邮箱', MICROSOFT_WORK_PROVIDER],
+  ])('finds the Microsoft entry for %s', (query, provider) => {
+    expect(filterProviders(PROVIDERS, query)).toContain(provider)
+  })
+
+  it('finds both Microsoft entries by the company name', () => {
+    expect(filterProviders(PROVIDERS, '微软')).toEqual([MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER])
   })
 
   it('labels a manually configured account as IMAP/SMTP', () => {
