@@ -46,6 +46,8 @@ SMTP 接受发送后保留本机快照，IMAP 同步到服务器副本后再对�
 
 iCloud 预设的 `imap.mail.me.com` 端点当前沿用标准默认策略，以原生 `Message-ID` 对账；没有已验证的 iCloud 专属身份规则，也未建立空的 iCloud 兼容模块。若真实账号显示出协议或副本差异，再按本页边界补充证据与适配，不能将品牌分支散入同步、发送或存储主流程。
 
+Gmail 预设的 `imap.gmail.com` 端点同样沿用标准默认策略。Gmail 以标签模拟文件夹，同一封邮件可出现在多个 IMAP 文件夹，删除、归档和已发送副本的实际语义尚待真实账号验证；有证据后再按本页边界决定是否增加兼容规则，见 [Gmail 接入评估](../reference/gmail-integration.md#待验证的-gmail-语义)。
+
 ### 3.2 QQ 邮箱
 
 QQ 模块位于 `core/src/providers/qq.rs`，仅对实际 IMAP 主机名精确等于 `imap.qq.com` 的账号启用，比较不区分 ASCII 大小写。后缀相似的其他主机不匹配。

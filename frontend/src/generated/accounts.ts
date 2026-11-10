@@ -278,6 +278,10 @@ indexedBodies: number, syncedAfter: string | null, syncedBefore: string | null, 
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 
+export type SelectedEmail = { id: string, accountId: string, folderId: string, isRead: boolean, isStarred: boolean, archived: boolean, localOnly: boolean, };
+
+export type EmailSelection = { items: Array<SelectedEmail>, truncated: boolean, };
+
 export type AttachmentSummary = { id: string, filename: string, mimeType: string, size: number, isInline: boolean, };
 
 export type EmailBody = { text: string | null, hasHtml: boolean, truncated: boolean, remoteImagesBlocked: number, };
@@ -502,7 +506,12 @@ undoUntil: string,
  * `true` when the messages are expunged for good instead of going to
  * Trash (they were in Trash, or the account has none).
  */
-permanent: boolean, };
+permanent: boolean,
+/**
+ * Ids skipped by a `partial` request, in input order; always empty
+ * otherwise.
+ */
+skippedIds: Array<string>, };
 
 export type ArchiveScope = "exclude" | "only" | "include";
 
@@ -510,7 +519,21 @@ export type ArchiveOutcome = { processedCount: number, changedCount: number,
 /**
  * For the trusted host UI only. Tool results must not expose this token.
  */
-undoToken: string | null, };
+undoToken: string | null,
+/**
+ * Ids a `partial` request skipped, in input order; always empty otherwise.
+ */
+skippedIds: Array<string>, };
+
+export type FlagBatchItemOutcome = "unchanged" | "queued" | "localOnly" | "failed";
+
+export type FlagBatchItem = { emailId: string, outcome: FlagBatchItemOutcome,
+/**
+ * Set only when `outcome` is `failed`.
+ */
+code: ErrorCode | null, };
+
+export type FlagBatchOutcome = { results: Array<FlagBatchItem>, };
 
 export type NewMailMessage = { emailId: string, from: MailAddress, subject: string,
 /**

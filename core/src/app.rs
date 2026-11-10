@@ -23,7 +23,7 @@ use crate::drafts::types::{
 };
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
-use crate::mail::{EmailDeletion, EmailDetail, EmailListQuery, EmailPage, Folder};
+use crate::mail::{EmailDeletion, EmailDetail, EmailListQuery, EmailPage, EmailSelection, Folder};
 use crate::secrets::SecretStore;
 use crate::send::types::{
     Caller, DraftChange, DraftChanged, OutboxItem, OutboxState, QueueSendRequest,
@@ -55,7 +55,9 @@ pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
 pub use draft_bodies::DraftBodyBinding;
 pub use flags::{FlagChange, MessageFlag};
-pub use organize::{ArchiveOutcome, EmailFlagResult};
+pub use organize::{
+    ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
+};
 pub use verification::{
     AccountConnectionVerification, CancelConnectionVerification, CancelDraftVerification,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
@@ -355,6 +357,12 @@ impl MailxCore {
         self.accounts()?.list_emails(query)
     }
 
+    /// "Select all": the first 500 emails `list_emails` would show for the
+    /// query, in the same order, ignoring its `limit` and `cursor`.
+    pub fn select_emails(&self, query: &EmailListQuery) -> Result<EmailSelection, AppError> {
+        self.accounts()?.select_emails(query)
+    }
+
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
         self.accounts()?.get_email(email_id)
     }
@@ -433,9 +441,25 @@ impl MailxCore {
         email_ids: &[String],
         confirmed_permanent: bool,
     ) -> Result<EmailDeletion, AppError> {
-        let scheduled = self.accounts()?.schedule_deletion(
+        self.delete_emails_partial(email_ids, confirmed_permanent, false)
+    }
+
+    /// Like [`Self::delete_emails`]; with `partial`, emails that cannot be
+    /// deleted (not visible, already being deleted, from an old UID
+    /// generation) are skipped and reported in `skipped_ids` instead of failing
+    /// the batch. Every id skipped is `notFound`. The undo batch covers only
+    /// the emails actually scheduled; a permanent deletion among them still
+    /// needs `confirmed_permanent`.
+    pub fn delete_emails_partial(
+        &self,
+        email_ids: &[String],
+        confirmed_permanent: bool,
+        partial: bool,
+    ) -> Result<EmailDeletion, AppError> {
+        let scheduled = self.accounts()?.schedule_deletion_with(
             email_ids,
             confirmed_permanent,
+            partial,
             chrono::Utc::now(),
             DELETE_UNDO_WINDOW,
         )?;
@@ -449,6 +473,7 @@ impl MailxCore {
                 .due_at
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             permanent: scheduled.permanent,
+            skipped_ids: scheduled.skipped_ids,
         })
     }
 

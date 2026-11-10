@@ -378,6 +378,7 @@ fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
         "qq" => Ok("https://help.mail.qq.com/detail/0/1087"),
         "139" => Ok("https://help.mail.10086.cn/statichtml/22/Content/1234606.html"),
         "icloud" => Ok("https://support.apple.com/en-us/102654"),
+        "gmail" => Ok("https://support.google.com/accounts/answer/185833"),
         "netease163" | "netease126" | "neteaseYeah" => Ok(
             "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
         ),
@@ -813,6 +814,9 @@ struct DeleteEmailsArgs {
     email_ids: Vec<String>,
     /// The user confirmed deleting for good; see `MailxCore::delete_emails`.
     confirmed_permanent: bool,
+    /// Skip emails that cannot be deleted instead of refusing the batch.
+    #[serde(default)]
+    partial: bool,
 }
 
 /// Hides the emails at once and deletes them on the server after the undo
@@ -828,7 +832,13 @@ pub(crate) async fn emails_delete(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.delete_emails(&args.email_ids, args.confirmed_permanent))
+                .run(move |core| {
+                    core.delete_emails_partial(
+                        &args.email_ids,
+                        args.confirmed_permanent,
+                        args.partial,
+                    )
+                })
                 .await
         }
         Err(error) => Err(error),
@@ -864,6 +874,9 @@ pub(crate) async fn emails_undo_delete(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArchiveEmailsArgs {
     email_ids: Vec<String>,
+    /// Skip emails that are not visible inbox mail instead of refusing the batch.
+    #[serde(default)]
+    partial: bool,
 }
 
 /// Archives inbox emails on this device only; the server is not touched.
@@ -879,9 +892,10 @@ pub(crate) async fn emails_archive(
         Ok(args) => {
             state
                 .run(move |core| {
-                    core.change_email_archive(
+                    core.change_email_archive_partial(
                         &args.email_ids,
                         true,
+                        args.partial,
                         mailx_core::MailChangeSource::User,
                     )
                 })
@@ -904,14 +918,69 @@ pub(crate) async fn emails_unarchive(
         Ok(args) => {
             state
                 .run(move |core| {
-                    core.change_email_archive(
+                    core.change_email_archive_partial(
                         &args.email_ids,
                         false,
+                        args.partial,
                         mailx_core::MailChangeSource::User,
                     )
                 })
                 .await
         }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetFlagsArgs {
+    email_ids: Vec<String>,
+    flag: FlagName,
+    wanted: bool,
+}
+
+/// Changes read / starred on several emails; each reports its own result.
+#[tauri::command]
+pub(crate) async fn emails_set_flags(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::FlagBatchOutcome>, ()> {
+    let args =
+        authorize(&window, "emails_set_flags").and_then(|_| parse::<SetFlagsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| {
+                    let flag = match args.flag {
+                        FlagName::Read => mailx_core::MessageFlag::Read,
+                        FlagName::Starred => mailx_core::MessageFlag::Starred,
+                    };
+                    core.set_emails_flag(&args.email_ids, flag, args.wanted)
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelectEmailsArgs {
+    query: EmailListQuery,
+}
+
+/// The first 500 emails of a list query, for "select all".
+#[tauri::command]
+pub(crate) async fn emails_select(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::EmailSelection>, ()> {
+    let args =
+        authorize(&window, "emails_select").and_then(|_| parse::<SelectEmailsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => state.run(move |core| core.select_emails(&args.query)).await,
         Err(error) => Err(error),
     }))
 }
@@ -1145,6 +1214,54 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn batch_mail_arguments_default_to_strict_and_reject_unknown_fields() {
+        let parse_json = |value| InvokeBody::Json(value);
+        let strict = parse::<DeleteEmailsArgs>(&parse_json(
+            json!({"emailIds": ["a"], "confirmedPermanent": false}),
+        ))
+        .unwrap();
+        assert!(!strict.partial);
+        let partial = parse::<DeleteEmailsArgs>(&parse_json(
+            json!({"emailIds": ["a"], "confirmedPermanent": true, "partial": true}),
+        ))
+        .unwrap();
+        assert!(partial.partial && partial.confirmed_permanent);
+        assert!(
+            !parse::<ArchiveEmailsArgs>(&parse_json(json!({"emailIds": ["a"]})))
+                .unwrap()
+                .partial
+        );
+        assert!(
+            parse::<ArchiveEmailsArgs>(&parse_json(json!({"emailIds": ["a"], "partial": true})))
+                .unwrap()
+                .partial
+        );
+        assert!(
+            parse::<ArchiveEmailsArgs>(&parse_json(json!({"emailIds": ["a"], "partial": "yes"})))
+                .is_err()
+        );
+        let flags = parse::<SetFlagsArgs>(&parse_json(
+            json!({"emailIds": ["a", "b"], "flag": "starred", "wanted": true}),
+        ))
+        .unwrap();
+        assert_eq!(flags.email_ids, ["a", "b"]);
+        assert!(matches!(flags.flag, FlagName::Starred) && flags.wanted);
+        for forged in [
+            json!({"emailIds": ["a"], "flag": "deleted", "wanted": true}),
+            json!({"emailIds": ["a"], "flag": "read", "wanted": true, "source": "mcp"}),
+            json!({"emailId": "a", "flag": "read", "wanted": true}),
+        ] {
+            assert!(parse::<SetFlagsArgs>(&parse_json(forged)).is_err());
+        }
+        let select = parse::<SelectEmailsArgs>(&parse_json(
+            json!({"query": {"folderRole": "inbox", "unread": true, "limit": 5}}),
+        ))
+        .unwrap();
+        assert_eq!(select.query.unread, Some(true));
+        assert!(parse::<SelectEmailsArgs>(&parse_json(json!({"query": {}, "limit": 1}))).is_err());
+    }
+
+    #[test]
     fn malformed_and_forged_arguments_are_redacted() {
         for body in [
             json!({"accountId": ["synthetic-secret"]}),
@@ -1181,6 +1298,10 @@ mod tests {
             provider_help_url("icloud").unwrap(),
             "https://support.apple.com/en-us/102654"
         );
+        assert_eq!(
+            provider_help_url("gmail").unwrap(),
+            "https://support.google.com/accounts/answer/185833"
+        );
         for provider in ["netease163", "netease126", "neteaseYeah"] {
             assert_eq!(
                 provider_help_url(provider).unwrap(),
@@ -1201,13 +1322,17 @@ mod tests {
             "icloud.com",
             "icloud/../",
             "ICLOUD",
+            "gmail.com",
+            "gmail/../",
+            "GMAIL",
+            "google",
         ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
                 AppError::validation("providerId")
             );
         }
-        for provider in ["139", "icloud"] {
+        for provider in ["139", "icloud", "gmail"] {
             assert!(
                 parse::<ProviderHelpArgs>(&InvokeBody::Json(
                     json!({"providerId":provider, "url":"https://attacker.invalid"})

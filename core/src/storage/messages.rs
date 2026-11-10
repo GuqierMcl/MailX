@@ -10,8 +10,8 @@ use crate::{
     events::NewMailMessage,
     mail::{
         ArchiveScope, AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail,
-        EmailListQuery, EmailPage, EmailRecipients, EmailSummary, LOCAL_SENT_PREFIX, MailAddress,
-        PreviewState,
+        EmailListQuery, EmailPage, EmailRecipients, EmailSelection, EmailSummary,
+        LOCAL_SENT_PREFIX, MailAddress, PreviewState, SelectedEmail,
     },
     sync::headers::MessageRecord,
 };
@@ -453,77 +453,7 @@ impl Storage {
         validated: &ValidatedEmailQuery,
     ) -> Result<EmailPage, AppError> {
         let query = &validated.query;
-        let mut filter = ScopeFilter::new(query)?;
-        // Local Sent copies (sending.md section 9.1) join the same page; the
-        // sent-role folder join keeps them out of every other scope.
-        let mut local = ScopeFilter::new(query)?;
-        if let Some(unread) = query.unread {
-            filter.add("m.is_read = ?", i64::from(!unread));
-            if unread {
-                // Local copies are always read.
-                local.clauses.push("0 = 1".into());
-            }
-        }
-        if let Some(starred) = query.starred {
-            filter.add("m.is_flagged = ?", i64::from(starred));
-            // Local Sent copies cannot carry stars. Filter before pagination.
-            if starred {
-                local.clauses.push("0 = 1".into());
-            }
-        }
-        if let Some(attachment) = query.has_attachment {
-            filter.add("m.has_attachment = ?", i64::from(attachment));
-            local.add(
-                "(COALESCE(o.attachment_count, 0) > 0) = ?",
-                i64::from(attachment),
-            );
-        }
-        let terms = match &query.text {
-            Some(text) => super::search_index::parse_query(text)?,
-            None => None,
-        };
-        // Local Sent copies are never archived.
-        match query.archive.unwrap_or(if terms.is_some() {
-            ArchiveScope::Include
-        } else {
-            ArchiveScope::Exclude
-        }) {
-            ArchiveScope::Include => {}
-            ArchiveScope::Exclude => filter.clauses.push(format!("NOT {}", archived_sql!())),
-            ArchiveScope::Only => {
-                filter.clauses.push(archived_sql!().into());
-                local.clauses.push("0 = 1".into());
-            }
-        }
-        if let Some(terms) = &terms {
-            let (subquery, values) = terms.email_ids_subquery();
-            filter.clauses.push(format!("m.id IN ({subquery})"));
-            filter.values.extend(values.iter().cloned());
-            local
-                .clauses
-                .push(format!("('local-sent:' || o.id) IN ({subquery})"));
-            local.values.extend(values);
-        }
-        if let Some(after) = &query.received_after {
-            filter.add("m.received_at >= ?", after.clone());
-            local.add("o.accepted_at >= ?", after.clone());
-        }
-        if let Some(before) = &query.received_before {
-            filter.add("m.received_at < ?", before.clone());
-            local.add("o.accepted_at < ?", before.clone());
-        }
-        if let Some(cursor) = &validated.cursor {
-            filter.clauses.push("(m.received_at, m.id) < (?, ?)".into());
-            filter
-                .values
-                .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
-            local
-                .clauses
-                .push("(o.accepted_at, 'local-sent:' || o.id) < (?, ?)".into());
-            local
-                .values
-                .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
-        }
+        let (filter, local, terms) = list_filters(query, validated.cursor.as_ref())?;
         let mut values = filter.values.clone();
         values.extend(local.values.iter().cloned());
         values.push((i64::from(validated.limit) + 1).into());
@@ -567,6 +497,45 @@ impl Storage {
             next_cursor,
             coverage: self.email_coverage(query)?,
         })
+    }
+
+    /// The first `limit` messages `list_emails` would show for the same query,
+    /// in the same order, ignoring its page size and cursor; `truncated` says
+    /// more matched. Carries only what a multi-selection needs.
+    pub(crate) fn select_emails(
+        &self,
+        query: &EmailListQuery,
+        limit: u32,
+    ) -> Result<EmailSelection, AppError> {
+        let (filter, local, _) = list_filters(query, None)?;
+        let mut values = filter.values.clone();
+        values.extend(local.values.iter().cloned());
+        values.push((i64::from(limit) + 1).into());
+        let sql = format!(
+            "SELECT {SELECTED_COLUMNS} {VISIBLE_MESSAGES} AND {}
+             UNION ALL
+             SELECT {LOCAL_SELECTED_COLUMNS} {LOCAL_COPIES} AND {}
+             ORDER BY 4 DESC, 1 DESC LIMIT ?",
+            filter.sql(),
+            local.sql()
+        );
+        let mut statement = self.db.prepare(&sql)?;
+        let mut items = statement
+            .query_map(params_from_iter(values), |row| {
+                Ok(SelectedEmail {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    folder_id: row.get(2)?,
+                    is_read: row.get(4)?,
+                    is_starred: row.get(5)?,
+                    archived: row.get(6)?,
+                    local_only: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let truncated = items.len() > limit as usize;
+        items.truncate(limit as usize);
+        Ok(EmailSelection { items, truncated })
     }
 
     fn email_coverage(&self, query: &EmailListQuery) -> Result<Coverage, AppError> {
@@ -754,6 +723,14 @@ const SUMMARY_COLUMNS: &str = concat!(
 /// Same 18 columns for a local Sent copy; `to` is the stored recipient preview
 /// (plain addresses) and the id carries the `local-sent:` prefix.
 const LOCAL_SUMMARY_COLUMNS: &str = "'local-sent:' || o.id, o.account_id, f.id, o.subject, a.display_name, a.email_address, o.accepted_at, 1, 0, COALESCE(o.attachment_count, 0) > 0, COALESCE(o.preview, ''), 'ready', 0, 'ready', o.recipients_preview, o.recipient_count, 1, 0";
+/// `select_emails` columns; the fourth is the sort key, as in a summary row.
+const SELECTED_COLUMNS: &str = concat!(
+    "m.id, m.account_id, m.folder_id, m.received_at, m.is_read, m.is_flagged, ",
+    archived_sql!(),
+    ", 0"
+);
+const LOCAL_SELECTED_COLUMNS: &str =
+    "'local-sent:' || o.id, o.account_id, f.id, o.accepted_at, 1, 0, 0, 1";
 /// Outbox items that are Sent-folder rows: accepted, no server copy found, not
 /// removed, snapshot still held. Joined to the account's single sent-role folder.
 pub(super) const LOCAL_COPIES: &str = "FROM outbox o JOIN accounts a ON a.id = o.account_id
@@ -825,6 +802,93 @@ fn recipients(row: &Row<'_>) -> rusqlite::Result<EmailRecipients> {
         addresses,
         total: u32::try_from(total).unwrap_or(u32::MAX),
     })
+}
+
+/// The row filters `list_emails` applies to server messages and to local Sent
+/// copies, shared with `select_emails` so both see exactly the same set.
+fn list_filters(
+    query: &EmailListQuery,
+    cursor: Option<&PageCursor>,
+) -> Result<
+    (
+        ScopeFilter,
+        ScopeFilter,
+        Option<super::search_index::SearchTerms>,
+    ),
+    AppError,
+> {
+    let mut filter = ScopeFilter::new(query)?;
+    // Local Sent copies (sending.md section 9.1) join the same page; the
+    // sent-role folder join keeps them out of every other scope.
+    let mut local = ScopeFilter::new(query)?;
+    if let Some(unread) = query.unread {
+        filter.add("m.is_read = ?", i64::from(!unread));
+        if unread {
+            // Local copies are always read.
+            local.clauses.push("0 = 1".into());
+        }
+    }
+    if let Some(starred) = query.starred {
+        filter.add("m.is_flagged = ?", i64::from(starred));
+        // Local Sent copies cannot carry stars. Filter before pagination.
+        if starred {
+            local.clauses.push("0 = 1".into());
+        }
+    }
+    if let Some(attachment) = query.has_attachment {
+        filter.add("m.has_attachment = ?", i64::from(attachment));
+        local.add(
+            "(COALESCE(o.attachment_count, 0) > 0) = ?",
+            i64::from(attachment),
+        );
+    }
+    let terms = match &query.text {
+        Some(text) => super::search_index::parse_query(text)?,
+        None => None,
+    };
+    // Local Sent copies are never archived.
+    match query.archive.unwrap_or(if terms.is_some() {
+        ArchiveScope::Include
+    } else {
+        ArchiveScope::Exclude
+    }) {
+        ArchiveScope::Include => {}
+        ArchiveScope::Exclude => filter.clauses.push(format!("NOT {}", archived_sql!())),
+        ArchiveScope::Only => {
+            filter.clauses.push(archived_sql!().into());
+            local.clauses.push("0 = 1".into());
+        }
+    }
+    if let Some(terms) = &terms {
+        let (subquery, values) = terms.email_ids_subquery();
+        filter.clauses.push(format!("m.id IN ({subquery})"));
+        filter.values.extend(values.iter().cloned());
+        local
+            .clauses
+            .push(format!("('local-sent:' || o.id) IN ({subquery})"));
+        local.values.extend(values);
+    }
+    if let Some(after) = &query.received_after {
+        filter.add("m.received_at >= ?", after.clone());
+        local.add("o.accepted_at >= ?", after.clone());
+    }
+    if let Some(before) = &query.received_before {
+        filter.add("m.received_at < ?", before.clone());
+        local.add("o.accepted_at < ?", before.clone());
+    }
+    if let Some(cursor) = cursor {
+        filter.clauses.push("(m.received_at, m.id) < (?, ?)".into());
+        filter
+            .values
+            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+        local
+            .clauses
+            .push("(o.accepted_at, 'local-sent:' || o.id) < (?, ?)".into());
+        local
+            .values
+            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+    }
+    Ok((filter, local, terms))
 }
 
 /// Shared account/folder scope for message rows and coverage; filters on message

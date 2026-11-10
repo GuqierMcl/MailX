@@ -2,7 +2,7 @@
 
 这里保存随前端打包的第三方服务商标识，用于识别用户选择的邮箱服务商；不属于 MailX 自有品牌，也不由 `branding/logo.svg` 派生。应用运行时不从服务商站点加载这些图标。
 
-2026-10-30 起采用官方发布的原始栅格素材，以本地 PNG 保存。保留完整图形、字形、配色、背景与长宽比例，不再提取部分数字、删去标识文字或使用 VTracer 描摹为 SVG。CSS 只做等比显示，不对图像重新着色。
+2026-10-30 起采用官方发布的原始素材：栅格图以本地 PNG 保存，官方提供静态 SVG 的（Gmail）直接保存原文件。保留完整图形、字形、配色、背景与长宽比例，不再提取部分数字、删去标识文字或使用 VTracer 描摹为 SVG。CSS 只做等比显示，不对图像重新着色。
 
 ## 选材和处理规范
 
@@ -65,9 +65,15 @@
 - 来源链：页面声明 `<base href="/system/icloud.com/2640Build24/en-us/">`，并引用[官方 `main.js`](https://www.icloud.com/system/icloud.com/2640Build24/en-us/main.js)。其中 AppIcon 的 `case "mail": case "mail2"` 明确选择 Mail 图标，并在浅色图片的 `srcSet` 中以 `3x` 引用 `../2b0f92bb67c43113d3f94d0d1377573c.png`；相对页面 base 解析得到下方原图 URL。
 - 原图：[iCloud Mail 3x PNG](https://www.icloud.com/system/icloud.com/2640Build24/2b0f92bb67c43113d3f94d0d1377573c.png)。本地文件与下载原件字节一致，保留完整图形与原始长宽比例；SHA-256 见下表。
 
+## Gmail
+
+- 文件：`gmail.svg`，192 × 192 静态 SVG，直接保存 Google 官方原文件，1,298 字节；统一用于浅深主题，透明背景，没有修改路径、渐变或尺寸。
+- 来源页面：[Gmail 产品页](https://workspace.google.com/products/gmail/)，核验日期：2026-11-08。页面导航中 `alt="Gmail"` 的产品图标引用下方原图。
+- 原图：[Gmail 192px SVG](https://www.gstatic.com/images/branding/productlogos/gmail_2026/v2/web/192px.svg)，`content-type: image/svg+xml`，`last-modified: Mon, 09 Mar 2026 22:48:00 GMT`。本地文件与下载原件字节一致；只含路径与内部渐变，没有脚本、外部资源或字体依赖。
+
 ## 文件核验与维护
 
-QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06。下表记录本地 PNG 的 SHA-256，用于发现素材更新或意外修改。
+QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -77,5 +83,6 @@ QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30�
 | `netease-yeah.png` | `77f34d1b7c3ac5477cf9a1e79e8c601a990332e9186aeab428e0dd3a82d4fc86` |
 | `mail-139.png` | `2d438d12f0e6bbc1d668d705b817cd1a374e7ffe053eedca16c5a6f15ee1862f` |
 | `icloud-mail.png` | `eb04a20229ea2fe673b7b78bf84213176a8ae765bf5c5ec88ac5c2458585f869` |
+| `gmail.svg` | `0a242131424b796a26247a8edd41d66fa294da6d177897526a19b7e81aedfdb8` |
 
 服务商名称及图形属于各自权利人，与 MailX 自有品牌资源分开维护。

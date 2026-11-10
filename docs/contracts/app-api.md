@@ -461,7 +461,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 **垃圾邮件的显示。** 垃圾邮件文件夹不显示数字，有未读时只显示一个圆点（`aria-label="有未读邮件"`）；它的未读数不计入账号行，也不计入折叠父文件夹的汇总，折叠的父文件夹在其下有未读垃圾邮件时显示圆点以免被折叠藏起来。“全部收件箱”本来只汇总收件箱角色，不受影响。
 
-**自动已读。** 前端在邮件详情显示出来之后才把它标为已读，只经过列表而没打开的邮件保持未读；已读、有待同步变更的邮件不处理。界面按钮作用于当前打开的邮件；共享工具层另提供最多 50 封的批量已读 / 星标操作，分别报告每个字段的写回结果。
+**自动已读。** 前端在邮件详情显示出来之后才把它标为已读，只经过列表而没打开的邮件保持未读；已读、有待同步变更的邮件不处理。界面按钮作用于当前打开的邮件，列表多选时作用于所选邮件（见“批量处理”）；共享工具层另提供最多 50 封的批量已读 / 星标操作，分别报告每个字段的写回结果。
 
 ### 删除
 
@@ -485,6 +485,14 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 - **未读数。** `Folder.unreadCount` 对收件箱是服务器未读数减去本机已归档的未读邮件（不低于 0），在读取文件夹时计算，库中仍保存服务器原值，同步更新不会丢掉这个扣减。`Folder.archivedCount` / `archivedUnreadCount` 是该收件箱已归档邮件总数 / 未读数，供“已归档”视图使用；非收件箱为 0。
 - **身份。** 归档按账号、邮箱来源和 `Message-ID` 头记录，UIDVALIDITY 重置后重建的邮件仍是已归档；没有 `Message-ID` 的邮件按本地 id 记录，重置后会回到收件箱。账号换了邮箱来源时不继承旧记录。共用同一 `Message-ID` 的两封收件箱邮件会一起视为已归档；邮件被别处移出收件箱后不再归入任何收件箱视图，若之后带同一 `Message-ID` 回到收件箱，会显示为已归档。
 - 前端归档立即生效，Toast 提供“撤销”（即取消归档）；见[邮件同步](../architecture/mail-sync.md#已实现本地归档仅本机自动测试覆盖经-macos-用户手测)。
+
+### 批量处理（主窗口）
+
+邮件列表的多选操作复用上面的删除与归档命令，另加批量标记与“全选”查询。均只开放给主窗口；共享工具层（MCP）的整批校验语义不变。
+
+- **跳过不可处理的邮件。** `emails_delete`、`emails_archive`、`emails_unarchive` 新增可选参数 `partial: boolean`（缺省 false，即原来的整批语义）。为 true 时，不可处理的邮件（不可见、已在删除中、来自旧 UID 世代；归档时还包括非收件箱邮件和本机已发送副本）被跳过，其余照常处理，跳过的 id 按输入顺序放进结果的 `skippedIds`；全部被跳过时返回 `notFound`，不改任何状态。`EmailDeletion` 与 `ArchiveOutcome` 新增 `skippedIds: string[]`，非 partial 调用恒为空数组。删除的撤销批次与归档的撤销回执只包含实际处理的邮件。partial 删除中只要有一封需要永久删除而未传 `confirmedPermanent: true`，仍整批返回 `confirmationRequired`。
+- **批量标记。** `setFlags(emailIds, flag, wanted)` 对应 `emails_set_flags`，`{ emailIds, flag: 'read' | 'starred', wanted }`，`emailIds` 去重后 1 到 500 个，否则 `validation`。返回 `FlagBatchOutcome { results: [{ emailId, outcome: 'unchanged' | 'queued' | 'localOnly' | 'failed', code }] }`，按输入顺序逐封报告（重复 id 只报一次），`code` 仅在 failed 时为错误码（如 `notFound`）；一封失败不影响其他邮件。本机已发送副本报告为 failed（`notFound`）。
+- **全选。** `selectEmails(query)` 对应 `emails_select`，`{ query: EmailListQuery }`，返回 `EmailSelection { items: SelectedEmail[], truncated }`：与 `emails_list` 相同条件和顺序（最新在前）下的前 500 封，忽略 `limit` 与 `cursor`；`truncated` 表示还有更多。`SelectedEmail` 为 `{ id, accountId, folderId, isRead, isStarred, archived, localOnly }`，只用于判断按钮状态和确认永久删除，不含主题、地址和正文。
 
 ### 全局提示（Toast）
 

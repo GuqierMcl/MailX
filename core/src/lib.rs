@@ -33,8 +33,9 @@ pub use app::{
     AvatarImage, AvatarKind, BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding,
     BodyDocument, BodyLinks, CancelConnectionVerification, CancelDraftVerification,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
-    DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagChange, MailxCore,
-    MessageFlag, OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest,
+    DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagBatchItem,
+    FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailxCore, MessageFlag,
+    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest,
     ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{

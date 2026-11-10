@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
-/** True for places where Esc already means something: text fields, menus, dialogs. */
-function escapeBelongsToSomethingElse(event: KeyboardEvent) {
+/** True for places where Esc already means something: text fields, menus, dialogs. Shared with the list selection. */
+export function escapeBelongsToSomethingElse(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing) return true
   const target = event.target instanceof Element ? event.target : null
   if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return true

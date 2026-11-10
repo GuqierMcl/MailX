@@ -22,8 +22,12 @@ use crate::error::{AppError, ErrorCode};
 /// The most messages one request may archive or unarchive.
 pub(crate) const MAX_ARCHIVE_BATCH: usize = 500;
 
-/// Account, mailbox source and archive key of a visible inbox message.
-fn inbox_key(tx: &Transaction<'_>, message_id: &str) -> Result<(String, String, String), AppError> {
+/// Account, mailbox source and archive key of a visible inbox message;
+/// `None` when the id is not one.
+fn inbox_key(
+    tx: &Transaction<'_>,
+    message_id: &str,
+) -> Result<Option<(String, String, String)>, AppError> {
     tx.query_row(
         "SELECT m.account_id, m.mailbox_source_id,
                 CASE WHEN COALESCE(m.message_id_header, '') <> ''
@@ -39,8 +43,8 @@ fn inbox_key(tx: &Transaction<'_>, message_id: &str) -> Result<(String, String, 
         [message_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
-    .optional()?
-    .ok_or_else(|| AppError::new(ErrorCode::NotFound))
+    .optional()
+    .map_err(AppError::from)
 }
 
 /// Stable identity of one local archive state (multiple visible messages may share it).
@@ -70,6 +74,8 @@ pub(crate) struct ArchiveEffects {
 #[derive(Clone, Debug)]
 pub(crate) struct ArchiveChange {
     pub processed_count: u32,
+    /// Ids a `partial` request skipped, in input order.
+    pub skipped_ids: Vec<String>,
     pub touched_keys: BTreeSet<ArchiveKey>,
     pub entries: Vec<ArchiveEntry>,
     pub effects: ArchiveEffects,
@@ -147,40 +153,60 @@ impl Storage {
     /// Archives the messages locally; archiving one again changes nothing.
     #[cfg(test)]
     pub(crate) fn archive_messages(&mut self, message_ids: &[String]) -> Result<(), AppError> {
-        self.change_archive(message_ids, true).map(|_| ())
+        self.change_archive(message_ids, true, false).map(|_| ())
     }
 
     #[cfg(test)]
     pub(crate) fn unarchive_messages(&mut self, message_ids: &[String]) -> Result<(), AppError> {
-        self.change_archive(message_ids, false).map(|_| ())
+        self.change_archive(message_ids, false, false).map(|_| ())
     }
 
     /// Validates the complete batch and changes all keys in one transaction.
+    ///
+    /// Without `partial` an id that is not a visible inbox message fails the
+    /// whole batch with `notFound`. With it such ids are skipped and listed in
+    /// input order; only when every id is skipped is the batch `notFound`.
     pub(crate) fn change_archive(
         &mut self,
         message_ids: &[String],
         archive: bool,
+        partial: bool,
     ) -> Result<ArchiveChange, AppError> {
-        let ids: BTreeSet<&str> = message_ids.iter().map(String::as_str).collect();
+        let mut ids: Vec<&str> = Vec::with_capacity(message_ids.len());
+        for id in message_ids {
+            if !ids.contains(&id.as_str()) {
+                ids.push(id);
+            }
+        }
         if ids.is_empty() || ids.len() > MAX_ARCHIVE_BATCH {
             return Err(AppError::new(ErrorCode::Validation));
         }
         let tx = self.db.transaction()?;
         let mut keys = BTreeSet::new();
+        let mut skipped_ids = Vec::new();
         for id in &ids {
-            let (account_id, source_id, key) = inbox_key(&tx, id)?;
-            keys.insert(ArchiveKey {
-                account_id,
-                source_id,
-                key,
-            });
+            match inbox_key(&tx, id)? {
+                Some((account_id, source_id, key)) => {
+                    keys.insert(ArchiveKey {
+                        account_id,
+                        source_id,
+                        key,
+                    });
+                }
+                None if partial => skipped_ids.push((*id).to_owned()),
+                None => return Err(AppError::new(ErrorCode::NotFound)),
+            }
+        }
+        if keys.is_empty() {
+            return Err(AppError::new(ErrorCode::NotFound));
         }
         // Nanoseconds make persisted comparison useful as an additional guard.
         // The application also invalidates receipts on every later operation
         // touching a key, including no-ops and archive/unarchive round trips.
         let now = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
         let mut change = ArchiveChange {
-            processed_count: ids.len() as u32,
+            processed_count: (ids.len() - skipped_ids.len()) as u32,
+            skipped_ids,
             touched_keys: keys,
             entries: Vec::new(),
             effects: ArchiveEffects::default(),

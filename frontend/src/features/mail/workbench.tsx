@@ -41,7 +41,10 @@ import { useMarkOpenedAsRead, useMessageFlags } from './use-message-flags'
 import { useEmailPreviews } from './use-email-previews'
 import { loadMailTree } from './mail-tree'
 import { DeleteForGoodDialog } from './delete-for-good-dialog'
-import { canArchive, useArchiveEmail } from './use-archive-email'
+import { canArchive, useArchiveEmail, useArchiveEmails } from './use-archive-email'
+import { useListSelection } from './use-list-selection'
+import { useSelectionActions } from './use-selection-actions'
+import { SelectionSummary } from './selection-summary'
 import { useDeleteEmail } from './use-delete-email'
 import { useMailStateChanges } from './use-mail-state-changes'
 import { isMailView } from './mailbox'
@@ -288,6 +291,10 @@ export function Workbench({ client }: { client: MailxClient }) {
     () => [...new Map((pages ?? []).flatMap((page) => page.items).map((email) => [email.id, email])).values()],
     [pages],
   )
+  // Picking messages: any change of mailbox, search or filter starts over.
+  const selection = useListSelection(emails, JSON.stringify([activeMailbox.kind, listKey]))
+  const selecting = mailView && selection.active
+  const exitSelection = selection.exit
   const body = useEmailBody(client, openedState, accounts, currentSyncStates)
   // What must close the reader: the message is gone for good (deleted, or moved out
   // of sight by the server), or its account was replaced. Neither is a list change.
@@ -303,7 +310,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const opened = openedState && !closedByAccount && !closedByLoss ? openedState : null
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
-  const { setFlag } = useMessageFlags(client)
+  const { setFlag, setFlags } = useMessageFlags(client)
   useMailStateChanges(client)
   useEmailPreviews(client)
   const requestPreviews = useCallback((ids: string[]) => { void client.requestPreviews(ids).catch(() => undefined) }, [client])
@@ -311,7 +318,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   // moved past stays unread.
   useMarkOpenedAsRead(
     opened ? body.email?.summary : null,
-    Boolean(opened && body.email && !body.detail.isPending),
+    // The reader shows the selection summary instead while picking messages.
+    Boolean(opened && body.email && !body.detail.isPending && !selecting),
     (email, flag, wanted) => void setFlag(email, flag, wanted),
   )
 
@@ -348,6 +356,16 @@ export function Workbench({ client }: { client: MailxClient }) {
   const archiveEmail = useArchiveEmail(client, useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
   }, []))
+  const hideOpened = useCallback((email: { id: string }) => {
+    setOpened((current) => current?.id === email.id ? null : current)
+  }, [])
+  const archiveEmails = useArchiveEmails(client, hideOpened)
+  const selectionActions = useSelectionActions({
+    client, selection, listQuery, folders, archivedView,
+    deleteMany: deleteEmail.requestBatch,
+    archiveMany: archiveEmails,
+    flagMany: setFlags,
+  })
   useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
     if (outboxId) {
       setOutboxChoice(outboxId)
@@ -360,6 +378,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (emailId) {
       setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
       setReaderChoice(false)
+      exitSelection()
       return
     }
     const inbox = folders.find((folder) => folder.accountId === accountId && folder.role === 'inbox' && folder.selectable)
@@ -368,7 +387,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       setFilter('all')
       setMailbox({ kind: 'folder', folder: inbox })
     }
-  }), [client])
+  }), [client, exitSelection])
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
@@ -446,6 +465,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const openEmail = (email: { id: string; accountId: string }) => {
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
     setReaderCollapsed(false)
+    // Opening a message (from search or the palette) ends picking, so the reader can show it.
+    exitSelection()
   }
   const toggleReader = () => setReaderCollapsed(!readerCollapsed)
   // Only the user's own drags are saved, and not while the reader is folded away
@@ -568,7 +589,10 @@ export function Workbench({ client }: { client: MailxClient }) {
               onDelete={deleteEmail.request}
               onRemoveLocal={requestRemoveLocal}
               canArchive={(email) => canArchive(email, folders)}
+              onRespond={(email, kind) => void compose.respond(email.id, kind)}
               onLoadMore={loadMore}
+              selection={selection}
+              selectionActions={selectionActions}
             />
             )}
           </ResizablePanel>
@@ -604,6 +628,8 @@ export function Workbench({ client }: { client: MailxClient }) {
                 accounts={accounts}
                 onEdit={(id) => void compose.openDraft(id)}
               />
+            ) : selecting ? (
+              <SelectionSummary items={selection.items} accounts={displayAccounts} />
             ) : (
             <EmailView
               hidden={readerCollapsed}

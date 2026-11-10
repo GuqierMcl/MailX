@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu'
+import type { BaseUIEvent } from '@base-ui/react/types'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
@@ -12,7 +14,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
-import { EmailCard } from './email-card'
+import { EmailCard, type RowClick } from './email-card'
+import { EmailContextMenuContent } from './email-context-menu'
+import type { RespondKind } from './email-menu-actions'
+import { SelectionHeader, type SelectionActions } from './selection-header'
+import { escapeBelongsToSomethingElse } from './use-close-on-escape'
+import type { ListSelection } from './use-list-selection'
 import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
 
@@ -59,14 +66,22 @@ type EmailListProps = {
   onRemoveLocal?: (email: EmailSummary) => void
   /** Whether local archive is available for this message's current folder. */
   canArchive?: (email: EmailSummary) => boolean
+  /** Starts a reply, reply-all or forward from the right-click menu (opens the composer window). */
+  onRespond?: (email: EmailSummary, kind: RespondKind) => void
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
+  /** Multi-select; without it the list has no "Select" entry. */
+  selection?: ListSelection
+  /** What the selection header does with the picked messages. */
+  selectionActions?: SelectionActions
 }
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
-  const { title, filter, onFilterChange } = props
+  const { title, filter, onFilterChange, selection, selectionActions } = props
+  const selecting = Boolean(selection?.active && selectionActions)
+  useSelectionKeys(selecting ? selection : undefined, selectionActions)
   return (
     <Tabs
       value={filter}
@@ -74,18 +89,54 @@ export function EmailList(props: EmailListProps) {
       className="flex h-full min-h-0 flex-col gap-0"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <h1 className="truncate text-base font-semibold">{title}</h1>
-        <TabsList className="ml-auto">
-          <TabsTrigger value="all">{t('mail:all')}</TabsTrigger>
-          <TabsTrigger value="unread">{t('mail:unread')}</TabsTrigger>
-        </TabsList>
+        {selecting && selection && selectionActions ? (
+          <>
+            <h1 className="sr-only">{title}</h1>
+            <SelectionHeader selection={selection} actions={selectionActions} />
+          </>
+        ) : (
+          <>
+            <h1 className="truncate text-base font-semibold">{title}</h1>
+            {selection && selectionActions && (
+              <Button variant="ghost" size="sm" className="ml-auto" onClick={selection.enter}>{t('mail:select')}</Button>
+            )}
+            <TabsList className={selection && selectionActions ? undefined : 'ml-auto'}>
+              <TabsTrigger value="all">{t('mail:all')}</TabsTrigger>
+              <TabsTrigger value="unread">{t('mail:unread')}</TabsTrigger>
+            </TabsList>
+          </>
+        )}
       </div>
-      <EmailRows {...props} />
+      {selecting && selection?.truncated && (
+        <p className="-mt-1 shrink-0 px-4 pb-1 text-xs text-muted-foreground">{t('mail:selectionLimit')}</p>
+      )}
+      <EmailRows {...props} selection={selectionActions ? selection : undefined} />
     </Tabs>
   )
 }
 
-function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore }: EmailListProps) {
+/** Esc leaves selection mode; Cmd/Ctrl+A selects everything in scope, outside text fields. */
+function useSelectionKeys(selection: ListSelection | undefined, actions: SelectionActions | undefined) {
+  const exit = selection?.exit
+  const selectAll = actions?.onSelectAll
+  useEffect(() => {
+    if (!exit || !selectAll) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (escapeBelongsToSomethingElse(event)) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        exit()
+      } else if (event.key.toLowerCase() === 'a' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        selectAll()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [exit, selectAll])
+}
+
+function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -154,9 +205,10 @@ function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, er
   return (
     <VirtualRows
       sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
-      onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive}
+      onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive} onRespond={onRespond}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
+      selection={selection}
     />
   )
 }
@@ -191,6 +243,7 @@ type VirtualRowsProps = {
   onDelete?: (email: EmailSummary) => void
   onRemoveLocal?: (email: EmailSummary) => void
   canArchive?: (email: EmailSummary) => boolean
+  onRespond?: (email: EmailSummary, kind: RespondKind) => void
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
@@ -200,21 +253,33 @@ type VirtualRowsProps = {
   searchHint: string | null
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
+  /** Present while picking messages. */
+  selection?: ListSelection
 }
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  // The selected and the focused row stay mounted however far they scroll away,
-  // so the open message keeps its highlight and keyboard focus is never dropped.
+  // One right-click menu serves the whole list. The snapshot outlives the open
+  // state so the closing animation keeps its content.
+  const [menu, setMenu] = useState<{ email: EmailSummary; open: boolean } | null>(null)
+  // Where focus was when the menu opened; it goes back there when the menu closes.
+  const menuReturnFocus = useRef<HTMLElement | null>(null)
+  const menuOpenId = menu?.open ? menu.email.id : null
+  // Old rows of the previous mailbox, and selection mode (whose header holds the
+  // batch actions), offer no per-message menu.
+  const menuDisabled = stale || Boolean(selection?.active)
+  // The selected, the focused and the menu's row stay mounted however far they
+  // scroll away, so the open message keeps its highlight, keyboard focus is never
+  // dropped and the menu never loses its row.
   const pinned = useMemo(() => {
     const indexes: number[] = []
-    for (const id of [selectedId, focusedId]) {
+    for (const id of [selectedId, focusedId, menuOpenId]) {
       const index = id === null ? -1 : emails.findIndex((email) => email.id === id)
       if (index >= 0) indexes.push(index)
     }
     return indexes
-  }, [emails, selectedId, focusedId])
+  }, [emails, selectedId, focusedId, menuOpenId])
   const rangeExtractor = useCallback(
     (range: Range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
     [pinned],
@@ -266,6 +331,17 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   usePreviewRequests(onRequestPreviews, rendered, previewLines)
   useGaveUpVersion()
 
+  // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
+  // with only that row. Inside, a click toggles and Shift picks the range.
+  const clickRow = (email: EmailSummary, intent: RowClick) => {
+    if (!selection) onSelect(email)
+    else if (!selection.active) {
+      if (intent.toggle || intent.range) selection.start(email)
+      else onSelect(email)
+    } else if (intent.range) selection.extend(email, emails)
+    else selection.toggle(email)
+  }
+
   return (
     <ScrollArea
       viewportRef={viewportRef}
@@ -276,47 +352,89 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
           {windowCapped ? `${searchHint} ${t('mail:syncCoverageLimited')}` : searchHint}
         </p>
       )}
-      <div
-        role="list"
-        aria-label={t('mail:messageList')}
-        aria-busy={stale || undefined}
-        style={{ height: virtualizer.getTotalSize() }}
-        className={cn(
-          'relative animate-in px-3 duration-150 fade-in-0 transition-opacity',
-          stale && 'pointer-events-none opacity-50',
-        )}
-        onFocus={(event) => {
-          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
-          setFocusedId(row ? emails[Number(row.dataset.index)]?.id ?? null : null)
-        }}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null)
-        }}
+      <ContextMenuPrimitive.Root
+        disabled={menuDisabled}
+        open={menu?.open ?? false}
+        onOpenChange={(open) => setMenu((current) => current && { ...current, open })}
       >
-        {virtualItems.map((item) => {
-          const email = emails[item.index]
-          return (
-            <EmailCard
-              key={item.key}
-              ref={virtualizer.measureElement}
-              index={item.index}
-              count={emails.length}
-              style={{ transform: `translateY(${item.start}px)` }}
-              email={email}
-              sentView={sentView}
-              account={accounts?.find((account) => account.id === email.accountId) ?? null}
-              selected={email.id === selectedId}
-              previewLines={previewLines}
-              onFlag={onFlag}
-              onArchive={onArchive}
-              onDelete={onDelete}
-              onRemoveLocal={onRemoveLocal}
-              canArchive={canArchive}
-              onSelect={() => onSelect(email)}
-            />
-          )
-        })}
-      </div>
+        <ContextMenuPrimitive.Trigger
+          role="list"
+          aria-label={t('mail:messageList')}
+          aria-busy={stale || undefined}
+          style={{ height: virtualizer.getTotalSize() }}
+          className={cn(
+            'relative animate-in px-3 duration-150 fade-in-0 transition-opacity',
+            stale && 'pointer-events-none opacity-50',
+          )}
+          onFocus={(event) => {
+            const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
+            setFocusedId(row ? emails[Number(row.dataset.index)]?.id ?? null : null)
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null)
+          }}
+          onContextMenu={(event) => {
+            // The native page menu stays blocked by the global guard; this only
+            // decides whether the message menu opens, and for which row.
+            const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
+            const email = row ? emails[Number(row.dataset.index)] : undefined
+            if (menuDisabled || !row || !email) {
+              event.preventBaseUIHandler()
+              return
+            }
+            if (anchorAtRow(event, row)) return
+            const active = document.activeElement
+            menuReturnFocus.current = active instanceof HTMLElement && active !== document.body ? active : null
+            setMenu({ email, open: false })
+          }}
+        >
+          {virtualItems.map((item) => {
+            const email = emails[item.index]
+            return (
+              <EmailCard
+                key={item.key}
+                ref={virtualizer.measureElement}
+                index={item.index}
+                count={emails.length}
+                style={{ transform: `translateY(${item.start}px)` }}
+                email={email}
+                sentView={sentView}
+                account={accounts?.find((account) => account.id === email.accountId) ?? null}
+                selected={email.id === selectedId}
+                previewLines={previewLines}
+                onFlag={onFlag}
+                onArchive={onArchive}
+                onDelete={onDelete}
+                onRemoveLocal={onRemoveLocal}
+                canArchive={canArchive}
+                selectionMode={selection?.active ?? false}
+                picked={selection?.isSelected(email.id) ?? false}
+                menuOpen={email.id === menuOpenId}
+                onSelect={(intent) => clickRow(email, intent)}
+              />
+            )
+          })}
+        </ContextMenuPrimitive.Trigger>
+        {menu && (
+          <EmailContextMenuContent
+            email={menu.email}
+            onOpen={onSelect}
+            onRespond={onRespond}
+            onFlag={onFlag}
+            onArchive={onArchive}
+            onDelete={onDelete}
+            onRemoveLocal={onRemoveLocal}
+            canArchive={canArchive}
+            finalFocus={() => {
+              // Back to where focus was (the row, after Shift+F10 or the menu key);
+              // never into the list just because the mouse was used.
+              const target = menuReturnFocus.current
+              menuReturnFocus.current = null
+              return target?.isConnected ? target : false
+            }}
+          />
+        )}
+      </ContextMenuPrimitive.Root>
       {hasMore && (
         <div className="flex flex-col items-center gap-2 px-3 pb-3">
           {loadMoreError && <p role="alert" className="text-sm text-destructive">{loadMoreError}</p>}
@@ -330,4 +448,34 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
       )}
     </ScrollArea>
   )
+}
+
+/** Menus re-sent at the row by `anchorAtRow`; they are never moved again. */
+const reanchored = new WeakSet<Event>()
+
+/**
+ * Shift+F10 and the menu key send `contextmenu` with a point that may lie
+ * outside the row, often (0, 0), and the menu opens at that point. Such an
+ * event is replaced by one at the row: 16px in from its left edge, vertically
+ * centred. A mouse right-click always lands inside the row and is left alone.
+ * Returns true when the event was replaced.
+ */
+function anchorAtRow(event: BaseUIEvent<ReactMouseEvent<HTMLElement>>, row: HTMLElement) {
+  if (reanchored.has(event.nativeEvent)) return false
+  const rect = row.getBoundingClientRect()
+  const { clientX: x, clientY: y } = event
+  if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return false
+  const replay = new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    button: 2,
+    clientX: rect.left + 16,
+    clientY: rect.top + rect.height / 2,
+  })
+  reanchored.add(replay)
+  event.preventBaseUIHandler()
+  event.preventDefault()
+  event.target.dispatchEvent(replay)
+  return true
 }

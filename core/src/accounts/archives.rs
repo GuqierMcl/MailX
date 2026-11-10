@@ -18,8 +18,9 @@ impl AccountService {
         &mut self,
         ids: &[String],
         archive: bool,
+        partial: bool,
     ) -> Result<ArchiveChange, AppError> {
-        self.storage.change_archive(ids, archive)
+        self.storage.change_archive(ids, archive, partial)
     }
 
     pub(crate) fn restore_archive(

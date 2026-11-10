@@ -77,7 +77,7 @@ describe('archiving an email', () => {
 
   it('does not offer undo when the target state was already reached', async () => {
     const { client, onHidden } = setup()
-    client.archiveEmails.mockResolvedValueOnce({ processedCount: 1, changedCount: 0, undoToken: null })
+    client.archiveEmails.mockResolvedValueOnce({ processedCount: 1, changedCount: 0, undoToken: null, skippedIds: [] })
     await userEvent.click(screen.getByRole('button', { name: 'go' }))
     await waitFor(() => expect(onHidden).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: t('mail:undo') })).not.toBeInTheDocument()

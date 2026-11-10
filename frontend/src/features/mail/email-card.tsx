@@ -2,7 +2,7 @@ import { t } from '@/i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Archive02Icon, ArchiveRestoreIcon, Attachment01Icon, Delete02Icon, StarIcon } from '@hugeicons/core-free-icons'
+import { Archive02Icon, ArchiveRestoreIcon, Attachment01Icon, Delete02Icon, StarIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary, PreviewLines, SnippetSegment } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
@@ -42,19 +42,30 @@ type EmailCardProps = {
   onDelete?: (email: EmailSummary) => void
   onRemoveLocal?: (email: EmailSummary) => void
   canArchive?: (email: EmailSummary) => boolean
-  onSelect: () => void
+  /** The list is picking messages: rows toggle instead of opening, and quick actions step aside. */
+  selectionMode?: boolean
+  /** Whether this row is among the picked ones (selection mode only). */
+  picked?: boolean
+  /** The list's right-click menu is open for this row: keep the row lit while it is. */
+  menuOpen?: boolean
+  /** A click on the row; Cmd/Ctrl asks to toggle it, Shift to pick the range up to it. */
+  onSelect: (intent: RowClick) => void
 }
 
+export type RowClick = { toggle: boolean; range: boolean }
+
 /** A message row with its state slot and quick actions kept outside the main link. */
-export function EmailCard({ email, sentView, account, selected, previewLines, index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onSelect }: EmailCardProps) {
+export function EmailCard({ email, sentView, account, selected: opened, previewLines, index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
   useTranslation()
   // In a sent view the row is about who the mail went to. The avatar follows
   // the same person, so it never shows the account owner on every row.
   const counterpart = sentView ? email.to.addresses[0] ?? email.from : email.from
-  const canChangeFlags = Boolean(onFlag) && !email.localOnly
-  const canChangeArchive = Boolean(onArchive && !email.localOnly && canArchive?.(email))
-  const canDelete = Boolean(onDelete) && !email.localOnly
-  const canRemoveLocal = Boolean(onRemoveLocal) && email.localOnly
+  // While picking messages the opened-message highlight and the quick actions step aside.
+  const selected = opened && !selectionMode
+  const canChangeFlags = !selectionMode && Boolean(onFlag) && !email.localOnly
+  const canChangeArchive = !selectionMode && Boolean(onArchive && !email.localOnly && canArchive?.(email))
+  const canDelete = !selectionMode && Boolean(onDelete) && !email.localOnly
+  const canRemoveLocal = !selectionMode && Boolean(onRemoveLocal) && email.localOnly
   const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal
   // The shortest rows cannot fit three comfortable targets beside the avatar.
   const verticalActions = previewLines !== 'none'
@@ -174,17 +185,34 @@ export function EmailCard({ email, sentView, account, selected, previewLines, in
           hideActions()
         }
       }}
+      onMouseDown={(event) => {
+        // Shift+click picks a range; it must not also select the text in between.
+        if (event.shiftKey) event.preventDefault()
+      }}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('[data-row-action]')) return
-        onSelect()
+        onSelect({ toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })
       }}
+      data-picked={selectionMode && picked ? '' : undefined}
       className={cn(
-        'group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors hover:bg-foreground/5 focus-within:bg-foreground/5',
+        'group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors focus-within:bg-foreground/5',
+        selectionMode
+          ? 'mail-pick has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:-outline-offset-1'
+          : 'hover:bg-foreground/5',
+        menuOpen && 'bg-foreground/5',
         selected && 'mail-selected',
       )}
     >
+      {selectionMode && (
+        // The check, not only the colour, says the row is picked.
+        <span aria-hidden className="mail-pick-mark pointer-events-none absolute top-0 right-0 z-10 size-[22px] rounded-tr-lg">
+          <HugeiconsIcon icon={Tick02Icon} strokeWidth={3} className="absolute top-[3px] right-[3px] size-2.5" />
+        </span>
+      )}
       <button
         type="button"
+        role={selectionMode ? 'checkbox' : undefined}
+        aria-checked={selectionMode ? picked : undefined}
         className="order-2 flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
       >
         <SenderAvatar sender={counterpart} accountId={email.accountId} />

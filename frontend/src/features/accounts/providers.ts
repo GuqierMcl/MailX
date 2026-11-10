@@ -7,6 +7,7 @@ import netease126Logo from '@/assets/providers/netease-126.png'
 import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
 import icloudMailLogo from '@/assets/providers/icloud-mail.png'
+import gmailLogo from '@/assets/providers/gmail.svg'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -186,7 +187,36 @@ export const ICLOUD_PROVIDER: MailProvider = {
   },
 }
 
-export const PROVIDERS: MailProvider[] = [ICLOUD_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
+const GMAIL_DOMAINS = ['gmail.com', 'googlemail.com'] as const
+
+export const GMAIL_PROVIDER: MailProvider = {
+  id: 'gmail',
+  get name() { return t('accounts:gmailProviderName') },
+  domain: GMAIL_DOMAINS.join(' / '),
+  get description() { return t('accounts:gmailProviderDescription') },
+  searchAliases: ['Gmail', 'Google', '谷歌', '谷歌邮箱'],
+  logo: gmailLogo,
+  icon: Mail01Icon,
+  preset: {
+    domains: GMAIL_DOMAINS,
+    imap: { host: 'imap.gmail.com', port: 993, tls: 'implicit' },
+    smtp: { host: 'smtp.gmail.com', port: 465, tls: 'implicit' },
+  },
+  get setup(): ProviderSetup {
+    return {
+      credentialKind: 'appPassword',
+      title: t('accounts:gmailSetupTitle'),
+      description: t('accounts:gmailSetupDescription'),
+      emailHint: t('accounts:gmailEmailHint'),
+      emailPlaceholder: 'you@gmail.com',
+      emailRequired: t('accounts:gmailEmailRequired'),
+      credentialHint: t('accounts:gmailAppPasswordHint'),
+      authenticationHelp: t('accounts:gmailAuthenticationHelp'),
+    }
+  },
+}
+
+export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
 
 const CREDENTIAL_TEXT_KEYS = {
   password: {

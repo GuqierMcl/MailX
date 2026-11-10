@@ -3,9 +3,11 @@ import { t } from '@/i18n'
 import { useCallback, useEffect } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { toast } from '@/components/ui/toast'
-import type { EmailDetail, EmailPage, EmailSummary } from '@/generated/accounts'
+import type { EmailDetail, EmailPage, EmailSummary, SelectedEmail } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
+import type { BatchSettle } from './use-delete-email'
+import { SELECTION_LIMIT } from './use-list-selection'
 
 type Flag = 'read' | 'starred'
 
@@ -97,6 +99,60 @@ export function useMessageFlags(client: MailxClient) {
     }
   }, [client, queryClient])
 
+  /**
+   * The same change for the list selection, in one call. Every row shows the new
+   * value at once; a message the host could not change gets its old value back
+   * and stays selected. One toast reports the batch (no undo), carrying the
+   * local-star notice when some stars stay on this device.
+   */
+  const setFlags = useCallback(async (items: SelectedEmail[], flag: Flag, wanted: boolean, settle: BatchSettle) => {
+    const field = FIELD[flag]
+    const local = items.filter((item) => item.localOnly).map((item) => item.id)
+    const targets = items.filter((item) => !item.localOnly).slice(0, SELECTION_LIMIT)
+    const left = items.filter((item) => !item.localOnly).slice(SELECTION_LIMIT).map((item) => item.id)
+    const changing = targets.filter((item) => item[field] !== wanted)
+    for (const item of changing) patchEverywhere(queryClient, item.id, (row) => ({ ...row, [field]: wanted, pendingChanges: true }))
+    const restore = (ids: string[]) => {
+      const before = new Map(changing.map((item) => [item.id, item[field]]))
+      for (const id of ids) {
+        if (before.has(id)) patchEverywhere(queryClient, id, (row) => ({ ...row, [field]: before.get(id), pendingChanges: false }))
+      }
+    }
+    const refreshCounts = () => {
+      if (flag === 'read') void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
+    }
+    const failedTitle = flag === 'read' ? t('mail:changeReadFailed') : t('mail:changeStarFailed')
+    if (targets.length === 0) {
+      toast.error(failedTitle)
+      settle({ done: [], failed: items.map((item) => item.id) })
+      return
+    }
+    let outcome
+    try {
+      outcome = await client.setFlags(targets.map((item) => item.id), flag, wanted)
+    } catch (error) {
+      refreshCounts()
+      restore(changing.map((item) => item.id))
+      toast.error(failedTitle, { description: errorText(error) })
+      settle({ done: [], failed: items.map((item) => item.id) })
+      return
+    }
+    refreshCounts()
+    const failedIds = outcome.results.filter((result) => result.outcome === 'failed').map((result) => result.emailId)
+    restore(failedIds)
+    const localStars = outcome.results.filter((result) => result.outcome === 'localOnly')
+    // Not pending: a local-only star is final.
+    for (const result of localStars) patchEverywhere(queryClient, result.emailId, (row) => ({ ...row, pendingChanges: false }))
+    const failed = [...failedIds, ...local, ...left]
+    const done = targets.map((item) => item.id).filter((id) => !failedIds.includes(id))
+    const title = failed.length > 0
+      ? t('mail:batchFlagPartial', { count: done.length, failed: failed.length })
+      : t(flag === 'read' ? (wanted ? 'mail:batchMarkedRead' : 'mail:batchMarkedUnread') : (wanted ? 'mail:batchStarred' : 'mail:batchUnstarred'), { count: done.length })
+    const localNotice = flag === 'starred' && wanted && localStars.length > 0
+    toast.info(title, localNotice ? { description: t(LOCAL_STAR_BODY), timeout: 9000 } : undefined)
+    settle({ done, failed })
+  }, [client, queryClient])
+
   // A write-back round that confirmed something clears the "waiting" markers and
   // may carry stars that turned out to be local-only.
   useEffect(() => client.onFlagWriteBack((written) => {
@@ -108,7 +164,7 @@ export function useMessageFlags(client: MailxClient) {
     }
   }), [client, queryClient])
 
-  return { setFlag }
+  return { setFlag, setFlags }
 }
 
 /**

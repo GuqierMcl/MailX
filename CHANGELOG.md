@@ -11,13 +11,26 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
-### 🔄 Changed
+### 🚀 Feature
 
-- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
+- Right-clicking a message in the list opens a menu with open, reply, reply all, forward, read and star, archive and delete actions, without opening the message. / 在邮件列表中右键点击邮件可打开菜单，提供打开、回复、全部回复、转发、已读与星标、归档和删除操作，且不会打开该邮件。 ([#105](https://github.com/GuqierMcl/MailX/pull/105))
 
 ### ✨ Optimization
 
 - Manual retry starts a fresh delivery retry window, and waiting for mailbox authorization preserves queued messages without spending delivery attempts. / 手动立即重试会重新开始投递重试窗口，等待邮箱授权时保留排队邮件且不消耗投递次数。
+
+### 🔄 Changed
+
+- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
+
+## [0.1.2] - 2026-11-08
+
+### 🚀 Feature
+
+- A Gmail entry, listed first with iCloud second, fills in encrypted IMAP / SMTP settings for @gmail.com and @googlemail.com, with the official bundled Gmail icon and step-by-step app password guidance. / 新增 Gmail 添加入口并排在服务商列表首位、iCloud 第二，为 @gmail.com 和 @googlemail.com 预填加密收发服务器，采用本地打包的官方 Gmail 图标，并提供应用专用密码的分步指引。 ([#100](https://github.com/GuqierMcl/MailX/pull/100))
+- Select several messages from the message list to mark them read or unread, star, archive or delete them together, with undo for delete and archive and failed messages kept selected. / 邮件列表支持多选，可一次标为已读或未读、加星标、归档或删除，删除与归档可撤销，没能处理的邮件保持选中。 ([#101](https://github.com/GuqierMcl/MailX/pull/101))
+
+### ✨ Optimization
 
 - Draft previews show saved rich-text formatting and inline images, follow the message theme and update after saving, with file attachments listed separately. / 草稿预览保留已保存的富文本格式和内嵌图片，跟随正文主题并在保存后更新，普通文件附件单独列出。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
 - A refresh button beside the title-bar sidebar toggle refreshes all accounts, with progress shown only for a manual refresh while automatic sync stays quiet. / 标题栏侧栏折叠按钮右侧新增刷新按钮，可刷新全部邮箱；仅手动刷新显示进度，自动同步保持安静。 ([#98](https://github.com/GuqierMcl/MailX/pull/98))
@@ -128,6 +141,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GuqierMcl/MailX/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GuqierMcl/MailX/releases/tag/v0.1.0

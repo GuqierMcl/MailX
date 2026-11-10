@@ -48,18 +48,19 @@ describe('mock provider help', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     try {
       const client = createMockClient()
-      for (const providerId of ['qq', '139', 'icloud', 'netease163', 'netease126', 'neteaseYeah']) {
+      for (const providerId of ['qq', '139', 'icloud', 'gmail', 'netease163', 'netease126', 'neteaseYeah']) {
         await client.openProviderHelp(providerId)
         expect(open).toHaveBeenLastCalledWith(providerId === 'qq'
           ? 'https://help.mail.qq.com/detail/0/1087'
           : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
             : providerId === 'icloud' ? 'https://support.apple.com/en-us/102654'
-              : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
+              : providerId === 'gmail' ? 'https://support.google.com/accounts/answer/185833'
+                : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
       }
-      for (const providerId of ['https://example.com', 'constructor', 'netease', '139.com', '139/../', 'icloud.com', 'icloud/../', 'ICLOUD', '']) {
+      for (const providerId of ['https://example.com', 'constructor', 'netease', '139.com', '139/../', 'icloud.com', 'icloud/../', 'ICLOUD', 'gmail.com', 'GMAIL', 'google', '']) {
         await expect(client.openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
       }
-      expect(open).toHaveBeenCalledTimes(6)
+      expect(open).toHaveBeenCalledTimes(7)
     } finally { open.mockRestore() }
   })
 })
@@ -387,5 +388,40 @@ describe('mock local archive', () => {
     await expect(client.archiveEmails([inbox.id, 'missing'])).rejects.toMatchObject({ failure: { code: 'notFound' } })
     await expect(client.archiveEmails([])).rejects.toMatchObject({ failure: { code: 'validation' } })
     expect((await client.listEmails(inboxQuery('only'))).items).toHaveLength(0)
+  })
+})
+
+describe('mock batch actions for the list selection', () => {
+  const inboxQuery = emailQuery({ folderRole: 'inbox', limit: 2 })
+
+  it('selects the same messages as the list, ignoring paging', async () => {
+    const client = createMockClient()
+    const listed = await client.listEmails({ ...inboxQuery, limit: 500 })
+    const selection = await client.selectEmails(inboxQuery)
+    expect(selection.items.map((item) => item.id)).toEqual(listed.items.map((item) => item.id))
+    expect(selection.truncated).toBe(false)
+    expect(Object.keys(selection.items[0]).sort()).toEqual(['accountId', 'archived', 'folderId', 'id', 'isRead', 'isStarred', 'localOnly'])
+  })
+
+  it('skips what it cannot delete or archive when asked to, and refuses when nothing is left', async () => {
+    const client = createMockClient()
+    const [first, second] = (await client.listEmails(inboxQuery)).items
+    const archived = await client.archiveEmails([first.id, 'missing'], true)
+    expect(archived).toMatchObject({ processedCount: 1, skippedIds: ['missing'] })
+    await expect(client.archiveEmails(['missing'], true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    const deletion = await client.deleteEmails([second.id, 'missing'], true, true)
+    expect(deletion.skippedIds).toEqual(['missing'])
+    await expect(client.deleteEmails([second.id], true, true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+  })
+
+  it('reports each flag change on its own', async () => {
+    const client = createMockClient()
+    const [first] = (await client.listEmails(inboxQuery)).items
+    const outcome = await client.setFlags([first.id, 'missing', first.id], 'read', !first.isRead)
+    expect(outcome.results).toEqual([
+      { emailId: first.id, outcome: 'queued', code: null },
+      { emailId: 'missing', outcome: 'failed', code: 'notFound' },
+    ])
+    await expect(client.setFlags([], 'read', true)).rejects.toMatchObject({ failure: { code: 'validation' } })
   })
 })

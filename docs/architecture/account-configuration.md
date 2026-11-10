@@ -20,7 +20,7 @@
 
 ## 2. 认证与写入型秘密
 
-当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，QQ / Foxmail、网易 163 / 126 / yeah.net、139 已有各自的授权码引导，iCloud 提供 Apple 应用专用密码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
+当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，QQ / Foxmail、网易 163 / 126 / yeah.net、139 已有各自的授权码引导，iCloud 与 Gmail 分别提供 Apple 和 Google 应用专用密码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
 
 秘密修改必须明确选择：
 
@@ -39,6 +39,8 @@ type SecretUpdate =
 QQ / Foxmail、网易 163、网易 126、网易 yeah.net 分别以 `qq`、`netease163`、`netease126`、`neteaseYeah` 保存服务商标识。三个网易入口使用各自的 `imap` / `smtp` 域名与 993 / 465 隐式 TLS 端点，向导默认完整邮箱登录名和共享客户端授权码；预设只初始化新账号，不覆盖已有手动配置、独立用户名、路由或图标偏好。免费网易入口分别只接受精确的 `163.com` / `126.com` / `yeah.net`，VIP 和企业邮箱暂用各自手动端点。授权码长度说明仅为引导，通用秘密模型不增加网易专属长度限制，也不改写输入字符。
 
 iCloud 入口以 `icloud` 保存服务商标识，新建时精确接受 `icloud.com` / `me.com` / `mac.com`。默认接收端为 `imap.mail.me.com:993` 隐式 TLS，发送端为 `smtp.mail.me.com:587` 强制 STARTTLS，收发使用完整邮箱用户名并共享 Apple 应用专用密码；高级设置允许分别覆盖用户名与凭证。引导说明主邮箱开通、双重认证，以及主密码修改或重置会撤销全部应用专用密码；不约束秘密长度、不删除连字符。入口使用本地打包的官方 iCloud Mail 图标，复用服务商图标开关；素材来源见[图标说明](../../frontend/src/assets/providers/README.md#icloud-mail)。iCloud+ 自定义域使用手动入口；别名和历史域地址的实际兼容性仍按账号独立验收，Apple 授权登录尚未实现。此预设不增加协议特判、认证类型或数据库迁移，也不将已有手动账号自动改为 `icloud`。
+
+Gmail 入口以 `gmail` 保存服务商标识，新建时精确接受 `gmail.com` / `googlemail.com`。接收端为 `imap.gmail.com:993`、发送端为 `smtp.gmail.com:465`，均为隐式 TLS；收发使用完整邮箱用户名并共享 Google 应用专用密码，高级设置允许分别覆盖。引导说明两步验证、粘贴时去掉分组空格、修改 Google 账号密码会撤销应用专用密码，以及安全密钥专用、高级保护和组织账号无法生成应用专用密码；秘密输入不被改写。入口使用本地打包的官方 Gmail 图标，来源见[图标说明](../../frontend/src/assets/providers/README.md#gmail)。Google 组织账号与 OAuth 登录不在此预设范围，评估见 [Gmail 接入评估](../reference/gmail-integration.md)。此预设不增加协议特判、认证类型或数据库迁移。
 
 添加向导的“测试登录”直接验证当前内存配置，不创建临时账号、不读取或写入 SecretStore、不写数据库、不启动同步。新配置的收发及代理秘密必须由本次输入提供（`replace`）；不允许 `keep` 借用已有账号的凭据。测试沿用创建配置的规范化与字段校验、所选路由与 TLS，点击测试仅表示用户授权向当前填写端点进行登录探测。结果不会变成持久化的信任或连接状态；测试可跳过，输入变化、离开连接步骤或关闭向导即取消并丢弃旧结果。
 

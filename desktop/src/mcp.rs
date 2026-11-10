@@ -140,7 +140,17 @@ impl McpManager {
                         .with_ui_opener({
                             let handle = app.clone();
                             move |account_id, email_id| {
-                                if crate::notifications::open_email(&handle, account_id, email_id) {
+                                // The body WebView harness compiles without the
+                                // notifications module and never serves MCP.
+                                #[cfg(feature = "body-webview-test")]
+                                let opened = {
+                                    let _ = (&handle, account_id, email_id);
+                                    false
+                                };
+                                #[cfg(not(feature = "body-webview-test"))]
+                                let opened =
+                                    crate::notifications::open_email(&handle, account_id, email_id);
+                                if opened {
                                     Ok(())
                                 } else {
                                     Err(mailx_core::tools::ToolError::new(

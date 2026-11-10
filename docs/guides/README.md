@@ -7,9 +7,17 @@ This page covers the basics of the desktop app. Published installers are listed 
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
-2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for QQ Mail / Foxmail, 163, 126, yeah.net, 139 and iCloud; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
+2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. To give the mail more room, collapse the sidebar from the title bar or with Cmd/Ctrl+B: it becomes a narrow column of icons with the same places, tooltips that show unread counts, and menus for More and each account. Your choice is remembered. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
+
+### Gmail
+
+Turn on [2-Step Verification](https://support.google.com/accounts/answer/185839) for your Google Account, then create an [app password](https://support.google.com/accounts/answer/185833) on the App passwords page of your Google Account. Google shows a 16-character password in groups; remove the spaces when you paste it into MailX. IMAP is always on in Gmail, so there is nothing to enable in Gmail settings.
+
+Choose Gmail for a `@gmail.com` or `@googlemail.com` address. MailX fills in `imap.gmail.com:993` and `smtp.gmail.com:465`, both with implicit TLS, sharing the app password. Both usernames are your full email address.
+
+Changing your Google Account password turns off all app passwords; create a new one and update the account connection in MailX. App passwords aren't available if you use only security keys for 2-Step Verification, have Advanced Protection, or use a work or school account. MailX doesn't offer Google sign-in in the browser yet, so these accounts can't be added for now. Gmail uses labels, so the same message can appear in several folders; how this shows up in MailX hasn't been fully checked with real accounts.
 
 ### iCloud Mail
 
@@ -29,9 +37,13 @@ Opening a message downloads and caches its body, so cached content can be read o
 
 Hover or focus a message with the keyboard to show quick actions. After a mouse click, moving the pointer away hides the actions again. With body previews enabled, the left column has star at the top, read status in the middle, and archive or restore at the bottom; a starred message keeps its yellow star visible. Delete stays at the upper right. Turning body previews off puts star and archive actions back at the upper right to keep the compact rows easy to use. The small read-status ring also appears in the reading toolbar: an empty ring means read, and a ring with a blue dot means unread. Local sent copies offer a confirmed removal from this device instead.
 
+Right-click a message in the list to open a menu with the same actions in one place: Open, Reply, Reply all, Forward, Mark as read or unread, Add or remove star, Archive or Move back to inbox where archiving is available, and Delete. A local sent copy offers only Open, Reply, Reply all, Forward and Remove from this device. Right-clicking does not open the message; the row stays highlighted while the menu is open. While you are selecting several messages, right-click does nothing; use the buttons at the top instead. With the keyboard, Shift+F10 or the Menu key opens the menu for the focused message, and Esc closes it.
+
 The open message, draft or outbox item keeps a blue selection background after the pointer leaves, with separate tones for light and dark themes. Custom accent colors also tint the selection background; nearly gray, very light or very dark colors use the default blue highlight instead so it stays distinct, while your main accent color stays as set. Hovering another row keeps the open item highlighted.
 
 Read and starred states write back to the server. Archive only removes the message from the inbox on this computer; find it under More → Archive or under Archived in the account, and it is unchanged for other clients. A server folder that is itself called Archive stays under its account with the server's name. Delete first offers a short undo window, then moves the message to the server's Trash; in Trash, or when the account has no such folder, a confirmation permanently deletes it. Moving messages to arbitrary server folders is not supported yet.
+
+To act on several messages at once, click Select above the message list, or Cmd/Ctrl-click or Shift-click a message. Selected messages get a blue outline with a check in the corner. Click to add or remove a message, Shift-click to select a run of messages, or use Select all to pick every message in the current list, up to 500 at a time. The buttons at the top then mark the selection read or unread, star it, archive it or delete it. Deleting and archiving can be undone; messages that could not be handled stay selected so you can see which ones. Click Done or press Esc to finish.
 
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
