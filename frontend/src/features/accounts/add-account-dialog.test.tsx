@@ -637,6 +637,8 @@ describe('add account wizard', () => {
       await userEvent.click(within(dialog).getByRole('radio', { name: 'Outlook' }))
       await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
       expect(within(dialog).getByLabelText('邮箱地址')).toBeInTheDocument()
+      expect(within(dialog).getByText('添加 Outlook 邮箱')).toBeInTheDocument()
+      expect(within(dialog).queryByText('手动配置 · 密码或授权码')).not.toBeInTheDocument()
       expect(within(dialog).getByText('MailX 会在浏览器中打开微软的登录页面。')).toBeInTheDocument()
       expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
       expect(within(dialog).queryByLabelText('收发密码')).not.toBeInTheDocument()
