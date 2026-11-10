@@ -4,7 +4,7 @@ import { t } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { MailxClient } from '@/lib/mailx-client'
-import { releaseDate, releaseUrl, restartBlockedText, retry as retryUpdate } from './details'
+import { failureText, releaseDate, releaseUrl, restartBlockedText, retry as retryUpdate } from './details'
 import { UpdateNotes } from './update-notes'
 import { downloadPercent, updateVersion, type UpdateSnapshot } from './types'
 
@@ -43,8 +43,8 @@ export function UpdateDialog({ client, snapshot, open, onOpenChange }: {
           {!snapshot.canInstall && <p className="mt-3 text-xs text-muted-foreground">{t('updater:installUnavailable')}</p>}
         </div>
         <DialogFooter className="flex-col items-stretch gap-2 border-t px-5 py-3 sm:flex-row sm:items-center">
-          {failed && <p className="mr-auto text-xs text-destructive">{t(failed.stage === 'check' ? 'updater:checkFailed' : 'updater:downloadFailed')}</p>}
-          {snapshot.phase === 'downloading' && (
+          {failed && <p className="mr-auto text-xs text-destructive">{failureText(failed.stage)}</p>}
+          {snapshot.canInstall && snapshot.phase === 'downloading' && (
             <div className="mr-auto flex w-full flex-col gap-1 sm:max-w-52">
               <p className="text-xs text-muted-foreground" aria-live="polite">
                 {percent === null ? t('updater:downloading') : t('updater:downloadingPercent', { percent })}
@@ -70,15 +70,14 @@ function Actions({ client, snapshot, onClose }: { client: MailxClient; snapshot:
   useTranslation()
   const [restartRefusal, setRestartRefusal] = useState<string | null>(null)
   const run = (operation: Promise<unknown>) => void operation.catch(() => undefined)
+  if (!snapshot.canInstall) return <Button size="sm" onClick={onClose}>{t('updater:close')}</Button>
   switch (snapshot.phase) {
     case 'available':
-      return snapshot.canInstall ? (
+      return (
         <>
           <Button variant="outline" size="sm" onClick={onClose}>{t('updater:later')}</Button>
           <Button size="sm" onClick={() => run(client.downloadUpdate())}>{t('updater:download')}</Button>
         </>
-      ) : (
-        <Button size="sm" onClick={onClose}>{t('updater:close')}</Button>
       )
     case 'downloading':
       return (
@@ -93,8 +92,9 @@ function Actions({ client, snapshot, onClose }: { client: MailxClient; snapshot:
       return (
         <>
           {restartRefusal && <p className="mr-auto text-xs text-destructive">{restartRefusal}</p>}
-          <Button variant="outline" size="sm" onClick={onClose}>{t('updater:installOnQuit')}</Button>
+          <Button variant="outline" size="sm" onClick={onClose}>{t(snapshot.installOnQuit === false ? 'updater:later' : 'updater:installOnQuit')}</Button>
           <Button size="sm" onClick={() => {
+            setRestartRefusal(null)
             client.restartToUpdate().catch((error: unknown) => setRestartRefusal(restartBlockedText(error) ?? t('updater:restartFailed')))
           }}>{t('updater:restartNow')}</Button>
         </>

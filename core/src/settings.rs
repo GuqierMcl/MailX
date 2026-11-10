@@ -346,9 +346,9 @@ pub struct GeneralSettings {
     #[ts(type = "LanguagePreference")]
     #[serde(deserialize_with = "deserialize_language")]
     pub language: String,
-    /// Check for a new version shortly after start and every few hours. Off,
-    /// only the manual check in Settings → About runs.
-    pub auto_check_updates: bool,
+    /// Download new versions automatically and install on a normal application
+    /// exit. Update checks always run; the desktop never restarts by itself.
+    pub auto_update: bool,
     /// Ask until the user chooses whether closing should keep MailX running.
     /// The desktop host applies platform and tray availability constraints.
     pub close_behavior: CloseBehavior,
@@ -372,7 +372,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             language: "system".into(),
-            auto_check_updates: true,
+            auto_update: true,
             close_behavior: CloseBehavior::Ask,
             show_menu_bar_icon: true,
             silent_start: false,
@@ -862,7 +862,15 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 }
                 if let Some(general) = general.as_object_mut() {
                     general.insert("language".into(), value.into());
-                    for key in ["autoCheckUpdates", "showMenuBarIcon", "silentStart"] {
+                    // The old switch controlled checks. Preserve an explicit opt-out
+                    // as manual downloads while checks become unconditional.
+                    let legacy_auto_update = general.remove("autoCheckUpdates");
+                    if !general.contains_key("autoUpdate")
+                        && let Some(value) = legacy_auto_update
+                    {
+                        general.insert("autoUpdate".into(), value);
+                    }
+                    for key in ["autoUpdate", "showMenuBarIcon", "silentStart"] {
                         if general.get(key).is_some_and(|value| !value.is_boolean()) {
                             general.remove(key);
                         }

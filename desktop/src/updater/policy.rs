@@ -3,6 +3,7 @@
 //! A server edition can later reuse them as they are.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -28,10 +29,11 @@ pub(crate) const NOTES_LIMIT: usize = 20_000;
 pub(crate) enum FailureStage {
     Check,
     Download,
+    Install,
 }
 
 /// Release information stays available while its package is downloading or ready.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ReleaseDetails {
     pub(crate) current: String,
     pub(crate) notes: Option<String>,
@@ -75,24 +77,9 @@ pub(crate) enum UpdateState {
 }
 
 impl UpdateState {
-    /// A check may start from a quiet state, never while one is already in
-    /// flight or after a version was found: that version stays the target.
+    /// Recheck known releases too: a release can be withdrawn or superseded.
     pub(crate) fn may_check(&self) -> bool {
-        matches!(self, Self::Idle | Self::Failed { .. })
-    }
-
-    /// Whether a version has been found, so periodic checks are pointless.
-    pub(crate) fn found_version(&self) -> bool {
-        matches!(
-            self,
-            Self::Available { .. }
-                | Self::Downloading { .. }
-                | Self::Ready { .. }
-                | Self::Failed {
-                    stage: FailureStage::Download,
-                    ..
-                }
-        )
+        !matches!(self, Self::Checking | Self::Downloading { .. })
     }
 
     pub(crate) fn may_download(&self) -> bool {
@@ -100,7 +87,7 @@ impl UpdateState {
             self,
             Self::Available { .. }
                 | Self::Failed {
-                    stage: FailureStage::Download,
+                    stage: FailureStage::Download | FailureStage::Install,
                     ..
                 }
         )
@@ -115,32 +102,72 @@ impl UpdateState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AutoCheck {
-    Run,
-    /// Switched off or busy: look again at the next interval.
-    Skip,
-    /// A version is already known: the scheduler is done.
-    Stop,
+/// A bounded retry budget belongs to the target, not to a periodic check.
+/// User cancellation suppresses that version for the rest of this process.
+#[derive(Default)]
+pub(crate) struct AutomaticDownload {
+    pub(crate) enabled: bool,
+    paused: HashSet<String>,
+    failures: u8,
+    pub(crate) retry_at: Option<Instant>,
 }
 
-/// The delay before the next scheduler tick: a short one after start, then
-/// the regular interval.
+impl AutomaticDownload {
+    pub(crate) fn set_enabled(&mut self, enabled: bool) {
+        if enabled && !self.enabled {
+            self.paused.clear();
+            self.reset_attempts();
+        }
+        self.enabled = enabled;
+    }
+
+    pub(crate) fn reset_attempts(&mut self) {
+        self.failures = 0;
+        self.retry_at = None;
+    }
+
+    pub(crate) fn pause(&mut self, version: &str) {
+        self.paused.insert(version.to_owned());
+        self.retry_at = None;
+    }
+
+    pub(crate) fn is_paused(&self, version: &str) -> bool {
+        self.paused.contains(version)
+    }
+
+    pub(crate) fn resume(&mut self, version: &str) {
+        self.paused.remove(version);
+        self.reset_attempts();
+    }
+
+    pub(crate) fn may_start(&self, version: &str, now: Instant) -> bool {
+        self.enabled
+            && !self.paused.contains(version)
+            && self.failures < 3
+            && self.retry_at.is_none_or(|at| now >= at)
+    }
+
+    pub(crate) fn failed(&mut self, now: Instant, retryable: bool) {
+        self.failures = self.failures.saturating_add(1);
+        self.retry_at = if retryable {
+            match self.failures {
+                1 => Some(now + Duration::from_secs(60)),
+                2 => Some(now + Duration::from_secs(5 * 60)),
+                _ => None,
+            }
+        } else {
+            self.failures = 3;
+            None
+        };
+    }
+}
+
+/// Short initial delay; checking remains enabled independently of downloads.
 pub(crate) fn next_wait(first: bool) -> Duration {
     if first {
         FIRST_CHECK_DELAY
     } else {
         CHECK_INTERVAL
-    }
-}
-
-pub(crate) fn auto_check(enabled: bool, state: &UpdateState) -> AutoCheck {
-    if state.found_version() {
-        AutoCheck::Stop
-    } else if enabled && state.may_check() {
-        AutoCheck::Run
-    } else {
-        AutoCheck::Skip
     }
 }
 
@@ -172,6 +199,7 @@ pub(crate) fn cap_notes(notes: Option<String>) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Snapshot {
     pub(crate) can_install: bool,
+    pub(crate) install_on_quit: bool,
     #[serde(flatten)]
     pub(crate) state: UpdateState,
 }
@@ -348,27 +376,29 @@ mod tests {
     }
 
     #[test]
-    fn auto_checks_run_only_when_enabled_and_quiet() {
-        assert_eq!(auto_check(true, &UpdateState::Idle), AutoCheck::Run);
-        assert_eq!(
-            auto_check(true, &failed(FailureStage::Check)),
-            AutoCheck::Run
-        );
-        assert_eq!(auto_check(false, &UpdateState::Idle), AutoCheck::Skip);
-        assert_eq!(auto_check(true, &UpdateState::Checking), AutoCheck::Skip);
-    }
-
-    #[test]
-    fn the_scheduler_stops_once_a_version_is_known() {
-        for state in [
-            available(),
-            downloading(),
-            ready(),
-            failed(FailureStage::Download),
-        ] {
-            assert_eq!(auto_check(true, &state), AutoCheck::Stop, "{state:?}");
-            assert_eq!(auto_check(false, &state), AutoCheck::Stop, "{state:?}");
-        }
+    fn retry_budget_survives_periodic_checks_and_cancel_is_not_a_failure() {
+        let now = Instant::now();
+        let mut policy = AutomaticDownload::default();
+        assert!(!policy.may_start("2.0.0", now));
+        policy.set_enabled(true);
+        assert!(policy.may_start("2.0.0", now));
+        policy.failed(now, true);
+        assert!(!policy.may_start("2.0.0", now));
+        assert!(policy.may_start("2.0.0", now + Duration::from_secs(60)));
+        policy.failed(now, true);
+        assert!(!policy.may_start("2.0.0", now + Duration::from_secs(60)));
+        policy.failed(now, true);
+        assert!(!policy.may_start("2.0.0", now + next_wait(false)));
+        policy.resume("2.0.0");
+        policy.pause("2.0.0");
+        assert!(!policy.may_start("2.0.0", now + next_wait(false)));
+        assert!(policy.may_start("2.1.0", now));
+        policy.set_enabled(false);
+        assert!(!policy.may_start("2.1.0", now));
+        policy.set_enabled(true);
+        assert!(policy.may_start("2.0.0", now));
+        policy.failed(now, false);
+        assert!(!policy.may_start("2.0.0", now + next_wait(false)));
     }
 
     #[test]
@@ -386,7 +416,7 @@ mod tests {
             |test: fn(&UpdateState) -> bool| -> Vec<bool> { all.iter().map(test).collect() };
         assert_eq!(
             allowed(UpdateState::may_check),
-            [true, false, false, false, false, true, true]
+            [true, false, true, false, true, true, true]
         );
         assert_eq!(
             allowed(UpdateState::may_download),
@@ -442,6 +472,7 @@ mod tests {
     fn snapshots_carry_the_capability_flat() {
         let json = serde_json::to_value(Snapshot {
             can_install: false,
+            install_on_quit: false,
             state: available(),
         })
         .unwrap();
@@ -490,6 +521,7 @@ mod tests {
         for state in release_states(details.clone()) {
             let json = serde_json::to_value(Snapshot {
                 can_install: true,
+                install_on_quit: true,
                 state,
             })
             .unwrap();

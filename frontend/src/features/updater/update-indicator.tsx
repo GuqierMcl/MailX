@@ -30,7 +30,7 @@ export function UpdateIndicator({ snapshot, onOpen }: { snapshot: UpdateSnapshot
               ? <ProgressRing percent={percent ?? 0} />
               : (
                 <span className="relative flex">
-                  <HugeiconsIcon icon={CircleArrowUp01Icon} strokeWidth={2} className={phase === 'ready' ? 'text-primary' : undefined} />
+                  <HugeiconsIcon icon={CircleArrowUp01Icon} strokeWidth={2} className={phase === 'ready' ? 'text-primary' : phase === 'failed' ? 'text-destructive' : undefined} />
                   {phase === 'available' && (
                     <span aria-hidden className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-primary ring-2 ring-background" />
                   )}

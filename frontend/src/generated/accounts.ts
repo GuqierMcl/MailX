@@ -443,10 +443,10 @@ export type CloseBehavior = "ask" | "background" | "quit";
 
 export type GeneralSettings = { language: LanguagePreference,
 /**
- * Check for a new version shortly after start and every few hours. Off,
- * only the manual check in Settings → About runs.
+ * Download new versions automatically and install on a normal application
+ * exit. Update checks always run; the desktop never restarts by itself.
  */
-autoCheckUpdates: boolean,
+autoUpdate: boolean,
 /**
  * Ask until the user chooses whether closing should keep MailX running.
  * The desktop host applies platform and tray availability constraints.

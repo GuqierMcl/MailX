@@ -22,6 +22,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🔄 Changed
 
+- Update checks now stay on, with default-enabled Automatic updates downloading in the background and prompting for a restart or installing on quit; turning it off keeps manual downloads, and previous disabled preferences are preserved. / 更新检查现固定开启，默认打开的“自动更新”会在后台下载并提醒重启或在退出时安装；关闭后保留手动下载，升级时保留原有关闭偏好。
 - Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
 
 ## [0.1.2] - 2026-11-08

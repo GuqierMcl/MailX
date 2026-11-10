@@ -34,7 +34,7 @@ describe('the real window trees', () => {
     const dialog = await settingsDialog()
     await userEvent.click(within(dialog).getByRole('button', { name: matcher('关于', 'About') }))
     expect(await within(dialog).findByRole('button', { name: matcher('检查更新', 'Check for updates') })).toBeInTheDocument()
-    expect(within(dialog).getByRole('switch', { name: matcher('自动检查更新', 'Check for updates automatically') })).toBeInTheDocument()
+    expect(within(dialog).getByRole('switch', { name: matcher('自动更新', 'Automatic updates') })).toBeInTheDocument()
   })
 
   it('renders no updater UI in a composer window', async () => {

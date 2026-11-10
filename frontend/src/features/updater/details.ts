@@ -1,6 +1,6 @@
 import { t } from '@/i18n'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
-import { downloadPercent, type UpdateSnapshot } from './types'
+import { downloadPercent, type UpdateFailureStage, type UpdateSnapshot } from './types'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
@@ -23,14 +23,20 @@ export function indicatorLabel(snapshot: UpdateSnapshot): string | null {
       return t('updater:indicatorDownloading', { version: snapshot.version, percent: downloadPercent(snapshot) ?? 0 })
     case 'ready':
       return t('updater:indicatorReady', { version: snapshot.version })
+    case 'failed':
+      return snapshot.version ? t('updater:indicatorFailed', { version: snapshot.version }) : null
     default:
       return null
   }
 }
 
 /** Retries the step that failed; a failed download keeps its version. */
-export function retry(client: MailxClient, stage: 'check' | 'download') {
+export function retry(client: MailxClient, stage: UpdateFailureStage) {
   return stage === 'check' ? client.checkForUpdates() : client.downloadUpdate()
+}
+
+export function failureText(stage: UpdateFailureStage): string {
+  return t(stage === 'check' ? 'updater:checkFailed' : stage === 'install' ? 'updater:installFailed' : 'updater:downloadFailed')
 }
 
 /** The refusal shown next to "restart now" when mail is still being sent. */

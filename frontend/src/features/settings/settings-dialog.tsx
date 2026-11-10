@@ -24,7 +24,7 @@ import { ComposePane } from './compose-pane'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { GeneralPane } from './general-pane'
 import { McpPane } from './mcp-pane'
-import { AutoCheckRow, UpdateStatusRow } from '@/features/updater/about-updates'
+import { AutoUpdateRow, UpdateStatusRow } from '@/features/updater/about-updates'
 
 export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'mcp' | 'about'
 /** Where the dialog opens. */
@@ -132,7 +132,7 @@ function AboutSection({ client }: { client: MailxClient }) {
           <span className="text-sm text-muted-foreground tabular-nums">{__APP_VERSION__}</span>
         </SettingsRow>
         <UpdateStatusRow />
-        <AutoCheckRow client={client} />
+        <AutoUpdateRow client={client} />
       </SettingsGroup>
     </SettingsPage>
   )
