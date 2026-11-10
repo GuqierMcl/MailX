@@ -1112,3 +1112,9 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 自动检查（未设置 `CARGO_TARGET_DIR`，使用工作区自己的 `target`）：`bun run check`（前端 90 个文件、1068 项测试，1007 条中英文消息，Rust / TypeScript DTO 一致，类型、lint、构建与 `cargo check` 通过）、`bun run rust:fmt`、`bun run rust:clippy`（`-D warnings`）、`bun run rust:test`（1191 项通过、0 失败、5 项原有忽略）、`git diff --check` 均通过。
 
 仍待真实账号验证：`email` / `preferred_username` 在个人账号与各类租户中实际给出的值、别名与登录名不同的邮箱的表现、IMAP 被管理员关闭时只返回通用失败（此时用户先被请求填写地址，再看到“无法打开邮箱”）、以及上文列出的其余项目。
+
+### Outlook.com 个人账号手测（2026-11-10）
+
+项目维护者在本机 macOS 上用开发版（`bun run tauri dev`，分支 `feat/microsoft-oauth`，提交 `92d9d5e` 之后）以一个 Outlook.com 个人账号手动测试：经“Outlook”入口在系统浏览器完成微软登录，账号添加成功，侧边栏列出服务器文件夹（收件箱、Drafts、已发送、垃圾邮件、已删除、存档、同步问题及其子文件夹、Notes），收件箱显示未读邮件。终端日志中没有应用报错。这说明 Outlook.com 的浏览器登录、回调、IMAP 求证与 XOAUTH2 收信同步在该账号上可用。
+
+本轮没有确认：经 `smtp-mail.outlook.com` 发信、IDLE 推送、重启后刷新令牌与“重新登录”、登录名与邮箱不同时的补填地址流程；Microsoft 365 / Exchange 入口没有可用的工作或学校账号，未测试；Windows 与 Linux 未测试。`Drafts` 与服务器的“存档”文件夹按现有规则显示服务器名称（草稿与归档角色不改名，MailX 另有本机草稿与本机归档），与其他服务商一致。

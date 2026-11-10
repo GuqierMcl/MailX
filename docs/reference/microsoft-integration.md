@@ -1,6 +1,6 @@
 # Microsoft 365 / Outlook.com（Exchange）接入评估
 
-状态：**已实现，尚未用真实微软账号验证**。Outlook（个人）与 Microsoft 365 / Exchange（工作或学校）两个入口通过浏览器登录，走 OAuth + IMAP / SMTP（XOAUTH2）；实现位置、规则和与通用 OAuth 基础的分工见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)与[账号配置](../architecture/account-configuration.md#5-通用-oauth-基础与开放边界)。本文记录用户所说“Exchange”的实际含义、各接入路径的可行性、Microsoft Entra 应用注册，以及接入时的决定与待验证项。
+状态：**已实现；Outlook.com 个人账号已手测添加与收信同步，Microsoft 365 尚未用真实账号验证**。Outlook（个人）与 Microsoft 365 / Exchange（工作或学校）两个入口通过浏览器登录，走 OAuth + IMAP / SMTP（XOAUTH2）；实现位置、规则和与通用 OAuth 基础的分工见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)与[账号配置](../architecture/account-configuration.md#5-通用-oauth-基础与开放边界)。本文记录用户所说“Exchange”的实际含义、各接入路径的可行性、Microsoft Entra 应用注册，以及接入时的决定与待验证项。
 
 ## 1. “Exchange”指什么
 
@@ -90,10 +90,12 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 
 暂不覆盖：自建 Exchange Server 的 EWS 接入（管理员开启了 IMAP / SMTP 时，现有“手动配置 IMAP/SMTP”即可使用）、世纪互联中国版、共享邮箱、Graph 同步。
 
-仍未用真实账号验证（本次实现只有受控测试，没有可用的微软账号）：
+已验证：2026-11-10 在 macOS 开发版上用一个 Outlook.com 个人账号完成浏览器登录、添加账号与 IMAP 文件夹 / 收件箱同步，见[验证记录第 38 节](../development/validation.md)。
 
-- Microsoft 365 与 Outlook.com 的授权、IMAP 同步、IDLE、SMTP 发信全链路，以及令牌过期后长连接的行为。
-- Outlook.com 的 SMTP 服务器：实现按微软设置页选用 `smtp-mail.outlook.com`，需确认它与 `smtp.office365.com` 在 XOAUTH2 下是否都可用。
+仍待真实账号验证：
+
+- Microsoft 365（工作或学校账号）的全部流程；Outlook.com 的 SMTP 发信、IDLE，以及令牌过期后长连接与重启后刷新的行为。
+- Outlook.com 的 SMTP 服务器：实现按微软设置页选用 `smtp-mail.outlook.com`，尚未在 XOAUTH2 下实际发信。
 - IMAP 登录求证在各类账号下的表现：`email` 与 `preferred_username` 在个人账号、各类租户中实际出现哪些值；别名、与登录名不同的邮箱、被管理员关闭 IMAP 时只返回通用失败，此时用户先被请求填写地址，再看到“无法打开邮箱”的提示。令牌里没有可用候选地址时的实际比例也未知。
 - `prompt=select_account` 与 `login_hint` 在两类账号上的实际行为，以及 `127.0.0.1` 无路径回调在各浏览器与防火墙下是否稳定。
 - Windows 凭据管理器中分条目存放的真实刷新令牌长度与读写。

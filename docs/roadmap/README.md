@@ -37,7 +37,7 @@
 
 依赖 M0。
 
-- [x] 账号、独立收发端点、密码类认证、路由配置及 SecretStore 持久化；通用 OAuth 授权、路由 HTTP、刷新协调与 XOAUTH2 基础已有实现；Outlook / Microsoft 365 浏览器登录入口已实现（自动测试通过，尚未用真实微软账号验证）。
+- [x] 账号、独立收发端点、密码类认证、路由配置及 SecretStore 持久化；通用 OAuth 授权、路由 HTTP、刷新协调与 XOAUTH2 基础已有实现；Outlook / Microsoft 365 浏览器登录入口已实现（Outlook.com 个人账号已手测添加与收信同步，Microsoft 365 尚未用真实账号验证）。
 - [x] QQ / Foxmail、网易 163 / 126 / Yeah、139、iCloud、Gmail 内置预设与收发连接诊断；iCloud 与 Gmail 使用应用专用密码，预设存在不等于完整兼容验证。
 - [ ] 补齐真实连接 / 认证 / 代理组合证据，含 Microsoft 的真实账号验证（见[验证记录](../development/validation.md)第 38 节）；Gmail 等其他 OAuth 提供商适配为后续任务。
 - [x] v3 邮件头迁移、全部可选目录头部分批入库、UID 身份和代际、固定窗口游标、重连 / 退避、flags 与删除对账的实现；真实服务商冒烟已有部分证据，完整兼容性验证未完成。
