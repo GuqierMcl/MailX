@@ -27,6 +27,8 @@ pub(crate) struct AuthRecord {
     pub generation: u32,
     pub secret_ref: String,
     pub trusted_endpoints: Vec<TrustEndpoint>,
+    #[serde(default)]
+    pub oauth: Option<crate::auth::GrantBinding>,
 }
 impl AuthRecord {
     pub fn summary(&self, endpoint: &TrustEndpoint) -> AuthenticationSummary {

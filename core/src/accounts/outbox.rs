@@ -36,6 +36,21 @@ pub(crate) enum Next {
     },
 }
 
+/// Outcome of [`AccountService::oauth_send_admission`].
+pub(crate) enum SendAdmission {
+    /// Password account, or nothing due: claim without an OAuth precheck.
+    NotRequired,
+    /// Resolve this plan's credential before claiming at this account revision.
+    Ready {
+        revision: u32,
+        plan: crate::smtp::SmtpPlan,
+    },
+    /// Keep queued messages waiting with this outbox reason.
+    Blocked(&'static str),
+    /// OAuth shutdown has begun; touch neither the network nor the outbox.
+    Paused,
+}
+
 pub(crate) struct Step {
     /// State changes made while looking, for the host.
     pub changed: Vec<Changed>,
@@ -428,6 +443,103 @@ impl AccountService {
             )?,
         };
         Ok(Some(changed))
+    }
+
+    /// Decides whether the worker may claim for this account. Only OAuth
+    /// accounts with a due message pay for a snapshot load and plan; password
+    /// accounts and idle outboxes return `NotRequired` after one cheap query.
+    pub(crate) fn oauth_send_admission(
+        &self,
+        id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<SendAdmission, AppError> {
+        if !self.storage.has_due_outbox(id, now)? {
+            return Ok(SendAdmission::NotRequired);
+        }
+        let account = self.storage.load(id)?.account;
+        if !account.authentication.is_oauth() {
+            return Ok(SendAdmission::NotRequired);
+        }
+        if self.oauth_shutdown {
+            return Ok(SendAdmission::Paused);
+        }
+        match self.smtp_plan(id) {
+            Ok(plan) => Ok(SendAdmission::Ready {
+                revision: account.revision,
+                plan,
+            }),
+            // Missing, undecodable or no longer trusted grants never recover on
+            // their own: the user must reauthorize the mailbox.
+            Err(PlanError::CredentialMissing | PlanError::CredentialUntrusted) => {
+                Ok(SendAdmission::Blocked("authorizationRequired"))
+            }
+            Err(PlanError::Account(error))
+                if matches!(
+                    error.code,
+                    ErrorCode::SecretMissing | ErrorCode::Unsupported
+                ) =>
+            {
+                Ok(SendAdmission::Blocked("authorizationRequired"))
+            }
+            Err(PlanError::Account(error)) if error.code == ErrorCode::NotFound => Err(error),
+            // Store or keychain trouble may clear without user action.
+            Err(PlanError::Account(_)) => Ok(SendAdmission::Blocked("authorizationUnavailable")),
+        }
+    }
+    pub(crate) fn record_oauth_send_blocked(
+        &self,
+        account_id: &str,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Changed>, AppError> {
+        let affected = self.storage.db.execute("UPDATE outbox SET last_error=?2, updated_at=?3, authorization_blocked_at=COALESCE(authorization_blocked_at,?3) WHERE account_id=?1 AND state='queued' AND (last_error IS NULL OR json_extract(last_error,'$.reason') != ?4)", rusqlite::params![account_id, crate::storage::encode(&OutboxError::reason(reason))?, now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true), reason])?;
+        if affected == 0 {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .storage
+            .list_outbox(Some(account_id), false)?
+            .into_iter()
+            .filter(|item| item.state == OutboxState::Queued)
+            .map(|item| Changed { item, draft: None })
+            .collect())
+    }
+
+    pub(crate) fn clear_oauth_send_blocked(
+        &self,
+        account_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Changed>, AppError> {
+        let mut statement = self.storage.db.prepare("SELECT id,authorization_blocked_at,retry_started_at FROM outbox WHERE account_id=?1 AND state='queued' AND authorization_blocked_at IS NOT NULL")?;
+        let rows = statement
+            .query_map([account_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        let resumed_ids = rows
+            .iter()
+            .map(|(id, _, _)| id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        for (id, blocked, started) in rows {
+            let blocked = crate::send::clock::parse_stamp(&blocked).unwrap_or(now);
+            let paused = (now - blocked).max(chrono::Duration::zero());
+            let started = started
+                .and_then(|value| crate::send::clock::parse_stamp(&value))
+                .map(|value| (value + paused).to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+            self.storage.db.execute("UPDATE outbox SET authorization_blocked_at=NULL,retry_started_at=?2,last_error=NULL WHERE id=?1 AND state='queued'", rusqlite::params![id,started])?;
+        }
+        Ok(self
+            .storage
+            .list_outbox(Some(account_id), false)?
+            .into_iter()
+            .filter(|item| resumed_ids.contains(&item.id))
+            .map(|item| Changed { item, draft: None })
+            .collect())
     }
 
     /// The item a settled resolution led to, for replays.

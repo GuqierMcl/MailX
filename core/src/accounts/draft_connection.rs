@@ -60,14 +60,14 @@ pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan,
             port: input.imap.port,
             tls: input.imap.tls,
             username: input.imap.username,
-            password: imap_password,
+            credential: crate::imap::ProtocolCredential::Password(imap_password),
         },
         smtp: SmtpLogin {
             host: input.smtp.host,
             port: input.smtp.port,
             tls: input.smtp.tls,
             username: input.smtp.username,
-            password: smtp_password,
+            credential: crate::imap::ProtocolCredential::Password(smtp_password),
         },
     })
 }
@@ -107,8 +107,14 @@ mod tests {
         assert_eq!(plan.imap.host, "imap.example.test");
         assert_eq!(plan.imap.username, "Fixture@example.test");
         assert_eq!(plan.smtp.username, "SMTP-user");
-        assert_eq!(plan.imap.password.expose_secret(), " imap-secret ");
-        assert_eq!(plan.smtp.password.expose_secret(), " smtp-secret ");
+        assert_eq!(
+            plan.imap.credential.secret().unwrap().expose_secret(),
+            " imap-secret "
+        );
+        assert_eq!(
+            plan.smtp.credential.secret().unwrap().expose_secret(),
+            " smtp-secret "
+        );
         assert!(plan.route.proxy.is_none());
     }
 

@@ -14,10 +14,9 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use super::Clock;
-use super::clock::parse_stamp;
 use super::schedule::{self, Transition};
 use super::types::{OutboxChanged, OutboxError};
-use crate::accounts::{AccountService, Next};
+use crate::accounts::{AccountService, Next, SendAdmission};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
 use crate::send::types::OutboxState;
@@ -73,6 +72,13 @@ impl Drop for ActiveSend {
 impl Shared {
     /// Runs a queue claim atomically with the shutdown gate. A successful claim
     /// owns its guard until protocol work and durable result recording finish.
+    fn paused(&self) -> bool {
+        self.gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .paused
+    }
+
     fn claim<T>(
         &self,
         take: impl FnOnce() -> Result<(T, bool), AppError>,
@@ -266,12 +272,74 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
         let Some(service) = shared.service.upgrade() else {
             return;
         };
+        if shared.paused() {
+            // Quit is pending: no token refresh or outbox write until resumed.
+            drop(service);
+            wake.notified().await;
+            continue;
+        }
+        let admission_id = account_id.clone();
+        let admission_now = clock.now();
+        let admission = blocking(&service, move |service| {
+            service.oauth_send_admission(&admission_id, admission_now)
+        })
+        .await;
+        let blocked = match admission {
+            Ok(SendAdmission::NotRequired) => Ok(None),
+            Ok(SendAdmission::Ready { revision, plan }) => {
+                match plan.login.credential.resolve(&plan.route).await {
+                    Ok(_) => Ok(Some(revision)),
+                    Err(
+                        crate::auth::OAuthError::ReauthenticationRequired
+                        | crate::auth::OAuthError::AuthorizationDenied,
+                    ) => Err("authorizationRequired"),
+                    Err(_) => Err("authorizationUnavailable"),
+                }
+            }
+            Ok(SendAdmission::Blocked(reason)) => Err(reason),
+            Ok(SendAdmission::Paused) => {
+                drop(service);
+                wake.notified().await;
+                continue;
+            }
+            Err(error) if error.code == ErrorCode::NotFound => return,
+            Err(_) => Err("authorizationUnavailable"),
+        };
+        let admission_revision = match blocked {
+            Ok(revision) => revision,
+            Err(reason) => {
+                let id = account_id.clone();
+                let now = clock.now();
+                if let Ok(changed) = blocking(&service, move |service| {
+                    service.record_oauth_send_blocked(&id, reason, now)
+                })
+                .await
+                {
+                    shared.announce(changed);
+                }
+                drop(service);
+                tokio::select! { () = tokio::time::sleep(Duration::from_secs(60)) => {}, () = wake.notified() => {} }
+                continue;
+            }
+        };
         let id = account_id.clone();
         let now = clock.now();
         let claiming = shared.clone();
         let step = blocking(&service, move |service| {
             claiming.claim(|| {
-                let step = service.outbox_step(&id, now)?;
+                if admission_revision
+                    .is_some_and(|revision| service.revision(&id).ok() != Some(revision))
+                {
+                    return Err(AppError::new(ErrorCode::Conflict));
+                }
+                let mut resumed = if admission_revision.is_some() {
+                    service.clear_oauth_send_blocked(&id, now)?
+                } else {
+                    Vec::new()
+                };
+                let mut step = service.outbox_step(&id, now)?;
+                resumed.append(&mut step.changed);
+                step.changed = resumed;
                 let sending = matches!(&step.next, Next::Job { .. });
                 Ok((step, sending))
             })
@@ -345,8 +413,7 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                         }
                     },
                 };
-                let first_queued =
-                    parse_stamp(&job.item.first_queued_at).unwrap_or_else(|| clock.now());
+                let first_queued = job.retry_started_at;
                 record(
                     &shared,
                     &service,

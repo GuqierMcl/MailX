@@ -566,8 +566,8 @@ mod tests {
         let accounts = service.list().unwrap();
         assert_eq!(accounts.len(), 3);
         assert!(accounts.iter().all(|account| {
-            account.authentication.imap.password_configured
-                && account.authentication.smtp.password_configured
+            account.authentication.imap().credential_configured
+                && account.authentication.smtp().credential_configured
         }));
         drop(service);
         let raw = backend.raw_vault().expect("the vault was written");
@@ -589,7 +589,7 @@ mod tests {
                 .list()
                 .unwrap()
                 .iter()
-                .all(|account| { account.authentication.imap.password_configured })
+                .all(|account| { account.authentication.imap().credential_configured })
         );
         assert_eq!(backend.vault_reads.load(Ordering::SeqCst) - before, 1);
         assert!(

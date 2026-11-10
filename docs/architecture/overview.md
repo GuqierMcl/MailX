@@ -44,7 +44,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 | 文本语言 | `i18next + react-i18next`；Rust 使用有类型的共享资源子集，已实现 | 根 `locales/{zh-CN,en}/` 随包提供，语言由设置快照统一派生；宿主注入系统语言，core 不读取平台 API。首版只适配文本，日期等区域格式化另行规划 |
 | 桌面 | Tauri v2，已初始化 | 使用 `frontend/dist` / Vite `devUrl`；账号 IPC、user-data-dir 与系统凭据库装配已接通；正文经自定义协议与空 sandbox iframe 隔离；`tauri-plugin-single-instance` 使第二次启动只唤起已运行的窗口，`tauri-plugin-window-state` 记住主窗口的大小、位置与最大化 / 全屏（刻意不恢复窗口装饰与可见性，主窗口先隐藏创建、恢复后再显示）；打包版本去掉浏览器默认行为（右键菜单、刷新 / 打印 / 查找 / 检查器快捷键等），主界面靠前端拦截，Windows 另用 WebView2 设置关闭浏览器快捷键与表单记忆；邮件正文所在的沙箱 iframe 有意不处理 |
 | 核心 | Rust，`MailxCore` 应用服务门面 | 账号存储为单连接加锁的短事务，宿主经阻塞线程调用；每个账号一个 tokio 后台同步任务，运行时由宿主注入；持锁期间不做网络 I/O |
-| 接收 / 发送 | `async-imap` 用于同步与标记写回；`lettre` 构建发送 MIME，SMTP 会话在 core 实现 | IMAP 与 SMTP 连接统一经过账号路由；已有受控服务器测试，完整真实服务商组合及 OAuth 仍待验证，详见[写信与发送](sending.md) |
+| 接收 / 发送 | `async-imap` 用于同步与标记写回；`lettre` 构建发送 MIME，SMTP 会话在 core 实现 | IMAP 与 SMTP 连接统一经过账号路由；已有受控服务器测试，通用 OAuth / XOAUTH2 已实现但生产注册为空，完整真实服务商组合仍待验证，详见[写信与发送](sending.md) |
 | MIME / HTML | `mail-parser` + `full_encoding` 与 `ammonia` 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 单连接、WAL、FULL 同步、外键、迁移校验与目录锁；FTS5 trigram 索引头部、预览、已缓存正文、附件名和本机已发送副本，短词退回 LIKE；覆盖边界见[存储与搜索](storage-search.md) |
 | AI | 规划采用 Rust 流式适配器 | OpenAI 兼容与 Ollama 为后续方案，尚未接入模型；不同协议不伪装成同一种接口 |

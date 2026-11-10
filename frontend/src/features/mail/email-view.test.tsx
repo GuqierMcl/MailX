@@ -62,7 +62,7 @@ describe('body failure guidance', () => {
     ['providerPolicy', 'netease126', /阻止了正文下载/],
     ['providerPolicy', 'neteaseYeah', /阻止了正文下载/],
     ['providerPolicy', null, /阻止了正文下载/],
-    ['authentication', 'netease163', /邮箱认证失败/],
+    ['authentication', 'netease163', /邮箱登录失败/],
   ] as const)('explains %s for %s and retries only when the reader asks', async (bodyFailure, providerId, expectedHint) => {
     const account = exampleAccount({ providerId })
     const email: EmailDetail = {
@@ -79,7 +79,7 @@ describe('body failure guidance', () => {
       onDownload={onDownload} onFlag={vi.fn()} onClose={vi.fn()} onRespond={vi.fn()} /></TooltipProvider>)
     expect(screen.getByText('正文获取失败')).toBeInTheDocument()
     expect(screen.getByText(expectedHint)).toBeInTheDocument()
-    if (bodyFailure === 'providerPolicy') expect(screen.queryByText(/邮箱认证失败/)).not.toBeInTheDocument()
+    if (bodyFailure === 'providerPolicy') expect(screen.queryByText(/邮箱登录失败/)).not.toBeInTheDocument()
     expect(onDownload).not.toHaveBeenCalled()
     if (bodyFailure === 'providerPolicy' && providerId) {
       await userEvent.click(screen.getByRole('button', { name: '查看官方帮助' }))

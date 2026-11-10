@@ -12,6 +12,7 @@ impl AccountService {
         // Do not call recover/get here: either can access a locked credential
         // store, and pending connection journals must be retired, never applied.
         let draft_ids = self.storage.remove_account(&request)?;
+        self.invalidate_account_oauth(&request.account_id);
         self.cleanup_removed_secrets().ok();
         Ok(AccountRemoval {
             credentials_pending: self
@@ -26,6 +27,10 @@ impl AccountService {
     pub(super) fn cleanup_removed_secrets(&self) -> Result<(), AppError> {
         let mut failed = false;
         for key in self.storage.removed_secrets()? {
+            if self.oauth_cleanup_pending(&key) {
+                failed = true;
+                continue;
+            }
             // A corrupt/shared historical reference must not delete a live
             // account's credential. Keep its intent for a later safe retry.
             if self.storage.is_referenced(&key)? {

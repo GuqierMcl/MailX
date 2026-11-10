@@ -4,10 +4,12 @@ pub(crate) mod bodies;
 mod deletions;
 pub(crate) mod draft_connection;
 mod drafts;
+pub(crate) mod oauth;
+pub(crate) mod oauth_sessions;
 pub(crate) mod outbox;
 mod removal;
 pub(crate) use drafts::{DraftSource, SourceMessage, local_offset};
-pub(crate) use outbox::Next;
+pub(crate) use outbox::{Next, SendAdmission};
 #[cfg(any(test, feature = "body-webview-test"))]
 mod body_fixture;
 pub(crate) mod messages;
@@ -30,6 +32,13 @@ use uuid::Uuid;
 pub struct AccountService {
     storage: Storage,
     secrets: Arc<dyn SecretStore>,
+    oauth_managers:
+        std::sync::Mutex<std::collections::HashMap<String, Arc<crate::auth::TokenManager>>>,
+    oauth_registrations: std::collections::HashMap<String, crate::auth::ProviderRegistration>,
+    retired_oauth_managers: std::sync::Mutex<Vec<(String, Arc<crate::auth::TokenManager>)>>,
+    oauth_shutdown: bool,
+    #[cfg(test)]
+    trusted_oauth_test_providers: std::collections::HashMap<String, oauth::TestProviderPolicy>,
 }
 
 impl AccountService {
@@ -37,6 +46,12 @@ impl AccountService {
         let mut service = Self {
             storage: Storage::open(path)?,
             secrets,
+            oauth_managers: std::sync::Mutex::new(std::collections::HashMap::new()),
+            oauth_registrations: std::collections::HashMap::new(),
+            retired_oauth_managers: std::sync::Mutex::new(Vec::new()),
+            oauth_shutdown: false,
+            #[cfg(test)]
+            trusted_oauth_test_providers: std::collections::HashMap::new(),
         };
         service.recover()?;
         Ok(service)
@@ -70,16 +85,45 @@ impl AccountService {
         let snapshot = self.storage.load(id)?;
         // Read only presence from the backend; never return its value or reference.
         let mut account = snapshot.account;
-        for summary in [
-            &mut account.authentication.imap,
-            &mut account.authentication.smtp,
-        ] {
-            let profile = snapshot
-                .profiles
-                .iter()
-                .find(|p| p.id == summary.id)
-                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
-            summary.password_configured = self.secrets.get(&profile.secret_ref)?.is_some();
+        match &mut account.authentication {
+            AccountAuthenticationSummary::Password(auth) => {
+                for summary in [&mut auth.imap, &mut auth.smtp] {
+                    let profile = snapshot
+                        .profiles
+                        .iter()
+                        .find(|p| p.id == summary.id)
+                        .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+                    summary.password_configured = self.secrets.get(&profile.secret_ref)?.is_some();
+                }
+            }
+            AccountAuthenticationSummary::OAuth2(auth) => {
+                for summary in [&mut auth.imap, &mut auth.smtp] {
+                    let profile = snapshot
+                        .profiles
+                        .iter()
+                        .find(|p| p.id == summary.id)
+                        .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+                    let stored = self.secrets.get(&profile.secret_ref)?;
+                    summary.credential_configured = stored.is_some();
+                    let revoked = stored
+                        .as_ref()
+                        .and_then(|value| crate::auth::TokenSet::decode_secret(value).ok())
+                        .is_none_or(|tokens| tokens.refresh_token.is_none());
+                    let manager_revoked = self
+                        .oauth_managers
+                        .lock()
+                        .ok()
+                        .and_then(|managers| {
+                            managers
+                                .get(&profile.secret_ref)
+                                .map(|manager| manager.needs_reauthorization())
+                        })
+                        .unwrap_or(false);
+                    if revoked || manager_revoked {
+                        auth.state = OAuthAuthenticationState::NeedsReauthorization;
+                    }
+                }
+            }
         }
         if let RouteConfig::Custom {
             authentication: Some(auth),
@@ -140,6 +184,12 @@ impl AccountService {
         mut request: UpdateConnectionRequest,
     ) -> Result<Account, AppError> {
         validate_uuid(&request.account_id, "accountId")?;
+        if !matches!(
+            request.connection.authentication,
+            AuthenticationInput::Password { .. }
+        ) {
+            return Err(AppError::new(ErrorCode::Unsupported));
+        }
         validate_connection(&mut request.connection)?;
         self.recover()?;
         let old = self.storage.load(&request.account_id)?;
@@ -203,6 +253,7 @@ impl AccountService {
             }
         }
         self.storage.apply(&journal)?;
+        self.invalidate_oauth_refs(&journal.retired_refs);
         journal.applied = true;
         // Cleanup failures are safe to defer: the committed new configuration is
         // already durable and a retained journal will retry old, unreferenced keys.
@@ -234,6 +285,7 @@ impl AccountService {
             }
             if complete && current_revision == journal.expected_revision {
                 self.storage.apply(&journal)?;
+                self.invalidate_oauth_refs(&journal.retired_refs);
                 journal.applied = true;
                 self.cleanup(&journal).ok();
             } else {
@@ -250,6 +302,9 @@ impl AccountService {
 
     fn cleanup(&self, journal: &Journal) -> Result<(), AppError> {
         for key in &journal.retired_refs {
+            if self.oauth_cleanup_pending(key) {
+                return Err(AppError::new(ErrorCode::SecretStoreUnavailable));
+            }
             if !self.storage.is_referenced(key)? {
                 self.secrets.delete(key)?;
             }
@@ -266,8 +321,8 @@ impl AccountService {
         let id = old.map(|s| s.account.id.clone()).unwrap_or_else(new_id);
         let imap_endpoint = TrustEndpoint::mail("imap", &config.imap);
         let smtp_endpoint = TrustEndpoint::mail("smtp", &config.smtp);
-        let old_imap = old.and_then(|s| s.profile(&s.account.authentication.imap.id));
-        let old_smtp = old.and_then(|s| s.profile(&s.account.authentication.smtp.id));
+        let old_imap = old.and_then(|s| s.profile(&s.account.authentication.imap().id));
+        let old_smtp = old.and_then(|s| s.profile(&s.account.authentication.smtp().id));
         let mut writes = vec![];
         let AuthenticationInput::Password { credentials } = config.authentication else {
             return Err(AppError::new(ErrorCode::Unsupported));
@@ -348,11 +403,11 @@ impl AccountService {
             mailbox_source_id: source,
             imap: config.imap,
             smtp: config.smtp,
-            authentication: PasswordAuthenticationSummary {
+            authentication: AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
                 mode,
                 imap: imap_summary,
                 smtp: smtp_summary,
-            },
+            }),
             default_route_revision: if matches!(route, RouteConfig::Inherit) {
                 Some(1)
             } else {
@@ -388,6 +443,9 @@ impl AccountService {
         match update {
             SecretUpdate::Keep => {
                 let old = old.ok_or_else(|| AppError::validation("authentication"))?;
+                if old.oauth.is_some() {
+                    return Err(AppError::validation("authentication"));
+                }
                 let value = self
                     .secrets
                     .get(&old.secret_ref)?
@@ -416,6 +474,7 @@ impl AccountService {
                         .unwrap_or(1),
                     secret_ref: secret_key(account_id),
                     trusted_endpoints: endpoints.to_vec(),
+                    oauth: None,
                 };
                 writes.push((profile.secret_ref.clone(), value));
                 Ok(profile)
@@ -519,10 +578,10 @@ impl AccountService {
             return Ok(false);
         };
         let imap = snapshot
-            .profile(&snapshot.account.authentication.imap.id)
+            .profile(&snapshot.account.authentication.imap().id)
             .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
         let smtp = snapshot
-            .profile(&snapshot.account.authentication.smtp.id)
+            .profile(&snapshot.account.authentication.smtp().id)
             .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
         match credentials {
             PasswordAuthenticationInput::Shared { password } => {
@@ -668,9 +727,6 @@ fn normalize_color(value: &str) -> Option<Option<String>> {
         .then(|| Some(format!("#{}", hex.to_ascii_lowercase())))
 }
 fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
-    if !matches!(config.authentication, AuthenticationInput::Password { .. }) {
-        return Err(AppError::new(ErrorCode::Unsupported));
-    }
     config.email_address = config.email_address.trim().to_owned();
     if !valid_text(&config.email_address, 320)
         || config.email_address.chars().any(char::is_whitespace)
@@ -729,18 +785,17 @@ fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
             }
         }
     }
-    let AuthenticationInput::Password { credentials } = &config.authentication else {
-        unreachable!()
-    };
-    for update in match credentials {
-        PasswordAuthenticationInput::Shared { password } => vec![password],
-        PasswordAuthenticationInput::Separate {
-            imap_password,
-            smtp_password,
-        } => vec![imap_password, smtp_password],
-    } {
-        if let SecretUpdate::Replace { value } = update {
-            validate_secret(value, "authentication")?;
+    if let AuthenticationInput::Password { credentials } = &config.authentication {
+        for update in match credentials {
+            PasswordAuthenticationInput::Shared { password } => vec![password],
+            PasswordAuthenticationInput::Separate {
+                imap_password,
+                smtp_password,
+            } => vec![imap_password, smtp_password],
+        } {
+            if let SecretUpdate::Replace { value } = update {
+                validate_secret(value, "authentication")?;
+            }
         }
     }
     Ok(())
@@ -827,3 +882,6 @@ fn canonical_config(
     }
     encode(&canonical)
 }
+
+#[cfg(test)]
+mod oauth_e2e_tests;

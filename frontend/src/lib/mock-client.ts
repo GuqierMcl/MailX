@@ -304,7 +304,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         ? { status: 'failed', stage: 'configuration', code: 'credentialMissing' }
         : trust !== 'trusted' ? { status: 'failed', stage: 'configuration', code: 'credentialUntrusted' }
         : { status: 'verified', stage: 'complete', code: null }
-      return { accountId, revision: account.revision, imap: check(account.authentication.imap.passwordConfigured, account.authentication.imap.trust), smtp: check(account.authentication.smtp.passwordConfigured, account.authentication.smtp.trust) }
+      return { accountId, revision: account.revision, imap: check((account.authentication.kind === 'password' ? account.authentication.imap.passwordConfigured : account.authentication.imap.credentialConfigured), account.authentication.imap.trust), smtp: check((account.authentication.kind === 'password' ? account.authentication.smtp.passwordConfigured : account.authentication.smtp.credentialConfigured), account.authentication.smtp.trust) }
     },
     async verifyDraftConnection(connection, signal) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -780,8 +780,8 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     imap: config.imap,
     smtp: config.smtp,
     authentication: separate
-      ? { mode: 'separate', imap: auth('imap'), smtp: auth('smtp') }
-      : { mode: 'shared', imap: auth('shared'), smtp: auth('shared') },
+      ? { kind: 'password', mode: 'separate', imap: auth('imap'), smtp: auth('smtp') }
+      : { kind: 'password', mode: 'shared', imap: auth('shared'), smtp: auth('shared') },
     route,
     routeRevision: 1,
     defaultRouteRevision: null,

@@ -8,7 +8,7 @@ MailX 面向需要管理多个邮箱的开发者与个人用户，将可靠收�
 
 | 能力 | 当前桌面实现 | 后续 |
 | --- | --- | --- |
-| 收发协议 | IMAP 收取、SMTP 发送队列，TLS 必需；收件箱 IDLE、失败退回轮询 | POP3、JMAP、提供商专属 API、OAuth |
+| 收发协议 | IMAP 收取、SMTP 发送队列，TLS 必需；收件箱 IDLE、失败退回轮询 | POP3、JMAP、提供商专属 API、生产 OAuth 服务商接入 |
 | 账号 | 多账号、统一收件箱、手动配置、QQ / Foxmail、163 / 126 / yeah.net、139 预设与收发登录测试 | 更多预设和自动发现 |
 | 阅读 | 三栏布局、虚拟列表与分页、按需正文缓存、附件保存、隔离 HTML、远程图片策略 | 全量离线下载与缓存配额 |
 | 整理 | 已读 / 未读、星标、按账号与文件夹过滤、可撤销删除、本机归档 | 移动到服务器文件夹、服务端归档、UI 多选批量操作 |
@@ -34,8 +34,8 @@ MailX 面向需要管理多个邮箱的开发者与个人用户，将可靠收�
 | QQ / Foxmail | IMAP / SMTP + 16 位授权码；已有预设 | 数字/英文 QQ 地址与 Foxmail 身份分别验证，真实发信、标记写回、收取范围变化、已发送副本及路由；见[接入方案](../reference/qq-foxmail-integration.md) |
 | 网易 163 / 126 / yeah.net | IMAP / SMTP + 客户端授权码；已有三个独立预设 | 官方参数与 IMAP ID 要求已核查，已有用户真实邮箱手测反馈；完整域名、平台与收发兼容矩阵待补充，见[接入方案](../reference/netease-163-126-integration.md) |
 | 139 邮箱 | IMAP / SMTP + 客户端授权码；已有预设 | 账号资格、授权码有效期、真实收发与路由；已有用户手测反馈，见[接入方案](../reference/139-mail-integration.md) |
-| Gmail（后续） | OAuth 2.0 + XOAUTH2 为目标路径，尚未实现 | 同意范围、刷新、标签文件夹语义、走代理 |
-| Outlook.com / Microsoft 365（后续） | OAuth 2.0 + XOAUTH2，尚未实现 | 租户策略、SMTP 可用性、刷新失败提示 |
+| Gmail（后续） | OAuth 2.0 + XOAUTH2 通用基础已有实现，Gmail 接入尚未开放 | 同意范围、刷新、标签文件夹语义、走代理 |
+| Outlook.com / Microsoft 365（后续） | OAuth 2.0 + XOAUTH2 通用基础已有实现，Microsoft 接入尚未开放 | 租户策略、SMTP 可用性、刷新失败提示 |
 | 企业邮箱 | 手动端点 + 届时已实现的认证方式 | 协议与 TLS 证书可用性；私有 CA 的显式配置尚未提供 |
 
 Google 文档描述 Gmail 的 XOAUTH2 接入与公开应用验证要求；Microsoft 文档描述 Outlook.com / Microsoft 365 的 OAuth 邮件接入。由此将应用注册、授权与发送权限验证列为实施依赖，而不假设普通密码普遍可用。[Google 官方说明](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol)、[Microsoft 官方说明](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth)。

@@ -42,7 +42,12 @@ mod bodies;
 mod body_fixture;
 mod draft_bodies;
 mod flags;
+mod oauth;
 mod organize;
+pub use oauth::{
+    BeginOAuthAccount, BeginOAuthReauthorization, OAuthBrowserAuthorization, OAuthSessionHandle,
+    OAuthSessionRequest,
+};
 mod verification;
 pub use crate::sync::cadence::Activity;
 pub use attachments::{AttachmentFile, AttachmentInfo};
@@ -86,6 +91,7 @@ pub struct MailxCore {
     verification: Arc<verification::VerificationRegistry>,
     draft_verification: Arc<verification::VerificationRegistry>,
     archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
+    oauth_sessions: Arc<crate::accounts::oauth_sessions::SessionCoordinator>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -224,6 +230,7 @@ impl MailxCore {
             verification: Arc::default(),
             draft_verification: Arc::default(),
             archive_undo: Arc::default(),
+            oauth_sessions: Arc::default(),
         })
     }
 

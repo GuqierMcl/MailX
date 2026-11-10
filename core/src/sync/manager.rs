@@ -51,6 +51,8 @@ pub enum SyncPhase {
 pub enum SyncFailureCode {
     /// The server rejected the login. Not retried until the account changes.
     Authentication,
+    /// An OAuth mailbox must be signed in again. Not retried until then.
+    SignInRequired,
     /// Provider security policy; only an explicit refresh/settings change retries.
     ProviderPolicy,
     /// The saved password was confirmed for other settings and needs re-entry.
@@ -1292,6 +1294,10 @@ fn classify(error: ImapError) -> Outcome {
         ImapError::Authentication(_) => {
             Outcome::Blocked(failure(SyncFailureCode::Authentication, detail, false))
         }
+        // The fixed message says everything a person can act on.
+        ImapError::SignInRequired => {
+            Outcome::Blocked(failure(SyncFailureCode::SignInRequired, None, false))
+        }
         ImapError::Unsupported(_) => {
             Outcome::Blocked(failure(SyncFailureCode::Unsupported, detail, false))
         }
@@ -1319,6 +1325,7 @@ fn classify(error: ImapError) -> Outcome {
 fn failure(code: SyncFailureCode, detail: Option<String>, will_retry: bool) -> SyncFailure {
     let message = match code {
         SyncFailureCode::Authentication => "服务器拒绝了登录，请检查用户名和密码或授权码。",
+        SyncFailureCode::SignInRequired => "邮箱登录已过期，请在账号设置中重新登录。",
         SyncFailureCode::ProviderPolicy => "服务商安全策略拒绝访问，请按服务商指引处理后手动重试。",
         SyncFailureCode::CredentialUntrusted => {
             "服务器或登录身份已改变，请在账号设置中重新输入密码。"

@@ -168,7 +168,7 @@ describe('accounts dialog', () => {
   })
 
   it('points to the connection when credentials need confirming or sync stopped', async () => {
-    const pending = exampleAccount({ authentication: { mode: 'shared', imap: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' }, smtp: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' } } })
+    const pending = exampleAccount({ authentication: { kind: 'password', mode: 'shared', imap: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' }, smtp: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' } } })
     const { dialog, view } = renderDialog([pending])
     expect(await within(dialog).findByText('凭证需要重新确认')).toBeInTheDocument()
     view.unmount()

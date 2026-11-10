@@ -157,15 +157,28 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 - **资料**（`profile`：`displayName`、`color`、`senderName`、`useProviderIcon`）只影响显示或发件人署名。`senderName` 是收件人在 `From` 中看到的名字，保存时去首尾空白，空值或 `null` 清除；含控制字符（含 CR / LF，防头部注入）或超过 128 个字符返回 `validation`，`field` 为 `senderName`；省略等同 `null`。`useProviderIcon` 是是否使用可用服务商图标的布尔偏好，默认 `true`。修改资料不推进 `revision`、不修改凭证、不重启同步；以最后一次写入为准，不做乐观锁。`color` 为 `#rrggbb`（规范为小写）或 `null`，空字符串等同 `null`。
 - **连接**（`connection`：`emailAddress`、可空 `providerId`、`imap` / `smtp`、`authentication`、`route`）决定 MailX 如何访问邮箱。修改必须匹配 `expectedRevision`，成功后推进 `revision`，宿主立即重启该账号的同步与正文下载，旧连接不会沿用。修改连接及其 journal 恢复不会改动资料，已关闭的 `useProviderIcon` 也保持关闭。
 
-创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color`、`senderName` 与 `useProviderIcon`）和全部连接字段；省略 `useProviderIcon` 时使用 `true`。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。OAuth2 输入类型目前仅用于明确返回 `unsupported`。
+创建仍是一个请求：`config` 同时包含资料字段（`displayName`、可省略的 `color`、`senderName` 与 `useProviderIcon`）和全部连接字段；省略 `useProviderIcon` 时使用 `true`。连接配置为 `{ host, port, tls, username }`，TLS 为 `implicit` 或 `startTls`。密码认证分 `shared` 和 `separate`；秘密输入必须使用 `keep` / `replace`，完整语义见[账号配置](../architecture/account-configuration.md)。普通创建 / 修改接口中的 OAuth2 输入仍返回 `unsupported`；可信宿主的专用授权会话接口见下文。
 
-创建和修改连接中的 `imap.username` / `smtp.username` 仍为字符串字段，各自去掉首尾空白（Unicode `White_Space` 加 `U+FEFF`，前后端一致）后，空字符串使用本次有效 `emailAddress`，非空值保留大小写。核心先完成规范化，再计算创建请求的幂等身份、邮箱来源与凭证信任；读取 DTO 返回实际保存的有效用户名。因此留空和明确填写同一邮箱地址的创建请求等价。保存后用户名不随邮箱地址自动变化；再次留空保存才按新的邮箱地址解析。有效登录身份改变时，现有来源及凭证确认规则继续适用；SMTP 仍使用配置的密码认证。
+创建和修改连接中的 `imap.username` / `smtp.username` 仍为字符串字段，各自去掉首尾空白（Unicode `White_Space` 加 `U+FEFF`，前后端一致）后，空字符串使用本次有效 `emailAddress`，非空值保留大小写。核心先完成规范化，再计算创建请求的幂等身份、邮箱来源与凭证信任；读取 DTO 返回实际保存的有效用户名。因此留空和明确填写同一邮箱地址的创建请求等价。保存后用户名不随邮箱地址自动变化；再次留空保存才按新的邮箱地址解析。有效登录身份改变时，现有来源及凭证确认规则继续适用；SMTP 按已保存的显式凭证类型选择密码认证或 XOAUTH2。
 
 `Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color`、`senderName` 与 `useProviderIcon`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。已有数据库账号升级后、旧账号快照或 journal 缺少 `useProviderIcon` 时，默认值均为 `true`。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
 
 创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改连接必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。修改资料只校验账号存在，`expectedRevision` 不参与。
+
+### OAuth 专用宿主命令
+
+以下命令仅可信 main 窗口且核心 Ready 时可调用，不授予正文、写信窗口或 MCP。生产受信注册与身份适配器均为空，`accounts_oauth_begin` 当前对所有提供商返回 `unsupported`，不会绑定端口、读取代理凭证或打开浏览器；前端没有可用 OAuth 服务商入口。
+
+| Tauri 命令 | 输入 | 结果 |
+| --- | --- | --- |
+| `accounts_oauth_begin` | `{ request: { providerId, request: { requestId, config } } }` | 宿主直接打开受信授权 URL，仅返回 `{ sessionId }` |
+| `accounts_oauth_reauthorize` | `{ request: { providerId, accountId, expectedRevision } }` | 固定当前 OAuth 账号目标并打开受信授权 URL，仅返回 `{ sessionId }` |
+| `accounts_oauth_finish` | `{ request: { sessionId } }` | 等待回调、交换和身份验证，消费会话内固定目标，创建或重授权账号并返回 `Account` |
+| `accounts_oauth_cancel` | `{ request: { sessionId } }` | 取消监听 / 交换 / 身份验证；重复取消无副作用 |
+
+调用方不提供授权 / token URL、PKCE 秘密、回调内容或已验证主体；输入里的 OAuth 身份提示不作为授权证明，核心以受信注册及验证结果替换。目标邮箱与用户名先按账号规则归一化，并在监听器绑定前核对受信邮件端点 / TLS / 登录身份策略；`configuration.targetMailboxResource` 是已验证邮箱目标，不能作为 token resource 配置。会话最多八个、五分钟有效、完成结果仅能消费一次；到期自动清理监听任务和未消费的已完成授权结果，不依赖前端再次调用。`configuration.issuer` 是验证器返回的已验证 issuer（多租户端点下因租户而异），不是注册项常量。账号摘要的 `authentication` 现在显式带 `kind`：`password` 保留原密码摘要，`oauth2` 使用 `configuration`、`state=connected | needsReauthorization` 和 `imap` / `smtp` 的 `{ id, generation, credentialConfigured, trust }`；所有结果均无 token。旧密码快照可读，写出带 `kind=password`。当前 OAuth 连接编辑不可用；专用重授权接口核对预期 revision 与稳定身份，生产服务商及界面仍未开放。 授权会话的回调路径与授权地址附加参数（`prompt`、`login_hint`、`nonce`）完全由受信注册项决定，调用方不可提供。管理员关闭协议时，同步与验证报告 `providerPolicy`，发信失败原因为 `providerPolicy`，均不含服务器文字。授权错误使用固定结构化码：`oauthNetwork`、`oauthProxy`、`oauthTls`、`oauthTimeout`、`oauthRateLimited`、`oauthServerUnavailable`、`oauthAuthorizationDenied`、`oauthSessionExpired`、`oauthInvalidResponse`、`oauthReauthorizationRequired`，不透传回调、URL、token 或服务端文字；网络与临时服务错误不会被报告为表单参数错误。
 
 ### 桌面窗口命令
 
@@ -300,7 +313,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `jobs.get` / `jobs.cancel` | jobId → job 状态 | GET / POST `/api/v1/jobs/{id}` / `…/cancel` |
 | `ai.start` / `ai.get` / `ai.cancel` | Run 请求 / runId → Run 快照 | POST / GET `/api/v1/ai/runs` / `…/{id}` / `…/{id}/cancel` |
 
-OAuth、附件上传和后续设置细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
+Web OAuth、附件上传和后续设置细分接口在对应实现任务中补充，不通过万能 `execute_sql` 或文件路径接口临时绕过边界。附件 Web 下载需检查所属账号和安全 `Content-Disposition`；正文读取默认不改变已读标记，标记由显式操作触发。
 
 ## 4. 邮件写操作一致性
 

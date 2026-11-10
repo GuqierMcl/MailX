@@ -291,7 +291,9 @@ fn login() -> ImapLogin {
         port: 993,
         tls: TlsMode::Implicit,
         username: "fixture@example.test".into(),
-        password: crate::secrets::SecretValue::new("synthetic-password".into()),
+        credential: crate::imap::ProtocolCredential::Password(crate::secrets::SecretValue::new(
+            "synthetic-password".into(),
+        )),
     }
 }
 

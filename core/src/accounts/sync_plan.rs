@@ -69,15 +69,12 @@ impl AccountService {
         let profile = snapshot
             .profiles
             .iter()
-            .find(|profile| profile.id == account.authentication.imap.id)
+            .find(|profile| profile.id == account.authentication.imap().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
         if profile.trust(&endpoint) != CredentialTrust::Trusted {
             return Err(PlanError::CredentialUntrusted);
         }
-        let password = self
-            .secrets
-            .get(&profile.secret_ref)?
-            .ok_or(PlanError::CredentialMissing)?;
+        let credential = self.protocol_credential(profile, account)?;
 
         let mut route = self.image_route(account_id)?;
         route.image_proxy_dns = false;
@@ -89,7 +86,7 @@ impl AccountService {
                 port: account.imap.port,
                 tls: account.imap.tls,
                 username: account.imap.username.clone(),
-                password,
+                credential,
             },
             route,
         })
@@ -106,15 +103,12 @@ impl AccountService {
         let profile = snapshot
             .profiles
             .iter()
-            .find(|profile| profile.id == account.authentication.smtp.id)
+            .find(|profile| profile.id == account.authentication.smtp().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
         if profile.trust(&endpoint) != CredentialTrust::Trusted {
             return Err(PlanError::CredentialUntrusted);
         }
-        let password = self
-            .secrets
-            .get(&profile.secret_ref)?
-            .ok_or(PlanError::CredentialMissing)?;
+        let credential = self.protocol_credential(profile, account)?;
         let mut route = self.image_route(account_id)?;
         route.image_proxy_dns = false;
 
@@ -124,7 +118,7 @@ impl AccountService {
                 port: account.smtp.port,
                 tls: account.smtp.tls,
                 username: account.smtp.username.clone(),
-                password,
+                credential,
             },
             route,
             sender_address: account.email_address.clone(),
@@ -299,7 +293,10 @@ pub(crate) mod tests {
             ),
             ("imap.example.com", 993, "lin")
         );
-        assert_eq!(plan.login.password.expose_secret(), "mail-secret");
+        assert_eq!(
+            plan.login.credential.secret().unwrap().expose_secret(),
+            "mail-secret"
+        );
         assert!(plan.route.proxy.is_none());
     }
 

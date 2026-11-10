@@ -6,13 +6,15 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
+export function exampleAccount(): Account & { authentication: Extract<Account['authentication'], { kind: 'password' }> }
+export function exampleAccount(overrides: Partial<Account>): Account
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
     displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, emailAddress: 'work@example.com', providerId: null,
     mailboxSourceId: 'source-a', imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'receive@example.com' },
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'send@example.com' },
-    authentication: { mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
+    authentication: { kind: 'password', mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
     route: { kind: 'direct' }, routeRevision: 1, defaultRouteRevision: null, connectionStatus: 'unverified',
     createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z', ...overrides,
   }

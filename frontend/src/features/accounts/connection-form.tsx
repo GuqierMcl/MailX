@@ -180,7 +180,9 @@ export function ConnectionForm({
     testPending.current?.abort()
     testPending.current = null
   }, [verificationResetKey])
-  const sameMode = account?.authentication.mode === draft.mode
+  const password = account?.authentication.kind === 'password' ? account.authentication : null
+  const oauth = account?.authentication.kind === 'oauth2'
+  const sameMode = password?.mode === draft.mode
   const oldProxyAuth = account?.route.kind === 'custom' ? account.route.authentication : null
   const needsTrust = account && (account.authentication.imap.trust === 'needsConfirmation'
     || account.authentication.smtp.trust === 'needsConfirmation'
@@ -282,16 +284,16 @@ export function ConnectionForm({
 
   const serverFields = (<><ConnectionFields protocol="imap" value={draft.imap} emailAddress={draft.emailAddress} onChange={(value) => change('imap', value)} error={error} />
           <ConnectionFields protocol="smtp" value={draft.smtp} emailAddress={draft.emailAddress} onChange={(value) => change('smtp', value)} error={error} /></>)
-  const modeFields = (<><RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label={t('accounts:authenticationMode')}>
+  const modeFields = oauth ? <FieldDescription>{t('accounts:oauthManagedCredentials')}</FieldDescription> : (<><RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label={t('accounts:authenticationMode')}>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">{t('accounts:sharedPassword')}</FieldLabel></Field>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-separate" value="separate" /><FieldLabel htmlFor="auth-separate">{t('accounts:separatePasswords')}</FieldLabel></Field>
               </RadioGroup>
               {account && !sameMode && <FieldDescription>{t('accounts:authenticationChanged')}</FieldDescription>}</>)
-  const passwordFields = (<>{draft.mode === 'shared'
-                ? <PasswordField id="sharedPassword" label={credentialText.shared} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
+  const passwordFields = oauth ? null : (<>{draft.mode === 'shared'
+                ? <PasswordField id="sharedPassword" label={credentialText.shared} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={sameMode && !!password?.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                 : <>
-                    <PasswordField id="imapPassword" label={credentialText.incoming} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!account?.authentication.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
-                    <PasswordField id="smtpPassword" label={credentialText.outgoing} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!account?.authentication.smtp.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
+                    <PasswordField id="imapPassword" label={credentialText.incoming} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!password?.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
+                    <PasswordField id="smtpPassword" label={credentialText.outgoing} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!password?.smtp.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                   </>}</>)
   const routeFields = (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
               <Field>
@@ -336,6 +338,8 @@ export function ConnectionForm({
                 </Field>
               </>}
           </SettingsGroup>)
+
+  if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>OAuth 2.0</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
 
   return (
     <SettingsPage footer={<>

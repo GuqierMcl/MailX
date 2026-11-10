@@ -539,7 +539,7 @@ fn plan_failure(error: PlanError) -> BodyFailureCode {
 fn imap_failure(error: ImapError) -> BodyFailureCode {
     match error {
         ImapError::TooLarge => BodyFailureCode::TooLarge,
-        ImapError::Authentication(_) => BodyFailureCode::Authentication,
+        ImapError::Authentication(_) | ImapError::SignInRequired => BodyFailureCode::Authentication,
         ImapError::ProviderPolicy => BodyFailureCode::ProviderPolicy,
         ImapError::Net(_) | ImapError::Timeout => BodyFailureCode::Network,
         _ => BodyFailureCode::Protocol,

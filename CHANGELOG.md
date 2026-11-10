@@ -15,6 +15,14 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - Right-clicking a message in the list opens a menu with open, reply, reply all, forward, read and star, archive and delete actions, without opening the message. / 在邮件列表中右键点击邮件可打开菜单，提供打开、回复、全部回复、转发、已读与星标、归档和删除操作，且不会打开该邮件。 ([#105](https://github.com/GuqierMcl/MailX/pull/105))
 
+### ✨ Optimization
+
+- Manual retry starts a fresh delivery retry window, and waiting for mailbox authorization preserves queued messages without spending delivery attempts. / 手动立即重试会重新开始投递重试窗口，等待邮箱授权时保留排队邮件且不消耗投递次数。
+
+### 🔄 Changed
+
+- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
+
 ## [0.1.2] - 2026-11-08
 
 ### 🚀 Feature

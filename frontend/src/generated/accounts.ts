@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -23,6 +23,14 @@ export type AuthenticationMode = "shared" | "separate";
 export type PasswordAuthenticationInput = { "mode": "shared", password: SecretUpdate, } | { "mode": "separate", imapPassword: SecretUpdate, smtpPassword: SecretUpdate, };
 
 export type OAuth2Configuration = { providerId: string, issuer: string, clientRegistrationId: string, authorizationSubject: string | null, targetMailboxResource: string | null, };
+
+export type BeginOAuthAccount = { providerId: string, request: CreateAccountRequest, };
+
+export type BeginOAuthReauthorization = { providerId: string, accountId: string, expectedRevision: number, };
+
+export type OAuthSessionRequest = { sessionId: string, };
+
+export type OAuthSessionHandle = { sessionId: string, };
 
 export type AuthenticationInput = { "kind": "password", } & ({ "mode": "shared", password: SecretUpdate, } | { "mode": "separate", imapPassword: SecretUpdate, smtpPassword: SecretUpdate, }) | { "kind": "oauth2", configuration: OAuth2Configuration, };
 
@@ -97,6 +105,14 @@ export type AuthenticationSummary = { id: string, generation: number, passwordCo
 
 export type PasswordAuthenticationSummary = { mode: AuthenticationMode, imap: AuthenticationSummary, smtp: AuthenticationSummary, };
 
+export type ProtocolAuthenticationSummary = { id: string, generation: number, credentialConfigured: boolean, trust: CredentialTrust, };
+
+export type OAuthAuthenticationState = "connected" | "needsReauthorization";
+
+export type OAuthAuthenticationSummary = { configuration: OAuth2Configuration, state: OAuthAuthenticationState, imap: ProtocolAuthenticationSummary, smtp: ProtocolAuthenticationSummary, };
+
+export type AccountAuthenticationSummary = { "kind": "password" } & PasswordAuthenticationSummary | { "kind": "oauth2" } & OAuthAuthenticationSummary;
+
 export type ProxyAuthenticationSummary = { username: string, passwordConfigured: boolean, trust: CredentialTrust, };
 
 export type RouteConfig = { "kind": "direct" } | { "kind": "inherit" } | { "kind": "custom", proxyKind: ProxyKind, host: string, port: number, dns: DnsPolicy,
@@ -124,7 +140,7 @@ senderName: string | null,
 /**
  * Appearance only. Defaults to true for credential journals from older builds.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: PasswordAuthenticationSummary, route: RouteConfig, routeRevision: number,
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */
@@ -278,7 +294,7 @@ body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 
-export type SyncFailureCode = "authentication" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
+export type SyncFailureCode = "authentication" | "signInRequired" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**

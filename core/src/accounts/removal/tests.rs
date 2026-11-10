@@ -590,8 +590,8 @@ fn a_shared_historical_key_never_deletes_another_accounts_live_credential() {
             .get(&other.id)
             .unwrap()
             .authentication
-            .imap
-            .password_configured
+            .imap()
+            .credential_configured
     );
     assert_eq!(f.secrets.0.lock().unwrap().entries.len(), 1);
 }

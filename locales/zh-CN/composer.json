@@ -222,7 +222,11 @@
     "accountChanged": "发件账号的地址已更改，这封邮件不会自动发出",
     "unknown": "发送过程中连接中断，服务器可能已收到这封邮件",
     "unspecified": "原因不明",
-    "snapshotMissing": "这封邮件的附件副本已丢失，请重新编辑后再发送。"
+    "snapshotMissing": "这封邮件的附件副本已丢失，请重新编辑后再发送。",
+    "authorizationRequired": "邮箱登录已过期，请在账号设置中重新登录，之后会自动继续发送",
+    "authorizationUnavailable": "暂时无法确认邮箱登录状态，恢复后会自动继续发送",
+    "signInRequired": "邮箱登录已过期，请在账号设置中重新登录后再发送",
+    "providerPolicy": "你的组织已关闭此邮箱的这种登录方式。请联系管理员允许 IMAP / SMTP 访问。"
   },
   "recipient": {
     "invalid": "地址无效：{{address}}",

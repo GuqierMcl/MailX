@@ -439,6 +439,7 @@ function server(protocol: string, connection: Account['imap']) {
 }
 
 function credentials(account: Account, needsTrust: boolean) {
+  if (account.authentication.kind === 'oauth2') return `OAuth 2.0 · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
   const mode = account.authentication.mode === 'shared' ? t('accounts:sharedPassword') : t('accounts:separatePasswords')
   const configured = account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured
   return `${mode} · ${needsTrust ? t('accounts:needsConfirmation') : configured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`

@@ -1,5 +1,6 @@
 //! Endpoint-scoped provider compatibility implementations.
 
+pub(crate) mod oauth;
 mod qq;
 
 use crate::mail::compatibility::{ProviderCompatibility, StandardCompatibility};

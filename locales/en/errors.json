@@ -33,5 +33,16 @@
   "tooManyAttachments": "Too many attachments.",
   "unsupportedImage": "This image can't be inserted inline. Add it as a regular attachment instead.",
   "confirmationRequired": "Deleting forever needs your confirmation first.",
-  "alreadyDeleting": "Deleting has started and can no longer be undone."
+  "alreadyDeleting": "Deleting has started and can no longer be undone.",
+  "oauthNetwork": "Can't reach your email provider right now. Check your internet connection and try again.",
+  "oauthTimeout": "Your email provider is taking too long to respond. Try again later.",
+  "oauthAuthorizationDenied": "MailX wasn't allowed to access your mailbox. To continue, sign in again and choose Allow.",
+  "oauthSessionExpired": "This sign-in took too long. Please sign in again.",
+  "oauthInvalidResponse": "Sign-in didn't finish. Please sign in again.",
+  "oauthReauthorizationRequired": "Your mailbox sign-in has expired. Please sign in again.",
+  "oauthProxy": "Can't reach your email provider through your proxy. Check your proxy settings.",
+  "oauthTls": "Can't open a secure connection to your email provider. Check your internet connection and try again.",
+  "oauthRateLimited": "Too many attempts. Wait a few minutes and try again.",
+  "oauthServerUnavailable": "Your email provider can't sign you in right now. Try again later.",
+  "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings."
 }

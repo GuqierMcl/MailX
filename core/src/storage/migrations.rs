@@ -171,6 +171,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["messages"],
         sql: include_str!("migrations/0024_sent_copy_identity.sql"),
     },
+    Migration {
+        version: 25,
+        description: "OAuth grant bindings and authorization-aware send admission",
+        required_tables: &["auth_profiles", "oauth_client_registrations"],
+        sql: include_str!("migrations/0025_oauth_bindings.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -575,7 +581,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 24);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 25);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()

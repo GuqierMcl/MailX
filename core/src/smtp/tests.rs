@@ -21,7 +21,7 @@ fn login(port: u16, tls: TlsMode) -> SmtpLogin {
         port,
         tls,
         username: "zhang".into(),
-        password: SecretValue::new(PASSWORD.into()),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(PASSWORD.into())),
     }
 }
 
@@ -321,7 +321,10 @@ mod plan {
             ),
             ("smtp.example.com", 465, "lin")
         );
-        assert_eq!(plan.login.password.expose_secret(), "mail-secret");
+        assert_eq!(
+            plan.login.credential.secret().unwrap().expose_secret(),
+            "mail-secret"
+        );
         assert_eq!(plan.sender_address, "lin@example.com");
         assert!(plan.route.proxy.is_none());
         assert!(!format!("{plan:?}").contains("mail-secret"));
@@ -371,7 +374,8 @@ async fn auth_plain_and_login_both_work() {
 #[tokio::test]
 async fn rejected_credentials_are_permanent_and_the_password_never_surfaces() {
     let (mut run, seen, _tls) = plain_via_starttls(|s| s.password = "different").await;
-    run.login.password = SecretValue::new("hunter2-wrong".into());
+    run.login.credential =
+        crate::imap::ProtocolCredential::Password(SecretValue::new("hunter2-wrong".into()));
     let outcome = run.go(hook(&seen)).await;
     assert_eq!(reason_of(&outcome), (false, FailureReason::AuthRejected));
     assert!(!saw(&seen, "MAIL"));
@@ -822,4 +826,112 @@ async fn a_slow_but_moving_body_write_is_not_cut_off() {
         "the test payload must outlast one idle budget"
     );
     assert!(seen.lock().unwrap().body.len() > (16 << 20));
+}
+
+#[tokio::test]
+async fn xoauth2_sends_bearer_and_completes_error_challenge_without_token_echo() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    for rejected in [false, true] {
+        let (client, server) = tokio::io::duplex(4096);
+        let mut conn = Conn::new(Box::new(client));
+        let mut login = login(465, TlsMode::Implicit);
+        login.credential = ProtocolCredential::OAuth2(SecretValue::new("oauth-test-token".into()));
+        let username = login.username.clone();
+        let peer = tokio::spawn(async move {
+            let mut server = BufReader::new(server);
+            let mut command = String::new();
+            server.read_line(&mut command).await.unwrap();
+            let encoded = command.trim_end().strip_prefix("AUTH XOAUTH2 ").unwrap();
+            assert_eq!(
+                STANDARD.decode(encoded).unwrap(),
+                format!("user={username}\x01auth=Bearer oauth-test-token\x01\x01").as_bytes()
+            );
+            if rejected {
+                server
+                    .get_mut()
+                    .write_all(b"334 eyJzdGF0dXMiOiI0MDEifQ==\r\n")
+                    .await
+                    .unwrap();
+                command.clear();
+                server.read_line(&mut command).await.unwrap();
+                assert_eq!(command, "\r\n");
+                server
+                    .get_mut()
+                    .write_all(b"535 oauth-test-token echoed\r\n")
+                    .await
+                    .unwrap();
+            } else {
+                server
+                    .get_mut()
+                    .write_all(b"235 authenticated\r\n")
+                    .await
+                    .unwrap();
+            }
+        });
+        let caps = Capabilities {
+            auth: vec!["XOAUTH2".into()],
+            starttls: false,
+            size: None,
+        };
+        let result = authenticate(&mut conn, &login, &caps, Duration::from_secs(1)).await;
+        assert_eq!(result.is_err(), rejected);
+        assert!(!format!("{result:?}").contains("oauth-test-token"));
+        peer.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn xoauth2_masks_encoded_credentials_in_all_later_replies() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let (client, server) = tokio::io::duplex(4096);
+    let mut conn = Conn::new(Box::new(client));
+    let mut login = login(465, TlsMode::Implicit);
+    login.credential = ProtocolCredential::OAuth2(SecretValue::new("oauth-test-token".into()));
+    let peer = tokio::spawn(async move {
+        let mut server = BufReader::new(server);
+        let mut line = String::new();
+        server.read_line(&mut line).await.unwrap();
+        let encoded = line
+            .trim_end()
+            .strip_prefix("AUTH XOAUTH2 ")
+            .unwrap()
+            .to_owned();
+        server
+            .get_mut()
+            .write_all(b"235 authenticated\r\n")
+            .await
+            .unwrap();
+        for code in [250, 550] {
+            line.clear();
+            server.read_line(&mut line).await.unwrap();
+            server
+                .get_mut()
+                .write_all(format!("{code} echoed {encoded} oauth-test-token\r\n").as_bytes())
+                .await
+                .unwrap();
+        }
+    });
+    let caps = Capabilities {
+        auth: vec!["XOAUTH2".into()],
+        starttls: false,
+        size: None,
+    };
+    authenticate(&mut conn, &login, &caps, Duration::from_secs(1))
+        .await
+        .unwrap();
+    for command in [
+        "MAIL FROM:<sender@example.com>",
+        "RCPT TO:<receiver@example.com>",
+    ] {
+        let reply = conn.command(command, Duration::from_secs(1)).await.unwrap();
+        assert_eq!(reply.text(), "Server response");
+        assert!(
+            !format!(
+                "{:?}",
+                unexpected(&reply, login.credential.secret().unwrap())
+            )
+            .contains("oauth-test-token")
+        );
+    }
+    peer.await.unwrap();
 }
