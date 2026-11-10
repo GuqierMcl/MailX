@@ -427,74 +427,104 @@ describe('mock batch actions for the list selection', () => {
 })
 
 describe('mock browser sign-in', () => {
-  const config = (emailAddress: string) => ({
-    displayName: 'Outlook', color: null, senderName: null, useProviderIcon: true, emailAddress, providerId: 'microsoft-personal',
-    imap: { host: '', port: 0, tls: 'implicit' as const, username: '' }, smtp: { host: '', port: 0, tls: 'implicit' as const, username: '' },
-    authentication: { kind: 'oauth2' as const, configuration: { providerId: 'microsoft-personal', issuer: '', clientRegistrationId: '', authorizationSubject: null, targetMailboxResource: null } },
-    route: { kind: 'direct' as const },
-  })
+  const profile = { displayName: 'Outlook', color: null, senderName: null, useProviderIcon: true }
+  const route = { kind: 'direct' as const }
   beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers(); localStorage.clear() })
 
-  it('creates an OAuth account after a short delay', async () => {
-    const client = createMockClient()
-    const before = (await client.listAccounts()).length
-    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config('lin@outlook.com') } })
+  /** Begins a sign-in and lets the "browser" come back. */
+  async function signIn(client: ReturnType<typeof createMockClient>, providerId = 'microsoft-personal') {
+    const { sessionId } = await client.beginOAuthAccount({ providerId, route })
     const finished = client.finishOAuthAccount(sessionId)
     await vi.advanceTimersByTimeAsync(1000)
-    const account = await finished
+    return { sessionId, result: await finished }
+  }
+
+  it('learns the address from the sign-in, with no address asked for first, and creates the account', async () => {
+    const client = createMockClient()
+    const before = (await client.listAccounts()).length
+    const { sessionId, result } = await signIn(client)
+    expect(result).toEqual({ kind: 'verified', emailAddress: 'lin@outlook.com' })
+    // Nothing is created until the profile is submitted.
+    expect((await client.listAccounts()).length).toBe(before)
+    const account = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
     expect(account.authentication).toMatchObject({ kind: 'oauth2', state: 'connected' })
     expect(account.providerId).toBe('microsoft-personal')
+    expect(account.emailAddress).toBe('lin@outlook.com')
+    expect(account.route).toEqual(route)
     expect((await client.listAccounts()).length).toBe(before + 1)
+    // The session is consumed: no second account from it.
+    await expect(client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
   })
 
   it.each([
-    ['microsoft-personal', 'smtp-mail.outlook.com'],
-    ['microsoft-work', 'smtp.office365.com'],
-  ])('fills the same servers as the core registration for %s, never the placeholders', async (providerId, smtpHost) => {
+    ['microsoft-personal', 'lin@outlook.com', 'smtp-mail.outlook.com'],
+    ['microsoft-work', 'lin@contoso.com', 'smtp.office365.com'],
+  ])('fills the same servers as the core registration for %s, never placeholders', async (providerId, address, smtpHost) => {
     const client = createMockClient()
-    const { sessionId } = await client.beginOAuthAccount({ providerId, request: { requestId: crypto.randomUUID(), config: { ...config(' lin@contoso.com '), providerId } } })
-    const finished = client.finishOAuthAccount(sessionId)
-    await vi.advanceTimersByTimeAsync(1000)
-    const account = await finished
-    expect(account.emailAddress).toBe('lin@contoso.com')
-    expect(account.imap).toEqual({ host: 'outlook.office365.com', port: 993, tls: 'implicit', username: 'lin@contoso.com' })
-    expect(account.smtp).toEqual({ host: smtpHost, port: 587, tls: 'startTls', username: 'lin@contoso.com' })
+    const { sessionId } = await signIn(client, providerId)
+    const account = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
+    expect(account.emailAddress).toBe(address)
+    expect(account.imap).toEqual({ host: 'outlook.office365.com', port: 993, tls: 'implicit', username: address })
+    expect(account.smtp).toEqual({ host: smtpHost, port: 587, tls: 'startTls', username: address })
     expect(await client.getAccount(account.id)).toMatchObject({ imap: account.imap, smtp: account.smtp })
   })
 
-  it('fails like the host for a refused mailbox and a denied sign-in', async () => {
+  it('asks for the address when the sign-in name is an alias, and accepts any typed address without another browser trip', async () => {
+    localStorage.setItem('mailx.mock.oauthAddress', 'alias.name@outlook.com')
     const client = createMockClient()
-    for (const [address, code] of [['refused@outlook.com', 'oauthMailboxRefused'], ['denied@outlook.com', 'oauthAuthorizationDenied']]) {
-      const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config(address) } })
-      const finished = client.finishOAuthAccount(sessionId)
-      const assertion = expect(finished).rejects.toMatchObject({ failure: { code } })
-      await vi.advanceTimersByTimeAsync(1000)
-      await assertion
-    }
+    const { sessionId, result } = await signIn(client)
+    expect(result).toEqual({ kind: 'needsMailbox', suggestion: 'alias.name@outlook.com' })
+    // Without a proven mailbox nothing can be created.
+    await expect(client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })).rejects.toMatchObject({ failure: { code: 'oauthMailboxRefused' } })
+    await expect(client.confirmOAuthMailbox({ sessionId, emailAddress: 'not an address' })).rejects.toMatchObject({ failure: { code: 'oauthMailboxRefused' } })
+    expect(await client.confirmOAuthMailbox({ sessionId, emailAddress: ' real@outlook.com ' })).toEqual({ kind: 'verified', emailAddress: 'real@outlook.com' })
+    const account = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
+    expect(account.emailAddress).toBe('real@outlook.com')
+    expect(account.imap.username).toBe('real@outlook.com')
   })
 
-  it('cancels a pending sign-in and rejects unknown providers', async () => {
+  it('keeps refusing addresses that start with refused and ends the session after five tries', async () => {
+    localStorage.setItem('mailx.mock.oauthAddress', 'refused@outlook.com')
     const client = createMockClient()
-    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-work', request: { requestId: crypto.randomUUID(), config: config('lin@contoso.com') } })
+    const { sessionId, result } = await signIn(client)
+    expect(result.kind).toBe('needsMailbox')
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await expect(client.confirmOAuthMailbox({ sessionId, emailAddress: 'refused2@outlook.com' })).rejects.toMatchObject({ failure: { code: 'oauthMailboxRefused' } })
+    }
+    await expect(client.confirmOAuthMailbox({ sessionId, emailAddress: 'fine@outlook.com' })).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
+  })
+
+  it('fails like the host when the user did not allow access', async () => {
+    localStorage.setItem('mailx.mock.oauthAddress', 'denied@outlook.com')
+    const client = createMockClient()
+    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', route })
+    const finished = client.finishOAuthAccount(sessionId)
+    const assertion = expect(finished).rejects.toMatchObject({ failure: { code: 'oauthAuthorizationDenied' } })
+    await vi.advanceTimersByTimeAsync(1000)
+    await assertion
+  })
+
+  it('cancels a pending or signed-in session, and rejects unknown providers', async () => {
+    const client = createMockClient()
+    const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-work', route })
     const finished = client.finishOAuthAccount(sessionId)
     const assertion = expect(finished).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
     await client.cancelOAuthAccount(sessionId)
     await assertion
     await expect(client.finishOAuthAccount(sessionId)).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
-    await expect(client.beginOAuthAccount({ providerId: 'other', request: { requestId: crypto.randomUUID(), config: config('x@y.com') } })).rejects.toMatchObject({ failure: { code: 'unsupported' } })
+    const signedIn = await signIn(client, 'microsoft-work')
+    await client.cancelOAuthAccount(signedIn.sessionId)
+    await expect(client.createOAuthAccount({ sessionId: signedIn.sessionId, requestId: crypto.randomUUID(), profile })).rejects.toMatchObject({ failure: { code: 'oauthSessionExpired' } })
+    await expect(client.beginOAuthAccount({ providerId: 'other', route })).rejects.toMatchObject({ failure: { code: 'unsupported' } })
   })
 
-  it('renews an OAuth account by bumping its revision', async () => {
+  it('renews an OAuth account by bumping its revision, with its own finish', async () => {
     const client = createMockClient()
-    const created = await (async () => {
-      const { sessionId } = await client.beginOAuthAccount({ providerId: 'microsoft-personal', request: { requestId: crypto.randomUUID(), config: config('lin@outlook.com') } })
-      const finished = client.finishOAuthAccount(sessionId)
-      await vi.advanceTimersByTimeAsync(1000)
-      return finished
-    })()
-    const { sessionId } = await client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })
-    const finished = client.finishOAuthAccount(sessionId)
+    const { sessionId } = await signIn(client)
+    const created = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
+    const again = await client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })
+    const finished = client.finishOAuthReauthorization(again.sessionId)
     await vi.advanceTimersByTimeAsync(1000)
     expect((await finished).revision).toBe(created.revision + 1)
     await expect(client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })).rejects.toMatchObject({ failure: { code: 'conflict' } })

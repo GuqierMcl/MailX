@@ -74,7 +74,7 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 
 ### 实现时的决定
 
-- **邮箱以 IMAP 登录求证。** 身份主体取 `{tid}/{oid}`，issuer 取 `id_token` 的 `iss`（必须等于 `https://login.microsoftonline.com/{tid}/v2.0`，`tid`、`oid` 为 GUID）。`email` 与 `preferred_username` 可变，不作证明：验证器用刚取得的 access token，沿账号路由以 XOAUTH2 登录本入口受信的 IMAP 端点（`user=` 为用户要添加的邮箱）后退出，成功才认定该邮箱可由这次授权访问；被拒返回“无法打开邮箱”的提示，网络、代理与超时沿用既有 OAuth 网络错误。此检查在通用层只是 `imap::prove_mailbox_access` 与 `IdentityEvidence.expected_mailbox`，不含微软名称。
+- **先登录，再由登录得到邮箱，邮箱以 IMAP 登录求证。** 身份主体取 `{tid}/{oid}`，issuer 取 `id_token` 的 `iss`（必须等于 `https://login.microsoftonline.com/{tid}/v2.0`，`tid`、`oid` 为 GUID）。`email` 与 `preferred_username` 可变，只能当提示：验证器先取 `email`、没有再取 `preferred_username`（都须长得像邮箱地址）作候选，用刚取得的 access token 沿账号路由以 XOAUTH2 登录本入口受信的 IMAP 端点（`user=` 为候选地址）后退出，成功才认定该邮箱可由这次授权访问。没有候选或被拒时（例如登录名只是别名），请用户填写邮箱地址，只用会话里已有的 token 对该地址再求证一次，不需要第二次浏览器往返；被拒返回“无法打开邮箱”的提示，网络、代理与超时沿用既有 OAuth 网络错误。通用层只有 `IdentityVerifier` 的 `check` / `prove_mailbox` 两步与 `imap::prove_mailbox_access`，不含微软名称。
 - **个人与工作账号分开。** 两个入口各用 `/consumers/` 与 `/organizations/` 端点；个人入口要求 `tid` 为消费者租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，工作入口要求其他租户，入错时提示改用对应入口。
 - **SMTP AUTH 被组织关闭。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭”；IMAP 只有通用失败，不分类、不猜测。
 - **令牌容量。** 只持久化刷新令牌（已有行为）；Windows 上超过单条目上限的值由与服务商无关的分条目包装存放，见[凭据库 §7](../architecture/secret-vault.md#7-oauth-凭证的大小限制)。
@@ -94,7 +94,7 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 
 - Microsoft 365 与 Outlook.com 的授权、IMAP 同步、IDLE、SMTP 发信全链路，以及令牌过期后长连接的行为。
 - Outlook.com 的 SMTP 服务器：实现按微软设置页选用 `smtp-mail.outlook.com`，需确认它与 `smtp.office365.com` 在 XOAUTH2 下是否都可用。
-- IMAP 登录求证在各类账号下的表现：别名、与登录名不同的邮箱、被管理员关闭 IMAP 时只返回通用失败，此时用户看到“无法打开邮箱”的提示。
+- IMAP 登录求证在各类账号下的表现：`email` 与 `preferred_username` 在个人账号、各类租户中实际出现哪些值；别名、与登录名不同的邮箱、被管理员关闭 IMAP 时只返回通用失败，此时用户先被请求填写地址，再看到“无法打开邮箱”的提示。令牌里没有可用候选地址时的实际比例也未知。
 - `prompt=select_account` 与 `login_hint` 在两类账号上的实际行为，以及 `127.0.0.1` 无路径回调在各浏览器与防火墙下是否稳定。
 - Windows 凭据管理器中分条目存放的真实刷新令牌长度与读写。
 - 令牌响应实际回显的 scope 格式与令牌长度。

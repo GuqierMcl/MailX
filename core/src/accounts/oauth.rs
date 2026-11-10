@@ -544,16 +544,42 @@ pub(crate) fn normalize_oauth_request(request: &mut CreateAccountRequest) -> Res
     Ok(())
 }
 
-/// Servers and login names come from the reviewed registration; whatever the
-/// caller sent for them (a front end sends placeholders) is replaced, so the
-/// saved account always shows the registration's servers.
-pub(crate) fn use_registered_servers(
+/// The request that creates an account from a signed-in session. The address
+/// is the one the mail server accepted; servers and login names come from the
+/// reviewed registration, and the route is the one chosen for sign-in. Nothing
+/// here is taken from the page except the profile.
+pub(crate) fn create_request(
     registration: &ProviderRegistration,
-    request: &mut CreateAccountRequest,
-) {
-    let (imap, smtp) = registration.mail_connections(&request.config.email_address);
-    request.config.imap = imap;
-    request.config.smtp = smtp;
+    mailbox: &str,
+    route: RouteInput,
+    request_id: String,
+    profile: AccountProfileInput,
+) -> CreateAccountRequest {
+    let (imap, smtp) = registration.mail_connections(mailbox);
+    CreateAccountRequest {
+        request_id,
+        config: AccountConfigInput {
+            display_name: profile.display_name,
+            color: profile.color,
+            sender_name: profile.sender_name,
+            use_provider_icon: profile.use_provider_icon,
+            email_address: mailbox.trim().to_owned(),
+            provider_id: Some(registration.id.clone()),
+            imap,
+            smtp,
+            authentication: AuthenticationInput::OAuth2 {
+                configuration: OAuth2Configuration {
+                    provider_id: registration.id.clone(),
+                    // Placeholder: the verified issuer replaces it on creation.
+                    issuer: String::new(),
+                    client_registration_id: registration.registration_id.clone(),
+                    authorization_subject: None,
+                    target_mailbox_resource: Some(mailbox.trim().to_owned()),
+                },
+            },
+            route,
+        },
+    }
 }
 
 /// Resolve a temporary authorization route without saving proxy/mail secrets.
@@ -562,12 +588,10 @@ pub(crate) fn use_registered_servers(
 /// `AccountService::image_route` and draft checks in `draft_connection`; when
 /// the default route can become a proxy, all three must change together, and
 /// sign-in must never fall back to direct (see `docs/architecture/network-security.md`).
-pub(crate) fn authorization_route(
-    request: &CreateAccountRequest,
-) -> Result<crate::net::NetRoute, AppError> {
-    let mut config = request.config.clone().split().1;
-    validate_connection(&mut config)?;
-    match config.route {
+pub(crate) fn authorization_route(route: &RouteInput) -> Result<crate::net::NetRoute, AppError> {
+    let mut route = route.clone();
+    validate_route(&mut route)?;
+    match route {
         RouteInput::Direct | RouteInput::Inherit => Ok(crate::net::NetRoute::default()),
         RouteInput::Custom {
             proxy_kind,
@@ -668,12 +692,14 @@ mod tests {
             .unwrap();
         (dir, service, account, secrets)
     }
-    fn request_with_route(route: serde_json::Value) -> CreateAccountRequest {
-        let config = super::super::sync_plan::tests::config(route);
-        serde_json::from_value(json!({"requestId":new_id(),"config":config})).unwrap()
+    fn route_input(route: serde_json::Value) -> RouteInput {
+        serde_json::from_value(route).unwrap()
+    }
+    fn profile() -> AccountProfileInput {
+        serde_json::from_value(json!({"displayName":"Work","color":null})).unwrap()
     }
     #[test]
-    fn a_new_oauth_account_shows_the_registrations_servers_not_the_front_ends_placeholders() {
+    fn a_new_oauth_account_uses_the_proven_address_and_the_registrations_servers() {
         use crate::auth::{GrantBinding, VerifiedAuthorization};
         for (provider, smtp_host) in [
             ("microsoft-personal", "smtp-mail.outlook.com"),
@@ -683,14 +709,17 @@ mod tests {
                 .unwrap()
                 .registration()
                 .clone();
-            let mut config = super::super::sync_plan::tests::config(json!({"kind":"direct"}));
-            config["emailAddress"] = json!("lin@contoso.com");
-            config["imap"] = json!({"host":"","port":0,"tls":"implicit","username":""});
-            config["smtp"] = json!({"host":"","port":0,"tls":"implicit","username":""});
-            config["authentication"] = json!({"kind":"oauth2","configuration":{"providerId":provider,"issuer":"","clientRegistrationId":"","authorizationSubject":null,"targetMailboxResource":null}});
-            let mut request: CreateAccountRequest =
-                serde_json::from_value(json!({"requestId":new_id(),"config":config})).unwrap();
-            use_registered_servers(&registration, &mut request);
+            // Only the proven address, the route and the profile come from the
+            // session and page; everything else is the registration's.
+            let request = create_request(
+                &registration,
+                " lin@contoso.com ",
+                route_input(json!({"kind":"inherit"})),
+                new_id(),
+                profile(),
+            );
+            assert_eq!(request.config.email_address, "lin@contoso.com");
+            assert_eq!(request.config.provider_id.as_deref(), Some(provider));
             let authorization = VerifiedAuthorization {
                 binding: GrantBinding {
                     provider_id: registration.id.clone(),
@@ -726,6 +755,7 @@ mod tests {
                 assert_eq!(saved.smtp.host, smtp_host, "{provider}");
                 assert_eq!((saved.smtp.port, saved.smtp.tls), (587, TlsMode::StartTls));
                 assert_eq!(saved.smtp.username, "lin@contoso.com");
+                assert!(matches!(saved.route, RouteConfig::Inherit));
             }
         }
     }
@@ -737,18 +767,28 @@ mod tests {
         let saved = service.image_route(&account.id).unwrap();
         assert!(saved.proxy.is_none());
         for kind in ["direct", "inherit"] {
-            let route = authorization_route(&request_with_route(json!({"kind": kind}))).unwrap();
+            let route = authorization_route(&route_input(json!({"kind": kind}))).unwrap();
             assert!(route.proxy.is_none(), "{kind}");
             assert!(!route.image_proxy_dns, "{kind}");
         }
         // A custom proxy is carried into sign-in; there is no fallback to direct.
-        let route = authorization_route(&request_with_route(json!({
+        let route = authorization_route(&route_input(json!({
             "kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":1080,
             "dns":"proxy","authentication":null,"imageProxyDns":false
         })));
         match route {
             Ok(route) => assert_eq!(route.proxy.as_ref().map(|p| p.port), Some(1080)),
             Err(error) => panic!("custom route rejected: {error:?}"),
+        }
+        // A broken proxy or a proxy secret that was not supplied is an error,
+        // never a quiet direct connection.
+        for bad in [
+            json!({"kind":"custom","proxyKind":"socks5","host":"","port":1080,"dns":"proxy","authentication":null}),
+            json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":0,"dns":"proxy","authentication":null}),
+            json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":1080,"dns":"proxy",
+                "authentication":{"username":"u","password":{"action":"keep"}}}),
+        ] {
+            assert!(authorization_route(&route_input(bad)).is_err());
         }
     }
     #[test]

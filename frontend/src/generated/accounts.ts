@@ -24,13 +24,23 @@ export type PasswordAuthenticationInput = { "mode": "shared", password: SecretUp
 
 export type OAuth2Configuration = { providerId: string, issuer: string, clientRegistrationId: string, authorizationSubject: string | null, targetMailboxResource: string | null, };
 
-export type BeginOAuthAccount = { providerId: string, request: CreateAccountRequest, };
+export type BeginOAuthAccount = { providerId: string,
+/**
+ * How MailX reaches the provider; also the new account's route.
+ */
+route: RouteInput, };
 
 export type BeginOAuthReauthorization = { providerId: string, accountId: string, expectedRevision: number, };
 
 export type OAuthSessionRequest = { sessionId: string, };
 
 export type OAuthSessionHandle = { sessionId: string, };
+
+export type ConfirmOAuthMailbox = { sessionId: string, emailAddress: string, };
+
+export type CreateOAuthAccount = { sessionId: string, requestId: string, profile: AccountProfileInput, };
+
+export type OAuthSignInResult = { "kind": "verified", emailAddress: string, } | { "kind": "needsMailbox", suggestion: string | null, };
 
 export type AuthenticationInput = { "kind": "password", } & ({ "mode": "shared", password: SecretUpdate, } | { "mode": "separate", imapPassword: SecretUpdate, smtpPassword: SecretUpdate, }) | { "kind": "oauth2", configuration: OAuth2Configuration, };
 

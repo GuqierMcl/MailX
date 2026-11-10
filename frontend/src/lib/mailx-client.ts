@@ -6,9 +6,12 @@ import type {
   AccountConnectionVerification,
   BeginOAuthAccount,
   BeginOAuthReauthorization,
+  ConfirmOAuthMailbox,
   ConnectionInput,
+  CreateOAuthAccount,
   DraftConnectionVerification,
   OAuthSessionHandle,
+  OAuthSignInResult,
   AccountSyncState,
   AppError,
   ApiResult,
@@ -89,19 +92,31 @@ export interface MailxClient {
   createAccount(request: CreateAccountRequest): Promise<Account>
   /**
    * Starts browser sign-in for a reviewed provider and opens its sign-in page.
-   * Only an opaque session handle comes back; the host never returns URLs or tokens.
+   * There is no address yet: it is learned from the sign-in. Only an opaque
+   * session handle comes back; the host never returns URLs or tokens.
    */
   beginOAuthAccount(request: BeginOAuthAccount): Promise<OAuthSessionHandle>
   /**
-   * Waits for the browser sign-in of `sessionId` and returns the saved account
-   * (a new one, or the renewed one after `reauthorizeOAuthAccount`). A session
-   * canceled meanwhile rejects with `oauthSessionExpired`.
+   * Waits for the browser. `verified` says the provider's mail server opened a
+   * mailbox with this sign-in; `needsMailbox` asks for the address (with the
+   * sign-in's own guess, if any). A session canceled meanwhile rejects with
+   * `oauthSessionExpired`. The signed-in session is kept for about 15 minutes.
    */
-  finishOAuthAccount(sessionId: string): Promise<Account>
-  /** Abandons a pending sign-in; unknown or finished sessions are ignored. */
+  finishOAuthAccount(sessionId: string): Promise<OAuthSignInResult>
+  /**
+   * Tries a typed address with the token the session already holds, with no
+   * second browser trip. Rejects with `oauthMailboxRefused` when the mail
+   * server does not open it; a few failures end the session.
+   */
+  confirmOAuthMailbox(request: ConfirmOAuthMailbox): Promise<OAuthSignInResult>
+  /** Creates the account from a verified session; only the profile comes from the page. */
+  createOAuthAccount(request: CreateOAuthAccount): Promise<Account>
+  /** Abandons a pending or signed-in session and drops its tokens; unknown ones are ignored. */
   cancelOAuthAccount(sessionId: string): Promise<void>
-  /** Starts signing an existing OAuth account in again; finish with `finishOAuthAccount`. */
+  /** Starts signing an existing OAuth account in again; finish with `finishOAuthReauthorization`. */
   reauthorizeOAuthAccount(request: BeginOAuthReauthorization): Promise<OAuthSessionHandle>
+  /** Waits for the browser of a sign-in again and returns the renewed account. */
+  finishOAuthReauthorization(sessionId: string): Promise<Account>
   /** Replaces the connection; the account's sync restarts with it right away. */
   updateConnection(request: UpdateConnectionRequest): Promise<Account>
   /** Renames or recolors the account; sync keeps running. */
@@ -395,9 +410,12 @@ export function createDesktopClient(): MailxClient {
     openProviderHelp: (providerId) => call<void>('accounts_open_provider_help', { providerId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
     beginOAuthAccount: (request) => call<OAuthSessionHandle>('accounts_oauth_begin', { request }),
-    finishOAuthAccount: (sessionId) => call<Account>('accounts_oauth_finish', { request: { sessionId } }),
+    finishOAuthAccount: (sessionId) => call<OAuthSignInResult>('accounts_oauth_finish', { request: { sessionId } }),
+    confirmOAuthMailbox: (request) => call<OAuthSignInResult>('accounts_oauth_confirm_mailbox', { request }),
+    createOAuthAccount: (request) => call<Account>('accounts_oauth_create', { request }),
     cancelOAuthAccount: (sessionId) => call<void>('accounts_oauth_cancel', { request: { sessionId } }),
     reauthorizeOAuthAccount: (request) => call<OAuthSessionHandle>('accounts_oauth_reauthorize', { request }),
+    finishOAuthReauthorization: (sessionId) => call<Account>('accounts_oauth_reauthorize_finish', { request: { sessionId } }),
     updateConnection: (request) => call<Account>('accounts_update_connection', { request }),
     updateProfile: (request) => call<Account>('accounts_update_profile', { request }),
     removeAccount: (request) => call<AccountRemoval>('accounts_remove', { request }),

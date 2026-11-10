@@ -56,7 +56,7 @@ export function SignInAgain({ client, account, disabled = false, required = fals
       const handle = await client.reauthorizeOAuthAccount({ providerId, accountId: account.id, expectedRevision: account.revision })
       mine.id = handle.sessionId
       if (mine.canceled) await client.cancelOAuthAccount(handle.sessionId).catch(() => undefined)
-      const renewed = await client.finishOAuthAccount(handle.sessionId)
+      const renewed = await client.finishOAuthReauthorization(handle.sessionId)
       if (alive.current && !mine.canceled) onSignedIn(renewed)
     } catch (cause) {
       if (alive.current && !mine.canceled) setFailure(clientFailure(cause))

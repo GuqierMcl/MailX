@@ -29,7 +29,9 @@ Changing or resetting your Apple Account password revokes all app-specific passw
 
 ### Microsoft (Outlook / Microsoft 365)
 
-Two entries sign in through your browser, so MailX never sees your password. Choose **Outlook** for a personal Outlook.com, Hotmail or Live address. Choose **Microsoft 365 / Exchange** for a work or school address. Enter the email address and, if you need one, the network settings; then continue to the last step, give the mailbox a name and click **Sign in in browser**. MailX opens the Microsoft sign-in page; finish signing in there and come back. You can cancel while MailX is waiting.
+Two entries sign in through your browser, so MailX never sees your password. Choose **Outlook** for a personal Outlook.com, Hotmail or Live address. Choose **Microsoft 365 / Exchange** for a work or school address. You don't type your address first: change the network settings if you need to, then click **Sign in in browser**. MailX opens the Microsoft sign-in page; finish signing in there and come back. You can cancel while MailX is waiting.
+
+MailX learns your address from the sign-in and checks that the mail server really opens that mailbox. If it can't (for example, you signed in with an alias or a different sign-in name), it asks you for the account's email address and checks that one with the sign-in you already have, without opening the browser again. You get five tries. Then give the mailbox a name and click **Done**. Going back or closing the window drops the sign-in, and it expires on its own after 15 minutes.
 
 If you pick the wrong entry, MailX tells you which one to use. If it says it couldn't open the mailbox, check the address first. For Outlook.com, make sure IMAP is turned on in Outlook settings. For work or school mail, your administrator may need to approve MailX or allow IMAP and SMTP for your mailbox. MailX can't work around an organization that turned either one off, and it doesn't keep asking you to sign in again in that case.
 

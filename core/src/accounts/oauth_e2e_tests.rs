@@ -3,9 +3,8 @@
 use super::*;
 use crate::{
     auth::{
-        IdentityVerifier, MailEndpointPolicy, MailLoginPolicy, MailProtocolPolicy, OAuthError,
-        ProviderRegistration, TokenManager, TokenSet, VerifiedIdentity,
-        credential::ProtocolCredential,
+        CheckedIdentity, IdentityVerifier, MailEndpointPolicy, MailLoginPolicy, MailProtocolPolicy,
+        OAuthError, ProviderRegistration, TokenManager, TokenSet, credential::ProtocolCredential,
     },
     net::NetRoute,
     secrets::{SecretStore, test_support::MemorySecrets},
@@ -24,17 +23,30 @@ use tokio::{
 };
 use url::Url;
 
-struct FixtureIdentity(u16);
+/// Learns the signed-in user from a fixture identity endpoint. The mail server
+/// "opens" only the addresses in `accepts`, standing in for the reviewed server.
+struct FixtureIdentity {
+    port: u16,
+    accepts: &'static [&'static str],
+}
+impl FixtureIdentity {
+    fn new(port: u16) -> Self {
+        Self {
+            port,
+            accepts: &["lin@example.com"],
+        }
+    }
+}
 impl IdentityVerifier for FixtureIdentity {
-    fn verify<'a>(
+    fn check<'a>(
         &'a self,
         evidence: &'a crate::auth::IdentityEvidence<'a>,
         route: &'a NetRoute,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
+        Box<dyn std::future::Future<Output = Result<CheckedIdentity, OAuthError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            let mut stream = crate::net::connect(route, "127.0.0.1", self.0)
+            let mut stream = crate::net::connect(route, "127.0.0.1", self.port)
                 .await
                 .map_err(|_| OAuthError::Network)?;
             stream.write_all(format!("GET /identity HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",evidence.access_token.expose_secret()).as_bytes()).await.map_err(|_|OAuthError::Network)?;
@@ -49,17 +61,35 @@ impl IdentityVerifier for FixtureIdentity {
                 .1;
             let identity: serde_json::Value =
                 serde_json::from_str(body).map_err(|_| OAuthError::InvalidResponse)?;
-            Ok(VerifiedIdentity {
+            Ok(CheckedIdentity {
                 issuer: "https://issuer.fixture.invalid".into(),
                 subject: identity["sub"]
                     .as_str()
                     .ok_or(OAuthError::InvalidResponse)?
                     .into(),
-                mailbox: identity["email"]
-                    .as_str()
-                    .ok_or(OAuthError::InvalidResponse)?
-                    .into(),
+                mailbox_hint: identity["email"].as_str().map(Into::into),
             })
+        })
+    }
+    fn prove_mailbox<'a>(
+        &'a self,
+        _: &'a NetRoute,
+        bearer: &'a crate::secrets::SecretValue,
+        mailbox: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), OAuthError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            // The same grant that signed in is the one that is proven.
+            assert_eq!(bearer.expose_secret(), "initial-access");
+            if self
+                .accepts
+                .iter()
+                .any(|accepted| accepted.eq_ignore_ascii_case(mailbox))
+            {
+                Ok(())
+            } else {
+                Err(OAuthError::MailboxRefused)
+            }
         })
     }
 }
@@ -278,23 +308,13 @@ async fn lifecycle(rotating: bool) {
         extra_authorize_params: vec![],
         login_hint: false,
     };
-    let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
-    config["imap"]["host"] = "localhost".into();
-    config["imap"]["port"] = ip.into();
-    config["smtp"]["host"] = "localhost".into();
-    config["smtp"]["port"] = sp.into();
-    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":"","clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
-    let request = serde_json::from_value(
-        serde_json::json!({"requestId":uuid::Uuid::new_v4().to_string(),"config":config}),
-    )
-    .unwrap();
     let coordinator = oauth_sessions::SessionCoordinator::default();
     let start = coordinator
         .begin(
             registration.clone(),
-            Arc::new(FixtureIdentity(port)),
+            Arc::new(FixtureIdentity::new(port)),
             NetRoute::default(),
-            request,
+            RouteInput::Direct,
         )
         .await
         .unwrap();
@@ -322,18 +342,35 @@ async fn lifecycle(rotating: bool) {
         )
         .await
         .unwrap();
-    let completed = coordinator.finish(&start.session_id).await.unwrap();
+    // No address was asked for: it comes from the sign-in and is proven.
+    assert_eq!(
+        coordinator.finish(&start.session_id).await.unwrap(),
+        oauth_sessions::SignInState::Verified("lin@example.com".into())
+    );
+    // The browser result is read once; the signed-in session is kept for the
+    // longer time the user needs to name the account.
     assert!(coordinator.finish(&start.session_id).await.is_err());
+    let remaining = coordinator.remaining(&start.session_id).unwrap();
+    assert!(remaining > Duration::from_secs(600) && remaining <= Duration::from_secs(900));
+    let target = coordinator.begin_create(&start.session_id).unwrap();
+    let request = super::oauth::create_request(
+        &target.registration,
+        &target.authorization.binding.mailbox,
+        target.route,
+        uuid::Uuid::new_v4().to_string(),
+        serde_json::from_value(serde_json::json!({"displayName":"Work","color":null})).unwrap(),
+    );
     let directory = tempfile::TempDir::new().unwrap();
     let secrets = Arc::new(MemorySecrets::default());
     let mut service = AccountService::open(directory.path(), secrets.clone()).unwrap();
     let account = service
-        .create_oauth(
-            completed.request,
-            completed.authorization,
-            completed.registration,
-        )
+        .create_oauth(request, target.authorization, target.registration)
         .unwrap();
+    coordinator.created(&start.session_id);
+    // Consumed once: neither a second account nor the tokens survive.
+    assert!(coordinator.begin_create(&start.session_id).is_err());
+    assert_eq!(coordinator.session_count(), 0);
+    assert_eq!(account.email_address, "lin@example.com");
     authenticate_plans(&service, &account.id, &tls).await;
     let snapshot = service.storage.load(&account.id).unwrap();
     let key = snapshot.profiles[0].secret_ref.clone();
@@ -367,8 +404,8 @@ async fn rotating_refresh_fixture_full_lifecycle() {
     lifecycle(true).await;
 }
 
-fn pending_fixture(port: u16, email: &str) -> (ProviderRegistration, CreateAccountRequest) {
-    let registration = ProviderRegistration {
+fn pending_fixture(port: u16) -> ProviderRegistration {
+    ProviderRegistration {
         id: "negative-fixture".into(),
         client_id: "fixture-client".into(),
         registration_id: "fixture-registration".into(),
@@ -394,28 +431,18 @@ fn pending_fixture(port: u16, email: &str) -> (ProviderRegistration, CreateAccou
         redirect_path: "/callback".into(),
         extra_authorize_params: vec![],
         login_hint: false,
-    };
-    let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
-    config["emailAddress"] = email.into();
-    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":"","clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
-    (
-        registration,
-        serde_json::from_value(
-            serde_json::json!({"requestId":uuid::Uuid::new_v4().to_string(),"config":config}),
-        )
-        .unwrap(),
-    )
+    }
 }
 #[tokio::test]
 async fn cancelled_authorization_closes_listener_and_cannot_be_consumed() {
-    let (registration, request) = pending_fixture(9, "lin@example.com");
+    let registration = pending_fixture(9);
     let coordinator = oauth_sessions::SessionCoordinator::default();
     let start = coordinator
         .begin(
             registration,
-            Arc::new(FixtureIdentity(9)),
+            Arc::new(FixtureIdentity::new(9)),
             NetRoute::default(),
-            request,
+            RouteInput::Direct,
         )
         .await
         .unwrap();
@@ -437,20 +464,9 @@ async fn cancelled_authorization_closes_listener_and_cannot_be_consumed() {
             .is_ok()
     );
 }
-#[tokio::test]
-async fn wrong_verified_identity_never_produces_consumable_authorization() {
-    let (port, count, server) = oauth_server(false).await;
-    let (registration, request) = pending_fixture(port, "other@example.com");
-    let coordinator = oauth_sessions::SessionCoordinator::default();
-    let start = coordinator
-        .begin(
-            registration,
-            Arc::new(FixtureIdentity(port)),
-            NetRoute::default(),
-            request,
-        )
-        .await
-        .unwrap();
+
+/// Sends the browser's callback to the session's loopback listener.
+async fn return_from_browser(start: &oauth_sessions::OAuthAuthorizationStart) {
     let authorization = Url::parse(&start.authorization_url).unwrap();
     let params: std::collections::HashMap<_, _> =
         authorization.query_pairs().into_owned().collect();
@@ -470,13 +486,205 @@ async fn wrong_verified_identity_never_produces_consumable_authorization() {
         )
         .await
         .unwrap();
+}
+#[tokio::test]
+async fn a_refused_sign_in_address_leaves_the_mailbox_to_the_user_and_nothing_is_created() {
+    // The fixture identity says `lin@example.com`; make the server refuse it.
+    let (port, count, server) = oauth_server(false).await;
+    let coordinator = oauth_sessions::SessionCoordinator::default();
+    let start = coordinator
+        .begin(
+            pending_fixture(port),
+            Arc::new(FixtureIdentity {
+                port,
+                accepts: &["real@example.com"],
+            }),
+            NetRoute::default(),
+            RouteInput::Direct,
+        )
+        .await
+        .unwrap();
+    return_from_browser(&start).await;
+    assert_eq!(
+        coordinator.finish(&start.session_id).await.unwrap(),
+        oauth_sessions::SignInState::NeedsMailbox(Some("lin@example.com".into()))
+    );
+    // Until the mail server accepts an address there is no account to create,
+    // and asking does not hand out the tokens.
     assert!(matches!(
-        coordinator.finish(&start.session_id).await,
-        Err(OAuthError::InvalidResponse)
+        coordinator.begin_create(&start.session_id),
+        Err(OAuthError::MailboxRefused)
     ));
-    assert!(coordinator.finish(&start.session_id).await.is_err());
+    // A wrong address is refused, with no second browser trip (the token
+    // endpoint was contacted exactly once, for the code exchange).
+    assert!(matches!(
+        coordinator
+            .confirm_mailbox(&start.session_id, "nobody@example.com")
+            .await,
+        Err(OAuthError::MailboxRefused)
+    ));
+    assert!(matches!(
+        coordinator.begin_create(&start.session_id),
+        Err(OAuthError::MailboxRefused)
+    ));
+    // The accepted address is trusted only now, and then creation is possible.
+    assert_eq!(
+        coordinator
+            .confirm_mailbox(&start.session_id, "real@example.com")
+            .await
+            .unwrap(),
+        oauth_sessions::SignInState::Verified("real@example.com".into())
+    );
+    let target = coordinator.begin_create(&start.session_id).unwrap();
+    assert_eq!(target.authorization.binding.mailbox, "real@example.com");
+    // A second creation cannot start while one is running, but a failed one can
+    // be retried with the same session.
+    assert!(coordinator.begin_create(&start.session_id).is_err());
+    coordinator.create_failed(&start.session_id);
+    assert!(coordinator.begin_create(&start.session_id).is_ok());
+    coordinator.created(&start.session_id);
+    assert!(coordinator.begin_create(&start.session_id).is_err());
+    // Exchange, then identity: no further token requests were made.
     assert_eq!(count.load(Ordering::SeqCst), 1);
     server.abort();
+}
+
+#[tokio::test]
+async fn typed_addresses_are_limited_and_the_session_ends_with_the_last_try() {
+    let (port, _count, server) = oauth_server(false).await;
+    let coordinator = oauth_sessions::SessionCoordinator::default();
+    let start = coordinator
+        .begin(
+            pending_fixture(port),
+            Arc::new(FixtureIdentity {
+                port,
+                accepts: &["real@example.com"],
+            }),
+            NetRoute::default(),
+            RouteInput::Direct,
+        )
+        .await
+        .unwrap();
+    return_from_browser(&start).await;
+    coordinator.finish(&start.session_id).await.unwrap();
+    for attempt in 1..=oauth_sessions::MAX_MAILBOX_ATTEMPTS {
+        assert!(
+            matches!(
+                coordinator
+                    .confirm_mailbox(&start.session_id, "nobody@example.com")
+                    .await,
+                Err(OAuthError::MailboxRefused)
+            ),
+            "attempt {attempt}"
+        );
+    }
+    // Out of tries: the tokens are gone and the user has to sign in again, so
+    // even the right address no longer works.
+    assert!(matches!(
+        coordinator
+            .confirm_mailbox(&start.session_id, "real@example.com")
+            .await,
+        Err(OAuthError::ExpiredSession)
+    ));
+    assert_eq!(coordinator.session_count(), 0);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_signed_in_session_is_dropped_when_its_time_is_up_and_cancel_drops_its_tokens() {
+    for cancel in [false, true] {
+        let (port, _count, server) = oauth_server(false).await;
+        let coordinator = oauth_sessions::SessionCoordinator::default();
+        let start = coordinator
+            .begin(
+                pending_fixture(port),
+                Arc::new(FixtureIdentity::new(port)),
+                NetRoute::default(),
+                RouteInput::Direct,
+            )
+            .await
+            .unwrap();
+        // While waiting for the browser the limit is the short one.
+        assert!(coordinator.remaining(&start.session_id).unwrap() <= Duration::from_secs(300));
+        return_from_browser(&start).await;
+        assert!(matches!(
+            coordinator.finish(&start.session_id).await,
+            Ok(oauth_sessions::SignInState::Verified(_))
+        ));
+        if cancel {
+            coordinator.cancel(&start.session_id).unwrap();
+        } else {
+            coordinator.expire_now(&start.session_id);
+        }
+        assert!(coordinator.begin_create(&start.session_id).is_err());
+        assert!(
+            coordinator
+                .confirm_mailbox(&start.session_id, "lin@example.com")
+                .await
+                .is_err()
+        );
+        assert_eq!(coordinator.session_count(), 0);
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn a_reauthorization_accepts_only_the_accounts_own_address() {
+    // The account is lin@example.com. The mail server either opens it with the
+    // new sign-in or does not; no other address can be offered instead.
+    for (accepts, opens) in [
+        (&["lin@example.com"][..], true),
+        (&["other@example.com"][..], false),
+    ] {
+        let (port, _count, server) = oauth_server(false).await;
+        let registration = pending_fixture(port);
+        let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
+        config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":"","clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
+        let mut request: CreateAccountRequest = serde_json::from_value(
+            serde_json::json!({"requestId":uuid::Uuid::new_v4().to_string(),"config":config}),
+        )
+        .unwrap();
+        let (imap, smtp) = registration.mail_connections("lin@example.com");
+        request.config.imap = imap;
+        request.config.smtp = smtp;
+        let coordinator = oauth_sessions::SessionCoordinator::default();
+        let start = coordinator
+            .begin_reauthorization(
+                registration,
+                Arc::new(FixtureIdentity { port, accepts }),
+                NetRoute::default(),
+                request,
+                uuid::Uuid::new_v4().to_string(),
+                3,
+            )
+            .await
+            .unwrap();
+        return_from_browser(&start).await;
+        // The new-account calls do not apply to a reauthorization session.
+        assert!(
+            coordinator
+                .confirm_mailbox(&start.session_id, "lin@example.com")
+                .await
+                .is_err()
+        );
+        let finished = coordinator.finish_reauthorization(&start.session_id).await;
+        if opens {
+            let completed = finished.unwrap();
+            assert_eq!(completed.authorization.binding.mailbox, "lin@example.com");
+            assert_eq!(completed.expected_revision, 3);
+            // Consumed once.
+            assert!(
+                coordinator
+                    .finish_reauthorization(&start.session_id)
+                    .await
+                    .is_err()
+            );
+        } else {
+            assert!(matches!(finished, Err(OAuthError::MailboxRefused)));
+        }
+        assert_eq!(coordinator.session_count(), 0);
+        server.abort();
+    }
 }
 
 /// One refresh-token grant returning `access`; yields the request body.
@@ -777,7 +985,7 @@ impl crate::auth::OAuthProvider for PolicyProvider {
         &self.registration
     }
     fn identity_verifier(&self) -> Arc<dyn IdentityVerifier> {
-        Arc::new(FixtureIdentity(0))
+        Arc::new(FixtureIdentity::new(0))
     }
     fn classify_rejection(
         &self,

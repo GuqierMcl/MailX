@@ -239,10 +239,10 @@
   "microsoftWorkProviderDescription": "Work or school mail",
   "microsoftWorkDomain": "Work or school address",
   "microsoftPersonalSignInTitle": "Add an Outlook mailbox",
-  "microsoftPersonalSignInDescription": "For Outlook.com, Hotmail and Live addresses. Enter your address, then sign in to your Microsoft account in the browser.",
+  "microsoftPersonalSignInDescription": "For Outlook.com, Hotmail and Live addresses. Sign in to your Microsoft account in your browser, and MailX finds your mailbox from the sign-in.",
   "microsoftPersonalEmailHint": "Your Outlook.com, Hotmail or Live address.",
   "microsoftWorkSignInTitle": "Add a Microsoft 365 mailbox",
-  "microsoftWorkSignInDescription": "For work or school mail. Enter your address, then sign in with your work or school account in the browser. Mail on a company-hosted Exchange server isn't covered here; use the IMAP/SMTP option instead.",
+  "microsoftWorkSignInDescription": "For work or school mail. Sign in with your work or school account in your browser, and MailX finds your mailbox from the sign-in. Mail on a company-hosted Exchange server isn't covered here; use the IMAP/SMTP option instead.",
   "microsoftWorkEmailHint": "Your work or school email address.",
   "microsoftHelp": "Outlook.com: turn on IMAP in Outlook settings before you sign in. Work or school accounts: your administrator may need to approve MailX or allow IMAP and SMTP. Mail on a company-hosted Exchange server isn't covered by the Microsoft 365 entry. Use the IMAP/SMTP option with the server details from your administrator.",
   "browserSignInNote": "MailX will open the Microsoft sign-in page in your browser.",
@@ -255,5 +255,7 @@
   "signInAgainNeededTitle": "Sign in again to keep this mailbox working",
   "signInAgainNeededDescription": "Your sign-in has expired or was withdrawn, so mail can't be received or sent. Sign in again in your browser; your mail and settings stay as they are.",
   "signInAgainFailed": "Couldn't sign in again",
-  "signedInThroughBrowser": "Browser sign-in"
+  "signedInThroughBrowser": "Browser sign-in",
+  "signInNeedsAddress": "MailX couldn't open a mailbox with this Microsoft account's sign-in name. Enter the account's email address.",
+  "checkingAddress": "Checking…"
 }

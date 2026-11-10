@@ -239,10 +239,10 @@
   "microsoftWorkProviderDescription": "工作或学校邮箱",
   "microsoftWorkDomain": "工作或学校邮箱地址",
   "microsoftPersonalSignInTitle": "添加 Outlook 邮箱",
-  "microsoftPersonalSignInDescription": "适用于 Outlook.com、Hotmail 和 Live 邮箱。先填写邮箱地址，再在浏览器里登录你的微软账号。",
+  "microsoftPersonalSignInDescription": "适用于 Outlook.com、Hotmail 和 Live 邮箱。在浏览器里登录你的微软账号，MailX 会根据登录结果找到你的邮箱。",
   "microsoftPersonalEmailHint": "你的 Outlook.com、Hotmail 或 Live 邮箱地址。",
   "microsoftWorkSignInTitle": "添加 Microsoft 365 邮箱",
-  "microsoftWorkSignInDescription": "适用于工作或学校邮箱。先填写邮箱地址，再在浏览器里用工作或学校账号登录。公司自己搭建的 Exchange 服务器不在这里支持，请改用 IMAP/SMTP 手动配置。",
+  "microsoftWorkSignInDescription": "适用于工作或学校邮箱。在浏览器里用工作或学校账号登录，MailX 会根据登录结果找到你的邮箱。公司自己搭建的 Exchange 服务器不在这里支持，请改用 IMAP/SMTP 手动配置。",
   "microsoftWorkEmailHint": "你的工作或学校邮箱地址。",
   "microsoftHelp": "Outlook.com：登录前请先在 Outlook 设置中开启 IMAP。工作或学校账号：可能需要管理员批准 MailX，或允许 IMAP 和 SMTP。公司自己搭建的 Exchange 服务器不在 Microsoft 365 入口支持范围内，请使用 IMAP/SMTP 手动配置，服务器信息向管理员获取。",
   "browserSignInNote": "MailX 会在浏览器中打开微软的登录页面。",
@@ -255,5 +255,7 @@
   "signInAgainNeededTitle": "需要重新登录，这个邮箱才能继续使用",
   "signInAgainNeededDescription": "登录已过期或被撤销，现在无法收发邮件。请在浏览器中重新登录；已有的邮件和设置不会变。",
   "signInAgainFailed": "重新登录没有成功",
-  "signedInThroughBrowser": "浏览器登录"
+  "signedInThroughBrowser": "浏览器登录",
+  "signInNeedsAddress": "MailX 没能用这个微软账号的登录名打开邮箱。请填写这个账号的邮箱地址。",
+  "checkingAddress": "正在检查…"
 }

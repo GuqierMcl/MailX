@@ -35,21 +35,30 @@ fn claims(tid: &str) -> serde_json::Value {
         "email": "someone-else@example.com",
     })
 }
-async fn verify(
+fn verifier(
     audience: Audience,
-    claims: serde_json::Value,
     proof: Result<(), OAuthError>,
-) -> (Result<VerifiedIdentity, OAuthError>, Arc<ScriptedProof>) {
+) -> (MicrosoftVerifier, Arc<ScriptedProof>) {
     let proof = Arc::new(ScriptedProof {
         result: proof,
         seen: Mutex::default(),
     });
     let provider = MicrosoftProvider::new(audience);
-    let verifier = MicrosoftVerifier {
-        audience,
-        imap: provider.registration.mail_policy.imap.clone(),
-        proof: proof.clone(),
-    };
+    (
+        MicrosoftVerifier {
+            audience,
+            imap: provider.registration.mail_policy.imap.clone(),
+            proof: proof.clone(),
+        },
+        proof,
+    )
+}
+/// The identity check on its own: it never signs in to a mail server.
+async fn check(
+    audience: Audience,
+    claims: serde_json::Value,
+) -> (Result<CheckedIdentity, OAuthError>, Arc<ScriptedProof>) {
+    let (verifier, proof) = verifier(audience, Ok(()));
     let access = SecretValue::new("access".into());
     let id_token = fixture_token(claims);
     let evidence = IdentityEvidence {
@@ -57,9 +66,8 @@ async fn verify(
         id_token: Some(&id_token),
         nonce: Some("n-1"),
         client_id: CLIENT_ID,
-        expected_mailbox: "Lin@Outlook.com",
     };
-    let result = verifier.verify(&evidence, &NetRoute::default()).await;
+    let result = verifier.check(&evidence, &NetRoute::default()).await;
     (result, proof)
 }
 
@@ -155,8 +163,8 @@ fn authorization_url_has_no_path_and_asks_for_account_selection() {
 }
 
 #[tokio::test]
-async fn work_account_is_bound_to_tenant_and_object_and_proven_through_imap() {
-    let (result, proof) = verify(Audience::Organization, claims(TENANT), Ok(())).await;
+async fn work_account_is_bound_to_tenant_and_object_with_the_claim_address_as_a_hint() {
+    let (result, proof) = check(Audience::Organization, claims(TENANT)).await;
     let identity = result.unwrap();
     assert_eq!(
         identity.issuer,
@@ -166,8 +174,65 @@ async fn work_account_is_bound_to_tenant_and_object_and_proven_through_imap() {
         identity.subject,
         format!("{TENANT}/{}", OBJECT.to_ascii_lowercase())
     );
-    // The claim's e-mail is ignored: the proven mailbox is the one asked for.
-    assert_eq!(identity.mailbox, "Lin@Outlook.com");
+    assert_eq!(
+        identity.mailbox_hint.as_deref(),
+        Some("someone-else@example.com")
+    );
+    // Reading claims never opens a mail connection.
+    assert!(proof.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_hint_is_email_then_preferred_username_and_only_when_address_shaped() {
+    let hint = |email: Option<&str>, upn: Option<&str>| {
+        let mut value = claims(TENANT);
+        let object = value.as_object_mut().unwrap();
+        object.remove("email");
+        if let Some(email) = email {
+            object.insert("email".into(), json!(email));
+        }
+        if let Some(upn) = upn {
+            object.insert("preferred_username".into(), json!(upn));
+        }
+        value
+    };
+    for (email, upn, expected) in [
+        (
+            Some("lin@contoso.com"),
+            Some("lin@contoso.onmicrosoft.com"),
+            Some("lin@contoso.com"),
+        ),
+        (
+            None,
+            Some("lin@contoso.onmicrosoft.com"),
+            Some("lin@contoso.onmicrosoft.com"),
+        ),
+        (
+            Some("not an address"),
+            Some("lin@contoso.com"),
+            Some("lin@contoso.com"),
+        ),
+        (Some("a@b@c"), None, None),
+        (None, Some("just-a-name"), None),
+        (None, None, None),
+    ] {
+        let (result, _) = check(Audience::Organization, hint(email, upn)).await;
+        assert_eq!(
+            result.unwrap().mailbox_hint.as_deref(),
+            expected,
+            "{email:?} {upn:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_mailbox_is_proven_only_through_the_reviewed_imap_server() {
+    let (verifier, proof) = verifier(Audience::Organization, Ok(()));
+    let bearer = SecretValue::new("access".into());
+    verifier
+        .prove_mailbox(&NetRoute::default(), &bearer, "Lin@Outlook.com")
+        .await
+        .unwrap();
     assert_eq!(
         *proof.seen.lock().unwrap(),
         [(
@@ -180,18 +245,16 @@ async fn work_account_is_bound_to_tenant_and_object_and_proven_through_imap() {
 
 #[tokio::test]
 async fn personal_account_needs_the_consumer_tenant() {
-    let (result, _) = verify(Audience::Personal, claims(CONSUMER_TENANT), Ok(())).await;
+    let (result, _) = check(Audience::Personal, claims(CONSUMER_TENANT)).await;
     assert!(result.unwrap().subject.starts_with(CONSUMER_TENANT));
-    let (result, proof) = verify(Audience::Personal, claims(TENANT), Ok(())).await;
+    let (result, _) = check(Audience::Personal, claims(TENANT)).await;
     assert_eq!(result.err(), Some(OAuthError::UseOrganizationEntry));
-    assert!(proof.seen.lock().unwrap().is_empty());
-    let (result, proof) = verify(Audience::Organization, claims(CONSUMER_TENANT), Ok(())).await;
+    let (result, _) = check(Audience::Organization, claims(CONSUMER_TENANT)).await;
     assert_eq!(result.err(), Some(OAuthError::UsePersonalEntry));
-    assert!(proof.seen.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn malformed_identity_claims_are_rejected_before_any_mail_login() {
+async fn malformed_identity_claims_are_rejected() {
     let mut other_issuer = claims(TENANT);
     other_issuer["iss"] = json!("https://login.microsoftonline.com/other/v2.0");
     let mut foreign_issuer = claims(TENANT);
@@ -224,7 +287,7 @@ async fn malformed_identity_claims_are_rejected_before_any_mail_login() {
         ("audience", wrong_audience),
         ("nonce", wrong_nonce),
     ] {
-        let (result, proof) = verify(Audience::Organization, value, Ok(())).await;
+        let (result, proof) = check(Audience::Organization, value).await;
         assert_eq!(result.err(), Some(OAuthError::InvalidResponse), "{name}");
         assert!(proof.seen.lock().unwrap().is_empty(), "{name}");
     }
@@ -246,9 +309,8 @@ async fn a_missing_id_token_is_not_identity() {
         id_token: None,
         nonce: Some("n-1"),
         client_id: CLIENT_ID,
-        expected_mailbox: "lin@example.com",
     };
-    let result = verifier.verify(&evidence, &NetRoute::default()).await;
+    let result = verifier.check(&evidence, &NetRoute::default()).await;
     assert_eq!(result.err(), Some(OAuthError::InvalidResponse));
 }
 
@@ -260,7 +322,11 @@ async fn proof_failures_pass_through_unchanged() {
         OAuthError::Proxy,
         OAuthError::Timeout,
     ] {
-        let (result, _) = verify(Audience::Organization, claims(TENANT), Err(error)).await;
+        let (verifier, _) = verifier(Audience::Organization, Err(error));
+        let bearer = SecretValue::new("access".into());
+        let result = verifier
+            .prove_mailbox(&NetRoute::default(), &bearer, "lin@contoso.com")
+            .await;
         assert_eq!(result.err(), Some(error));
     }
 }

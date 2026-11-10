@@ -4,6 +4,8 @@ import type {
   AccountRemoval,
   AccountConfigInput,
   OAuthSessionHandle,
+  OAuthSignInResult,
+  RouteInput,
   Draft,
   InlineImage,
   DraftChanged,
@@ -339,9 +341,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       folders.push(...buildFolders(account.id, emails, dataset.customFolders))
       return structuredClone(account)
     },
-    async beginOAuthAccount({ providerId, request }) {
+    async beginOAuthAccount({ providerId, route }) {
       if (!OAUTH_PROVIDER_IDS.includes(providerId)) throw new MailxClientError({ code: 'unsupported', message: '', field: null })
-      return oauthSessions.begin({ kind: 'create', providerId, config: request.config })
+      return oauthSessions.begin({ kind: 'create', providerId, route, hint: mockSignInAddress(providerId), mailbox: null, attempts: 0 })
     },
     async reauthorizeOAuthAccount({ providerId, accountId, expectedRevision }) {
       const account = accounts.find((row) => row.id === accountId)
@@ -350,18 +352,48 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return oauthSessions.begin({ kind: 'reauthorize', providerId, accountId })
     },
     async finishOAuthAccount(sessionId) {
-      const session = await oauthSessions.wait(sessionId)
-      if (session.kind === 'create') {
-        const account = oauthAccountFromConfig(crypto.randomUUID(), 1, session.providerId, session.config)
-        accounts.push(account)
-        folders.push(...buildFolders(account.id, emails, dataset.customFolders))
-        return structuredClone(account)
+      const session = await oauthSessions.wait(sessionId, 'create')
+      if (session.hint.startsWith('denied')) {
+        oauthSessions.cancel(sessionId)
+        throw new MailxClientError({ code: 'oauthAuthorizationDenied', message: '', field: null })
       }
+      // Like the host: the sign-in's address is tried first, and a refused or
+      // missing one leaves the address to the user.
+      if (session.hint.startsWith('alias') || session.hint.startsWith('refused')) return { kind: 'needsMailbox', suggestion: session.hint }
+      session.mailbox = session.hint
+      return { kind: 'verified', emailAddress: session.hint }
+    },
+    async confirmOAuthMailbox({ sessionId, emailAddress }) {
+      const session = oauthSessions.signedIn(sessionId)
+      if (session.mailbox !== null) throw new MailxClientError({ code: 'oauthInvalidResponse', message: '', field: null })
+      const typed = emailAddress.trim()
+      session.attempts += 1
+      if (!/^[^\s@]+@[^\s@]+$/.test(typed) || typed.toLowerCase().startsWith('refused')) {
+        if (session.attempts >= MOCK_MAILBOX_ATTEMPTS) oauthSessions.cancel(sessionId)
+        throw new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null })
+      }
+      session.mailbox = typed
+      return { kind: 'verified', emailAddress: typed } satisfies OAuthSignInResult
+    },
+    async createOAuthAccount({ sessionId, profile }) {
+      const session = oauthSessions.signedIn(sessionId)
+      if (session.mailbox === null) throw new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null })
+      const displayName = profile.displayName.trim()
+      if (!displayName) throw new MailxClientError({ code: 'validation', message: '', field: 'displayName' })
+      const account = oauthAccountFromSession(crypto.randomUUID(), session, { ...profile, displayName })
+      accounts.push(account)
+      folders.push(...buildFolders(account.id, emails, dataset.customFolders))
+      oauthSessions.cancel(sessionId)
+      return structuredClone(account)
+    },
+    async finishOAuthReauthorization(sessionId) {
+      const session = await oauthSessions.wait(sessionId, 'reauthorize')
       const index = accounts.findIndex((row) => row.id === session.accountId)
       if (index < 0) throw notFound()
       const current = accounts[index]
       if (current.authentication.kind !== 'oauth2') throw new MailxClientError({ code: 'unsupported', message: '', field: null })
       accounts[index] = { ...current, revision: current.revision + 1, authentication: { ...current.authentication, state: 'connected' }, updatedAt: new Date().toISOString() }
+      oauthSessions.cancel(sessionId)
       return structuredClone(accounts[index])
     },
     async cancelOAuthAccount(sessionId) { oauthSessions.cancel(sessionId) },
@@ -781,47 +813,70 @@ const WORK = '11111111-1111-4111-8111-111111111111'
 const PERSONAL = '22222222-2222-4222-8222-222222222222'
 
 const OAUTH_PROVIDER_IDS = ['microsoft-personal', 'microsoft-work']
-/** How long the mock "browser sign-in" takes before it succeeds. */
+/** How long the mock "browser sign-in" takes before it comes back. */
 const OAUTH_DELAY_MS = 600
-
-type OAuthSession =
-  | { kind: 'create'; providerId: string; config: AccountConfigInput }
-  | { kind: 'reauthorize'; providerId: string; accountId: string }
+/** Typed mailbox addresses a mock session accepts trying, as in the host. */
+const MOCK_MAILBOX_ATTEMPTS = 5
 
 /**
- * Stands in for the host's sign-in sessions. Finishing succeeds after a short
- * delay. To exercise failures, use an address starting with `refused` (the
- * mailbox won't open) or `denied` (access wasn't allowed). Cancel makes a
- * pending finish fail with `oauthSessionExpired`, as the host does.
+ * The address the mock sign-in "returns". The page never asks for one first.
+ * To exercise the other paths in the browser preview, set
+ * `localStorage['mailx.mock.oauthAddress']`: `alias…` or `refused…` makes the
+ * mail server refuse it (the page then asks for an address; `refused…` also
+ * fails every typed address starting with `refused`), `denied…` makes the user
+ * decline access.
+ */
+function mockSignInAddress(providerId: string): string {
+  const preset = typeof localStorage === 'undefined' ? null : localStorage.getItem('mailx.mock.oauthAddress')
+  return (preset?.trim() || (providerId === 'microsoft-personal' ? 'lin@outlook.com' : 'lin@contoso.com')).toLowerCase()
+}
+
+type CreateSession = {
+  kind: 'create'
+  providerId: string
+  route: RouteInput
+  /** What the sign-in names; tried first. */
+  hint: string
+  /** The address the mock mail server accepted, once there is one. */
+  mailbox: string | null
+  attempts: number
+}
+type OAuthSession = CreateSession | { kind: 'reauthorize'; providerId: string; accountId: string }
+
+/**
+ * Stands in for the host's sign-in sessions. Waiting for the browser takes a
+ * moment; cancel makes a pending wait fail with `oauthSessionExpired`, as the
+ * host does, and drops the session with its "tokens".
  */
 function createOAuthSessions() {
-  const pending = new Map<string, { session: OAuthSession; abort: () => void }>()
+  const sessions = new Map<string, { session: OAuthSession; abort: () => void }>()
+  const expired = () => new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null })
   return {
     begin(session: OAuthSession): OAuthSessionHandle {
       const sessionId = crypto.randomUUID()
-      pending.set(sessionId, { session, abort: () => undefined })
+      sessions.set(sessionId, { session, abort: () => undefined })
       return { sessionId }
     },
-    wait(sessionId: string): Promise<OAuthSession> {
-      const entry = pending.get(sessionId)
-      if (!entry) return Promise.reject(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null }))
-      const address = entry.session.kind === 'create' ? entry.session.config.emailAddress.toLowerCase() : ''
+    wait<K extends OAuthSession['kind']>(sessionId: string, kind: K): Promise<Extract<OAuthSession, { kind: K }>> {
+      const entry = sessions.get(sessionId)
+      if (!entry || entry.session.kind !== kind) return Promise.reject(expired())
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(sessionId)
-          if (address.startsWith('refused')) reject(new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null }))
-          else if (address.startsWith('denied')) reject(new MailxClientError({ code: 'oauthAuthorizationDenied', message: '', field: null }))
-          else resolve(entry.session)
-        }, OAUTH_DELAY_MS)
+        const timer = setTimeout(() => resolve(entry.session as Extract<OAuthSession, { kind: K }>), OAUTH_DELAY_MS)
         entry.abort = () => {
           clearTimeout(timer)
-          reject(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null }))
+          reject(expired())
         }
       })
     },
+    /** A session whose browser already returned. */
+    signedIn(sessionId: string): CreateSession {
+      const entry = sessions.get(sessionId)
+      if (!entry || entry.session.kind !== 'create') throw expired()
+      return entry.session
+    },
     cancel(sessionId: string) {
-      const entry = pending.get(sessionId)
-      pending.delete(sessionId)
+      const entry = sessions.get(sessionId)
+      sessions.delete(sessionId)
       entry?.abort()
     },
   }
@@ -835,12 +890,18 @@ function registeredServers(providerId: string, emailAddress: string): Pick<Accou
   }
 }
 
-function oauthAccountFromConfig(id: string, revision: number, providerId: string, config: AccountConfigInput): Account {
+/** Builds the account like the host: address, servers and route from the session, the rest from the profile. */
+function oauthAccountFromSession(id: string, session: CreateSession, profile: Pick<AccountConfigInput, 'displayName' | 'color' | 'senderName' | 'useProviderIcon'>): Account {
   const endpoint = (suffix: string) => ({ id: `${id}-${suffix}`, generation: 1, credentialConfigured: true, trust: 'trusted' as const })
-  const address = config.emailAddress.trim()
+  const address = session.mailbox ?? ''
+  const { providerId } = session
+  const placeholder = { issuer: '', clientRegistrationId: '', authorizationSubject: null, targetMailboxResource: null }
   return {
-    ...accountFromConfig(id, revision, { ...config, emailAddress: address, ...registeredServers(providerId, address) }),
-    providerId,
+    ...accountFromConfig(id, 1, {
+      ...profile, emailAddress: address, providerId, route: session.route,
+      ...registeredServers(providerId, address),
+      authentication: { kind: 'oauth2', configuration: { providerId, ...placeholder } },
+    }),
     authentication: {
       kind: 'oauth2',
       configuration: {
@@ -848,7 +909,7 @@ function oauthAccountFromConfig(id: string, revision: number, providerId: string
         issuer: 'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0',
         clientRegistrationId: `${providerId}-v1`,
         authorizationSubject: '00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000001',
-        targetMailboxResource: config.emailAddress,
+        targetMailboxResource: address,
       },
       state: 'connected',
       imap: endpoint('imap'),

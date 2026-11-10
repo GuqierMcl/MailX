@@ -1,19 +1,32 @@
 use super::*;
+/// Knows one mailbox: the sign-in names it, and only it opens.
 struct Identity;
 impl IdentityVerifier for Identity {
-    fn verify<'a>(
+    fn check<'a>(
         &'a self,
         _: &'a IdentityEvidence<'a>,
         _: &'a NetRoute,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
-    > {
+    ) -> BoxFuture<'a, Result<CheckedIdentity, OAuthError>> {
         Box::pin(async {
-            Ok(VerifiedIdentity {
+            Ok(CheckedIdentity {
                 issuer: "https://issuer.fixture.invalid".into(),
                 subject: "subject".into(),
-                mailbox: "test@example.com".into(),
+                mailbox_hint: Some("test@example.com".into()),
             })
+        })
+    }
+    fn prove_mailbox<'a>(
+        &'a self,
+        _: &'a NetRoute,
+        _: &'a SecretValue,
+        mailbox: &'a str,
+    ) -> BoxFuture<'a, Result<(), OAuthError>> {
+        Box::pin(async move {
+            if mailbox.eq_ignore_ascii_case("test@example.com") {
+                Ok(())
+            } else {
+                Err(OAuthError::MailboxRefused)
+            }
         })
     }
 }
@@ -122,11 +135,11 @@ async fn code_exchange_has_pkce_and_one_shot_state() {
             &callback,
             &NetRoute::default(),
             &Identity,
-            "test@example.com",
+            Some("test@example.com"),
         )
         .await
         .unwrap();
-    let tokens = authorization.tokens;
+    let tokens = authorization.authorization().unwrap().tokens;
     assert_eq!(tokens.access_token.expose_secret(), "access-marker");
     assert!(!format!("{tokens:?}").contains("access-marker"));
     let request = task.await.unwrap();
@@ -146,7 +159,7 @@ async fn mismatched_and_duplicate_state_reject_before_network() {
                 &callback,
                 &NetRoute::default(),
                 &Identity,
-                "test@example.com"
+                Some("test@example.com")
             )
             .await
             .err()
@@ -173,7 +186,7 @@ async fn mismatched_and_duplicate_state_reject_before_network() {
                 &callback,
                 &NetRoute::default(),
                 &Identity,
-                "test@example.com"
+                Some("test@example.com")
             )
             .await
             .err()
@@ -334,9 +347,9 @@ async fn loopback_callback_is_bound_and_consumed() {
     assert_eq!(result.query(), Some("code=one&state=two"));
 }
 
-#[tokio::test]
-async fn verified_identity_must_match_the_target_mailbox() {
-    let (port, server) = server(r#"{"access_token":"wrong-user-token","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}"#).await;
+/// A callback for a fresh session of `registration(port)`, with a token endpoint
+/// that answers one exchange.
+async fn callback_for(port: u16) -> (OAuthSession, Url) {
     let redirect = Url::parse("http://127.0.0.1:41234/callback").unwrap();
     let (session, authorization) =
         OAuthSession::begin(registration(port), redirect.as_str(), None).unwrap();
@@ -350,19 +363,137 @@ async fn verified_identity_must_match_the_target_mailbox() {
     callback
         .query_pairs_mut()
         .extend_pairs([("state", state.as_str()), ("code", "code")]);
+    (session, callback)
+}
+const EXCHANGE: &str = r#"{"access_token":"user-token","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}"#;
+
+#[tokio::test]
+async fn a_known_mailbox_must_be_accepted_by_the_mail_server() {
+    let (port, server) = server(EXCHANGE).await;
+    let (session, callback) = callback_for(port).await;
     assert_eq!(
         session
             .complete(
                 &callback,
                 &NetRoute::default(),
                 &Identity,
-                "other@example.com"
+                Some("other@example.com")
             )
             .await
             .err(),
-        Some(OAuthError::InvalidResponse)
+        Some(OAuthError::MailboxRefused)
     );
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_new_account_takes_the_signed_in_address_once_the_mail_server_accepts_it() {
+    let (port, server) = server(EXCHANGE).await;
+    let (session, callback) = callback_for(port).await;
+    let signed = session
+        .complete(&callback, &NetRoute::default(), &Identity, None)
+        .await
+        .unwrap();
+    assert_eq!(signed.mailbox(), Some("test@example.com"));
+    let authorization = signed.authorization().unwrap();
+    assert_eq!(authorization.binding.mailbox, "test@example.com");
+    assert_eq!(authorization.binding.subject, "subject");
+    server.await.unwrap();
+}
+
+/// Names an address the mail server refuses, and accepts only `lin@example.com`.
+struct HintRefused(Option<&'static str>);
+impl IdentityVerifier for HintRefused {
+    fn check<'a>(
+        &'a self,
+        _: &'a IdentityEvidence<'a>,
+        _: &'a NetRoute,
+    ) -> BoxFuture<'a, Result<CheckedIdentity, OAuthError>> {
+        Box::pin(async move {
+            Ok(CheckedIdentity {
+                issuer: "https://issuer.fixture.invalid".into(),
+                subject: "subject".into(),
+                mailbox_hint: self.0.map(Into::into),
+            })
+        })
+    }
+    fn prove_mailbox<'a>(
+        &'a self,
+        _: &'a NetRoute,
+        _: &'a SecretValue,
+        mailbox: &'a str,
+    ) -> BoxFuture<'a, Result<(), OAuthError>> {
+        Box::pin(async move {
+            if mailbox == "lin@example.com" {
+                Ok(())
+            } else {
+                Err(OAuthError::MailboxRefused)
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_refused_or_missing_hint_leaves_the_mailbox_open_and_a_typed_address_is_only_trusted_after_proof()
+ {
+    for hint in [Some("alias@example.com"), None] {
+        let (port, server) = server(EXCHANGE).await;
+        let (session, callback) = callback_for(port).await;
+        let verifier = HintRefused(hint);
+        let mut signed = session
+            .complete(&callback, &NetRoute::default(), &verifier, None)
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(signed.mailbox(), None);
+        assert_eq!(signed.identity().mailbox_hint.as_deref(), hint);
+        // Without a proven mailbox there is nothing to create an account from.
+        assert_eq!(
+            signed.authorization().err(),
+            Some(OAuthError::MailboxRefused)
+        );
+        // A typed address is refused, and nothing is recorded.
+        for typed in ["", "not an address", "nobody@example.com"] {
+            assert_eq!(
+                signed
+                    .prove(&verifier, &NetRoute::default(), typed)
+                    .await
+                    .err(),
+                Some(OAuthError::MailboxRefused),
+                "{typed:?}"
+            );
+            assert_eq!(signed.mailbox(), None);
+        }
+        // The right one is accepted with the token the session already holds.
+        signed
+            .prove(&verifier, &NetRoute::default(), " lin@example.com ")
+            .await
+            .unwrap();
+        assert_eq!(signed.mailbox(), Some("lin@example.com"));
+        assert_eq!(
+            signed.authorization().unwrap().binding.mailbox,
+            "lin@example.com"
+        );
+    }
+}
+
+#[test]
+fn only_address_shaped_text_is_a_mailbox_hint() {
+    for good in ["lin@example.com", " lin@contoso.onmicrosoft.com ", "a@b"] {
+        assert_eq!(address_shaped(good).as_deref(), Some(good.trim()), "{good}");
+    }
+    for bad in [
+        "",
+        "lin",
+        "@example.com",
+        "lin@",
+        "a@b@c",
+        "lin smith@example.com",
+        "lin@exa\u{1}mple.com",
+        &format!("{}@example.com", "x".repeat(260)),
+    ] {
+        assert_eq!(address_shaped(bad), None, "{bad:?}");
+    }
 }
 
 #[tokio::test]
@@ -1260,24 +1391,27 @@ async fn rejected_access_token_is_forgotten_and_the_next_resolution_refreshes() 
 /// the client must not parse require.
 struct IdTokenIdentity;
 impl IdentityVerifier for IdTokenIdentity {
-    fn verify<'a>(
+    fn check<'a>(
         &'a self,
         evidence: &'a IdentityEvidence<'a>,
         _: &'a NetRoute,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
-    > {
+    ) -> BoxFuture<'a, Result<CheckedIdentity, OAuthError>> {
         Box::pin(async move {
             let claims = evidence.id_token_claims()?;
-            Ok(VerifiedIdentity {
+            Ok(CheckedIdentity {
                 issuer: claims.issuer.clone(),
                 subject: claims.subject.clone(),
-                mailbox: claims
-                    .string("email")
-                    .ok_or(OAuthError::InvalidResponse)?
-                    .into(),
+                mailbox_hint: claims.string("email").map(Into::into),
             })
         })
+    }
+    fn prove_mailbox<'a>(
+        &'a self,
+        _: &'a NetRoute,
+        _: &'a SecretValue,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<(), OAuthError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 fn openid_registration(port: u16) -> ProviderRegistration {
@@ -1345,9 +1479,10 @@ async fn id_token_login(
             &callback,
             &NetRoute::default(),
             &IdTokenIdentity,
-            expected_mailbox,
+            Some(expected_mailbox),
         )
-        .await;
+        .await
+        .and_then(|signed| signed.authorization());
     (result, server.await.unwrap())
 }
 fn good_claims(nonce: &str) -> serde_json::Value {

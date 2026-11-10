@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changeDraft, draftToConnection, initialDraft } from './account-draft'
+import { changeDraft, draftToConnection, draftToRoute, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
 import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
@@ -186,5 +186,27 @@ describe('network route input boundary', () => {
     expect(draftToConnection(changed, account).route).toMatchObject({ imageProxyDns: true, confirmImageProxyDns: true })
     changed = changeDraft(changed, 'proxyPort', '1081')
     expect(draftToConnection(changed, account).route).toMatchObject({ imageProxyDns: false, confirmImageProxyDns: false })
+  })
+})
+
+describe('sign-in route', () => {
+  it('has a route but needs no address, servers or passwords', () => {
+    const draft = initialDraft(null)
+    expect(draftToRoute(draft)).toEqual({ kind: 'direct' })
+    expect(draftToRoute({ ...draft, routeKind: 'inherit' })).toEqual({ kind: 'inherit' })
+  })
+
+  it('carries a custom proxy, with its login, into sign-in', () => {
+    const draft = { ...initialDraft(null), routeKind: 'custom' as const, proxyKind: 'httpConnect' as const, proxyHost: ' proxy.example.com ', proxyPort: '8080' }
+    expect(draftToRoute({ ...draft, proxyHost: 'proxy.example.com' })).toMatchObject({ kind: 'custom', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 8080, dns: 'proxy', authentication: null })
+    const withLogin = draftToRoute({ ...draft, proxyHost: 'proxy.example.com', proxyAuth: true, proxyUsername: ' lin ', proxyPassword: { replace: true, value: 'synthetic' } })
+    expect(withLogin).toMatchObject({ authentication: { username: 'lin', password: { action: 'replace', value: 'synthetic' } } })
+  })
+
+  it('rejects a broken proxy instead of quietly signing in directly', () => {
+    const draft = { ...initialDraft(null), routeKind: 'custom' as const, proxyHost: 'proxy.example.com', proxyPort: '8080' }
+    for (const broken of [{ proxyHost: '' }, { proxyHost: 'http://proxy.example.com' }, { proxyPort: '0' }, { proxyPort: 'abc' }, { proxyAuth: true, proxyUsername: '' }, { proxyAuth: true, proxyUsername: 'lin', proxyPassword: { replace: true, value: '' } }]) {
+      expect(() => draftToRoute({ ...draft, ...broken })).toThrow(MailxClientError)
+    }
   })
 })

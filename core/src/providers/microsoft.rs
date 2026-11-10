@@ -7,9 +7,9 @@
 use crate::{
     accounts::types::TlsMode,
     auth::{
-        IdentityEvidence, IdentityVerifier, MailEndpointPolicy, MailLoginPolicy, MailProtocol,
-        MailProtocolPolicy, MailRejection, OAuthError, OAuthProvider, ProviderRegistration,
-        RejectionKind, VerifiedIdentity,
+        CheckedIdentity, IdentityEvidence, IdentityVerifier, MailEndpointPolicy, MailLoginPolicy,
+        MailProtocol, MailProtocolPolicy, MailRejection, OAuthError, OAuthProvider,
+        ProviderRegistration, RejectionKind, address_shaped,
     },
     net::NetRoute,
     secrets::SecretValue,
@@ -165,11 +165,11 @@ struct MicrosoftVerifier {
     proof: Arc<dyn MailboxProof>,
 }
 impl IdentityVerifier for MicrosoftVerifier {
-    fn verify<'a>(
+    fn check<'a>(
         &'a self,
         evidence: &'a IdentityEvidence<'a>,
-        route: &'a NetRoute,
-    ) -> Pin<Box<dyn Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>> {
+        _route: &'a NetRoute,
+    ) -> Pin<Box<dyn Future<Output = Result<CheckedIdentity, OAuthError>> + Send + 'a>> {
         Box::pin(async move {
             let claims = evidence.id_token_claims()?;
             let tenant = claims.string("tid").ok_or(OAuthError::InvalidResponse)?;
@@ -186,26 +186,30 @@ impl IdentityVerifier for MicrosoftVerifier {
                 (Audience::Organization, true) => return Err(OAuthError::UsePersonalEntry),
                 _ => {}
             }
-            // `email` and `preferred_username` are mutable hints. The mailbox
-            // counts as proven only when the reviewed IMAP server opens it.
-            self.proof
-                .prove(
-                    route,
-                    &self.imap,
-                    evidence.expected_mailbox,
-                    evidence.access_token,
-                )
-                .await?;
-            Ok(VerifiedIdentity {
+            // `email` and `preferred_username` are mutable hints. They only
+            // suggest which mailbox to try; the reviewed IMAP server decides.
+            let hint = claims
+                .string("email")
+                .and_then(address_shaped)
+                .or_else(|| claims.string("preferred_username").and_then(address_shaped));
+            Ok(CheckedIdentity {
                 issuer: claims.issuer.clone(),
                 subject: format!(
                     "{}/{}",
                     tenant.to_ascii_lowercase(),
                     object.to_ascii_lowercase()
                 ),
-                mailbox: evidence.expected_mailbox.to_owned(),
+                mailbox_hint: hint,
             })
         })
+    }
+    fn prove_mailbox<'a>(
+        &'a self,
+        route: &'a NetRoute,
+        bearer: &'a SecretValue,
+        mailbox: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), OAuthError>> + Send + 'a>> {
+        self.proof.prove(route, &self.imap, mailbox, bearer)
     }
 }
 

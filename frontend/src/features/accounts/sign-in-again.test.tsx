@@ -24,7 +24,10 @@ describe('sign in again', () => {
     await userEvent.click(screen.getByRole('button', { name: '重新登录' }))
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledOnce())
     expect(client.reauthorizeOAuthAccount).toHaveBeenCalledWith({ providerId: 'microsoft-work', accountId: account.id, expectedRevision: 4 })
-    expect(client.finishOAuthAccount).toHaveBeenCalledWith('dddddddd-dddd-4ddd-8ddd-dddddddddddd')
+    expect(client.finishOAuthReauthorization).toHaveBeenCalledWith('dddddddd-dddd-4ddd-8ddd-dddddddddddd')
+    // A sign-in again never goes through the new-account calls.
+    expect(client.finishOAuthAccount).not.toHaveBeenCalled()
+    expect(client.createOAuthAccount).not.toHaveBeenCalled()
   })
 
   it('is a quiet button while the sign-in works', () => {
@@ -35,7 +38,7 @@ describe('sign in again', () => {
 
   it('shows a plain message when signing in again fails', async () => {
     const client = testClient()
-    client.finishOAuthAccount.mockRejectedValue(new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null }))
+    client.finishOAuthReauthorization.mockRejectedValue(new MailxClientError({ code: 'oauthMailboxRefused', message: '', field: null }))
     const onSignedIn = vi.fn()
     render(<SignInAgain client={client} account={oauthAccount('needsReauthorization')} onSignedIn={onSignedIn} />)
     await userEvent.click(screen.getByRole('button', { name: '重新登录' }))
@@ -47,7 +50,7 @@ describe('sign in again', () => {
   it('cancels a pending sign-in and does not report it as a failure', async () => {
     const client = testClient()
     let release: (reason: unknown) => void = () => undefined
-    client.finishOAuthAccount.mockImplementation(() => new Promise((_resolve, reject) => { release = reject }))
+    client.finishOAuthReauthorization.mockImplementation(() => new Promise((_resolve, reject) => { release = reject }))
     client.cancelOAuthAccount.mockImplementation(async () => { release(new MailxClientError({ code: 'oauthSessionExpired', message: '', field: null })) })
     render(<SignInAgain client={client} account={oauthAccount('needsReauthorization')} onSignedIn={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: '重新登录' }))

@@ -1,14 +1,53 @@
 //! Desktop-independent authorization orchestration. Only reviewed registrations
 //! and identity adapters can start a session; the caller never supplies URLs.
 use super::*;
+use crate::accounts::{
+    oauth_sessions::SignInState,
+    types::{AccountProfileInput, RouteInput},
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Starts browser sign-in for a new account. There is no address yet: it is
+/// learned from the sign-in and confirmed against the mail server. Servers and
+/// login names come from the reviewed provider entry, never from the caller.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BeginOAuthAccount {
     pub provider_id: String,
-    pub request: CreateAccountRequest,
+    /// How MailX reaches the provider; also the new account's route.
+    pub route: RouteInput,
+}
+/// An address typed by the user after sign-in. It counts only once the mail
+/// server opens that mailbox with the session's own token.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfirmOAuthMailbox {
+    pub session_id: String,
+    pub email_address: String,
+}
+/// Creates the account from a signed-in session. Only the profile comes from
+/// the page; the address, servers, login names and route come from the session.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateOAuthAccount {
+    pub session_id: String,
+    pub request_id: String,
+    pub profile: AccountProfileInput,
+}
+/// What the page learns once the browser has returned or an address was tried.
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum OAuthSignInResult {
+    /// The mail server opened this mailbox with the new sign-in.
+    Verified { email_address: String },
+    /// No usable mailbox yet; ask for the address. `suggestion` is the address
+    /// the sign-in offered, if any, which the mail server did not accept.
+    NeedsMailbox { suggestion: Option<String> },
 }
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -62,6 +101,15 @@ fn error(error: crate::auth::OAuthError) -> AppError {
 /// to exiting. Persistence retries take a few seconds at most when healthy.
 const OAUTH_SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
 
+impl From<SignInState> for OAuthSignInResult {
+    fn from(state: SignInState) -> Self {
+        match state {
+            SignInState::Verified(email_address) => Self::Verified { email_address },
+            SignInState::NeedsMailbox(suggestion) => Self::NeedsMailbox { suggestion },
+        }
+    }
+}
+
 impl MailxCore {
     pub async fn begin_oauth_account(
         &self,
@@ -72,25 +120,12 @@ impl MailxCore {
         let provider = crate::providers::oauth::lookup(&input.provider_id).map_err(error)?;
         let registration = provider.registration().clone();
         let verifier = provider.identity_verifier();
-        let mut request = input.request;
-        // Public identity hints are never proof of an OAuth grant. The account
-        // target uses only trusted registration metadata and verified identity.
-        request.config.provider_id = Some(registration.id.clone());
-        request.config.authentication = crate::accounts::types::AuthenticationInput::OAuth2 {
-            configuration: crate::accounts::types::OAuth2Configuration {
-                provider_id: registration.id.clone(),
-                // Placeholder: the verified issuer replaces it once sign-in completes.
-                issuer: String::new(),
-                client_registration_id: registration.registration_id.clone(),
-                authorization_subject: None,
-                target_mailbox_resource: Some(request.config.email_address.clone()),
-            },
-        };
-        crate::accounts::oauth::use_registered_servers(&registration, &mut request);
-        let route = crate::accounts::oauth::authorization_route(&request)?;
+        // The route is checked and resolved before the listener binds; a proxy
+        // that fails never falls back to a direct connection.
+        let route = crate::accounts::oauth::authorization_route(&input.route)?;
         let start = self
             .oauth_sessions
-            .begin(registration, verifier, route, request)
+            .begin(registration, verifier, route, input.route)
             .await
             .map_err(error)?;
         Ok(OAuthBrowserAuthorization {
@@ -180,33 +215,90 @@ impl MailxCore {
     pub fn cancel_oauth_account(&self, input: OAuthSessionRequest) -> Result<(), AppError> {
         self.oauth_sessions.cancel(&input.session_id).map_err(error)
     }
+    /// Waits for the browser. The signed-in session is kept for a while so the
+    /// page can ask for an address and create the account.
     pub async fn finish_oauth_account(
+        &self,
+        input: OAuthSessionRequest,
+    ) -> Result<OAuthSignInResult, AppError> {
+        self.oauth_sessions
+            .finish(&input.session_id)
+            .await
+            .map(Into::into)
+            .map_err(error)
+    }
+    /// Tries a typed address with the session's own token; no second browser trip.
+    pub async fn confirm_oauth_mailbox(
+        &self,
+        input: ConfirmOAuthMailbox,
+    ) -> Result<OAuthSignInResult, AppError> {
+        self.oauth_sessions
+            .confirm_mailbox(&input.session_id, &input.email_address)
+            .await
+            .map(Into::into)
+            .map_err(error)
+    }
+    /// Creates the account from a session whose mailbox the mail server accepted.
+    pub async fn create_oauth_account(
+        &self,
+        input: CreateOAuthAccount,
+    ) -> Result<Account, AppError> {
+        let target = self
+            .oauth_sessions
+            .begin_create(&input.session_id)
+            .map_err(error)?;
+        let mailbox = target.authorization.binding.mailbox.clone();
+        let request = crate::accounts::oauth::create_request(
+            &target.registration,
+            &mailbox,
+            target.route,
+            input.request_id,
+            input.profile,
+        );
+        let service = self.service.clone();
+        let created = tokio::task::spawn_blocking(move || {
+            service
+                .lock()
+                .map_err(|_| AppError::new(ErrorCode::Internal))?
+                .create_oauth(request, target.authorization, target.registration)
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal));
+        match created {
+            Ok(Ok(account)) => {
+                self.oauth_sessions.created(&input.session_id);
+                self.sync.restart(&account.id);
+                self.outbox.start(&account.id);
+                Ok(account)
+            }
+            Ok(Err(failure)) | Err(failure) => {
+                // Nothing was saved, so the user can fix the profile and retry.
+                self.oauth_sessions.create_failed(&input.session_id);
+                Err(failure)
+            }
+        }
+    }
+    /// Waits for the browser of a reauthorization and saves the renewed grant.
+    pub async fn finish_oauth_reauthorization(
         &self,
         input: OAuthSessionRequest,
     ) -> Result<Account, AppError> {
         let completed = self
             .oauth_sessions
-            .finish(&input.session_id)
+            .finish_reauthorization(&input.session_id)
             .await
             .map_err(error)?;
         let service = self.service.clone();
         let account = tokio::task::spawn_blocking(move || {
-            let mut service = service
+            service
                 .lock()
-                .map_err(|_| AppError::new(ErrorCode::Internal))?;
-            match completed.reauthorization {
-                Some((account_id, expected_revision)) => service.reauthorize_oauth(
-                    &account_id,
-                    expected_revision,
+                .map_err(|_| AppError::new(ErrorCode::Internal))?
+                .reauthorize_oauth(
+                    &completed.account_id,
+                    completed.expected_revision,
                     completed.authorization,
                     completed.registration,
-                ),
-                None => service.create_oauth(
-                    completed.request,
-                    completed.authorization,
-                    completed.registration,
-                ),
-            }
+                )
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))??;
@@ -264,14 +356,10 @@ mod tests {
             Arc::new(|_: &CoreEvent| {}),
         )
         .unwrap();
-        let request: CreateAccountRequest = serde_json::from_value(serde_json::json!({
-            "requestId": uuid::Uuid::new_v4().to_string(),
-            "config": crate::accounts::sync_plan::tests::config(serde_json::json!({"kind":"direct"}))
-        })).unwrap();
         let error = match core
             .begin_oauth_account(BeginOAuthAccount {
                 provider_id: "https://untrusted.example/authorize".into(),
-                request,
+                route: RouteInput::Direct,
             })
             .await
         {
