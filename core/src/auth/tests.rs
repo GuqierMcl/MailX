@@ -48,6 +48,21 @@ fn registration(port: u16) -> ProviderRegistration {
         login_hint: false,
     }
 }
+#[test]
+fn mail_connections_come_from_the_registration_not_the_caller() {
+    let mut registration = registration(1);
+    registration.mail_policy.smtp.login = MailLoginPolicy::Fixed("relay".into());
+    let (imap, smtp) = registration.mail_connections("  Lin@Example.com ");
+    assert_eq!(imap.host, "imap.example.com");
+    assert_eq!((imap.port, imap.tls), (993, crate::TlsMode::Implicit));
+    assert_eq!(imap.username, "Lin@Example.com");
+    assert_eq!(smtp.host, "smtp.example.com");
+    assert_eq!((smtp.port, smtp.tls), (465, crate::TlsMode::Implicit));
+    assert_eq!(smtp.username, "relay");
+    registration
+        .validate_mail_target("lin@example.com", &imap, &smtp)
+        .unwrap();
+}
 async fn server(response: &'static str) -> (u16, tokio::task::JoinHandle<String>) {
     server_status(response, "200 OK").await
 }

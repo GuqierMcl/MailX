@@ -127,6 +127,30 @@ impl ProviderRegistration {
     pub(crate) fn redirect_uri(&self, port: u16) -> String {
         format!("http://127.0.0.1:{port}{}", self.redirect_path)
     }
+    /// The IMAP and SMTP settings this entry allows for `mailbox`, so callers
+    /// take servers from the reviewed registration instead of supplying them.
+    pub(crate) fn mail_connections(
+        &self,
+        mailbox: &str,
+    ) -> (
+        crate::accounts::types::ConnectionConfig,
+        crate::accounts::types::ConnectionConfig,
+    ) {
+        let mailbox = mailbox.trim();
+        let connection = |policy: &MailProtocolPolicy| crate::accounts::types::ConnectionConfig {
+            host: policy.host.clone(),
+            port: policy.port,
+            tls: policy.tls,
+            username: match &policy.login {
+                MailLoginPolicy::Mailbox => mailbox.to_owned(),
+                MailLoginPolicy::Fixed(username) => username.clone(),
+            },
+        };
+        (
+            connection(&self.mail_policy.imap),
+            connection(&self.mail_policy.smtp),
+        )
+    }
     pub(crate) fn validate_mail_target(
         &self,
         mailbox: &str,

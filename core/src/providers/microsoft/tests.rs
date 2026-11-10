@@ -121,6 +121,24 @@ fn registrations_are_valid_and_match_the_reviewed_facts() {
 }
 
 #[test]
+fn reviewed_servers_fill_the_account_settings() {
+    for audience in [Audience::Personal, Audience::Organization] {
+        let registration = registration(audience);
+        let (imap, smtp) = registration.mail_connections("  Lin@Outlook.com ");
+        assert_eq!(
+            (imap.host.as_str(), imap.port),
+            ("outlook.office365.com", 993)
+        );
+        assert_eq!(imap.username, "Lin@Outlook.com");
+        assert_eq!(smtp.host, registration.mail_policy.smtp.host);
+        assert_eq!((smtp.port, smtp.tls), (587, TlsMode::StartTls));
+        registration
+            .validate_mail_target("Lin@Outlook.com", &imap, &smtp)
+            .unwrap();
+    }
+}
+
+#[test]
 fn authorization_url_has_no_path_and_asks_for_account_selection() {
     let (_, url) = crate::auth::OAuthSession::begin(
         registration(Audience::Personal),
