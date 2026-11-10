@@ -66,8 +66,9 @@ impl MailxCore {
     ) -> Result<OAuthBrowserAuthorization, AppError> {
         // Lookup precedes validation, proxy credential access and loopback bind.
         // Empty production registries therefore cause no observable side effect.
-        let registration = crate::auth::lookup_registration(&input.provider_id).map_err(error)?;
-        let verifier = crate::auth::lookup_identity_verifier(&input.provider_id).map_err(error)?;
+        let provider = crate::providers::oauth::lookup(&input.provider_id).map_err(error)?;
+        let registration = provider.registration().clone();
+        let verifier = provider.identity_verifier();
         let mut request = input.request;
         // Public identity hints are never proof of an OAuth grant. The account
         // target uses only trusted registration metadata and verified identity.
@@ -96,8 +97,9 @@ impl MailxCore {
         &self,
         input: BeginOAuthReauthorization,
     ) -> Result<OAuthBrowserAuthorization, AppError> {
-        let registration = crate::auth::lookup_registration(&input.provider_id).map_err(error)?;
-        let verifier = crate::auth::lookup_identity_verifier(&input.provider_id).map_err(error)?;
+        let provider = crate::providers::oauth::lookup(&input.provider_id).map_err(error)?;
+        let registration = provider.registration().clone();
+        let verifier = provider.identity_verifier();
         let service = self.service.clone();
         let account_id = input.account_id.clone();
         let expected_revision = input.expected_revision;

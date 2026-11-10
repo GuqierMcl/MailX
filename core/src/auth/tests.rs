@@ -43,6 +43,9 @@ fn registration(port: u16) -> ProviderRegistration {
         scopes: vec!["mail".into()],
         resource: None,
         allowed_targets: vec![],
+        redirect_path: "/callback".into(),
+        extra_authorize_params: vec![],
+        login_hint: false,
     }
 }
 async fn server(response: &'static str) -> (u16, tokio::task::JoinHandle<String>) {
@@ -90,10 +93,11 @@ async fn code_exchange_has_pkce_and_one_shot_state() {
     let (port, task) = server(r#"{"access_token":"access-marker","refresh_token":"refresh-marker","token_type":"Bearer","expires_in":3600}"#).await;
     let redirect = Url::parse("http://127.0.0.1:41234/callback").unwrap();
     let (session, authorization) =
-        OAuthSession::begin(registration(port), redirect.clone()).unwrap();
+        OAuthSession::begin(registration(port), redirect.as_str(), None).unwrap();
     let params: std::collections::HashMap<_, _> =
         authorization.query_pairs().into_owned().collect();
     assert_eq!(params["code_challenge_method"], "S256");
+    assert_eq!(params["redirect_uri"], redirect.as_str());
     let mut callback = redirect;
     callback
         .query_pairs_mut()
@@ -113,11 +117,13 @@ async fn code_exchange_has_pkce_and_one_shot_state() {
     let request = task.await.unwrap();
     assert!(request.contains("code_verifier="));
     assert!(request.contains("grant_type=authorization_code"));
+    // Byte-identical to the authorization request's value.
+    assert!(request.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A41234%2Fcallback&"));
 }
 #[tokio::test]
 async fn mismatched_and_duplicate_state_reject_before_network() {
     let redirect = Url::parse("http://127.0.0.1:41234/callback").unwrap();
-    let (session, _) = OAuthSession::begin(registration(9), redirect.clone()).unwrap();
+    let (session, _) = OAuthSession::begin(registration(9), redirect.as_str(), None).unwrap();
     let callback = Url::parse("http://127.0.0.1:41234/callback?state=wrong&code=secret").unwrap();
     assert_eq!(
         session
@@ -132,7 +138,8 @@ async fn mismatched_and_duplicate_state_reject_before_network() {
             .unwrap(),
         OAuthError::InvalidCallback
     );
-    let (session, authorization) = OAuthSession::begin(registration(9), redirect.clone()).unwrap();
+    let (session, authorization) =
+        OAuthSession::begin(registration(9), redirect.as_str(), None).unwrap();
     let state = authorization
         .query_pairs()
         .find(|(k, _)| k == "state")
@@ -196,8 +203,7 @@ async fn concurrent_refresh_is_singleflight_and_persists_rotation() {
     assert!(task.await.unwrap().contains("refresh_token=old-refresh"));
 }
 #[test]
-fn production_registry_is_empty_and_untrusted_registration_rejected() {
-    assert!(available_provider_ids().is_empty());
+fn untrusted_registration_is_rejected() {
     let mut reg = registration(1);
     reg.token_endpoint = Url::parse("http://example.com/token").unwrap();
     assert_eq!(reg.validate(), Err(OAuthError::InvalidRegistration));
@@ -289,8 +295,10 @@ async fn cancelled_waiter_does_not_lose_rotated_refresh_token() {
 
 #[tokio::test]
 async fn loopback_callback_is_bound_and_consumed() {
-    let callback = super::loopback::LoopbackCallback::bind().await.unwrap();
-    let redirect = callback.redirect_uri().clone();
+    let callback = super::loopback::LoopbackCallback::bind("/callback")
+        .await
+        .unwrap();
+    let redirect = Url::parse(callback.redirect_uri()).unwrap();
     let receiver = tokio::spawn(callback.receive());
     let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", redirect.port().unwrap()))
         .await
@@ -316,7 +324,7 @@ async fn verified_identity_must_match_the_target_mailbox() {
     let (port, server) = server(r#"{"access_token":"wrong-user-token","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}"#).await;
     let redirect = Url::parse("http://127.0.0.1:41234/callback").unwrap();
     let (session, authorization) =
-        OAuthSession::begin(registration(port), redirect.clone()).unwrap();
+        OAuthSession::begin(registration(port), redirect.as_str(), None).unwrap();
     let state = authorization
         .query_pairs()
         .find(|(k, _)| k == "state")
@@ -359,10 +367,10 @@ async fn insufficient_scope_is_rejected() {
 }
 
 #[tokio::test]
-async fn random_loopback_path_rejects_unrelated_requests_and_cancels() {
-    let callback = loopback::LoopbackCallback::bind().await.unwrap();
-    let redirect = callback.redirect_uri().clone();
-    assert_ne!(redirect.path(), "/oauth/callback");
+async fn registered_loopback_path_rejects_unrelated_requests_and_cancels() {
+    let callback = loopback::LoopbackCallback::bind("/callback").await.unwrap();
+    let redirect = Url::parse(callback.redirect_uri()).unwrap();
+    assert_eq!(redirect.path(), "/callback");
     let port = redirect.port().unwrap();
     let receiver = tokio::spawn(callback.receive());
     let mut wrong = tokio::net::TcpStream::connect(("127.0.0.1", port))
@@ -385,9 +393,126 @@ async fn random_loopback_path_rejects_unrelated_requests_and_cancels() {
 }
 
 #[tokio::test]
+async fn empty_callback_path_has_no_trailing_slash_and_accepts_the_root_request() {
+    let callback = loopback::LoopbackCallback::bind("").await.unwrap();
+    let uri = callback.redirect_uri().to_owned();
+    let port = Url::parse(&uri).unwrap().port().unwrap();
+    assert_eq!(uri, format!("http://127.0.0.1:{port}"));
+    let receiver = tokio::spawn(callback.receive());
+    let mut browser = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    browser
+        .write_all(
+            format!("GET /?code=one&state=two HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut page = String::new();
+    browser.read_to_string(&mut page).await.unwrap();
+    assert_eq!(
+        receiver.await.unwrap().unwrap().query(),
+        Some("code=one&state=two")
+    );
+    assert!(page.contains("text/html"));
+    assert!(page.contains("Sign-in complete") && page.contains("登录完成"));
+}
+
+#[tokio::test]
+async fn callback_page_is_script_free_and_differs_when_the_provider_reports_an_error() {
+    let callback = loopback::LoopbackCallback::bind("/callback").await.unwrap();
+    let port = Url::parse(callback.redirect_uri()).unwrap().port().unwrap();
+    let receiver = tokio::spawn(callback.receive());
+    let mut browser = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    browser
+        .write_all(
+            format!(
+                "GET /callback?error=access_denied&state=s HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut page = String::new();
+    browser.read_to_string(&mut page).await.unwrap();
+    receiver.await.unwrap().unwrap();
+    assert!(page.contains("Sign-in was not completed") && page.contains("未能完成登录"));
+    assert!(!page.contains("access_denied"));
+    assert!(!page.to_lowercase().contains("<script"));
+    assert!(page.contains("Content-Security-Policy: default-src 'none'"));
+    assert!(!page.contains("script-src"));
+}
+
+#[test]
+fn redirect_uri_text_is_built_once_from_the_registration() {
+    let mut reg = registration(1);
+    assert_eq!(reg.redirect_uri(53124), "http://127.0.0.1:53124/callback");
+    reg.redirect_path = String::new();
+    assert_eq!(reg.redirect_uri(53124), "http://127.0.0.1:53124");
+    assert_eq!(reg.validate(), Ok(()));
+    for bad in ["callback", "//x", "/a b", "/a?b", "/a#b", "/a\\b"] {
+        reg.redirect_path = bad.into();
+        assert_eq!(
+            reg.validate(),
+            Err(OAuthError::InvalidRegistration),
+            "{bad}"
+        );
+    }
+    // A redirect that differs from the registered value is refused.
+    let reg = registration(1);
+    assert_eq!(
+        OAuthSession::begin(reg.clone(), "http://127.0.0.1:41234/other", None).err(),
+        Some(OAuthError::InvalidRegistration)
+    );
+    assert_eq!(
+        OAuthSession::begin(reg, "http://127.0.0.1:41234/callback/", None).err(),
+        Some(OAuthError::InvalidRegistration)
+    );
+}
+
+#[test]
+fn authorize_extras_are_static_and_the_login_hint_is_opt_in() {
+    let mut reg = registration(1);
+    reg.extra_authorize_params = vec![("prompt".into(), "select_account".into())];
+    let uri = "http://127.0.0.1:41234/callback";
+    let (_, url) = OAuthSession::begin(reg.clone(), uri, Some("lin@example.com")).unwrap();
+    let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(params["prompt"], "select_account");
+    assert!(!params.contains_key("login_hint"));
+    reg.login_hint = true;
+    let (_, url) = OAuthSession::begin(reg.clone(), uri, Some("lin@example.com")).unwrap();
+    let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(params["login_hint"], "lin@example.com");
+    assert_eq!(params["redirect_uri"], uri);
+    assert_eq!(
+        OAuthSession::begin(reg.clone(), uri, Some("a\nb@example.com")).err(),
+        Some(OAuthError::InvalidRegistration)
+    );
+    // Extras cannot override parameters the flow owns.
+    for key in [
+        "state",
+        "redirect_uri",
+        "scope",
+        "code_challenge",
+        "login_hint",
+    ] {
+        let mut reg = registration(1);
+        reg.extra_authorize_params = vec![(key.into(), "x".into())];
+        assert_eq!(
+            reg.validate(),
+            Err(OAuthError::InvalidRegistration),
+            "{key}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn speculative_empty_connection_does_not_block_callback() {
-    let callback = loopback::LoopbackCallback::bind().await.unwrap();
-    let redirect = callback.redirect_uri().clone();
+    let callback = loopback::LoopbackCallback::bind("/callback").await.unwrap();
+    let redirect = Url::parse(callback.redirect_uri()).unwrap();
     let port = redirect.port().unwrap();
     let receiver = tokio::spawn(callback.receive());
     let _empty = tokio::net::TcpStream::connect(("127.0.0.1", port))

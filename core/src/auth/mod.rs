@@ -34,15 +34,6 @@ pub enum OAuthError {
     Storage,
 }
 
-/// No provider registrations ship yet. Enabling a provider requires a reviewed
-/// registration and identity-verification adapter, not user-supplied endpoints.
-pub fn available_provider_ids() -> &'static [&'static str] {
-    &[]
-}
-
-pub(crate) fn lookup_registration(_: &str) -> Result<ProviderRegistration, OAuthError> {
-    Err(OAuthError::UnsupportedProvider)
-}
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TokenTarget {
@@ -93,8 +84,40 @@ pub(crate) struct ProviderRegistration {
     pub resource: Option<String>,
     #[serde(default)]
     pub allowed_targets: Vec<TokenTarget>,
+    /// Path of the redirect URI registered with the provider, such as
+    /// `/callback`. Providers ignore only the port of a loopback redirect, so
+    /// the path is fixed by the registration. Empty means no path at all.
+    #[serde(default)]
+    pub redirect_path: String,
+    /// Static parameters appended to the authorization request. They come from
+    /// reviewed code only and may not replace a parameter the flow sets itself.
+    #[serde(default)]
+    pub extra_authorize_params: Vec<(String, String)>,
+    /// Whether the authorization request carries the account address as
+    /// `login_hint`, so the provider can preselect the account.
+    #[serde(default)]
+    pub login_hint: bool,
 }
+/// Authorization parameters the flow sets itself.
+const RESERVED_AUTHORIZE_PARAMS: &[&str] = &[
+    "response_type",
+    "client_id",
+    "redirect_uri",
+    "scope",
+    "state",
+    "code_challenge",
+    "code_challenge_method",
+    "resource",
+    "nonce",
+    "login_hint",
+];
 impl ProviderRegistration {
+    /// The exact `redirect_uri` text for a loopback listener on `port`. The
+    /// same string goes into the authorization and token requests; an empty
+    /// path yields no trailing slash.
+    pub(crate) fn redirect_uri(&self, port: u16) -> String {
+        format!("http://127.0.0.1:{port}{}", self.redirect_path)
+    }
     pub(crate) fn validate_mail_target(
         &self,
         mailbox: &str,
@@ -179,6 +202,26 @@ impl ProviderRegistration {
                 return Err(OAuthError::InvalidRegistration);
             }
         }
+        if !(self.redirect_path.is_empty()
+            || self.redirect_path.len() <= 128
+                && self.redirect_path.starts_with('/')
+                && !self.redirect_path.starts_with("//")
+                && !self
+                    .redirect_path
+                    .chars()
+                    .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '?' | '#' | '\\')))
+            || self.extra_authorize_params.len() > 8
+            || self.extra_authorize_params.iter().any(|(key, value)| {
+                key.is_empty()
+                    || key.len() > 64
+                    || value.len() > 512
+                    || RESERVED_AUTHORIZE_PARAMS.contains(&key.as_str())
+                    || key.chars().any(char::is_control)
+                    || value.chars().any(char::is_control)
+            })
+        {
+            return Err(OAuthError::InvalidRegistration);
+        }
         if self
             .scopes
             .iter()
@@ -210,8 +253,13 @@ impl ProviderRegistration {
     }
 }
 
-pub(crate) fn lookup_identity_verifier(_: &str) -> Result<Arc<dyn IdentityVerifier>, OAuthError> {
-    Err(OAuthError::UnsupportedProvider)
+/// One reviewed OAuth provider entry. Several entries may share a client ID
+/// and differ in their endpoints, so an entry is identified by the id of its
+/// registration, never by the client ID. Implementations live in
+/// `crate::providers`; this module stays provider-neutral.
+pub(crate) trait OAuthProvider: Send + Sync {
+    fn registration(&self) -> &ProviderRegistration;
+    fn identity_verifier(&self) -> Arc<dyn IdentityVerifier>;
 }
 /// Only reviewed provider adapters implement this boundary. A token response
 /// alone cannot prove which mailbox the user authorized.
@@ -250,16 +298,22 @@ pub(crate) struct GrantBinding {
 pub(crate) struct OAuthSession {
     provider: ProviderRegistration,
     redirect: Url,
+    redirect_uri: String,
     state: oauth2::CsrfToken,
     verifier: SecretValue,
     deadline: Instant,
 }
 impl OAuthSession {
+    /// `redirect_uri` is the exact text from the loopback listener. `login_hint`
+    /// is the validated account address; it is sent only when the registration
+    /// opts in.
     pub(crate) fn begin(
         provider: ProviderRegistration,
-        redirect: Url,
+        redirect_uri: &str,
+        login_hint: Option<&str>,
     ) -> Result<(Self, Url), OAuthError> {
         provider.validate()?;
+        let redirect = Url::parse(redirect_uri).map_err(|_| OAuthError::InvalidRegistration)?;
         if redirect.scheme() != "http"
             || redirect.host_str() != Some("127.0.0.1")
             || redirect.port().is_none()
@@ -267,6 +321,7 @@ impl OAuthSession {
             || redirect.password().is_some()
             || redirect.query().is_some()
             || redirect.fragment().is_some()
+            || redirect_uri != provider.redirect_uri(redirect.port().unwrap_or_default())
         {
             return Err(OAuthError::InvalidRegistration);
         }
@@ -278,7 +333,7 @@ impl OAuthSession {
         authorization.query_pairs_mut().extend_pairs([
             ("response_type", "code"),
             ("client_id", &provider.client_id),
-            ("redirect_uri", redirect.as_str()),
+            ("redirect_uri", redirect_uri),
             ("scope", &provider.scopes.join(" ")),
             ("state", state.secret()),
             ("code_challenge", &challenge),
@@ -289,10 +344,24 @@ impl OAuthSession {
                 .query_pairs_mut()
                 .append_pair("resource", resource);
         }
+        if provider.login_hint
+            && let Some(hint) = login_hint
+        {
+            if hint.is_empty() || hint.len() > 320 || hint.chars().any(char::is_control) {
+                return Err(OAuthError::InvalidRegistration);
+            }
+            authorization
+                .query_pairs_mut()
+                .append_pair("login_hint", hint);
+        }
+        authorization
+            .query_pairs_mut()
+            .extend_pairs(&provider.extra_authorize_params);
         Ok((
             Self {
                 provider,
                 redirect,
+                redirect_uri: redirect_uri.to_owned(),
                 state,
                 verifier,
                 deadline: Instant::now() + Duration::from_secs(300),
@@ -345,7 +414,7 @@ impl OAuthSession {
                 ("grant_type", "authorization_code"),
                 ("client_id", &self.provider.client_id),
                 ("code", &code),
-                ("redirect_uri", self.redirect.as_str()),
+                ("redirect_uri", &self.redirect_uri),
                 ("code_verifier", self.verifier.expose_secret()),
             ])
             .finish()

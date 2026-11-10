@@ -116,10 +116,13 @@ impl SessionCoordinator {
             .clone()
             .try_acquire_owned()
             .map_err(|_| OAuthError::ExpiredSession)?;
-        let callback = LoopbackCallback::bind().await?;
-        let (session, url) =
-            OAuthSession::begin(registration.clone(), callback.redirect_uri().clone())?;
+        let callback = LoopbackCallback::bind(&registration.redirect_path).await?;
         let expected_mailbox = request.config.email_address.clone();
+        let (session, url) = OAuthSession::begin(
+            registration.clone(),
+            callback.redirect_uri(),
+            Some(&expected_mailbox),
+        )?;
         let session_id = uuid::Uuid::new_v4().to_string();
         let task = tokio::spawn(async move {
             let _permit = permit;

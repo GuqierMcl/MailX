@@ -10,9 +10,14 @@ use url::Url;
 pub(crate) struct LoopbackCallback {
     listener: TcpListener,
     redirect: Url,
+    redirect_uri: String,
 }
 impl LoopbackCallback {
-    pub(crate) async fn bind() -> Result<Self, OAuthError> {
+    /// Binds an ephemeral IPv4 loopback port. Providers match a loopback
+    /// redirect on everything except the port, so `path` is the registered
+    /// value (empty for none) and the text is built here, once, to be reused
+    /// byte for byte in the authorization and token requests.
+    pub(crate) async fn bind(path: &str) -> Result<Self, OAuthError> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
             .map_err(|_| OAuthError::Network)?;
@@ -20,13 +25,17 @@ impl LoopbackCallback {
             .local_addr()
             .map_err(|_| OAuthError::Network)?
             .port();
-        let path = oauth2::CsrfToken::new_random();
-        let redirect = Url::parse(&format!("http://127.0.0.1:{port}/oauth/{}", path.secret()))
-            .map_err(|_| OAuthError::InvalidRegistration)?;
-        Ok(Self { listener, redirect })
+        let redirect_uri = format!("http://127.0.0.1:{port}{path}");
+        let redirect = Url::parse(&redirect_uri).map_err(|_| OAuthError::InvalidRegistration)?;
+        Ok(Self {
+            listener,
+            redirect,
+            redirect_uri,
+        })
     }
-    pub(crate) fn redirect_uri(&self) -> &Url {
-        &self.redirect
+    /// The exact `redirect_uri` text, without a trailing slash for an empty path.
+    pub(crate) fn redirect_uri(&self) -> &str {
+        &self.redirect_uri
     }
     /// Overall lifetime, individual connection lifetime, and request bytes are
     /// bounded separately: a speculative browser connection cannot monopolize
@@ -57,6 +66,35 @@ impl LoopbackCallback {
         .map_err(|_| OAuthError::Timeout)?
     }
 }
+/// No script, no network access and no framing; only the inline style below.
+const PAGE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+macro_rules! page {
+    ($title_en:literal, $text_en:literal, $title_zh:literal, $text_zh:literal) => {
+        concat!(
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+            "<meta name=\"referrer\" content=\"no-referrer\"><title>MailX</title>",
+            "<style>body{font:16px/1.6 system-ui,sans-serif;max-width:28rem;margin:20vh auto;padding:0 1.5rem;color:#222}",
+            "h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:0 0 1.5rem;color:#555}",
+            "@media(prefers-color-scheme:dark){body{background:#1b1b1b;color:#eee}p{color:#aaa}}</style></head><body>",
+            "<h1 lang=\"en\">", $title_en, "</h1><p lang=\"en\">", $text_en, "</p>",
+            "<h1 lang=\"zh-CN\">", $title_zh, "</h1><p lang=\"zh-CN\">", $text_zh, "</p>",
+            "</body></html>"
+        )
+    };
+}
+const PAGE_DONE: &str = page!(
+    "Sign-in complete",
+    "You can close this tab and return to MailX.",
+    "登录完成",
+    "可以关闭此页面，返回 MailX。"
+);
+const PAGE_FAILED: &str = page!(
+    "Sign-in was not completed",
+    "Return to MailX and try again.",
+    "未能完成登录",
+    "请返回 MailX 后重试。"
+);
 async fn read_callback(mut stream: TcpStream, redirect: &Url) -> Result<Url, OAuthError> {
     let mut bytes = Vec::new();
     loop {
@@ -103,9 +141,10 @@ async fn read_callback(mut stream: TcpStream, redirect: &Url) -> Result<Url, OAu
     if callback.path() != redirect.path() {
         return Err(OAuthError::InvalidCallback);
     }
-    let body = "Authorization received. Return to application.";
+    let failed = callback.query_pairs().any(|(key, _)| key == "error");
+    let body = if failed { PAGE_FAILED } else { PAGE_DONE };
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: {PAGE_CSP}\r\n\r\n{}",
         body.len(),
         body
     );

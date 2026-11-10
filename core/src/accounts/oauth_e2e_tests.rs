@@ -266,6 +266,9 @@ async fn lifecycle(rotating: bool) {
         scopes: vec!["mail".into()],
         resource: Some("urn:mail".into()),
         allowed_targets: vec![],
+        redirect_path: "/callback".into(),
+        extra_authorize_params: vec![],
+        login_hint: false,
     };
     let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
     config["imap"]["host"] = "localhost".into();
@@ -381,6 +384,9 @@ fn pending_fixture(port: u16, email: &str) -> (ProviderRegistration, CreateAccou
         scopes: vec!["mail".into()],
         resource: Some("urn:mail".into()),
         allowed_targets: vec![],
+        redirect_path: "/callback".into(),
+        extra_authorize_params: vec![],
+        login_hint: false,
     };
     let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
     config["emailAddress"] = email.into();
@@ -523,6 +529,9 @@ fn revoked_manager(token_port: u16, imap: u16, smtp: u16) -> Arc<TokenManager> {
         scopes: vec!["mail".into()],
         resource: None,
         allowed_targets: vec![],
+        redirect_path: "/callback".into(),
+        extra_authorize_params: vec![],
+        login_hint: false,
     };
     let mut manager = TokenManager::new(
         registration,

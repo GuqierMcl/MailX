@@ -35,8 +35,8 @@ pub use app::{
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
     DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagBatchItem,
     FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailxCore, MessageFlag,
-    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest,
-    ProtocolVerification, RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
+    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, ProtocolVerification,
+    RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

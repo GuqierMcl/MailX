@@ -67,6 +67,9 @@ fn registration_matches_policy(
                 .iter()
                 .collect::<std::collections::BTreeSet<_>>()
         && registration.resource == policy.resource
+        && registration.redirect_path == policy.redirect_path
+        && registration.extra_authorize_params == policy.extra_authorize_params
+        && registration.login_hint == policy.login_hint
         && registration
             .allowed_targets
             .iter()
@@ -88,6 +91,9 @@ pub(super) struct TestProviderPolicy {
     resource: Option<String>,
     allowed_targets: Vec<crate::auth::TokenTarget>,
     mail_policy: crate::auth::MailEndpointPolicy,
+    redirect_path: String,
+    extra_authorize_params: Vec<(String, String)>,
+    login_hint: bool,
 }
 #[cfg(test)]
 impl From<&ProviderRegistration> for TestProviderPolicy {
@@ -103,6 +109,9 @@ impl From<&ProviderRegistration> for TestProviderPolicy {
             resource: value.resource.clone(),
             allowed_targets: value.allowed_targets.clone(),
             mail_policy: value.mail_policy.clone(),
+            redirect_path: value.redirect_path.clone(),
+            extra_authorize_params: value.extra_authorize_params.clone(),
+            login_hint: value.login_hint,
         }
     }
 }
@@ -125,6 +134,9 @@ impl TestProviderPolicy {
                     .iter()
                     .collect::<std::collections::BTreeSet<_>>()
             && self.resource == value.resource
+            && self.redirect_path == value.redirect_path
+            && self.extra_authorize_params == value.extra_authorize_params
+            && self.login_hint == value.login_hint
             && self
                 .allowed_targets
                 .iter()
@@ -243,9 +255,11 @@ impl AccountService {
             registration.clone()
         } else {
             let registration = self.load_oauth_registration(&binding.client_registration_id)?;
-            let trusted = crate::auth::lookup_registration(&binding.provider_id)
+            let trusted = crate::providers::oauth::lookup(&binding.provider_id)
                 .ok()
-                .is_some_and(|policy| registration_matches_policy(&registration, &policy));
+                .is_some_and(|policy| {
+                    registration_matches_policy(&registration, policy.registration())
+                });
             #[cfg(test)]
             let trusted = trusted
                 || self
@@ -602,6 +616,9 @@ mod tests {
                 },
             },
             resource: Some("urn:mail".into()),
+            redirect_path: "/callback".into(),
+            extra_authorize_params: vec![],
+            login_hint: false,
         }
     }
     fn verified(subject: &str) -> VerifiedAuthorization {
@@ -778,6 +795,7 @@ mod tests {
             "scopes",
             "resource",
             "allowed_targets",
+            "redirect_path",
         ] {
             let (dir, service, account, secrets) = fixture();
             let mut value = serde_json::to_value(registration()).unwrap();
