@@ -28,7 +28,7 @@ struct FixtureIdentity(u16);
 impl IdentityVerifier for FixtureIdentity {
     fn verify<'a>(
         &'a self,
-        token: &'a SecretValue,
+        evidence: &'a crate::auth::IdentityEvidence<'a>,
         route: &'a NetRoute,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
@@ -37,7 +37,7 @@ impl IdentityVerifier for FixtureIdentity {
             let mut stream = crate::net::connect(route, "127.0.0.1", self.0)
                 .await
                 .map_err(|_| OAuthError::Network)?;
-            stream.write_all(format!("GET /identity HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",token.expose_secret()).as_bytes()).await.map_err(|_|OAuthError::Network)?;
+            stream.write_all(format!("GET /identity HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",evidence.access_token.expose_secret()).as_bytes()).await.map_err(|_|OAuthError::Network)?;
             let mut response = String::new();
             stream
                 .read_to_string(&mut response)
@@ -50,6 +50,7 @@ impl IdentityVerifier for FixtureIdentity {
             let identity: serde_json::Value =
                 serde_json::from_str(body).map_err(|_| OAuthError::InvalidResponse)?;
             Ok(VerifiedIdentity {
+                issuer: "https://issuer.fixture.invalid".into(),
                 subject: identity["sub"]
                     .as_str()
                     .ok_or(OAuthError::InvalidResponse)?
@@ -244,7 +245,6 @@ async fn lifecycle(rotating: bool) {
             "fixture-stable"
         }
         .into(),
-        issuer: "fixture-issuer".into(),
         client_id: "public-client".into(),
         registration_id: uuid::Uuid::new_v4().to_string(),
         mail_policy: MailEndpointPolicy {
@@ -275,7 +275,7 @@ async fn lifecycle(rotating: bool) {
     config["imap"]["port"] = ip.into();
     config["smtp"]["host"] = "localhost".into();
     config["smtp"]["port"] = sp.into();
-    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":registration.issuer,"clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
+    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":"","clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
     let request = serde_json::from_value(
         serde_json::json!({"requestId":uuid::Uuid::new_v4().to_string(),"config":config}),
     )
@@ -362,7 +362,6 @@ async fn rotating_refresh_fixture_full_lifecycle() {
 fn pending_fixture(port: u16, email: &str) -> (ProviderRegistration, CreateAccountRequest) {
     let registration = ProviderRegistration {
         id: "negative-fixture".into(),
-        issuer: "fixture-issuer".into(),
         client_id: "fixture-client".into(),
         registration_id: "fixture-registration".into(),
         mail_policy: MailEndpointPolicy {
@@ -390,7 +389,7 @@ fn pending_fixture(port: u16, email: &str) -> (ProviderRegistration, CreateAccou
     };
     let mut config = sync_plan::tests::config(serde_json::json!({"kind":"direct"}));
     config["emailAddress"] = email.into();
-    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":registration.issuer,"clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
+    config["authentication"] = serde_json::json!({"kind":"oauth2","configuration":{"providerId":registration.id,"issuer":"","clientRegistrationId":registration.registration_id,"authorizationSubject":null,"targetMailboxResource":"urn:mail"}});
     (
         registration,
         serde_json::from_value(
@@ -506,7 +505,6 @@ async fn refresh_server(access: &'static str) -> (u16, tokio::task::JoinHandle<S
 fn revoked_manager(token_port: u16, imap: u16, smtp: u16) -> Arc<TokenManager> {
     let registration = ProviderRegistration {
         id: "revoked-fixture".into(),
-        issuer: "fixture-issuer".into(),
         client_id: "public-client".into(),
         registration_id: "revoked-registration".into(),
         mail_policy: MailEndpointPolicy {

@@ -3,13 +3,14 @@ struct Identity;
 impl IdentityVerifier for Identity {
     fn verify<'a>(
         &'a self,
-        _: &'a SecretValue,
+        _: &'a IdentityEvidence<'a>,
         _: &'a NetRoute,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
     > {
         Box::pin(async {
             Ok(VerifiedIdentity {
+                issuer: "https://issuer.fixture.invalid".into(),
                 subject: "subject".into(),
                 mailbox: "test@example.com".into(),
             })
@@ -21,7 +22,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 fn registration(port: u16) -> ProviderRegistration {
     ProviderRegistration {
         id: "test".into(),
-        issuer: "test-issuer".into(),
         client_id: "public-client".into(),
         registration_id: "test-registration".into(),
         mail_policy: MailEndpointPolicy {
@@ -1197,7 +1197,8 @@ async fn missing_expires_in_uses_a_short_default_lifetime() {
         &["mail".into()],
     )
     .await
-    .unwrap();
+    .unwrap()
+    .tokens;
     let lifetime = tokens.expires_at - now();
     assert!((1700..=1800).contains(&lifetime), "{lifetime}");
     server.await.unwrap();
@@ -1238,4 +1239,161 @@ async fn rejected_access_token_is_forgotten_and_the_next_resolution_refreshes() 
     assert!(server.await.unwrap().contains("refresh_token=refresh"));
     // Password credentials have nothing to refresh.
     assert!(!credential::ProtocolCredential::Password(SecretValue::new("p".into())).reject());
+}
+
+/// Reads identity from the `id_token` only, as providers whose access tokens
+/// the client must not parse require.
+struct IdTokenIdentity;
+impl IdentityVerifier for IdTokenIdentity {
+    fn verify<'a>(
+        &'a self,
+        evidence: &'a IdentityEvidence<'a>,
+        _: &'a NetRoute,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let claims = evidence.id_token_claims()?;
+            Ok(VerifiedIdentity {
+                issuer: claims.issuer.clone(),
+                subject: claims.subject.clone(),
+                mailbox: claims
+                    .string("email")
+                    .ok_or(OAuthError::InvalidResponse)?
+                    .into(),
+            })
+        })
+    }
+}
+fn openid_registration(port: u16) -> ProviderRegistration {
+    let mut reg = registration(port);
+    reg.scopes = vec!["openid".into(), "email".into(), "mail".into()];
+    reg
+}
+/// Runs a full code exchange whose token endpoint returns an `id_token` built
+/// by `claims(nonce)`; returns the session result and the token request body.
+async fn id_token_login(
+    claims: impl Fn(&str) -> serde_json::Value,
+    expected_mailbox: &str,
+) -> (Result<VerifiedAuthorization, OAuthError>, String) {
+    // The nonce is only known after `begin`, so serve the response lazily.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let redirect = Url::parse("http://127.0.0.1:41234/callback").unwrap();
+    let (session, authorization) =
+        OAuthSession::begin(openid_registration(port), redirect.as_str(), None).unwrap();
+    let params: std::collections::HashMap<_, _> =
+        authorization.query_pairs().into_owned().collect();
+    let nonce = params["nonce"].clone();
+    let id_token = id_token::fixture_token(claims(&nonce));
+    let body = serde_json::json!({
+        "access_token": "opaque-access-the-client-must-not-parse",
+        "refresh_token": "refresh-marker",
+        "token_type": "Bearer", "expires_in": 3600,
+        "scope": "openid email mail",
+        "id_token": id_token.expose_secret(),
+    })
+    .to_string();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0; 4096];
+            let n = stream.read(&mut chunk).await.unwrap();
+            bytes.extend_from_slice(&chunk[..n]);
+            if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
+                let len: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length: "))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if bytes.len() >= end + 4 + len {
+                    break;
+                }
+            }
+        }
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(reply.as_bytes()).await.unwrap();
+        String::from_utf8(bytes).unwrap()
+    });
+    let mut callback = redirect;
+    callback
+        .query_pairs_mut()
+        .extend_pairs([("state", params["state"].as_str()), ("code", "code")]);
+    let result = session
+        .complete(
+            &callback,
+            &NetRoute::default(),
+            &IdTokenIdentity,
+            expected_mailbox,
+        )
+        .await;
+    (result, server.await.unwrap())
+}
+fn good_claims(nonce: &str) -> serde_json::Value {
+    serde_json::json!({
+        "iss": "https://login.fixture.invalid/tenant-42/v2.0", "sub": "subject-42",
+        "aud": "public-client", "exp": now() + 3600, "nonce": nonce,
+        "email": "test@example.com"
+    })
+}
+#[tokio::test]
+async fn identity_comes_from_the_id_token_with_a_per_tenant_issuer() {
+    let (result, request) = id_token_login(good_claims, "test@example.com").await;
+    let authorization = result.unwrap();
+    assert_eq!(
+        authorization.binding.issuer,
+        "https://login.fixture.invalid/tenant-42/v2.0"
+    );
+    assert_eq!(authorization.binding.subject, "subject-42");
+    assert_eq!(authorization.binding.mailbox, "test@example.com");
+    // The id_token is neither part of the token set nor of its stored form.
+    let stored = authorization.tokens.encode_secret().unwrap();
+    assert!(!stored.expose_secret().contains("tenant-42"));
+    assert!(!format!("{:?}", authorization.tokens).contains("tenant-42"));
+    assert!(request.contains("grant_type=authorization_code"));
+}
+#[tokio::test]
+async fn id_token_nonce_audience_and_expiry_are_enforced() {
+    type Tamper = fn(&str) -> serde_json::Value;
+    let cases: [(&str, Tamper); 3] = [
+        ("nonce", |_| {
+            let mut c = good_claims("other-nonce");
+            c["nonce"] = "other-nonce".into();
+            c
+        }),
+        ("audience", |n| {
+            let mut c = good_claims(n);
+            c["aud"] = "another-client".into();
+            c
+        }),
+        ("expiry", |n| {
+            let mut c = good_claims(n);
+            c["exp"] = 1.into();
+            c
+        }),
+    ];
+    for (name, claims) in cases {
+        let (result, _) = id_token_login(claims, "test@example.com").await;
+        assert_eq!(result.err(), Some(OAuthError::InvalidResponse), "{name}");
+    }
+}
+#[tokio::test]
+async fn openid_requests_carry_a_fresh_nonce_and_others_do_not() {
+    let redirect = "http://127.0.0.1:41234/callback";
+    let nonce_of = |reg: ProviderRegistration| {
+        let (_, url) = OAuthSession::begin(reg, redirect, None).unwrap();
+        url.query_pairs()
+            .find(|(k, _)| k == "nonce")
+            .map(|(_, v)| v.into_owned())
+    };
+    let first = nonce_of(openid_registration(1)).unwrap();
+    assert!(first.len() >= 20);
+    assert_ne!(Some(first), nonce_of(openid_registration(1)));
+    assert_eq!(nonce_of(registration(1)), None);
 }

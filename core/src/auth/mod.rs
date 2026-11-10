@@ -11,6 +11,7 @@ use std::{
 use url::Url;
 
 pub(crate) mod credential;
+pub(crate) mod id_token;
 pub(crate) mod loopback;
 mod transport;
 
@@ -74,7 +75,6 @@ pub(crate) enum MailLoginPolicy {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProviderRegistration {
     pub id: String,
-    pub issuer: String,
     pub client_id: String,
     pub registration_id: String,
     pub mail_policy: MailEndpointPolicy,
@@ -148,6 +148,11 @@ impl ProviderRegistration {
         }
         Ok(())
     }
+    /// OpenID Connect is requested, so the flow sends a nonce and the verifier
+    /// can rely on the `id_token`.
+    fn requests_openid(&self) -> bool {
+        self.scopes.iter().any(|s| s == "openid")
+    }
     fn default_target(&self) -> TokenTarget {
         TokenTarget::new(self.resource.clone(), self.scopes.clone())
     }
@@ -161,7 +166,6 @@ impl ProviderRegistration {
 
     pub(crate) fn validate(&self) -> Result<(), OAuthError> {
         if self.id.is_empty()
-            || self.issuer.is_empty()
             || self.client_id.is_empty()
             || self.registration_id.is_empty()
             || self.scopes.is_empty()
@@ -261,19 +265,53 @@ pub(crate) trait OAuthProvider: Send + Sync {
     fn registration(&self) -> &ProviderRegistration;
     fn identity_verifier(&self) -> Arc<dyn IdentityVerifier>;
 }
+/// What one token exchange produced, for identity checks. The `id_token` is
+/// held only for the duration of verification and is never persisted or logged.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Read by provider identity verifiers, which are added with the first provider"
+    )
+)]
+pub(crate) struct IdentityEvidence<'a> {
+    pub access_token: &'a SecretValue,
+    pub id_token: Option<&'a SecretValue>,
+    /// The nonce sent in the authorization request, when it carried one.
+    pub nonce: Option<&'a str>,
+    pub client_id: &'a str,
+}
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Called by provider identity verifiers, which are added with the first provider"
+    )
+)]
+impl IdentityEvidence<'_> {
+    /// Claims of the exchange's `id_token`, checked against the client and nonce.
+    pub(crate) fn id_token_claims(&self) -> Result<id_token::IdTokenClaims, OAuthError> {
+        let token = self.id_token.ok_or(OAuthError::InvalidResponse)?;
+        id_token::parse_id_token(token, self.client_id, self.nonce)
+    }
+}
 /// Only reviewed provider adapters implement this boundary. A token response
 /// alone cannot prove which mailbox the user authorized.
 pub(crate) trait IdentityVerifier: Send + Sync {
     fn verify<'a>(
         &'a self,
-        access: &'a SecretValue,
+        evidence: &'a IdentityEvidence<'a>,
         route: &'a NetRoute,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
     >;
 }
+/// The issuer is whatever the verifier established for this grant. With
+/// multi-tenant endpoints it differs per tenant, so it is not a registration
+/// constant.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedIdentity {
+    pub issuer: String,
     pub subject: String,
     pub mailbox: String,
 }
@@ -284,6 +322,7 @@ pub(crate) struct VerifiedAuthorization {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct GrantBinding {
     pub provider_id: String,
+    /// Verified for this grant; never taken from the registration.
     pub issuer: String,
     pub client_registration_id: String,
     pub client_id: String,
@@ -299,6 +338,7 @@ pub(crate) struct OAuthSession {
     provider: ProviderRegistration,
     redirect: Url,
     redirect_uri: String,
+    nonce: Option<String>,
     state: oauth2::CsrfToken,
     verifier: SecretValue,
     deadline: Instant,
@@ -344,6 +384,12 @@ impl OAuthSession {
                 .query_pairs_mut()
                 .append_pair("resource", resource);
         }
+        let nonce = provider
+            .requests_openid()
+            .then(|| oauth2::CsrfToken::new_random().secret().clone());
+        if let Some(nonce) = &nonce {
+            authorization.query_pairs_mut().append_pair("nonce", nonce);
+        }
         if provider.login_hint
             && let Some(hint) = login_hint
         {
@@ -362,6 +408,7 @@ impl OAuthSession {
                 provider,
                 redirect,
                 redirect_uri: redirect_uri.to_owned(),
+                nonce,
                 state,
                 verifier,
                 deadline: Instant::now() + Duration::from_secs(300),
@@ -419,7 +466,7 @@ impl OAuthSession {
             ])
             .finish()
         };
-        let tokens = transport::exchange(
+        let transport::ExchangeResponse { tokens, id_token } = transport::exchange(
             route,
             &self.provider.token_endpoint,
             body,
@@ -430,13 +477,21 @@ impl OAuthSession {
         if tokens.refresh_token.is_none() {
             return Err(OAuthError::InvalidResponse);
         }
-        let identity = tokio::time::timeout(
-            Duration::from_secs(30),
-            verifier.verify(&tokens.access_token, route),
-        )
-        .await
-        .map_err(|_| OAuthError::Timeout)??;
-        if identity.subject.is_empty()
+        let evidence = IdentityEvidence {
+            access_token: &tokens.access_token,
+            id_token: id_token.as_ref(),
+            nonce: self.nonce.as_deref(),
+            client_id: &self.provider.client_id,
+        };
+        let identity =
+            tokio::time::timeout(Duration::from_secs(30), verifier.verify(&evidence, route))
+                .await
+                .map_err(|_| OAuthError::Timeout)??;
+        drop(id_token);
+        if identity.issuer.is_empty()
+            || identity.issuer.len() > 2048
+            || identity.issuer.chars().any(char::is_control)
+            || identity.subject.is_empty()
             || identity.subject.len() > 4096
             || identity.subject.chars().any(char::is_control)
             || identity.mailbox.is_empty()
@@ -449,7 +504,7 @@ impl OAuthSession {
         Ok(VerifiedAuthorization {
             binding: GrantBinding {
                 provider_id: self.provider.id,
-                issuer: self.provider.issuer,
+                issuer: identity.issuer,
                 client_registration_id: self.provider.registration_id,
                 client_id: self.provider.client_id,
                 subject: identity.subject,
@@ -921,7 +976,7 @@ impl TokenManager {
         )
         .await
         {
-            Ok(tokens) => tokens,
+            Ok(response) => response.tokens,
             Err(OAuthError::ReauthenticationRequired | OAuthError::AuthorizationDenied) => {
                 self.reauthorization
                     .store(true, std::sync::atomic::Ordering::SeqCst);

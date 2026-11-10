@@ -11,13 +11,21 @@ impl Drop for Connection {
     }
 }
 
+/// One token endpoint answer. `id_token` is returned to the caller for
+/// identity checks and is never stored.
+#[derive(Debug)]
+pub(super) struct ExchangeResponse {
+    pub tokens: TokenSet,
+    pub id_token: Option<SecretValue>,
+}
+
 pub(super) async fn exchange(
     route: &NetRoute,
     endpoint: &Url,
     body: String,
     previous: Option<SecretValue>,
     required_scopes: &[String],
-) -> Result<TokenSet, OAuthError> {
+) -> Result<ExchangeResponse, OAuthError> {
     tokio::time::timeout(
         Duration::from_secs(30),
         exchange_inner(route, endpoint, body, previous, required_scopes),
@@ -31,7 +39,7 @@ async fn exchange_inner(
     body: String,
     previous: Option<SecretValue>,
     required_scopes: &[String],
-) -> Result<TokenSet, OAuthError> {
+) -> Result<ExchangeResponse, OAuthError> {
     let host = endpoint.host_str().ok_or(OAuthError::InvalidRegistration)?;
     let mut stream = crate::net::connect(
         route,
@@ -90,20 +98,16 @@ async fn exchange_inner(
     if !status.is_success() {
         let error: oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType> =
             serde_json::from_slice(&bytes).map_err(|_| OAuthError::InvalidResponse)?;
-        return Err(
-            if matches!(
-                error.error(),
-                oauth2::basic::BasicErrorResponseType::InvalidGrant
-            ) {
-                OAuthError::ReauthenticationRequired
-            } else {
-                OAuthError::InvalidResponse
-            },
-        );
+        return Err(error_kind(error.error()));
     }
     use oauth2::TokenResponse;
     let parsed: oauth2::basic::BasicTokenResponse =
         serde_json::from_slice(&bytes).map_err(|_| OAuthError::InvalidResponse)?;
+    let id_token = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v.get("id_token")?.as_str().map(str::to_owned))
+        .filter(|t| !t.is_empty() && t.len() <= 16384 && !t.chars().any(char::is_control))
+        .map(SecretValue::new);
     if parsed.token_type() != &oauth2::basic::BasicTokenType::Bearer {
         return Err(OAuthError::InvalidResponse);
     }
@@ -135,12 +139,15 @@ async fn exchange_inner(
         Some(n) if n > 0 && n <= 31_536_000 => n,
         Some(_) => return Err(OAuthError::InvalidResponse),
     };
-    Ok(TokenSet {
-        access_token: SecretValue::new(access.clone()),
-        refresh_token: refresh,
-        expires_at: now().saturating_add(lifetime),
-        scopes,
-        target: Some(TokenTarget::new(resource, required_scopes.to_vec())),
+    Ok(ExchangeResponse {
+        tokens: TokenSet {
+            access_token: SecretValue::new(access.clone()),
+            refresh_token: refresh,
+            expires_at: now().saturating_add(lifetime),
+            scopes,
+            target: Some(TokenTarget::new(resource, required_scopes.to_vec())),
+        },
+        id_token,
     })
 }
 
@@ -180,5 +187,14 @@ fn network_error(error: crate::net::NetError) -> OAuthError {
         crate::net::NetError::Tls(_) => OAuthError::Tls,
         crate::net::NetError::Timeout => OAuthError::Timeout,
         _ => OAuthError::Network,
+    }
+}
+
+/// Maps a token endpoint error to the one case callers act on: the grant can
+/// no longer be used and the user has to sign in again.
+fn error_kind(error: &oauth2::basic::BasicErrorResponseType) -> OAuthError {
+    match error {
+        oauth2::basic::BasicErrorResponseType::InvalidGrant => OAuthError::ReauthenticationRequired,
+        _ => OAuthError::InvalidResponse,
     }
 }

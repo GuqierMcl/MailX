@@ -34,7 +34,6 @@ fn binding_matches_registration(
     registration: &ProviderRegistration,
 ) -> bool {
     binding.provider_id == registration.id
-        && binding.issuer == registration.issuer
         && binding.client_id == registration.client_id
         && binding.client_registration_id == registration.registration_id
         && binding.resource == registration.resource
@@ -55,7 +54,6 @@ fn registration_matches_policy(
         && registration.client_id == policy.client_id
         && registration.registration_id == policy.registration_id
         && registration.mail_policy == policy.mail_policy
-        && registration.issuer == policy.issuer
         && registration.authorization_endpoint == policy.authorization_endpoint
         && registration.token_endpoint == policy.token_endpoint
         && registration
@@ -84,7 +82,6 @@ pub(super) struct TestProviderPolicy {
     id: String,
     client_id: String,
     registration_id: String,
-    issuer: String,
     authorization_endpoint: url::Url,
     token_endpoint: url::Url,
     scopes: Vec<String>,
@@ -102,7 +99,6 @@ impl From<&ProviderRegistration> for TestProviderPolicy {
             id: value.id.clone(),
             client_id: value.client_id.clone(),
             registration_id: value.registration_id.clone(),
-            issuer: value.issuer.clone(),
             authorization_endpoint: value.authorization_endpoint.clone(),
             token_endpoint: value.token_endpoint.clone(),
             scopes: value.scopes.clone(),
@@ -122,7 +118,6 @@ impl TestProviderPolicy {
             && self.mail_policy == value.mail_policy
             && self.client_id == value.client_id
             && self.registration_id == value.registration_id
-            && self.issuer == value.issuer
             && self.authorization_endpoint == value.authorization_endpoint
             && self.token_endpoint == value.token_endpoint
             && self
@@ -266,10 +261,7 @@ impl AccountService {
                     .trusted_oauth_test_providers
                     .get(&registration.id)
                     .is_some_and(|policy| policy.matches(&registration));
-            if !trusted
-                || registration.id != binding.provider_id
-                || registration.issuer != binding.issuer
-            {
+            if !trusted || registration.id != binding.provider_id {
                 return Err(sync_plan::PlanError::CredentialUntrusted);
             }
             registration
@@ -595,7 +587,6 @@ mod tests {
         ProviderRegistration {
             id: "fixture".into(),
             registration_id: "fixture-app".into(),
-            issuer: "https://fixture.invalid".into(),
             client_id: "public-client".into(),
             authorization_endpoint: "https://fixture.invalid/authorize".parse().unwrap(),
             token_endpoint: "https://fixture.invalid/token".parse().unwrap(),
@@ -724,6 +715,47 @@ mod tests {
                 .unwrap_err()
                 .code,
             ErrorCode::Conflict
+        );
+    }
+    #[test]
+    fn the_verified_issuer_may_differ_per_tenant_but_reauthorization_must_keep_it() {
+        // Registration matching ignores the issuer: tenants differ per account.
+        let dir = TempDir::new().unwrap();
+        let mut service =
+            AccountService::open(dir.path(), Arc::new(MemorySecrets::default())).unwrap();
+        let mut tenant = verified("stable-subject");
+        tenant.binding.issuer = "https://login.fixture.invalid/tenant-a/v2.0".into();
+        let account = service
+            .create_oauth(request(), tenant, registration())
+            .unwrap();
+        let AccountAuthenticationSummary::OAuth2(auth) = &account.authentication else {
+            panic!()
+        };
+        assert_eq!(
+            auth.configuration.issuer,
+            "https://login.fixture.invalid/tenant-a/v2.0"
+        );
+        // Same subject under another tenant's issuer is a different identity.
+        let mut other = verified("stable-subject");
+        other.binding.issuer = "https://login.fixture.invalid/tenant-b/v2.0".into();
+        assert_eq!(
+            service
+                .reauthorize_oauth(&account.id, 1, other, registration())
+                .unwrap_err()
+                .code,
+            ErrorCode::Validation
+        );
+        let mut same = verified("stable-subject");
+        same.binding.issuer = "https://login.fixture.invalid/tenant-a/v2.0".into();
+        let changed = service
+            .reauthorize_oauth(&account.id, 1, same, registration())
+            .unwrap();
+        let AccountAuthenticationSummary::OAuth2(auth) = &changed.authentication else {
+            panic!()
+        };
+        assert_eq!(
+            auth.configuration.issuer,
+            "https://login.fixture.invalid/tenant-a/v2.0"
         );
     }
     #[test]

@@ -76,7 +76,8 @@ impl MailxCore {
         request.config.authentication = crate::accounts::types::AuthenticationInput::OAuth2 {
             configuration: crate::accounts::types::OAuth2Configuration {
                 provider_id: registration.id.clone(),
-                issuer: registration.issuer.clone(),
+                // Placeholder: the verified issuer replaces it once sign-in completes.
+                issuer: String::new(),
                 client_registration_id: registration.registration_id.clone(),
                 authorization_subject: None,
                 target_mailbox_resource: Some(request.config.email_address.clone()),
