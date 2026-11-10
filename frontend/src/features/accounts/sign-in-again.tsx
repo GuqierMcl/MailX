@@ -12,6 +12,8 @@ type SignInAgainProps = {
   /** An account that signs in through the browser. */
   account: Account
   disabled?: boolean
+  /** Shows the prominent warning even when the account itself still reads as connected, e.g. after a stopped sync. */
+  required?: boolean
   onSignedIn: (account: Account) => void
 }
 
@@ -20,9 +22,9 @@ type SignInAgainProps = {
  * the block is a prominent warning; otherwise it stays a quiet button so a
  * working sign-in can still be refreshed on purpose.
  */
-export function SignInAgain({ client, account, disabled = false, onSignedIn }: SignInAgainProps) {
+export function SignInAgain({ client, account, disabled = false, required = false, onSignedIn }: SignInAgainProps) {
   useTranslation()
-  const needed = account.authentication.kind === 'oauth2' && account.authentication.state === 'needsReauthorization'
+  const needed = required || (account.authentication.kind === 'oauth2' && account.authentication.state === 'needsReauthorization')
   const [waiting, setWaiting] = useState(false)
   const [failure, setFailure] = useState<ClientFailure | null>(null)
   const session = useRef<{ id: string | null; canceled: boolean } | null>(null)

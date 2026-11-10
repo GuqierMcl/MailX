@@ -33,6 +33,7 @@
   "loadingAccount": "正在加载账号配置",
   "credentialsNeedConfirmation": "凭证需要重新确认",
   "changedIdentityHint": "服务器或登录身份已改变，在重新输入密码之前 MailX 不会用旧凭证连接。",
+  "changedIdentityOAuthHint": "此账号的邮件服务器已改变，MailX 不再使用已保存的登录。请移除该账号后重新添加。",
   "editConnection": "修改连接",
   "syncStopped": "同步已停止",
   "retryAfterConnectionChange": "修改连接后会重新尝试。",

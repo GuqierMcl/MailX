@@ -448,6 +448,21 @@ describe('mock browser sign-in', () => {
     expect((await client.listAccounts()).length).toBe(before + 1)
   })
 
+  it.each([
+    ['microsoft-personal', 'smtp-mail.outlook.com'],
+    ['microsoft-work', 'smtp.office365.com'],
+  ])('fills the same servers as the core registration for %s, never the placeholders', async (providerId, smtpHost) => {
+    const client = createMockClient()
+    const { sessionId } = await client.beginOAuthAccount({ providerId, request: { requestId: crypto.randomUUID(), config: { ...config(' lin@contoso.com '), providerId } } })
+    const finished = client.finishOAuthAccount(sessionId)
+    await vi.advanceTimersByTimeAsync(1000)
+    const account = await finished
+    expect(account.emailAddress).toBe('lin@contoso.com')
+    expect(account.imap).toEqual({ host: 'outlook.office365.com', port: 993, tls: 'implicit', username: 'lin@contoso.com' })
+    expect(account.smtp).toEqual({ host: smtpHost, port: 587, tls: 'startTls', username: 'lin@contoso.com' })
+    expect(await client.getAccount(account.id)).toMatchObject({ imap: account.imap, smtp: account.smtp })
+  })
+
   it('fails like the host for a refused mailbox and a denied sign-in', async () => {
     const client = createMockClient()
     for (const [address, code] of [['refused@outlook.com', 'oauthMailboxRefused'], ['denied@outlook.com', 'oauthAuthorizationDenied']]) {

@@ -827,10 +827,19 @@ function createOAuthSessions() {
   }
 }
 
+/** The servers the core's reviewed registrations use; the real host replaces whatever the page sends. */
+function registeredServers(providerId: string, emailAddress: string): Pick<AccountConfigInput, 'imap' | 'smtp'> {
+  return {
+    imap: { host: 'outlook.office365.com', port: 993, tls: 'implicit', username: emailAddress },
+    smtp: { host: providerId === 'microsoft-personal' ? 'smtp-mail.outlook.com' : 'smtp.office365.com', port: 587, tls: 'startTls', username: emailAddress },
+  }
+}
+
 function oauthAccountFromConfig(id: string, revision: number, providerId: string, config: AccountConfigInput): Account {
   const endpoint = (suffix: string) => ({ id: `${id}-${suffix}`, generation: 1, credentialConfigured: true, trust: 'trusted' as const })
+  const address = config.emailAddress.trim()
   return {
-    ...accountFromConfig(id, revision, config),
+    ...accountFromConfig(id, revision, { ...config, emailAddress: address, ...registeredServers(providerId, address) }),
     providerId,
     authentication: {
       kind: 'oauth2',

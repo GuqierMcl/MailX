@@ -33,6 +33,7 @@
   "loadingAccount": "Loading account settings",
   "credentialsNeedConfirmation": "Credentials need confirmation",
   "changedIdentityHint": "The server or login identity changed. MailX will not connect with old credentials until you re-enter the password.",
+  "changedIdentityOAuthHint": "The mail servers for this account changed, so MailX stopped using its saved sign-in. Remove the account and add it again.",
   "editConnection": "Edit connection",
   "syncStopped": "Sync stopped",
   "retryAfterConnectionChange": "Will retry after the connection is updated.",

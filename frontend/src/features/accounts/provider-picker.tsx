@@ -61,8 +61,8 @@ export function ProviderPicker({ selected, query, onQueryChange, onSelect, onAdv
                   onChange={() => onSelect(provider)} aria-labelledby={`${rowId}-name`} aria-describedby={`${rowId}-description`}
                   className="sr-only" />
                 <ProviderIcon provider={provider} className="size-8 sm:size-10" />
-                <span id={`${rowId}-name`} className="truncate text-sm font-medium">{provider.name}</span>
-                <span id={`${rowId}-description`} className="truncate text-xs text-muted-foreground">{provider.description}</span>
+                <span id={`${rowId}-name`} className="line-clamp-2 break-words text-sm leading-tight font-medium">{provider.name}</span>
+                <span id={`${rowId}-description`} className="line-clamp-2 break-words text-xs text-muted-foreground">{provider.description}</span>
                 <span aria-hidden className="flex size-4 items-center justify-center text-primary">
                   {checked && <HugeiconsIcon icon={Tick02Icon} className="size-4" strokeWidth={3} />}
                 </span>

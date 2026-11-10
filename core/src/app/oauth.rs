@@ -86,11 +86,7 @@ impl MailxCore {
                 target_mailbox_resource: Some(request.config.email_address.clone()),
             },
         };
-        // Servers and login names come from the reviewed registration; whatever
-        // the caller sent for them is replaced.
-        let (imap, smtp) = registration.mail_connections(&request.config.email_address);
-        request.config.imap = imap;
-        request.config.smtp = smtp;
+        crate::accounts::oauth::use_registered_servers(&registration, &mut request);
         let route = crate::accounts::oauth::authorization_route(&request)?;
         let start = self
             .oauth_sessions

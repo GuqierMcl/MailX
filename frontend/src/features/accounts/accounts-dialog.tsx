@@ -231,28 +231,32 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
     || (account.route.kind === 'custom' && account.route.authentication?.trust === 'needsConfirmation')
   // A failure that will be retried is transient; only a stopped sync needs the user.
   const stopped = sync?.failure && !sync.failure.willRetry ? sync.failure : null
+  // A browser sign-in has no connection settings to edit: renewing the sign-in is the only repair.
+  const oauth = account.authentication.kind === 'oauth2'
+  const stoppedForSignIn = oauth && (stopped?.code === 'signInRequired' || stopped?.code === 'credentialMissing')
 
   return (
     <SettingsPage>
       {needsTrust ? (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle>
-          <AlertDescription>{t('accounts:changedIdentityHint')}</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+          <AlertDescription>{oauth ? t('accounts:changedIdentityOAuthHint') : t('accounts:changedIdentityHint')}</AlertDescription>
+          {!oauth && <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
         </Alert>
-      ) : stopped && (
+      ) : stopped && !stoppedForSignIn && (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
-          <AlertDescription>{errorText(stopped)}  {stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          <AlertDescription>{errorText(stopped)}  {!oauth && stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
           {(stopped.code === 'authentication' || stopped.code === 'providerPolicy') && <ProviderAuthHelp client={client} providerId={account.providerId} reason={stopped.code} />}
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+          {!oauth && <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
         </Alert>
       )}
-      {account.authentication.kind === 'oauth2' && (
+      {oauth && (
         <SignInAgain
           client={client}
           account={account}
           disabled={removing}
+          required={stoppedForSignIn}
           onSignedIn={(renewed) => {
             replace(renewed)
             onSaved()
@@ -275,7 +279,7 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
         <SettingsRow label={t('accounts:credentials')} description={credentials(account, needsTrust)} />
         <SettingsRow label={t('accounts:networkRoute')} description={route(account.route)} />
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={removing} onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+          {!oauth && <Button variant="outline" disabled={removing} onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
           <Button variant="destructive" disabled={removing || !client.available} onClick={() => setConfirming(true)}>{t('accounts:removeAccount')}</Button>
         </div>
         <ConnectionVerification account={account} client={client} />

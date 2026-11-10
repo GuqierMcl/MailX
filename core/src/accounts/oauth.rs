@@ -544,6 +544,18 @@ pub(crate) fn normalize_oauth_request(request: &mut CreateAccountRequest) -> Res
     Ok(())
 }
 
+/// Servers and login names come from the reviewed registration; whatever the
+/// caller sent for them (a front end sends placeholders) is replaced, so the
+/// saved account always shows the registration's servers.
+pub(crate) fn use_registered_servers(
+    registration: &ProviderRegistration,
+    request: &mut CreateAccountRequest,
+) {
+    let (imap, smtp) = registration.mail_connections(&request.config.email_address);
+    request.config.imap = imap;
+    request.config.smtp = smtp;
+}
+
 /// Resolve a temporary authorization route without saving proxy/mail secrets.
 /// `Inherit` is the application default route, which is direct until an
 /// app-wide proxy setting exists. Sync and sending resolve it in
@@ -659,6 +671,63 @@ mod tests {
     fn request_with_route(route: serde_json::Value) -> CreateAccountRequest {
         let config = super::super::sync_plan::tests::config(route);
         serde_json::from_value(json!({"requestId":new_id(),"config":config})).unwrap()
+    }
+    #[test]
+    fn a_new_oauth_account_shows_the_registrations_servers_not_the_front_ends_placeholders() {
+        use crate::auth::{GrantBinding, VerifiedAuthorization};
+        for (provider, smtp_host) in [
+            ("microsoft-personal", "smtp-mail.outlook.com"),
+            ("microsoft-work", "smtp.office365.com"),
+        ] {
+            let registration = crate::providers::oauth::lookup(provider)
+                .unwrap()
+                .registration()
+                .clone();
+            let mut config = super::super::sync_plan::tests::config(json!({"kind":"direct"}));
+            config["emailAddress"] = json!("lin@contoso.com");
+            config["imap"] = json!({"host":"","port":0,"tls":"implicit","username":""});
+            config["smtp"] = json!({"host":"","port":0,"tls":"implicit","username":""});
+            config["authentication"] = json!({"kind":"oauth2","configuration":{"providerId":provider,"issuer":"","clientRegistrationId":"","authorizationSubject":null,"targetMailboxResource":null}});
+            let mut request: CreateAccountRequest =
+                serde_json::from_value(json!({"requestId":new_id(),"config":config})).unwrap();
+            use_registered_servers(&registration, &mut request);
+            let authorization = VerifiedAuthorization {
+                binding: GrantBinding {
+                    provider_id: registration.id.clone(),
+                    issuer: "https://login.microsoftonline.com/t/v2.0".into(),
+                    client_registration_id: registration.registration_id.clone(),
+                    client_id: registration.client_id.clone(),
+                    subject: "t/o".into(),
+                    mailbox: "lin@contoso.com".into(),
+                    grant_id: new_id(),
+                    generation: 1,
+                    resource: registration.resource.clone(),
+                    scopes: registration.scopes.clone(),
+                },
+                tokens: TokenSet {
+                    access_token: SecretValue::new(String::new()),
+                    refresh_token: Some(SecretValue::new("refresh".into())),
+                    expires_at: 0,
+                    target: None,
+                    scopes: registration.scopes.clone(),
+                },
+            };
+            let dir = TempDir::new().unwrap();
+            let mut service =
+                AccountService::open(dir.path(), Arc::new(MemorySecrets::default())).unwrap();
+            let account = service
+                .create_oauth(request, authorization, registration)
+                .unwrap();
+            let shown = service.get(&account.id).unwrap();
+            for saved in [&account, &shown] {
+                assert_eq!(saved.imap.host, "outlook.office365.com", "{provider}");
+                assert_eq!((saved.imap.port, saved.imap.tls), (993, TlsMode::Implicit));
+                assert_eq!(saved.imap.username, "lin@contoso.com");
+                assert_eq!(saved.smtp.host, smtp_host, "{provider}");
+                assert_eq!((saved.smtp.port, saved.smtp.tls), (587, TlsMode::StartTls));
+                assert_eq!(saved.smtp.username, "lin@contoso.com");
+            }
+        }
     }
     #[test]
     fn sign_in_uses_the_same_route_as_saved_accounts() {
