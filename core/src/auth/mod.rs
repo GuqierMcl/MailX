@@ -33,6 +33,15 @@ pub enum OAuthError {
     AuthorizationDenied,
     ReauthenticationRequired,
     Storage,
+    /// The mail server refused to open the mailbox with the bearer that was
+    /// just issued, so the address or the mailbox's protocol settings are wrong.
+    MailboxRefused,
+    /// The account signed in is a personal one, but the entry is for
+    /// organization accounts.
+    UsePersonalEntry,
+    /// The account signed in belongs to an organization, but the entry is for
+    /// personal accounts.
+    UseOrganizationEntry,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -117,6 +126,30 @@ impl ProviderRegistration {
     /// path yields no trailing slash.
     pub(crate) fn redirect_uri(&self, port: u16) -> String {
         format!("http://127.0.0.1:{port}{}", self.redirect_path)
+    }
+    /// The IMAP and SMTP settings this entry allows for `mailbox`, so callers
+    /// take servers from the reviewed registration instead of supplying them.
+    pub(crate) fn mail_connections(
+        &self,
+        mailbox: &str,
+    ) -> (
+        crate::accounts::types::ConnectionConfig,
+        crate::accounts::types::ConnectionConfig,
+    ) {
+        let mailbox = mailbox.trim();
+        let connection = |policy: &MailProtocolPolicy| crate::accounts::types::ConnectionConfig {
+            host: policy.host.clone(),
+            port: policy.port,
+            tls: policy.tls,
+            username: match &policy.login {
+                MailLoginPolicy::Mailbox => mailbox.to_owned(),
+                MailLoginPolicy::Fixed(username) => username.clone(),
+            },
+        };
+        (
+            connection(&self.mail_policy.imap),
+            connection(&self.mail_policy.smtp),
+        )
     }
     pub(crate) fn validate_mail_target(
         &self,
@@ -282,7 +315,7 @@ pub(crate) enum MailProtocol {
     not(test),
     expect(
         dead_code,
-        reason = "Read by provider rejection hooks, which are added with the first provider"
+        reason = "`imap_code` is read only by providers whose IMAP server reports a distinguishable code"
     )
 )]
 pub(crate) struct MailRejection<'a> {
@@ -302,27 +335,20 @@ pub(crate) enum RejectionKind {
 }
 /// What one token exchange produced, for identity checks. The `id_token` is
 /// held only for the duration of verification and is never persisted or logged.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Read by provider identity verifiers, which are added with the first provider"
-    )
-)]
 pub(crate) struct IdentityEvidence<'a> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "For providers whose access token identifies the user; read by test fixtures"
+        )
+    )]
     pub access_token: &'a SecretValue,
     pub id_token: Option<&'a SecretValue>,
     /// The nonce sent in the authorization request, when it carried one.
     pub nonce: Option<&'a str>,
     pub client_id: &'a str,
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Called by provider identity verifiers, which are added with the first provider"
-    )
-)]
 impl IdentityEvidence<'_> {
     /// Claims of the exchange's `id_token`, checked against the client and nonce.
     pub(crate) fn id_token_claims(&self) -> Result<id_token::IdTokenClaims, OAuthError> {
@@ -330,25 +356,120 @@ impl IdentityEvidence<'_> {
         id_token::parse_id_token(token, self.client_id, self.nonce)
     }
 }
+type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 /// Only reviewed provider adapters implement this boundary. A token response
-/// alone cannot prove which mailbox the user authorized.
+/// alone cannot prove which mailbox the user authorized, so identity is split
+/// in two: what the sign-in says (a hint), and what the mail server accepts
+/// (the proof).
 pub(crate) trait IdentityVerifier: Send + Sync {
-    fn verify<'a>(
+    /// Checks the token exchange and returns who signed in. The mailbox in the
+    /// result is only a hint taken from claims, never proof.
+    fn check<'a>(
         &'a self,
         evidence: &'a IdentityEvidence<'a>,
         route: &'a NetRoute,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<VerifiedIdentity, OAuthError>> + Send + 'a>,
-    >;
+    ) -> BoxFuture<'a, Result<CheckedIdentity, OAuthError>>;
+    /// Proves that `mailbox` opens with `bearer` on the provider's reviewed
+    /// mail server. A refused login is [`OAuthError::MailboxRefused`].
+    fn prove_mailbox<'a>(
+        &'a self,
+        route: &'a NetRoute,
+        bearer: &'a SecretValue,
+        mailbox: &'a str,
+    ) -> BoxFuture<'a, Result<(), OAuthError>>;
 }
 /// The issuer is whatever the verifier established for this grant. With
 /// multi-tenant endpoints it differs per tenant, so it is not a registration
-/// constant.
+/// constant. `mailbox_hint` is address-shaped text from claims; the flow only
+/// trusts a mailbox after [`IdentityVerifier::prove_mailbox`] accepted it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct VerifiedIdentity {
+pub(crate) struct CheckedIdentity {
     pub issuer: String,
     pub subject: String,
-    pub mailbox: String,
+    pub mailbox_hint: Option<String>,
+}
+/// The address text of `text`, when it looks like one: a single `@` between a
+/// non-empty name and domain, no spaces or control characters, a sane length.
+/// It says nothing about whether the mailbox exists or belongs to anyone.
+pub(crate) fn address_shaped(text: &str) -> Option<String> {
+    let text = text.trim();
+    let (name, domain) = text.split_once('@')?;
+    (text.len() <= 254
+        && !name.is_empty()
+        && !domain.is_empty()
+        && !domain.contains('@')
+        && !text.chars().any(|c| c.is_whitespace() || c.is_control()))
+    .then(|| text.to_owned())
+}
+/// A signed-in grant: tokens and the checked identity, with the mailbox either
+/// proven or still to be supplied. Tokens never leave this value except
+/// through [`SignedIn::authorization`].
+#[derive(Clone)]
+pub(crate) struct SignedIn {
+    provider: ProviderRegistration,
+    tokens: TokenSet,
+    identity: CheckedIdentity,
+    mailbox: Option<String>,
+}
+impl SignedIn {
+    /// The mailbox the mail server accepted, once there is one.
+    pub(crate) fn mailbox(&self) -> Option<&str> {
+        self.mailbox.as_deref()
+    }
+    pub(crate) fn identity(&self) -> &CheckedIdentity {
+        &self.identity
+    }
+    pub(crate) fn registration(&self) -> &ProviderRegistration {
+        &self.provider
+    }
+    /// Proves `mailbox` with this grant's own access token. Only a proven
+    /// mailbox is recorded; whatever the user typed is never trusted before.
+    pub(crate) async fn prove(
+        &mut self,
+        verifier: &dyn IdentityVerifier,
+        route: &NetRoute,
+        mailbox: &str,
+    ) -> Result<(), OAuthError> {
+        let mailbox = address_shaped(mailbox).ok_or(OAuthError::MailboxRefused)?;
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            verifier.prove_mailbox(route, &self.tokens.access_token, &mailbox),
+        )
+        .await
+        .map_err(|_| OAuthError::Timeout)??;
+        self.mailbox = Some(mailbox);
+        Ok(())
+    }
+    /// The grant for account creation or reauthorization. Needs a proven mailbox.
+    pub(crate) fn authorization(&self) -> Result<VerifiedAuthorization, OAuthError> {
+        let mailbox = self.mailbox.clone().ok_or(OAuthError::MailboxRefused)?;
+        let identity = &self.identity;
+        if identity.issuer.is_empty()
+            || identity.issuer.len() > 2048
+            || identity.issuer.chars().any(char::is_control)
+            || identity.subject.is_empty()
+            || identity.subject.len() > 4096
+            || identity.subject.chars().any(char::is_control)
+            || mailbox.len() > 512
+        {
+            return Err(OAuthError::InvalidResponse);
+        }
+        Ok(VerifiedAuthorization {
+            binding: GrantBinding {
+                provider_id: self.provider.id.clone(),
+                issuer: identity.issuer.clone(),
+                client_registration_id: self.provider.registration_id.clone(),
+                client_id: self.provider.client_id.clone(),
+                subject: identity.subject.clone(),
+                mailbox,
+                grant_id: uuid::Uuid::new_v4().to_string(),
+                generation: 1,
+                resource: self.provider.resource.clone(),
+                scopes: self.provider.scopes.clone(),
+            },
+            tokens: self.tokens.clone(),
+        })
+    }
 }
 pub(crate) struct VerifiedAuthorization {
     pub(crate) binding: GrantBinding,
@@ -456,8 +577,8 @@ impl OAuthSession {
         callback: &Url,
         route: &NetRoute,
         verifier: &dyn IdentityVerifier,
-        expected_mailbox: &str,
-    ) -> Result<VerifiedAuthorization, OAuthError> {
+        known_mailbox: Option<&str>,
+    ) -> Result<SignedIn, OAuthError> {
         if Instant::now() >= self.deadline {
             return Err(OAuthError::ExpiredSession);
         }
@@ -518,39 +639,35 @@ impl OAuthSession {
             nonce: self.nonce.as_deref(),
             client_id: &self.provider.client_id,
         };
-        let identity =
-            tokio::time::timeout(Duration::from_secs(30), verifier.verify(&evidence, route))
+        let mut identity =
+            tokio::time::timeout(Duration::from_secs(30), verifier.check(&evidence, route))
                 .await
                 .map_err(|_| OAuthError::Timeout)??;
         drop(id_token);
-        if identity.issuer.is_empty()
-            || identity.issuer.len() > 2048
-            || identity.issuer.chars().any(char::is_control)
-            || identity.subject.is_empty()
-            || identity.subject.len() > 4096
-            || identity.subject.chars().any(char::is_control)
-            || identity.mailbox.is_empty()
-            || identity.mailbox.len() > 512
-            || identity.mailbox.chars().any(char::is_control)
-            || !identity.mailbox.eq_ignore_ascii_case(expected_mailbox)
-        {
-            return Err(OAuthError::InvalidResponse);
-        }
-        Ok(VerifiedAuthorization {
-            binding: GrantBinding {
-                provider_id: self.provider.id,
-                issuer: identity.issuer,
-                client_registration_id: self.provider.registration_id,
-                client_id: self.provider.client_id,
-                subject: identity.subject,
-                mailbox: identity.mailbox,
-                grant_id: uuid::Uuid::new_v4().to_string(),
-                generation: 1,
-                resource: self.provider.resource,
-                scopes: self.provider.scopes,
-            },
+        identity.mailbox_hint = identity.mailbox_hint.as_deref().and_then(address_shaped);
+        let hint = identity.mailbox_hint.clone();
+        let mut signed = SignedIn {
+            provider: self.provider,
             tokens,
-        })
+            identity,
+            mailbox: None,
+        };
+        match known_mailbox {
+            // Reauthorization: the account's own address is the only mailbox
+            // this sign-in may serve, so a refusal is an error.
+            Some(mailbox) => signed.prove(verifier, route, mailbox).await?,
+            // New account: try the sign-in's address, and leave the mailbox
+            // open for the user to name when the server does not accept it.
+            None => {
+                if let Some(hint) = hint {
+                    match signed.prove(verifier, route, &hint).await {
+                        Ok(()) | Err(OAuthError::MailboxRefused) => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+        }
+        Ok(signed)
     }
 }
 

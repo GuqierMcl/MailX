@@ -332,4 +332,83 @@ describe('accounts dialog', () => {
     expect(onAccountsChanged).toHaveBeenCalledTimes(calls)
     expect(within(dialog).queryByLabelText('账号名称')).not.toBeInTheDocument()
   })
+
+  describe('an account that signs in through the browser', () => {
+    const endpoint = { id: 'oauth-profile', generation: 1, credentialConfigured: true, trust: 'trusted' as const }
+    const oauthAccount = (state: 'connected' | 'needsReauthorization' = 'connected', trust: 'trusted' | 'needsConfirmation' = 'trusted') => exampleAccount({
+      providerId: 'microsoft-work', emailAddress: 'lin@contoso.com',
+      imap: { host: 'outlook.office365.com', port: 993, tls: 'implicit', username: 'lin@contoso.com' },
+      smtp: { host: 'smtp.office365.com', port: 587, tls: 'startTls', username: 'lin@contoso.com' },
+      authentication: { kind: 'oauth2', configuration: { providerId: 'microsoft-work', issuer: 'https://issuer.example', clientRegistrationId: 'registration', authorizationSubject: 'subject', targetMailboxResource: null }, state, imap: { ...endpoint, trust }, smtp: { ...endpoint, trust } },
+    })
+    const failure = (code: 'signInRequired' | 'providerPolicy' | 'credentialMissing') => exampleSyncState({
+      accountId: exampleAccount().id, phase: 'failed', failure: { code, message: '', detail: null, willRetry: false },
+    })
+
+    it('has no edit-connection button, but keeps removing and verifying, and shows the real servers', async () => {
+      const account = oauthAccount()
+      const { dialog } = renderDialog([account])
+      expect(await within(dialog).findByText(/IMAP · outlook\.office365\.com:993 · TLS · lin@contoso\.com/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/SMTP · smtp\.office365\.com:587 · STARTTLS · lin@contoso\.com/)).toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: '修改连接' })).not.toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '移除账号' })).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '验证收发连接' })).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '重新登录' })).toBeInTheDocument()
+    })
+
+    it('puts a routine sign-in renewal among the connection actions, and only a needed one at the top', async () => {
+      const connected = oauthAccount()
+      const { dialog, view } = renderDialog([connected])
+      const remove = await within(dialog).findByRole('button', { name: '移除账号' })
+      const signIn = within(dialog).getByRole('button', { name: '重新登录' })
+      // Same row as removing, below the profile settings, with no warning above the account.
+      expect(signIn.parentElement).toBe(remove.parentElement)
+      expect(within(dialog).getByLabelText('账号名称').compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(within(dialog).queryByText('需要重新登录，这个邮箱才能继续使用')).not.toBeInTheDocument()
+      view.unmount()
+
+      const needed = oauthAccount('needsReauthorization')
+      const second = renderDialog([needed])
+      const warning = await within(second.dialog).findByText('需要重新登录，这个邮箱才能继续使用')
+      const buttons = within(second.dialog).getAllByRole('button', { name: '重新登录' })
+      expect(buttons).toHaveLength(1)
+      expect(warning.compareDocumentPosition(within(second.dialog).getByLabelText('账号名称')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(buttons[0].parentElement).not.toBe(within(second.dialog).getByRole('button', { name: '移除账号' }).parentElement)
+    })
+
+    it('offers signing in again instead of editing when the sign-in is no longer valid', async () => {
+      const account = oauthAccount()
+      for (const code of ['signInRequired', 'credentialMissing'] as const) {
+        const { dialog, view } = renderDialog([account], {}, testClient([account]), { [account.id]: { ...failure(code), accountId: account.id } })
+        expect(await within(dialog).findByText('需要重新登录，这个邮箱才能继续使用')).toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: '重新登录' })).toBeInTheDocument()
+        expect(within(dialog).queryByText('同步已停止')).not.toBeInTheDocument()
+        expect(within(dialog).queryByRole('button', { name: '修改连接' })).not.toBeInTheDocument()
+        view.unmount()
+      }
+    })
+
+    it('shows other stopped-sync reasons without an edit button or a promise to retry after editing', async () => {
+      const account = oauthAccount()
+      const { dialog } = renderDialog([account], {}, testClient([account]), { [account.id]: { ...failure('providerPolicy'), accountId: account.id } })
+      expect(await within(dialog).findByText('同步已停止')).toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: '修改连接' })).not.toBeInTheDocument()
+      expect(within(dialog).queryByText('修改连接后会重新尝试。')).not.toBeInTheDocument()
+    })
+
+    it('does not tell the user to edit the connection when the saved servers no longer match', async () => {
+      const account = oauthAccount('connected', 'needsConfirmation')
+      const { dialog } = renderDialog([account])
+      expect(await within(dialog).findByText('凭证需要重新确认')).toBeInTheDocument()
+      expect(within(dialog).getByText(/请移除该账号后重新添加/)).toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: '修改连接' })).not.toBeInTheDocument()
+    })
+
+    it('leaves password accounts unchanged', async () => {
+      const { dialog } = renderDialog([exampleAccount()], {}, testClient([exampleAccount()]), { [exampleAccount().id]: exampleSyncState({ phase: 'failed', failure: { code: 'authentication', message: '', detail: null, willRetry: false } }) })
+      expect(await within(dialog).findByText('同步已停止')).toBeInTheDocument()
+      expect(within(dialog).getAllByRole('button', { name: '修改连接' })).toHaveLength(2)
+      expect(within(dialog).queryByRole('button', { name: '重新登录' })).not.toBeInTheDocument()
+    })
+  })
 })

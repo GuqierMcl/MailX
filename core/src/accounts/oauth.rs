@@ -544,13 +544,54 @@ pub(crate) fn normalize_oauth_request(request: &mut CreateAccountRequest) -> Res
     Ok(())
 }
 
+/// The request that creates an account from a signed-in session. The address
+/// is the one the mail server accepted; servers and login names come from the
+/// reviewed registration, and the route is the one chosen for sign-in. Nothing
+/// here is taken from the page except the profile.
+pub(crate) fn create_request(
+    registration: &ProviderRegistration,
+    mailbox: &str,
+    route: RouteInput,
+    request_id: String,
+    profile: AccountProfileInput,
+) -> CreateAccountRequest {
+    let (imap, smtp) = registration.mail_connections(mailbox);
+    CreateAccountRequest {
+        request_id,
+        config: AccountConfigInput {
+            display_name: profile.display_name,
+            color: profile.color,
+            sender_name: profile.sender_name,
+            use_provider_icon: profile.use_provider_icon,
+            email_address: mailbox.trim().to_owned(),
+            provider_id: Some(registration.id.clone()),
+            imap,
+            smtp,
+            authentication: AuthenticationInput::OAuth2 {
+                configuration: OAuth2Configuration {
+                    provider_id: registration.id.clone(),
+                    // Placeholder: the verified issuer replaces it on creation.
+                    issuer: String::new(),
+                    client_registration_id: registration.registration_id.clone(),
+                    authorization_subject: None,
+                    target_mailbox_resource: Some(mailbox.trim().to_owned()),
+                },
+            },
+            route,
+        },
+    }
+}
+
 /// Resolve a temporary authorization route without saving proxy/mail secrets.
-pub(crate) fn authorization_route(
-    request: &CreateAccountRequest,
-) -> Result<crate::net::NetRoute, AppError> {
-    let mut config = request.config.clone().split().1;
-    validate_connection(&mut config)?;
-    match config.route {
+/// `Inherit` is the application default route, which is direct until an
+/// app-wide proxy setting exists. Sync and sending resolve it in
+/// `AccountService::image_route` and draft checks in `draft_connection`; when
+/// the default route can become a proxy, all three must change together, and
+/// sign-in must never fall back to direct (see `docs/architecture/network-security.md`).
+pub(crate) fn authorization_route(route: &RouteInput) -> Result<crate::net::NetRoute, AppError> {
+    let mut route = route.clone();
+    validate_route(&mut route)?;
+    match route {
         RouteInput::Direct | RouteInput::Inherit => Ok(crate::net::NetRoute::default()),
         RouteInput::Custom {
             proxy_kind,
@@ -650,6 +691,105 @@ mod tests {
             .create_oauth(request(), verified("stable-subject"), registration())
             .unwrap();
         (dir, service, account, secrets)
+    }
+    fn route_input(route: serde_json::Value) -> RouteInput {
+        serde_json::from_value(route).unwrap()
+    }
+    fn profile() -> AccountProfileInput {
+        serde_json::from_value(json!({"displayName":"Work","color":null})).unwrap()
+    }
+    #[test]
+    fn a_new_oauth_account_uses_the_proven_address_and_the_registrations_servers() {
+        use crate::auth::{GrantBinding, VerifiedAuthorization};
+        for (provider, smtp_host) in [
+            ("microsoft-personal", "smtp-mail.outlook.com"),
+            ("microsoft-work", "smtp.office365.com"),
+        ] {
+            let registration = crate::providers::oauth::lookup(provider)
+                .unwrap()
+                .registration()
+                .clone();
+            // Only the proven address, the route and the profile come from the
+            // session and page; everything else is the registration's.
+            let request = create_request(
+                &registration,
+                " lin@contoso.com ",
+                route_input(json!({"kind":"inherit"})),
+                new_id(),
+                profile(),
+            );
+            assert_eq!(request.config.email_address, "lin@contoso.com");
+            assert_eq!(request.config.provider_id.as_deref(), Some(provider));
+            let authorization = VerifiedAuthorization {
+                binding: GrantBinding {
+                    provider_id: registration.id.clone(),
+                    issuer: "https://login.microsoftonline.com/t/v2.0".into(),
+                    client_registration_id: registration.registration_id.clone(),
+                    client_id: registration.client_id.clone(),
+                    subject: "t/o".into(),
+                    mailbox: "lin@contoso.com".into(),
+                    grant_id: new_id(),
+                    generation: 1,
+                    resource: registration.resource.clone(),
+                    scopes: registration.scopes.clone(),
+                },
+                tokens: TokenSet {
+                    access_token: SecretValue::new(String::new()),
+                    refresh_token: Some(SecretValue::new("refresh".into())),
+                    expires_at: 0,
+                    target: None,
+                    scopes: registration.scopes.clone(),
+                },
+            };
+            let dir = TempDir::new().unwrap();
+            let mut service =
+                AccountService::open(dir.path(), Arc::new(MemorySecrets::default())).unwrap();
+            let account = service
+                .create_oauth(request, authorization, registration)
+                .unwrap();
+            let shown = service.get(&account.id).unwrap();
+            for saved in [&account, &shown] {
+                assert_eq!(saved.imap.host, "outlook.office365.com", "{provider}");
+                assert_eq!((saved.imap.port, saved.imap.tls), (993, TlsMode::Implicit));
+                assert_eq!(saved.imap.username, "lin@contoso.com");
+                assert_eq!(saved.smtp.host, smtp_host, "{provider}");
+                assert_eq!((saved.smtp.port, saved.smtp.tls), (587, TlsMode::StartTls));
+                assert_eq!(saved.smtp.username, "lin@contoso.com");
+                assert!(matches!(saved.route, RouteConfig::Inherit));
+            }
+        }
+    }
+    #[test]
+    fn sign_in_uses_the_same_route_as_saved_accounts() {
+        // `inherit` is the app default route, which is direct today; the saved
+        // account's sync and send route resolves it the same way.
+        let (_dir, service, account, _) = fixture();
+        let saved = service.image_route(&account.id).unwrap();
+        assert!(saved.proxy.is_none());
+        for kind in ["direct", "inherit"] {
+            let route = authorization_route(&route_input(json!({"kind": kind}))).unwrap();
+            assert!(route.proxy.is_none(), "{kind}");
+            assert!(!route.image_proxy_dns, "{kind}");
+        }
+        // A custom proxy is carried into sign-in; there is no fallback to direct.
+        let route = authorization_route(&route_input(json!({
+            "kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":1080,
+            "dns":"proxy","authentication":null,"imageProxyDns":false
+        })));
+        match route {
+            Ok(route) => assert_eq!(route.proxy.as_ref().map(|p| p.port), Some(1080)),
+            Err(error) => panic!("custom route rejected: {error:?}"),
+        }
+        // A broken proxy or a proxy secret that was not supplied is an error,
+        // never a quiet direct connection.
+        for bad in [
+            json!({"kind":"custom","proxyKind":"socks5","host":"","port":1080,"dns":"proxy","authentication":null}),
+            json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":0,"dns":"proxy","authentication":null}),
+            json!({"kind":"custom","proxyKind":"socks5","host":"127.0.0.1","port":1080,"dns":"proxy",
+                "authentication":{"username":"u","password":{"action":"keep"}}}),
+        ] {
+            assert!(authorization_route(&route_input(bad)).is_err());
+        }
     }
     #[test]
     fn verified_identity_overrides_untrusted_configuration_and_public_output_has_no_secrets() {

@@ -77,17 +77,26 @@ SQLite 与系统凭据库不能共用事务，因此使用不含秘密的 `crede
 
 ## 5. 通用 OAuth 基础与开放边界
 
-`core/src/auth/` 已实现授权码 + PKCE、严格 `state` / 回调校验、按账号路由的 token 交换与刷新，以及邮件协议 XOAUTH2。生产服务商列表（`core/src/providers/oauth.rs`）为空，核心只通过 `OAuthProvider` trait 与唯一查找函数访问服务商条目：当前没有 OAuth 服务商入口，不能使用 Gmail、Outlook 或任意自定义 OAuth 端点；未知 `providerId` 在绑定监听器、读取代理凭证或打开浏览器前返回 `unsupported`。普通创建 / 修改接口仍不能接受调用方提供的 OAuth 身份作为有效授权。
+`core/src/auth/` 已实现授权码 + PKCE、严格 `state` / 回调校验、按账号路由的 token 交换与刷新，以及邮件协议 XOAUTH2。生产服务商列表（`core/src/providers/oauth.rs`）目前只有两个 Microsoft 条目 `microsoft-personal` 与 `microsoft-work`（规则见[服务商兼容层](provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)和 [Microsoft 接入评估](../reference/microsoft-integration.md)）；核心只通过 `OAuthProvider` trait 与唯一查找函数访问服务商条目，不能使用 Gmail 或任意自定义 OAuth 端点；未知 `providerId` 在绑定监听器、读取代理凭证或打开浏览器前返回 `unsupported`。普通创建 / 修改接口仍不能接受调用方提供的 OAuth 身份作为有效授权。
 
 授权请求与回调遵循以下与服务商无关的规则：
 
 - **固定回调路径。** 服务商只忽略回环地址重定向的端口，所以注册项带 `redirectPath`（空表示无路径）。`redirect_uri` 由核心拼成一次文本（空路径时为 `http://127.0.0.1:{port}`，无结尾斜杠），授权请求与 token 请求逐字节复用。空路径时浏览器请求 `/`（或 `/?…`）即被接受。CSRF 防护仍由 `state` + PKCE 承担，监听器仍是一次性、仅回环、有大小与时间上限。
 - **授权请求附加项。** 注册项可声明静态附加参数（如 `prompt`），不得覆盖流程自己设置的参数；也可声明使用 `login_hint`，值只来自已校验的账号邮箱。调用方的输入不会进入授权地址。申请 `openid` scope 时，每个会话生成新的 `nonce`。
 - **回调页面。** 浏览器看到的是无脚本、严格 CSP 的最小 HTML 页，同一页用英文和中文说明登录已完成、可返回 MailX；回调带 `error` 时显示另一段“未能完成登录”的文字，不回显任何回调参数。
-- **身份验证拿到完整 token 响应。** 部分服务商签发的 access token 客户端不应解析，身份来自 OIDC `id_token`。`IdentityVerifier` 收到 `IdentityEvidence`（access token、可选 `id_token`、请求所用 `nonce` 与客户端 ID）；`id_token` 只在验证期间持有，不保存、不记录。通用辅助函数解码 JWT 载荷并核对 `aud`（多受众时要求 `azp`）、`exp`（允许 2 分钟时钟偏差）、`nonce`、`iss` 与 `sub`。不验证签名：该 token 由本客户端直接经 TLS 从 token 端点取得，OIDC Core 3.1.3.7 允许以此代替签名校验；任何其他来源的 `id_token` 都不得交给该函数。
+- **身份验证拿到完整 token 响应。** 部分服务商签发的 access token 客户端不应解析，身份来自 OIDC `id_token`。`IdentityVerifier` 分成两步：`check` 收到 `IdentityEvidence`（access token、可选 `id_token`、请求所用 `nonce` 与客户端 ID），返回 issuer、主体和一个**邮箱提示**（`CheckedIdentity.mailbox_hint`，来自声明、必须长得像邮箱地址，只是猜测）；`prove_mailbox` 用 bearer 向受信邮件服务器求证某个邮箱。`id_token` 只在验证期间持有，不保存、不记录。通用辅助函数解码 JWT 载荷并核对 `aud`（多受众时要求 `azp`）、`exp`（允许 2 分钟时钟偏差）、`nonce`、`iss` 与 `sub`。不验证签名：该 token 由本客户端直接经 TLS 从 token 端点取得，OIDC Core 3.1.3.7 允许以此代替签名校验；任何其他来源的 `id_token` 都不得交给该函数。
 - **issuer 不是常量。** 多租户端点下 `iss` 因租户而异，所以 issuer 由验证器返回并保存在 grant 绑定中，`OAuth2Configuration.issuer` 展示的是这个已验证值。注册项匹配只比较提供商、注册标识、客户端 ID、resource 与 scopes；重新授权要求已验证的 `(issuer, subject)` 与原绑定一致。同一客户端 ID 可对应多个注册项（例如个人账号与工作账号端点不同），注册项由自己的标识区分。
 
-授权会话由核心持有目标账号配置、路由、PKCE 秘密和 IPv4 `127.0.0.1` 临时监听器。最多八个会话、总有效期五分钟；宿主只打开受信注册生成的授权地址，网页仅收到不透明 `sessionId`。到期定时释放未消费的已完成授权结果及任务，不依赖宿主再次调用；完成和取消为一次性操作，取消会中止回调、交换与验证；只有身份适配器验证的主体和目标邮箱与预期一致，结果才可消费为账号。浏览器收到回调只表示回调已收到，不证明账号授权或创建成功。
+新账号的 OAuth 授权**不先问邮箱地址**：`begin` 只收提供商标识和网络路由，地址由登录得出并经邮件服务器确认。创建账号时核心用已确认的地址和受信注册项的 IMAP / SMTP 服务器与登录名（`ProviderRegistration::mail_connections`）生成账号配置，页面只提供资料（名称、颜色、发件人名称、是否使用服务商图标）。授权使用的路由与同步、发信相同：`inherit` 当前解析为直连（应用默认路由固定为 direct），自定义代理原样带入，失败不回退直连；将来应用默认路由可变时，授权、同步与发信三处必须一起改（`accounts::oauth::authorization_route`、`AccountService::image_route`、`draft_connection`），测试 `sign_in_uses_the_same_route_as_saved_accounts` 守住当前一致性。
+
+授权会话由核心持有目标（新账号的网络路由，或重新授权的账号）、PKCE 秘密和 IPv4 `127.0.0.1` 临时监听器，网页仅收到不透明 `sessionId`，宿主只打开受信注册生成的授权地址。会话有两个阶段，最多同时八个（已登录的会话也占名额）：
+
+- **等待浏览器**：最长五分钟。回调到达后交换 token、核对 `id_token`（租户、issuer、受众、nonce、个人 / 工作类型），再按下面的方式确定邮箱；等待超时、取消或失败都释放监听器与任务。
+- **已登录**：浏览器返回后，会话（token、已验证的 issuer 与主体、已确认或待确认的邮箱）再保留最多十五分钟，让用户填写邮箱地址、给账号命名，之后丢弃，不依赖前端再次调用。取消、关闭添加窗口、返回上一步、输错邮箱次数用完（5 次）、创建成功都立即丢弃它和其中的 token。
+
+邮箱**提示不是证明**。核心取 `id_token` 的候选地址（对 Microsoft：先 `email`，没有再取 `preferred_username`，都须长得像邮箱），用刚取得的 token 求证；服务器打开了它，结果就是 `verified`（带地址）。没有候选地址，或服务器拒绝它（例如登录名只是别名），结果是 `needsMailbox`（带被拒的地址作为建议，或没有），页面请用户填写邮箱地址，核心只用会话里已有的 token 再求证一次，不需要第二次浏览器往返；用户键入的地址在求证通过之前不被信任，也不进入账号。网络、代理、TLS 与超时错误照旧直接返回。账号只能从邮箱已被确认的会话创建，每个会话的结果只可消费一次；创建因资料等问题失败（没有写入任何内容）时，会话保留，可修改后重试，同一会话不能同时创建两次。
+
+重新授权不变：账号的地址已知，作为 `login_hint` 发给登录页，也是求证唯一接受的邮箱；仍要求新的 `(issuer, subject)` 与原绑定一致。重新授权有自己的完成命令，直接返回更新后的账号。浏览器收到回调只表示回调已收到，不证明账号授权或创建成功。
 
 客户端注册项与账号 grant 分开持久化，当前注册必须与受信策略完整匹配，没有开放任意客户端配置。邮件目标归一化后须核对受信 IMAP / SMTP host、port、TLS 和邮箱 / 固定登录身份策略，创建、重新授权与恢复均再次核对，不能把 bearer 交给调用方任意服务器。`targetMailboxResource` 表达经验证的邮箱目标，token 的 resource / scope 另由后端策略管理。
 
@@ -97,9 +106,11 @@ token 端点的 `invalid_grant`、`interaction_required`、`consent_required`、
 
 刷新存在远端轮换与本地写入之间的不可回滚边界，本地持久化失败不能保证恢复旧 refresh token。移除账号使本机协调器失效并按凭证清理流程删除本机秘密，不调用服务商撤销端点。journal 恢复提交同样使旧凭证所有者失效；存在在途写入的已退役 grant 保留持久化清理意图，补偿删除失败时由后续恢复重试，不提前确认清理完成。
 
-`Account.authentication` 是 `kind=password | oauth2` 的联合类型。密码摘要保留 `mode` 和 `passwordConfigured`；OAuth 摘要包含受信配置、`state` 与协议级 `credentialConfigured` / `trust`，不返回 token 或秘密引用，也不把 OAuth 当作共享 / 独立密码。旧无 `kind` 的密码快照兼容读取，写出时带显式 `kind`。OAuth 连接编辑当前不可用，资料编辑与本机移除仍沿用现有流程；核心与宿主已提供绑定账号及预期 revision 的专用重授权会话，核对稳定主体、邮箱、issuer、提供商与客户端注册后更新凭证 generation 和账号 revision，服务商 UI 尚未开放。
+`Account.authentication` 是 `kind=password | oauth2` 的联合类型。密码摘要保留 `mode` 和 `passwordConfigured`；OAuth 摘要包含受信配置、`state` 与协议级 `credentialConfigured` / `trust`，不返回 token 或秘密引用，也不把 OAuth 当作共享 / 独立密码。旧无 `kind` 的密码快照兼容读取，写出时带显式 `kind`。OAuth 连接编辑当前不可用，资料编辑与本机移除仍沿用现有流程；核心与宿主提供绑定账号及预期 revision 的专用重授权会话，核对稳定主体、邮箱、issuer、提供商与客户端注册后更新凭证 generation 和账号 revision。账号设置里的“重新登录”调用该会话，账号需要时以醒目警示呈现。
 
 正式退出会先取消未完成授权，停止发件箱、同步、正文和预览任务，并关闭新凭证解析及新刷新准入，再等待包括已退役 grant 在内的 refresh token 持久化收尾，之后才销毁桌面异步运行时；不依赖核心 Drop 的短时等待保护凭证轮换。已收到但尚未落盘的轮换值，在明确写入失败后最多重试三次，每次串行等待真实凭据库调用结束；持续失败会返回结构化存储错误并记录固定脱敏原因后退出。整个收尾（等待后台任务结束和凭证持久化）最多 20 秒，超时同样返回存储错误并继续退出，不无限阻止退出；超时时尚未落盘的轮换值会丢失。操作系统凭据库调用本身可能阻塞，持续凭据库故障或强制终止仍可能需要重新授权，远端轮换不能回滚。
+
+求证由中立函数 `imap::prove_mailbox_access` 完成：用刚取得的 bearer 沿授权路由以 XOAUTH2 登录受信 IMAP 端点后退出，登录被拒映射为 `OAuthError::MailboxRefused`，网络、代理、TLS 与超时沿用既有 OAuth 网络错误。
 
 服务商开放仍需审核注册、公开客户端资格、授权端点、scope / 资源、身份验证适配器和真实收发证据；受控测试不能替代公开分发验证。系统浏览器使用自身网络设置，MailX 只控制 token、身份查询和邮件连接的账号路由。
 

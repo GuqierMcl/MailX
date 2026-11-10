@@ -45,8 +45,8 @@ mod flags;
 mod oauth;
 mod organize;
 pub use oauth::{
-    BeginOAuthAccount, BeginOAuthReauthorization, OAuthBrowserAuthorization, OAuthSessionHandle,
-    OAuthSessionRequest,
+    BeginOAuthAccount, BeginOAuthReauthorization, ConfirmOAuthMailbox, CreateOAuthAccount,
+    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
 };
 mod verification;
 pub use crate::sync::cadence::Activity;

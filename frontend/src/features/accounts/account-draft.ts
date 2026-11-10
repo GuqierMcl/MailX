@@ -1,5 +1,5 @@
 import { t } from '@/i18n'
-import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, SecretUpdate } from '@/generated/accounts'
+import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, RouteInput, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { providerEmailRequired, type MailProvider } from './providers'
 
@@ -117,7 +117,13 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
     : draft.mode === 'shared'
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
-  let route: ConnectionInput['route'] = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }
+  const route = draftToRoute(draft)
+  return { emailAddress, providerId: account ? account.providerId : provider?.id ?? null, imap, smtp, authentication, route }
+}
+
+/** The network route a draft describes. Sign-in has a route but no servers or address yet. */
+export function draftToRoute(draft: AccountDraft): RouteInput {
+  let route: RouteInput = { kind: draft.routeKind === 'inherit' ? 'inherit' : 'direct' }
   if (draft.routeKind === 'custom') {
     if (draft.proxyAuth && !draft.proxyUsername.trim()) invalid('proxyUsername', t('accounts:proxyUsernameRequired'))
     route = {
@@ -127,5 +133,5 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
       authentication: draft.proxyAuth ? { username: draft.proxyUsername.trim(), password: secret(draft.proxyPassword, 'proxyPassword') } : null,
     }
   }
-  return { emailAddress, providerId: account ? account.providerId : provider?.id ?? null, imap, smtp, authentication, route }
+  return route
 }

@@ -273,17 +273,73 @@ pub(crate) async fn accounts_oauth_reauthorize(
     Ok(respond(result))
 }
 
+/// Waits for the browser; the result says whether the mail server already
+/// opened a mailbox with the sign-in or an address is still needed.
 #[tauri::command]
 pub(crate) async fn accounts_oauth_finish(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
-) -> Result<ApiResult<Account>, ()> {
+) -> Result<ApiResult<mailx_core::OAuthSignInResult>, ()> {
     let args = authorize(&window, "accounts_oauth_finish")
         .and_then(|_| parse::<WriteArgs<mailx_core::OAuthSessionRequest>>(request.body()));
     Ok(respond(match args {
         Ok(args) => match state.core() {
             Ok(core) => core.finish_oauth_account(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+/// Tries an address the user typed, with the token the session already holds.
+#[tauri::command]
+pub(crate) async fn accounts_oauth_confirm_mailbox(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::OAuthSignInResult>, ()> {
+    let args = authorize(&window, "accounts_oauth_confirm_mailbox")
+        .and_then(|_| parse::<WriteArgs<mailx_core::ConfirmOAuthMailbox>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.confirm_oauth_mailbox(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+/// Creates the account from a signed-in session; the page supplies only the profile.
+#[tauri::command]
+pub(crate) async fn accounts_oauth_create(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Account>, ()> {
+    let args = authorize(&window, "accounts_oauth_create")
+        .and_then(|_| parse::<WriteArgs<mailx_core::CreateOAuthAccount>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.create_oauth_account(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
+}
+
+/// Waits for the browser of a sign-in again and saves the renewed grant.
+#[tauri::command]
+pub(crate) async fn accounts_oauth_reauthorize_finish(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Account>, ()> {
+    let args = authorize(&window, "accounts_oauth_reauthorize_finish")
+        .and_then(|_| parse::<WriteArgs<mailx_core::OAuthSessionRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.finish_oauth_reauthorization(args.request).await,
             Err(error) => Err(error),
         },
         Err(error) => Err(error),

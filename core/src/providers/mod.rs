@@ -1,5 +1,6 @@
 //! Endpoint-scoped provider compatibility implementations.
 
+mod microsoft;
 pub(crate) mod oauth;
 mod qq;
 

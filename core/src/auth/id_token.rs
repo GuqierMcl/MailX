@@ -1,13 +1,6 @@
 //! Provider-neutral OpenID Connect `id_token` checks. Providers that issue
 //! access tokens the client must not parse take the mailbox identity from this
 //! token instead.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Consumed by provider identity verifiers, which are added with the first provider"
-    )
-)]
 use super::{OAuthError, now};
 use crate::secrets::SecretValue;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -20,6 +13,13 @@ const CLOCK_SKEW_SECS: u64 = 120;
 #[derive(Clone, Debug)]
 pub(crate) struct IdTokenClaims {
     pub issuer: String,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Providers whose `sub` is pairwise take the subject from other claims; kept for providers that use it"
+        )
+    )]
     pub subject: String,
     claims: serde_json::Map<String, serde_json::Value>,
 }

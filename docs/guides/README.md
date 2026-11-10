@@ -7,7 +7,7 @@ This page covers the basics of the desktop app. Published installers are listed 
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
-2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. OAuth sign-in is not supported yet.
+2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, Outlook, Microsoft 365 / Exchange, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. Outlook and Microsoft 365 sign in in your browser and need no password or authorization code (see below); sign-in in the browser is not available for other providers yet.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. To give the mail more room, collapse the sidebar from the title bar or with Cmd/Ctrl+B: it becomes a narrow column of icons with the same places, tooltips that show unread counts, and menus for More and each account. Your choice is remembered. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
 
@@ -26,6 +26,18 @@ First [create an iCloud Mail address](https://support.apple.com/guide/icloud/cre
 Choose iCloud for an `@icloud.com`, `@me.com` or `@mac.com` address. MailX fills in `imap.mail.me.com:993` with implicit TLS and `smtp.mail.me.com:587` with STARTTLS, sharing the app-specific password. Both usernames default to your full email address. If incoming sign-in fails, Advanced settings lets you change only the IMAP username to the part before `@`, as [Apple's server guide](https://support.apple.com/en-us/102525) suggests; keep the full address for SMTP.
 
 Changing or resetting your Apple Account password revokes all app-specific passwords. Generate a new one and update the account connection in MailX to restore access. Apple Account authorization sign-in is not available in MailX. Use manual IMAP / SMTP setup for an iCloud+ custom domain; aliases have no separate sender selector, and MailX does not automatically merge addresses that share one mailbox. Mail Drop is not available, so Apple's ordinary message-size limit still applies to attachments and inline images.
+
+### Microsoft (Outlook / Microsoft 365)
+
+Two entries sign in through your browser, so MailX never sees your password. Choose **Outlook** for a personal Outlook.com, Hotmail or Live address. Choose **Microsoft 365 / Exchange** for a work or school address. You don't type your address first: change the network settings if you need to, then click **Sign in in browser**. MailX opens the Microsoft sign-in page; finish signing in there and come back. You can cancel while MailX is waiting.
+
+MailX learns your address from the sign-in and checks that the mail server really opens that mailbox. If it can't (for example, you signed in with an alias or a different sign-in name), it asks you for the account's email address and checks that one with the sign-in you already have, without opening the browser again. You get five tries. Then give the mailbox a name and click **Done**. Going back or closing the window drops the sign-in, and it expires on its own after 15 minutes.
+
+If you pick the wrong entry, MailX tells you which one to use. If it says it couldn't open the mailbox, check the address first. For Outlook.com, make sure IMAP is turned on in Outlook settings. For work or school mail, your administrator may need to approve MailX or allow IMAP and SMTP for your mailbox. MailX can't work around an organization that turned either one off, and it doesn't keep asking you to sign in again in that case.
+
+If your sign-in expires or is withdrawn, open the account in MailX and click **Sign in again**; your mail and settings stay as they are. Mail on a company-hosted Exchange server isn't covered by the Microsoft 365 entry. Use manual IMAP / SMTP setup with the server details from your administrator.
+
+These entries haven't been tested with real Microsoft accounts yet, and shared mailboxes and China-operated Microsoft 365 aren't supported.
 
 ## Reading, search and organizing
 

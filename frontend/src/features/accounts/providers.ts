@@ -8,6 +8,8 @@ import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
 import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import gmailLogo from '@/assets/providers/gmail.svg'
+import outlookLogo from '@/assets/providers/outlook.svg'
+import microsoftLogo from '@/assets/providers/microsoft.svg'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -28,6 +30,20 @@ export type ProviderSetup = {
   rangeHint?: string
   authenticationHelp: string
   providerPolicyHelp?: string
+}
+
+/**
+ * Guidance for a provider that signs in through the browser. The user gives
+ * only the address; servers and sign-in rules come from the host's reviewed
+ * list, never from the page.
+ */
+export type SignInSetup = {
+  title: string
+  description: string
+  emailHint: string
+  emailPlaceholder: string
+  /** Short help shown under the entry in the provider list. */
+  help: string
 }
 
 /**
@@ -53,6 +69,8 @@ export type MailProvider = {
   preset?: ProviderPreset
   /** Localized guidance; its presence enables the compact credential form. */
   setup?: ProviderSetup
+  /** Present for providers that sign in in the browser instead of with a password. */
+  signIn?: SignInSetup
 }
 
 export const GENERIC_PROVIDER: MailProvider = {
@@ -216,7 +234,49 @@ export const GMAIL_PROVIDER: MailProvider = {
   },
 }
 
-export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
+// The ids are the host's reviewed provider ids and are also stored as the
+// account's `providerId`. Outlook uses Microsoft's product icon; the work entry
+// uses the Microsoft logo, as Microsoft's sign-in guidance asks for work or
+// school accounts (see assets/providers/README.md).
+export const MICROSOFT_PERSONAL_PROVIDER: MailProvider = {
+  id: 'microsoft-personal',
+  get name() { return t('accounts:microsoftPersonalProviderName') },
+  get domain() { return 'outlook.com / hotmail.com / live.com' },
+  get description() { return t('accounts:microsoftPersonalProviderDescription') },
+  searchAliases: ['Outlook', 'Hotmail', 'Live', 'MSN', 'Microsoft', '微软'],
+  logo: outlookLogo,
+  icon: Mail01Icon,
+  get signIn(): SignInSetup {
+    return {
+      title: t('accounts:microsoftPersonalSignInTitle'),
+      description: t('accounts:microsoftPersonalSignInDescription'),
+      emailHint: t('accounts:microsoftPersonalEmailHint'),
+      emailPlaceholder: 'you@outlook.com',
+      help: t('accounts:microsoftHelp'),
+    }
+  },
+}
+
+export const MICROSOFT_WORK_PROVIDER: MailProvider = {
+  id: 'microsoft-work',
+  get name() { return t('accounts:microsoftWorkProviderName') },
+  get domain() { return t('accounts:microsoftWorkDomain') },
+  get description() { return t('accounts:microsoftWorkProviderDescription') },
+  searchAliases: ['Exchange', 'Office 365', 'Microsoft 365', 'Microsoft', '微软', '企业邮箱'],
+  logo: microsoftLogo,
+  icon: Mail01Icon,
+  get signIn(): SignInSetup {
+    return {
+      title: t('accounts:microsoftWorkSignInTitle'),
+      description: t('accounts:microsoftWorkSignInDescription'),
+      emailHint: t('accounts:microsoftWorkEmailHint'),
+      emailPlaceholder: 'you@company.com',
+      help: t('accounts:microsoftHelp'),
+    }
+  },
+}
+
+export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
 
 const CREDENTIAL_TEXT_KEYS = {
   password: {

@@ -726,6 +726,32 @@ fn normalize_color(value: &str) -> Option<Option<String>> {
     (hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
         .then(|| Some(format!("#{}", hex.to_ascii_lowercase())))
 }
+/// Checks the proxy part of a route; shared by connection checks and sign-in,
+/// which has a route but no mailbox address yet.
+fn validate_route(route: &mut RouteInput) -> Result<(), AppError> {
+    if let RouteInput::Custom {
+        host,
+        port,
+        authentication,
+        ..
+    } = route
+    {
+        validate_host(host, "route.host")?;
+        if *port == 0 {
+            return Err(AppError::validation("route.port"));
+        }
+        if let Some(auth) = authentication {
+            if !valid_text(&auth.username, 255) {
+                return Err(AppError::validation("route.authentication.username"));
+            }
+            if let SecretUpdate::Replace { value } = &auth.password {
+                validate_secret(value, "route.authentication.password")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
     config.email_address = config.email_address.trim().to_owned();
     if !valid_text(&config.email_address, 320)
@@ -765,26 +791,7 @@ fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
             return Err(AppError::validation(&format!("{name}.username")));
         }
     }
-    if let RouteInput::Custom {
-        host,
-        port,
-        authentication,
-        ..
-    } = &mut config.route
-    {
-        validate_host(host, "route.host")?;
-        if *port == 0 {
-            return Err(AppError::validation("route.port"));
-        }
-        if let Some(auth) = authentication {
-            if !valid_text(&auth.username, 255) {
-                return Err(AppError::validation("route.authentication.username"));
-            }
-            if let SecretUpdate::Replace { value } = &auth.password {
-                validate_secret(value, "route.authentication.password")?;
-            }
-        }
-    }
+    validate_route(&mut config.route)?;
     if let AuthenticationInput::Password { credentials } = &config.authentication {
         for update in match credentials {
             PasswordAuthenticationInput::Shared { password } => vec![password],

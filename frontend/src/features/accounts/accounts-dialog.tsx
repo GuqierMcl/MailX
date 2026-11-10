@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountRemoval, AccountSyncState, RouteConfig } from '@/generated/accounts'
@@ -25,6 +25,8 @@ import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx
 import { sortAccountsForDisplay } from './account-order'
 import { SortableAccountList } from './sortable-account-list'
 import { ConnectionVerification } from './connection-verification'
+import { SignInAgain } from './sign-in-again'
+import { signInNeeded } from './sign-in-state'
 import { ProviderAuthHelp } from './provider-auth-help'
 import { ConnectionDialog } from './connection-dialog'
 import { ProfileFields } from './profile-fields'
@@ -230,23 +232,43 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
     || (account.route.kind === 'custom' && account.route.authentication?.trust === 'needsConfirmation')
   // A failure that will be retried is transient; only a stopped sync needs the user.
   const stopped = sync?.failure && !sync.failure.willRetry ? sync.failure : null
+  // A browser sign-in has no connection settings to edit: renewing the sign-in is the only repair.
+  const oauth = account.authentication.kind === 'oauth2'
+  const stoppedForSignIn = oauth && (stopped?.code === 'signInRequired' || stopped?.code === 'credentialMissing')
+  // Only a sign-in the account can't sync without goes to the top; otherwise it is a connection action.
+  const signInFirst = oauth && signInNeeded(account, stoppedForSignIn)
+  const signInAgain = (trailing?: ReactNode) => (
+    <SignInAgain
+      client={client}
+      account={account}
+      disabled={removing}
+      required={stoppedForSignIn}
+      trailing={trailing}
+      onSignedIn={(renewed) => {
+        replace(renewed)
+        onSaved()
+      }}
+    />
+  )
+  const removeButton = <Button variant="destructive" disabled={removing || !client.available} onClick={() => setConfirming(true)}>{t('accounts:removeAccount')}</Button>
 
   return (
     <SettingsPage>
       {needsTrust ? (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle>
-          <AlertDescription>{t('accounts:changedIdentityHint')}</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+          <AlertDescription>{oauth ? t('accounts:changedIdentityOAuthHint') : t('accounts:changedIdentityHint')}</AlertDescription>
+          {!oauth && <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
         </Alert>
-      ) : stopped && (
+      ) : stopped && !stoppedForSignIn && (
         <Alert variant="destructive">
           <AlertTitle>{t('accounts:syncStopped')}</AlertTitle>
-          <AlertDescription>{errorText(stopped)}  {stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
+          <AlertDescription>{errorText(stopped)}  {!oauth && stopped.code !== 'providerPolicy' && t('accounts:retryAfterConnectionChange')}</AlertDescription>
           {(stopped.code === 'authentication' || stopped.code === 'providerPolicy') && <ProviderAuthHelp client={client} providerId={account.providerId} reason={stopped.code} />}
-          <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
+          {!oauth && <Button variant="outline" className="mt-3 w-fit" onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
         </Alert>
       )}
+      {signInFirst && signInAgain()}
       <fieldset disabled={removing} className="contents"><ProfileEditor
         client={client}
         account={account}
@@ -262,10 +284,12 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
         <SettingsRow label={t('accounts:outgoingServer')} description={server('SMTP', account.smtp)} />
         <SettingsRow label={t('accounts:credentials')} description={credentials(account, needsTrust)} />
         <SettingsRow label={t('accounts:networkRoute')} description={route(account.route)} />
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={removing} onClick={onEditConnection}>{t('accounts:editConnection')}</Button>
-          <Button variant="destructive" disabled={removing || !client.available} onClick={() => setConfirming(true)}>{t('accounts:removeAccount')}</Button>
-        </div>
+        {oauth && !signInFirst ? signInAgain(removeButton) : (
+          <div className="flex flex-wrap gap-2">
+            {!oauth && <Button variant="outline" disabled={removing} onClick={onEditConnection}>{t('accounts:editConnection')}</Button>}
+            {removeButton}
+          </div>
+        )}
         <ConnectionVerification account={account} client={client} />
       </SettingsGroup>
       {confirming && <RemoveAccountDialog
@@ -439,7 +463,7 @@ function server(protocol: string, connection: Account['imap']) {
 }
 
 function credentials(account: Account, needsTrust: boolean) {
-  if (account.authentication.kind === 'oauth2') return `OAuth 2.0 · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
+  if (account.authentication.kind === 'oauth2') return `${t('accounts:signedInThroughBrowser')} · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
   const mode = account.authentication.mode === 'shared' ? t('accounts:sharedPassword') : t('accounts:separatePasswords')
   const configured = account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured
   return `${mode} · ${needsTrust ? t('accounts:needsConfirmation') : configured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`

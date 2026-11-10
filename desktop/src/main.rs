@@ -18,6 +18,8 @@ mod mcp_sidecar;
 #[cfg(not(feature = "body-webview-test"))]
 mod notifications;
 #[cfg(not(feature = "body-webview-test"))]
+mod secret_split;
+#[cfg(not(feature = "body-webview-test"))]
 mod secret_store;
 #[cfg(not(feature = "body-webview-test"))]
 mod secret_vault;
@@ -270,6 +272,9 @@ fn main() {
             commands::accounts_oauth_reauthorize,
             commands::accounts_oauth_begin,
             commands::accounts_oauth_finish,
+            commands::accounts_oauth_confirm_mailbox,
+            commands::accounts_oauth_create,
+            commands::accounts_oauth_reauthorize_finish,
             commands::accounts_oauth_cancel,
             commands::accounts_verify_connection,
             commands::accounts_cancel_verification,

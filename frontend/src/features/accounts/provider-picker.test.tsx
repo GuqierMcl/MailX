@@ -3,7 +3,8 @@ import { fireEvent, render, screen } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ProviderPicker } from './provider-picker'
-import { GENERIC_PROVIDER, type MailProvider } from './providers'
+import { GENERIC_PROVIDER, MICROSOFT_WORK_PROVIDER, PROVIDERS, type MailProvider } from './providers'
+import { i18n } from '@/i18n'
 
 const providers: MailProvider[] = [
   GENERIC_PROVIDER,
@@ -49,5 +50,27 @@ describe('provider picker', () => {
     await user.keyboard('{ArrowUp}{ArrowUp}')
     expect(screen.getByRole('radio', { name: 'Another Mail' })).toBeChecked()
     expect(screen.getByRole('radio', { name: 'Another Mail' })).toHaveFocus()
+  })
+
+  it.each(['zh-CN', 'en'])('keeps the whole Microsoft 365 / Exchange name in the list (%s) by letting names wrap instead of cutting them off', async (language) => {
+    await i18n.changeLanguage(language)
+    function Real() {
+      const [selected, setSelected] = useState<MailProvider | null>(null)
+      const [query, setQuery] = useState('')
+      return <ProviderPicker selected={selected} query={query} onQueryChange={setQuery} onSelect={setSelected} onAdvance={vi.fn()} />
+    }
+    render(<Real />)
+    const option = screen.getByRole('radio', { name: MICROSOFT_WORK_PROVIDER.name })
+    const name = document.getElementById(option.getAttribute('aria-labelledby')!)!
+    expect(name).toHaveTextContent('Microsoft 365 / Exchange')
+    // `truncate` is what produced "Microsoft 365 / E..."; names wrap onto a second line instead.
+    expect(name).not.toHaveClass('truncate')
+    expect(name).toHaveClass('line-clamp-2', 'break-words')
+    // Every row keeps the same wrapping rule, so no entry is cut off on one line.
+    for (const provider of PROVIDERS) {
+      const row = screen.getByRole('radio', { name: provider.name })
+      expect(document.getElementById(row.getAttribute('aria-labelledby')!)).not.toHaveClass('truncate')
+    }
+    await i18n.changeLanguage('zh-CN')
   })
 })

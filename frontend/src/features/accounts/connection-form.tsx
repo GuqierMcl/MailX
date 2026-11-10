@@ -68,7 +68,7 @@ type LoginTestState = (
   | { kind: 'ready'; report: DraftConnectionVerification }
 ) & { scopeKey: string }
 
-function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
+export function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
   const invalid = error?.field === id
   const describedBy = [description && `${id}-description`, invalid && `${id}-error`].filter(Boolean).join(' ') || undefined
   return (
@@ -150,6 +150,64 @@ function PasswordField({ id, label, value, onChange, canKeep, error, placeholder
       )}
     </FieldGroup>
   )
+}
+
+/**
+ * How MailX reaches the provider: direct, the app default or a proxy. Shared by
+ * the connection form and the browser sign-in step, which has no servers or
+ * passwords to ask for.
+ */
+export function RouteFields({ draft, change, error, oldProxyAuth }: {
+  draft: AccountDraft
+  change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]): void
+  error: ClientFailure | null
+  /** The saved proxy login when editing; `null` for a new account. */
+  oldProxyAuth: { passwordConfigured: boolean } | null
+}) {
+  useTranslation()
+  return (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
+              <Field>
+                <FieldLabel htmlFor="routeKind">{t('accounts:connectionMode')}</FieldLabel>
+                <Select value={draft.routeKind} onValueChange={(value) => {
+                  if (!value) return
+                  change('routeKind', value)
+                  if (value !== 'custom') change('proxyPassword', { ...draft.proxyPassword, value: '' })
+                }}
+                  items={{ direct: t('accounts:directConnection'), inherit: t('accounts:appDefault'), custom: t('accounts:customProxy') }}>
+                  <SelectTrigger id="routeKind" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="direct">{t('accounts:directConnection')}</SelectItem><SelectItem value="inherit">{t('accounts:appDefault')}</SelectItem><SelectItem value="custom">{t('accounts:customProxy')}</SelectItem></SelectContent>
+                </Select>
+                <FieldDescription>{draft.routeKind === 'inherit' ? t('accounts:appDefaultHint') : draft.routeKind === 'direct' ? t('accounts:directConnectionHint') : t('accounts:proxyNoFallbackHint')}</FieldDescription>
+              </Field>
+              {draft.routeKind === 'custom' && <>
+                <div className="grid grid-cols-[1fr_1.5fr_0.75fr] gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="proxyKind">{t('accounts:proxyType')}</FieldLabel>
+                    <Select value={draft.proxyKind} onValueChange={(value) => { if (value) change('proxyKind', value) }} items={{ socks5: 'SOCKS5', httpConnect: 'HTTP CONNECT' }}>
+                      <SelectTrigger id="proxyKind" className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="socks5">SOCKS5</SelectItem><SelectItem value="httpConnect">HTTP CONNECT</SelectItem></SelectContent>
+                    </Select>
+                  </Field>
+                  <TextField id="proxyHost" label={t('accounts:proxyHost')} value={draft.proxyHost} onChange={(value) => change('proxyHost', value)} placeholder="127.0.0.1" error={error} />
+                  <TextField id="proxyPort" label={t('accounts:proxyPort')} value={draft.proxyPort} onChange={(value) => change('proxyPort', value)} inputMode="numeric" error={error} />
+                </div>
+                <Field orientation="horizontal">
+                  <FieldContent><FieldLabel htmlFor="proxyAuth">{t('accounts:proxyAuthentication')}</FieldLabel><FieldDescription>{t('accounts:proxyAuthenticationHint')}</FieldDescription></FieldContent>
+                  <Switch id="proxyAuth" checked={draft.proxyAuth} onCheckedChange={(value) => { change('proxyAuth', value); change('proxyPassword', { replace: !oldProxyAuth, value: '' }) }} />
+                </Field>
+                {draft.proxyAuth && <>
+                  <TextField id="proxyUsername" label={t('accounts:proxyUsername')} value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
+                  <PasswordField id="proxyPassword" label={t('accounts:proxyPassword')} value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} placeholder={t('accounts:enterProxyPassword')} />
+                </>}
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel htmlFor="imageProxyDns">{t('accounts:proxyHttpsImages')}</FieldLabel>
+                    <FieldDescription>{t('accounts:proxyHttpsImagesHint')}</FieldDescription>
+                  </FieldContent>
+                  <Switch id="imageProxyDns" checked={draft.imageProxyDns} onCheckedChange={(value) => change('imageProxyDns', value)} />
+                </Field>
+              </>}
+          </SettingsGroup>)
 }
 
 /**
@@ -295,51 +353,9 @@ export function ConnectionForm({
                     <PasswordField id="imapPassword" label={credentialText.incoming} value={draft.imapPassword} onChange={(value) => change('imapPassword', value)} canKeep={sameMode && !!password?.imap.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                     <PasswordField id="smtpPassword" label={credentialText.outgoing} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!password?.smtp.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                   </>}</>)
-  const routeFields = (<SettingsGroup title={t('accounts:networkRoute')} description={t('accounts:routeDescription')}>
-              <Field>
-                <FieldLabel htmlFor="routeKind">{t('accounts:connectionMode')}</FieldLabel>
-                <Select value={draft.routeKind} onValueChange={(value) => {
-                  if (!value) return
-                  change('routeKind', value)
-                  if (value !== 'custom') change('proxyPassword', { ...draft.proxyPassword, value: '' })
-                }}
-                  items={{ direct: t('accounts:directConnection'), inherit: t('accounts:appDefault'), custom: t('accounts:customProxy') }}>
-                  <SelectTrigger id="routeKind" className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="direct">{t('accounts:directConnection')}</SelectItem><SelectItem value="inherit">{t('accounts:appDefault')}</SelectItem><SelectItem value="custom">{t('accounts:customProxy')}</SelectItem></SelectContent>
-                </Select>
-                <FieldDescription>{draft.routeKind === 'inherit' ? t('accounts:appDefaultHint') : draft.routeKind === 'direct' ? t('accounts:directConnectionHint') : t('accounts:proxyNoFallbackHint')}</FieldDescription>
-              </Field>
-              {draft.routeKind === 'custom' && <>
-                <div className="grid grid-cols-[1fr_1.5fr_0.75fr] gap-4">
-                  <Field>
-                    <FieldLabel htmlFor="proxyKind">{t('accounts:proxyType')}</FieldLabel>
-                    <Select value={draft.proxyKind} onValueChange={(value) => { if (value) change('proxyKind', value) }} items={{ socks5: 'SOCKS5', httpConnect: 'HTTP CONNECT' }}>
-                      <SelectTrigger id="proxyKind" className="w-full"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="socks5">SOCKS5</SelectItem><SelectItem value="httpConnect">HTTP CONNECT</SelectItem></SelectContent>
-                    </Select>
-                  </Field>
-                  <TextField id="proxyHost" label={t('accounts:proxyHost')} value={draft.proxyHost} onChange={(value) => change('proxyHost', value)} placeholder="127.0.0.1" error={error} />
-                  <TextField id="proxyPort" label={t('accounts:proxyPort')} value={draft.proxyPort} onChange={(value) => change('proxyPort', value)} inputMode="numeric" error={error} />
-                </div>
-                <Field orientation="horizontal">
-                  <FieldContent><FieldLabel htmlFor="proxyAuth">{t('accounts:proxyAuthentication')}</FieldLabel><FieldDescription>{t('accounts:proxyAuthenticationHint')}</FieldDescription></FieldContent>
-                  <Switch id="proxyAuth" checked={draft.proxyAuth} onCheckedChange={(value) => { change('proxyAuth', value); change('proxyPassword', { replace: !oldProxyAuth, value: '' }) }} />
-                </Field>
-                {draft.proxyAuth && <>
-                  <TextField id="proxyUsername" label={t('accounts:proxyUsername')} value={draft.proxyUsername} onChange={(value) => change('proxyUsername', value)} error={error} />
-                  <PasswordField id="proxyPassword" label={t('accounts:proxyPassword')} value={draft.proxyPassword} onChange={(value) => change('proxyPassword', value)} canKeep={!!oldProxyAuth?.passwordConfigured} error={error} placeholder={t('accounts:enterProxyPassword')} />
-                </>}
-                <Field orientation="horizontal">
-                  <FieldContent>
-                    <FieldLabel htmlFor="imageProxyDns">{t('accounts:proxyHttpsImages')}</FieldLabel>
-                    <FieldDescription>{t('accounts:proxyHttpsImagesHint')}</FieldDescription>
-                  </FieldContent>
-                  <Switch id="imageProxyDns" checked={draft.imageProxyDns} onCheckedChange={(value) => change('imageProxyDns', value)} />
-                </Field>
-              </>}
-          </SettingsGroup>)
+  const routeFields = <RouteFields draft={draft} change={change} error={error} oldProxyAuth={oldProxyAuth} />
 
-  if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>OAuth 2.0</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
+  if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>{t('accounts:signedInThroughBrowser')}</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
 
   return (
     <SettingsPage footer={<>

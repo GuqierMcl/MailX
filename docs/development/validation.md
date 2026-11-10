@@ -1073,3 +1073,48 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 这些结果只说明中立基础按预期工作，不代表任何服务商、租户策略、真实系统浏览器回调或真实原生凭据库已通过验证。
 
 2026-11-10 本地完整检查：`bun run check` 通过（前端 89 个文件 / 1016 项测试，DTO、类型、lint、i18n、构建与 `cargo check` 均通过）；`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）通过；`bun run rust:test` 共 1163 项通过、0 项失败、5 项既有忽略项（core 单元 931、账号集成 39、desktop 148、bridge 两组各 6、MCP server 17、端到端 16）；`git diff --check` 无输出。仅为本机自动检查，范围见上。
+
+## 38. Microsoft（Outlook / Microsoft 365）浏览器登录
+
+2026-11-10 实现两个入口 `microsoft-personal`（Outlook）与 `microsoft-work`（Microsoft 365 / Exchange）。实现位于 `core/src/providers/microsoft.rs`，规则见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)，选型与决定见[接入评估](../reference/microsoft-integration.md)。**没有使用任何真实微软账号，也没有访问微软服务器**；以下全部是受控测试，不代表真实账号、租户策略、系统浏览器回调或原生凭据库通过验证。
+
+受控测试覆盖：
+
+- `cargo test -p mailx-core --lib providers::`：两个注册项通过 `validate()`，客户端 ID、端点、服务器、scope、空回调路径与 `prompt=select_account` / `login_hint` 与已核对的事实一致；身份验证器检查 `iss` 与 `tid` 对应、`tid` / `oid` 为标准 GUID、个人与工作租户互斥（入错入口返回专用错误且不触发 IMAP 登录）、主体为 `{tid}/{oid}`，邮箱取求证结果而非 `email` 声明；`aud` / `nonce` / 缺少 `id_token` 被拒，IMAP 求证的拒绝与网络错误原样透传；SMTP `535 5.7.139` 才归为管理员关闭，其他状态码、IMAP 响应码均不分类。
+- `cargo test -p mailx-core --lib imap::tests::mailbox_proof`：被拒登录映射为“无法打开邮箱”，代理、TLS、超时与连接失败保持各自的 OAuth 网络类别。
+- `cargo test -p mailx-core --lib auth::`：`mail_connections` 由注册项给出服务器与登录名，且通过目标校验；其余通用 OAuth 测试不变。
+- `cargo test -p mailx-core --lib accounts::oauth`：`sign_in_uses_the_same_route_as_saved_accounts` 固定 `inherit` 与直连在授权、同步、发信三处一致，自定义代理原样带入。
+- `cargo test -p mailx-desktop secret_split`：用强制 1280 个 UTF-16 单元上限的内存 `SecretStore` 验证分条目包装：短值保持单条目且旧值可读，长值拆分并还原，不切断字符，缩短或删除时清理旧段，缺段或长度不符返回错误而不是“无凭证”，写段失败不留下头部，形似头部的明文可原样读回。Windows 专用接线（`cfg(target_os = "windows")`）在 macOS 上只做了人工审阅，没有为 Windows 目标编译或运行。
+- 前端：提供商列表顺序与搜索别名；添加流程只问邮箱、不出现服务器 / 密码 / 测试登录；“在浏览器中登录”调用、等待与取消、关闭弹窗放弃等待；邮箱被拒、入错入口、代理问题回到第 2 步，未允许访问留在第 3 步；账号设置的“重新登录”（需要时醒目、取消、失败提示）；浏览器模拟客户端的成功、拒绝、取消与重新登录路径。
+
+浏览器模拟客户端已目测：搜索 “outlook” 只出现 Outlook 条目并显示帮助，第 2 步只有邮箱地址与“高级设置”，创建账号后账号设置里出现“重新登录”。未操作真实账号。
+
+仍待真实账号验证（清单与背景见接入评估第 7 节）：授权页与回调、IMAP / SMTP 收发与 IDLE、Outlook.com 的 `smtp-mail.outlook.com` 与工作账号的 `smtp.office365.com`、管理员批准与关闭 IMAP / SMTP 时的实际表现、`login_hint` / `prompt` 行为、令牌轮换与过期后的“重新登录”、Windows 凭据管理器中分条目存放的真实刷新令牌，以及三个平台的桌面行为。官方 Outlook 图标与 Microsoft 标识已加入，见下文“图标”。
+
+### 图标（2026-11-10）
+
+“Outlook”入口使用 Microsoft 官方 Outlook 产品图标 `outlook.svg`（48 × 48，8,832 字节），“Microsoft 365 / Exchange”入口使用 Microsoft 登录品牌指南提供的 Microsoft 标识 `microsoft.svg`（21 × 21，343 字节）。来源页面、直接 URL、核验日期、SHA-256、许可条款和不使用 Exchange 产品图标的理由见[图标说明](../../frontend/src/assets/providers/README.md#microsoft-outlook)。已核对两个本地文件与下载原件字节一致、哈希与记录相同，且不含脚本、外部资源或字体依赖。
+
+浏览器预览检查：在 14 / 18 / 20 / 24 / 32 / 40 px、浅色（白）与深色（#1b1b1b）背景下，两个图标图形完整、比例正确（`object-contain`，无滤镜），Outlook 在 14 px 仍可辨认信封与 O 形，Microsoft 四色方块在所有尺寸都清楚；添加账号列表中两行的图标与名称显示正常。前端测试覆盖两个条目登记了不同的本地（非远程）图标，并在图标块与徽标中用 `object-contain` 原样显示。该检查只验证素材显示，不替代原生桌面界面验收，也不构成对 Microsoft 许可条款的法律确认。
+
+### 先登录再得到邮箱地址（2026-11-10 追加）
+
+用户手测桌面应用后，新账号流程改为不先问邮箱地址：选择入口后直接在浏览器登录，地址由登录得出，并仍以受信 IMAP 服务器打开该邮箱为唯一证明（`id_token` 声明只是提示）。上文“邮箱取求证结果而非 `email` 声明”等描述是前一版“先填地址”流程的测试，现行规则见[账号配置第 5 节](../architecture/account-configuration.md#5-通用-oauth-基础与开放边界)与[接入评估](../reference/microsoft-integration.md)。仍然**没有使用任何真实微软账号**，以下都是受控测试。
+
+- `cargo test -p mailx-core --lib auth::`：`complete` 对新账号取登录给出的候选地址并用该 token 求证，通过则邮箱已确认；候选被拒或没有时邮箱保持未定，`authorization()` 此时拒绝出具授权；用户键入的地址只有 `prove` 通过才记录，空串、非地址形状和被拒的地址都不被记录，成功的写入前后去掉首尾空白；重新授权传入已知地址时，被拒直接报错；`address_shaped` 的好坏样例（缺少名称或域名、多个 `@`、空白与控制字符、过长）。
+- `cargo test -p mailx-core --lib providers::`：Microsoft 的 `check` 不触发任何邮件连接，候选地址先取 `email` 再取 `preferred_username`、两者都须长得像地址；`prove_mailbox` 只经受信 IMAP 端点（主机与端口来自注册项）；个人 / 工作租户互斥、畸形声明被拒，求证失败原样透传。
+- `cargo test -p mailx-core --lib accounts::oauth`（含会话端到端测试）：新账号会话在浏览器返回后给出 `Verified(地址)`，结果只读一次，已登录的会话剩余时间约 15 分钟（等待浏览器时不超过 5 分钟）；账号由已确认的地址、受信服务器与会话路由生成，创建后会话与 token 被丢弃；候选被拒时给出 `NeedsMailbox(被拒地址)`，在邮箱确认前 `begin_create` 拒绝，错误地址被拒、正确地址确认后才能创建，且 token 端点始终只被访问一次（没有第二次浏览器往返）；创建失败后可用同一会话重试，不能同时创建两次；输错 5 次后会话作废，之后即使地址正确也是 `ExpiredSession`；会话到期或取消后既不能创建也不能确认；重新授权只接受账号自己的地址，被拒返回 `MailboxRefused`，成功结果只可消费一次，且新账号命令对重新授权会话无效；自定义代理、直连与 `inherit` 的授权路由与已保存账号一致，破损代理（空主机、端口 0、缺少代理密码）报错而不回退直连。
+- `cargo test -p mailx-desktop window_access`：新增的 `accounts_oauth_confirm_mailbox`、`accounts_oauth_create`、`accounts_oauth_reauthorize_finish` 只对可信 main 窗口开放，处理器、生成权限与能力表一致。
+- 前端：第 2 步没有地址、服务器、密码和“测试登录”，保留高级网络设置；登录成功后直接进入第 3 步并以该地址命名，`createOAuthAccount` 只带会话、请求标识和资料；候选被拒或没有时出现预填（或为空）的地址框，确认只调用 `confirmOAuthMailbox` 而不再调用 `beginOAuthAccount`；被拒的地址在输入框下以通俗文字提示并可重试；会话超时回到第 2 步并说明；等待与取消、返回上一步与关闭弹窗都丢弃会话；入错入口、未允许访问、网络错误留在第 2 步；创建时资料出错留在第 3 步并保留会话；自定义代理路由、破损代理报错；“重新登录”改用自己的完成命令；浏览器模拟客户端的默认成功、`alias…` / `refused…` 的需要地址与五次上限、`denied…` 的拒绝与取消路径。
+
+浏览器预览（模拟客户端）已目测：第 2 步只有说明、高级设置和“在浏览器中登录”；点击后显示等待与“取消”，随后进入第 3 步，名称默认为得到的地址，创建后账号详情显示 `outlook.office365.com:993` 与 `smtp-mail.outlook.com:587`、没有“修改连接”；`alias` 地址时第 2 步出现说明文字与预填地址框，键入地址后直接进入第 3 步；返回上一步回到干净的第 2 步，等待中取消没有错误、也没有迟到进入第 3 步。预览窗口较矮时对话框内容可滚动。
+
+自动检查（未设置 `CARGO_TARGET_DIR`，使用工作区自己的 `target`）：`bun run check`（前端 90 个文件、1068 项测试，1007 条中英文消息，Rust / TypeScript DTO 一致，类型、lint、构建与 `cargo check` 通过）、`bun run rust:fmt`、`bun run rust:clippy`（`-D warnings`）、`bun run rust:test`（1191 项通过、0 失败、5 项原有忽略）、`git diff --check` 均通过。
+
+仍待真实账号验证：`email` / `preferred_username` 在个人账号与各类租户中实际给出的值、别名与登录名不同的邮箱的表现、IMAP 被管理员关闭时只返回通用失败（此时用户先被请求填写地址，再看到“无法打开邮箱”）、以及上文列出的其余项目。
+
+### Outlook.com 个人账号手测（2026-11-10）
+
+项目维护者在本机 macOS 上用开发版（`bun run tauri dev`，分支 `feat/microsoft-oauth`，提交 `92d9d5e` 之后）以一个 Outlook.com 个人账号手动测试：经“Outlook”入口在系统浏览器完成微软登录，账号添加成功，侧边栏列出服务器文件夹（收件箱、Drafts、已发送、垃圾邮件、已删除、存档、同步问题及其子文件夹、Notes），收件箱显示未读邮件。终端日志中没有应用报错。这说明 Outlook.com 的浏览器登录、回调、IMAP 求证与 XOAUTH2 收信同步在该账号上可用。
+
+本轮没有确认：经 `smtp-mail.outlook.com` 发信、IDLE 推送、重启后刷新令牌与“重新登录”、登录名与邮箱不同时的补填地址流程；Microsoft 365 / Exchange 入口没有可用的工作或学校账号，未测试；Windows 与 Linux 未测试。`Drafts` 与服务器的“存档”文件夹按现有规则显示服务器名称（草稿与归档角色不改名，MailX 另有本机草稿与本机归档），与其他服务商一致。
