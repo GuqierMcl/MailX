@@ -69,7 +69,10 @@ async fn oauth_server(rotating: bool) -> (u16, Arc<AtomicUsize>, tokio::task::Jo
     let exchanges = Arc::new(AtomicUsize::new(0));
     let count = exchanges.clone();
     let task = tokio::spawn(async move {
-        for _ in 0..3 {
+        // Code exchange, identity lookup, then one refresh per plan use: the
+        // access token is memory-only, so the first use after creation and
+        // after a restart both refresh.
+        for _ in 0..4 {
             let (stream, _) = listener.accept().await.unwrap();
             let mut stream = BufReader::new(stream);
             let mut head = String::new();
@@ -101,13 +104,18 @@ async fn oauth_server(rotating: bool) -> (u16, Arc<AtomicUsize>, tokio::task::Jo
                     assert!(body.contains("code=fixture-code"));
                     r#"{"access_token":"initial-access","refresh_token":"stable-refresh","token_type":"Bearer","expires_in":3600,"scope":"mail"}"#.to_owned()
                 } else {
-                    assert!(body.contains("refresh_token=stable-refresh"));
+                    let previous = if rotating && n == 2 {
+                        "rotated-refresh-1"
+                    } else {
+                        "stable-refresh"
+                    };
+                    assert!(body.contains(&format!("refresh_token={previous}")));
                     format!(
-                        r#"{{"access_token":"refreshed-access","refresh_token":"{}","token_type":"Bearer","expires_in":3600,"scope":"mail"}}"#,
+                        r#"{{"access_token":"refreshed-access-{n}","refresh_token":"{}","token_type":"Bearer","expires_in":3600,"scope":"mail"}}"#,
                         if rotating {
-                            "rotated-refresh"
+                            format!("rotated-refresh-{n}")
                         } else {
-                            "stable-refresh"
+                            "stable-refresh".to_owned()
                         }
                     )
                 }
@@ -131,7 +139,7 @@ async fn protocol_servers(
     let sp = smtp.local_addr().unwrap().port();
     let itls = tls.clone();
     let imap_task = tokio::spawn(async move {
-        for token in ["initial-access", "refreshed-access"] {
+        for token in ["refreshed-access-1", "refreshed-access-2"] {
             let (stream, _) = imap.accept().await.unwrap();
             let stream = tokio_rustls::TlsAcceptor::from(itls.clone())
                 .accept(stream)
@@ -174,7 +182,7 @@ async fn protocol_servers(
         }
     });
     let smtp_task = tokio::spawn(async move {
-        for token in ["initial-access", "refreshed-access"] {
+        for token in ["refreshed-access-1", "refreshed-access-2"] {
             let (stream, _) = smtp.accept().await.unwrap();
             let stream = tokio_rustls::TlsAcceptor::from(tls.clone())
                 .accept(stream)
@@ -330,9 +338,9 @@ async fn lifecycle(rotating: bool) {
     let snapshot = service.storage.load(&account.id).unwrap();
     let key = snapshot.profiles[0].secret_ref.clone();
     drop(service);
-    let mut tokens = TokenSet::decode_secret(&secrets.get(&key).unwrap().unwrap()).unwrap();
-    tokens.expires_at = 0;
-    secrets.set(&key, &tokens.encode_secret().unwrap()).unwrap();
+    // Only the refresh token and its target are stored, never the access token.
+    let stored = secrets.get(&key).unwrap().unwrap();
+    assert!(!stored.expose_secret().contains("access"));
     let mut reopened = AccountService::open(directory.path(), secrets.clone()).unwrap();
     reopened.trust_test_oauth_policy(&registration);
     authenticate_plans(&reopened, &account.id, &tls).await;
@@ -340,12 +348,12 @@ async fn lifecycle(rotating: bool) {
     assert_eq!(
         saved.refresh_token.unwrap().expose_secret(),
         if rotating {
-            "rotated-refresh"
+            "rotated-refresh-2"
         } else {
             "stable-refresh"
         }
     );
-    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(count.load(Ordering::SeqCst), 3);
     oauth_task.await.unwrap();
     imap_task.await.unwrap();
     smtp_task.await.unwrap();

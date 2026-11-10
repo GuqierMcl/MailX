@@ -533,9 +533,28 @@ impl std::fmt::Debug for TokenSet {
     }
 }
 impl TokenSet {
+    /// What is kept in the credential store: the refresh token, the granted
+    /// scopes and the target they were issued for. Access tokens stay in
+    /// memory. Some providers issue access tokens of well over a thousand
+    /// characters, and Windows Credential Manager holds at most 2560 bytes per
+    /// item (about 1280 characters, stored as UTF-16), so keeping both would
+    /// not fit. After a restart the first use refreshes instead.
+    ///
+    /// A refresh token that alone exceeds the store's limit makes the write
+    /// fail (the Windows adapter returns an error rather than truncating); the
+    /// token manager reports that as [`OAuthError::Storage`].
     pub(crate) fn encode_secret(&self) -> Result<SecretValue, OAuthError> {
-        Ok(SecretValue::new(serde_json::to_string(&serde_json::json!({ "access_token": self.access_token.expose_secret(), "refresh_token": self.refresh_token.as_ref().map(SecretValue::expose_secret), "expires_at": self.expires_at, "scopes": self.scopes, "target": self.target })).map_err(|_| OAuthError::Storage)?))
+        Ok(SecretValue::new(
+            serde_json::to_string(&serde_json::json!({
+                "refresh_token": self.refresh_token.as_ref().map(SecretValue::expose_secret),
+                "scopes": self.scopes,
+                "target": self.target,
+            }))
+            .map_err(|_| OAuthError::Storage)?,
+        ))
     }
+    /// Restores a stored grant. The access token is empty and already expired,
+    /// so the first resolution refreshes.
     pub(crate) fn decode_secret(value: &SecretValue) -> Result<Self, OAuthError> {
         if value.expose_secret().len() > 131072 {
             return Err(OAuthError::Storage);
@@ -543,34 +562,24 @@ impl TokenSet {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Stored {
-            access_token: SecretValue,
             refresh_token: Option<SecretValue>,
-            expires_at: u64,
             scopes: Vec<String>,
             #[serde(default)]
             target: Option<TokenTarget>,
         }
         let value: Stored =
             serde_json::from_str(value.expose_secret()).map_err(|_| OAuthError::Storage)?;
-        if value.access_token.expose_secret().is_empty()
-            || value.access_token.expose_secret().len() > 16384
-            || value
-                .access_token
-                .expose_secret()
-                .chars()
-                .any(char::is_control)
-            || value.refresh_token.as_ref().is_some_and(|r| {
-                r.expose_secret().is_empty()
-                    || r.expose_secret().len() > 16384
-                    || r.expose_secret().chars().any(char::is_control)
-            })
-        {
+        if value.refresh_token.as_ref().is_some_and(|r| {
+            r.expose_secret().is_empty()
+                || r.expose_secret().len() > 16384
+                || r.expose_secret().chars().any(char::is_control)
+        }) {
             return Err(OAuthError::Storage);
         }
         Ok(Self {
-            access_token: value.access_token,
+            access_token: SecretValue::new(String::new()),
             refresh_token: value.refresh_token,
-            expires_at: value.expires_at,
+            expires_at: 0,
             scopes: value.scopes,
             target: value.target,
         })

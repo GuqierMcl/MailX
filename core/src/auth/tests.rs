@@ -1397,3 +1397,129 @@ async fn openid_requests_carry_a_fresh_nonce_and_others_do_not() {
     assert_ne!(Some(first), nonce_of(openid_registration(1)));
     assert_eq!(nonce_of(registration(1)), None);
 }
+
+/// Models Windows Credential Manager through keyring: at most 2560 bytes per
+/// item, stored as UTF-16, so 1280 characters. An oversized write fails and
+/// stores nothing.
+#[derive(Default)]
+struct WindowsLimitSecrets {
+    memory: crate::secrets::test_support::MemorySecrets,
+}
+impl SecretStore for WindowsLimitSecrets {
+    fn get(&self, key: &str) -> Result<Option<SecretValue>, crate::secrets::SecretStoreError> {
+        self.memory.get(key)
+    }
+    fn set(&self, key: &str, value: &SecretValue) -> Result<(), crate::secrets::SecretStoreError> {
+        if value.expose_secret().encode_utf16().count() * 2 > 2560 {
+            return Err(crate::secrets::SecretStoreError::Failed);
+        }
+        self.memory.set(key, value)
+    }
+    fn delete(&self, key: &str) -> Result<(), crate::secrets::SecretStoreError> {
+        self.memory.delete(key)
+    }
+}
+fn expired_grant(store: &Arc<WindowsLimitSecrets>, key: &str, port: u16) -> Arc<TokenManager> {
+    let mut manager = TokenManager::new(registration(port), store.clone(), key.into()).unwrap();
+    manager
+        .restore(TokenSet {
+            access_token: SecretValue::new("expired".into()),
+            refresh_token: Some(SecretValue::new("old-refresh".into())),
+            expires_at: 0,
+            target: None,
+            scopes: vec!["mail".into()],
+        })
+        .unwrap();
+    Arc::new(manager)
+}
+fn token_body(access: &str, refresh: &str) -> &'static str {
+    Box::leak(
+        serde_json::json!({"access_token":access,"refresh_token":refresh,"token_type":"Bearer","expires_in":3600})
+            .to_string()
+            .into_boxed_str(),
+    )
+}
+#[tokio::test]
+async fn long_access_tokens_are_not_persisted_so_the_grant_fits_a_1280_character_item() {
+    let access = "a".repeat(2000);
+    let refresh = "r".repeat(900);
+    let (port, server) = server(token_body(&access, &refresh)).await;
+    let store = Arc::new(WindowsLimitSecrets::default());
+    let manager = expired_grant(&store, "windows-grant", port);
+    let token = manager.access_token(&NetRoute::default()).await.unwrap();
+    assert_eq!(token.expose_secret(), access);
+    manager.drain().await;
+    server.await.unwrap();
+    let stored = store.get("windows-grant").unwrap().unwrap();
+    assert!(stored.expose_secret().encode_utf16().count() <= 1280);
+    assert!(!stored.expose_secret().contains(&access[..50]));
+    let restored = TokenSet::decode_secret(&stored).unwrap();
+    assert_eq!(restored.refresh_token.unwrap().expose_secret(), refresh);
+    // After a restart the access token is gone and the first use refreshes.
+    let mut reopened = TokenManager::new(registration(1), store, "windows-grant".into()).unwrap();
+    reopened
+        .restore(TokenSet::decode_secret(&stored).unwrap())
+        .unwrap();
+    assert!(reopened.cached_token().is_none());
+}
+#[tokio::test]
+async fn a_refresh_token_larger_than_the_store_limit_fails_with_storage_and_is_never_truncated() {
+    let refresh = "r".repeat(2000);
+    let (port, server) = server(token_body("short-access", &refresh)).await;
+    let store = Arc::new(WindowsLimitSecrets::default());
+    store
+        .set("windows-grant", &expired_secret("old-refresh"))
+        .unwrap();
+    let manager = expired_grant(&store, "windows-grant", port);
+    assert_eq!(
+        manager
+            .access_token(&NetRoute::default())
+            .await
+            .unwrap_err(),
+        OAuthError::Storage
+    );
+    manager.drain().await;
+    server.await.unwrap();
+    // The previous value is intact: nothing was cut to fit.
+    let kept = TokenSet::decode_secret(&store.get("windows-grant").unwrap().unwrap()).unwrap();
+    assert_eq!(kept.refresh_token.unwrap().expose_secret(), "old-refresh");
+    // The rotation stays in memory for a later write; no access token escaped.
+    assert!(manager.cached_token().is_none());
+    assert!(!manager.needs_reauthorization());
+}
+fn expired_secret(refresh: &str) -> SecretValue {
+    TokenSet {
+        access_token: SecretValue::new("expired".into()),
+        refresh_token: Some(SecretValue::new(refresh.into())),
+        expires_at: 0,
+        target: None,
+        scopes: vec!["mail".into()],
+    }
+    .encode_secret()
+    .unwrap()
+}
+#[test]
+fn stored_grants_hold_no_access_token_and_old_records_are_rejected_safely() {
+    let tokens = TokenSet {
+        access_token: SecretValue::new("access-marker".into()),
+        refresh_token: Some(SecretValue::new("refresh-marker".into())),
+        expires_at: 123,
+        target: Some(TokenTarget::new(None, vec!["mail".into()])),
+        scopes: vec!["mail".into()],
+    };
+    let stored = tokens.encode_secret().unwrap();
+    assert!(!stored.expose_secret().contains("access-marker"));
+    assert!(!stored.expose_secret().contains("expires_at"));
+    let restored = TokenSet::decode_secret(&stored).unwrap();
+    assert_eq!(restored.expires_at, 0);
+    assert!(restored.access_token.expose_secret().is_empty());
+    assert_eq!(restored.target, tokens.target);
+    // The earlier layout (unreleased) fails closed instead of being half read.
+    let legacy = SecretValue::new(
+        r#"{"access_token":"a","refresh_token":"r","expires_at":1,"scopes":["mail"]}"#.into(),
+    );
+    assert_eq!(
+        TokenSet::decode_secret(&legacy).err(),
+        Some(OAuthError::Storage)
+    );
+}
