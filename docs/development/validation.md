@@ -1059,3 +1059,17 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 通用 OAuth 定向复验还覆盖同 grant 多 resource / scope 缓存、已完成授权被取消的竞态、存储 apply 失败后的同进程 journal 恢复、在途轮换写入与补偿删除失败的持久清理意图、关门后旧 plan、取消退出等待者、退出时有限密钥库重试、客户端及绑定同时被篡改，以及邮件端点与信任记录同时被篡改的缓存 / 重启路径。`cargo test -p mailx-core --lib oauth --locked` 的 27 项通过；发件箱授权等待文案定向测试 2 项通过。上述受控结果不扩展真实服务商或平台验证范围。
 
 最后退出 owner 排队窄窗补丁后，工作区格式、全部 target 的 Clippy `-D warnings` 与 `bun run types:check` 再次通过；`cargo test -p mailx-core --lib auth:: --locked` 的 40 项通过（853 项被过滤）。该复验包含尚未调度的持久化 owner 在等待者取消后仍计入 active、已开始的真实密钥库写入不会提前被视为 drained；独立只读审查最终通过，未留阻断项。完整前端仍为上述 963 项，完整工作区 Rust 仍引用上述实际运行的 1122 项 / 5 项忽略，不将定向结果冒充新增全量运行。
+
+### 服务商中立补充（2026-11-10）
+
+生产服务商列表仍为空；以下用假数据的受控测试（不含任何真实服务商的客户端 ID、端点、主机、租户或 scope）覆盖新增的中立能力：
+
+- `cargo test -p mailx-core --lib auth::`：固定回调路径与逐字节一致的 `redirect_uri`（含空路径无结尾斜杠、根路径请求被接受）、静态授权附加参数与 `login_hint` 的开关、不可覆盖流程自有参数；无脚本的双语回调页及 `error` 分支；`id_token` 的 `aud` / `exp` / `nonce` / `iss` / `sub` 检查及随机 `nonce`；身份来自 `id_token`、issuer 随租户变化；token 端点 `invalid_grant` / `interaction_required` / `consent_required` / `login_required` 归为需要重新登录。
+- 凭据大小：模拟 Windows 凭据管理器 1280 字符上限的 `SecretStore` 替身，验证 2000 字符 access token 不落盘、900 字符 refresh token 可保存并在重启后刷新；2000 字符 refresh token 返回存储错误，旧值保持不变，没有截断。这不是在真实 Windows 凭据管理器上的实测。
+- `cargo test -p mailx-core --lib accounts::oauth`：issuer 不参与注册项匹配、重新授权要求同一已验证 `(issuer, subject)`；服务商拒绝分类钩子在 SMTP（回复码 + 增强状态码）与 IMAP（响应码）上都不触发刷新重试、不标记需要重新授权，且错误中不含服务器文字。
+- `providers::oauth` 测试：生产列表为空，未知标识返回 `unsupported`，列出的条目标识唯一且通过校验。
+- 前端：发件箱 `providerPolicy` 原因的中英文文案。
+
+这些结果只说明中立基础按预期工作，不代表任何服务商、租户策略、真实系统浏览器回调或真实原生凭据库已通过验证。
+
+2026-11-10 本地完整检查：`bun run check` 通过（前端 89 个文件 / 1016 项测试，DTO、类型、lint、i18n、构建与 `cargo check` 均通过）；`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）通过；`bun run rust:test` 共 1163 项通过、0 项失败、5 项既有忽略项（core 单元 931、账号集成 39、desktop 148、bridge 两组各 6、MCP server 17、端到端 16）；`git diff --check` 无输出。仅为本机自动检查，范围见上。

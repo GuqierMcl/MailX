@@ -72,7 +72,9 @@ QQ 模块位于 `core/src/providers/qq.rs`，仅对实际 IMAP 主机名精确�
 
 ## 4. OAuth 身份与授权策略边界
 
-`core/src/auth/` 提供与品牌无关的授权码 / PKCE、一次性 loopback 会话、按账号路由的 token HTTP、grant 刷新协调、按 resource / scopes 隔离的 access token 缓存及 XOAUTH2。生产 OAuth 注册表当前为空；通用实现及本地受控测试不代表任何实际邮箱服务商已可使用 OAuth。
+`core/src/auth/` 提供与品牌无关的授权码 / PKCE、一次性 loopback 会话、按账号路由的 token HTTP、grant 刷新协调、按 resource / scopes 隔离的 access token 缓存及 XOAUTH2。生产 OAuth 服务商列表当前为空；通用实现及本地受控测试不代表任何实际邮箱服务商已可使用 OAuth。
+
+边界划分：`core/src/auth/` 只放与服务商无关的流程、数据类型和 `OAuthProvider` trait（注册项、身份验证器、可选的拒绝分类钩子）；服务商的客户端 ID、端点、主机、scope 与租户规则只写在 `core/src/providers/`，由 `providers/oauth.rs` 的列表和唯一查找函数提供。同步、发信和存储主流程不出现品牌分支。同一客户端 ID 可有多个注册项（端点不同），以注册项标识区分。
 
 未来服务商适配器负责受信 issuer、固定授权 / token 端点、精确的 IMAP / SMTP host、port、TLS 与登录身份规则、允许的 resource / scope 目标、客户端注册策略以及身份响应的后端验证，输出稳定主体和目标邮箱证据。应用客户端注册项与账号 grant 分开存储；当前没有开放 BYOA 或任意端点配置，授权会话绑定监听器前、创建、恢复和重新授权时，均须校验邮件端点与登录身份策略；恢复持久化客户端项时还必须与受信策略核对端点、客户端 / 注册标识和允许目标，不能仅凭同名 provider 信任数据库中的 URL。邮箱别名、共享邮箱和委派授权必须由适配器明确验证，不由前端传入 subject 证明。
 

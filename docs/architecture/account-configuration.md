@@ -77,13 +77,25 @@ SQLite 与系统凭据库不能共用事务，因此使用不含秘密的 `crede
 
 ## 5. 通用 OAuth 基础与开放边界
 
-`core/src/auth/` 已实现授权码 + PKCE、严格 `state` / 回调校验、按账号路由的 token 交换与刷新，以及邮件协议 XOAUTH2。生产注册表与身份适配器注册表均为空：当前没有 OAuth 服务商入口，不能使用 Gmail、Outlook 或任意自定义 OAuth 端点；未知 `providerId` 在绑定监听器、读取代理凭证或打开浏览器前返回 `unsupported`。普通创建 / 修改接口仍不能接受调用方提供的 OAuth 身份作为有效授权。
+`core/src/auth/` 已实现授权码 + PKCE、严格 `state` / 回调校验、按账号路由的 token 交换与刷新，以及邮件协议 XOAUTH2。生产服务商列表（`core/src/providers/oauth.rs`）为空，核心只通过 `OAuthProvider` trait 与唯一查找函数访问服务商条目：当前没有 OAuth 服务商入口，不能使用 Gmail、Outlook 或任意自定义 OAuth 端点；未知 `providerId` 在绑定监听器、读取代理凭证或打开浏览器前返回 `unsupported`。普通创建 / 修改接口仍不能接受调用方提供的 OAuth 身份作为有效授权。
+
+授权请求与回调遵循以下与服务商无关的规则：
+
+- **固定回调路径。** 服务商只忽略回环地址重定向的端口，所以注册项带 `redirectPath`（空表示无路径）。`redirect_uri` 由核心拼成一次文本（空路径时为 `http://127.0.0.1:{port}`，无结尾斜杠），授权请求与 token 请求逐字节复用。空路径时浏览器请求 `/`（或 `/?…`）即被接受。CSRF 防护仍由 `state` + PKCE 承担，监听器仍是一次性、仅回环、有大小与时间上限。
+- **授权请求附加项。** 注册项可声明静态附加参数（如 `prompt`），不得覆盖流程自己设置的参数；也可声明使用 `login_hint`，值只来自已校验的账号邮箱。调用方的输入不会进入授权地址。申请 `openid` scope 时，每个会话生成新的 `nonce`。
+- **回调页面。** 浏览器看到的是无脚本、严格 CSP 的最小 HTML 页，同一页用英文和中文说明登录已完成、可返回 MailX；回调带 `error` 时显示另一段“未能完成登录”的文字，不回显任何回调参数。
+- **身份验证拿到完整 token 响应。** 部分服务商签发的 access token 客户端不应解析，身份来自 OIDC `id_token`。`IdentityVerifier` 收到 `IdentityEvidence`（access token、可选 `id_token`、请求所用 `nonce` 与客户端 ID）；`id_token` 只在验证期间持有，不保存、不记录。通用辅助函数解码 JWT 载荷并核对 `aud`（多受众时要求 `azp`）、`exp`（允许 2 分钟时钟偏差）、`nonce`、`iss` 与 `sub`。不验证签名：该 token 由本客户端直接经 TLS 从 token 端点取得，OIDC Core 3.1.3.7 允许以此代替签名校验；任何其他来源的 `id_token` 都不得交给该函数。
+- **issuer 不是常量。** 多租户端点下 `iss` 因租户而异，所以 issuer 由验证器返回并保存在 grant 绑定中，`OAuth2Configuration.issuer` 展示的是这个已验证值。注册项匹配只比较提供商、注册标识、客户端 ID、resource 与 scopes；重新授权要求已验证的 `(issuer, subject)` 与原绑定一致。同一客户端 ID 可对应多个注册项（例如个人账号与工作账号端点不同），注册项由自己的标识区分。
 
 授权会话由核心持有目标账号配置、路由、PKCE 秘密和 IPv4 `127.0.0.1` 临时监听器。最多八个会话、总有效期五分钟；宿主只打开受信注册生成的授权地址，网页仅收到不透明 `sessionId`。到期定时释放未消费的已完成授权结果及任务，不依赖宿主再次调用；完成和取消为一次性操作，取消会中止回调、交换与验证；只有身份适配器验证的主体和目标邮箱与预期一致，结果才可消费为账号。浏览器收到回调只表示回调已收到，不证明账号授权或创建成功。
 
 客户端注册项与账号 grant 分开持久化，当前注册必须与受信策略完整匹配，没有开放任意客户端配置。邮件目标归一化后须核对受信 IMAP / SMTP host、port、TLS 和邮箱 / 固定登录身份策略，创建、重新授权与恢复均再次核对，不能把 bearer 交给调用方任意服务器。`targetMailboxResource` 表达经验证的邮箱目标，token 的 resource / scope 另由后端策略管理。
 
-一份 grant 由账号内唯一凭证所有者持有，IMAP / SMTP 共享刷新协调器而不复制 refresh token。access token 按 grant、resource 和规范化 scope 集合隔离缓存，不同目标通过同一 grant 的最新 refresh token 串行轮换。并发刷新合并为同一个在途刷新，结果持久化成功后才交付新 access token；网络故障保留重试能力，明确撤销或授权失效与网络故障分别处理。IMAP / SMTP 服务器拒绝本地尚未过期的 access token（提前撤销、轮换或服务端有效期更短）时，只丢弃该缓存值，刷新后在同一次连接流程中重试一次；新 token 仍被拒时，同步记为 `signInRequired`、发信记为 `signInRequired`，界面提示用户重新登录，不自动标记整个 grant 需要重新授权，以免单一协议被关闭时连带阻塞另一协议。token 响应按 RFC 6749 §5.1 解析：缺少 `expires_in` 时按 30 分钟有效期处理；回显的 `scope` 可省略 `offline_access`、`openid`、`profile`、`email` 等元 scope，资源 scope 仍必须授予。刷新存在远端轮换与本地写入之间的不可回滚边界，本地持久化失败不能保证恢复旧 refresh token。移除账号使本机协调器失效并按凭证清理流程删除本机秘密，不调用服务商撤销端点。journal 恢复提交同样使旧凭证所有者失效；存在在途写入的已退役 grant 保留持久化清理意图，补偿删除失败时由后续恢复重试，不提前确认清理完成。
+一份 grant 由账号内唯一凭证所有者持有，IMAP / SMTP 共享刷新协调器而不复制 refresh token。access token 按 grant、resource 和规范化 scope 集合隔离缓存，不同目标通过同一 grant 的最新 refresh token 串行轮换。并发刷新合并为同一个在途刷新，结果持久化成功后才交付新 access token；网络故障保留重试能力，明确撤销或授权失效与网络故障分别处理。IMAP / SMTP 服务器拒绝本地尚未过期的 access token（提前撤销、轮换或服务端有效期更短）时，只丢弃该缓存值，刷新后在同一次连接流程中重试一次；新 token 仍被拒时，同步记为 `signInRequired`、发信记为 `signInRequired`，界面提示用户重新登录，不自动标记整个 grant 需要重新授权，以免单一协议被关闭时连带阻塞另一协议。token 响应按 RFC 6749 §5.1 解析：缺少 `expires_in` 时按 30 分钟有效期处理；回显的 `scope` 可省略 `offline_access`、`openid`、`profile`、`email` 等元 scope，资源 scope 仍必须授予。**凭据库只保存恢复所需的最少内容：** refresh token、已授予的 scopes 与目标。access token 只在内存中，重启后的首次使用会先刷新。原因是 Windows 凭据管理器单个条目最多 2560 字节（keyring 按 UTF-16 存储，约 1280 个字符），部分服务商的 access 与 refresh token 加起来会超限。单个 refresh token 本身仍超过该上限时，写入返回存储错误而不是截断，原值保持不变，轮换值留在内存中等待重试，详见[系统凭据库](secret-vault.md)。
+
+token 端点的 `invalid_grant`、`interaction_required`、`consent_required`、`login_required` 视为需要重新登录，其余错误保持为无效响应。服务商适配器还可以按结构化字段（协议、SMTP 回复码与增强状态码、IMAP 响应码）把邮件服务器拒绝识别为“管理员已关闭此协议”；此类拒绝记为 `providerPolicy`，不触发刷新重试，也不把 grant 标记为需要重新授权，界面提示联系管理员，不含服务器文字。
+
+刷新存在远端轮换与本地写入之间的不可回滚边界，本地持久化失败不能保证恢复旧 refresh token。移除账号使本机协调器失效并按凭证清理流程删除本机秘密，不调用服务商撤销端点。journal 恢复提交同样使旧凭证所有者失效；存在在途写入的已退役 grant 保留持久化清理意图，补偿删除失败时由后续恢复重试，不提前确认清理完成。
 
 `Account.authentication` 是 `kind=password | oauth2` 的联合类型。密码摘要保留 `mode` 和 `passwordConfigured`；OAuth 摘要包含受信配置、`state` 与协议级 `credentialConfigured` / `trust`，不返回 token 或秘密引用，也不把 OAuth 当作共享 / 独立密码。旧无 `kind` 的密码快照兼容读取，写出时带显式 `kind`。OAuth 连接编辑当前不可用，资料编辑与本机移除仍沿用现有流程；核心与宿主已提供绑定账号及预期 revision 的专用重授权会话，核对稳定主体、邮箱、issuer、提供商与客户端注册后更新凭证 generation 和账号 revision，服务商 UI 尚未开放。
 
