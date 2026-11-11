@@ -483,6 +483,8 @@ pub(crate) fn sanitize(value: &str) -> Sanitized {
         .add_tag_attributes("br", &["clear"])
         .add_tag_attributes("img", &[CID_SLOT, DATA_SLOT, REMOTE_SLOT])
         .add_tag_attributes("a", &[LINK_SLOT])
+        // Apple Mail and Thunderbird mark quotes with `blockquote type="cite"`.
+        .add_tag_attributes("blockquote", &["type"])
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true);
     let cleaned = builder

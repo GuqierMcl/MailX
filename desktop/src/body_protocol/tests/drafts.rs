@@ -313,3 +313,17 @@ fn draft_body_prepare_is_main_only_and_never_grants_composer_image_access() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn draft_documents_never_fold_a_trailing_quote() {
+    let (_directory, core, _, _db) = fixture();
+    let draft = create(
+        &core,
+        "<p>Reply</p><p>On 2026-11-03, Bob wrote:</p><blockquote><p>Quoted</p></blockquote>",
+    );
+    let protocol = BodyProtocol::default();
+    let (url, _) = prepare(&protocol, &core, &draft).await;
+    let html = html(&protocol, &core, &url).await;
+    assert!(html.contains("Quoted") && html.contains("<blockquote "));
+    assert!(!html.contains("<details") && !html.contains("<summary"));
+}

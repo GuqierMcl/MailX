@@ -96,7 +96,7 @@ git diff --check
 
 ### 持续集成
 
-CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，安装步骤仍有 8 分钟总上限，更新索引时的临时错误也必须使步骤失败。2026-10-28 排查的 [main CI 40540404597](https://github.com/GuqierMcl/MailX/actions/runs/40540404597) 在 Azure Ubuntu 镜像缓慢下载依赖时触发该上限，Linux 的编译和测试尚未开始；同次前端、macOS 与 Windows 检查已通过。修复的工作流已通过本地 `actionlint`（含 ShellCheck）与差异检查，实际 Ubuntu 安装和三平台结果以修复提交对应的 CI 为准。
+CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，更新索引时的临时错误也必须使该次尝试失败。官方镜像在 runner 上无法访问时，步骤会恢复 runner 原有的镜像配置再试一次；仍失败时改用 ubuntu.com 以外的社区镜像（kernel.org 与 OCF Berkeley）。镜像只提供下载，索引仍由 APT 按 Ubuntu 签名密钥校验。每次尝试的更新限 3 分钟、安装限 5 分钟，整个步骤上限 20 分钟。2026-11-11 PR #114 的 CI 在 Ubuntu runner 上连续约一小时无法解析任何 `*.ubuntu.com` 域名（`archive`、`security` 与 `azure.archive` 均报 `Temporary failure resolving`），前两种方式都失败，因此加入第三种。2026-10-28 排查的 [main CI 40540404597](https://github.com/GuqierMcl/MailX/actions/runs/40540404597) 在 Azure Ubuntu 镜像缓慢下载依赖时触发该上限，Linux 的编译和测试尚未开始；同次前端、macOS 与 Windows 检查已通过。修复的工作流已通过本地 `actionlint`（含 ShellCheck）与差异检查，实际 Ubuntu 安装和三平台结果以修复提交对应的 CI 为准。
 
 `.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行；所有 Linux 任务使用与发布构建一致的 Ubuntu 22.04，Rust 缓存按 runner 版本隔离：
 

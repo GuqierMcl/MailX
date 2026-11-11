@@ -813,3 +813,16 @@ fn favicons_are_decoded_under_limits_and_always_leave_as_png() {
     assert!(validate_image(b"\0\0\x01\0\x01\0 not really an icon", "image/x-icon").is_err());
     assert!(validate_image(b"", "image/x-icon").is_err());
 }
+
+#[test]
+fn blockquote_type_cite_survives_so_quotes_can_be_recognized() {
+    let html = rendered_html(
+        r#"<div>ok</div><blockquote type="cite" onclick="x()"><div>old</div></blockquote>"#,
+    )
+    .sanitized_html
+    .unwrap();
+    assert!(html.contains(r#"<blockquote type="cite">"#), "{html}");
+    assert!(!html.contains("onclick"));
+    // Bumped together with the sanitizer change so cached bodies are rebuilt.
+    assert_eq!(SANITIZER_VERSION, 6);
+}

@@ -48,13 +48,26 @@ impl AccountService {
             let uid =
                 u32::try_from(position + 1).map_err(|_| AppError::new(ErrorCode::Validation))?;
             let size = i64::try_from(*size).map_err(|_| AppError::new(ErrorCode::Validation))?;
+            // Already at the current threading rules: the rows have no threading
+            // headers, and the background re-threading pass started with the core
+            // must not write while a test measures that reading writes nothing.
             tx.execute(
                 "INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity,
                  uid, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
-                 received_at, size, is_read, is_flagged, flags, has_attachment, remote_state, updated_at)
+                 received_at, size, is_read, is_flagged, flags, has_attachment, remote_state, updated_at,
+                 threading_version)
                  VALUES (?1, ?2, ?3, ?4, 17, ?5, 'Synthetic fixture', 'fixture@example.invalid',
-                 '[]', '[]', '[]', ?6, ?7, 0, 0, '[]', 1, 'present', ?6)",
-                params![id, account, source, folder, uid, timestamp, size],
+                 '[]', '[]', '[]', ?6, ?7, 0, 0, '[]', 1, 'present', ?6, ?8)",
+                params![
+                    id,
+                    account,
+                    source,
+                    folder,
+                    uid,
+                    timestamp,
+                    size,
+                    crate::storage::conversations::THREADING_VERSION
+                ],
             )?;
         }
         tx.commit()?;

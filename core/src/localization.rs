@@ -61,6 +61,14 @@ impl SupportedLocale {
         interpolate(template, values)
     }
 
+    /// Label of the control that unfolds a quoted earlier message in the reader.
+    pub fn quoted_text_label(self) -> &'static str {
+        match self {
+            Self::ZhCn => "显示引用内容",
+            Self::En => "Show quoted text",
+        }
+    }
+
     pub fn no_subject(self) -> String {
         self.text(false, "noSubject", &[])
     }

@@ -61,6 +61,8 @@ Read and starred states write back to the server. Archive only removes the messa
 
 To act on several messages at once, click Select above the message list, or Cmd/Ctrl-click or Shift-click a message. Selected messages get a blue outline with a check in the corner. Click to add or remove a message, Shift-click to select a run of messages, or use Select all to pick every message in the current list, up to 500 at a time. The buttons at the top then mark the selection read or unread, star it, archive it or delete it. Deleting and archiving can be undone; messages that could not be handled stay selected so you can see which ones. Click Done or press Esc to finish.
 
+When a reply ends with the earlier message it quotes, MailX folds that quoted text behind a Show quoted text button so the new part stands out; click it to expand. MailX recognizes the quoting styles of common mail apps; quotes it cannot recognize, replies written between quoted lines, and forwarded messages are shown in full as before. Folding only changes how the message is displayed: replying or forwarding still includes the full original.
+
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
 ## Composing and sending
