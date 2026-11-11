@@ -4,6 +4,7 @@ use tempfile::TempDir;
 use super::*;
 
 mod drafts;
+mod translation;
 
 const APP_ORIGIN: &str = "tauri://localhost";
 const PNG: &str =
@@ -911,7 +912,7 @@ async fn remote_routes_require_a_current_document_grant_and_policy() {
         .await;
     assert_eq!(reply.status(), StatusCode::NOT_FOUND);
     let one_time = protocol
-        .prepare_with_images(&core, id.clone(), true, true)
+        .prepare_with_images(&core, id.clone(), true, true, None)
         .await
         .unwrap();
     assert!(protocol.permits_remote_request(&remote(&one_time.document_token), Ask));
@@ -941,7 +942,7 @@ async fn remote_routes_require_a_current_document_grant_and_policy() {
     );
     assert!(!protocol.permits_remote_request(&remote(&one_time.document_token), Never));
     let automatic = protocol
-        .prepare_with_images(&core, id.clone(), true, false)
+        .prepare_with_images(&core, id.clone(), true, false, None)
         .await
         .unwrap();
     assert!(protocol.permits_remote_request(&remote(&automatic.document_token), Automatic));
@@ -997,7 +998,7 @@ async fn image_retry_rotates_only_an_existing_valid_grant() {
             .is_err()
     );
     let granted = protocol
-        .prepare_with_images(&core, id.clone(), true, true)
+        .prepare_with_images(&core, id.clone(), true, true, None)
         .await
         .unwrap();
     let resource = format!(
@@ -1042,7 +1043,7 @@ async fn changing_an_accounts_connection_revokes_its_readers_and_confirmations()
     let (_directory, core, ids, _db) = fixture();
     let protocol = BodyProtocol::default();
     let first = protocol
-        .prepare_with_images(&core, ids[0].clone(), true, true)
+        .prepare_with_images(&core, ids[0].clone(), true, true, None)
         .await
         .unwrap();
     let second = protocol.prepare(&core, ids[1].clone()).await.unwrap();

@@ -22,6 +22,7 @@ import type {
   MailAddress,
   MailStateChanged,
   RouteConfig,
+  TranslationProviderId,
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
@@ -111,6 +112,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const mailStateListeners = new Set<(change: MailStateChanged) => void>()
 
   const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
+  const MOCK_TRANSLATION_KEYS: TranslationProviderId[] = ['deepl', 'microsoft', 'google']
   const MOCK_ATTACHMENT_SAMPLES: [string, string, number][] = [
     ['季度报表.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 86_000],
     ['产品演示.pdf', 'application/pdf', 1_840_000],
@@ -666,6 +668,16 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     getAvatar: async () => null,
     saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
+    translationStatus: async (emailId) => ({ emailId, targetLanguage: 'en', detectedLanguage: null, detectionReliable: false, suggested: false, autoTranslate: false, translation: null }),
+    translateEmail: async () => { throw new MailxClientError({ code: 'translationNotConfigured', message: '尚未配置翻译服务。', field: null }) },
+    cancelTranslation: async () => undefined,
+    clearTranslation: async () => undefined,
+    clearTranslations: async () => undefined,
+    translationCacheStats: async () => ({ count: 0, bytes: 0 }),
+    translationKeys: async () => MOCK_TRANSLATION_KEYS.map((provider) => ({ provider, configured: false })),
+    setTranslationKey: async () => { throw new MailxClientError({ code: 'translationNotConfigured', message: '尚未配置翻译服务。', field: null }) },
+    removeTranslationKey: async () => MOCK_TRANSLATION_KEYS.map((provider) => ({ provider, configured: false })),
+    testTranslation: async () => { throw new MailxClientError({ code: 'translationNotConfigured', message: '尚未配置翻译服务。', field: null }) },
     prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
     prepareDraftBody: async (draftId, expectedRevision) => {
       const draft = requireDraft(draftId)

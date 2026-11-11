@@ -83,6 +83,68 @@ impl MailxCore {
         )
     }
 
+    /// Caches a synthetic translation of a fixture message: every text piece
+    /// becomes `"[<target>] <text>"`, placeholders stay. Test-only; no network.
+    pub fn body_test_translation(
+        &self,
+        email_id: &str,
+        target: &str,
+        include_quotes: bool,
+    ) -> Result<(), AppError> {
+        use crate::{
+            settings::TranslationProviderId,
+            storage::translations::NewTranslation,
+            translate::{self, Piece, SEGMENTER_VERSION, wire},
+        };
+        let mut service = self.accounts()?;
+        let identity = service.body_identity(email_id)?;
+        let body = service
+            .body_cache(&identity)?
+            .ok_or_else(|| AppError::new(ErrorCode::BodyNotCached))?;
+        let html = body
+            .rendered
+            .sanitized_html
+            .ok_or_else(|| AppError::new(ErrorCode::BodyNotCached))?;
+        let segments = translate::extract(&render::fold_quotes(&html, "x"), include_quotes)
+            .map_err(|_| AppError::new(ErrorCode::Validation))?;
+        let stored: Vec<Option<String>> = segments
+            .iter()
+            .map(|segment| {
+                let pieces = segment
+                    .pieces()
+                    .iter()
+                    .map(|piece| match piece {
+                        Piece::Text(text) => Piece::Text(format!("[{target}] {text}")),
+                        other => other.clone(),
+                    })
+                    .collect();
+                Some(wire::encode(&translate::Segment::new(pieces)))
+            })
+            .collect();
+        let written = service.translation_put(
+            &identity,
+            &(body.raw.clone(), body.sanitizer_version),
+            &NewTranslation {
+                message_id: email_id,
+                target_language: target,
+                include_quotes,
+                raw_sha256: &body.raw.sha256,
+                sanitizer_version: body.sanitizer_version,
+                segmenter_version: SEGMENTER_VERSION,
+                provider: TranslationProviderId::ALL[0],
+                source_language: None,
+                subject: None,
+                segments: &stored,
+                partial: false,
+            },
+        )?;
+        if written {
+            Ok(())
+        } else {
+            Err(AppError::new(ErrorCode::BodyNotCached))
+        }
+    }
+
     fn body_fixture_open(
         path: &Path,
         runtime: Handle,

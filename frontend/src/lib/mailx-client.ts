@@ -52,6 +52,11 @@ import type {
   EmailSelection,
   FlagBatchOutcome,
   ContactAggregation,
+  TranslationCacheStats,
+  TranslationKeyState,
+  TranslationProviderId,
+  TranslationStatus,
+  TranslationTest,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
@@ -180,6 +185,24 @@ export interface MailxClient {
   saveAttachment(emailId: string, attachmentId: string): Promise<'saved' | 'cancelled'>
   /** Deletes cached avatars, site icons and downloaded message images. */
   clearImageCache(): Promise<void>
+  /** Local only: detected language and any cached translation, never the network. */
+  translationStatus(emailId: string): Promise<TranslationStatus>
+  /** Translates the cached body with the configured service; `targetLanguage` overrides the setting. */
+  translateEmail(emailId: string, targetLanguage?: string): Promise<TranslationStatus>
+  /** Stops a running translation of this message; it fails with `translationCancelled`. */
+  cancelTranslation(emailId: string): Promise<void>
+  /** Removes the cached translations of one message. */
+  clearTranslation(emailId: string): Promise<void>
+  /** Removes every cached translation. */
+  clearTranslations(): Promise<void>
+  translationCacheStats(): Promise<TranslationCacheStats>
+  /** Which services have a key stored; the keys themselves are never returned. */
+  translationKeys(): Promise<TranslationKeyState[]>
+  /** Stores a service key and returns the list after the change. */
+  setTranslationKey(provider: TranslationProviderId, key: string): Promise<TranslationKeyState[]>
+  removeTranslationKey(provider: TranslationProviderId): Promise<TranslationKeyState[]>
+  /** Translates a fixed sentence with the saved settings to check key, region and route. */
+  testTranslation(): Promise<TranslationTest>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
@@ -195,7 +218,11 @@ export interface MailxClient {
    */
   requestPreviews(emailIds: string[]): Promise<void>
   onEmailPreviews(listener: (previews: EmailPreviews) => void): () => void
-  prepareBody(emailId: string, loadRemoteImages?: boolean): Promise<{ documentToken: string }>
+  /**
+   * `translation` is the target language of the translated variant of the body;
+   * the host serves it only while a current cached translation exists.
+   */
+  prepareBody(emailId: string, loadRemoteImages?: boolean, translation?: string): Promise<{ documentToken: string }>
   releaseBody(emailId: string, documentToken: string): Promise<void>
   imageStatus(emailId: string, documentToken: string): Promise<RemoteImageStatus[]>
   retryImages(emailId: string, documentToken: string): Promise<{ documentToken: string }>
@@ -463,6 +490,16 @@ export function createDesktopClient(): MailxClient {
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
     saveAttachment: (emailId, attachmentId) => call<'saved' | 'cancelled'>('attachments_save', { emailId, attachmentId }),
     clearImageCache: () => call<void>('image_cache_clear'),
+    translationStatus: (emailId) => call<TranslationStatus>('translation_status', { emailId }),
+    translateEmail: (emailId, targetLanguage) => call<TranslationStatus>('translation_translate', { emailId, targetLanguage }),
+    cancelTranslation: (emailId) => call<void>('translation_cancel', { emailId }),
+    clearTranslation: (emailId) => call<void>('translation_clear', { emailId }),
+    clearTranslations: () => call<void>('translation_clear_all'),
+    translationCacheStats: () => call<TranslationCacheStats>('translation_cache_stats'),
+    translationKeys: () => call<TranslationKeyState[]>('translation_keys'),
+    setTranslationKey: (provider, key) => call<TranslationKeyState[]>('translation_set_key', { provider, key }),
+    removeTranslationKey: (provider) => call<TranslationKeyState[]>('translation_remove_key', { provider }),
+    testTranslation: () => call<TranslationTest>('translation_test'),
     onSyncState(listener) {
       if (!available) return () => undefined
       let disposed = false
@@ -481,7 +518,7 @@ export function createDesktopClient(): MailxClient {
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),
     requestPreviews: (emailIds) => call<void>('emails_request_previews', { emailIds }),
     onEmailPreviews: (listener) => subscribe<EmailPreviews>('mailx://email-previews', listener),
-    prepareBody: (emailId, loadRemoteImages = false) => call('emails_prepare_body', { emailId, loadRemoteImages }),
+    prepareBody: (emailId, loadRemoteImages = false, translation) => call('emails_prepare_body', { emailId, loadRemoteImages, translation }),
     releaseBody: (emailId, documentToken) => call('emails_release_body', { emailId, documentToken }),
     imageStatus: (emailId, documentToken) => call('emails_image_status', { emailId, documentToken }),
     retryImages: (emailId, documentToken) => call('emails_retry_images', { emailId, documentToken }),
