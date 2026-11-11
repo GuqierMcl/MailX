@@ -70,11 +70,14 @@ describe('desktop client boundary', () => {
     vi.mocked(invoke)
       .mockResolvedValueOnce({ ok: true, data: page, requestId: 'list' })
       .mockResolvedValueOnce({ ok: true, data: { summary: { id: 'email-id' } }, requestId: 'detail' })
+      .mockResolvedValueOnce({ ok: true, data: { messages: [], possiblyIncomplete: false }, requestId: 'thread' })
     const client = createDesktopClient()
     await expect(client.listEmails(query)).resolves.toEqual(page)
     await expect(client.getEmail('email-id')).resolves.toEqual({ summary: { id: 'email-id' } })
     expect(invoke).toHaveBeenNthCalledWith(1, 'emails_list', { query })
     expect(invoke).toHaveBeenNthCalledWith(2, 'emails_get', { emailId: 'email-id' })
+    await expect(client.getConversation('email-id')).resolves.toEqual({ messages: [], possiblyIncomplete: false })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'emails_get_conversation', { emailId: 'email-id' })
   })
 
   it('never invokes IPC when the desktop host is absent', async () => {

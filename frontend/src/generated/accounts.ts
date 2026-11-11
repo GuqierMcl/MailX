@@ -324,6 +324,12 @@ indexedBodies: number, syncedAfter: string | null, syncedBefore: string | null, 
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 
+export type ConversationPage = { messages: Array<EmailSummary>,
+/**
+ * True when local headers might be incomplete (some older messages may be missing).
+ */
+possiblyIncomplete: boolean, };
+
 export type SelectedEmail = { id: string, accountId: string, folderId: string, isRead: boolean, isStarred: boolean, archived: boolean, localOnly: boolean, };
 
 export type EmailSelection = { items: Array<SelectedEmail>, truncated: boolean, };

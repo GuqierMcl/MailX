@@ -48,6 +48,8 @@ fn record(uid: u32, is_read: bool) -> MessageRecord {
         message_id_header: Some(format!("message-{uid}@example.test")),
         original_message_id: None,
         sent_identity_policy: crate::providers::for_imap_host("").policy_key(),
+        in_reply_to: None,
+        references_header: None,
         subject: format!("Subject {uid}"),
         from_name: None,
         from_address: "sender@example.test".into(),

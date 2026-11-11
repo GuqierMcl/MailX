@@ -38,6 +38,7 @@ import type {
   ResolveUnknownRequest,
   UpdateDraftRequest,
   NotificationSound,
+  ConversationPage,
   EmailDetail,
   EmailPreviews,
   EmailListQuery,
@@ -183,6 +184,8 @@ export interface MailxClient {
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
   getEmail(emailId: string): Promise<EmailDetail>
+  /** The locally known messages of the email's conversation, oldest first. */
+  getConversation(emailId: string): Promise<ConversationPage>
   fetchBody(emailId: string): Promise<EmailDetail>
   /**
    * Asks for list previews of the rows now on screen. This is the complete set
@@ -474,6 +477,7 @@ export function createDesktopClient(): MailxClient {
     },
     listEmails: (query) => call<EmailPage>('emails_list', { query }),
     getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
+    getConversation: (emailId) => call<ConversationPage>('emails_get_conversation', { emailId }),
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),
     requestPreviews: (emailIds) => call<void>('emails_request_previews', { emailIds }),
     onEmailPreviews: (listener) => subscribe<EmailPreviews>('mailx://email-previews', listener),

@@ -9,7 +9,8 @@ pub(super) struct QqCompatibility;
 
 impl ProviderCompatibility for QqCompatibility {
     fn policy_key(&self) -> &'static str {
-        "qq:v1"
+        // v2: In-Reply-To and References joined the base header set (see default:v2).
+        "qq:v2"
     }
 
     fn extra_header_fields(&self) -> &'static [&'static str] {

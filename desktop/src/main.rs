@@ -247,6 +247,7 @@ fn main() {
             commands::folders_list,
             commands::emails_list,
             commands::emails_get,
+            commands::emails_get_conversation,
             commands::emails_fetch_body,
             commands::emails_request_previews,
             commands::emails_prepare_body,

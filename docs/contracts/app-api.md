@@ -33,6 +33,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 | --- | --- | --- | --- |
 | `listEmails(query)` | `emails_list`，`{ query }` | `MailxCore::list_emails` → `AccountService::list_emails` | `EmailPage` |
 | `getEmail(emailId)` | `emails_get`，`{ emailId }` | `MailxCore::get_email` → `AccountService::get_email` | `EmailDetail` |
+| `getConversation(emailId)` | `emails_get_conversation`，`{ emailId }` | `MailxCore::get_conversation` → `AccountService::get_conversation` | `ConversationPage { messages, possiblyIncomplete }`，按接收时间升序；无会话的邮件只返回自身；排除垃圾邮件与回收站副本（打开的邮件本身除外）；邮件不存在或不可见返回 `notFound` |
 
 两个命令与账号、文件夹读取使用同一主窗口来源与启动 Ready 准入，参数结构拒绝未知顶层字段。不访问网络，不下载正文，也不改变已读或星标。宿主没有通用 SQL、路径或读凭证参数。
 

@@ -24,8 +24,8 @@ use crate::drafts::types::{
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
 use crate::mail::{
-    ContactAggregation, EmailDeletion, EmailDetail, EmailListQuery, EmailPage, EmailSelection,
-    Folder,
+    ContactAggregation, ConversationPage, EmailDeletion, EmailDetail, EmailListQuery, EmailPage,
+    EmailSelection, Folder,
 };
 use crate::secrets::SecretStore;
 use crate::send::types::{
@@ -380,6 +380,11 @@ impl MailxCore {
 
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
         self.accounts()?.get_email(email_id)
+    }
+
+    /// The locally known messages of the email's conversation, oldest first.
+    pub fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+        self.accounts()?.get_conversation(email_id)
     }
 
     /// Explicit user-opened body request; shared work survives individual IPC

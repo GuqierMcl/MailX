@@ -1,6 +1,6 @@
 use mailx_core::{
     Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
-    CancelConnectionVerification, CancelDraftVerification, CreateAccountRequest,
+    CancelConnectionVerification, CancelDraftVerification, ConversationPage, CreateAccountRequest,
     DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage, ErrorCode, Folder,
     RemoveAccountRequest, SettingsPatch, SettingsSnapshot, UpdateConnectionRequest,
     UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
@@ -517,6 +517,24 @@ pub(crate) async fn emails_get(
     let args = authorize(&window, "emails_get").and_then(|_| parse::<EmailGetArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => state.run(move |core| core.get_email(&args.email_id)).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn emails_get_conversation(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<ConversationPage>, ()> {
+    let args = authorize(&window, "emails_get_conversation")
+        .and_then(|_| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.get_conversation(&args.email_id))
+                .await
+        }
         Err(error) => Err(error),
     }))
 }

@@ -15,6 +15,10 @@ pub(crate) struct MessageRecord {
     /// Additional identity supplied by the endpoint's compatibility policy.
     pub original_message_id: Option<String>,
     pub sent_identity_policy: &'static str,
+    /// First In-Reply-To identifier, without angle brackets.
+    pub in_reply_to: Option<String>,
+    /// References identifiers, space separated and without angle brackets.
+    pub references_header: Option<String>,
     pub subject: String,
     pub from_name: Option<String>,
     pub from_address: String,
@@ -55,6 +59,13 @@ pub(crate) fn parse_header(
             .as_ref()
             .and_then(|message| compatibility.original_message_id(message)),
         sent_identity_policy: compatibility.policy_key(),
+        in_reply_to: parsed
+            .as_ref()
+            .and_then(|message| thread_ids(message.in_reply_to()).into_iter().next()),
+        references_header: parsed
+            .as_ref()
+            .map(|message| thread_ids(message.references()).join(" "))
+            .filter(|joined| !joined.is_empty()),
         message_id_header: parsed
             .as_ref()
             .and_then(|message| message.message_id())
@@ -83,6 +94,28 @@ pub(crate) fn parse_header(
         flags: remote.flags.clone(),
         has_attachment: parsed.as_ref().is_some_and(looks_like_attachment),
     }
+}
+
+/// Message identifiers of a threading header: brackets removed, empty values
+/// and values over the 998-byte line limit skipped. Anything else that does not
+/// parse yields nothing rather than failing the message.
+fn thread_ids(value: &mail_parser::HeaderValue<'_>) -> Vec<String> {
+    const MAX_ID_BYTES: usize = 998;
+    value
+        .as_text_list()
+        .unwrap_or_default()
+        .iter()
+        .map(|id| {
+            id.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .trim()
+        })
+        .filter(|id| {
+            !id.is_empty() && id.len() <= MAX_ID_BYTES && !id.contains(char::is_whitespace)
+        })
+        .map(str::to_owned)
+        .collect()
 }
 
 /// A header-only guess: a `multipart/mixed` container, a non-text single part
@@ -176,6 +209,23 @@ mod tests {
             size: Some(1024),
             header: header.as_ref().to_vec(),
         }
+    }
+
+    #[test]
+    fn threading_headers_are_extracted_without_brackets() {
+        let record = parse_header(
+            &remote("In-Reply-To: <b@x.test>\r\nReferences: <a@x.test>\r\n <b@x.test>\r\n\r\n"),
+            sync_time(),
+        );
+        assert_eq!(record.in_reply_to.as_deref(), Some("b@x.test"));
+        assert_eq!(
+            record.references_header.as_deref(),
+            Some("a@x.test b@x.test")
+        );
+        let none = parse_header(&remote("Subject: x\r\n\r\n"), sync_time());
+        assert_eq!((none.in_reply_to, none.references_header), (None, None));
+        let long = format!("In-Reply-To: <{}@x.test>\r\n\r\n", "a".repeat(1000));
+        assert_eq!(parse_header(&remote(long), sync_time()).in_reply_to, None);
     }
 
     #[test]

@@ -6,7 +6,9 @@ use super::{AccountService, validate_email_id, validate_uuid};
 pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
 use crate::{
     AppError,
-    mail::{EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_SELECTION},
+    mail::{
+        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_SELECTION,
+    },
     storage::messages::{PageCursor, ValidatedEmailQuery},
     sync::headers::MessageRecord,
 };
@@ -75,6 +77,11 @@ impl AccountService {
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
         validate_email_id(email_id)?;
         self.storage.get_email(email_id)
+    }
+
+    pub fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+        validate_email_id(email_id)?;
+        self.storage.get_conversation(email_id)
     }
 
     pub(crate) fn sync_folders(

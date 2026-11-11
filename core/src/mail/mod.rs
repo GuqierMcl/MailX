@@ -259,6 +259,15 @@ pub struct EmailPage {
     pub coverage: Coverage,
 }
 
+/// The locally known messages of one conversation, oldest first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub messages: Vec<EmailSummary>,
+    /// True when local headers might be incomplete (some older messages may be missing).
+    pub possibly_incomplete: bool,
+}
+
 /// One message of a "select all": just enough to decide which batch actions
 /// apply and whether deleting needs confirmation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

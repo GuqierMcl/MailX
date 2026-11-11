@@ -13,6 +13,7 @@ import type {
   OutboxChanged,
   OutboxItem,
   OutboxState,
+  ConversationPage,
   EmailDetail,
   EmailPreviews,
   EmailSummary,
@@ -565,6 +566,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async getConversation(emailId): Promise<ConversationPage> {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      // The mock has no threading headers: group by subject within the account.
+      const key = normalizedSubject(email.summary.subject)
+      const related = key
+        ? emails.filter((row) => row.summary.accountId === email.summary.accountId && normalizedSubject(row.summary.subject) === key)
+        : [email]
+      const messages = related
+        .map((row) => structuredClone(row.summary))
+        .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id))
+      return { messages, possiblyIncomplete: false }
+    },
     async fetchBody(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
@@ -1069,6 +1083,15 @@ const DEFAULT_CUSTOM_FOLDERS: CustomFolders = {
     ['clients/east', '华东区', 'clients', true],
   ],
   [PERSONAL]: [['travel', '旅行', null, true]],
+}
+
+function normalizedSubject(subject: string): string {
+  let rest = subject.trim()
+  for (;;) {
+    const next = rest.replace(/^(re|fwd|fw|回复|答复|转发)\s*[:：]\s*/i, '')
+    if (next === rest) return rest.trim().toLowerCase()
+    rest = next
+  }
 }
 
 function buildFolders(accountId: string, emails: EmailDetail[], customFolders: CustomFolders): Folder[] {

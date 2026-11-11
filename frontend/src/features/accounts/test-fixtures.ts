@@ -89,6 +89,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
+    getConversation: vi.fn<MailxClient['getConversation']>().mockRejectedValue(new Error('not found')),
     fetchBody: vi.fn<MailxClient['fetchBody']>().mockRejectedValue(new Error('unavailable')),
     requestPreviews: vi.fn<MailxClient['requestPreviews']>().mockResolvedValue(undefined),
     onEmailPreviews: vi.fn<MailxClient['onEmailPreviews']>().mockReturnValue(() => undefined),

@@ -75,6 +75,7 @@ fn main() {
         EmailListQuery,
         Coverage,
         EmailPage,
+        ConversationPage,
         SelectedEmail,
         EmailSelection,
         AttachmentSummary,

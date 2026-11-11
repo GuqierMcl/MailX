@@ -32,6 +32,7 @@ fn main() {
             "folders_list",
             "emails_list",
             "emails_get",
+            "emails_get_conversation",
             "emails_fetch_body",
             "emails_request_previews",
             "emails_prepare_body",

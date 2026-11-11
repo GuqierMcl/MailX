@@ -53,4 +53,15 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn policy_key_bump_triggers_resync() {
+        // v1 stamps predate In-Reply-To / References; they must not match.
+        assert_ne!(for_imap_host("imap.example.com").policy_key(), "default:v1");
+        assert_ne!(for_imap_host("imap.qq.com").policy_key(), "qq:v1");
+        assert_ne!(
+            for_imap_host("imap.qq.com").policy_key(),
+            for_imap_host("imap.example.com").policy_key()
+        );
+    }
 }
