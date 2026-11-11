@@ -156,6 +156,19 @@ function cargoMembers(dir) {
 const lockEntry = (name) =>
   new RegExp(`(\\[\\[package\\]\\]\\nname = "${escapeRegExp(name)}"\\nversion = ")([^"]+)("\\n)(?!source = )`);
 
+/** The files a version change rewrites (see `planVersionWrite`). */
+export function versionFiles(dir = repoRoot) {
+  return [...packageFiles(dir), "Cargo.toml", "Cargo.lock"];
+}
+
+/** Every file the version helpers read: `versionFiles` plus each member's manifest. */
+export function versionInputs(dir = repoRoot) {
+  const list = /^members\s*=\s*\[([^\]]*)\]/m.exec(read(dir, "Cargo.toml"))?.[1];
+  if (list === undefined) throw new Error("Cargo.toml 中找不到 workspace members");
+  const members = [...list.matchAll(/"([^"]+)"/g)].map(([, member]) => `${member}/Cargo.toml`);
+  return [...versionFiles(dir), ...members];
+}
+
 /** Every version the repository records, in a stable order. */
 export function readVersions(dir = repoRoot) {
   const entries = packageFiles(dir).map((file) => ({
