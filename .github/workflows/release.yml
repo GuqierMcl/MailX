@@ -102,27 +102,48 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The runner's Azure Ubuntu mirror can make slow progress until the
-      # installation deadline. Prefer the official HTTPS mirrors, while keeping
-      # retries, connection/read timeouts and the overall step limit.
+      # installation deadline, so the official HTTPS mirrors are tried first.
+      # Those can in turn be unreachable from the runner (DNS failures), so a
+      # failed attempt falls back to the runner's own mirror configuration.
+      # Each attempt keeps retries, connection/read timeouts and its own limit.
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
-          # Support both direct Ubuntu sources and the runner's mirror+file layout.
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
-            if [ -f "$source" ]; then
-              sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
-            fi
+          sources=(/etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt)
+          for source in "${sources[@]}"; do
+            if [ -f "$source" ]; then sudo cp -a "$source" "$source.runner"; fi
           done
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          fi
+          use_official_mirrors() {
+            # Support both direct Ubuntu sources and the runner's mirror+file layout.
+            for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source" ]; then
+                sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
+              fi
+            done
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            fi
+          }
+          use_runner_mirrors() {
+            for source in "${sources[@]}"; do
+              if [ -f "$source.runner" ]; then sudo cp -a "$source.runner" "$source"; fi
+            done
+          }
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" update --error-on=any
-          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config \
-            patchelf
+          install() {
+            sudo timeout 300 apt-get "${apt_options[@]}" update --error-on=any &&
+              sudo timeout 300 apt-get "${apt_options[@]}" install -y --no-install-recommends \
+                libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+                libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config \
+                patchelf
+          }
+          use_official_mirrors
+          if ! install; then
+            echo "::warning::Official Ubuntu mirrors failed; retrying with the runner's mirror."
+            use_runner_mirrors
+            install
+          fi
       # rustup reads rust-toolchain.toml and installs the pinned toolchain.
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
