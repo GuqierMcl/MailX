@@ -12,8 +12,10 @@ mod css;
 mod html;
 mod images;
 mod plain;
+mod quotes;
 
 pub(crate) use html::sanitize as sanitize_document;
+pub use quotes::fold_quotes;
 
 pub use html::{
     ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
@@ -23,7 +25,7 @@ pub use images::{
     InlineImage, MAX_REMOTE_IMAGE_OUTPUT_BYTES, decode_remote_raster, validate as validate_image,
 };
 
-pub const SANITIZER_VERSION: u32 = 5;
+pub const SANITIZER_VERSION: u32 = 6;
 pub const MAX_MESSAGE_BYTES: usize = 100 * 1024 * 1024;
 pub const MAX_BODY_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_MIME_DEPTH: usize = 30;

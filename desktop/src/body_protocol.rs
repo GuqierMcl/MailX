@@ -58,6 +58,7 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                     && let Ok(snapshot) = state.settings(|store| store.get()).await
                 {
                     protocol.set_base_css(mailx_core::mail_body_css(&snapshot.settings.appearance));
+                    protocol.set_locale(snapshot.effective_locale);
                 }
                 if matches!(
                     parse_route(&request.uri().to_string()),
@@ -146,6 +147,8 @@ struct Confirmation {
 pub(crate) struct BodyProtocol {
     numbered_links: bool,
     base_css: Mutex<String>,
+    /// Language of host-generated text in reader documents (quote fold label).
+    locale: Mutex<mailx_core::SupportedLocale>,
     documents: Mutex<HashMap<String, Document>>,
     confirmations: Mutex<HashMap<String, Confirmation>>,
 }
@@ -362,6 +365,7 @@ impl BodyProtocol {
         Self {
             numbered_links,
             base_css: Mutex::new(mailx_core::mail_body_css(&Default::default())),
+            locale: Mutex::new(Default::default()),
             documents: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
         }
@@ -450,6 +454,12 @@ impl BodyProtocol {
     fn set_base_css(&self, css: String) {
         if let Ok(mut current) = self.base_css.lock() {
             *current = css;
+        }
+    }
+
+    fn set_locale(&self, locale: mailx_core::SupportedLocale) {
+        if let Ok(mut current) = self.locale.lock() {
+            *current = locale;
         }
     }
 
@@ -650,6 +660,15 @@ impl BodyProtocol {
                 let allow_remote = document.remote_images;
                 let html = document.binding.document(core).await?;
                 self.resolve(&id, &token)?;
+                // Display-time only, and only for received mail: a draft preview
+                // shows exactly what the user typed. Folding precedes binding so
+                // resource slots inside the folded quote are bound like any other.
+                let html = if matches!(document.binding, BodySource::Email(_)) {
+                    let locale = *self.locale.lock().map_err(|_| missing())?;
+                    render::fold_quotes(&html, locale.quoted_text_label())
+                } else {
+                    html
+                };
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
                         ResourceBinding::Remote { index } => {

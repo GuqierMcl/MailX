@@ -13,6 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Quoted earlier messages at the end of a reply are folded behind Show quoted text when MailX recognizes the quoting style; anything else is shown in full as before. / 回复末尾引用的原邮件在 MailX 能识别其引用格式时会收进“显示引用内容”，其余情况仍完整显示。
 - Messages that are part of a back-and-forth open as a conversation, with your replies included and a switch back to single messages. / 属于多次往来的邮件会以对话形式打开，包含你自己的回复，并可切换回逐封阅读。 ([#113](https://github.com/GuqierMcl/MailX/pull/113))
 - Right-click a message and choose Show mail from this contact to list that contact's mail, then go back with the back button, Esc or the mouse's back button. / 右键邮件并选择“查看此联系人的邮件”可列出该联系人的邮件，再用返回按钮、Esc 或鼠标后退键返回。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Group a contact's mail into a single row in your inboxes from the right-click menu, and manage grouped contacts under Settings → Contacts. / 可通过右键菜单将联系人的邮件在收件箱中聚合为一行，并在“设置 → 联系人”中管理已聚合的联系人。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))

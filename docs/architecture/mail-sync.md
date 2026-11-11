@@ -34,6 +34,12 @@
 - 已知 RFC822.SIZE 超过 100 MiB 时不发 FETCH；接收层在超限 literal 预分配前拒绝，累计 payload 同样受限。正文 FETCH 预算为 `max(30s, size / 64 KiB/s)`，最多 10 分钟；未知大小用 10 分钟硬上限，其余命令仍为 30 秒。
 - 下载完成后净化并缓存正文、附件元数据和摘要，HTML 只经隔离协议提供。失败持久化受控原因码（包括 `providerPolicy`），界面保留手动重试；升级客户端不会自动重试此前失败的正文。缓存、图片与隔离边界见[存储设计](storage-search.md)和[网络安全](network-security.md)。
 
+### 引用折叠（显示时）
+
+阅读文档在 `mailx-body` 协议提供时，对回复末尾的“被引用的上一封邮件”默认折叠，点击“显示引用内容 / Show quoted text”展开。折叠只发生在**提供文档时**（`core::mail::render::fold_quotes`，在资源绑定之前）：缓存中的 `sanitized_html`、全文搜索文本以及回复 / 转发草稿的引用都不含折叠，草稿预览同样不折叠。折叠控件是宿主生成的原生 `<details><summary>`，不需要脚本；标签来自 MailX 自己的本地化文案（跟随界面语言），不取自邮件内容。
+
+识别为尽力而为，按层依次尝试，取首个通过安全检查的候选：已知容器（`.gmail_quote`、`.gmail_extra`、`.yahoo_quoted`、`blockquote[type=cite]`、Outlook 网页版 `#divRplyFwdMsg` 等；ProtonMail / Tutanota / Zmail / 网易 / 139 等类名未经真实邮件核对）；“称呼行 + blockquote”（`On … wrote:`、`… 写道：`、德 / 法 / 西 / 日语等，含纯文本 `>` 转成的引用）；分隔文字与头部块（`-----Original Message-----`、`—— 原始邮件 ——`、连续的 发件人 / 发送时间 / 收件人 / 主题 或 From / Sent / To / Subject 行，含 Outlook 桌面版的 border-top 外层）。安全规则：只折叠**末尾**区域（其后没有有意义的内容）；区域之前必须仍有可见文字或图片；转发邮件（`Forwarded message`、`转发邮件信息`、`FW:` 主题等标记）不折叠；区域之外还有其他引用块时（插入式回复）不折叠；一封邮件至多折叠一处，其中嵌套的旧引用随之折叠。超过 2 MiB 或任何不确定的情况都原样显示。折叠不改变 CSP、IPC 或链接拦截；点击 `<summary>` 不是导航，由浏览器原生展开。修改识别规则或净化器放行的属性时递增 `SANITIZER_VERSION`，缓存正文在下次打开时本地重建。
+
 ## 已实现：列表预览
 
 - 列表预览与正文下载是两条独立通道。前端把当前可见行的 id 交给 `emails_request_previews`，核心为每个账号打开一条独立短连接（同 `open_body_session`：账号路由、TLS、认证和接收预算完全一致，代理失败不回退直连），EXAMINE 目录并核对 UIDVALIDITY，每个目录每批至多 50 个 UID 发一条 `UID FETCH <set> (UID BODY.PEEK[HEADER.FIELDS (CONTENT-TYPE CONTENT-TRANSFER-ENCODING MIME-VERSION)] BODY.PEEK[TEXT]<0.16384>)`。PEEK 不改变已读标记。

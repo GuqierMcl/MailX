@@ -608,6 +608,19 @@ const GENERIC_FAMILIES: &[&str] = &[
     "ui-rounded",
 ];
 
+/// Pill-like toggle for a folded quote (`render::fold_quotes`). The marker is
+/// hidden for WebKit/Blink and Gecko; hover and keyboard focus are visible.
+const QUOTE_FOLD_CSS: &str = concat!(
+    "details.mailx-quote{margin:12px 0 0}",
+    "details.mailx-quote>summary{display:inline-block;list-style:none;cursor:pointer;user-select:none;",
+    "padding:0 12px;border-radius:999px;background:#eceff1;color:#5f6368;font-size:12px;line-height:22px}",
+    "details.mailx-quote>summary::-webkit-details-marker{display:none}",
+    "details.mailx-quote>summary::before{content:\"\\00b7\\00b7\\00b7  \"}",
+    "details.mailx-quote>summary:hover{background:#dde1e4;color:#3c4043}",
+    "details.mailx-quote>summary:focus-visible{outline:2px solid #1a73e8;outline-offset:2px}",
+    "details.mailx-quote[open]>summary{margin-bottom:12px}",
+);
+
 /// Base style for the message document: only what the message itself does not
 /// specify. Family names were validated by `normalized`, so quoting is safe.
 pub fn mail_body_css(appearance: &AppearanceSettings) -> String {
@@ -645,7 +658,7 @@ pub fn mail_body_css(appearance: &AppearanceSettings) -> String {
         FontSize::Large => "16px",
     };
     format!(
-        "html{{background:white;color:black}}body{{margin:0;{font};font-size:{size};line-height:1.5}}.mailx-page{{box-sizing:border-box;min-height:100vh;padding:16px;overflow-wrap:break-word}}.mailx-body{{box-sizing:border-box;min-height:100vh;margin:-16px;padding:16px}}img{{max-width:100%;height:auto}}"
+        "html{{background:white;color:black}}body{{margin:0;{font};font-size:{size};line-height:1.5}}.mailx-page{{box-sizing:border-box;min-height:100vh;padding:16px;overflow-wrap:break-word}}.mailx-body{{box-sizing:border-box;min-height:100vh;margin:-16px;padding:16px}}img{{max-width:100%;height:auto}}{QUOTE_FOLD_CSS}"
     )
 }
 

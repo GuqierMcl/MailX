@@ -1112,3 +1112,74 @@ async fn releasing_a_reading_revokes_its_resources_and_pending_links_only() {
         assert_eq!(reply.status(), StatusCode::NOT_FOUND);
     }
 }
+
+fn quoted_mime() -> Vec<u8> {
+    format!(
+        "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=fixture\r\n\r\n\
+         --fixture\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
+         <div>Reply text</div><div>On 2026-11-03, Bob wrote:</div>\
+         <blockquote><p>Quoted line</p><img src=\"cid:pixel\"></blockquote>\r\n\
+         --fixture\r\nContent-Type: image/png\r\nContent-Disposition: inline\r\n\
+         Content-ID: <pixel>\r\nContent-Transfer-Encoding: base64\r\n\r\n{PNG}\r\n\
+         --fixture--\r\n"
+    )
+    .into_bytes()
+}
+
+#[tokio::test]
+async fn reader_documents_fold_the_trailing_quote_without_scripts_and_still_bind_resources() {
+    let directory = TempDir::new().unwrap();
+    let raw = quoted_mime();
+    let (core, ids) =
+        MailxCore::body_test_fixture(directory.path(), tokio::runtime::Handle::current(), &[&raw])
+            .unwrap();
+    let protocol = BodyProtocol::default();
+    let id = &ids[0];
+    for (locale, label) in [
+        (mailx_core::SupportedLocale::En, "Show quoted text"),
+        (mailx_core::SupportedLocale::ZhCn, "显示引用内容"),
+    ] {
+        protocol.set_locale(locale);
+        let prepared = protocol.prepare(&core, id.clone()).await.unwrap();
+        let url = format!(
+            "{BODY_ORIGIN}/document/{id}?token={}",
+            prepared.document_token
+        );
+        let (response, _) = protocol
+            .serve(&core, request(Method::GET, &url), APP_ORIGIN)
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = String::from_utf8(response.into_body()).unwrap();
+        assert!(
+            html.contains(&format!("<summary>{label}</summary>")),
+            "{html}"
+        );
+        assert!(html.contains("<details class=\"mailx-quote\">"));
+        assert!(!html.contains("<script"));
+        // Reply text stays outside; the image inside the fold is bound.
+        let (before, folded) = html.split_once("<details").unwrap();
+        assert!(before.contains("Reply text") && !before.contains("Quoted line"));
+        assert!(folded.contains("Quoted line"));
+        assert!(
+            folded.contains(&format!("src=\"{BODY_ORIGIN}/part/{id}/")),
+            "{folded}"
+        );
+        assert!(!html.contains("data-mailx-"));
+    }
+}
+
+#[tokio::test]
+async fn plain_reader_documents_without_a_quote_are_not_folded() {
+    let (_directory, core, ids, _db) = fixture();
+    let protocol = BodyProtocol::default();
+    let prepared = protocol.prepare(&core, ids[0].clone()).await.unwrap();
+    let url = format!(
+        "{BODY_ORIGIN}/document/{}?token={}",
+        ids[0], prepared.document_token
+    );
+    let (response, _) = protocol
+        .serve(&core, request(Method::GET, &url), APP_ORIGIN)
+        .await;
+    let html = String::from_utf8(response.into_body()).unwrap();
+    assert!(!html.contains("<details"));
+}
