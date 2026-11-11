@@ -53,7 +53,7 @@ OAuth 通用基础采用授权码 + PKCE，检查一次性 `state`、回调来�
 
 Tauri 的信任边界和能力机制要求限制 WebView 对原生能力的访问；MailX 将正文视作独立不可信资源，不让它获得应用权限。[Tauri 安全文档](https://v2.tauri.app/security/)。
 
-处理链：原始 MIME → 有界解码 → 纯文本提取 → `ammonia` 白名单 HTML → 资源 URL 重写 → sandbox iframe。iframe 不启用 `allow-scripts`、`allow-same-origin`、表单、弹窗或顶层导航；邮件脚本不可执行，宿主阻止子框架初始化可调用的 Tauri API。WebView2 可能保留冻结的 internals 中 plugins / postMessage 两个底层成员；不能将其描述为对象完全不存在，权限隔离由真实 WebView 测试核查。应用 CSP 与正文 CSP 分开维护。
+处理链：原始 MIME → 有界解码 → 纯文本提取 → `ammonia` 白名单 HTML → 资源 URL 重写 → sandbox iframe。iframe 不启用 `allow-scripts`、`allow-same-origin`、表单、弹窗或顶层导航；邮件脚本不可执行，宿主阻止子框架初始化可调用的 Tauri API。WebView2 可能保留冻结的 internals 中 plugins / postMessage 两个底层成员；不能将其描述为对象完全不存在，权限隔离需在真实 WebView 中专项核查。应用 CSP 与正文 CSP 分开维护。
 
 - 删除 script、事件属性、form、object、embed、meta refresh、远程字体、CSS `url()` / `@import`、SVG 和其他主动内容。CSS 属性与样式块结构化清理，处理转义和注释，保留安全排版；不能以危险子串过滤替代。净化器是其中一层，不能替代沙箱。
 - 默认 CSP `default-src 'none'`，仅允许处理后样式与由父应用生成的安全图片资源。禁止正文自行发起 fetch、加载原始外部 URL 或自动下载。
@@ -67,7 +67,7 @@ Tauri 的信任边界和能力机制要求限制 WebView 对原生能力的访�
 
 实际协议为 macOS / Linux 的 `mailx-body://localhost` 和 Windows 的 `http://mailx-body.localhost`。Wry 会重写 Windows 传入请求的 scheme，因此资源与 CSP 必须按浏览器实际 origin 生成。协议仅 GET；404 不暴露原因，其他方法为 405；所有响应包含 CSP、nosniff、no-referrer、no-store。图片 CSP 限定当前邮件 /part 与 /remote 路径，不能通过资源加载触发 /link。每次 document / part / remote / link / links_open 都重新验证绑定。
 
-导航在提交前拦截，WebView2 保留 204 后备。Body WebView 使用手动工作流，普通前端与 Rust 检查自动运行；每次涉及正文边界的变更应按受影响范围验证，不能沿用旧实现的通过结论。执行证据统一见[验证记录](../development/validation.md)。
+导航在提交前拦截，WebView2 保留 204 后备。普通前端与 Rust 检查自动运行；修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证。专用 Body WebView 工作流及测试脚手架已移除，普通测试不等同于真实引擎隔离验证，也不能沿用旧实现的通过结论。验证方式与执行证据统一见[验证记录](../development/validation.md#body-native-validation)。
 
 ## 6. 端点与 SSRF
 

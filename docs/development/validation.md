@@ -107,9 +107,13 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 
 2026-11-02，[PR #74](https://github.com/GuqierMcl/MailX/pull/74) 的代码提交 `9c501b8` 已通过[三平台 CI](https://github.com/GuqierMcl/MailX/actions/runs/41324929231) 与 [Linux AppImage 启动检查](https://github.com/GuqierMcl/MailX/actions/runs/41324929243)。实际检查 180 个 ELF（含 AppImage runtime），最高 glibc 需求为 2.35；五个托盘库依赖解析与动态加载成功。正常场景无降级日志；删除 AppIndicator 后仅记录一次降级，窗口仍可见且进程存活。两个独立空数据库均通过完整性检查，schema 与迁移版本均为 21。运行环境为 Ubuntu 22.04.5、非 root、无网络；该证据未覆盖 AppImageHub 的 Firejail 环境或真实桌面托盘交互。
 
-MVP 阶段，三平台 `Body WebView` 已移至 `.github/workflows/body-webview.yml`，仅由 `workflow_dispatch` 手动触发，不再随每个 PR 或 main 推送自动运行。测试代码、平台矩阵与证据上传保留；在 GitHub Actions 的 `Body WebView` 工作流中选择目标分支运行。工作流合入默认分支后才会提供手动入口。
+<a id="body-native-validation"></a>
 
-修改正文渲染、CSP、资源协议、链接拦截或升级 Tauri / Wry 时，建议按受影响行为补跑；发布前再进行三平台检查。该检查使用隔离数据目录和合成 MIME，在真实 WKWebView、WebView2、WebKitGTK 中检查正文协议、沙箱与外链路径，并上传 `body-webview-<os>` 证据。仅测试构建入口与桥接能力仍不能进入正式应用。常规前端与 Rust 测试继续覆盖净化、协议和权限相关回归。
+专用 `Body WebView` 工作流及其测试构建、驱动和脚本已移除，不再作为每次发布的检查项。下文保留既有真实引擎验证的历史结果，其结论仍只对应当时的提交、平台与场景。
+
+修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证，使用隔离数据目录与合成邮件核对正文 / CID 显示、脚本与应用 IPC 隔离、未授权资源请求，以及打开链接后正文保留。记录实际提交、引擎 / 平台、验证方法、结果与未覆盖范围；验证方法按当次改动确定，不要求恢复原专用脚手架。
+
+常规前端与 Rust 测试继续覆盖净化、协议、令牌和权限相关回归，但不能证明真实 WKWebView、WebView2 或 WebKitGTK 的沙箱与 CSP 行为。专用检查移除后没有持续的三平台原生自动回归；安装包阅读冒烟和历史绿灯也不能替代本次正文边界变更的专项证据。
 
 `mcp-server` 与 `mcp-bridge` 是工作区成员，已被上述三平台 `rust:clippy` / `rust:test` 覆盖，其中 Windows 命名管道与 DACL 代码只在 `windows-2025` 任务里编译并运行测试；没有为它们另设任务。
 
@@ -238,7 +242,7 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 
 检查涵盖自定义协议加载、CID 显示、脚本零执行、远程资源零请求、父 DOM 与应用状态隔离、Tauri 命令不可调用，以及各自的链接路径。WebView2 可能保留冻结的 `__TAURI_INTERNALS__` 中 `plugins` / `postMessage` 底层成员；断言的是邮件无法执行脚本或获得可调用的应用 IPC，不能宣称该对象完全不存在。Windows 资源地址和 CSP 使用浏览器实际 origin，不能直接沿用 Wry 重写后的请求 scheme。
 
-复现入口为 `bun run body-webview:build`、`bun run body-webview:test`，外部驱动入口与平台依赖以 `.github/workflows/body-webview.yml` 为准。macOS 使用受限测试驱动，Windows / Linux 使用外部 WebDriver；这些证据针对真实引擎中的合成页面，不等于三平台都完成真实邮箱人工阅读。测试桥由 `body-webview-test` feature 隔离，正式前端构建另检查不包含开发预览模块。
+当时的复现入口为 `bun run body-webview:build`、`bun run body-webview:test`，外部驱动与平台依赖由 `.github/workflows/body-webview.yml` 配置；这些命令、工作流及 `body-webview-test` feature 现已移除。历史实现可从 [PR #10 合入提交](https://github.com/GuqierMcl/MailX/tree/0430c416f5af89a22a4e1ac6438ceb689326ade2/tests/body-webview) 回溯。macOS 当时使用受限测试驱动，Windows / Linux 使用外部 WebDriver；这些证据针对真实引擎中的合成页面，不等于三平台都完成真实邮箱人工阅读。测试桥当时由该 feature 隔离，正式前端构建另检查不包含开发预览模块。
 
 2026-10-20 正文 UI 与兼容修复的检查：
 
@@ -285,7 +289,7 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - `cargo test --workspace --locked`：core 207、账号集成 25、desktop 28 项通过，共 260；1 项真实凭据库测试默认忽略。内存缓存用例覆盖同次复用、重新打开隔离、邮件失效、释放后迟到写入拒绝、无新增图片表与缓存读取不写 SQLite；协议用例覆盖旧令牌撤销、待处理链接清理和不影响新阅读。Rust 格式、Clippy 与差异检查通过。
 - 内存缓存调整前，macOS arm64 实际 WKWebView 合成检查 68/68；本次缓存生命周期调整未重跑 WebView。该记录通过原生鼠标事件点击正文链接；没有编号列表、没有额外 iframe 导航或文档请求，正文文字和 CID 图片保留，脚本 / IPC 隔离及零非授权外部请求保持。使用独立合成数据目录，不连接真实邮箱。首次截图分析超过旧 30 秒上限，单独运行成功后调整为 60 秒并补诊断，再完整通过；失败记录未记为通过。
 - 本机证据位于 `target/body-webview-evidence/image-policy-retry/`，报告记录未提交源码差异与二进制摘要。Windows / Linux 本次未运行，不能沿用上方旧版本三平台结果；远程图片真实服务商页面与代理兼容矩阵也未实测。
-- Body WebView 三平台任务移至 `workflow_dispatch` 手动工作流；自动 frontend / Rust 作业与原触发条件逐项比较保持一致。工作流文件进入默认分支后，GitHub 才会显示手动运行入口。
+- 当时将 Body WebView 三平台任务移至 `workflow_dispatch` 手动工作流；自动 frontend / Rust 作业与原触发条件逐项比较保持一致。该专用工作流现已移除，当前验证方式见[正文原生验证](#body-native-validation)。
 
 
 ### 2026-10-20 远程图片 Fake-IP 与 SVG 兼容修复
@@ -422,7 +426,7 @@ macOS arm64 release `.app` 已完成本轮真实账号只读验收：
 - 直连 DNS 只解析一次，筛选允许的候选后固定实际连接地址，通过成熟连接器处理同族回退与双栈竞争。自定义 SOCKS5/HTTP CONNECT 代理可在账号设置显式开启 HTTPS 图片域名解析；v10 迁移默认关闭，代理端点或认证身份变化须重新开启。受控本地代理测试覆盖目标域名不在本地解析、原域名 TLS 校验、代理失败不直连、重定向检查和取消后的解码配额。
 - 可信阅读区显示固定失败原因并提供手动重试。状态接口绑定当前邮件、文档令牌及显示许可；失败资源可重取，成功图片即使磁盘缓存已清理也复用内存。关闭正文、收紧策略和保存账号连接后撤销旧授权并取消旧阅读请求。正文与头像缓存按账号、来源及连接版本隔离，不复用旧全局键；头像网络失败不再长期缓存为空。
 - `cargo test --workspace --locked --quiet` 通过：core 448、账号集成 31、desktop 61，共 **540 项通过**，1 项真实系统凭据库测试按默认忽略。`bun run frontend:test --maxWorkers=4` 通过：48 个文件、**446 项测试**；初次高并发运行中的编辑器懒加载测试曾超时，降低 worker 数后全量复跑通过。生成 DTO 一致性、TypeScript、ESLint、生产构建、工作区 Clippy（禁止警告）、Rust 格式和差异检查通过。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
-- Windows 原生合成测试已使用本轮重新构建的 `body-webview-test` 二进制执行，WebView2 / EdgeDriver 均为 155.0.4283.62，**48/48 断言通过、canary 外部请求为 0**。覆盖中文正文、CID 图片、原生链接点击、恶意 HTML 与策略探针；使用临时合成 profile 和独立 WebView 数据目录，不访问真实账号或系统凭证。报告位于 `target/body-webview-evidence/remote-image-ab-windows-final/report.json`（本地生成证据，不提交）。验证中修复了新 profile 尚未创建便初始化图片缓存导致首次启动失败的问题，并补回归；测试 feature 的通知命令返回 unsupported，以配合其不装配通知模块的隔离方式。
+- Windows 原生合成测试已使用本轮重新构建的 `body-webview-test` 二进制执行（该专用 feature 现已移除），WebView2 / EdgeDriver 均为 155.0.4283.62，**48/48 断言通过、canary 外部请求为 0**。覆盖中文正文、CID 图片、原生链接点击、恶意 HTML 与策略探针；使用临时合成 profile 和独立 WebView 数据目录，不访问真实账号或系统凭证。报告位于 `target/body-webview-evidence/remote-image-ab-windows-final/report.json`（本地生成证据，不提交）。验证中修复了新 profile 尚未创建便初始化图片缓存导致首次启动失败的问题，并补回归；测试 feature 的通知命令当时返回 unsupported，以配合其不装配通知模块的隔离方式。
 
 本轮原生 harness 不覆盖远程代理软件矩阵。Mihomo / sing-box 的 SOCKS、CONNECT、TUN、任意自定义 Fake-IP 网段及 macOS/Linux 本轮行为仍待实机验证；此前 Windows 网易/GitHub 两个来源的现场结果不扩展为全部服务商和代理兼容承诺。未发送真实邮件。
 
@@ -1131,3 +1135,11 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 缓存测试使用公开的抛弃式签名测试向量，通过插件实际验签；覆盖复用、篡改、身份不匹配、中断残留、来源保留、安装尝试记录及清理与安装记录写入并发。测试不访问发布网络、不调用平台安装器。
 
 本轮未启动真实更新下载安装，没有发布版本、安装应用或接入真实邮箱。macOS、Windows、Linux AppImage 的端到端升级，deb / rpm 的仅提示界面，系统代理与弱网、真实安装失败、退出时多个写信窗口和发送中的保护仍需分别实测；当前自动检查通过不代表这些组合已验收。缓存跨进程复用仍要求一次成功的新清单检查；不提供部分下载续传或数据库自动回滚。
+
+## 40. 移除 Body WebView 专用检查（2026-11-11）
+
+移除三平台 Body WebView 工作流、原生驱动、测试页面、专用构建命令及桌面测试启动分支，取消每次发布必跑要求。保留正文 CSP、空 sandbox、子框架 Tauri 桥防护及普通前端 / Rust 回归；合成邮件 fixture 改由 core 的 `test-support` 特性提供，仅在桌面开发依赖中启用。锁文件清理 17 个失去依赖的包，没有新增包或依赖版本升级。当前专项验证约定见[正文原生验证](#body-native-validation)。
+
+本机 macOS 检查通过：`bun install --frozen-lockfile`、`bun run check`（版本脚本 48 项、前端 91 个文件 / 1,089 项测试，以及 i18n、DTO、类型、lint、构建与工作区检查）、`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）、`bun run rust:test`（1,211 项通过、0 失败、5 项既有忽略）及 `git diff --check`。Rust 测试包括 core 单元 953、账号集成 39、desktop 174、bridge 两组各 6、MCP server 17、端到端 16 项。生产构建保留既有的大 chunk 提示；文档本地链接及专项验证锚点已核对，独立只读审查未发现阻断项。
+
+本轮未运行真实 WebView 专项验证或 Windows / Linux 本机检查；上述结果仅证明本机常规检查与回归，不扩展三平台原生隔离证据。

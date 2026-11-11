@@ -254,39 +254,6 @@ impl DesktopState {
             .ok_or_else(|| AppError::new(ErrorCode::CoreNotReady))
     }
 
-    #[cfg(feature = "body-webview-test")]
-    pub(crate) fn for_body_test(core: MailxCore, directory: PathBuf) -> Self {
-        struct NoSecrets;
-        impl SecretStore for NoSecrets {
-            fn get(
-                &self,
-                _: &str,
-            ) -> Result<
-                Option<mailx_core::secrets::SecretValue>,
-                mailx_core::secrets::SecretStoreError,
-            > {
-                panic!("test must not read credentials")
-            }
-            fn set(
-                &self,
-                _: &str,
-                _: &mailx_core::secrets::SecretValue,
-            ) -> Result<(), mailx_core::secrets::SecretStoreError> {
-                panic!("test must not write credentials")
-            }
-            fn delete(&self, _: &str) -> Result<(), mailx_core::secrets::SecretStoreError> {
-                panic!("test must not delete credentials")
-            }
-        }
-        let state = Self::new(
-            Ok(directory),
-            Arc::new(NoSecrets),
-            Arc::new(|_: &mailx_core::CoreEvent| {}),
-        );
-        state.finish_initialization(Ok(core));
-        state
-    }
-
     fn is_ready(&self) -> bool {
         matches!(
             self.0.startup.lock().ok().as_deref(),

@@ -1,4 +1,4 @@
-//! Synthetic, local-only profile for core tests and the explicit WebView probe.
+//! Synthetic, local-only profile for core and host tests.
 use std::{path::Path, sync::Arc};
 
 use tokio::runtime::Handle;
