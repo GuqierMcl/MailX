@@ -5,8 +5,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AccountSyncState, EmailSummary } from '@/generated/accounts'
+import type { AccountSyncState, EmailListQuery, EmailSummary, FolderRole } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { toast } from '@/components/ui/toast'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { usePanelRef } from 'react-resizable-panels'
@@ -14,7 +15,9 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
+import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
 import { EmailList, type ListFilter } from './email-list'
+import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
 import { EmailView, RemoveLocalCopyDialog } from './email-view'
@@ -46,6 +49,7 @@ import { useListSelection } from './use-list-selection'
 import { useSelectionActions } from './use-selection-actions'
 import { SelectionSummary } from './selection-summary'
 import { useDeleteEmail } from './use-delete-email'
+import { useContactAggregation } from './use-contact-aggregation'
 import { useMailStateChanges } from './use-mail-state-changes'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
@@ -57,9 +61,18 @@ import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
 const PAGE_SIZE = 100
+/** Mail in these folders never shows up under a contact. */
+const CONTACT_EXCLUDED_ROLES: FolderRole[] = ['junk', 'trash']
 
 /** What was opened, and which server of its account it came from at that moment. */
 type OpenedState = OpenedEmail & { source: string | null }
+
+/**
+ * One sender's mail, drilled into from a list. It sits on top of the mailbox
+ * that was showing (which stays highlighted); `accountId` is that mailbox's
+ * account when it was scoped to one, so the contact view stays inside it.
+ */
+type ContactView = { address: string; name: string | null; accountId: string | null }
 
 export function Workbench({ client }: { client: MailxClient }) {
   useTranslation()
@@ -87,6 +100,16 @@ export function Workbench({ client }: { client: MailxClient }) {
   // matches": changing mailbox, filter or search, or the list refreshing, never
   // closes it. Only opening another message, closing it, or it ceasing to exist does.
   const [openedState, setOpened] = useState<OpenedState | null>(null)
+  const [contact, setContact] = useState<ContactView | null>(null)
+  // Which way the list slides on a base <-> contact switch; null for any other change.
+  const [slide, setSlide] = useState<'forward' | 'back' | null>(null)
+  // Scroll offset of the base list: followed live, copied when the contact view opens,
+  // and handed back to the list that replaces the contact view.
+  const liveScroll = useRef(0)
+  const savedScroll = useRef(0)
+  const [restoreScroll, setRestoreScroll] = useState(0)
+  const trackScroll = useCallback((offset: number) => { liveScroll.current = offset }, [])
+  const reducedMotion = usePrefersReducedMotion()
   // The draft or outbox item shown in the reader while those views are open.
   const [draftChoice, setDraftChoice] = useState<string | null>(null)
   const [outboxChoice, setOutboxChoice] = useState<string | null>(null)
@@ -134,11 +157,18 @@ export function Workbench({ client }: { client: MailxClient }) {
   const outboxCount = outbox.data?.length ?? 0
   // The outbox entry exists only while something is unfinished; if the view is open
   // when the last item completes, fall back to the inbox.
+  // Picking a mailbox from anywhere (sidebar, rail, palette, notification) ends the contact view.
+  const showMailbox = useCallback((next: Mailbox) => {
+    setContact(null)
+    setSlide(null)
+    setRestoreScroll(0)
+    setMailbox(next)
+  }, [])
   const outboxGone = mailbox.kind === 'outbox' && outbox.isSuccess && outboxCount === 0
   const selectOutboxItem = useCallback((outboxId: string) => {
     setOutboxChoice(outboxId)
-    setMailbox({ kind: 'outbox' })
-  }, [])
+    showMailbox({ kind: 'outbox' })
+  }, [showMailbox])
   // An outbox change can add, drop or swap a local sent copy (a matched server
   // copy replaces it), so lists that include Sent scopes are refetched. If the
   // opened message was such a copy, its detail refetch reports notFound and the
@@ -172,6 +202,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     syncSnapshots.current = nextSync
     setSyncStates(nextSync)
     setOpened((opened) => opened?.accountId === report.accountId ? null : opened)
+    setContact((current) => current?.accountId === report.accountId ? null : current)
     setMailbox((current) => current.kind === 'folder' && current.folder.accountId === report.accountId
       ? { kind: 'unified', role: 'inbox' } : current)
     setDraftChoice((id) => id && report.draftIds.includes(id) ? null : id)
@@ -240,16 +271,27 @@ export function Workbench({ client }: { client: MailxClient }) {
     return state?.mailboxSourceId === account.mailboxSourceId ? [[account.id, state]] : []
   }))
   const sentView = mailView && (folderRole === 'sent' || (activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'sent'))
-  const scopedFolders = folders.filter((folder) => folder.selectable && (folderId ? folder.id === folderId
-    : starredView ? !STARRED_EXCLUDED_ROLES.includes(folder.role)
-      : folder.role === folderRole && (!archivedView || !selectedAccountId || folder.accountId === selectedAccountId)))
+  const contactView = mailView ? contact : null
+  const scopedFolders = folders.filter((folder) => folder.selectable && (contactView
+    ? !CONTACT_EXCLUDED_ROLES.includes(folder.role) && (!contactView.accountId || folder.accountId === contactView.accountId)
+    : folderId ? folder.id === folderId
+      : starredView ? !STARRED_EXCLUDED_ROLES.includes(folder.role)
+        : folder.role === folderRole && (!archivedView || !selectedAccountId || folder.accountId === selectedAccountId)))
   const scopeRevision = JSON.stringify(scopedFolders.map((folder) => [
     folder.id,
     accounts.find((account) => account.id === folder.accountId)?.mailboxSourceId,
     currentSyncStates[folder.accountId]?.generation ?? 0,
     currentSyncStates[folder.accountId]?.folders.find((state) => state.folderId === folder.id)?.dataRevision ?? 0,
   ]).sort())
-  const listQuery = useMemo(() => emailQuery({
+  const listQuery = useMemo(() => contactView ? emailQuery({
+    fromAddress: contactView.address,
+    accountIds: contactView.accountId ? [contactView.accountId] : null,
+    archive: 'include',
+    excludeFolderRoles: CONTACT_EXCLUDED_ROLES,
+    unread: filter === 'unread' ? true : null,
+    text: query || null,
+    limit: PAGE_SIZE,
+  }) : emailQuery({
     folderId,
     folderRole,
     accountIds: archivedView && selectedAccountId ? [selectedAccountId] : null,
@@ -259,7 +301,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     unread: filter === 'unread' ? true : null,
     text: query || null,
     limit: PAGE_SIZE,
-  }), [folderId, folderRole, archivedView, starredView, selectedAccountId, filter, query])
+  }), [contactView, folderId, folderRole, archivedView, starredView, selectedAccountId, filter, query])
   const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
 
   const list = useInfiniteQuery({
@@ -270,9 +312,11 @@ export function Workbench({ client }: { client: MailxClient }) {
     enabled: !treeLoading && mailView,
     // Keep the previous rows (dimmed) while the next folder or filter loads, so
     // switching never blanks the list. Rows from another mailbox source (a
-    // changed server) are never carried over.
+    // changed server) are never carried over, nor are those of another sender
+    // (going into or out of a contact view starts from an empty list).
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[2] === sourceIdentity ? previous : undefined,
+      previousQuery?.queryKey[2] === sourceIdentity &&
+      (previousQuery.queryKey[3] as EmailListQuery).fromAddress === listQuery.fromAddress ? previous : undefined,
   })
 
   // Only data in this view's folders refreshes it; a refetch reloads every
@@ -361,7 +405,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [])
   const archiveEmails = useArchiveEmails(client, hideOpened)
   const selectionActions = useSelectionActions({
-    client, selection, listQuery, folders, archivedView,
+    client, selection, listQuery, folders, archivedView: archivedView && !contactView,
     deleteMany: deleteEmail.requestBatch,
     archiveMany: archiveEmails,
     flagMany: setFlags,
@@ -369,7 +413,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
     if (outboxId) {
       setOutboxChoice(outboxId)
-      setMailbox({ kind: 'outbox' })
+      showMailbox({ kind: 'outbox' })
       return
     }
     const { accounts, folders } = latestTree.current
@@ -385,9 +429,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (inbox) {
       setSearch('')
       setFilter('all')
-      setMailbox({ kind: 'folder', folder: inbox })
+      showMailbox({ kind: 'folder', folder: inbox })
     }
-  }), [client, exitSelection])
+  }), [client, exitSelection, showMailbox])
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
@@ -406,6 +450,48 @@ export function Workbench({ client }: { client: MailxClient }) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [composeNew])
+
+  const contactRules = useContactAggregation(client)
+  const baseTitle = mailboxTitle(activeMailbox)
+  // Into the contact view: remember where the list was, then slide to the sender's mail.
+  const viewContact = useCallback((email: EmailSummary) => {
+    if (!contact) savedScroll.current = liveScroll.current
+    setContact({
+      address: email.from.address.trim(),
+      name: email.from.name?.trim() || null,
+      accountId: selectedAccountId,
+    })
+    setSlide('forward')
+  }, [contact, selectedAccountId])
+  const leaveContact = useCallback(() => {
+    setRestoreScroll(savedScroll.current)
+    setContact(null)
+    setSlide('back')
+  }, [])
+  // Esc and the mouse's back button return from the contact view. Esc yields to selection
+  // mode, to an open message (the reader closes first) and to anything else that uses it.
+  const inContact = contactView !== null
+  const escapeGoesBack = inContact && !selecting && !(opened && !readerCollapsed)
+  useEffect(() => {
+    if (!escapeGoesBack) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || escapeBelongsToSomethingElse(event)) return
+      event.preventDefault()
+      leaveContact()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [escapeGoesBack, leaveContact])
+  useEffect(() => {
+    if (!inContact) return
+    const onMouseUp = (event: MouseEvent) => {
+      if (event.button !== 3) return
+      event.preventDefault()
+      leaveContact()
+    }
+    window.addEventListener('mouseup', onMouseUp)
+    return () => window.removeEventListener('mouseup', onMouseUp)
+  }, [inContact, leaveContact])
 
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
@@ -448,14 +534,16 @@ export function Workbench({ client }: { client: MailxClient }) {
   }
   const showAccountBadges = (activeMailbox.kind === 'unified' || activeMailbox.kind === 'starred' || (activeMailbox.kind === 'archived' && !activeMailbox.accountId)) && accounts.length > 1
   // Drafts and outbox are not searched; the title-bar search then speaks for the inbox.
-  const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : activeMailbox.kind === 'folder'
+  const searchScope = !mailView ? mailboxTitle({ kind: 'unified', role: 'inbox' }) : contactView
+    ? contactView.name ?? contactView.address
+    : activeMailbox.kind === 'folder'
     ? `${accounts.find((account) => account.id === activeMailbox.folder.accountId)?.displayName ?? ''} · ${folderLabel(activeMailbox.folder)}`
     : activeMailbox.kind === 'archived' && activeMailbox.accountId
       ? `${accounts.find((account) => account.id === activeMailbox.accountId)?.displayName ?? ''} · ${mailboxTitle(activeMailbox)}`
       : mailboxTitle(activeMailbox)
   const firstPageError = list.isError && !list.isFetchNextPageError ? errorText(list.error) : null
 
-  const selectMailbox = (next: Mailbox) => setMailbox(next)
+  const selectMailbox = showMailbox
   // A search or a found message belongs to a mail list: leave the local views for it.
   const leaveLocalView = () => { if (!mailView) setMailbox({ kind: 'unified', role: 'inbox' }) }
   const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
@@ -521,6 +609,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             archive: listQuery.archive,
             starred: listQuery.starred,
             excludeFolderRoles: listQuery.excludeFolderRoles,
+            fromAddress: listQuery.fromAddress,
           } : { folderRole: 'inbox' }}
           sourceIdentity={sourceIdentity}
           accounts={displayAccounts}
@@ -563,9 +652,22 @@ export function Workbench({ client }: { client: MailxClient }) {
                 onSelect={(id) => { setOutboxChoice(id); setReaderCollapsed(false) }}
               />
             ) : (
+            // The whole pane content slides as one piece on a base <-> contact switch; the
+            // key replays it per view. Never the virtual rows themselves.
+            <div
+              key={contactView ? `contact:${contactView.address.toLowerCase()}` : 'base'}
+              data-slot="list-pane"
+              className={cn('h-full min-h-0', slide && !reducedMotion && listSlideClass(slide))}
+            >
             <EmailList
               onRequestPreviews={requestPreviews}
-              title={mailboxTitle(activeMailbox)}
+              title={contactView ? contactView.name ?? contactView.address : baseTitle}
+              contact={contactView ? { name: contactView.name, address: contactView.address, backTitle: baseTitle, onBack: leaveContact } : undefined}
+              initialScrollTop={contactView ? undefined : restoreScroll}
+              onScrollOffset={contactView ? undefined : trackScroll}
+              onViewContact={viewContact}
+              onAggregate={contactRules.setAggregated}
+              isAggregated={contactRules.isAggregated}
               sentView={sentView}
               emails={emails}
               accounts={showAccountBadges ? accounts : null}
@@ -594,6 +696,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               selection={selection}
               selectionActions={selectionActions}
             />
+            </div>
             )}
           </ResizablePanel>
           <ResizableHandle disabled={readerCollapsed} className={readerCollapsed ? 'pointer-events-none opacity-0' : undefined} />
@@ -663,6 +766,14 @@ export function Workbench({ client }: { client: MailxClient }) {
         onConfirm={confirmRemoveLocal}
       />
     </TooltipProvider>
+  )
+}
+
+/** Entering a contact slides the list in from the right, coming back from the left. */
+function listSlideClass(slide: 'forward' | 'back') {
+  return cn(
+    'animate-in fade-in-0 duration-200 ease-out',
+    slide === 'forward' ? 'slide-in-from-right-6' : 'slide-in-from-left-6',
   )
 }
 

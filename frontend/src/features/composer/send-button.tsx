@@ -3,7 +3,7 @@ import { t } from '@/i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { usePrefersReducedMotion } from './use-reduced-motion'
+import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
 
 /** Clicks this soon after the confirm state appears are ignored, so a double click cannot skip the confirmation. */
 export const CONFIRM_GUARD_MS = 400

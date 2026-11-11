@@ -14,7 +14,9 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
   }
 }
 
-function everything(): Required<EmailMenuCallbacks> {
+type ContactCallbacks = 'onViewContact' | 'onAggregate' | 'isAggregated' | 'viewingContact'
+
+function everything(): Required<Omit<EmailMenuCallbacks, ContactCallbacks>> {
   return {
     onOpen: vi.fn(), onRespond: vi.fn(), onFlag: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onRemoveLocal: vi.fn(), canArchive: () => true,
   }
@@ -64,6 +66,49 @@ describe('emailMenuActions', () => {
     expect(callbacks.onFlag).toHaveBeenCalledWith(target, 'starred', true)
     expect(callbacks.onArchive).toHaveBeenCalledWith(target, true)
     expect(callbacks.onDelete).toHaveBeenCalledWith(target)
+  })
+})
+
+describe('the contact items of the menu', () => {
+  const contactCallbacks = () => ({ onViewContact: vi.fn(), onAggregate: vi.fn(), isAggregated: vi.fn(() => false) })
+
+  it('offers viewing and grouping a sender, between respond and flags', () => {
+    expect(kinds(emailMenuActions(email('a'), { ...everything(), ...contactCallbacks() }))).toEqual([
+      ['open'], ['reply', 'replyAll', 'forward'], ['viewContact', 'aggregate'], ['unread', 'star'], ['archive'], ['delete'],
+    ])
+  })
+
+  it('offers to stop grouping once the sender has a rule', () => {
+    const callbacks = { ...contactCallbacks(), isAggregated: vi.fn(() => true) }
+    const target = email('a')
+    const group = emailMenuActions(target, callbacks)[0]
+    expect(group.map((action) => action.kind)).toEqual(['viewContact', 'unaggregate'])
+    group[1].run()
+    expect(callbacks.onAggregate).toHaveBeenCalledWith(target, false)
+    group[0].run()
+    expect(callbacks.onViewContact).toHaveBeenCalledWith(target)
+  })
+
+  it('asks to group when there is no rule', () => {
+    const callbacks = contactCallbacks()
+    const target = email('a')
+    emailMenuActions(target, callbacks)[0][1].run()
+    expect(callbacks.onAggregate).toHaveBeenCalledWith(target, true)
+  })
+
+  it('does not offer viewing the contact that is already on screen, compared without case', () => {
+    const groups = emailMenuActions(email('a'), { ...contactCallbacks(), viewingContact: 'Notifications@GitHub.com' })
+    expect(kinds(groups)).toEqual([['aggregate']])
+  })
+
+  it('hides the whole group for a local-only copy and for a row without a sender address', () => {
+    expect(kinds(emailMenuActions(email('a', { localOnly: true }), contactCallbacks()))).toEqual([])
+    expect(kinds(emailMenuActions(email('a', { from: { name: null, address: '' } }), contactCallbacks()))).toEqual([])
+  })
+
+  it('hides the items whose callbacks are missing', () => {
+    expect(kinds(emailMenuActions(email('a'), { onViewContact: vi.fn() }))).toEqual([['viewContact']])
+    expect(kinds(emailMenuActions(email('a'), { onAggregate: vi.fn() }))).toEqual([['aggregate']])
   })
 })
 
@@ -206,6 +251,31 @@ describe('the message list right-click menu', () => {
     expect(await screen.findByRole('menu')).toBeInTheDocument()
     // The keyboard event, then one replayed 16px in from the row's left edge, vertically centred.
     expect(seen).toEqual([[0, 0], [26, 140]])
+  })
+
+  it('shows the contact items in a normal list but not in a Sent view', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const contacts = { onViewContact: vi.fn(), onAggregate: vi.fn(), isAggregated: () => false }
+    const props = {
+      title: '收件箱', emails: [email('a')], accounts: null, loading: false,
+      syncStatus: { phase: 'idle' as const, failure: null, windowCapped: false },
+      hasMore: false, loadingMore: false, refreshing: false, stale: false, loadMoreError: null, error: null,
+      filter: 'all' as const, search: '', selectedId: null, previewLines: 'one' as const,
+      onFilterChange: vi.fn(), onSelect: vi.fn(), onLoadMore: vi.fn(), ...contacts,
+    }
+    const view = render(<EmailList {...props} />)
+    rightClick(within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')[0])
+    const menu = await screen.findByRole('menu')
+    await userEvent.click(within(menu).getByRole('menuitem', { name: '查看此联系人的邮件' }))
+    expect(contacts.onViewContact).toHaveBeenCalledOnce()
+    expect(contacts.onViewContact.mock.calls[0][0].id).toBe('a')
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+    view.unmount()
+
+    render(<EmailList {...props} sentView />)
+    rightClick(within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')[0])
+    const sentMenu = await screen.findByRole('menu')
+    expect(within(sentMenu).queryByRole('menuitem', { name: /联系人/ })).not.toBeInTheDocument()
   })
 
   it('stays closed while the rows belong to the previous mailbox', () => {
