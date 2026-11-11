@@ -1,4 +1,4 @@
-//! Synthetic profile construction, compiled only for tests and the WebView probe.
+//! Synthetic profile construction, compiled only for tests and test support.
 use rusqlite::params;
 use uuid::Uuid;
 

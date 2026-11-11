@@ -1520,29 +1520,20 @@ pub(crate) async fn notifications_test(
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    #[cfg(feature = "body-webview-test")]
-    {
-        let _ = (app, window, state, request);
-        Ok(respond(Err(AppError::new(ErrorCode::Unsupported))))
-    }
-    #[cfg(not(feature = "body-webview-test"))]
-    {
-        let args = authorize(&window, "notifications_test")
-            .and_then(|_| parse::<EmptyArgs>(request.body()));
-        Ok(respond(match args {
-            Ok(_) => state.settings(|store| store.get()).await.map(|snapshot| {
-                crate::notifications::test(
-                    &app,
-                    &snapshot.settings.notifications,
-                    snapshot.effective_locale,
-                )
-            }),
-            Err(error) => Err(error),
-        }))
-    }
+    let args =
+        authorize(&window, "notifications_test").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state.settings(|store| store.get()).await.map(|snapshot| {
+            crate::notifications::test(
+                &app,
+                &snapshot.settings.notifications,
+                snapshot.effective_locale,
+            )
+        }),
+        Err(error) => Err(error),
+    }))
 }
 
-#[cfg(not(feature = "body-webview-test"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SoundArgs {
@@ -1556,17 +1547,9 @@ pub(crate) async fn notifications_preview_sound(
     window: WebviewWindow,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ApiResult<()>, ()> {
-    #[cfg(feature = "body-webview-test")]
-    {
-        let _ = (window, request);
-        Ok(respond(Err(AppError::new(ErrorCode::Unsupported))))
-    }
-    #[cfg(not(feature = "body-webview-test"))]
-    {
-        let args = authorize(&window, "notifications_preview_sound")
-            .and_then(|_| parse::<SoundArgs>(request.body()));
-        Ok(respond(
-            args.map(|args| crate::notifications::preview(args.sound)),
-        ))
-    }
+    let args = authorize(&window, "notifications_preview_sound")
+        .and_then(|_| parse::<SoundArgs>(request.body()));
+    Ok(respond(
+        args.map(|args| crate::notifications::preview(args.sound)),
+    ))
 }

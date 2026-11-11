@@ -9,7 +9,6 @@ use std::sync::Mutex;
 
 use mailx_core::Activity;
 use serde::{Deserialize, Serialize};
-#[cfg(not(feature = "body-webview-test"))]
 use tauri::plugin::TauriPlugin;
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
@@ -20,7 +19,6 @@ use tauri::{
     utils::config::WindowEffectsConfig,
     window::{Effect, EffectState},
 };
-#[cfg(not(feature = "body-webview-test"))]
 use tauri_plugin_window_state::StateFlags;
 
 pub(crate) const MAIN_WINDOW: &str = "main";
@@ -30,7 +28,6 @@ const STATE_EVENT: &str = "mailx://window-state";
 /// purpose. DECORATIONS: this module owns the title bar style per platform.
 /// VISIBLE: the plugin would persist "hidden" if the app is quit while hidden
 /// (macOS Cmd+H), and the next launch would then never show the window.
-#[cfg(not(feature = "body-webview-test"))]
 pub(crate) const WINDOW_STATE_FLAGS: StateFlags = StateFlags::SIZE
     .union(StateFlags::POSITION)
     .union(StateFlags::MAXIMIZED)
@@ -39,7 +36,6 @@ pub(crate) const WINDOW_STATE_FLAGS: StateFlags = StateFlags::SIZE
 /// Remembers the main window's size, position and maximized / fullscreen state
 /// between launches. A saved position on a monitor that is gone is ignored by
 /// the plugin, which leaves placement to the operating system.
-#[cfg(not(feature = "body-webview-test"))]
 pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
     tauri_plugin_window_state::Builder::default()
         .with_state_flags(WINDOW_STATE_FLAGS)
@@ -55,7 +51,7 @@ pub(crate) fn window_state_plugin<R: Runtime>() -> TauriPlugin<R> {
 /// `unsafe` COM calls this workspace forbids; its own keyboard and pointer
 /// script is not used (the frontend has one, with an exception for text fields),
 /// and default context menus stay on so text fields keep their edit menu.
-#[cfg(all(windows, not(feature = "body-webview-test")))]
+#[cfg(windows)]
 pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
     use tauri_plugin_prevent_default::{Builder, Flags, PlatformOptions};
     Builder::new()
@@ -545,7 +541,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "body-webview-test"))]
     #[test]
     fn window_state_never_restores_decorations_or_visibility() {
         assert!(!WINDOW_STATE_FLAGS.contains(StateFlags::DECORATIONS));
@@ -560,7 +555,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "body-webview-test"))]
     #[test]
     fn a_second_launch_before_the_window_exists_is_ignored() {
         let app = tauri::test::mock_app();
@@ -568,7 +562,6 @@ mod tests {
         assert!(app.get_webview_window(MAIN_WINDOW).is_none());
     }
 
-    #[cfg(not(feature = "body-webview-test"))]
     #[test]
     fn an_early_manual_launch_is_remembered_before_the_login_window_is_created() {
         let app = tauri::test::mock_app();
@@ -578,7 +571,6 @@ mod tests {
         assert!(crate::autostart::user_activated(app.handle()));
     }
 
-    #[cfg(not(feature = "body-webview-test"))]
     // The mock runtime reports every window as visible, so showing and focusing
     // can only be checked for not failing here; the real effect needs a real window.
     #[test]

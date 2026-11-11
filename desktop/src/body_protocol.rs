@@ -47,13 +47,6 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                 .and_then(|url| app_origin(&url))
                 .unwrap_or_else(|| "'none'".into());
             tauri::async_runtime::spawn(async move {
-                #[cfg(feature = "body-webview-test")]
-                let trace = parse_route(&request.uri().to_string()).map(|(route, _)| match route {
-                    Route::Document { id, .. } => ("document", id),
-                    Route::Part { id, .. } => ("part", id),
-                    Route::Link { id, .. } => ("link", id),
-                    Route::Remote { id, .. } => ("remote", id),
-                });
                 let mut core = (label == "main")
                     .then(|| app.try_state::<crate::state::DesktopState>())
                     .flatten()
@@ -101,13 +94,6 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                         None,
                     ),
                 };
-                #[cfg(feature = "body-webview-test")]
-                crate::body_webview_test::record_response(
-                    &app,
-                    trace.as_ref().map_or("unknown", |(route, _)| *route),
-                    trace.as_ref().map(|(_, id)| id.as_str()),
-                    reply.status().as_u16(),
-                );
                 if let Some(event) = event {
                     let _ = app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, event);
                 }
@@ -162,8 +148,6 @@ pub(crate) struct BodyProtocol {
     base_css: Mutex<String>,
     documents: Mutex<HashMap<String, Document>>,
     confirmations: Mutex<HashMap<String, Confirmation>>,
-    #[cfg(feature = "body-webview-test")]
-    test_policy_probe: Mutex<Option<(String, String)>>,
 }
 
 impl Default for BodyProtocol {
@@ -380,16 +364,7 @@ impl BodyProtocol {
             base_css: Mutex::new(mailx_core::mail_body_css(&Default::default())),
             documents: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
-            #[cfg(feature = "body-webview-test")]
-            test_policy_probe: Mutex::new(None),
         }
-    }
-    #[cfg(feature = "body-webview-test")]
-    pub(crate) fn configure_test_policy_probe(&self, id: String, canary_origin: String) {
-        *self
-            .test_policy_probe
-            .lock()
-            .expect("test policy probe lock") = Some((id, canary_origin));
     }
     fn issue(&self, binding: impl Into<BodySource>) -> Result<String, AppError> {
         let binding = binding.into();
@@ -701,22 +676,6 @@ impl BodyProtocol {
                     base_css = self.base_css.lock().map_err(|_| missing())?,
                     dark_css = if dark { DARK_CSS } else { "" }
                 );
-                #[cfg(feature = "body-webview-test")]
-                let html = {
-                    let probe = self.test_policy_probe.lock().map_err(|_| missing())?;
-                    if let Some((probe_id, canary)) =
-                        probe.as_ref().filter(|(probe_id, _)| probe_id == &id)
-                    {
-                        crate::body_webview_test::policy_probe_html(
-                            canary,
-                            &resource_url(origin, "part", probe_id, "pixel", &token),
-                            &resource_url(origin, "link", probe_id, "0", &token),
-                        )
-                        .map_err(|_| missing())?
-                    } else {
-                        html
-                    }
-                };
                 let scope = format!("{origin}/part/{id}/ {origin}/remote/{id}/");
                 Ok((
                     response(

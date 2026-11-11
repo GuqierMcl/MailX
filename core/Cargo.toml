@@ -52,7 +52,7 @@ rustix = { version = "1", features = ["fs"] }
 
 [features]
 # Synthetic cache construction is excluded from normal desktop/core builds.
-body-webview-test = []
+test-support = []
 
 [dev-dependencies]
 # Test-only certificates for the fake SMTP servers.

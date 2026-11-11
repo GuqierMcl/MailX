@@ -21,7 +21,6 @@ plist = "1"
 sys-locale = "0.3.2"
 tauri = { workspace = true, features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
-tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 percent-encoding = "2"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-single-instance = "2"
@@ -55,7 +54,7 @@ tauri-plugin-prevent-default = { version = "6", features = ["platform-windows"] 
 
 [dev-dependencies]
 tempfile = "3"
-mailx-core = { workspace = true, features = ["body-webview-test"] }
+mailx-core = { workspace = true, features = ["test-support"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tauri = { workspace = true, features = ["test"] }
@@ -64,7 +63,6 @@ tauri = { workspace = true, features = ["test"] }
 # Enable the custom protocol for loading bundled frontend assets in production builds.
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-body-webview-test = ["dep:tauri-plugin-wdio-webdriver", "mailx-core/body-webview-test"]
 
 [lints]
 workspace = true

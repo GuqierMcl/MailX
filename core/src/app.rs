@@ -38,7 +38,7 @@ use crate::sync::previews::PreviewManager;
 mod attachments;
 mod avatars;
 mod bodies;
-#[cfg(any(test, feature = "body-webview-test"))]
+#[cfg(any(test, feature = "test-support"))]
 mod body_fixture;
 mod draft_bodies;
 mod flags;

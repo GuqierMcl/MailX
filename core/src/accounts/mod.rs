@@ -10,7 +10,7 @@ pub(crate) mod outbox;
 mod removal;
 pub(crate) use drafts::{DraftSource, SourceMessage, local_offset};
 pub(crate) use outbox::{Next, SendAdmission};
-#[cfg(any(test, feature = "body-webview-test"))]
+#[cfg(any(test, feature = "test-support"))]
 mod body_fixture;
 pub(crate) mod messages;
 pub(crate) mod model;
