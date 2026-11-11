@@ -37,7 +37,7 @@ If you pick the wrong entry, MailX tells you which one to use. If it says it cou
 
 If your sign-in expires or is withdrawn, open the account in MailX and click **Sign in again**; your mail and settings stay as they are. Mail on a company-hosted Exchange server isn't covered by the Microsoft 365 entry. Use manual IMAP / SMTP setup with the server details from your administrator.
 
-These entries haven't been tested with real Microsoft accounts yet, and shared mailboxes and China-operated Microsoft 365 aren't supported.
+Outlook has been tested with a personal Outlook.com account; the Microsoft 365 entry hasn't been tested with a real work or school account yet. Shared mailboxes and China-operated Microsoft 365 aren't supported.
 
 ## Reading, search and organizing
 
