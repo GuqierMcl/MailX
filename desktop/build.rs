@@ -51,6 +51,8 @@ fn main() {
             "emails_undo_archive",
             "emails_set_flags",
             "emails_select",
+            "contacts_list_aggregations",
+            "contacts_set_aggregation",
             "attachments_save",
             "avatars_get",
             "image_cache_clear",

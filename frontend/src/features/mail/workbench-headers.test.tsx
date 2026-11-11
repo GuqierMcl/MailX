@@ -21,6 +21,7 @@ const inbox: Folder = {
 
 function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
+    senderGroup: null,
     id, accountId: account.id, folderId: inbox.id, subject: `邮件 ${id}`,
     from: { name: '发件人', address: 'sender@example.com' }, preview: '',
     receivedAt: '2026-10-18T08:00:00.000Z', isRead: false, isStarred: false,

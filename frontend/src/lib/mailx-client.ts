@@ -50,6 +50,7 @@ import type {
   RemoveAccountRequest,
   EmailSelection,
   FlagBatchOutcome,
+  ContactAggregation,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
@@ -157,6 +158,10 @@ export interface MailxClient {
   setFlags(emailIds: string[], flag: 'read' | 'starred', wanted: boolean): Promise<FlagBatchOutcome>
   /** The first 500 messages a list query matches (same order), for selecting them all. */
   selectEmails(query: EmailListQuery): Promise<EmailSelection>
+  /** The senders whose mail collapses into one row in inbox lists, with their visible message counts. */
+  listContactAggregations(): Promise<ContactAggregation[]>
+  /** Starts or stops aggregating a sender address (case-insensitive, all accounts); idempotent. */
+  setContactAggregation(address: string, aggregated: boolean): Promise<void>
   /** Restores only an archive operation's changes; newer changes are never overwritten. */
   undoArchive(undoToken: string): Promise<void>
   /** Committed local flag/archive changes, including those made by agents. */
@@ -438,6 +443,8 @@ export function createDesktopClient(): MailxClient {
     unarchiveEmails: (emailIds, partial = false) => call<ArchiveOutcome>('emails_unarchive', { emailIds, partial }),
     setFlags: (emailIds, flag, wanted) => call<FlagBatchOutcome>('emails_set_flags', { emailIds, flag, wanted }),
     selectEmails: (query) => call<EmailSelection>('emails_select', { query }),
+    listContactAggregations: () => call<ContactAggregation[]>('contacts_list_aggregations', {}),
+    setContactAggregation: (address, aggregated) => call<void>('contacts_set_aggregation', { address, aggregated }),
     undoArchive: (undoToken) => call<void>('emails_undo_archive', { undoToken }),
     onMailStateChanged: (listener) => subscribe<MailStateChanged>('mailx://mail-state-changed', listener),
     onDeletions(listener) {

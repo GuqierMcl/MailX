@@ -238,6 +238,11 @@ fn validate_query(query: &EmailListQuery) -> Result<ValidatedEmailQuery, AppErro
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_owned);
+    query.from_address = query
+        .from_address
+        .as_deref()
+        .map(|value| super::contacts::normalize_sender_address(value, "fromAddress"))
+        .transpose()?;
     let cursor = query
         .cursor
         .as_ref()

@@ -60,6 +60,8 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 - `excludeFolderRoles` 可省略（默认空数组，不排除），列出的角色所在文件夹不出现在结果中；侧栏“星标”用 `{ starred: true, archive: 'include', excludeFolderRoles: ['junk', 'trash'] }`。它只缩小结果，显式的 `folderRole` 不受影响；MCP 工具在未指定文件夹时也用它排除垃圾邮件与已删除。
 - `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。`starred` 按 true / false / null 筛选星标，核心 SQL 在分页前处理，本机已发送副本不带星标；标记写回见后文。
 - `text` 为本地全文搜索（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索第一批已实现尚未手测)）：按 Unicode 空白拆词，所有词都须命中，双引号括起的部分作为整体；最多 16 个词、256 个字符，超出返回 `validation`（字段 `text`）；空白文本视为不限。检索主题、人员（发件人、收件人、抄送的名字与地址）、预览、已缓存正文（每封最多 64 KiB）与附件名，全角 ASCII 与半角互相匹配；不少于 3 个字符的词用 FTS5 trigram，少于 3 个字符的词退回参数化 LIKE；用户文本不作为 SQL 或 FTS 表达式执行，不调用服务商搜索。`EmailSummary.matchSnippet` 为命中片段 `SnippetSegment[] | null`（`{ text, hit }` 纯文本分段，无 HTML，仅在正文或附件名命中时给出），`coverage.indexedBodies` 为作用域内已收进索引的正文数。
+- `fromAddress` 只列发件地址等于它的邮件，不区分大小写（ASCII 小写，与 SQLite `lower()` 一致）；去除首尾空白后须非空、不超过 320 个字符、含 `@` 且无控制字符，否则返回 `validation`（字段 `fromAddress`）。本机已发送副本按所属账号自己的地址匹配。只按完整地址匹配，不按域名，也不合并同一个人的多个地址。
+- `groupSenders`（缺省 false）为 true 时，有聚合规则的发件人（见下文“联系人聚合”）的邮件在列表中折叠为每个发件人一行；存在 `text` 或 `fromAddress` 时被忽略（搜索和单个联系人视图从不折叠）。
 - `receivedAfter` / `receivedBefore` 为 RFC 3339 时间，规范化为 UTC 毫秒格式后按左闭右开区间过滤；无效时间返回 `validation`。
 - `limit` 为 null 或省略时默认 50，有效范围 1–200；工作台请求 100。越界返回 `validation`。
 - `cursor` 为 null 时从第一页开始，否则原样传回服务端提供的游标。更改查询条件后须清空游标重新开始；游标不是权限凭据。
@@ -527,6 +529,16 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 - **跳过不可处理的邮件。** `emails_delete`、`emails_archive`、`emails_unarchive` 新增可选参数 `partial: boolean`（缺省 false，即原来的整批语义）。为 true 时，不可处理的邮件（不可见、已在删除中、来自旧 UID 世代；归档时还包括非收件箱邮件和本机已发送副本）被跳过，其余照常处理，跳过的 id 按输入顺序放进结果的 `skippedIds`；全部被跳过时返回 `notFound`，不改任何状态。`EmailDeletion` 与 `ArchiveOutcome` 新增 `skippedIds: string[]`，非 partial 调用恒为空数组。删除的撤销批次与归档的撤销回执只包含实际处理的邮件。partial 删除中只要有一封需要永久删除而未传 `confirmedPermanent: true`，仍整批返回 `confirmationRequired`。
 - **批量标记。** `setFlags(emailIds, flag, wanted)` 对应 `emails_set_flags`，`{ emailIds, flag: 'read' | 'starred', wanted }`，`emailIds` 去重后 1 到 500 个，否则 `validation`。返回 `FlagBatchOutcome { results: [{ emailId, outcome: 'unchanged' | 'queued' | 'localOnly' | 'failed', code }] }`，按输入顺序逐封报告（重复 id 只报一次），`code` 仅在 failed 时为错误码（如 `notFound`）；一封失败不影响其他邮件。本机已发送副本报告为 failed（`notFound`）。
 - **全选。** `selectEmails(query)` 对应 `emails_select`，`{ query: EmailListQuery }`，返回 `EmailSelection { items: SelectedEmail[], truncated }`：与 `emails_list` 相同条件和顺序（最新在前）下的前 500 封，忽略 `limit` 与 `cursor`；`truncated` 表示还有更多。`SelectedEmail` 为 `{ id, accountId, folderId, isRead, isStarred, archived, localOnly }`，只用于判断按钮状态和确认永久删除，不含主题、地址和正文。
+
+### 联系人聚合（主窗口）
+
+用户可以把某个发件地址“聚合”：之后在收件箱类视图中，该地址的所有邮件折叠成一行，点击后打开该发件人的联系人视图（`fromAddress` 查询）。规则保存在本机 `contact_aggregations` 表（迁移 0026），对所有账号生效，只按邮箱地址（ASCII 小写）匹配。MCP 工具与契约不受影响，`EmailListQuery` 的新增字段不出现在 MCP 工具输入中。
+
+- **折叠行。** `groupSenders: true` 且无 `text`、无 `fromAddress` 时，列表中该发件人的所有邮件被一行取代，这一行就是通过本次查询全部条件的该发件人最新一封邮件（`id`、主题、标记、`receivedAt`、预览均取自它），并带 `EmailSummary.senderGroup: SenderGroup | null`，`SenderGroup { address, total, unread }`（`address` 为规范化地址，`total` / `unread` 为通过所有筛选条件的邮件数与其中未读数）。因此“未读”页只在发件人有未读邮件时才显示折叠行，且行为其最新未读邮件。折叠行与普通行按 `(receivedAt DESC, id DESC)`（以其最新邮件为准）混排并共用同一游标，分页无重复、无遗漏，包括时间戳相同的情况。本机已发送副本从不折叠。
+- **全选。** `selectEmails` 在折叠生效时排除已聚合发件人的邮件（折叠行不可选择），其余与 `emails_list` 的独立行一致。
+- **规则列表。** `listContactAggregations()` 对应 `contacts_list_aggregations`（无参数），返回 `ContactAggregation[]`，`ContactAggregation { address, name: string | null, messageCount, latestReceivedAt: string | null, createdAt }`：`name` 取该地址最新一封可见邮件的发件人名，`messageCount` 为所有账号中该地址在垃圾邮件和已删除邮件之外的可见邮件数（与联系人视图一致），按名称（无名称时按地址）不区分大小写排序。
+- **设置规则。** `setContactAggregation(address, aggregated)` 对应 `contacts_set_aggregation`，`{ address, aggregated: boolean }`；地址校验同 `fromAddress`，失败返回 `validation`（字段 `address`）。幂等：重复添加或删除不存在的规则都成功。两个命令只开放给主窗口，参数拒绝未知字段。
+- **TypeScript。** `EmailListQuery` 新增 `fromAddress: string | null` 与 `groupSenders: boolean`；`mock-client` 按同样语义实现。
 
 ### 全局提示（Toast）
 

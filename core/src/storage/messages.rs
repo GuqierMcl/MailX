@@ -11,7 +11,7 @@ use crate::{
     mail::{
         ArchiveScope, AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail,
         EmailListQuery, EmailPage, EmailRecipients, EmailSelection, EmailSummary,
-        LOCAL_SENT_PREFIX, MailAddress, PreviewState, SelectedEmail,
+        LOCAL_SENT_PREFIX, MailAddress, PreviewState, SelectedEmail, SenderGroup,
     },
     sync::headers::MessageRecord,
 };
@@ -454,20 +454,54 @@ impl Storage {
     ) -> Result<EmailPage, AppError> {
         let query = &validated.query;
         let (filter, local, terms) = list_filters(query, validated.cursor.as_ref())?;
-        let mut values = filter.values.clone();
+        let mut values = Vec::new();
+        let mut prefix = String::new();
+        let mut group_branch = String::new();
+        let mut group_values: Vec<Value> = Vec::new();
+        if grouping(query) {
+            // One row per aggregated sender: the newest message that passes
+            // every filter except the page cursor, with the counts of that
+            // same set. The cursor then applies to the newest message, so a
+            // group appears on exactly one page.
+            let (scope, _, _) = base_filters(query)?;
+            values.extend(scope.values.iter().cloned());
+            prefix = format!(
+                "WITH g AS (SELECT id, addr, total, unread FROM (
+                    SELECT m.id AS id, lower(m.from_address) AS addr,
+                           COUNT(*) OVER (PARTITION BY lower(m.from_address)) AS total,
+                           SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) OVER (PARTITION BY lower(m.from_address)) AS unread,
+                           ROW_NUMBER() OVER (PARTITION BY lower(m.from_address) ORDER BY m.received_at DESC, m.id DESC) AS rn
+                    {VISIBLE_MESSAGES} AND {} AND {SENDER_GROUPED}
+                 ) WHERE rn = 1) ",
+                scope.sql()
+            );
+            group_branch = format!(
+                "UNION ALL
+                 SELECT {SUMMARY_COLUMNS}, (SELECT addr FROM g WHERE g.id = m.id), (SELECT total FROM g WHERE g.id = m.id), (SELECT unread FROM g WHERE g.id = m.id)
+                 {VISIBLE_MESSAGES} AND m.id IN (SELECT id FROM g){} "
+                , if let Some(cursor) = &validated.cursor {
+                    group_values.extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+                    " AND (m.received_at, m.id) < (?, ?)"
+                } else {
+                    ""
+                }
+            );
+        }
+        values.extend(filter.values.iter().cloned());
         values.extend(local.values.iter().cloned());
+        values.extend(group_values);
         values.push((i64::from(validated.limit) + 1).into());
         let sql = format!(
-            "SELECT {SUMMARY_COLUMNS} {VISIBLE_MESSAGES} AND {}
+            "{prefix}SELECT {SUMMARY_COLUMNS}, NULL, NULL, NULL {VISIBLE_MESSAGES} AND {}
              UNION ALL
-             SELECT {LOCAL_SUMMARY_COLUMNS} {LOCAL_COPIES} AND {}
-             ORDER BY 7 DESC, 1 DESC LIMIT ?",
+             SELECT {LOCAL_SUMMARY_COLUMNS}, NULL, NULL, NULL {LOCAL_COPIES} AND {}
+             {group_branch}ORDER BY 7 DESC, 1 DESC LIMIT ?",
             filter.sql(),
             local.sql()
         );
         let mut statement = self.db.prepare(&sql)?;
         let mut items = statement
-            .query_map(params_from_iter(values), summary)?
+            .query_map(params_from_iter(values), list_summary)?
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         let next_cursor = if items.len() > validated.limit as usize {
@@ -738,7 +772,7 @@ pub(super) const LOCAL_COPIES: &str = "FROM outbox o JOIN accounts a ON a.id = o
    AND f.id = (SELECT MIN(s.id) FROM folders s WHERE s.account_id = o.account_id AND s.mailbox_source_id = a.mailbox_source_id AND s.role = 'sent' AND s.selectable = 1)
  WHERE o.state = 'accepted' AND o.server_copy_message_id IS NULL AND o.deleted_locally_at IS NULL
    AND o.snapshot_released_at IS NULL AND o.snapshot_hash IS NOT NULL";
-const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
+pub(super) const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.id = m.account_id AND a.mailbox_source_id = m.mailbox_source_id
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1
  AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)";
@@ -776,7 +810,25 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
         local_only: row.get(16)?,
         archived: row.get(17)?,
         match_snippet: None,
+        sender_group: None,
     })
+}
+
+/// A summary row of `list_emails`: columns 18 to 20 carry the sender group
+/// (address, total, unread), all NULL for an ordinary row.
+fn list_summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
+    let mut item = summary(row)?;
+    if let Some(address) = row.get::<_, Option<String>>(18)? {
+        let count = |index| -> rusqlite::Result<u32> {
+            Ok(u32::try_from(row.get::<_, i64>(index)?).unwrap_or(u32::MAX))
+        };
+        item.sender_group = Some(SenderGroup {
+            address,
+            total: count(19)?,
+            unread: count(20)?,
+        });
+    }
+    Ok(item)
 }
 
 /// Columns 14 to 16 of a summary row: stored recipients, their count, and
@@ -804,11 +856,53 @@ fn recipients(row: &Row<'_>) -> rusqlite::Result<EmailRecipients> {
     })
 }
 
+/// Whether the list collapses aggregated senders: never in a text search or a
+/// single-sender view.
+fn grouping(query: &EmailListQuery) -> bool {
+    query.group_senders && query.text.is_none() && query.from_address.is_none()
+}
+
+/// A sender with an aggregation rule; written NULL-safe so it works as `NOT`.
+const SENDER_GROUPED: &str =
+    "EXISTS (SELECT 1 FROM contact_aggregations r WHERE r.address = lower(m.from_address))";
+
 /// The row filters `list_emails` applies to server messages and to local Sent
-/// copies, shared with `select_emails` so both see exactly the same set.
+/// copies, shared with `select_emails` so both see exactly the same set. Rows
+/// of aggregated senders are left out of the server filter when the list
+/// groups them: they appear only as group rows.
 fn list_filters(
     query: &EmailListQuery,
     cursor: Option<&PageCursor>,
+) -> Result<
+    (
+        ScopeFilter,
+        ScopeFilter,
+        Option<super::search_index::SearchTerms>,
+    ),
+    AppError,
+> {
+    let (mut filter, mut local, terms) = base_filters(query)?;
+    if grouping(query) {
+        filter.clauses.push(format!("NOT {SENDER_GROUPED}"));
+    }
+    if let Some(cursor) = cursor {
+        filter.clauses.push("(m.received_at, m.id) < (?, ?)".into());
+        filter
+            .values
+            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+        local
+            .clauses
+            .push("(o.accepted_at, 'local-sent:' || o.id) < (?, ?)".into());
+        local
+            .values
+            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
+    }
+    Ok((filter, local, terms))
+}
+
+/// Every content filter of a query except the page cursor and grouping.
+fn base_filters(
+    query: &EmailListQuery,
 ) -> Result<
     (
         ScopeFilter,
@@ -841,6 +935,10 @@ fn list_filters(
             "(COALESCE(o.attachment_count, 0) > 0) = ?",
             i64::from(attachment),
         );
+    }
+    if let Some(address) = &query.from_address {
+        filter.add("lower(m.from_address) = ?", address.clone());
+        local.add("lower(a.email_address) = ?", address.clone());
     }
     let terms = match &query.text {
         Some(text) => super::search_index::parse_query(text)?,
@@ -875,18 +973,6 @@ fn list_filters(
     if let Some(before) = &query.received_before {
         filter.add("m.received_at < ?", before.clone());
         local.add("o.accepted_at < ?", before.clone());
-    }
-    if let Some(cursor) = cursor {
-        filter.clauses.push("(m.received_at, m.id) < (?, ?)".into());
-        filter
-            .values
-            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
-        local
-            .clauses
-            .push("(o.accepted_at, 'local-sent:' || o.id) < (?, ?)".into());
-        local
-            .values
-            .extend([cursor.r.clone().into(), cursor.i.clone().into()]);
     }
     Ok((filter, local, terms))
 }

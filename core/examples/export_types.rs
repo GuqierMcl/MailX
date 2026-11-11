@@ -69,6 +69,8 @@ fn main() {
         BodyFailureCode,
         PreviewState,
         EmailSummary,
+        SenderGroup,
+        ContactAggregation,
         SnippetSegment,
         EmailListQuery,
         Coverage,

@@ -77,6 +77,8 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     unarchiveEmails: vi.fn<MailxClient['unarchiveEmails']>().mockResolvedValue({ processedCount: 1, changedCount: 1, undoToken: 'unarchive-1', skippedIds: [] }),
     setFlags: vi.fn<MailxClient['setFlags']>().mockImplementation(async (emailIds) => ({ results: emailIds.map((emailId) => ({ emailId, outcome: 'queued' as const, code: null })) })),
     selectEmails: vi.fn<MailxClient['selectEmails']>().mockResolvedValue({ items: [], truncated: false }),
+    listContactAggregations: vi.fn<MailxClient['listContactAggregations']>().mockResolvedValue([]),
+    setContactAggregation: vi.fn<MailxClient['setContactAggregation']>().mockResolvedValue(undefined),
     undoArchive: vi.fn<MailxClient['undoArchive']>().mockResolvedValue(undefined),
     onMailStateChanged: vi.fn<MailxClient['onMailStateChanged']>().mockReturnValue(() => undefined),
     onDeletions: vi.fn<MailxClient['onDeletions']>().mockReturnValue(() => undefined),

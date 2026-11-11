@@ -5,7 +5,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { InboxIcon, Search01Icon } from '@hugeicons/core-free-icons'
+import { ArrowLeft01Icon, InboxIcon, Search01Icon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -16,7 +16,7 @@ import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { cn } from '@/lib/utils'
 import { EmailCard, type RowClick } from './email-card'
 import { EmailContextMenuContent } from './email-context-menu'
-import type { RespondKind } from './email-menu-actions'
+import type { EmailMenuCallbacks, RespondKind } from './email-menu-actions'
 import { SelectionHeader, type SelectionActions } from './selection-header'
 import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import type { ListSelection } from './use-list-selection'
@@ -31,8 +31,23 @@ export type ListSyncStatus = {
   windowCapped: boolean
 }
 
-type EmailListProps = {
+/** Shown in the header while the list holds one sender's mail (the contact view). */
+export type ContactHeading = {
+  name: string | null
+  address: string
+  /** The view this one returns to, e.g. "收件箱". */
+  backTitle: string
+  onBack: () => void
+}
+
+type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'> & {
   title: string
+  /** Set in the contact view: back button and the contact's name replace the plain title. */
+  contact?: ContactHeading
+  /** Where the list starts scrolling, in px; used to come back to a remembered position. */
+  initialScrollTop?: number
+  /** Reports the scroll offset as the user scrolls. */
+  onScrollOffset?: (offset: number) => void
   /** A sent-role view (a Sent folder or the unified Sent): rows name the recipients, not the sender. */
   sentView?: boolean
   emails: EmailSummary[]
@@ -79,7 +94,7 @@ type EmailListProps = {
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
-  const { title, filter, onFilterChange, selection, selectionActions } = props
+  const { title, contact, filter, onFilterChange, selection, selectionActions } = props
   const selecting = Boolean(selection?.active && selectionActions)
   useSelectionKeys(selecting ? selection : undefined, selectionActions)
   return (
@@ -96,7 +111,7 @@ export function EmailList(props: EmailListProps) {
           </>
         ) : (
           <>
-            <h1 className="truncate text-base font-semibold">{title}</h1>
+            {contact ? <ContactTitle contact={contact} /> : <h1 className="truncate text-base font-semibold">{title}</h1>}
             {selection && selectionActions && (
               <Button variant="ghost" size="sm" className="ml-auto" onClick={selection.enter}>{t('mail:select')}</Button>
             )}
@@ -112,6 +127,29 @@ export function EmailList(props: EmailListProps) {
       )}
       <EmailRows {...props} selection={selectionActions ? selection : undefined} />
     </Tabs>
+  )
+}
+
+/** Back button, then the contact's name with the address muted under it. */
+function ContactTitle({ contact }: { contact: ContactHeading }) {
+  const name = contact.name?.trim() || null
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-1 max-w-28 shrink-0 px-2"
+        aria-label={t('mail:backTo', { title: contact.backTitle })}
+        onClick={contact.onBack}
+      >
+        <HugeiconsIcon icon={ArrowLeft01Icon} />
+        <span className="truncate">{contact.backTitle}</span>
+      </Button>
+      <div className="flex min-w-0 flex-col leading-tight">
+        <h1 className="truncate text-base font-semibold" title={name ?? contact.address}>{name ?? contact.address}</h1>
+        {name && <p className="truncate text-xs text-muted-foreground" title={contact.address}>{contact.address}</p>}
+      </div>
+    </>
   )
 }
 
@@ -136,7 +174,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -209,6 +247,8 @@ function EmailRows({ sentView = false, emails, accounts, loading, syncStatus, er
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
       selection={selection}
+      viewingContact={contact?.address ?? null} onViewContact={onViewContact} onAggregate={onAggregate} isAggregated={isAggregated}
+      initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset}
     />
   )
 }
@@ -255,9 +295,12 @@ type VirtualRowsProps = {
   onLoadMore: () => void
   /** Present while picking messages. */
   selection?: ListSelection
-}
+  viewingContact: string | null
+  initialScrollTop?: number
+  onScrollOffset?: (offset: number) => void
+} & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // One right-click menu serves the whole list. The snapshot outlives the open
@@ -298,7 +341,18 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
     paddingEnd: LIST_PADDING,
     overscan: OVERSCAN,
     rangeExtractor,
+    // Coming back to a list: start where the user left it.
+    initialOffset: initialScrollTop,
   })
+
+  // Report the scroll offset so the caller can come back to it later.
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || !onScrollOffset) return
+    const onScroll = () => onScrollOffset(viewport.scrollTop)
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+    return () => viewport.removeEventListener('scroll', onScroll)
+  }, [onScrollOffset])
 
   // Row heights follow the preview setting and the root font size (rem), so a change
   // to either drops the cached sizes.
@@ -334,6 +388,12 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
   // with only that row. Inside, a click toggles and Shift picks the range.
   const clickRow = (email: EmailSummary, intent: RowClick) => {
+    // A group row opens the sender's list; it is not a message, so it never opens in the
+    // reader nor takes part in picking (picking mode ignores it).
+    if (email.senderGroup) {
+      if (!selection?.active) onViewContact?.(email)
+      return
+    }
     if (!selection) onSelect(email)
     else if (!selection.active) {
       if (intent.toggle || intent.range) selection.start(email)
@@ -400,7 +460,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
                 email={email}
                 sentView={sentView}
                 account={accounts?.find((account) => account.id === email.accountId) ?? null}
-                selected={email.id === selectedId}
+                selected={!email.senderGroup && email.id === selectedId}
                 previewLines={previewLines}
                 onFlag={onFlag}
                 onArchive={onArchive}
@@ -418,13 +478,19 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
         {menu && (
           <EmailContextMenuContent
             email={menu.email}
-            onOpen={onSelect}
-            onRespond={onRespond}
-            onFlag={onFlag}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            onRemoveLocal={onRemoveLocal}
+            // A group row is no single message: only its contact items are offered.
+            onOpen={menu.email.senderGroup ? undefined : onSelect}
+            onRespond={menu.email.senderGroup ? undefined : onRespond}
+            onFlag={menu.email.senderGroup ? undefined : onFlag}
+            onArchive={menu.email.senderGroup ? undefined : onArchive}
+            onDelete={menu.email.senderGroup ? undefined : onDelete}
+            onRemoveLocal={menu.email.senderGroup ? undefined : onRemoveLocal}
             canArchive={canArchive}
+            // Rows of a Sent view show recipients, not senders: no contact items there.
+            onViewContact={sentView ? undefined : onViewContact}
+            onAggregate={sentView ? undefined : onAggregate}
+            isAggregated={menu.email.senderGroup ? () => true : isAggregated}
+            viewingContact={viewingContact}
             finalFocus={() => {
               // Back to where focus was (the row, after Shift+F10 or the menu key);
               // never into the list just because the mouse was used.

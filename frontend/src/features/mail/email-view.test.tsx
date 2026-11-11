@@ -67,6 +67,7 @@ describe('body failure guidance', () => {
     const account = exampleAccount({ providerId })
     const email: EmailDetail = {
       summary: {
+        senderGroup: null,
         id: 'policy-mail', accountId: account.id, folderId: 'inbox', subject: 'Policy failure',
         from: { name: null, address: 'synthetic@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
         isRead: false, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, hasAttachment: false, bodyState: 'failed', previewState: 'failed', preview: '',
@@ -97,6 +98,7 @@ describe('local-only sent copy', () => {
   function localEmail(localOnly: boolean): EmailDetail {
     return {
       summary: {
+        senderGroup: null,
         id: localOnly ? 'local-sent:1' : 'sent-1', accountId: 'a', folderId: 'sent', subject: 'Sent copy',
         from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
         isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [{ name: null, address: 'you@example.com' }], total: 1 }, localOnly, archived: false,
@@ -144,6 +146,7 @@ describe('local archive button', () => {
   function detail(archived: boolean, folderId = 'inbox'): EmailDetail {
     return {
       summary: {
+        senderGroup: null,
         id: 'mail-1', accountId: 'a', folderId, subject: 'Hi',
         from: { name: null, address: 'lin@example.com' }, receivedAt: '2026-10-28T00:00:00Z',
         isRead: true, isStarred: false, pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived,

@@ -132,6 +132,38 @@ pub struct EmailSummary {
     /// names; `None` when there is no text search or the hit is only in the
     /// subject or people.
     pub match_snippet: Option<Vec<SnippetSegment>>,
+    /// Set when this row stands for every message of an aggregated sender in
+    /// the list (see [`EmailListQuery::group_senders`]); the row itself is
+    /// that sender's newest message in scope.
+    pub sender_group: Option<SenderGroup>,
+}
+
+/// A sender whose messages are collapsed into one list row. Counts cover the
+/// messages that pass every filter of the query, across all accounts in scope.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderGroup {
+    /// Normalized (ASCII lowercase) sender address.
+    pub address: String,
+    #[ts(type = "number")]
+    pub total: u32,
+    #[ts(type = "number")]
+    pub unread: u32,
+}
+
+/// An aggregated sender, as listed in the contact settings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactAggregation {
+    /// Normalized (ASCII lowercase) sender address.
+    pub address: String,
+    /// Display name of the newest visible message from this address.
+    pub name: Option<String>,
+    /// Visible messages from this address in every account, outside junk and trash.
+    #[ts(type = "number")]
+    pub message_count: u32,
+    pub latest_received_at: Option<String>,
+    pub created_at: String,
 }
 
 /// One run of a search snippet; `hit` marks the matched text. Plain text only.
@@ -190,6 +222,12 @@ pub struct EmailListQuery {
     /// Match the local desired star state, including pending server writes.
     pub starred: Option<bool>,
     pub has_attachment: Option<bool>,
+    /// Only messages from this sender address (case-insensitive). Local Sent
+    /// copies match on the account's own address.
+    pub from_address: Option<String>,
+    /// Collapse messages of aggregated senders into one row each. Ignored in
+    /// a text search and together with `from_address`.
+    pub group_senders: bool,
     pub received_after: Option<String>,
     pub received_before: Option<String>,
     #[ts(type = "number | null")]

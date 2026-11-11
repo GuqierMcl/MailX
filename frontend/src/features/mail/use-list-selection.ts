@@ -37,6 +37,8 @@ function add(picked: Map<string, SelectedEmail>, rows: Array<SelectedEmail | Ema
   const next = new Map(picked)
   let truncated = false
   for (const row of rows) {
+    // A sender's group row stands for many messages and is never picked itself.
+    if ('senderGroup' in row && row.senderGroup) continue
     if (next.has(row.id)) continue
     if (next.size >= SELECTION_LIMIT) {
       truncated = true
@@ -83,7 +85,7 @@ export function useListSelection(emails: EmailSummary[], scope: string) {
   }, [current.picked, emails])
 
   /** Cmd/Ctrl/Shift+click outside the mode: only that row, never the opened message. */
-  const start = useCallback((email: EmailSummary) => setState((s) => ({
+  const start = useCallback((email: EmailSummary) => setState((s) => email.senderGroup ? s : ({
     ...s, active: true, session: s.session + 1, picked: new Map([[email.id, toSelected(email)]]), anchor: email.id, all: false, truncated: false,
   })), [])
   const enter = useCallback(() => setState((s) => s.active ? s : ({
@@ -93,6 +95,7 @@ export function useListSelection(emails: EmailSummary[], scope: string) {
     ...s, active: false, session: s.session + 1, picked: EMPTY, anchor: null, all: false, truncated: false,
   }) : s), [])
   const toggle = useCallback((email: EmailSummary) => setState((s) => {
+    if (email.senderGroup) return s
     if (s.picked.has(email.id)) {
       const picked = new Map(s.picked)
       picked.delete(email.id)
@@ -103,6 +106,7 @@ export function useListSelection(emails: EmailSummary[], scope: string) {
   }), [])
   /** Shift+click: every row from the anchor to this one, in list order. */
   const extend = useCallback((email: EmailSummary, rows: EmailSummary[]) => setState((s) => {
+    if (email.senderGroup) return s
     const from = s.anchor === null ? -1 : rows.findIndex((row) => row.id === s.anchor)
     const to = rows.findIndex((row) => row.id === email.id)
     if (to < 0) return s
@@ -138,7 +142,7 @@ export function useListSelection(emails: EmailSummary[], scope: string) {
   const isSelected = useCallback((id: string) => picked.has(id), [picked])
   // "Everything" stops being true once a listed row is outside the selection,
   // e.g. new mail that arrived after selecting all.
-  const allSelected = current.active && current.all && picked.size > 0 && emails.every((email) => picked.has(email.id))
+  const allSelected = current.active && current.all && picked.size > 0 && emails.every((email) => email.senderGroup || picked.has(email.id))
 
   return {
     active: current.active,

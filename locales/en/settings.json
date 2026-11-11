@@ -195,5 +195,17 @@
   "mcpClientGroup": "{{label}} ×{{count}}",
   "mcpClientSeparator": ", ",
   "mcpClientsConnected": "Connected clients",
-  "mcpTitleConnected": "Connected: {{names}}"
+  "mcpTitleConnected": "Connected: {{names}}",
+  "contacts": "Contacts",
+  "contactsGroupedTitle": "Grouped mail",
+  "contactsGroupedDescription": "Mail from these contacts shows as one row in your inbox. Open it to see everything. Right-click a message to add someone.",
+  "contactsEmptyTitle": "No grouped contacts yet",
+  "contactsLoadFailed": "Couldn’t load grouped contacts",
+  "contactsMessageSummary_one": "{{count}} message · latest {{date}}",
+  "contactsMessageSummary_other": "{{count}} messages · latest {{date}}",
+  "contactsMessageCount_one": "{{count}} message",
+  "contactsMessageCount_other": "{{count}} messages",
+  "contactsUngroup": "Stop grouping",
+  "contactsUngroupLabel": "Stop grouping {{name}}",
+  "contactsUngroupFailed": "Couldn’t stop grouping"
 }

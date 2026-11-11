@@ -13,6 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, convertFileSrc: ()
 const account = exampleAccount()
 const inbox: Folder = { id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount: 0, totalCount: 1, archivedCount: 0, archivedUnreadCount: 0 }
 const mail: EmailSummary = {
+  senderGroup: null,
   id: 'mail-1', accountId: account.id, folderId: 'inbox', subject: '季度计划', from: { name: '陈晓', address: 'chen@example.com' }, preview: '',
   receivedAt: '2026-10-18T08:00:00.000Z', isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false,
 }

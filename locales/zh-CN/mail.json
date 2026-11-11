@@ -222,5 +222,17 @@
   "batchFlagPartial_other": "{{count}} 封已更改，{{failed}} 封未能更改",
   "deleteForGoodBatchTitle_other": "删除 {{count}} 封邮件？",
   "deleteForGoodBatchDescription_other": "其中 {{count}} 封将被永久删除：它们已在“已删除”中，或所在账号没有“已删除”文件夹。删除后服务器上不会保留副本；撤销只在提示消失前有效。",
-  "deleteBatchConfirm": "删除"
+  "deleteBatchConfirm": "删除",
+  "viewContactMail": "查看此联系人的邮件",
+  "aggregateContact": "聚合此联系人的邮件",
+  "unaggregateContact": "取消聚合此联系人",
+  "contactGrouped": "已聚合 {{name}} 的邮件",
+  "contactUngrouped": "已取消聚合 {{name}}",
+  "groupContactFailed": "无法聚合此联系人的邮件",
+  "ungroupContactFailed": "无法取消聚合此联系人",
+  "backTo": "返回{{title}}",
+  "senderGroupCount_other": "{{count}} 封",
+  "senderGroupUnread_other": "{{count}} 封未读",
+  "senderGroupLabel": "{{name}}，{{total}} 封邮件",
+  "senderGroupLabelUnread": "{{name}}，{{total}} 封邮件，{{unread}} 封未读"
 }

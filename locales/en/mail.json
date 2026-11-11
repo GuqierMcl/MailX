@@ -249,5 +249,19 @@
   "deleteForGoodBatchTitle_other": "Delete {{count}} messages?",
   "deleteForGoodBatchDescription_one": "{{count}} of them will be deleted forever: it is already in Trash, or its account has no Trash. The server keeps no copy; you can undo only until the notice goes away.",
   "deleteForGoodBatchDescription_other": "{{count}} of them will be deleted forever: they are already in Trash, or their account has no Trash. The server keeps no copy; you can undo only until the notice goes away.",
-  "deleteBatchConfirm": "Delete"
+  "deleteBatchConfirm": "Delete",
+  "viewContactMail": "Show mail from this contact",
+  "aggregateContact": "Group mail from this contact",
+  "unaggregateContact": "Stop grouping this contact",
+  "contactGrouped": "Grouping mail from {{name}}",
+  "contactUngrouped": "Stopped grouping {{name}}",
+  "groupContactFailed": "Couldn’t group this contact’s mail",
+  "ungroupContactFailed": "Couldn’t stop grouping this contact’s mail",
+  "backTo": "Back to {{title}}",
+  "senderGroupCount_one": "{{count}} message",
+  "senderGroupCount_other": "{{count}} messages",
+  "senderGroupUnread_one": "{{count}} unread",
+  "senderGroupUnread_other": "{{count}} unread",
+  "senderGroupLabel": "{{name}}, {{total}} messages",
+  "senderGroupLabelUnread": "{{name}}, {{total}} messages, {{unread}} unread"
 }

@@ -39,3 +39,12 @@ export const composeKeys = {
   drafts: () => [...composeKeys.all, 'drafts'] as const,
   outbox: () => [...composeKeys.all, 'outbox'] as const,
 }
+
+/**
+ * Sender grouping rules (contact aggregation). Not under `mailKeys.all`: sync
+ * rounds do not change them, so they are refetched only after the user edits one.
+ */
+export const contactKeys = {
+  all: ['contacts'] as const,
+  aggregations: () => [...contactKeys.all, 'aggregations'] as const,
+}

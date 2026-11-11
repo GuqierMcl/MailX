@@ -479,6 +479,8 @@ fn search_emails(
         received_before: input.received_before,
         limit: Some(limit),
         cursor: input.cursor,
+        from_address: None,
+        group_senders: false,
     })?;
     Ok(SearchEmailsOutput {
         emails: page

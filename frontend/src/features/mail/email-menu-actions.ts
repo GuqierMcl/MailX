@@ -9,6 +9,8 @@ import {
   MailReply01Icon,
   MailReplyAll01Icon,
   StarIcon,
+  UserMultiple02Icon,
+  UserSearch01Icon,
   ViewIcon,
 } from '@hugeicons/core-free-icons'
 import type { EmailSummary } from '@/generated/accounts'
@@ -25,14 +27,23 @@ export type EmailMenuCallbacks = {
   onRemoveLocal?: (email: EmailSummary) => void
   /** Whether local archive is available for this message's current folder. */
   canArchive?: (email: EmailSummary) => boolean
+  /** Opens the contact view for the message's sender. */
+  onViewContact?: (email: EmailSummary) => void
+  /** Turns grouping of the sender's mail on or off. */
+  onAggregate?: (email: EmailSummary, aggregate: boolean) => void
+  /** Whether the sender's mail is already grouped. */
+  isAggregated?: (email: EmailSummary) => boolean
+  /** The sender whose contact view is on screen, if any; "view" is not offered for it again. */
+  viewingContact?: string | null
 }
 
 export type EmailMenuAction = {
-  kind: 'open' | RespondKind | 'read' | 'unread' | 'star' | 'unstar' | 'archive' | 'unarchive' | 'delete' | 'removeLocal'
+  kind: 'open' | RespondKind | 'viewContact' | 'aggregate' | 'unaggregate' | 'read' | 'unread' | 'star' | 'unstar' | 'archive' | 'unarchive' | 'delete' | 'removeLocal'
   label:
     | 'mail:openMessage' | 'mail:reply' | 'mail:replyAll' | 'mail:forward'
     | 'mail:markRead' | 'mail:markUnread' | 'mail:star' | 'mail:unstar'
     | 'mail:archive' | 'mail:unarchive' | 'mail:delete' | 'mail:removeLocalCopy'
+    | 'mail:viewContactMail' | 'mail:aggregateContact' | 'mail:unaggregateContact'
   icon: IconSvgElement
   destructive?: boolean
   run: () => void
@@ -41,10 +52,10 @@ export type EmailMenuAction = {
 /**
  * The menu for one message, as groups of actions. Rules match the row's quick
  * actions: a local-only sent copy has no server message, so it offers no read,
- * star, archive or delete, only removal from this device. Empty groups are dropped.
+ * star, archive, delete or contact items, only removal from this device. Empty groups are dropped.
  */
 export function emailMenuActions(email: EmailSummary, available: EmailMenuCallbacks): EmailMenuAction[][] {
-  const { onOpen, onRespond, onFlag, onArchive, onDelete, onRemoveLocal, canArchive } = available
+  const { onOpen, onRespond, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onViewContact, onAggregate, isAggregated, viewingContact } = available
   const localOnly = email.localOnly
   const open: EmailMenuAction[] = onOpen ? [{ kind: 'open', label: 'mail:openMessage', icon: ViewIcon, run: () => onOpen(email) }] : []
   const respond: EmailMenuAction[] = onRespond
@@ -54,6 +65,18 @@ export function emailMenuActions(email: EmailSummary, available: EmailMenuCallba
         ['forward', 'mail:forward', Forward01Icon],
       ] as const).map(([kind, label, icon]) => ({ kind, label, icon, run: () => onRespond(email, kind) }))
     : []
+  // Rows of a local-only copy or without a sender address have no contact to speak of.
+  const sender = email.from.address.trim().toLowerCase()
+  const hasContact = !localOnly && sender !== ''
+  const contact: EmailMenuAction[] = []
+  if (hasContact && onViewContact && sender !== viewingContact?.trim().toLowerCase()) {
+    contact.push({ kind: 'viewContact', label: 'mail:viewContactMail', icon: UserSearch01Icon, run: () => onViewContact(email) })
+  }
+  if (hasContact && onAggregate) {
+    contact.push(isAggregated?.(email)
+      ? { kind: 'unaggregate', label: 'mail:unaggregateContact', icon: UserMultiple02Icon, run: () => onAggregate(email, false) }
+      : { kind: 'aggregate', label: 'mail:aggregateContact', icon: UserMultiple02Icon, run: () => onAggregate(email, true) })
+  }
   const flags: EmailMenuAction[] = onFlag && !localOnly
     ? [
         email.isRead
@@ -72,5 +95,5 @@ export function emailMenuActions(email: EmailSummary, available: EmailMenuCallba
   const remove: EmailMenuAction[] = localOnly
     ? onRemoveLocal ? [{ kind: 'removeLocal', label: 'mail:removeLocalCopy', icon: Delete02Icon, destructive: true, run: () => onRemoveLocal(email) }] : []
     : onDelete ? [{ kind: 'delete', label: 'mail:delete', icon: Delete02Icon, destructive: true, run: () => onDelete(email) }] : []
-  return [open, respond, flags, archive, remove].filter((group) => group.length > 0)
+  return [open, respond, contact, flags, archive, remove].filter((group) => group.length > 0)
 }
