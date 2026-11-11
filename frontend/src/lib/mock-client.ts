@@ -263,10 +263,28 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     return 'queued' as const
   }
 
-  /** Every message a list query matches, newest first, as `emails_list` orders them. */
+  /** Aggregated sender addresses (lowercase) and when each rule was made. */
+  const contactRules = new Map<string, string>()
+
+  /** Like the core: trimmed, non-empty, at most 320 characters, with an `@` and no control characters. */
+  function senderAddress(value: string, field: string) {
+    const address = value.trim()
+    // eslint-disable-next-line no-control-regex
+    if (!address || address.length > 320 || !address.includes('@') || /[\u0000-\u001f\u007f-\u009f]/.test(address)) {
+      throw new MailxClientError({ code: 'validation', message: '', field })
+    }
+    return address.toLowerCase()
+  }
+
+  /**
+   * Every message a list query matches, newest first, as `emails_list` orders them:
+   * `items` are the list rows (aggregated senders collapsed into group rows when the
+   * query groups them) and `individual` the messages that are listed as themselves.
+   */
   function matchingEmails(query: EmailListQuery) {
     const terms = query.text?.trim() ? parseSearchTerms(query.text) : []
     if (!terms) throw new MailxClientError({ code: 'validation', message: '搜索词过多或过长。', field: 'text' })
+    const fromAddress = query.fromAddress == null ? null : senderAddress(query.fromAddress, 'fromAddress')
     const archiveScope = query.archive ?? (terms.length > 0 ? 'include' : 'exclude')
     const inScope = emails.filter((email) =>
       (!query.accountIds || query.accountIds.includes(email.summary.accountId)) &&
@@ -277,16 +295,41 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
       (query.unread == null || email.summary.isRead === !query.unread) &&
       (query.starred == null || email.summary.isStarred === query.starred) &&
-      (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment),
+      (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment) &&
+      // A local Sent copy's sender is the account's own address.
+      (fromAddress == null || (email.summary.localOnly
+        ? accounts.find((account) => account.id === email.summary.accountId)?.emailAddress.toLowerCase() === fromAddress
+        : email.summary.from.address.toLowerCase() === fromAddress)),
     )
-    const items = inScope
+    const newestFirst = <T extends { receivedAt: string; id: string }>(a: T, b: T) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id)
+    const matched = inScope
       .flatMap((email) => {
         if (terms.length === 0) return [{ ...email.summary, matchSnippet: null }]
         const { matched, snippet } = matchEmail(email, terms)
         return matched ? [{ ...email.summary, matchSnippet: snippet }] : []
       })
-      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
-    return { inScope, items }
+      .sort(newestFirst)
+    // Never in a text search or a single-sender view; local Sent copies are never grouped.
+    const grouping = query.groupSenders && terms.length === 0 && fromAddress == null
+    const isGrouped = (email: EmailSummary) => grouping && !email.localOnly && contactRules.has(email.from.address.toLowerCase())
+    const groups = new Map<string, { total: number; unread: number }>()
+    for (const email of matched) {
+      if (!isGrouped(email)) continue
+      const address = email.from.address.toLowerCase()
+      const group = groups.get(address) ?? { total: 0, unread: 0 }
+      group.total += 1
+      if (!email.isRead) group.unread += 1
+      groups.set(address, group)
+    }
+    const shown = new Set<string>()
+    const items = matched.filter((email) => {
+      if (!isGrouped(email)) return true
+      const address = email.from.address.toLowerCase()
+      if (shown.has(address)) return false
+      shown.add(address)
+      return true
+    }).map((email) => isGrouped(email) ? { ...email, senderGroup: { address: email.from.address.toLowerCase(), ...groups.get(email.from.address.toLowerCase())! } } : email)
+    return { inScope, items, individual: matched.filter((email) => !isGrouped(email)) }
   }
 
   return {
@@ -489,12 +532,33 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       }
     },
     async selectEmails(query) {
-      const { items } = matchingEmails(query)
+      // Group rows stand for several messages and cannot be selected.
+      const { individual: items } = matchingEmails(query)
       return {
         items: items.slice(0, 500).map(({ id, accountId, folderId, isRead, isStarred, archived, localOnly }) =>
           ({ id, accountId, folderId, isRead, isStarred, archived, localOnly })),
         truncated: items.length > 500,
       }
+    },
+    async listContactAggregations() {
+      return [...contactRules].map(([address, createdAt]) => {
+        const own = emails
+          .filter((email) => !email.summary.localOnly && email.summary.from.address.toLowerCase() === address)
+          .map((email) => email.summary)
+          .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id))
+        return {
+          address,
+          name: own[0]?.from.name?.trim() || null,
+          messageCount: own.length,
+          latestReceivedAt: own[0]?.receivedAt ?? null,
+          createdAt,
+        }
+      }).sort((a, b) => (a.name ?? a.address).toLowerCase().localeCompare((b.name ?? b.address).toLowerCase()) || a.address.localeCompare(b.address))
+    },
+    async setContactAggregation(address, aggregated) {
+      const key = senderAddress(address, 'address')
+      if (!aggregated) contactRules.delete(key)
+      else if (!contactRules.has(key)) contactRules.set(key, new Date().toISOString())
     },
     async getEmail(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
@@ -1259,6 +1323,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       previewState: lazy ? 'missing' : 'ready',
       pendingChanges: false,
       matchSnippet: null,
+      senderGroup: null,
     }
     return {
       summary,

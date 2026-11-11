@@ -10,6 +10,7 @@ const home = exampleAccount({ id: 'home', displayName: '个人邮箱', emailAddr
 
 function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
+    senderGroup: null,
     id, accountId: work.id, folderId: 'inbox', subject: `主题 ${id}`,
     from: { name: 'GitHub', address: 'notifications@github.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
     isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, ...overrides,

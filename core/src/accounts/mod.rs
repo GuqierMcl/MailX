@@ -1,6 +1,7 @@
 mod archives;
 mod attachments;
 pub(crate) mod bodies;
+mod contacts;
 mod deletions;
 pub(crate) mod draft_connection;
 mod drafts;

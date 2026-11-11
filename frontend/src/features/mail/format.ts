@@ -12,6 +12,8 @@ export function emailQuery(query: Partial<EmailListQuery>): EmailListQuery {
     unread: null,
     starred: null,
     hasAttachment: null,
+    fromAddress: null,
+    groupSenders: false,
     receivedAfter: null,
     receivedBefore: null,
     limit: null,

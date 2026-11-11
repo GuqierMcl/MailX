@@ -302,6 +302,8 @@ fn main() {
             commands::emails_unarchive,
             commands::emails_set_flags,
             commands::emails_select,
+            commands::contacts_list_aggregations,
+            commands::contacts_set_aggregation,
             commands::emails_undo_archive,
             commands::attachments_save,
             commands::avatars_get,

@@ -248,7 +248,33 @@ archived: boolean,
  * names; `None` when there is no text search or the hit is only in the
  * subject or people.
  */
-matchSnippet: Array<SnippetSegment> | null, };
+matchSnippet: Array<SnippetSegment> | null,
+/**
+ * Set when this row stands for every message of an aggregated sender in
+ * the list (see [`EmailListQuery::group_senders`]); the row itself is
+ * that sender's newest message in scope.
+ */
+senderGroup: SenderGroup | null, };
+
+export type SenderGroup = {
+/**
+ * Normalized (ASCII lowercase) sender address.
+ */
+address: string, total: number, unread: number, };
+
+export type ContactAggregation = {
+/**
+ * Normalized (ASCII lowercase) sender address.
+ */
+address: string,
+/**
+ * Display name of the newest visible message from this address.
+ */
+name: string | null,
+/**
+ * Visible messages from this address in every account, outside junk and trash.
+ */
+messageCount: number, latestReceivedAt: string | null, createdAt: string, };
 
 export type SnippetSegment = { text: string, hit: boolean, };
 
@@ -274,7 +300,17 @@ archive: ArchiveScope | null, text: string | null, unread: boolean | null,
 /**
  * Match the local desired star state, including pending server writes.
  */
-starred: boolean | null, hasAttachment: boolean | null, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
+starred: boolean | null, hasAttachment: boolean | null,
+/**
+ * Only messages from this sender address (case-insensitive). Local Sent
+ * copies match on the account's own address.
+ */
+fromAddress: string | null,
+/**
+ * Collapse messages of aggregated senders into one row each. Ignored in
+ * a text search and together with `from_address`.
+ */
+groupSenders: boolean, receivedAfter: string | null, receivedBefore: string | null, limit: number | null, cursor: string | null, };
 
 export type Coverage = { headersComplete: boolean,
 /**

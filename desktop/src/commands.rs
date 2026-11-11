@@ -1020,6 +1020,47 @@ pub(crate) async fn emails_set_flags(
     }))
 }
 
+/// The senders aggregated into one list row.
+#[tauri::command]
+pub(crate) async fn contacts_list_aggregations(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::ContactAggregation>>, ()> {
+    let args = authorize(&window, "contacts_list_aggregations")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state.run(|core| core.list_contact_aggregations()).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetContactAggregationArgs {
+    address: String,
+    aggregated: bool,
+}
+
+/// Starts or stops aggregating one sender address.
+#[tauri::command]
+pub(crate) async fn contacts_set_aggregation(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "contacts_set_aggregation")
+        .and_then(|_| parse::<SetContactAggregationArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.set_contact_aggregation(&args.address, args.aggregated))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SelectEmailsArgs {

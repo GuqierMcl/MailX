@@ -23,7 +23,10 @@ use crate::drafts::types::{
 };
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
-use crate::mail::{EmailDeletion, EmailDetail, EmailListQuery, EmailPage, EmailSelection, Folder};
+use crate::mail::{
+    ContactAggregation, EmailDeletion, EmailDetail, EmailListQuery, EmailPage, EmailSelection,
+    Folder,
+};
 use crate::secrets::SecretStore;
 use crate::send::types::{
     Caller, DraftChange, DraftChanged, OutboxItem, OutboxState, QueueSendRequest,
@@ -361,6 +364,18 @@ impl MailxCore {
     /// query, in the same order, ignoring its `limit` and `cursor`.
     pub fn select_emails(&self, query: &EmailListQuery) -> Result<EmailSelection, AppError> {
         self.accounts()?.select_emails(query)
+    }
+
+    /// The senders aggregated into one list row, with their visible message counts.
+    pub fn list_contact_aggregations(&self) -> Result<Vec<ContactAggregation>, AppError> {
+        self.accounts()?.list_contact_aggregations()
+    }
+
+    /// Starts or stops aggregating a sender address (case-insensitive,
+    /// all accounts). Idempotent.
+    pub fn set_contact_aggregation(&self, address: &str, aggregated: bool) -> Result<(), AppError> {
+        self.accounts()?
+            .set_contact_aggregation(address, aggregated)
     }
 
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {

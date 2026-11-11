@@ -530,3 +530,59 @@ describe('mock browser sign-in', () => {
     await expect(client.reauthorizeOAuthAccount({ providerId: 'microsoft-personal', accountId: created.id, expectedRevision: created.revision })).rejects.toMatchObject({ failure: { code: 'conflict' } })
   })
 })
+
+describe('mock contact views and sender aggregation', () => {
+  const inbox = emailQuery({ folderRole: 'inbox', limit: 200 })
+
+  async function busiestSender(client: ReturnType<typeof createMockClient>) {
+    const counts = new Map<string, number>()
+    for (const item of (await client.listEmails(inbox)).items) {
+      const address = item.from.address.toLowerCase()
+      counts.set(address, (counts.get(address) ?? 0) + 1)
+    }
+    const [address, total] = [...counts].sort((a, b) => b[1] - a[1])[0]
+    return { address, total }
+  }
+
+  it('lists one sender case-insensitively and validates the address', async () => {
+    const client = createMockClient()
+    const { address, total } = await busiestSender(client)
+    const page = await client.listEmails({ ...inbox, fromAddress: ` ${address.toUpperCase()} ` })
+    expect(page.items).toHaveLength(total)
+    expect(page.items.every((item) => item.from.address.toLowerCase() === address && item.senderGroup === null)).toBe(true)
+    for (const bad of ['', 'nope', 'a@b\n.test']) {
+      await expect(client.listEmails({ ...inbox, fromAddress: bad })).rejects.toMatchObject({ failure: { code: 'validation', field: 'fromAddress' } })
+    }
+  })
+
+  it('collapses an aggregated sender into its newest message with counts', async () => {
+    const client = createMockClient()
+    const { address, total } = await busiestSender(client)
+    const plain = (await client.listEmails(inbox)).items
+    await client.setContactAggregation(address.toUpperCase(), true)
+    await client.setContactAggregation(address, true)
+    const grouped = (await client.listEmails({ ...inbox, groupSenders: true })).items
+    const own = plain.filter((item) => item.from.address.toLowerCase() === address)
+    expect(grouped).toHaveLength(plain.length - own.length + 1)
+    const row = grouped.find((item) => item.senderGroup)!
+    expect(row.id).toBe(own[0].id)
+    expect(row.senderGroup).toEqual({ address, total, unread: own.filter((item) => !item.isRead).length })
+    // Counts follow the other filters, and a search or a sender view never groups.
+    const unread = (await client.listEmails({ ...inbox, groupSenders: true, unread: true })).items
+    const unreadOwn = own.filter((item) => !item.isRead)
+    expect(unread.find((item) => item.senderGroup)?.senderGroup).toEqual(unreadOwn.length ? { address, total: unreadOwn.length, unread: unreadOwn.length } : undefined)
+    expect((await client.listEmails({ ...inbox, groupSenders: true, fromAddress: address })).items).toHaveLength(total)
+    expect((await client.listEmails({ ...inbox, groupSenders: true, text: address })).items.every((item) => item.senderGroup === null)).toBe(true)
+    // Group rows are not selectable; the grouped sender's messages are left out.
+    const selection = await client.selectEmails({ ...inbox, groupSenders: true })
+    expect(selection.items).toHaveLength(plain.length - own.length)
+    // The rule shows up in the settings list and can be removed again.
+    const [rule] = await client.listContactAggregations()
+    expect(rule).toMatchObject({ address, messageCount: total, latestReceivedAt: own[0].receivedAt })
+    await client.setContactAggregation(address, false)
+    await client.setContactAggregation(address, false)
+    expect(await client.listContactAggregations()).toEqual([])
+    expect((await client.listEmails({ ...inbox, groupSenders: true })).items).toHaveLength(plain.length)
+    await expect(client.setContactAggregation('nope', true)).rejects.toMatchObject({ failure: { code: 'validation', field: 'address' } })
+  })
+})

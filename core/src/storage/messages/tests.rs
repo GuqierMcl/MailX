@@ -1,3 +1,4 @@
+mod contacts;
 mod sent_identity;
 use std::sync::Arc;
 

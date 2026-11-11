@@ -7,6 +7,7 @@ import { EmailList } from './email-list'
 
 function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
+    senderGroup: null,
     id, accountId: 'work', folderId: 'inbox', subject: `主题 ${id}`,
     from: { name: 'GitHub', address: 'notifications@github.com' }, preview: `预览 ${id}`, receivedAt: '2026-10-20T00:00:00Z',
     isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, ...overrides,

@@ -15,6 +15,7 @@ const folders: Folder[] = [
 ]
 
 const localCopy: EmailSummary = {
+  senderGroup: null,
   id: 'local-sent:1', accountId: account.id, folderId: 'sent', subject: '周五评审安排', preview: '',
   from: { name: null, address: 'me@example.com' }, receivedAt: '2026-10-28T08:00:00.000Z',
   isRead: true, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null,

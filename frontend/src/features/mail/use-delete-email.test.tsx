@@ -13,6 +13,7 @@ import { deletesForGood, useDeleteEmail } from './use-delete-email'
 
 function email(overrides: Partial<EmailSummary> = {}): EmailSummary {
   return {
+    senderGroup: null,
     id: 'mail-1', accountId: 'account-1', folderId: 'inbox', subject: 'Hello',
     from: { name: 'Lin', address: 'lin@example.com' }, preview: '', receivedAt: '2026-10-20T00:00:00Z',
     isRead: false, isStarred: false, hasAttachment: false, bodyState: 'ready', previewState: 'ready', pendingChanges: false, matchSnippet: null, to: { addresses: [], total: 0 }, localOnly: false, archived: false, ...overrides,

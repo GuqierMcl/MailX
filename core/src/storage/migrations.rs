@@ -177,6 +177,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["auth_profiles", "oauth_client_registrations"],
         sql: include_str!("migrations/0025_oauth_bindings.sql"),
     },
+    Migration {
+        version: 26,
+        description: "contact aggregation rules and sender lookup index",
+        required_tables: &["contact_aggregations"],
+        sql: include_str!("migrations/0026_contact_aggregations.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -581,7 +587,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 25);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 26);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -607,6 +613,34 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn contact_aggregations_migration_adds_rules_table_and_sender_index() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(25)).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        db.execute(
+            "INSERT INTO contact_aggregations(address, created_at) VALUES ('a@example.test', 't')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            db.execute(
+                "INSERT INTO contact_aggregations(address, created_at) VALUES ('a@example.test', 't')",
+                [],
+            )
+            .is_err(),
+            "one rule per address"
+        );
+        let index: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_by_sender'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
     }
 
     #[test]
