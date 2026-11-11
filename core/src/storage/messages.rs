@@ -635,15 +635,23 @@ impl Storage {
             });
         };
         let sql = format!(
-            "SELECT {SUMMARY_COLUMNS} {VISIBLE_MESSAGES} AND m.account_id = ?1 AND m.conversation_id = ?2
+            "SELECT {SUMMARY_COLUMNS}, m.message_id_header, COALESCE(f.role, '') = 'sent'
+             {VISIBLE_MESSAGES} AND m.account_id = ?1 AND m.conversation_id = ?2
              AND (COALESCE(f.role, '') NOT IN ('junk', 'trash') OR m.id = ?3)
              ORDER BY m.received_at ASC, m.id ASC"
         );
-        let messages = self
+        let rows = self
             .db
             .prepare(&sql)?
-            .query_map(params![own.account_id, conversation_id, email_id], summary)?
+            .query_map(params![own.account_id, conversation_id, email_id], |row| {
+                Ok((
+                    summary(row)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, bool>(19)?,
+                ))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
+        let messages = collapse_copies(rows, email_id);
         let possibly_incomplete: bool = self.db.query_row(
             "SELECT EXISTS(
                SELECT 1 FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
@@ -832,6 +840,49 @@ pub(super) const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1
  AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)";
+
+/// Collapses rows sharing a Message-ID (the same message filed in several
+/// folders) to one: the opened email if present, else a non-Sent copy, else the
+/// earliest. `rows` are `(summary, message_id_header, in_sent_folder)` in
+/// display order; rows without a Message-ID are never collapsed.
+fn collapse_copies(
+    rows: Vec<(EmailSummary, Option<String>, bool)>,
+    opened: &str,
+) -> Vec<EmailSummary> {
+    let mut keep: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (index, (item, id, sent)) in rows.iter().enumerate() {
+        let Some(id) = id.as_deref().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        match keep.get(id) {
+            None => {
+                keep.insert(id, index);
+            }
+            Some(&best) => {
+                let (current, _, current_sent) = &rows[best];
+                // Rows are ordered by time, so ties keep the earlier one.
+                let better = if current.id == opened {
+                    false
+                } else if item.id == opened {
+                    true
+                } else {
+                    *current_sent && !*sent
+                };
+                if better {
+                    keep.insert(id, index);
+                }
+            }
+        }
+    }
+    let kept: std::collections::HashSet<usize> = keep.values().copied().collect();
+    rows.iter()
+        .enumerate()
+        .filter(|(index, (_, id, _))| {
+            id.as_deref().is_none_or(|id| id.is_empty()) || kept.contains(index)
+        })
+        .map(|(_, (item, _, _))| item.clone())
+        .collect()
+}
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
     Ok(EmailSummary {

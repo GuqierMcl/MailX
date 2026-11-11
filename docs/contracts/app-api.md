@@ -33,7 +33,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 | --- | --- | --- | --- |
 | `listEmails(query)` | `emails_list`，`{ query }` | `MailxCore::list_emails` → `AccountService::list_emails` | `EmailPage` |
 | `getEmail(emailId)` | `emails_get`，`{ emailId }` | `MailxCore::get_email` → `AccountService::get_email` | `EmailDetail` |
-| `getConversation(emailId)` | `emails_get_conversation`，`{ emailId }` | `MailxCore::get_conversation` → `AccountService::get_conversation` | `ConversationPage { messages, possiblyIncomplete }`，按接收时间升序；无会话的邮件只返回自身；排除垃圾邮件与回收站副本（打开的邮件本身除外）；邮件不存在或不可见返回 `notFound` |
+| `getConversation(emailId)` | `emails_get_conversation`，`{ emailId }` | `MailxCore::get_conversation` → `AccountService::get_conversation` | `ConversationPage { messages, possiblyIncomplete }`，按接收时间升序；无会话的邮件只返回自身；会话只在同一账号内，按 `References` / `In-Reply-To`（含引用同一未缓存根邮件的兄弟邮件）归并，无线索头部时仅对 30 天内同一对象之间的双向往来（己方与对方各至少一封，≤20 封）按主题兜底，单向通知不成会话；规则变化由 `threading_version` 触发后台重建；同一 `Message-ID` 的多份副本只列一份（优先打开的那份，其次非已发送文件夹的副本，再次最早的）；排除垃圾邮件与回收站副本（打开的邮件本身除外）；邮件不存在或不可见返回 `notFound` |
 
 两个命令与账号、文件夹读取使用同一主窗口来源与启动 Ready 准入，参数结构拒绝未知顶层字段。不访问网络，不下载正文，也不改变已读或星标。宿主没有通用 SQL、路径或读凭证参数。
 

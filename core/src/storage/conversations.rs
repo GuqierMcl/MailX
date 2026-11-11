@@ -16,6 +16,12 @@ use crate::AppError;
 const SUBJECT_WINDOW_DAYS: f64 = 30.0;
 /// A subject shared by more messages than this is a mailing pattern, not a thread.
 const SUBJECT_GROUP_LIMIT: usize = 20;
+/// At most this many referenced IDs (the most recent ones) are looked up.
+const REFERENCE_LIMIT: usize = 20;
+/// Bumped whenever the threading rules change in a way that needs a rebuild:
+/// `conversation_id` is derived data, and rows below this version are
+/// re-threaded in the background (see [`Storage::rethread_step`]).
+pub(crate) const THREADING_VERSION: i64 = 1;
 
 struct Row {
     id: String,
@@ -115,14 +121,27 @@ fn by_references(tx: &Connection, message: &Row) -> Result<Option<String>, AppEr
     if wanted.is_empty() {
         return Ok(None);
     }
+    if wanted.len() > REFERENCE_LIMIT {
+        wanted.drain(..wanted.len() - REFERENCE_LIMIT);
+    }
+    // Rows are related when they are one of the referenced messages or when
+    // they reference one of them too (siblings of an uncached root).
+    let marks = vec!["?"; wanted.len()].join(",");
+    let tokens = vec![
+        "instr(' ' || COALESCE(references_header, '') || ' ', ' ' || ? || ' ') > 0";
+        wanted.len()
+    ]
+    .join(" OR ");
     let sql = format!(
         "SELECT id, conversation_id FROM messages
-         WHERE account_id = ? AND id <> ? AND message_id_header IN ({})
-         ORDER BY received_at ASC, id ASC",
-        vec!["?"; wanted.len()].join(",")
+         WHERE account_id = ? AND id <> ?
+           AND (message_id_header IN ({marks}) OR in_reply_to IN ({marks}) OR {tokens})
+         ORDER BY received_at ASC, id ASC"
     );
     let mut values: Vec<Value> = vec![message.account_id.clone().into(), message.id.clone().into()];
-    values.extend(wanted.iter().map(|id| Value::from((*id).to_owned())));
+    for _ in 0..3 {
+        values.extend(wanted.iter().map(|id| Value::from((*id).to_owned())));
+    }
     let matched: Matched = tx
         .prepare(&sql)?
         .query_map(params_from_iter(values), |row| {
@@ -165,44 +184,98 @@ fn by_subject_fallback(tx: &Connection, message: &Row) -> Result<Option<String>,
     by_subject(tx, message)
 }
 
+/// Lower-cased addresses of a JSON `[{name, address}]` column.
+fn addresses(json: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<serde_json::Value>>(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| entry.get("address")?.as_str().map(str::to_ascii_lowercase))
+        .collect()
+}
+
+/// Who the message was exchanged with: the recipients of a message the
+/// account sent, otherwise its sender.
+fn counterpart(me: &str, from: &str, to: &str, cc: &str) -> (bool, HashSet<String>) {
+    let from = from.to_ascii_lowercase();
+    if from == me {
+        (
+            true,
+            addresses(to).into_iter().chain(addresses(cc)).collect(),
+        )
+    } else {
+        (false, HashSet::from([from]))
+    }
+}
+
+/// Subject fallback joins only a real two-way exchange with one counterpart:
+/// one-way notifications sharing a subject are not a conversation.
 fn by_subject(tx: &Connection, message: &Row) -> Result<Option<String>, AppError> {
     let subject = normalize_subject(&message.subject);
     if subject.is_empty() {
         return Ok(None);
     }
+    let me: String = tx.query_row(
+        "SELECT lower(email_address) FROM accounts WHERE id = ?1",
+        [&message.account_id],
+        |row| row.get(0),
+    )?;
+    let (own_sent, own_peers) = tx.query_row(
+        "SELECT from_address, to_addresses, cc_addresses FROM messages WHERE id = ?1",
+        [&message.id],
+        |row| {
+            Ok(counterpart(
+                &me,
+                &row.get::<_, String>(0)?,
+                &row.get::<_, String>(1)?,
+                &row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
     // SQLite folds only ASCII case, so the pre-filter works on the stripped
     // subject with the same folding; the exact comparison happens below.
     let prefilter = strip_prefixes(&message.subject).to_ascii_lowercase();
     let mut statement = tx.prepare(
-        "SELECT id, conversation_id, subject FROM messages
+        "SELECT id, conversation_id, subject, from_address, to_addresses, cc_addresses FROM messages
          WHERE account_id = ?1 AND id <> ?2 AND in_reply_to IS NULL AND references_header IS NULL
            AND abs(julianday(received_at) - julianday(?3)) <= ?4
            AND instr(lower(subject), ?5) > 0
          ORDER BY received_at ASC, id ASC",
     )?;
-    let matched: Matched = statement
-        .query_map(
-            params![
-                message.account_id,
-                message.id,
-                message.received_at,
-                SUBJECT_WINDOW_DAYS,
-                prefilter
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )?
-        .filter_map(|row| match row {
-            Ok((id, cid, other)) => (normalize_subject(&other) == subject).then_some(Ok((id, cid))),
-            Err(error) => Some(Err(error)),
-        })
-        .collect::<Result<_, _>>()?;
-    if matched.is_empty() || matched.len() + 1 > SUBJECT_GROUP_LIMIT {
+    let candidates = statement.query_map(
+        params![
+            message.account_id,
+            message.id,
+            message.received_at,
+            SUBJECT_WINDOW_DAYS,
+            prefilter
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        },
+    )?;
+    let (mut matched, mut any_sent, mut any_received) = (Matched::new(), own_sent, !own_sent);
+    for candidate in candidates {
+        let (id, cid, other, from, to, cc) = candidate?;
+        if normalize_subject(&other) != subject {
+            continue;
+        }
+        let (sent, peers) = counterpart(&me, &from, &to, &cc);
+        if peers.is_disjoint(&own_peers) {
+            continue;
+        }
+        any_sent |= sent;
+        any_received |= !sent;
+        matched.push((id, cid));
+    }
+    if matched.is_empty() || matched.len() + 1 > SUBJECT_GROUP_LIMIT || !(any_sent && any_received)
+    {
         return Ok(None);
     }
     Ok(Some(adopt(tx, &matched, &[&message.id])?))
@@ -220,7 +293,7 @@ pub(crate) fn assign_conversations(
     let tx = storage.db.transaction()?;
     let mut messages = Vec::new();
     for id in new_message_ids {
-        if let Some(row) = load(&tx, id)?.filter(|row| row.conversation_id.is_none()) {
+        if let Some(row) = load(&tx, id)? {
             messages.push(row);
         }
     }
@@ -228,7 +301,8 @@ pub(crate) fn assign_conversations(
     messages.sort_by(|a, b| a.received_at.cmp(&b.received_at).then(a.id.cmp(&b.id)));
     let mut assigned: Vec<(Row, String)> = Vec::new();
     for message in messages {
-        // An earlier message of this batch may have pulled this one in.
+        // Already linked (stored earlier, or pulled in by an earlier message
+        // of this batch): nothing to derive, only the version to record.
         let current = load(&tx, &message.id)?.and_then(|row| row.conversation_id);
         let cid = match current {
             Some(cid) => Some(cid),
@@ -243,6 +317,13 @@ pub(crate) fn assign_conversations(
         if let Some(cid) = cid {
             assigned.push((message, cid));
         }
+    }
+    // Every processed row records the rules it was threaded with, linked or not.
+    for id in new_message_ids {
+        tx.execute(
+            "UPDATE messages SET threading_version = ?1 WHERE id = ?2 AND threading_version < ?1",
+            params![THREADING_VERSION, id],
+        )?;
     }
     // Older cached messages that arrived before their parent.
     for (message, cid) in &assigned {
@@ -261,6 +342,22 @@ pub(crate) fn assign_conversations(
 }
 
 impl Storage {
+    /// Threads up to `limit` present messages still on older rules, oldest
+    /// first so parents precede replies, and returns how many it processed.
+    pub(crate) fn rethread_step(&mut self, limit: usize) -> Result<usize, AppError> {
+        // The literal lets SQLite use the partial `messages_pending_rethread` index.
+        let ids: Vec<String> = self
+            .db
+            .prepare(&format!(
+                "SELECT id FROM messages WHERE threading_version < {THREADING_VERSION}
+                 AND remote_state = 'present' ORDER BY received_at ASC, id ASC LIMIT ?1"
+            ))?
+            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        assign_conversations(self, &ids)?;
+        Ok(ids.len())
+    }
+
     /// Best-effort threading of just-stored rows. Threading is derived data:
     /// a failure here is dropped and the rows are retried by the next batch
     /// that touches them, so it can never fail a sync.

@@ -113,37 +113,245 @@ fn a_parent_arriving_after_its_reply_joins_the_reply() {
     assert_eq!(cid(&f, 1), cid(&f, 2));
 }
 
+const ME: &str = "lin@example.com";
+
+fn addr(address: &str) -> MailAddress {
+    MailAddress {
+        name: None,
+        address: address.into(),
+    }
+}
+
+/// A header-less message from `from` to `to`.
+fn mail(uid: u32, subject: &str, at: &str, from: &str, to: &[&str]) -> MessageRecord {
+    MessageRecord {
+        from_address: from.into(),
+        to_addresses: to.iter().map(|a| addr(a)).collect(),
+        cc_addresses: vec![],
+        ..msg(uid, subject, at, None, None)
+    }
+}
+
 #[test]
-fn subject_fallback_groups_within_30_days() {
+fn subject_fallback_groups_a_two_way_exchange_within_30_days() {
     let mut f = setup();
     put(
         &mut f,
-        &[msg(1, "Invoice", "2026-09-01T00:00:00.000Z", None, None)],
-    );
-    put(
-        &mut f,
-        &[msg(
-            2,
-            "RE: invoice",
-            "2026-09-06T00:00:00.000Z",
-            None,
-            None,
+        &[mail(
+            1,
+            "Invoice",
+            "2026-09-01T00:00:00.000Z",
+            ME,
+            &["x@example.test"],
         )],
     );
     put(
         &mut f,
-        &[msg(
+        &[mail(
+            2,
+            "RE: invoice",
+            "2026-09-06T00:00:00.000Z",
+            "X@example.test",
+            &[ME],
+        )],
+    );
+    put(
+        &mut f,
+        &[mail(
             3,
             "回复: Invoice",
             "2026-10-07T00:00:00.000Z",
-            None,
-            None,
+            ME,
+            &["x@example.test"],
         )],
     );
     assert!(cid(&f, 1).is_some());
     assert_eq!(cid(&f, 1), cid(&f, 2));
     // 31 days after the first and 31 after the second: out of both windows.
     assert!(cid(&f, 3).is_none());
+}
+
+#[test]
+fn one_way_notifications_with_the_same_subject_are_not_a_conversation() {
+    let mut f = setup();
+    let records: Vec<_> = (1..=4)
+        .map(|uid| {
+            mail(
+                uid,
+                "Welcome",
+                "2026-10-01T00:00:00.000Z",
+                "no-reply@example.test",
+                &[ME],
+            )
+        })
+        .collect();
+    put(&mut f, &records);
+    for uid in 1..=4 {
+        assert!(cid(&f, uid).is_none(), "{uid}");
+        let page = f.service.get_conversation(&local_id(&f, uid)).unwrap();
+        assert_eq!(page.messages.len(), 1);
+    }
+}
+
+#[test]
+fn the_same_subject_with_different_counterparts_is_not_merged() {
+    let mut f = setup();
+    put(
+        &mut f,
+        &[
+            mail(1, "Hi", "2026-10-01T00:00:00.000Z", ME, &["x@example.test"]),
+            mail(
+                2,
+                "Re: Hi",
+                "2026-10-02T00:00:00.000Z",
+                "x@example.test",
+                &[ME],
+            ),
+        ],
+    );
+    put(
+        &mut f,
+        &[
+            mail(3, "Hi", "2026-10-03T00:00:00.000Z", ME, &["y@example.test"]),
+            mail(
+                4,
+                "Re: Hi",
+                "2026-10-04T00:00:00.000Z",
+                "y@example.test",
+                &[ME],
+            ),
+        ],
+    );
+    assert!(cid(&f, 1).is_some());
+    assert_eq!(cid(&f, 1), cid(&f, 2));
+    assert!(cid(&f, 3).is_some());
+    assert_eq!(cid(&f, 3), cid(&f, 4));
+    assert_ne!(cid(&f, 1), cid(&f, 3));
+}
+
+#[test]
+fn siblings_referencing_an_uncached_root_share_a_conversation() {
+    let mut f = setup();
+    let root = "root@example.test";
+    put(
+        &mut f,
+        &[
+            msg(
+                1,
+                "Re: [repo] PR",
+                "2026-10-01T00:00:00.000Z",
+                Some(root),
+                Some(root),
+            ),
+            msg(
+                2,
+                "Re: [repo] PR",
+                "2026-10-02T00:00:00.000Z",
+                Some(root),
+                Some(root),
+            ),
+            msg(
+                3,
+                "Re: [repo] PR",
+                "2026-10-03T00:00:00.000Z",
+                Some(root),
+                Some(root),
+            ),
+        ],
+    );
+    assert!(cid(&f, 1).is_some());
+    assert_eq!(cid(&f, 1), cid(&f, 2));
+    assert_eq!(cid(&f, 1), cid(&f, 3));
+}
+
+#[test]
+fn a_self_sent_message_in_sent_and_inbox_is_listed_once() {
+    let mut f = setup();
+    let mut sent = mail(11, "Note", "2026-10-01T00:00:00.000Z", ME, &[ME]);
+    sent.message_id_header = Some("self@example.test".into());
+    let mut inbox = sent.clone();
+    inbox.uid = 12;
+    inbox.received_at = "2026-10-01T00:00:05.000Z".into();
+    put_sent(&mut f, &[sent]);
+    put(&mut f, &[inbox]);
+    put(
+        &mut f,
+        &[msg(
+            13,
+            "Re: Note",
+            "2026-10-02T00:00:00.000Z",
+            Some("self@example.test"),
+            None,
+        )],
+    );
+    for opened in [11, 12] {
+        let page = f.service.get_conversation(&local_id(&f, 13)).unwrap();
+        assert_eq!(page.messages.len(), 2);
+        let page = f.service.get_conversation(&local_id(&f, opened)).unwrap();
+        assert_eq!(page.messages.len(), 2, "{opened}");
+        assert!(page.messages.iter().any(|m| m.id == local_id(&f, opened)));
+    }
+    // Not opened: the non-Sent copy wins.
+    let page = f.service.get_conversation(&local_id(&f, 13)).unwrap();
+    assert!(page.messages.iter().any(|m| m.id == local_id(&f, 12)));
+    assert!(page.messages.iter().all(|m| m.id != local_id(&f, 11)));
+}
+
+#[test]
+fn rethread_step_rebuilds_old_rows_and_finishes() {
+    let mut f = setup();
+    put(
+        &mut f,
+        &[
+            msg(1, "Ask", "2026-10-01T00:00:00.000Z", None, None),
+            msg(
+                2,
+                "Re: Ask",
+                "2026-10-02T00:00:00.000Z",
+                Some(&mid(1)),
+                None,
+            ),
+            msg(3, "Alone", "2026-10-03T00:00:00.000Z", None, None),
+        ],
+    );
+    f.db.execute(
+        "UPDATE messages SET conversation_id = NULL, threading_version = 0",
+        [],
+    )
+    .unwrap();
+    assert!(cid(&f, 1).is_none());
+    assert_eq!(f.service.rethread_step(2).unwrap(), 2);
+    assert_eq!(f.service.rethread_step(2).unwrap(), 1);
+    assert_eq!(f.service.rethread_step(2).unwrap(), 0);
+    assert!(cid(&f, 1).is_some());
+    assert_eq!(cid(&f, 1), cid(&f, 2));
+    assert!(cid(&f, 3).is_none());
+    let pending: i64 =
+        f.db.query_row(
+            "SELECT COUNT(*) FROM messages WHERE threading_version < 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pending, 0);
+}
+
+#[test]
+fn processed_rows_are_marked_even_when_they_stay_solo() {
+    let mut f = setup();
+    put(
+        &mut f,
+        &[msg(1, "Alone", "2026-10-01T00:00:00.000Z", None, None)],
+    );
+    assert!(cid(&f, 1).is_none());
+    let version: i64 =
+        f.db.query_row(
+            "SELECT threading_version FROM messages WHERE uid = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, crate::storage::conversations::THREADING_VERSION);
 }
 
 #[test]

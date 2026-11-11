@@ -44,7 +44,41 @@ pub(crate) fn spawn_search_backfill(
     task.abort_handle()
 }
 
+/// Re-threads messages stored under older threading rules, in short batches
+/// with the service lock released in between. Errors are non-fatal: the rows
+/// stay on the old version and are retried at the next start.
+pub(crate) fn spawn_rethread_backfill(
+    service: &std::sync::Arc<std::sync::Mutex<AccountService>>,
+    runtime: &tokio::runtime::Handle,
+) -> tokio::task::AbortHandle {
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(20);
+    let weak = std::sync::Arc::downgrade(service);
+    let task = runtime.spawn(async move {
+        loop {
+            let Some(service) = weak.upgrade() else {
+                return;
+            };
+            let step = tokio::task::spawn_blocking(move || {
+                let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+                service.rethread_step(RETHREAD_BATCH)
+            })
+            .await;
+            match step {
+                Ok(Ok(processed)) if processed > 0 => tokio::time::sleep(PAUSE).await,
+                _ => return,
+            }
+        }
+    });
+    task.abort_handle()
+}
+
+const RETHREAD_BATCH: usize = 200;
+
 impl AccountService {
+    pub(crate) fn rethread_step(&mut self, limit: usize) -> Result<usize, AppError> {
+        self.storage.rethread_step(limit)
+    }
+
     pub(crate) fn search_index_backfill_step(&mut self) -> Result<bool, AppError> {
         self.storage
             .search_index_backfill_step(crate::storage::search_index::BACKFILL_BATCH)

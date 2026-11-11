@@ -106,6 +106,7 @@ pub struct MailxCore {
 struct Closing {
     service: std::sync::Weak<Mutex<AccountService>>,
     search_backfill: tokio::task::AbortHandle,
+    rethread_backfill: tokio::task::AbortHandle,
     sync: Arc<SyncManager>,
     outbox: Arc<OutboxManager>,
     bodies: Arc<BodyManager>,
@@ -114,8 +115,9 @@ struct Closing {
 
 impl Drop for Closing {
     fn drop(&mut self) {
-        let mut stopped = vec![self.search_backfill.clone()];
+        let mut stopped = vec![self.search_backfill.clone(), self.rethread_backfill.clone()];
         self.search_backfill.abort();
+        self.rethread_backfill.abort();
         stopped.extend(self.sync.shutdown());
         stopped.extend(self.outbox.shutdown());
         stopped.extend(self.bodies.shutdown());
@@ -162,6 +164,8 @@ impl MailxCore {
         let accounts = service.list()?;
         let service = Arc::new(Mutex::new(service));
         let search_backfill = crate::accounts::messages::spawn_search_backfill(&service, &runtime);
+        let rethread_backfill =
+            crate::accounts::messages::spawn_rethread_backfill(&service, &runtime);
         let bodies = Arc::new(BodyManager::new(&service, runtime.clone()));
         let previews = Arc::new(PreviewManager::new(
             &service,
@@ -217,6 +221,7 @@ impl MailxCore {
             _closing: Arc::new(Closing {
                 service: Arc::downgrade(&service),
                 search_backfill,
+                rethread_backfill,
                 sync: sync.clone(),
                 outbox: outbox.clone(),
                 bodies: bodies.clone(),
