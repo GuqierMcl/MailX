@@ -25,6 +25,7 @@ English | [简体中文](README.zh-CN.md)
 - **Fast and lightweight** — A Rust core on the system WebView, with no bundled browser engine. MailX opens straight into your locally cached mail, on Windows, macOS and Linux.
 - **One inbox for every account** — Read all your mailboxes in a single unified inbox. Search headers, previews, cached message bodies and attachment names locally. Read and starred states sync back to the server; archive locally or delete with a short undo window.
 - **Safe reading** — Message bodies download when you open them and render in an isolated sandbox that cannot reach the app. Remote images wait until you allow them.
+- **Translate what you read** — Translate an open message in place, keeping its layout, with a DeepL, Microsoft Translator or Google Cloud Translation key of your own. Nothing is sent until you agree and translate; attachments and passwords are never sent.
 - **Composing in its own window** — A rich-text editor for new mail, replies and forwards, with attachments and pasted screenshots. Drafts are saved locally as you type.
 - **Sending you can trust** — Every message goes through a send queue, with an optional undo delay and retries for eligible failures. A message the server may already have accepted is never sent twice on its own. Local sent copies appear in the Sent folder while waiting for a matching server copy.
 - **Per-account network routing** — Each account can connect directly or through its own SOCKS5 or HTTP proxy. If the proxy fails, MailX stops rather than quietly connecting without it.
@@ -55,6 +56,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 - **Passwords live in the system keychain** — macOS Keychain, Windows Credential Manager or the Secret Service on Linux — and are never shown back in the app.
 - **Connections you control.** MailX connects to your mail servers (through the account's proxy if set) and checks GitHub for updates, which you can turn off. Enabling avatar lookups or allowing remote images also makes requests to the relevant image services. Avatar lookups are off by default, and remote images ask first.
 - **Mail you send carries its own images.** Pictures inserted into the body travel inside the message; displaying them does not require downloading from an external image server.
+- **Translation sends text only when you ask.** After you agree, translating a message sends its subject and text to the service you chose, and nothing else; its key stays in the system keychain, and an optional proxy is used for translation only. Saved translations stay on this computer.
 - **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
 
 ## Roadmap
@@ -68,6 +70,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 | Browser sign-in: Outlook, Microsoft 365 / Exchange | ✅ Implemented |
 | Browser sign-in: Gmail | 🗓️ Planned |
 | Built-in AI assistant | 🗓️ Planned |
+| Message translation through a service you choose | ✅ Implemented (automated tests only) |
 | Local MCP server for external AI clients | ✅ Implemented |
 | Server: self-hosted web version | 🗓️ Planned |
 

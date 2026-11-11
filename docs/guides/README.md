@@ -65,6 +65,52 @@ When a reply ends with the earlier message it quotes, MailX folds that quoted te
 
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
+## Translate messages
+
+MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation uses an online translation service that you choose and pay for yourself; it is not built into MailX and not an AI assistant. This feature is new and has only been checked with automated tests and a preview with sample data, not yet with real service accounts or by hand on every system.
+
+### Set up a service
+
+1. Open Settings → Translation and, under Translation service, choose DeepL, Microsoft Translator or Google Cloud Translation. You need a key from the service you choose; get it from that service's own website. For Microsoft there is also an optional Region, which is the region you picked when you created the resource; leave it empty for a global resource.
+2. Paste the key and click Save. MailX keeps it securely on this device and never shows it again; the row then says Saved, and you can Replace or Remove it. Use Test to translate a short sample sentence and check that the key and connection work. The test does not send any of your mail.
+3. Under Translating, choose what to translate into: "Same as the app language" (the default) or one of 26 languages.
+
+### Translate and switch back
+
+Open a message and click the translate button in the reading toolbar, just after the read and star buttons. The small arrow beside it opens a menu: Translate to (pick another language), Translate again, and Translation settings…. You can also choose Translate this message in the command palette. The original stays readable while the translation runs, and you can cancel. Click the button again to go back to the original, and again for the translation. Both versions stay loaded, so switching is instant and each remembers where you scrolled. If a translation fails, the reason and a Retry button appear in the line above the message.
+
+If no translation service or key is set up yet, the button tells you ("No translation service is set up yet") and offers Open settings. Only messages that have been downloaded and have a formatted (HTML) body can be translated.
+
+The first time you use a service, MailX asks "Send this message to …?" before anything is sent, and you can Cancel. Switching to another service asks again. While you stay in MailX, it remembers for each message whether you were viewing the translation and whether you closed the hint; this is not kept after you quit.
+
+### The language hint
+
+Once a service and key are set up, a message that looks like it is in a language other than yours gets a line above it, for example "This message is in French" with a Translate to … button. Its More menu lets you choose "Always translate …" or "Don't suggest translating …" for that language, and the close button hides the hint for this message only. The same two choices are in the toolbar menu. The language is detected on your computer; nothing is sent until you translate. Short messages and mixed-language messages may not be recognized, and Simplified and Traditional Chinese are not told apart. Under Settings → Translation → Foreign-language mail you can turn the hint off ("Offer to translate").
+
+### Translate automatically by language
+
+Choose "Always translate …" for a language, and messages in that language are translated automatically as soon as you open them, which sends their text to the translation service you agreed to. Settings → Translation → Foreign-language mail lists the languages you set to "Always translate" and "Don't offer for", and you can add or remove languages there. A language can only be in one of the two lists.
+
+### What is sent and what is not
+
+MailX sends the message's subject and text to the service you chose, and only after you agree. It does not send attachments, pictures, link addresses or your mailbox passwords. Quoted earlier messages at the end of a reply are not translated unless you turn on "Translate quoted earlier messages" (off by default). Code and plain web or email addresses are left as they are. What each service does with your text is governed by that service's own terms, so check them before you use it for private mail.
+
+### Use a proxy for translation
+
+Translation connects directly by default. Under Settings → Translation → Connection you can choose "Through a proxy" (SOCKS5 or HTTP) that is used only for translation; proxy usernames and passwords are not supported yet. The proxy you set on a mail account is not used for translation. If the proxy cannot connect, translation fails with an error and never quietly connects directly.
+
+### Saved translations
+
+Finished translations are kept on this computer so reopening a message does not send it again; they are removed when you delete the message or its account. Settings → Translation → Saved translations shows how many messages are saved and how much space they use, and Clear removes them all. There is no button to remove a single message's saved translation; "Translate again" in the toolbar menu replaces it with a new translation of that message. Saved translations are not encrypted, so treat them like your mail cache.
+
+### Limits
+
+- Very long messages are only partly translated: MailX sends at most 50,000 characters of a message and leaves the rest in the original language, and the line above the message says "This message is long, so only the first part was translated". A message whose body is larger than 2 MiB is not translated.
+- A message must be downloaded before it can be translated. Plain-text messages can be translated too; a message with an empty body has nothing to translate.
+- Sent copies that exist only on this computer cannot be translated, and neither can drafts while you write them.
+- If a service drops a link or picture from a paragraph, MailX keeps that paragraph in the original language.
+- Translation is not available to MCP clients, and a side-by-side view is not available.
+
 ## Composing and sending
 
 New mail, reply, reply all and forward use a separate compose window, and drafts save locally as you type. You can attach files, insert pictures or paste screenshots; attachments and inline images together default to a 20 MiB limit, and providers may impose a lower one. Drafts do not sync to other clients.

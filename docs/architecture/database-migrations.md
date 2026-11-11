@@ -95,6 +95,8 @@ frontend/src/features/startup/
 
 `0028_conversation_rethread.sql` 为 `messages` 增加默认 0 的 `threading_version`，清空按旧规则计算的 `conversation_id`，并为待重建的行建部分索引。会话是可再生的派生数据：启动后由后台任务按当前规则分批重建（每批 200 封），期间无法识别的邮件按单封显示。规则见[邮件同步](mail-sync.md)。
 
+`0029_message_translations.sql` 新建 `message_translations`，按（邮件、目标语言、是否含引用）保存译文：正文原始哈希、净化版本与分段版本、所用服务、源语言、译后主题、每段译文（JSON 数组）与是否部分翻译；邮件删除时级联删除。行只在这三项版本与当前邮件一致时被使用，因此正文或算法变化后无需清理任务即自然失效。译文属于邮件派生的敏感数据，设计见[邮件翻译](translation.md)。
+
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则

@@ -113,7 +113,7 @@ type EmailPage = {
 | `fetchBody(emailId)` | `emails_fetch_body`，`{ emailId }` | 最新 `EmailDetail` |
 | `requestPreviews(emailIds)` | `emails_request_previews`，`{ emailIds: string[] }`（仅 main 窗口） | null；立即返回，结果经 `mailx://email-previews` 推送 |
 | `onEmailPreviews(listener)` | `mailx://email-previews`，`{ items: [{ emailId, preview, previewState }] }` | 取消监听函数 |
-| `prepareBody(emailId, loadRemoteImages?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean }` | `{ documentToken }` |
+| `prepareBody(emailId, loadRemoteImages?, translation?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean, translation?: string }`；`translation` 是译文的目标语言，见[邮件翻译](#邮件翻译主窗口) | `{ documentToken }` |
 | `prepareDraftBody(draftId, expectedRevision)` | `drafts_prepare_body`，`{ draftId, expectedRevision }`（仅 main 窗口） | `{ documentToken }`，绑定当前已保存的草稿版本 |
 | `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
 | `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, loading, error }`，无原始 URL |
@@ -207,6 +207,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | 命令 | main | composer | 说明 |
 | --- | --- | --- | --- |
 | `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform`、`window_set_theme` | 是 | 是 | 窗口命令只作用于调用窗口 |
+| `translation_status`、`translation_translate`、`translation_cancel`、`translation_clear`、`translation_clear_all`、`translation_cache_stats`、`translation_keys`、`translation_set_key`、`translation_remove_key`、`translation_test` | 是 | 否 | 仅 main 的 capability（`capabilities/main.json`）授予；写信窗口没有这些权限，见“邮件翻译（主窗口）” |
 | `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
 | `drafts_prepare_body { draftId, expectedRevision }` | 是 | 否 | 为已保存版本创建只读正文令牌；HTML、内嵌图片及链接使用隔离正文协议，见“按需正文与外链” |
 | `attachments_add { request: { draftId, expectedRevision } }`、`attachments_add_dropped { request: { draftId, expectedRevision } }`、`attachments_remove { request: { draftId, attachmentId, expectedRevision } }` | 否（`validation`） | 仅自己的草稿 | 请求里没有本地路径：`attachments_add` 由宿主打开系统多选对话框（取消返回 `null`），`attachments_add_dropped` 认领宿主收到的系统文件拖入（`composer://files-dropped` 通知页面，无载荷；没有待认领路径返回 `null`）。均返回最新 `Draft`；已入队的草稿返回 `draftLocked`，revision 不符返回 `conflict`，超限返回 `attachmentTooLarge` / `tooManyAttachments` |
@@ -280,11 +281,11 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 偏好只需要数据目录，由宿主单独打开并复用 `SettingsStore`，不受 Ready 检查影响；核心启动失败时语言、外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。`settings_get` 和设置变更事件对本地可信 main 与合法 `composer-<uuid>` 窗口开放，`settings_update` 仍只允许 main；邮件正文 iframe 和其他窗口无权访问。
 
-`AppSettings` 包含 `general`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回核心原始顺序的第一个账号，即创建时间与 id 顺序；显示排序不参与此选择）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.navCollapsed`（默认 false）记录侧栏是否收成图标栏，下次启动恢复；窄窗口自动收成图标栏不修改该值。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段；`LayoutSettingsPatch` 的每个字段均可选，核心在设置锁内逐字段与当前值合并，因此侧栏宽度、列表宽度与账号显示顺序在不同窗口先后保存也不会相互覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。宽度与折叠类布局变化由前端抖动写入（停止 500ms 后一次提交），账号顺序在放下时提交一次，核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览，其余取值始终按行数预留固定高度（每行 1rem），没有预览的邮件也留出同样的空白，使列表每行等高；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新在核心锁内合并，`layout` 按提交的字段更新，其他设置节按提交的整节替换；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 另含 `translation`（见“邮件翻译”）。`AppSettings` 包含 `general`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回核心原始顺序的第一个账号，即创建时间与 id 顺序；显示排序不参与此选择）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.navCollapsed`（默认 false）记录侧栏是否收成图标栏，下次启动恢复；窄窗口自动收成图标栏不修改该值。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段；`LayoutSettingsPatch` 的每个字段均可选，核心在设置锁内逐字段与当前值合并，因此侧栏宽度、列表宽度与账号显示顺序在不同窗口先后保存也不会相互覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。宽度与折叠类布局变化由前端抖动写入（停止 500ms 后一次提交），账号顺序在放下时提交一次，核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览，其余取值始终按行数预留固定高度（每行 1rem），没有预览的邮件也留出同样的空白，使列表每行等高；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新在核心锁内合并，`layout` 按提交的字段更新，其他设置节按提交的整节替换；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
 `layout.accountOrder` 是账号 id 的有序数组（默认 `[]`），仅控制本机界面的账号显示顺序，不改变核心账号查询顺序、草稿已有发件账号或默认发件规则。账号管理列表、邮件侧栏、命令面板、写信发件账号选择及相关设置列表共用该偏好；其他可信窗口通过现有设置事件读取最新顺序。显示时先按已记录且仍存在的 id 排列，再按原始顺序追加未记录账号；重复、未知或已删除的 id 不产生额外行。空数组及旧文件缺少该字段时沿用原始顺序。提交最多 256 个条目，每项去首尾空白并解析为 UUID，转为规范小写形式，保留首次出现的顺序去重，绝不按 id 排序；非法 UUID、字段类型错误或超限返回 `validation`，`field` 为 `layout.accountOrder`，不落盘。手工编辑文件中的非法列表加载时只将此字段清为 `[]`，保留其他合法设置。设置存储不访问账号数据库，保存时不检查账号是否存在。
 
-`general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的六个设置节均为可选，未提交的节保留；`layout` 使用 `LayoutSettingsPatch` 在核心锁内逐字段合并，其他提交的节仍整节替换，其局部修改由前端在发送前与最新已提交值合并。
+`general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的七个设置节（含 `translation`）均为可选，未提交的节保留；`layout` 使用 `LayoutSettingsPatch` 在核心锁内逐字段合并，其他提交的节仍整节替换，其局部修改由前端在发送前与最新已提交值合并。
 
 `general.autoUpdate` 是默认 true 的布尔值，控制桌面自动下载及自动包的退出安装；启动和定时检查固定开启。旧文件缺少新字段且有合法 `general.autoCheckUpdates` 时迁移其布尔值，保留原 false；新字段优先，均缺少时为 true，保存只输出 `autoUpdate`。设置保存成功后宿主按 revision 应用策略：关闭时取消自动下载并解除自动包的退出安装，手动下载的同意不受影响；重新开启可恢复已暂停的自动下载。这是设置文件扩展，不涉及邮件数据库迁移。
 
@@ -542,6 +543,90 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 - **规则列表。** `listContactAggregations()` 对应 `contacts_list_aggregations`（无参数），返回 `ContactAggregation[]`，`ContactAggregation { address, name: string | null, messageCount, latestReceivedAt: string | null, createdAt }`：`name` 取该地址最新一封可见邮件的发件人名，`messageCount` 为所有账号中该地址在垃圾邮件和已删除邮件之外的可见邮件数（与联系人视图一致），按名称（无名称时按地址）不区分大小写排序。
 - **设置规则。** `setContactAggregation(address, aggregated)` 对应 `contacts_set_aggregation`，`{ address, aggregated: boolean }`；地址校验同 `fromAddress`，失败返回 `validation`（字段 `address`）。幂等：重复添加或删除不存在的规则都成功。两个命令只开放给主窗口，参数拒绝未知字段。
 - **TypeScript。** `EmailListQuery` 新增 `fromAddress: string | null` 与 `groupSenders: boolean`；`mock-client` 按同样语义实现。
+
+### 邮件翻译（主窗口）
+
+把已缓存的邮件正文经用户选定的翻译服务翻译，设计见[邮件翻译](../architecture/translation.md)。状态：已实现，仅有自动测试；没有用真实密钥调用过翻译服务。命令只开放给主窗口，参数拒绝未知字段。
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `translationStatus(emailId)` | `translation_status`，`{ emailId }` | `TranslationStatus`；只读本地，不联网、不下载正文 |
+| `translateEmail(emailId, targetLanguage?)` | `translation_translate`，`{ emailId, targetLanguage?: string }` | `TranslationStatus`；完成后 `translation` 有值 |
+| `cancelTranslation(emailId)` | `translation_cancel`，`{ emailId }` | null；取消该邮件进行中的翻译，被取消的调用返回 `translationCancelled` |
+| `clearTranslation(emailId)` | `translation_clear`，`{ emailId }` | null；删除该邮件的缓存译文 |
+| `clearTranslations()` | `translation_clear_all`，`{}` | null |
+| `translationCacheStats()` | `translation_cache_stats`，`{}` | `TranslationCacheStats` |
+| `translationKeys()` | `translation_keys`，`{}` | `TranslationKeyState[]` |
+| `setTranslationKey(provider, key)` | `translation_set_key`，`{ provider, key }` | `TranslationKeyState[]`（更新后的状态） |
+| `removeTranslationKey(provider)` | `translation_remove_key`，`{ provider }` | `TranslationKeyState[]` |
+| `testTranslation()` | `translation_test`，`{}` | `TranslationTest` |
+
+宿主处理这些命令时始终使用**已保存**的设置和当前界面语言，调用方不能在命令里传入服务、路由或同意状态。没有任何命令返回密钥。
+
+```ts
+type TranslationProviderId = "deepl" | "microsoft" | "google";
+
+type TranslationStatus = {
+  emailId: string;
+  targetLanguage: string;          // 已解析：显式目标，否则设置值；auto 跟随界面语言
+  detectedLanguage: string | null; // 本机检测出的主语言代码，未知为 null
+  detectionReliable: boolean;
+  suggested: boolean;              // 是否显示“这封邮件是……”提示
+  autoTranslate: boolean;          // 命中“总是翻译”且已同意当前服务，应自动翻译
+  translation: TranslationInfo | null; // 存在当前有效的缓存译文时有值
+};
+type TranslationInfo = {
+  provider: TranslationProviderId;
+  sourceLanguage: string | null;   // 服务报告的源语言（小写）
+  subject: string | null;          // 译后主题
+  partial: boolean;                // 部分内容因 50,000 字符预算、单段过大或 5000 段上限保持原文
+};
+type TranslationCacheStats = { count: number; bytes: number };
+type TranslationKeyState = { provider: TranslationProviderId; configured: boolean };
+type TranslationTest = { translated: string }; // 固定英文句子的译文，最多 200 字符
+```
+
+- `translationStatus` 在未选服务、密钥未保存、邮件为本机已发送副本、正文尚未缓存或缓存的净化版本过旧时，`suggested` 与 `autoTranslate` 为 false 或语言未知；`translation` 仅在缓存键（邮件、目标语言、是否含引用、正文哈希、净化版本、分段版本）全部匹配时有值。
+- `translateEmail` 的检查顺序：设置校验、服务已选（`translationNotConfigured`）、密钥已保存（`translationNotConfigured`）、已同意当前服务（`translationConsentRequired`）、目标语言有效（`validation`，字段 `target`）、正文已缓存（`bodyNotCached`）、大小（`translationTooLarge`）。同一邮件再次翻译会取消上一次；全应用最多 2 个并行。本机已发送副本返回 `validation`（字段 `emailId`）。
+- `testTranslation` 只翻译一句固定英文，用于检查密钥、区域与网络，不含邮件内容，不要求同意；目标语言为 `auto` 时译成简体中文。
+- `setTranslationKey` 去掉首尾空白，拒绝空值、控制字符与超过 512 字符，返回 `validation`（字段 `translation.key`），错误中不含密钥原值。密钥存入 SecretStore 的 `mailx/translation/<provider>`。
+- `prepareBody` 的 `translation` 为译文目标语言（必须是 26 种目标之一，否则 `validation`，字段 `target`）。宿主按当前邮件正文身份读取缓存译文，并在引用折叠之后、资源绑定之前应用；译文取自当前已保存的“翻译引用内容”设置。没有当前有效的缓存译文时不签发令牌，准备返回 `notFound`，协议请求也返回 404，不会退回提供原文。译文文档使用自己的文档令牌，其余绑定与 `releaseBody` 规则不变；草稿预览不支持译文。
+
+`settings.translation`（`TranslationSettings`，通过现有 `settings_update` 的 `translation` 节整节替换，其余设置事件与快照规则不变）：
+
+| 字段 | 取值 / 默认 | 说明 |
+| --- | --- | --- |
+| `provider` | `deepl` / `microsoft` / `google` / `null`，默认 `null` | 所选翻译服务 |
+| `microsoftRegion` | 字符串，默认 `""`，最多 40 字符 | Azure 资源区域，仅 Microsoft 使用，空表示全局资源 |
+| `route` | `{ kind: "direct" }`（默认）或 `{ kind: "proxy", proxyKind, host, port }` | 翻译专用路由；不使用邮箱账号的代理；本版无代理用户名 / 密码；代理失败不回退直连 |
+| `targetLanguage` | `auto`（默认，跟随界面语言）或 26 种目标之一 | `zh-Hans`、`zh-Hant`、`en`、`ja`、`ko`、`fr`、`de`、`es`、`pt`、`it`、`ru`、`nl`、`pl`、`tr`、`ar`、`id`、`uk`、`sv`、`da`、`fi`、`cs`、`el`、`hu`、`ro`、`bg`、`nb` |
+| `suggest` | 布尔，默认 true | 是否显示邮件语言提示 |
+| `neverSuggest` | 小写语言码数组，默认 `[]`，最多 64 项 | 不再提示的语言 |
+| `alwaysTranslate` | 小写语言码数组，默认 `[]`，最多 64 项 | 打开时自动翻译的语言；与 `neverSuggest` 不能重叠 |
+| `includeQuotes` | 布尔，默认 false | 是否翻译已折叠的引用内容 |
+| `consentedProvider` | 服务 id 或 `null` | 用户已同意向其发送邮件文字的服务；与 `provider` 不同时同意无效 |
+
+校验失败返回 `validation`，字段如 `translation.targetLanguage`、`translation.neverSuggest`、`translation.alwaysTranslate`、`translation.microsoftRegion`、`translation.route.host`、`translation.route.port`，不落盘。旧文件缺少该节时使用默认值；文件中类型或取值非法的单个字段回到默认并保留其余设置。这是设置文件扩展。
+
+翻译缓存表 `message_translations`（迁移 0029）见[存储与搜索](../architecture/storage-search.md)与[数据库迁移](../architecture/database-migrations.md)。
+
+新增错误码（camelCase，固定脱敏文本）：
+
+| code | 含义 / 处理 |
+| --- | --- |
+| `translationNotConfigured` | 未选择翻译服务或未保存密钥，到设置中完成 |
+| `translationConsentRequired` | 需先同意向所选服务发送邮件文字，由界面询问后保存 `consentedProvider` |
+| `translationKeyRejected` | 服务拒绝了密钥，重新填写 |
+| `translationQuotaExceeded` | 服务额度用尽 |
+| `translationRateLimited` | 请求过于频繁，稍后重试 |
+| `translationNetwork` | 无法连接翻译服务 |
+| `translationProxy` | 无法通过所设代理连接，不回退直连 |
+| `translationTimeout` | 单个请求超过 30 秒 |
+| `translationUnavailable` | 服务端暂时故障（5xx） |
+| `translationInvalidResponse` | 服务返回的内容无法使用（条数不符、过长或无法解析） |
+| `translationLanguageUnsupported` | 所选服务不支持该目标语言 |
+| `translationTooLarge` | 邮件正文过大（净化 HTML 超过 2 MiB） |
+| `translationCancelled` | 翻译已被取消 |
 
 ### 全局提示（Toast）
 
