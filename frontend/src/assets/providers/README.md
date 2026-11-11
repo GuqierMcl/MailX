@@ -53,10 +53,10 @@
 
 ## 中国移动 139 邮箱
 
-- 文件：`mail-139.png`，512 × 512，保留完整官方应用图标，包括白底、蓝色信封与 `139`、粉色 `AI+` 区域。
-- 来源链：[139 官方下载页](https://logininterface.mail.10086.cn/download/index.html)的 iOS 下载入口指向 [App Store 应用 474433226](https://apps.apple.com/cn/app/id474433226)；[Apple 公开应用元数据](https://itunes.apple.com/lookup?id=474433226&country=cn)的 `artworkUrl512` 提供原图。核验时应用为“139邮箱-手机号即是邮箱号”，开发商与销售方均为 `China Mobile Internet Company Limited`。
-- [原始图片](https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/40/94/0c/40940c85-1451-304d-da2c-ec1d2dd78560/AppIcon-0-1x_U007epad-0-11-0-P3-85-220-0.png/512x512bb.jpg)为 JPEG，仅按原尺寸解码保存为 PNG；已逐像素核对解码结果一致，没有裁切、缩放、补画或去背景。
-- JPEG 原文件 SHA-256：`704bc48e9153048dbabbb7fa18841308d70bfa37182f01c874707c885d3e3d00`。
+- 文件：`mail-139.png`，66 × 66 RGBA PNG，保留完整官方图标的蓝色圆底、白色信封和 `139` 标识，不含推广信息。
+- 来源链：[139 官方下载页](https://logininterface.mail.10086.cn/download/index.html)的 Android 下载入口指向[官方 APK](https://appdownload.mail.10086.cn/event/static/sys/20200723/PE-V11.6.0-9048001.apk)；APK 内的 `assets/blue/drawable/ic_mail_139.png` 与 `assets/black/drawable/ic_mail_139.png` 字节一致。
+- 直接保留 APK 内 PNG 原文件，没有裁切、缩放、补画、去背景或改色；核验日期：2026-11-11。
+- PNG 原文件 SHA-256：`837435be15ce7c6d53d6fb52f830bbbae9e3b42a9fe51e2a7cdd2a138cf3f2b1`。
 
 ## iCloud Mail
 
@@ -87,7 +87,7 @@
 
 ## 文件核验与维护
 
-QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
+QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱的核验日期：2026-11-11；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -95,7 +95,7 @@ QQ 邮箱、网易邮箱与中国移动 139 邮箱的核验日期：2026-10-30�
 | `netease-163.png` | `3c47492e5f0c3ab280571be237468d245111cb24df5454b250138e5ae8134ada` |
 | `netease-126.png` | `7a938c619dbeca51d4ece451d4f8b02107435638be5ab6e98fa3ed8c3d694b2d` |
 | `netease-yeah.png` | `77f34d1b7c3ac5477cf9a1e79e8c601a990332e9186aeab428e0dd3a82d4fc86` |
-| `mail-139.png` | `2d438d12f0e6bbc1d668d705b817cd1a374e7ffe053eedca16c5a6f15ee1862f` |
+| `mail-139.png` | `837435be15ce7c6d53d6fb52f830bbbae9e3b42a9fe51e2a7cdd2a138cf3f2b1` |
 | `icloud-mail.png` | `eb04a20229ea2fe673b7b78bf84213176a8ae765bf5c5ec88ac5c2458585f869` |
 | `gmail.svg` | `0a242131424b796a26247a8edd41d66fa294da6d177897526a19b7e81aedfdb8` |
 | `outlook.svg` | `81bfb24bb128298a9ed0ea6fe8d9ba8cff703b26d6a7cbd18cc4314cecba8f1f` |
