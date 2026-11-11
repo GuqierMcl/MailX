@@ -3,7 +3,7 @@ import { t } from '@/i18n'
 import { useCallback, useEffect } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { toast } from '@/components/ui/toast'
-import type { EmailDetail, EmailPage, EmailSummary, SelectedEmail } from '@/generated/accounts'
+import type { ConversationPage, EmailDetail, EmailPage, EmailSummary, SelectedEmail } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import type { BatchSettle } from './use-delete-email'
@@ -48,6 +48,16 @@ function patchOpened(
     detail && { ...detail, summary: change(detail.summary) })
 }
 
+/** The conversation rows are copies of the summaries too; keep their dots and stars in step. */
+function patchConversations(
+  client: ReturnType<typeof useQueryClient>,
+  emailId: string,
+  change: (summary: EmailSummary) => EmailSummary,
+) {
+  client.setQueriesData<ConversationPage>({ queryKey: mailKeys.conversations() }, (data) =>
+    data && { ...data, messages: data.messages.map((item) => (item.id === emailId ? change(item) : item)) })
+}
+
 /** `mailKeys.email(id)` entries, as opposed to lists and the folder tree. */
 const isEmailDetail = (query: { queryKey: readonly unknown[] }) => query.queryKey[1] === 'email'
 
@@ -59,6 +69,7 @@ function patchEverywhere(
 ) {
   patchLists(client, emailId, change)
   patchOpened(client, emailId, change)
+  patchConversations(client, emailId, change)
 }
 
 /**
@@ -159,6 +170,7 @@ export function useMessageFlags(client: MailxClient) {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     // The open message holds its own copy of "waiting"; re-read it as well.
     void queryClient.invalidateQueries({ queryKey: mailKeys.all, predicate: isEmailDetail })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.conversations() })
     if (written.localOnlyStars > 0) {
       toast.info(t(LOCAL_STAR_TITLE), { description: t(LOCAL_STAR_BODY), timeout: 9000 })
     }

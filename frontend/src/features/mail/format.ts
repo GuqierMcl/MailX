@@ -84,3 +84,13 @@ export function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+/** The subject without reply and forward prefixes ("Re:", "回复：", "Fwd:" ...), so a thread has one title. */
+export function threadSubject(subject: string) {
+  let rest = subject.trim()
+  for (;;) {
+    const next = rest.replace(/^(re|fwd|fw|回复|答复|转发)\s*[:：]\s*/i, '')
+    if (next === rest) return rest
+    rest = next.trim()
+  }
+}

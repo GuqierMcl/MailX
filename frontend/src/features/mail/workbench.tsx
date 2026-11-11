@@ -20,6 +20,7 @@ import { EmailList, type ListFilter } from './email-list'
 import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
+import { ConversationFrame, type ThreadMode } from './conversation-view'
 import { EmailView, RemoveLocalCopyDialog } from './email-view'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
@@ -100,6 +101,11 @@ export function Workbench({ client }: { client: MailxClient }) {
   // matches": changing mailbox, filter or search, or the list refreshing, never
   // closes it. Only opening another message, closing it, or it ceasing to exist does.
   const [openedState, setOpened] = useState<OpenedState | null>(null)
+  // The message whose conversation the reader shows. Every normal way of opening a
+  // message sets it; expanding another message of the thread does not, so the thread
+  // stays put while the expanded message changes.
+  const [anchorId, setAnchorId] = useState<string | null>(null)
+  const [threadMode, setThreadMode] = useState<ThreadMode>('thread')
   const [contact, setContact] = useState<ContactView | null>(null)
   // Which way the list slides on a base <-> contact switch; null for any other change.
   const [slide, setSlide] = useState<'forward' | 'back' | null>(null)
@@ -358,6 +364,15 @@ export function Workbench({ client }: { client: MailxClient }) {
   const opened = openedState && !closedByAccount && !closedByLoss ? openedState : null
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
+  const conversation = useQuery({
+    queryKey: mailKeys.conversation(anchorId ?? ''),
+    queryFn: () => client.getConversation(anchorId!),
+    enabled: Boolean(anchorId && opened),
+  })
+  const threadPage = opened && conversation.data && anchorId ? conversation.data : null
+  const threadPosition = threadPage?.messages.find((message) => message.id === opened?.id)
+  // One-message threads, local sent copies, and loading or failed lookups keep today's reader.
+  const threaded = Boolean(threadPage && threadPage.messages.length >= 2 && threadPosition && !threadPosition.localOnly)
   const { setFlag, setFlags } = useMessageFlags(client)
   useMailStateChanges(client)
   useEmailPreviews(client)
@@ -425,6 +440,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (!account) return
     if (emailId) {
       setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
+      setAnchorId(emailId)
       setReaderChoice(false)
       exitSelection()
       return
@@ -556,9 +572,15 @@ export function Workbench({ client }: { client: MailxClient }) {
   // Every way of opening a message (list click, search result, notification) shows the reader.
   const openEmail = (email: { id: string; accountId: string }) => {
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
+    setAnchorId(email.id)
     setReaderCollapsed(false)
     // Opening a message (from search or the palette) ends picking, so the reader can show it.
     exitSelection()
+  }
+  // Expanding a message inside the thread opens it like any other (read mark, toolbar,
+  // body) but keeps the anchor, so the same conversation stays on screen.
+  const expandInThread = (email: EmailSummary) => {
+    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
   }
   const toggleReader = () => setReaderCollapsed(!readerCollapsed)
   // Only the user's own drags are saved, and not while the reader is folded away
@@ -753,6 +775,18 @@ export function Workbench({ client }: { client: MailxClient }) {
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
               onRemoveLocal={removeLocalCopy}
               onDelete={deleteEmail.request}
+              frame={threaded && threadPage && opened ? (content) => (
+                <ConversationFrame
+                  // A new thread starts with its earlier / newer rows folded again.
+                  key={anchorId}
+                  page={threadPage}
+                  expandedId={opened.id}
+                  selfAddress={accounts.find((account) => account.id === opened.accountId)?.emailAddress ?? null}
+                  mode={threadMode}
+                  onModeChange={setThreadMode}
+                  onExpand={expandInThread}
+                >{content}</ConversationFrame>
+              ) : undefined}
               onArchive={body.email && canArchive(body.email.summary, folders) ? (email, archive) => void archiveEmail(email, archive) : undefined}
             />
             )}

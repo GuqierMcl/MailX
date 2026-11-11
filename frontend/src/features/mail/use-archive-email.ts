@@ -19,6 +19,7 @@ function useArchiveChange(client: MailxClient) {
   const queryClient = useQueryClient()
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.conversations() })
     // The inbox and archived unread numbers move together.
     void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
   }, [queryClient])

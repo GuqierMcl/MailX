@@ -1,3 +1,4 @@
+import { previewText } from './preview-text'
 import { t } from '@/i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,7 +9,6 @@ import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
 import { displayName, formatListTime, recipientsLabel } from './format'
 import { LocalOnlyMarker } from './local-only-marker'
-import { isGivenUp } from './preview-gave-up'
 import { SenderAvatar } from './sender-avatar'
 import { ReadStatusButton } from './read-status-button'
 
@@ -335,12 +335,6 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
 }
 
 /** What the preview slot shows while the body is fetched or unavailable. */
-function previewText(email: EmailSummary) {
-  if (email.bodyState === 'ready' || email.previewState === 'ready') return email.preview
-  if (email.previewState === 'missing' && !isGivenUp(email.id)) return t('mail:previewLoading')
-  return ''
-}
-
 /** Search hits use a faint wash and stronger text, while other segments remain plain text. */
 function SnippetText({ segments }: { segments: SnippetSegment[] }) {
   return segments.map((segment, index) => segment.hit

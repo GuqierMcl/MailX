@@ -44,6 +44,7 @@ export function useDeleteEmail(client: MailxClient, folders: Folder[], onHidden:
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.conversations() })
     // Unread numbers in the sidebar move with hidden unread messages.
     void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
   }, [queryClient])
