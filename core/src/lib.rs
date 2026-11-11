@@ -25,6 +25,7 @@ mod startup;
 mod storage;
 mod sync;
 pub mod tools;
+pub mod translate;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
