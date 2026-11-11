@@ -17,19 +17,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Decides whether anything beyond documentation changed. The checks below are
-  # required by the branch ruleset, so the workflow itself must always run: a
-  # workflow skipped by `paths-ignore` leaves its required checks pending forever.
-  # A job skipped through `if` reports success instead, which lets docs-only PRs merge.
+  # Decides what a change needs. The checks below are required by the branch
+  # ruleset, so the workflow itself must always run: a workflow skipped by
+  # `paths-ignore` leaves its required checks pending forever. A job skipped
+  # through `if` reports success instead, which lets docs-only PRs merge.
+  #   - docs:    documentation and text only, nothing to build;
+  #   - release: only a version bump written by `version:bump` / `version:set`
+  #              plus CHANGELOG.md, checked by the light release job below;
+  #   - code:    everything else, the full suite.
+  # Pushes to main are always `code`, so a merged release PR is still fully
+  # checked before it is tagged (the Release workflow refuses untested tags).
   changes:
     name: Detect code changes
     runs-on: ubuntu-22.04
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      kind: ${{ steps.filter.outputs.kind }}
+      code: ${{ steps.filter.outputs.kind == 'code' }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        if: github.event_name == 'pull_request'
+        with:
+          bun-version-file: package.json
       - id: filter
         env:
           EVENT: ${{ github.event_name }}
@@ -38,14 +49,14 @@ jobs:
         run: |
           # Pushes to main always run everything. Only pull requests may skip.
           if [ "$EVENT" != "pull_request" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "kind=code" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Documentation and text only: anything else, including code that
           # lives next to docs, workflows, scripts and lockfiles, counts as code.
           # A failed diff must fall through to "code", never to "docs only".
           if ! files=$(git diff --name-only "$BASE...$HEAD"); then
-            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "kind=code" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Changed files:"
@@ -54,11 +65,40 @@ jobs:
           # (rather than relying on grep's exit status) keeps this unambiguous.
           # shellcheck disable=SC2126 # `grep -c` exits non-zero on zero matches.
           other=$(printf '%s\n' "$files" | grep -Ev '^(docs/.*\.(md|webp|png|jpg|svg)|[^/]+\.md|LICENSE|\.github/ISSUE_TEMPLATE/.*\.md|\.github/pull_request_template\.md)$' | wc -l | tr -d ' ') || other=1
-          if [ -z "$files" ] || [ "${other:-1}" -gt 0 ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
+          if [ -n "$files" ] && [ "${other:-1}" -eq 0 ]; then
+            echo "kind=docs" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # A release PR? The classifier comes from the base commit, so the pull
+          # request cannot change how it is judged. It compares each version file
+          # with what a bump from the base writes; any other change, a missing
+          # classifier or any error means "code".
+          if git worktree add --detach "$RUNNER_TEMP/base" "$BASE" &&
+            verdict=$(bun "$RUNNER_TEMP/base/scripts/check-release-pr.mjs" "$BASE" "$HEAD"); then
+            echo "$verdict"
+            if [ "$(printf '%s\n' "$verdict" | tail -n 1)" = "release" ]; then
+              echo "kind=release" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "kind=code" >> "$GITHUB_OUTPUT"
+
+  # A release PR changes nothing but versions and the changelog, which is what
+  # these checks cover. The full suite runs on main once the PR is merged.
+  release:
+    name: Release PR checks
+    needs: changes
+    if: needs.changes.outputs.kind == 'release'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run version:check --release
+      - run: bun run version:test
 
   frontend:
     name: Frontend and repository checks
@@ -169,11 +209,12 @@ jobs:
   # names the ruleset waits for, so requiring the matrix jobs directly leaves every
   # docs-only pull request pending forever. This job always runs and decides:
   #   - code changed: the frontend job and every Rust matrix job must have passed;
-  #   - documentation only: they must have been skipped (or passed);
+  #   - a release PR: the release checks must have passed, the rest skipped;
+  #   - documentation only: everything must have been skipped (or passed);
   #   - anything failed or was cancelled, or change detection broke: fail.
   result:
     name: CI result
-    needs: [changes, frontend, rust]
+    needs: [changes, release, frontend, rust]
     if: always()
     runs-on: ubuntu-22.04
     timeout-minutes: 5
@@ -181,32 +222,44 @@ jobs:
       - name: Judge the checks
         env:
           CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
+          KIND: ${{ needs.changes.outputs.kind }}
+          RELEASE: ${{ needs.release.result }}
           FRONTEND: ${{ needs.frontend.result }}
           RUST: ${{ needs.rust.result }}
         run: |
-          echo "change detection: $CHANGES (code=$CODE)  frontend: $FRONTEND  rust: $RUST"
+          echo "change detection: $CHANGES (kind=$KIND)  release: $RELEASE  frontend: $FRONTEND  rust: $RUST"
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Change detection did not succeed, so nothing can be trusted."
             exit 1
           fi
-          case "$CODE" in
-            true)
+          settled() {
+            for result in "$@"; do
+              case "$result" in
+                success | skipped) ;;
+                *) echo "::error::A check ended as '$result'."; exit 1 ;;
+              esac
+            done
+          }
+          case "$KIND" in
+            code)
               if [ "$FRONTEND" != "success" ] || [ "$RUST" != "success" ]; then
                 echo "::error::Code changed, so the frontend and Rust checks must pass."
                 exit 1
               fi
+              settled "$RELEASE"
               ;;
-            false)
-              for result in "$FRONTEND" "$RUST"; do
-                case "$result" in
-                  success | skipped) ;;
-                  *) echo "::error::A check ended as '$result'."; exit 1 ;;
-                esac
-              done
+            release)
+              if [ "$RELEASE" != "success" ]; then
+                echo "::error::A release PR must pass the release checks."
+                exit 1
+              fi
+              settled "$FRONTEND" "$RUST"
+              ;;
+            docs)
+              settled "$RELEASE" "$FRONTEND" "$RUST"
               ;;
             *)
-              echo "::error::Unexpected change detection output '$CODE'."
+              echo "::error::Unexpected change detection output '$KIND'."
               exit 1
               ;;
           esac

@@ -66,9 +66,9 @@
 1. **确认 main 的 CI 是绿的**，`CHANGELOG.md` 的 `[Unreleased]` 已写全。
 2. **新建发版分支**：`git switch main && git pull --ff-only && git switch -c release/vX.Y.Z`。
 3. **改版本**：先 `bun run version:bump … --dry-run` 看结果，再去掉 `--dry-run` 执行。
-4. **检查**：`git diff`（应只有版本文件和 `CHANGELOG.md`）；`bun run check`、`bun run rust:test`（也可交给 PR 的 CI）。
+4. **检查**：`git diff`（应只有版本文件和 `CHANGELOG.md`）；`bun run version:check --release`、`bun run version:test`。发版 PR 只要保持这种改动，CI 就只跑这两项轻量检查（见下文“发版 PR 的 CI”），全量检查在合并后的 `main` 上进行。
 5. **提交并开 PR**：`git commit -am "chore(release): vX.Y.Z"`，推送、等 CI 通过、合并。
-6. **打标签**（必须是合并后的 main，不是 PR 分支）：
+6. **等 `main` 的 CI 通过后打标签**（必须是合并后的 main，不是 PR 分支）：合并提交推到 `main` 后会跑全量 CI，等它的 `CI result` 变绿再打标签。提前推送的标签会被发版工作流拒绝，CI 通过后在 Actions 页重跑该次运行即可。
    ```sh
    git switch main && git pull --ff-only
    bun run version:check --release     # 仍然通过
@@ -83,6 +83,10 @@
 
 发版后**不需要**再把版本改成下一个开发版本；`main` 保持在最近发布的版本号，下次发版再改。
 
+### 发版 PR 的 CI
+
+CI 的变更检测把 PR 分成三类：只改文档、发版、其他改动。发版 PR 的判定由 `scripts/check-release-pr.mjs` 完成（使用基准分支上的版本，PR 不能改变自己的判定方式）：改动的文件只能是版本文件和 `CHANGELOG.md`，版本必须升高，且每个版本文件都必须与在基准提交上运行 `version:bump` / `version:set` 写出的内容一字不差；`Cargo.lock` 中只允许 MailX 自身成员的版本变化。满足时只运行 `Release PR checks`（`version:check --release` 与 `version:test`），前端和三平台 Rust 检查跳过；任何其他改动或判定出错都按普通改动跑全量检查。推送到 `main` 始终跑全量检查，因此合并后的提交在打标签前仍会完整编译和测试，发版工作流也会核对这一点。
+
 ## 6. 工作流做了什么
 
 `.github/workflows/release.yml`：
@@ -92,7 +96,7 @@ Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 gl
 Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"`，再把该临时配置传给 `bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"`。脚本从构建机的 `pkg-config` 库目录解析 AppIndicator、Ayatana Indicator/Ido 与 dbusmenu 的五个 SONAME，检查 ELF、SONAME 和依赖闭包，并把真实文件复制到 AppImage 的 `usr/lib`。这组库由托盘后端动态加载，普通链接依赖扫描会遗漏；其余依赖和 RPATH 仍由 linuxdeploy 处理。macOS 与 Windows 继续使用原构建命令。
 
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
-- **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
+- **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先，且该提交在 `main` 上的 `CI result` 必须已经通过（发版 PR 只跑轻量检查，全量检查以合并后的这次为准）。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
 - **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 

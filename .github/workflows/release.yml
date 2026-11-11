@@ -30,6 +30,9 @@ jobs:
     name: Verify version
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
@@ -53,6 +56,25 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not point into main. Merge the release PR first, then tag the merge commit."
             exit 1
           fi
+      # A release PR only gets light checks (versions and changelog); the full
+      # suite runs when it lands on main. Installers are built only from a commit
+      # whose CI on main passed, so a tag pushed too early fails here, before any
+      # build. Re-run this workflow once the CI result is green.
+      - name: The tagged commit passed CI on main
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=CI%20result&filter=all" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions") | (.conclusion // .status)] | join(" ")')
+          echo "CI result on $GITHUB_SHA: ${conclusions:-none}"
+          case " $conclusions " in
+            *" success "*) ;;
+            *)
+              echo "::error::CI on main has not passed for this commit yet (${conclusions:-no run}). Wait for the CI result to turn green, then re-run this workflow."
+              exit 1
+              ;;
+          esac
       - id: meta
         run: |
           version=$(bun -e 'console.log(JSON.parse(require("fs").readFileSync("package.json","utf8")).version)')
