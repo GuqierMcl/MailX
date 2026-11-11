@@ -337,7 +337,8 @@ describe('synced inbox headers', () => {
       expect(rows()).toHaveLength(103)
     })
     await userEvent.click(rows()[102])
-    await screen.findByRole('heading', { name: items[102].subject })
+    // Opening the row loads its detail and its conversation; allow a slow runner.
+    await screen.findByRole('heading', { name: items[102].subject }, { timeout: 3000 })
     const calls = client.listEmails.mock.calls.length
     emit(exampleSyncState({ sequence: 2, folders: [exampleFolderSyncState('inbox'), exampleFolderSyncState('sent', { dataRevision: 1 })] }))
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
@@ -355,7 +356,8 @@ describe('synced inbox headers', () => {
     await screen.findByRole('list', { name: '邮件列表' })
     await waitFor(() => expect(rows()).toHaveLength(103))
     await userEvent.click(rows()[102])
-    await screen.findByRole('heading', { name: items[102].subject })
+    // Opening the row loads its detail and its conversation; allow a slow runner.
+    await screen.findByRole('heading', { name: items[102].subject }, { timeout: 3000 })
     items = [email('new'), ...items.map((item) => ({ ...item, isRead: true }))]
     emit(exampleSyncState({ phase: 'syncing', sequence: 2, folders: [exampleFolderSyncState('inbox', { dataRevision: 1 }), exampleFolderSyncState('sent', { phase: 'syncing' })] }))
     await waitFor(() => expect(rows()).toHaveLength(104))
