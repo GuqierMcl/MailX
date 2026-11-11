@@ -33,17 +33,19 @@
 
 ## 支持的邮箱
 
-以下服务商内置预设：选择服务商，填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好。
+以下服务商内置预设。多数服务商只需选择后填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好；Outlook 和 Microsoft 365 则改为在浏览器中登录。
 
-| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Gmail | iCloud 邮箱 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
+| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365 / Exchange" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Gmail | iCloud 邮箱 | Outlook | Microsoft 365 / Exchange | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
 
 Gmail 接受 `@gmail.com` 和 `@googlemail.com` 地址，使用 Google 应用专用密码，需要先开启两步验证。生成方法和不可用的情况见[添加账号指南](docs/guides/zh-CN/README.md#gmail)。
 
 iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 Apple 应用专用密码。账号前提和用户名设置见[添加账号指南](docs/guides/zh-CN/README.md#icloud-邮箱)。
 
-其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail、Outlook 等服务的 OAuth 登录（无需应用专用密码、在浏览器中登录）在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
+Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Exchange（工作或学校邮箱）通过浏览器中的微软登录页登录，不需要在 MailX 中输入密码。Outlook.com 需要先在 Outlook 设置中开启 IMAP；工作或学校账号可能需要管理员批准 MailX，或为邮箱允许 IMAP 和 SMTP。公司自己搭建的 Exchange 服务器不在这个入口范围内，如果它提供 IMAP 和 SMTP，可以手动添加。详见[添加账号指南](docs/guides/zh-CN/README.md#microsoftoutlook--microsoft-365)。
+
+其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail 的浏览器登录（无需应用专用密码）在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
 
 <sub>服务商名称与 Logo 为其各自所有者的商标，仅用于标识服务商。</sub>
 
@@ -63,7 +65,8 @@ iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 App
 | 桌面端：撰写与发送 | ✅ 可用 |
 | 桌面端：在已发送文件夹中显示发出的邮件 | ✅ 已实现 |
 | 本地内容全文搜索 | ✅ 已实现 |
-| OAuth 登录（Gmail、Outlook） | 🗓️ 规划中 |
+| 浏览器登录：Outlook、Microsoft 365 / Exchange | ✅ 已实现 |
+| 浏览器登录：Gmail | 🗓️ 规划中 |
 | 内置 AI 助手 | 🗓️ 规划中 |
 | 供外部 AI 客户端使用的本地 MCP 服务 | ✅ 已实现 |
 | 服务器：自托管 Web 版本 | 🗓️ 规划中 |
@@ -72,7 +75,7 @@ iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 App
 
 ## 已知限制
 
-- 当前支持密码 / 授权码认证的 IMAP 和 SMTP 账号；OAuth、内置 AI 助手和自托管 Web 版本尚未提供。
+- 当前支持使用密码、授权码或应用专用密码的 IMAP 和 SMTP 账号，以及 Outlook 和 Microsoft 365 的浏览器登录；Gmail 等其他服务商的浏览器登录、内置 AI 助手和自托管 Web 版本尚未提供。
 - 首次同步从固定的最近 30 天窗口开始，每轮补齐各文件夹窗口中最新的一千封邮件头，已缓存的邮件会保留。搜索只覆盖本机内容，未打开过的正文可能不在结果中；附件按名称搜索，不搜索文件内容。
 - 归档只在本机生效；移动到任意服务器文件夹和把本地草稿同步到服务器尚未实现。已发送的本机副本不会上传到服务器。
 - 提供 Windows、macOS 和 Linux 构建，但各功能与服务商的覆盖范围不同。已验证的组合和剩余缺口见[验证记录](docs/development/validation.md)。
