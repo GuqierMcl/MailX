@@ -11,6 +11,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### 🚀 Feature
 
 - Quoted earlier messages at the end of a reply are folded behind Show quoted text when MailX recognizes the quoting style; anything else is shown in full as before. / 回复末尾引用的原邮件在 MailX 能识别其引用格式时会收进“显示引用内容”，其余情况仍完整显示。 ([#114](https://github.com/GuqierMcl/MailX/pull/114))
@@ -150,7 +152,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GuqierMcl/MailX/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GuqierMcl/MailX/releases/tag/v0.1.0
