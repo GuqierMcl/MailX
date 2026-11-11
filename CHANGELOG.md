@@ -13,7 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- Messages that are part of a back-and-forth open as a conversation, with your replies included and a switch back to single messages. / 属于多次往来的邮件会以对话形式打开，包含你自己的回复，并可切换回逐封阅读。
+- Messages that are part of a back-and-forth open as a conversation, with your replies included and a switch back to single messages. / 属于多次往来的邮件会以对话形式打开，包含你自己的回复，并可切换回逐封阅读。 ([#113](https://github.com/GuqierMcl/MailX/pull/113))
 - Right-click a message and choose Show mail from this contact to list that contact's mail, then go back with the back button, Esc or the mouse's back button. / 右键邮件并选择“查看此联系人的邮件”可列出该联系人的邮件，再用返回按钮、Esc 或鼠标后退键返回。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Group a contact's mail into a single row in your inboxes from the right-click menu, and manage grouped contacts under Settings → Contacts. / 可通过右键菜单将联系人的邮件在收件箱中聚合为一行，并在“设置 → 联系人”中管理已聚合的联系人。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Add Outlook.com, Hotmail, Live and Microsoft 365 mailboxes by signing in in your browser, without a password. / 通过浏览器登录即可添加 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，无需密码。 ([#107](https://github.com/GuqierMcl/MailX/pull/107))
