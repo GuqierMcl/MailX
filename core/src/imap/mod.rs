@@ -937,7 +937,7 @@ impl Session {
         // rejects, and one such message would fail every retry of its batch.
         // Attachments are inferred from CONTENT-TYPE / CONTENT-DISPOSITION.
         let mut fields =
-            "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION"
+            "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION IN-REPLY-TO REFERENCES"
                 .to_owned();
         for field in self.compatibility.extra_header_fields() {
             fields.push(' ');
@@ -1727,7 +1727,7 @@ mod tests {
     #[tokio::test]
     async fn header_fetch_uses_the_actual_endpoints_compatibility_fields() {
         let header = b"Message-ID: <rewritten@qq.com>\r\nX-OQ-MSGID: <original@vip.qq.com>\r\n\r\n";
-        let fields = "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION X-OQ-MSGID";
+        let fields = "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION IN-REPLY-TO REFERENCES X-OQ-MSGID";
         let response = format!(
             "* 1 FETCH (UID 42 FLAGS (\\Seen) BODY[HEADER.FIELDS ({fields})] {{{}}}\r\n{})\r\n{{tag}} OK\r\n",
             header.len(),
@@ -1786,7 +1786,7 @@ mod tests {
             ("STATUS \"INBOX\" (MESSAGES UNSEEN UIDNEXT UIDVALIDITY)".into(), "* STATUS INBOX (MESSAGES 3 UNSEEN 2 UIDNEXT 43 UIDVALIDITY 9)\r\n{tag} OK\r\n".into()),
             ("EXAMINE \"INBOX\"".into(), "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n* OK [UIDNEXT 43] next\r\n{tag} OK [READ-ONLY]\r\n".into()),
             ("UID SEARCH SINCE 18-Sep-2026".into(), "* SEARCH 42 7 19\r\n{tag} OK\r\n".into()),
-            ("UID FETCH 42 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION)])".into(), response),
+            ("UID FETCH 42 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION IN-REPLY-TO REFERENCES)])".into(), response),
             ("UID FETCH 42 (UID FLAGS)".into(), "* 1 FETCH (UID 42 FLAGS (\\Seen))\r\n{tag} OK\r\n".into()),
             ("LOGOUT".into(), "{tag} OK\r\n".into()),
         ]).await;

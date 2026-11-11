@@ -13,6 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Messages that are part of a back-and-forth open as a conversation, with your replies included and a switch back to single messages. / 属于多次往来的邮件会以对话形式打开，包含你自己的回复，并可切换回逐封阅读。 ([#113](https://github.com/GuqierMcl/MailX/pull/113))
 - Right-click a message and choose Show mail from this contact to list that contact's mail, then go back with the back button, Esc or the mouse's back button. / 右键邮件并选择“查看此联系人的邮件”可列出该联系人的邮件，再用返回按钮、Esc 或鼠标后退键返回。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Group a contact's mail into a single row in your inboxes from the right-click menu, and manage grouped contacts under Settings → Contacts. / 可通过右键菜单将联系人的邮件在收件箱中聚合为一行，并在“设置 → 联系人”中管理已聚合的联系人。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Add Outlook.com, Hotmail, Live and Microsoft 365 mailboxes by signing in in your browser, without a password. / 通过浏览器登录即可添加 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，无需密码。 ([#107](https://github.com/GuqierMcl/MailX/pull/107))
@@ -20,6 +21,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- The 139 Mail provider now uses the clean official blue mail icon without the promotional “AI+” badge. / 139 邮箱服务商现使用不含“AI+”推广信息的官方蓝色邮件图标。
 - The About page now shows the MailX logo and version, with GitHub, problem-report and feature-request templates, and release history together below the update controls. / “关于”页现展示 MailX Logo 与版本，并在更新设置下方集中提供 GitHub、问题反馈和功能建议模板及发布记录入口。
 - Manual retry starts a fresh delivery retry window, and waiting for mailbox authorization preserves queued messages without spending delivery attempts. / 手动立即重试会重新开始投递重试窗口，等待邮箱授权时保留排队邮件且不消耗投递次数。
 

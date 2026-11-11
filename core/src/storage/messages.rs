@@ -9,8 +9,8 @@ use crate::{
     AppError, ErrorCode,
     events::NewMailMessage,
     mail::{
-        ArchiveScope, AttachmentSummary, BodyState, Coverage, EmailBody, EmailDetail,
-        EmailListQuery, EmailPage, EmailRecipients, EmailSelection, EmailSummary,
+        ArchiveScope, AttachmentSummary, BodyState, ConversationPage, Coverage, EmailBody,
+        EmailDetail, EmailListQuery, EmailPage, EmailRecipients, EmailSelection, EmailSummary,
         LOCAL_SENT_PREFIX, MailAddress, PreviewState, SelectedEmail, SenderGroup,
     },
     sync::headers::MessageRecord,
@@ -230,9 +230,10 @@ impl Storage {
             "INSERT INTO messages (id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
              message_id_header, subject, from_name, from_address, to_addresses, cc_addresses, reply_to_addresses,
              received_at, sent_at, size, is_read, is_flagged, flags, has_attachment, remote_state, updated_at,
-             original_message_id, sent_identity_policy)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'present', ?21, ?22, ?23)
+             original_message_id, sent_identity_policy, in_reply_to, references_header)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'present', ?21, ?22, ?23, ?24, ?25)
              ON CONFLICT (folder_id, uid_validity, uid) DO UPDATE SET
+             in_reply_to = excluded.in_reply_to, references_header = excluded.references_header,
              message_id_header = excluded.message_id_header, subject = excluded.subject,
              original_message_id = excluded.original_message_id, sent_identity_policy = excluded.sent_identity_policy,
              from_name = excluded.from_name, from_address = excluded.from_address,
@@ -269,6 +270,8 @@ impl Storage {
                 timestamp,
                 record.original_message_id,
                 record.sent_identity_policy,
+                record.in_reply_to,
+                record.references_header,
             ])?;
         }
         drop(statement);
@@ -295,6 +298,8 @@ impl Storage {
         }
         tx.execute("UPDATE folder_sync_cursors SET highest_uid = MAX(highest_uid, ?1), updated_at = ?2 WHERE folder_id = ?3", params![highest_uid, timestamp, target.folder_id])?;
         tx.commit()?;
+        let uids: Vec<u32> = records.iter().map(|record| record.uid).collect();
+        self.thread_stored(&target.folder_id, target.uid_validity, &uids);
         // Sync only fetches UIDs that are not cached as present, so each record
         // is a new or revived message.
         Ok(Some(records.len()))
@@ -603,6 +608,65 @@ impl Storage {
         })
     }
 
+    /// The visible messages of the conversation the given email belongs to,
+    /// oldest first. An email without a conversation (or a local Sent copy,
+    /// which carries no threading data) is returned alone. Junk and Trash
+    /// copies are left out unless they are the opened email itself.
+    pub(crate) fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+        if email_id.starts_with(LOCAL_SENT_PREFIX) {
+            return Ok(ConversationPage {
+                messages: vec![self.get_email(email_id)?.summary],
+                possibly_incomplete: false,
+            });
+        }
+        let sql =
+            format!("SELECT {SUMMARY_COLUMNS}, m.conversation_id {VISIBLE_MESSAGES} AND m.id = ?1");
+        let (own, conversation_id) = self
+            .db
+            .query_row(&sql, [email_id], |row| {
+                Ok((summary(row)?, row.get::<_, Option<String>>(18)?))
+            })
+            .optional()?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        let Some(conversation_id) = conversation_id else {
+            return Ok(ConversationPage {
+                messages: vec![own],
+                possibly_incomplete: false,
+            });
+        };
+        let sql = format!(
+            "SELECT {SUMMARY_COLUMNS}, m.message_id_header, COALESCE(f.role, '') = 'sent'
+             {VISIBLE_MESSAGES} AND m.account_id = ?1 AND m.conversation_id = ?2
+             AND (COALESCE(f.role, '') NOT IN ('junk', 'trash') OR m.id = ?3)
+             ORDER BY m.received_at ASC, m.id ASC"
+        );
+        let rows = self
+            .db
+            .prepare(&sql)?
+            .query_map(params![own.account_id, conversation_id, email_id], |row| {
+                Ok((
+                    summary(row)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, bool>(19)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let messages = collapse_copies(rows, email_id);
+        let possibly_incomplete: bool = self.db.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
+               LEFT JOIN folder_sync_cursors c ON c.folder_id = f.id
+               WHERE f.account_id = ?1 AND f.selectable = 1 AND COALESCE(f.role, '') NOT IN ('junk', 'trash')
+                 AND (c.folder_id IS NULL OR c.window_capped = 1 OR c.backfill_done = 0))",
+            [&own.account_id],
+            |row| row.get(0),
+        )?;
+        Ok(ConversationPage {
+            messages,
+            possibly_incomplete,
+        })
+    }
+
     pub(crate) fn get_email(&self, id: &str) -> Result<EmailDetail, AppError> {
         if let Some(outbox_id) = id.strip_prefix(LOCAL_SENT_PREFIX) {
             return self.local_email(outbox_id);
@@ -776,6 +840,49 @@ pub(super) const VISIBLE_MESSAGES: &str = "FROM messages m JOIN accounts a ON a.
  JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id AND f.mailbox_source_id = m.mailbox_source_id
  JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity WHERE m.remote_state = 'present' AND f.selectable = 1
  AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)";
+
+/// Collapses rows sharing a Message-ID (the same message filed in several
+/// folders) to one: the opened email if present, else a non-Sent copy, else the
+/// earliest. `rows` are `(summary, message_id_header, in_sent_folder)` in
+/// display order; rows without a Message-ID are never collapsed.
+fn collapse_copies(
+    rows: Vec<(EmailSummary, Option<String>, bool)>,
+    opened: &str,
+) -> Vec<EmailSummary> {
+    let mut keep: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (index, (item, id, sent)) in rows.iter().enumerate() {
+        let Some(id) = id.as_deref().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        match keep.get(id) {
+            None => {
+                keep.insert(id, index);
+            }
+            Some(&best) => {
+                let (current, _, current_sent) = &rows[best];
+                // Rows are ordered by time, so ties keep the earlier one.
+                let better = if current.id == opened {
+                    false
+                } else if item.id == opened {
+                    true
+                } else {
+                    *current_sent && !*sent
+                };
+                if better {
+                    keep.insert(id, index);
+                }
+            }
+        }
+    }
+    let kept: std::collections::HashSet<usize> = keep.values().copied().collect();
+    rows.iter()
+        .enumerate()
+        .filter(|(index, (_, id, _))| {
+            id.as_deref().is_none_or(|id| id.is_empty()) || kept.contains(index)
+        })
+        .map(|(_, (item, _, _))| item.clone())
+        .collect()
+}
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
     Ok(EmailSummary {

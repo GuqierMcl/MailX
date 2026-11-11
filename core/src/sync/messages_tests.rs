@@ -1301,8 +1301,7 @@ fn accepted_sent_copy(fixture: &Fixture) -> String {
 }
 
 fn add_qq_sent_header(script: &mut Script, include_original: bool) {
-    let fields =
-        "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION X-OQ-MSGID";
+    let fields = "DATE SUBJECT FROM TO CC REPLY-TO MESSAGE-ID CONTENT-TYPE CONTENT-DISPOSITION IN-REPLY-TO REFERENCES X-OQ-MSGID";
     let original = if include_original {
         "X-OQ-MSGID: <original@vip.qq.com>\r\n"
     } else {

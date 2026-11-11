@@ -234,5 +234,16 @@
   "senderGroupCount_other": "{{count}} 封",
   "senderGroupUnread_other": "{{count}} 封未读",
   "senderGroupLabel": "{{name}}，{{total}} 封邮件",
-  "senderGroupLabelUnread": "{{name}}，{{total}} 封邮件，{{unread}} 封未读"
+  "senderGroupLabelUnread": "{{name}}，{{total}} 封邮件，{{unread}} 封未读",
+  "threadCount_other": "{{count}} 封",
+  "threadViewLabel": "阅读方式",
+  "threadViewSingle": "单封",
+  "threadViewConversation": "对话",
+  "threadIncomplete": "本机可能没有这段对话的全部邮件",
+  "threadMe": "我",
+  "threadEarlier_other": "更早的 {{count}} 封",
+  "threadNewer_other": "更新的 {{count}} 封",
+  "threadRowLabel": "{{name}}，{{time}}：{{preview}}",
+  "threadRowLabelUnread": "{{name}}，{{time}}，未读：{{preview}}",
+  "threadMessages": "这段对话里的邮件"
 }

@@ -56,7 +56,7 @@ impl Storage {
                AND f.mailbox_source_id = m.mailbox_source_id
              JOIN folder_sync_cursors c ON c.folder_id = m.folder_id AND c.uid_validity = m.uid_validity
              WHERE m.account_id = ?1 AND m.mailbox_source_id = ?2 AND m.folder_id = ?3
-               AND f.role = 'sent' AND f.selectable = 1 AND m.remote_state = 'present'
+               AND f.selectable = 1 AND m.remote_state = 'present'
                AND m.sent_identity_policy <> ?4
                AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id)
              ORDER BY m.uid DESC LIMIT 200",
@@ -89,10 +89,11 @@ impl Storage {
                 }
                 tx.execute(
                     "UPDATE messages SET message_id_header = ?4, original_message_id = ?5,
-                     sent_identity_policy = ?6
+                     sent_identity_policy = ?6, in_reply_to = ?7, references_header = ?8
                      WHERE folder_id = ?1 AND uid_validity = ?2 AND uid = ?3 AND remote_state = 'present'",
                     params![target.folder_id, target.uid_validity, uid, record.message_id_header,
-                        record.original_message_id, policy],
+                        record.original_message_id, policy, record.in_reply_to,
+                        record.references_header],
                 )?;
             } else {
                 changed += tx.execute(
@@ -115,6 +116,7 @@ impl Storage {
             &timestamp,
         )?;
         tx.commit()?;
+        self.thread_stored(&target.folder_id, target.uid_validity, requested);
         Ok(Some(changed))
     }
 }

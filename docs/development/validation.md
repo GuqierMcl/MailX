@@ -822,6 +822,17 @@ QQ 邮箱、网易 163 / 126 / yeah.net 与 139 的本地图标已替换为官�
 
 本轮仅验证本地图片与前端显示，不涉及真实邮箱登录或收发。
 
+## 2026-11-11 139 邮箱图标去除推广信息
+
+将 `mail-139.png` 替换为 139 官方 Android APK 中的 `assets/blue/drawable/ic_mail_139.png` 原始 PNG。新图标为 66 × 66 RGBA，保留蓝色圆底、白色信封和 `139` 标识，不含原应用图标中的“AI+”推广区域；来源、APK 路径与 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md)。
+
+已核对：
+
+- 官方 APK 的 `blue` 与 `black` 图标条目字节一致，本地文件 SHA-256 为 `837435be15ce7c6d53d6fb52f830bbbae9e3b42a9fe51e2a7cdd2a138cf3f2b1`。
+- 现有服务商图标相关测试 69 项通过，类型检查和生产构建覆盖新资源；小尺寸图标仍由现有 `object-contain` 等比显示。本轮 lint 仍受当前分支其他会话功能改动触发的 Fast Refresh 规则报错影响，与图标资源无关。
+
+本轮仅验证本地图片来源与前端显示，不涉及真实邮箱登录或收发。
+
 ## 24. 删除邮件（2026-10-31，经 macOS 用户手测）
 
 已实现删除到“已删除”（Trash）与永久删除，带 5 秒撤销窗口；规则见[邮件同步](../architecture/mail-sync.md#已实现删除邮件自动测试覆盖经-macos-用户手测)和[应用接口](../contracts/app-api.md#删除)。

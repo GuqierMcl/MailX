@@ -263,5 +263,19 @@
   "senderGroupUnread_one": "{{count}} unread",
   "senderGroupUnread_other": "{{count}} unread",
   "senderGroupLabel": "{{name}}, {{total}} messages",
-  "senderGroupLabelUnread": "{{name}}, {{total}} messages, {{unread}} unread"
+  "senderGroupLabelUnread": "{{name}}, {{total}} messages, {{unread}} unread",
+  "threadCount_one": "{{count}} message",
+  "threadCount_other": "{{count}} messages",
+  "threadViewLabel": "Reading mode",
+  "threadViewSingle": "Single",
+  "threadViewConversation": "Conversation",
+  "threadIncomplete": "Some earlier messages may not be on this computer",
+  "threadMe": "Me",
+  "threadEarlier_one": "{{count}} earlier message",
+  "threadEarlier_other": "{{count}} earlier messages",
+  "threadNewer_one": "{{count}} newer message",
+  "threadNewer_other": "{{count}} newer messages",
+  "threadRowLabel": "{{name}}, {{time}}: {{preview}}",
+  "threadRowLabelUnread": "{{name}}, {{time}}, unread: {{preview}}",
+  "threadMessages": "Messages in this conversation"
 }

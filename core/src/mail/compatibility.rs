@@ -21,7 +21,9 @@ pub(crate) struct StandardCompatibility;
 
 impl ProviderCompatibility for StandardCompatibility {
     fn policy_key(&self) -> &'static str {
-        "default:v1"
+        // v2: headers now include In-Reply-To and References for conversation
+        // threading, so cached messages are fetched again once.
+        "default:v2"
     }
 
     fn extra_header_fields(&self) -> &'static [&'static str] {

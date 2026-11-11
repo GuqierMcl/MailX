@@ -13,6 +13,7 @@ import type {
   OutboxChanged,
   OutboxItem,
   OutboxState,
+  ConversationPage,
   EmailDetail,
   EmailPreviews,
   EmailSummary,
@@ -565,6 +566,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!email) throw notFound()
       return structuredClone(email)
     },
+    async getConversation(emailId): Promise<ConversationPage> {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      // The mock has no threading headers: group by subject within the account.
+      const key = normalizedSubject(email.summary.subject)
+      const related = key
+        ? emails.filter((row) => row.summary.accountId === email.summary.accountId && normalizedSubject(row.summary.subject) === key)
+        : [email]
+      const messages = related
+        .map((row) => structuredClone(row.summary))
+        .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id))
+      return { messages, possiblyIncomplete: false }
+    },
     async fetchBody(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
@@ -1071,6 +1085,15 @@ const DEFAULT_CUSTOM_FOLDERS: CustomFolders = {
   [PERSONAL]: [['travel', '旅行', null, true]],
 }
 
+function normalizedSubject(subject: string): string {
+  let rest = subject.trim()
+  for (;;) {
+    const next = rest.replace(/^(re|fwd|fw|回复|答复|转发)\s*[:：]\s*/i, '')
+    if (next === rest) return rest.trim().toLowerCase()
+    rest = next
+  }
+}
+
 function buildFolders(accountId: string, emails: EmailDetail[], customFolders: CustomFolders): Folder[] {
   const custom = (customFolders[accountId] ?? []).map(
     ([path, name, parent, selectable]) => [`${accountId}:${path}`, name, 'other', parent && `${accountId}:${parent}`, selectable] as const,
@@ -1258,6 +1281,50 @@ const DEFAULT_SEEDS: Seed[] = [
     hoursAgo: 80,
     read: true,
     starred: true,
+  },
+  // A conversation in the work account: two messages from the owner sit among the replies.
+  {
+    account: WORK,
+    from: { name: '周明', address: 'zhou.ming@example.com' },
+    subject: '十二月团建地点',
+    text: '大家好，十二月团建想去郊外住一晚，目前有两个备选：莫干山和安吉。大家有偏好的话请回复我。\n\n周明',
+    hoursAgo: 52,
+    read: true,
+  },
+  {
+    account: WORK,
+    role: 'sent',
+    from: ME_WORK,
+    to: [{ name: '周明', address: 'zhou.ming@example.com' }],
+    subject: 'Re: 十二月团建地点',
+    text: '我倾向安吉，交通更方便，周五晚上出发也来得及。预算大概多少？',
+    hoursAgo: 50,
+    read: true,
+  },
+  {
+    account: WORK,
+    from: { name: '周明', address: 'zhou.ming@example.com' },
+    subject: '回复：十二月团建地点',
+    text: '人均 800 左右，含住宿和两顿饭。那就先按安吉来，我去问问民宿还有没有空位。',
+    hoursAgo: 26,
+    read: true,
+  },
+  {
+    account: WORK,
+    from: { name: '王芳', address: 'wang.fang@example.com' },
+    subject: 'Re: 十二月团建地点',
+    text: '好啊，周末可以。我问了两家民宿，12 月 13 日那个周末都有空位，需要的话我先帮大家占房。',
+    hoursAgo: 2,
+  },
+  {
+    account: WORK,
+    role: 'sent',
+    from: ME_WORK,
+    to: [{ name: '王芳', address: 'wang.fang@example.com' }],
+    subject: 'Re: Re: 十二月团建地点',
+    text: '麻烦你先占房，我下午把名单发给你。',
+    hoursAgo: 1,
+    read: true,
   },
 ]
 

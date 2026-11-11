@@ -71,7 +71,7 @@ describe('workbench', () => {
     await userEvent.click(within(sentRow).getByRole('button', { name: '展开已发送的各账号' }))
     await userEvent.click(within(sentRow).getByRole('button', { name: '工作邮箱' }))
     expect(screen.getByRole('heading', { name: '已发送' })).toBeInTheDocument()
-    await waitFor(() => expect(rows()).toHaveLength(2)) // one server copy plus the mock's local-only copy
+    await waitFor(() => expect(rows()).toHaveLength(4)) // three server copies (two replies in the mock thread) plus the mock's local-only copy
 
     await userEvent.click(screen.getByRole('button', { name: '收件箱' }))
     await userEvent.click(screen.getByRole('tab', { name: '未读' }))

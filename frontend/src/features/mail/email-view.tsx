@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
@@ -81,46 +81,49 @@ type EmailViewProps = {
   onDelete?: (email: EmailSummary) => void
   /** Archives (or, with `false`, restores) the email locally; set only where the email is in an inbox. */
   onArchive?: (email: EmailSummary, archive: boolean) => void
+  /** Wraps the reader's content (everything under the toolbar), e.g. with the rest of a conversation. */
+  frame?: (content: ReactNode) => ReactNode
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
   // nothing open does the reader have no actions to offer.
   const open = Boolean(email) || loading || Boolean(error)
   useCloseOnEscape(open && !hidden, onClose)
+  const content = loading || showSkeleton ? (
+    showSkeleton ? (
+      <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    ) : <div className="min-h-0 flex-1" />
+  ) : error ? (
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>{t('mail:openMailFailed')}</EmptyTitle>
+        <EmptyDescription>{error}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  ) : email ? (
+    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} />
+  ) : (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <HugeiconsIcon icon={MailOpen01Icon} />
+        </EmptyMedia>
+        <EmptyTitle>{t('mail:noMessageSelected')}</EmptyTitle>
+        <EmptyDescription>{t('mail:selectMessageHint')}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  )
   return (
     <div className="flex h-full min-h-0 flex-col">
       {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} />}
-      {loading || showSkeleton ? (
-        showSkeleton ? (
-          <div className="flex animate-in flex-col gap-3 p-4 duration-150 fade-in-0" role="status" aria-label={t('mail:loadingMail')}>
-            <Skeleton className="h-6 w-2/3" />
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-40 w-full" />
-          </div>
-        ) : <div className="min-h-0 flex-1" />
-      ) : error ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>{t('mail:openMailFailed')}</EmptyTitle>
-            <EmptyDescription>{error}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : email ? (
-        <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} />
-      ) : (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <HugeiconsIcon icon={MailOpen01Icon} />
-            </EmptyMedia>
-            <EmptyTitle>{t('mail:noMessageSelected')}</EmptyTitle>
-            <EmptyDescription>{t('mail:selectMessageHint')}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
+      {frame ? frame(content) : content}
     </div>
   )
 }

@@ -23,6 +23,10 @@ export const mailKeys = {
   /** `sources` pins the accounts' server identities so a server change starts a fresh list. */
   emails: (sources: string, query: EmailListQuery) => [...mailKeys.emailLists(), sources, query] as const,
   email: (id: string) => [...mailKeys.all, 'email', id] as const,
+  /** Every cached conversation; not under `emailLists`, whose entries are infinite-query pages. */
+  conversations: () => [...mailKeys.all, 'conversation'] as const,
+  /** The thread of the message the user opened (the "anchor"), whichever message of it is expanded. */
+  conversation: (anchorId: string) => [...mailKeys.conversations(), anchorId] as const,
 }
 
 /** App preferences; sync rounds never touch them. */

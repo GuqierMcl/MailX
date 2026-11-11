@@ -183,6 +183,18 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["contact_aggregations"],
         sql: include_str!("migrations/0026_contact_aggregations.sql"),
     },
+    Migration {
+        version: 27,
+        description: "conversation threading headers and conversation identity",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0027_conversation_threading.sql"),
+    },
+    Migration {
+        version: 28,
+        description: "rebuild conversation identity with threading version",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0028_conversation_rethread.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -587,7 +599,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 26);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 28);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1080,6 +1092,70 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn conversation_threading_migration_adds_columns_and_keeps_messages() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(26)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+               attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'INBOX', 'Inbox', 'inbox', 1, '[]', 0, 1, 't');
+             INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+               message_id_header, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
+               received_at, is_read, is_flagged, flags, has_attachment, remote_state, updated_at)
+             VALUES ('m', 'a', 'source', 'f', 7, 42, 'x@example.invalid', 'Hi', 'a@example.invalid',
+               '[]', '[]', '[]', 't', 1, 1, '[]', 0, 'present', 't');",
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let row: (Option<String>, Option<String>, Option<String>, String) = db
+            .query_row(
+                "SELECT in_reply_to, references_header, conversation_id, subject FROM messages WHERE id = 'm'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (None, None, None, "Hi".into()));
+        assert!(
+            db.query_row(
+                "SELECT 1 FROM sqlite_master WHERE name = 'messages_by_conversation'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn conversation_rethread_migration_adds_version_and_clears_conversations() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(27)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+               attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'INBOX', 'Inbox', 'inbox', 1, '[]', 0, 1, 't');
+             INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+               message_id_header, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
+               received_at, is_read, is_flagged, flags, has_attachment, remote_state, updated_at, conversation_id)
+             VALUES ('m', 'a', 'source', 'f', 7, 42, 'x@example.invalid', 'Hi', 'a@example.invalid',
+               '[]', '[]', '[]', 't', 1, 1, '[]', 0, 'present', 't', 'old');",
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let row: (Option<String>, i64, String) = db
+            .query_row(
+                "SELECT conversation_id, threading_version, subject FROM messages WHERE id = 'm'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (None, 0, "Hi".into()));
     }
 
     #[test]
