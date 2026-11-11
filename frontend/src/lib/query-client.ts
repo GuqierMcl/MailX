@@ -52,3 +52,10 @@ export const contactKeys = {
   all: ['contacts'] as const,
   aggregations: () => [...contactKeys.all, 'aggregations'] as const,
 }
+
+/** Which translation services have a saved key, and what the saved translations take up. Only the user's own edits change them. */
+export const translationKeys = {
+  all: ['translation'] as const,
+  keys: () => [...translationKeys.all, 'keys'] as const,
+  cache: () => [...translationKeys.all, 'cache'] as const,
+}

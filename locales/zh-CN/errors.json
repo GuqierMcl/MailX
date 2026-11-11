@@ -47,5 +47,18 @@
   "oauthTls": "无法与邮箱服务商建立安全连接，请检查网络后重试。",
   "oauthRateLimited": "尝试次数过多，请稍等几分钟再试。",
   "oauthServerUnavailable": "邮箱服务商暂时无法登录，请稍后重试。",
-  "signInRequired": "邮箱登录已过期，请在账号设置中重新登录。"
+  "signInRequired": "邮箱登录已过期，请在账号设置中重新登录。",
+  "translationNotConfigured": "还没有设置翻译服务或密钥，请先在设置里完成。",
+  "translationConsentRequired": "需要先同意把邮件内容发送给翻译服务，才能翻译。",
+  "translationKeyRejected": "翻译服务不接受这个密钥，请检查密钥是否正确、是否仍然有效。",
+  "translationQuotaExceeded": "翻译服务的额度已用完，请稍后再试，或查看你在该服务的账户。",
+  "translationRateLimited": "翻译太频繁了，请稍等一会儿再试。",
+  "translationNetwork": "无法连接翻译服务，请检查网络后重试。",
+  "translationProxy": "无法通过翻译设置里的代理连接，请检查代理设置。",
+  "translationTimeout": "翻译服务响应太慢，请稍后重试。",
+  "translationUnavailable": "翻译服务暂时无法使用，请稍后重试。",
+  "translationInvalidResponse": "翻译服务返回了无法识别的结果，请重试。",
+  "translationLanguageUnsupported": "所选的翻译服务不支持这种语言，可以换一个服务或语言试试。",
+  "translationTooLarge": "邮件太大，无法翻译。",
+  "translationCancelled": "翻译已取消。"
 }

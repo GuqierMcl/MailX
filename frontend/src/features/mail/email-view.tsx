@@ -40,6 +40,9 @@ import { SenderAvatar } from './sender-avatar'
 import { ReadStatusButton } from './read-status-button'
 import { useCloseOnEscape } from './use-close-on-escape'
 import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
+import { TranslationBar } from './translation/translation-bar'
+import { TranslationToolbarGroup } from './translation/translation-toolbar'
+import type { EmailTranslation } from './translation/use-email-translation'
 
 export function RemoveLocalCopyDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
   return (
@@ -81,11 +84,13 @@ type EmailViewProps = {
   onDelete?: (email: EmailSummary) => void
   /** Archives (or, with `false`, restores) the email locally; set only where the email is in an inbox. */
   onArchive?: (email: EmailSummary, archive: boolean) => void
+  /** Translation of the open message, shared with the command palette; absent where nothing can be translated. */
+  translation?: EmailTranslation
   /** Wraps the reader's content (everything under the toolbar), e.g. with the rest of a conversation. */
   frame?: (content: ReactNode) => ReactNode
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -108,7 +113,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
       </EmptyHeader>
     </Empty>
   ) : email ? (
-    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} />
+    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} />
   ) : (
     <Empty>
       <EmptyHeader>
@@ -122,7 +127,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   )
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} />}
       {frame ? frame(content) : content}
     </div>
   )
@@ -135,7 +140,7 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive }: { summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
+function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, translation }: { translation?: EmailTranslation; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
@@ -189,6 +194,7 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete,
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </IconButton>
       </div>}
+      {translation?.available && !localOnly && <TranslationToolbarGroup translation={translation} />}
       <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
       </IconButton>
@@ -207,7 +213,7 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId'> & { email: EmailDetail }
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation'> & { email: EmailDetail }
 
 function EmailContent({ email, ...props }: ContentProps) {
   useTranslation()
@@ -216,7 +222,7 @@ function EmailContent({ email, ...props }: ContentProps) {
     <article className="flex min-h-0 flex-1 animate-in flex-col overflow-hidden duration-150 fade-in-0">
       <ScrollArea className="max-h-[35%] shrink-0">
         <header className="flex flex-col gap-4 p-4">
-          <h2 className="text-lg font-semibold">{summary.subject || t('mail:noSubject')}</h2>
+          <h2 className="text-lg font-semibold" title={props.translation?.subject ? summary.subject : undefined}>{props.translation?.subject ?? (summary.subject || t('mail:noSubject'))}</h2>
           <div className="flex items-start gap-3 text-sm">
             <SenderAvatar sender={summary.from} accountId={summary.accountId} size="lg" />
             <div className="grid min-w-0 flex-1 gap-0.5">
@@ -252,7 +258,7 @@ const BODY_FAILURE: Record<BodyFailureCode, string> = {
   get storage() { return t('mail:bodyStorageFailed') },
 }
 
-function Body({ email, providerId, client, downloading, onDownload }: ContentProps) {
+function Body({ email, providerId, client, downloading, onDownload, translation }: ContentProps) {
   useTranslation()
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
@@ -265,7 +271,11 @@ function Body({ email, providerId, client, downloading, onDownload }: ContentPro
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     {body.truncated && <Alert><AlertDescription>{t('mail:bodyTruncated')}</AlertDescription></Alert>}
     {body.hasHtml
-      ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0} />
+      ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0}
+        banner={translation?.available ? <TranslationBar translation={translation} /> : undefined}
+        translated={translation?.available && translation.status?.translation ? {
+          target: translation.status.targetLanguage, version: translation.generation, showing: translation.translationVisible, onFailed: translation.failBody,
+        } : null} />
       : <PlainText text={body.text} />}
   </div>
 }

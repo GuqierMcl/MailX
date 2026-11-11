@@ -586,3 +586,51 @@ describe('mock contact views and sender aggregation', () => {
     await expect(client.setContactAggregation('nope', true)).rejects.toMatchObject({ failure: { code: 'validation', field: 'address' } })
   })
 })
+
+describe('mock translation', () => {
+  async function ready() {
+    const client = createMockClient({ seed: 'showcase' })
+    const page = await client.listEmails({ ...emailQuery({ folderRole: 'inbox' }), limit: 200 })
+    const foreign = page.items.find((item) => item.subject === '来週の打ち合わせについて')!
+    return { client, foreign }
+  }
+
+  it('detects the language of the foreign showcase mail and enforces setup and consent like the core', async () => {
+    const { client, foreign } = await ready()
+    expect(await client.translationStatus(foreign.id)).toMatchObject({ detectedLanguage: 'ja', suggested: false, translation: null })
+    await expect(client.translateEmail(foreign.id)).rejects.toMatchObject({ failure: { code: 'translationNotConfigured' } })
+    await client.setTranslationKey('deepl', 'key')
+    const section = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...section, provider: 'deepl' } })
+    expect(await client.translationStatus(foreign.id)).toMatchObject({ suggested: true, autoTranslate: false })
+    await expect(client.translateEmail(foreign.id)).rejects.toMatchObject({ failure: { code: 'translationConsentRequired' } })
+    await expect(client.prepareBody(foreign.id, false, 'zh-Hans')).rejects.toMatchObject({ failure: { code: 'notFound' } })
+  })
+
+  it('translates, caches, can be cancelled and clears', async () => {
+    const { client, foreign } = await ready()
+    await client.setTranslationKey('deepl', 'key')
+    const section = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...section, provider: 'deepl', consentedProvider: 'deepl' } })
+    const cancelled = client.translateEmail(foreign.id)
+    await client.cancelTranslation(foreign.id)
+    await expect(cancelled).rejects.toMatchObject({ failure: { code: 'translationCancelled' } })
+    const done = await client.translateEmail(foreign.id)
+    expect(done.translation).toMatchObject({ provider: 'deepl', sourceLanguage: 'ja', subject: "Regarding next week's meeting" })
+    expect(await client.translationStatus(foreign.id)).toMatchObject({ translation: { sourceLanguage: 'ja' } })
+    await expect(client.prepareBody(foreign.id, false, done.targetLanguage)).resolves.toHaveProperty('documentToken')
+    expect(await client.translationCacheStats()).toMatchObject({ count: 1 })
+    await client.clearTranslations()
+    expect(await client.translationCacheStats()).toEqual({ count: 0, bytes: 0 })
+  })
+
+  it('keeps keys out of reach and tests with a sample', async () => {
+    const { client } = await ready()
+    await expect(client.testTranslation()).rejects.toMatchObject({ failure: { code: 'translationNotConfigured' } })
+    expect(await client.setTranslationKey('google', 'secret')).toContainEqual({ provider: 'google', configured: true })
+    const section = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...section, provider: 'google' } })
+    expect((await client.testTranslation()).translated).toEqual(expect.any(String))
+    expect(await client.removeTranslationKey('google')).toContainEqual({ provider: 'google', configured: false })
+  })
+})

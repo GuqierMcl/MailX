@@ -47,5 +47,18 @@
   "oauthTls": "Can't open a secure connection to your email provider. Check your internet connection and try again.",
   "oauthRateLimited": "Too many attempts. Wait a few minutes and try again.",
   "oauthServerUnavailable": "Your email provider can't sign you in right now. Try again later.",
-  "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings."
+  "signInRequired": "Your mailbox sign-in has expired. Sign in again in account settings.",
+  "translationNotConfigured": "No translation service or key is set up yet. Set one up in Settings first.",
+  "translationConsentRequired": "You need to agree to send the message to the translation service before it can be translated.",
+  "translationKeyRejected": "The translation service didn't accept this key. Check that it's correct and still valid.",
+  "translationQuotaExceeded": "You've used up the translation service's allowance. Try again later or check your account with the service.",
+  "translationRateLimited": "Too many translation requests. Wait a moment and try again.",
+  "translationNetwork": "Can't reach the translation service. Check your internet connection and try again.",
+  "translationProxy": "Can't connect through the proxy set for translation. Check the proxy settings.",
+  "translationTimeout": "The translation service is taking too long to respond. Try again later.",
+  "translationUnavailable": "The translation service isn't available right now. Try again later.",
+  "translationInvalidResponse": "The translation service sent back something unexpected. Try again.",
+  "translationLanguageUnsupported": "The translation service doesn't support this language. Try another service or language.",
+  "translationTooLarge": "This message is too large to translate.",
+  "translationCancelled": "Translation was cancelled."
 }
