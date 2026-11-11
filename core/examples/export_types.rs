@@ -153,5 +153,13 @@ fn main() {
         OutboxChanged,
         DraftChange,
         DraftChanged,
+        TranslationProviderId,
+        TranslationRoute,
+        TranslationSettings,
+        TranslationKeyState,
+        TranslationTest,
+        TranslationStatus,
+        TranslationInfo,
+        TranslationCacheStats,
     );
 }

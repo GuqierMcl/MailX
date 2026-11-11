@@ -63,7 +63,34 @@ impl MailxCore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(AppError::new(ErrorCode::StorageUnavailable)),
         }
-        let core = Self::open(path, Arc::new(NoSecrets), runtime, events)?;
+        Self::body_fixture_open(path, runtime, raws, events, Arc::new(NoSecrets))
+    }
+
+    /// As [`Self::body_test_fixture`], with a secret store the test controls.
+    #[cfg(test)]
+    pub(crate) fn body_test_fixture_with_secrets(
+        path: &Path,
+        runtime: Handle,
+        raws: &[&[u8]],
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<(Self, Vec<String>), AppError> {
+        Self::body_fixture_open(
+            path,
+            runtime,
+            raws,
+            Arc::new(|_: &crate::events::CoreEvent| {}),
+            secrets,
+        )
+    }
+
+    fn body_fixture_open(
+        path: &Path,
+        runtime: Handle,
+        raws: &[&[u8]],
+        events: crate::events::Events,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<(Self, Vec<String>), AppError> {
+        let core = Self::open(path, secrets, runtime, events)?;
         let identities = core
             .accounts()?
             .body_fixture_seed(&raws.iter().map(|raw| raw.len()).collect::<Vec<_>>())?;

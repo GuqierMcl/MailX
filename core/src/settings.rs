@@ -6,6 +6,7 @@
 //! never hold secrets and do not depend on account storage being open.
 
 use crate::SupportedLocale;
+use crate::accounts::types::ProxyKind;
 use crate::error::{AppError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -293,6 +294,217 @@ impl From<LayoutSettings> for LayoutSettingsPatch {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TranslationProviderId {
+    Deepl,
+    Microsoft,
+    Google,
+}
+
+impl TranslationProviderId {
+    pub const ALL: [Self; 3] = [Self::Deepl, Self::Microsoft, Self::Google];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deepl => "deepl",
+            Self::Microsoft => "microsoft",
+            Self::Google => "google",
+        }
+    }
+}
+
+/// How translation requests reach the service. The mail accounts' own proxies
+/// are never used. Proxy credentials are not supported in this version.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TranslationRoute {
+    #[default]
+    Direct,
+    Proxy {
+        proxy_kind: ProxyKind,
+        host: String,
+        port: u16,
+    },
+}
+
+const MAX_LANGUAGE_RULES: usize = 64;
+const MAX_PROXY_HOST_CHARS: usize = 255;
+const MAX_MICROSOFT_REGION_CHARS: usize = 40;
+
+/// Mail translation through a third-party service. `consented_provider` is the
+/// service the user agreed to send mail text to; changing the provider
+/// invalidates the consent until the user agrees again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TranslationSettings {
+    /// `None` until a service is chosen.
+    pub provider: Option<TranslationProviderId>,
+    /// Azure resource region; `""` for a global resource.
+    pub microsoft_region: String,
+    pub route: TranslationRoute,
+    /// `"auto"` (follow the UI language) or one of `translate::languages::TARGETS`.
+    pub target_language: String,
+    /// Offer to translate when a mail is in another language.
+    pub suggest: bool,
+    /// Base language codes that never get the offer.
+    pub never_suggest: Vec<String>,
+    /// Base language codes translated without asking.
+    pub always_translate: Vec<String>,
+    /// Translate folded quoted text too.
+    pub include_quotes: bool,
+    pub consented_provider: Option<TranslationProviderId>,
+}
+
+impl Default for TranslationSettings {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            microsoft_region: String::new(),
+            route: TranslationRoute::Direct,
+            target_language: "auto".into(),
+            suggest: true,
+            never_suggest: Vec::new(),
+            always_translate: Vec::new(),
+            include_quotes: false,
+            consented_provider: None,
+        }
+    }
+}
+
+fn normalize_language_codes(codes: &[String]) -> Option<Vec<String>> {
+    if codes.len() > MAX_LANGUAGE_RULES {
+        return None;
+    }
+    let mut out: Vec<String> = codes.to_vec();
+    if out
+        .iter()
+        .any(|code| !(2..=3).contains(&code.len()) || !code.bytes().all(|b| b.is_ascii_lowercase()))
+    {
+        return None;
+    }
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
+impl TranslationSettings {
+    /// Validates client input and returns its canonical form.
+    pub fn normalized(self) -> Result<Self, AppError> {
+        if self.target_language != "auto"
+            && !crate::translate::languages::is_target(&self.target_language)
+        {
+            return Err(AppError::validation("translation.targetLanguage"));
+        }
+        let never_suggest = normalize_language_codes(&self.never_suggest)
+            .ok_or_else(|| AppError::validation("translation.neverSuggest"))?;
+        let always_translate = normalize_language_codes(&self.always_translate)
+            .ok_or_else(|| AppError::validation("translation.alwaysTranslate"))?;
+        if never_suggest
+            .iter()
+            .any(|code| always_translate.contains(code))
+        {
+            return Err(AppError::validation("translation.alwaysTranslate"));
+        }
+        let region = &self.microsoft_region;
+        if region.len() > MAX_MICROSOFT_REGION_CHARS
+            || !region
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(AppError::validation("translation.microsoftRegion"));
+        }
+        if let TranslationRoute::Proxy { host, port, .. } = &self.route {
+            let bad_host = host.is_empty()
+                || host.chars().count() > MAX_PROXY_HOST_CHARS
+                || host.chars().any(|c| c.is_whitespace() || c.is_control());
+            if bad_host {
+                return Err(AppError::validation("translation.route.host"));
+            }
+            if *port == 0 {
+                return Err(AppError::validation("translation.route.port"));
+            }
+        }
+        Ok(Self {
+            never_suggest,
+            always_translate,
+            ..self
+        })
+    }
+
+    /// Hand-edited files fall back per field.
+    fn sanitized(self) -> Self {
+        let defaults = Self::default();
+        let mut never_suggest = normalize_language_codes(&self.never_suggest).unwrap_or_default();
+        let always_translate = normalize_language_codes(&self.always_translate).unwrap_or_default();
+        never_suggest.retain(|code| !always_translate.contains(code));
+        let valid_route = Self {
+            route: self.route.clone(),
+            ..defaults.clone()
+        }
+        .normalized()
+        .is_ok();
+        let valid_region = Self {
+            microsoft_region: self.microsoft_region.clone(),
+            ..defaults.clone()
+        }
+        .normalized()
+        .is_ok();
+        let valid_target = self.target_language == "auto"
+            || crate::translate::languages::is_target(&self.target_language);
+        Self {
+            provider: self.provider,
+            microsoft_region: if valid_region {
+                self.microsoft_region
+            } else {
+                defaults.microsoft_region
+            },
+            route: if valid_route {
+                self.route
+            } else {
+                defaults.route
+            },
+            target_language: if valid_target {
+                self.target_language
+            } else {
+                defaults.target_language
+            },
+            suggest: self.suggest,
+            never_suggest,
+            always_translate,
+            include_quotes: self.include_quotes,
+            consented_provider: self.consented_provider,
+        }
+    }
+}
+
+/// Drops translation fields of the wrong type or with unknown values, so a
+/// hand-edited file loses only that field instead of the whole file.
+fn repair_translation(value: &mut serde_json::Value) {
+    let Some(section) = value.as_object_mut() else {
+        return;
+    };
+    let is_provider = |v: &serde_json::Value| {
+        v.is_null() || serde_json::from_value::<TranslationProviderId>(v.clone()).is_ok()
+    };
+    let is_codes = |v: &serde_json::Value| {
+        v.as_array()
+            .is_some_and(|a| a.iter().all(serde_json::Value::is_string))
+    };
+    section.retain(|key, v| match key.as_str() {
+        "provider" | "consentedProvider" => is_provider(v),
+        "route" => serde_json::from_value::<TranslationRoute>(v.clone()).is_ok(),
+        "microsoftRegion" | "targetLanguage" => v.is_string(),
+        "suggest" | "includeQuotes" => v.is_boolean(),
+        "neverSuggest" | "alwaysTranslate" => is_codes(v),
+        _ => true,
+    });
+}
+
 /// Seconds a sent message waits in the queue where it can still be undone.
 pub const UNDO_SEND_SECONDS: [u32; 5] = [0, 5, 10, 20, 30];
 
@@ -401,6 +613,8 @@ pub struct SettingsPatch {
     pub notifications: Option<NotificationSettings>,
     #[ts(optional)]
     pub compose: Option<ComposeSettings>,
+    #[ts(optional)]
+    pub translation: Option<TranslationSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -413,6 +627,7 @@ pub struct AppSettings {
     pub notifications: NotificationSettings,
     pub compose: ComposeSettings,
     pub mcp: McpSettings,
+    pub translation: TranslationSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -493,6 +708,7 @@ impl AppSettings {
             notifications,
             compose,
             mcp: self.mcp,
+            translation: self.translation.normalized()?,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -534,6 +750,7 @@ impl AppSettings {
             notifications,
             compose,
             mcp: self.mcp,
+            translation: self.translation.sanitized(),
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
                 nav_collapsed: self.layout.nav_collapsed,
@@ -772,6 +989,9 @@ impl SettingsStore {
                 .compose
                 .unwrap_or_else(|| state.settings.compose.clone()),
             mcp: state.settings.mcp,
+            translation: patch
+                .translation
+                .unwrap_or_else(|| state.settings.translation.clone()),
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;
@@ -856,6 +1076,13 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
         .get_mut("settings")
         .and_then(serde_json::Value::as_object_mut)
     {
+        if let Some(translation) = settings.get_mut("translation") {
+            if translation.is_object() {
+                repair_translation(translation);
+            } else {
+                settings.remove("translation");
+            }
+        }
         match settings.get_mut("general") {
             None => {
                 settings.insert("general".into(), serde_json::json!({"language": "zh-CN"}));

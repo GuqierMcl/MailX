@@ -9,6 +9,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         notifications: NotificationSettings::default(),
         mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
+        translation: TranslationSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -353,7 +354,18 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mutedAccounts": []
                 },
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0 },
-                "mcp": { "enabled": false }
+                "mcp": { "enabled": false },
+                "translation": {
+                    "provider": null,
+                    "microsoftRegion": "",
+                    "route": { "kind": "direct" },
+                    "targetLanguage": "auto",
+                    "suggest": true,
+                    "neverSuggest": [],
+                    "alwaysTranslate": [],
+                    "includeQuotes": false,
+                    "consentedProvider": null
+                }
             },
             "stored": false,
             "recovered": false,
@@ -1241,4 +1253,247 @@ fn mcp_is_off_by_default_and_only_its_own_setter_changes_it() {
         .unwrap();
     assert!(reopened.settings.mcp.enabled);
     assert!(!store.set_mcp_enabled(false).unwrap().settings.mcp.enabled);
+}
+
+fn translation(edit: impl FnOnce(&mut TranslationSettings)) -> TranslationSettings {
+    let mut settings = TranslationSettings::default();
+    edit(&mut settings);
+    settings
+}
+
+fn proxy(host: &str, port: u16) -> TranslationRoute {
+    TranslationRoute::Proxy {
+        proxy_kind: ProxyKind::Socks5,
+        host: host.into(),
+        port,
+    }
+}
+
+fn field_of(settings: TranslationSettings) -> Option<String> {
+    settings.normalized().err().and_then(|error| error.field)
+}
+
+#[test]
+fn translation_defaults_are_off_and_private() {
+    let defaults = TranslationSettings::default();
+    assert_eq!(defaults.provider, None);
+    assert_eq!(defaults.consented_provider, None);
+    assert_eq!(defaults.route, TranslationRoute::Direct);
+    assert_eq!(defaults.target_language, "auto");
+    assert!(defaults.suggest && !defaults.include_quotes);
+    assert!(defaults.never_suggest.is_empty() && defaults.always_translate.is_empty());
+    assert_eq!(AppSettings::default().translation, defaults);
+}
+
+#[test]
+fn translation_settings_serialize_in_the_documented_shape() {
+    let settings = translation(|s| {
+        s.provider = Some(TranslationProviderId::Microsoft);
+        s.route = proxy("proxy.example", 1080);
+    });
+    let json = serde_json::to_value(&settings).unwrap();
+    assert_eq!(json["provider"], "microsoft");
+    assert_eq!(json["microsoftRegion"], "");
+    assert_eq!(json["targetLanguage"], "auto");
+    assert_eq!(
+        json["route"],
+        serde_json::json!({"kind": "proxy", "proxyKind": "socks5", "host": "proxy.example", "port": 1080})
+    );
+    assert_eq!(
+        serde_json::to_value(TranslationRoute::Direct).unwrap(),
+        serde_json::json!({"kind": "direct"})
+    );
+}
+
+#[test]
+fn translation_input_is_validated_per_field() {
+    assert_eq!(
+        field_of(translation(|s| s.target_language = "xx".into())).as_deref(),
+        Some("translation.targetLanguage")
+    );
+    assert_eq!(
+        field_of(translation(|s| s.target_language = "zh-hans".into())).as_deref(),
+        Some("translation.targetLanguage")
+    );
+    for ok in ["auto", "zh-Hans", "nb"] {
+        assert!(
+            translation(|s| s.target_language = ok.into())
+                .normalized()
+                .is_ok()
+        );
+    }
+    for bad in [
+        vec!["E".to_owned()],
+        vec!["EN".into()],
+        vec!["en1".into()],
+        vec!["abcd".into()],
+        vec!["zh-Hans".into()],
+    ] {
+        assert_eq!(
+            field_of(translation(|s| s.never_suggest = bad.clone())).as_deref(),
+            Some("translation.neverSuggest")
+        );
+        assert_eq!(
+            field_of(translation(|s| s.always_translate = bad.clone())).as_deref(),
+            Some("translation.alwaysTranslate")
+        );
+    }
+    let many: Vec<String> = (0..65u8)
+        .map(|n| format!("{}{}", char::from(b'a' + n / 26), char::from(b'a' + n % 26)))
+        .collect();
+    assert!(many.iter().all(|c| (2..=3).contains(&c.len())));
+    assert_eq!(
+        field_of(translation(|s| s.never_suggest = many.clone())).as_deref(),
+        Some("translation.neverSuggest")
+    );
+    for bad in ["West", "west europe", "west_europe", &"a".repeat(41)] {
+        assert_eq!(
+            field_of(translation(|s| s.microsoft_region = bad.into())).as_deref(),
+            Some("translation.microsoftRegion")
+        );
+    }
+    for ok in ["", "westeurope", "east-us-2", &"a".repeat(40)] {
+        assert!(
+            translation(|s| s.microsoft_region = ok.into())
+                .normalized()
+                .is_ok()
+        );
+    }
+}
+
+#[test]
+fn language_lists_are_sorted_unique_and_exclusive() {
+    let normalized = translation(|s| {
+        s.never_suggest = vec!["fr".into(), "de".into(), "fr".into()];
+        s.always_translate = vec!["ja".into(), "ko".into()];
+    })
+    .normalized()
+    .unwrap();
+    assert_eq!(normalized.never_suggest, ["de", "fr"]);
+    assert_eq!(
+        field_of(translation(|s| {
+            s.never_suggest = vec!["fr".into()];
+            s.always_translate = vec!["de".into(), "fr".into()];
+        }))
+        .as_deref(),
+        Some("translation.alwaysTranslate")
+    );
+}
+
+#[test]
+fn translation_proxy_needs_a_plain_host_and_a_port() {
+    assert!(
+        translation(|s| s.route = proxy("127.0.0.1", 8080))
+            .normalized()
+            .is_ok()
+    );
+    for host in ["", "a b", "a\tb", "a\nb", &"h".repeat(256)] {
+        assert_eq!(
+            field_of(translation(|s| s.route = proxy(host, 80))).as_deref(),
+            Some("translation.route.host"),
+            "{host:?}"
+        );
+    }
+    assert!(
+        translation(|s| s.route = proxy(&"h".repeat(255), 80))
+            .normalized()
+            .is_ok()
+    );
+    assert_eq!(
+        field_of(translation(|s| s.route = proxy("host", 0))).as_deref(),
+        Some("translation.route.port")
+    );
+}
+
+#[test]
+fn patching_translation_replaces_only_that_section() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    store
+        .patch(SettingsPatch {
+            appearance: Some(AppearanceSettings {
+                accent_color: "#112233".into(),
+                ..AppearanceSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    let chosen = translation(|s| {
+        s.provider = Some(TranslationProviderId::Google);
+        s.consented_provider = Some(TranslationProviderId::Google);
+        s.never_suggest = vec!["fr".into()];
+    });
+    let snapshot = store
+        .patch(SettingsPatch {
+            translation: Some(chosen.clone()),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(snapshot.settings.translation, chosen);
+    assert_eq!(snapshot.settings.appearance.accent_color, "#112233");
+    let rejected = store.patch(SettingsPatch {
+        translation: Some(translation(|s| s.target_language = "xx".into())),
+        ..SettingsPatch::default()
+    });
+    assert_eq!(
+        rejected.unwrap_err().field.as_deref(),
+        Some("translation.targetLanguage")
+    );
+    let reopened = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(reopened.get().unwrap().settings.translation, chosen);
+}
+
+#[test]
+fn a_hand_edited_translation_section_falls_back_per_field() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"},"translation":{
+            "provider":"nonsense","consentedProvider":"deepl","microsoftRegion":"Bad Region",
+            "route":{"kind":"proxy","proxyKind":"socks5","host":"","port":1},
+            "targetLanguage":"xx","suggest":false,"neverSuggest":["fr","DE","fr"],
+            "alwaysTranslate":["fr","ja"],"includeQuotes":"yes"}}}"#,
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(
+        !snapshot.recovered,
+        "one bad field must not discard the file"
+    );
+    assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+    let t = snapshot.settings.translation;
+    assert_eq!(t.provider, None);
+    assert_eq!(t.consented_provider, Some(TranslationProviderId::Deepl));
+    assert_eq!(t.microsoft_region, "");
+    assert_eq!(t.route, TranslationRoute::Direct);
+    assert_eq!(t.target_language, "auto");
+    assert!(!t.suggest, "a valid field keeps its value");
+    assert!(!t.include_quotes);
+    // "DE" is invalid so the whole list falls back; "fr" is kept out of the never list.
+    assert!(t.never_suggest.is_empty());
+    assert_eq!(t.always_translate, ["fr", "ja"]);
+    // Whatever was loaded passes validation as is.
+    assert!(t.clone().normalized().is_ok());
+}
+
+#[test]
+fn a_translation_section_of_the_wrong_type_is_ignored() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"translation":[1,2]}}"#,
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(!snapshot.recovered);
+    assert_eq!(
+        snapshot.settings.translation,
+        TranslationSettings::default()
+    );
 }

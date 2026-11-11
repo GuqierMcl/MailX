@@ -9,6 +9,7 @@ use scraper::Html;
 
 mod detect;
 pub mod languages;
+pub(crate) mod provider;
 mod rewrite;
 mod walk;
 pub mod wire;

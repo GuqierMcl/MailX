@@ -38,7 +38,8 @@ pub use app::{
     DraftConnectionVerification, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome,
     FlagBatchOutcome, FlagChange, MailxCore, MessageFlag, OAuthBrowserAuthorization,
     OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult, ProtocolVerification,
-    RemoteImageStatus, VerifyAccountConnection, VerifyDraftConnection,
+    RemoteImageStatus, TranslationCacheStats, TranslationInfo, TranslationKeyState,
+    TranslationStatus, TranslationTest, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -58,7 +59,8 @@ pub use settings::{
     AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings,
     LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings, NotificationSettings,
     NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsChanged,
-    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, mail_body_css,
+    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, TranslationProviderId,
+    TranslationRoute, TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{
