@@ -105,7 +105,10 @@ impl MailxCore {
             .rendered
             .sanitized_html
             .ok_or_else(|| AppError::new(ErrorCode::BodyNotCached))?;
-        let segments = translate::extract(&render::fold_quotes(&html, "x"), include_quotes)
+        let translate::Extraction {
+            segments,
+            truncated,
+        } = translate::extract_checked(&render::fold_quotes(&html, "x"), include_quotes)
             .map_err(|_| AppError::new(ErrorCode::Validation))?;
         let stored: Vec<Option<String>> = segments
             .iter()
@@ -135,7 +138,7 @@ impl MailxCore {
                 source_language: None,
                 subject: None,
                 segments: &stored,
-                partial: false,
+                partial: truncated,
             },
         )?;
         if written {

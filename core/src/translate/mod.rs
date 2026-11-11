@@ -75,21 +75,37 @@ pub enum ExtractError {
 
 /// Parse, normalize pre-formatted text and plan, exactly the same for both
 /// entry points so they can never disagree about segment boundaries.
-fn analyze(html: &str, include_quotes: bool) -> (Html, Vec<walk::Planned>) {
+fn analyze(html: &str, include_quotes: bool) -> (Html, Vec<walk::Planned>, bool) {
     let mut document = Html::parse_fragment(html);
     walk::prepare(&mut document, include_quotes);
-    let plans = walk::plan(&document, include_quotes);
-    (document, plans)
+    let (plans, truncated) = walk::plan(&document, include_quotes);
+    (document, plans, truncated)
 }
 
 /// Segments in document order. `include_quotes == false` skips the folded
 /// quote (`details.mailx-quote`) subtrees.
 pub fn extract(html: &str, include_quotes: bool) -> Result<Vec<Segment>, ExtractError> {
+    extract_checked(html, include_quotes).map(|extraction| extraction.segments)
+}
+
+/// What `extract` found, and whether the walk stopped at `MAX_SEGMENTS` with
+/// text left over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Extraction {
+    pub segments: Vec<Segment>,
+    pub truncated: bool,
+}
+
+/// The same walk as `extract`, also saying whether it was cut short.
+pub fn extract_checked(html: &str, include_quotes: bool) -> Result<Extraction, ExtractError> {
     if html.len() > MAX_HTML_BYTES {
         return Err(ExtractError::TooLarge);
     }
-    let (_, plans) = analyze(html, include_quotes);
-    Ok(plans.into_iter().map(|plan| plan.segment).collect())
+    let (_, plans, truncated) = analyze(html, include_quotes);
+    Ok(Extraction {
+        segments: plans.into_iter().map(|plan| plan.segment).collect(),
+        truncated,
+    })
 }
 
 /// `translations[i]` is the wire-format translation of segment `i`, or `None`
@@ -99,7 +115,7 @@ pub fn apply(html: &str, include_quotes: bool, translations: &[Option<String>]) 
     if html.len() > MAX_HTML_BYTES {
         return None;
     }
-    let (mut document, plans) = analyze(html, include_quotes);
+    let (mut document, plans, _) = analyze(html, include_quotes);
     if plans.len() != translations.len() {
         return None;
     }

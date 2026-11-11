@@ -331,15 +331,13 @@ enum Item {
     Candidate(Vec<NodeId>),
 }
 
-pub(super) fn plan(document: &Html, include_quotes: bool) -> Vec<Planned> {
+/// The plans in document order, and whether more than `MAX_SEGMENTS` exist.
+pub(super) fn plan(document: &Html, include_quotes: bool) -> (Vec<Planned>, bool) {
     let infos = classify(document, include_quotes);
     let tree = &document.tree;
     let mut out: Vec<Planned> = Vec::new();
     let mut stack = vec![Item::Container(document.root_element().id())];
     while let Some(item) = stack.pop() {
-        if out.len() >= MAX_SEGMENTS {
-            break;
-        }
         match item {
             Item::Container(id) => {
                 let items = split_container(tree, &infos, id);
@@ -358,12 +356,15 @@ pub(super) fn plan(document: &Html, include_quotes: bool) -> Vec<Planned> {
                 {
                     stack.push(Item::Container(*only));
                 } else if let Some(planned) = build(tree, &infos, nodes) {
+                    if out.len() >= MAX_SEGMENTS {
+                        return (out, true);
+                    }
                     out.push(planned);
                 }
             }
         }
     }
-    out
+    (out, false)
 }
 
 fn kind_of(infos: &HashMap<NodeId, Info>, node: Ref) -> Option<Kind> {

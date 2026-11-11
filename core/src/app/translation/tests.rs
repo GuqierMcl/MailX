@@ -1108,3 +1108,19 @@ fn four_byte_text_is_split_so_no_json_body_exceeds_the_documented_cap() {
         }
     }
 }
+
+#[tokio::test]
+async fn a_body_past_the_segment_cap_is_stored_as_partial() {
+    let paragraphs = |n: usize| (0..n).map(|i| format!("<p>n{i}</p>")).collect::<String>();
+    let f = fixture(&[
+        &paragraphs(translate::MAX_SEGMENTS + 1),
+        &paragraphs(translate::MAX_SEGMENTS),
+    ]);
+    echo(&f);
+    with_key(&f, TranslationProviderId::Deepl).await;
+    let s = settings(TranslationProviderId::Deepl);
+    let over = translate_to_de(&f, 0, &s).await.unwrap();
+    assert!(over.translation.unwrap().partial);
+    let exact = translate_to_de(&f, 1, &s).await.unwrap();
+    assert!(!exact.translation.unwrap().partial);
+}

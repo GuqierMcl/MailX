@@ -701,8 +701,11 @@ impl MailxCore {
         let include_quotes = settings.include_quotes;
         let html = source.html.clone();
         // Parsing a large message is CPU work; keep it off the async threads.
-        let segments = tokio::task::spawn_blocking(move || {
-            translate::extract(&render::fold_quotes(&html, FOLD_LABEL), include_quotes)
+        let translate::Extraction {
+            segments,
+            truncated,
+        } = tokio::task::spawn_blocking(move || {
+            translate::extract_checked(&render::fold_quotes(&html, FOLD_LABEL), include_quotes)
         })
         .await
         .map_err(|_| internal())?
@@ -714,6 +717,8 @@ impl MailxCore {
             slots,
             partial,
         } = plan(&segments, limits);
+        // Text past the segment cap is never sent, so it is as partial as a spent budget.
+        let partial = partial || truncated;
         let subject = source
             .subject
             .as_deref()

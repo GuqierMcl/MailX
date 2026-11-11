@@ -1091,3 +1091,26 @@ fn mostly_english_with_a_few_cjk_characters_is_english() {
     let sample = "Please find the attached quarterly report for the finance team, and let me know whether the figures in the summary look right to you. 谢谢";
     assert_eq!(detected(sample).0, "en");
 }
+
+#[test]
+fn the_walk_reports_truncation_only_past_the_segment_cap() {
+    let paragraphs = |n: usize| {
+        (0..n)
+            .map(|i| format!("<p>item {i}</p>"))
+            .collect::<String>()
+    };
+    let exact = extract_checked(&paragraphs(MAX_SEGMENTS), true).unwrap();
+    assert_eq!(
+        (exact.segments.len(), exact.truncated),
+        (MAX_SEGMENTS, false)
+    );
+    let over = extract_checked(&paragraphs(MAX_SEGMENTS + 1), true).unwrap();
+    assert_eq!((over.segments.len(), over.truncated), (MAX_SEGMENTS, true));
+    // Trailing markup that yields no segment is not "more text".
+    let tail = format!("{}<p></p><div> </div>", paragraphs(MAX_SEGMENTS));
+    assert!(!extract_checked(&tail, true).unwrap().truncated);
+    assert_eq!(
+        extract(&paragraphs(MAX_SEGMENTS + 1), true).unwrap(),
+        over.segments
+    );
+}
