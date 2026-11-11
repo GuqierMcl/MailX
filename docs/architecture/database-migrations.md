@@ -87,6 +87,14 @@ frontend/src/features/startup/
 
 `0024_sent_copy_identity.sql` 为 `messages` 增加可空的 `original_message_id` 和默认空串的 `sent_identity_policy`，分别保存服务商兼容层校验的原始标识和已处理策略版本；原生 `message_id_header` 保留。迁移本身不联网，不根据主题或时间回填身份。启动补做已有缓存的标准 `Message-ID` 对账；需要扩展头部的旧已发送缓存由启动后的同步按持久化策略标记分批补抓，每个已发送文件夹每轮最多 200 个，失败或重启可继续。规则与保护条件见[邮箱服务商兼容层](provider-compatibility.md#33-存储与恢复)。
 
+`0025_oauth_bindings.sql` 为 `auth_profiles` 增加可空的 `oauth_binding_json`，新建 `oauth_client_registrations` 保存服务商的客户端登记；同时为 `outbox` 增加 `retry_started_at`（已尝试过投递的行以 `first_queued_at` 回填）与 `authorization_blocked_at`，用于手动重试重新计时和等待邮箱授权时不消耗投递次数。
+
+`0026_contact_aggregations.sql` 新建全局的 `contact_aggregations`，按小写邮箱地址保存联系人聚合规则，并为 `messages` 建立按小写发件人地址与时间排序的索引。
+
+`0027_conversation_threading.sql` 为 `messages` 增加可空的 `in_reply_to`、`references_header` 与 `conversation_id`，并建立按账号和会话的部分索引。迁移本身不联网；同步策略版本随之升为 `default:v2` / `qq:v2`，已缓存邮件的这两个邮件头由启动后的同步按文件夹分批补抓（每个文件夹每轮最多 200 封），失败或重启可继续。
+
+`0028_conversation_rethread.sql` 为 `messages` 增加默认 0 的 `threading_version`，清空按旧规则计算的 `conversation_id`，并为待重建的行建部分索引。会话是可再生的派生数据：启动后由后台任务按当前规则分批重建（每批 200 封），期间无法识别的邮件按单封显示。规则见[邮件同步](mail-sync.md)。
+
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则

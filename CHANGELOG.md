@@ -28,8 +28,9 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🔄 Changed
 
+- The local database upgrades from v24 to v28 for browser sign-in, grouped contacts and conversations; after the upgrade MailX fetches reply information for cached mail and groups it into conversations in the background, and older versions cannot open the upgraded database, so keep a full backup from before the upgrade if you may downgrade. / 本地数据库从 v24 升级到 v28，以支持浏览器登录、联系人聚合和对话；升级后 MailX 会在后台为已缓存的邮件补取回复信息并整理成对话，旧版无法直接打开升级后的数据库，降级前需保留升级前的完整数据备份。
 - Update checks now stay on, with default-enabled Automatic updates downloading in the background and prompting for a restart or installing on quit; turning it off keeps manual downloads, and previous disabled preferences are preserved. / 更新检查现固定开启，默认打开的“自动更新”会在后台下载并提醒重启或在退出时安装；关闭后保留手动下载，升级时保留原有关闭偏好。
-- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts; OAuth provider sign-in remains unavailable. / 账号摘要现明确区分密码与 OAuth 凭证并兼容已有密码账号，OAuth 服务商登录仍未开放。
+- Account summaries now distinguish password and OAuth credentials while preserving existing password accounts. / 账号摘要现明确区分密码与 OAuth 凭证，并兼容已有的密码账号。
 
 ## [0.1.2] - 2026-11-08
 
