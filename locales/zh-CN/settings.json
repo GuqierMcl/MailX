@@ -194,5 +194,15 @@
   "mcpClientGroup": "{{label}} ×{{count}}",
   "mcpClientSeparator": "、",
   "mcpClientsConnected": "已连接的客户端",
-  "mcpTitleConnected": "已连接：{{names}}"
+  "mcpTitleConnected": "已连接：{{names}}",
+  "contacts": "联系人",
+  "contactsGroupedTitle": "邮件聚合",
+  "contactsGroupedDescription": "这些联系人的邮件在收件箱里收成一行，点开可查看全部。在邮件上点右键即可添加。",
+  "contactsEmptyTitle": "还没有聚合的联系人",
+  "contactsLoadFailed": "无法读取聚合的联系人",
+  "contactsMessageSummary_other": "{{count}} 封邮件 · 最近 {{date}}",
+  "contactsMessageCount_other": "{{count}} 封邮件",
+  "contactsUngroup": "取消聚合",
+  "contactsUngroupLabel": "取消聚合 {{name}}",
+  "contactsUngroupFailed": "无法取消聚合"
 }

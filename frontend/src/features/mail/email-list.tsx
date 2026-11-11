@@ -388,6 +388,12 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
   // with only that row. Inside, a click toggles and Shift picks the range.
   const clickRow = (email: EmailSummary, intent: RowClick) => {
+    // A group row opens the sender's list; it is not a message, so it never opens in the
+    // reader nor takes part in picking (picking mode ignores it).
+    if (email.senderGroup) {
+      if (!selection?.active) onViewContact?.(email)
+      return
+    }
     if (!selection) onSelect(email)
     else if (!selection.active) {
       if (intent.toggle || intent.range) selection.start(email)
@@ -454,7 +460,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
                 email={email}
                 sentView={sentView}
                 account={accounts?.find((account) => account.id === email.accountId) ?? null}
-                selected={email.id === selectedId}
+                selected={!email.senderGroup && email.id === selectedId}
                 previewLines={previewLines}
                 onFlag={onFlag}
                 onArchive={onArchive}
@@ -472,17 +478,18 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
         {menu && (
           <EmailContextMenuContent
             email={menu.email}
-            onOpen={onSelect}
-            onRespond={onRespond}
-            onFlag={onFlag}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            onRemoveLocal={onRemoveLocal}
+            // A group row is no single message: only its contact items are offered.
+            onOpen={menu.email.senderGroup ? undefined : onSelect}
+            onRespond={menu.email.senderGroup ? undefined : onRespond}
+            onFlag={menu.email.senderGroup ? undefined : onFlag}
+            onArchive={menu.email.senderGroup ? undefined : onArchive}
+            onDelete={menu.email.senderGroup ? undefined : onDelete}
+            onRemoveLocal={menu.email.senderGroup ? undefined : onRemoveLocal}
             canArchive={canArchive}
             // Rows of a Sent view show recipients, not senders: no contact items there.
             onViewContact={sentView ? undefined : onViewContact}
             onAggregate={sentView ? undefined : onAggregate}
-            isAggregated={isAggregated}
+            isAggregated={menu.email.senderGroup ? () => true : isAggregated}
             viewingContact={viewingContact}
             finalFocus={() => {
               // Back to where focus was (the row, after Shift+F10 or the menu key);

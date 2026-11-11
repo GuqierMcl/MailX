@@ -272,6 +272,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   }))
   const sentView = mailView && (folderRole === 'sent' || (activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'sent'))
   const contactView = mailView ? contact : null
+  const inboxView = mailView && !archivedView && !starredView && !contactView
+    && (activeMailbox.kind === 'unified' ? activeMailbox.role === 'inbox' : activeMailbox.kind === 'folder' && activeMailbox.folder.role === 'inbox')
   const scopedFolders = folders.filter((folder) => folder.selectable && (contactView
     ? !CONTACT_EXCLUDED_ROLES.includes(folder.role) && (!contactView.accountId || folder.accountId === contactView.accountId)
     : folderId ? folder.id === folderId
@@ -300,8 +302,10 @@ export function Workbench({ client }: { client: MailxClient }) {
     excludeFolderRoles: starredView ? STARRED_EXCLUDED_ROLES : [],
     unread: filter === 'unread' ? true : null,
     text: query || null,
+    // Grouped senders collapse into one row, in inbox views only.
+    groupSenders: inboxView,
     limit: PAGE_SIZE,
-  }), [contactView, folderId, folderRole, archivedView, starredView, selectedAccountId, filter, query])
+  }), [contactView, folderId, folderRole, archivedView, starredView, inboxView, selectedAccountId, filter, query])
   const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
 
   const list = useInfiniteQuery({

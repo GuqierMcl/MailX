@@ -57,7 +57,7 @@ describe('settings dialog', () => {
   it('shows a visible title and keeps navigation on narrow windows', () => {
     const { dialog } = renderDialog()
     expect(within(dialog).getByRole('heading', { name: '设置' })).toBeVisible()
-    for (const name of ['外观', '发信', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+    for (const name of ['外观', '发信', '联系人', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
   })
 
   it('has a 发信 section with the default sender account and the undo window', async () => {

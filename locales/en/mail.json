@@ -257,5 +257,11 @@
   "contactUngrouped": "Stopped grouping {{name}}",
   "groupContactFailed": "Couldn’t group this contact’s mail",
   "ungroupContactFailed": "Couldn’t stop grouping this contact’s mail",
-  "backTo": "Back to {{title}}"
+  "backTo": "Back to {{title}}",
+  "senderGroupCount_one": "{{count}} message",
+  "senderGroupCount_other": "{{count}} messages",
+  "senderGroupUnread_one": "{{count}} unread",
+  "senderGroupUnread_other": "{{count}} unread",
+  "senderGroupLabel": "{{name}}, {{total}} messages",
+  "senderGroupLabelUnread": "{{name}}, {{total}} messages, {{unread}} unread"
 }

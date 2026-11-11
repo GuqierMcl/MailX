@@ -230,5 +230,9 @@
   "contactUngrouped": "已取消聚合 {{name}}",
   "groupContactFailed": "无法聚合此联系人的邮件",
   "ungroupContactFailed": "无法取消聚合此联系人",
-  "backTo": "返回{{title}}"
+  "backTo": "返回{{title}}",
+  "senderGroupCount_other": "{{count}} 封",
+  "senderGroupUnread_other": "{{count}} 封未读",
+  "senderGroupLabel": "{{name}}，{{total}} 封邮件",
+  "senderGroupLabelUnread": "{{name}}，{{total}} 封邮件，{{unread}} 封未读"
 }

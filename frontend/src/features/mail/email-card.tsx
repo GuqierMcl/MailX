@@ -2,7 +2,7 @@ import { t } from '@/i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Archive02Icon, ArchiveRestoreIcon, Attachment01Icon, Delete02Icon, StarIcon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { Archive02Icon, ArchiveRestoreIcon, ArrowRight01Icon, Attachment01Icon, Delete02Icon, StarIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary, PreviewLines, SnippetSegment } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
@@ -61,11 +61,14 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
   // the same person, so it never shows the account owner on every row.
   const counterpart = sentView ? email.to.addresses[0] ?? email.from : email.from
   // While picking messages the opened-message highlight and the quick actions step aside.
-  const selected = opened && !selectionMode
-  const canChangeFlags = !selectionMode && Boolean(onFlag) && !email.localOnly
-  const canChangeArchive = !selectionMode && Boolean(onArchive && !email.localOnly && canArchive?.(email))
-  const canDelete = !selectionMode && Boolean(onDelete) && !email.localOnly
-  const canRemoveLocal = !selectionMode && Boolean(onRemoveLocal) && email.localOnly
+  // A group row stands for a whole sender: it opens a list, never a message, so it has
+  // no opened state, no quick actions and nothing to pick.
+  const group = email.senderGroup
+  const selected = opened && !selectionMode && !group
+  const canChangeFlags = !selectionMode && !group && Boolean(onFlag) && !email.localOnly
+  const canChangeArchive = !selectionMode && !group && Boolean(onArchive && !email.localOnly && canArchive?.(email))
+  const canDelete = !selectionMode && !group && Boolean(onDelete) && !email.localOnly
+  const canRemoveLocal = !selectionMode && !group && Boolean(onRemoveLocal) && email.localOnly
   const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal
   // The shortest rows cannot fit three comfortable targets beside the avatar.
   const verticalActions = previewLines !== 'none'
@@ -144,7 +147,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
       <HugeiconsIcon icon={email.archived ? ArchiveRestoreIcon : Archive02Icon} />
     </IconButton>
   )
-  const starMarker = email.isStarred && (
+  const starMarker = email.isStarred && !group && (
     <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
   )
   const hideTime = hasCornerActions && actionsVisible
@@ -193,17 +196,18 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         if ((event.target as HTMLElement).closest('[data-row-action]')) return
         onSelect({ toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })
       }}
-      data-picked={selectionMode && picked ? '' : undefined}
+      data-picked={selectionMode && !group && picked ? '' : undefined}
+      data-sender-group={group ? '' : undefined}
       className={cn(
         'group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors focus-within:bg-foreground/5',
-        selectionMode
+        selectionMode && !group
           ? 'mail-pick has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:-outline-offset-1'
           : 'hover:bg-foreground/5',
         menuOpen && 'bg-foreground/5',
         selected && 'mail-selected',
       )}
     >
-      {selectionMode && (
+      {selectionMode && !group && (
         // The check, not only the colour, says the row is picked.
         <span aria-hidden className="mail-pick-mark pointer-events-none absolute top-0 right-0 z-10 size-[22px] rounded-tr-lg">
           <HugeiconsIcon icon={Tick02Icon} strokeWidth={3} className="absolute top-[3px] right-[3px] size-2.5" />
@@ -211,8 +215,9 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
       )}
       <button
         type="button"
-        role={selectionMode ? 'checkbox' : undefined}
-        aria-checked={selectionMode ? picked : undefined}
+        role={selectionMode && !group ? 'checkbox' : undefined}
+        aria-checked={selectionMode && !group ? picked : undefined}
+        aria-label={group ? t(group.unread > 0 ? 'mail:senderGroupLabelUnread' : 'mail:senderGroupLabel', { name: displayName(email.from), total: group.total, unread: group.unread }) : undefined}
         className="order-2 flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
       >
         <SenderAvatar sender={counterpart} accountId={email.accountId} />
@@ -223,18 +228,26 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
                   muted, and gives way to the sender before the time ever does. */}
               <span className="flex min-w-0 items-baseline gap-1.5">
                 <span className="truncate font-normal">{sentView ? recipientsLabel(email.to) : displayName(email.from)}</span>
-                {account && (
+                {group && (
+                  <>
+                    <span className="shrink-0 text-xs text-muted-foreground">{t('mail:senderGroupCount', { count: group.total })}</span>
+                    {group.unread > 0 && (
+                      <span className="shrink-0 text-xs text-blue-600 dark:text-blue-400">{t('mail:senderGroupUnread', { count: group.unread })}</span>
+                    )}
+                  </>
+                )}
+                {account && !group && (
                   <>
                     <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
                     <span className="min-w-0 truncate text-xs text-muted-foreground" title={account.emailAddress}>{account.displayName}</span>
                   </>
                 )}
               </span>
-              {email.localOnly && <LocalOnlyMarker className="ml-auto" />}
-              {email.archived && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t('mail:archivedMarker')}</span>}
+              {email.localOnly && !group && <LocalOnlyMarker className="ml-auto" />}
+              {email.archived && !group && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t('mail:archivedMarker')}</span>}
             </div>
             {/* The blue dot is the only visual read-state marker in the row. */}
-            <div className="flex items-center gap-1.5 text-xs text-foreground/75">
+            <div className={cn('flex items-center gap-1.5 text-xs text-foreground/75', group && 'pr-5')}>
               {!verticalActions && starMarker}
               <span className="truncate">{email.subject || t('mail:noSubject')}</span>
               {email.hasAttachment && (
@@ -244,7 +257,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
           </div>
           {/* The slot is always reserved, even without a preview, so every row has one height. */}
           {previewLines !== 'none' && (
-            <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground')}>
+            <p className={cn(PREVIEW_CLAMP[previewLines], PREVIEW_HEIGHT[previewLines], 'w-full overflow-hidden text-xs text-muted-foreground', group && 'pr-5')}>
               {email.matchSnippet ? <SnippetText segments={email.matchSnippet} /> : previewText(email)}
             </p>
           )}
@@ -263,7 +276,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         )}
         <ReadStatusButton
           data-row-action
-          isRead={email.isRead}
+          isRead={group ? group.unread === 0 : email.isRead}
           interactive={canChangeFlags && actionsMounted}
           ringClassName={actionVisibility}
           onClick={() => onFlag?.(email, 'read', !email.isRead)}
@@ -313,6 +326,10 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
           </div>
         )}
       </div>
+      {group && (
+        // Out of the flow, so the row keeps the height of any other row.
+        <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden className="pointer-events-none absolute right-2 bottom-3 size-4 text-muted-foreground" />
+      )}
     </div>
   )
 }

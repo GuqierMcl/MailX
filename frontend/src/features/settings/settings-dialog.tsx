@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { ComputerIcon, InformationCircleIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon } from '@hugeicons/core-free-icons'
+import { ComputerIcon, InformationCircleIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
   Sidebar,
@@ -21,11 +21,12 @@ import { SecurityPane } from './security-pane'
 import { AppearancePane } from './appearance-pane'
 import { NotificationsPane } from './notifications-pane'
 import { ComposePane } from './compose-pane'
+import { ContactsPane } from './contacts-pane'
 import { GeneralPane } from './general-pane'
 import { McpPane } from './mcp-pane'
 import { AboutPane } from './about-pane'
 
-export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'security' | 'mcp' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'contacts' | 'security' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -57,6 +58,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       heading: t('settings:groupMail'),
       items: [
         { id: 'compose', name: t('settings:compose'), icon: PencilEdit02Icon },
+        { id: 'contacts', name: t('settings:contacts'), icon: UserMultiple02Icon },
         { id: 'security', name: t('settings:security'), icon: Shield01Icon },
       ],
     },
@@ -107,6 +109,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'appearance' && <AppearancePane client={client} />}
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
+              {section === 'contacts' && <ContactsPane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
               {section === 'mcp' && <McpPane client={client} />}
               {section === 'about' && <AboutPane client={client} />}
