@@ -96,46 +96,53 @@ jobs:
       - uses: actions/checkout@v7
       # The runner's Azure Ubuntu mirror can make slow progress until the
       # installation deadline, so the official HTTPS mirrors are tried first.
-      # Those can in turn be unreachable from the runner (DNS failures), so a
-      # failed attempt falls back to the runner's own mirror configuration.
-      # Each attempt keeps retries, connection/read timeouts and its own limit.
+      # Every *.ubuntu.com host can also be unreachable from the runner (DNS
+      # failures for over an hour on 2026-11-11), so a failed attempt retries
+      # with the runner's own mirror and then with community mirrors outside
+      # ubuntu.com. APT still verifies every index against Ubuntu's signing
+      # keys, so a mirror cannot change what is installed. Each attempt keeps
+      # retries, connection/read timeouts and its own time limit.
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 12
+        timeout-minutes: 20
         run: |
           sources=(/etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt)
           for source in "${sources[@]}"; do
             if [ -f "$source" ]; then sudo cp -a "$source" "$source.runner"; fi
           done
-          use_official_mirrors() {
-            # Support both direct Ubuntu sources and the runner's mirror+file layout.
-            for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
-              if [ -f "$source" ]; then
-                sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
-              fi
-            done
-            if [ -f /etc/apt/apt-mirrors.txt ]; then
-              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-            fi
-          }
           use_runner_mirrors() {
             for source in "${sources[@]}"; do
               if [ -f "$source.runner" ]; then sudo cp -a "$source.runner" "$source"; fi
             done
           }
+          # Rewrites the runner's Ubuntu hosts matching $1 to the base URL $2 in
+          # direct sources, and lists $2 and $3 in the mirror+file layout.
+          use_mirrors() {
+            use_runner_mirrors
+            for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source" ]; then
+                sudo sed -i -E 's#https?://('"$1"')[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#'"$2"'\2#g' "$source"
+              fi
+            done
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s/\tpriority:1\n%s/\tpriority:2\n' "$2" "$3" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            fi
+          }
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           install() {
-            sudo timeout 300 apt-get "${apt_options[@]}" update --error-on=any &&
+            sudo timeout 180 apt-get "${apt_options[@]}" update --error-on=any &&
               sudo timeout 300 apt-get "${apt_options[@]}" install -y --no-install-recommends \
                 libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
                 libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev pkg-config
           }
-          use_official_mirrors
-          if ! install; then
-            echo "::warning::Official Ubuntu mirrors failed; retrying with the runner's mirror."
-            use_runner_mirrors
-            install
-          fi
+          use_mirrors 'azure[.]archive' https://archive.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu
+          if install; then exit 0; fi
+          echo "::warning::Official Ubuntu mirrors failed; retrying with the runner's mirror."
+          use_runner_mirrors
+          if install; then exit 0; fi
+          echo "::warning::The runner's Ubuntu mirror failed; retrying with community mirrors."
+          use_mirrors 'azure[.]archive|archive|security' https://mirrors.edge.kernel.org/ubuntu https://mirrors.ocf.berkeley.edu/ubuntu
+          install
       # rustup reads rust-toolchain.toml and installs the pinned toolchain.
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
