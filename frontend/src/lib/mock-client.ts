@@ -329,7 +329,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       !(query.excludeFolderRoles ?? []).some((role) => folders.some((folder) => folder.id === email.summary.folderId && folder.role === role)) &&
       // Like the core: archived mail only shows in the archived views and in searches.
       (archiveScope === 'include' || (archiveScope === 'only') === email.summary.archived) &&
-      (query.unread == null || email.summary.isRead === !query.unread) &&
+      (query.unread == null || email.summary.isRead === !query.unread || (query.keepIds ?? []).includes(email.summary.id)) &&
       (query.starred == null || email.summary.isStarred === query.starred) &&
       (query.hasAttachment == null || email.summary.hasAttachment === query.hasAttachment) &&
       // A local Sent copy's sender is the account's own address.

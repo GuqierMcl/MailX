@@ -64,6 +64,9 @@ import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
 const PAGE_SIZE = 100
+/** The core's limit on kept ids (`MAX_KEEP_IDS`); the oldest drop out first. */
+const MAX_KEPT = 500
+const NO_IDS: string[] = []
 /** Mail in these folders never shows up under a contact. */
 const CONTACT_EXCLUDED_ROLES: FolderRole[] = ['junk', 'trash']
 
@@ -93,6 +96,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [addingAccount, setAddingAccount] = useState(false)
   const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
   const [filter, setFilter] = useState<ListFilter>('all')
+  // Messages opened in one Unread view; see `keptIds` below.
+  const [kept, setKept] = useState<{ view: string; ids: string[] }>({ view: '', ids: NO_IDS })
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -315,10 +320,27 @@ export function Workbench({ client }: { client: MailxClient }) {
     limit: PAGE_SIZE,
   }), [contactView, folderId, folderRole, archivedView, starredView, inboxView, selectedAccountId, filter, query])
   const listKey = useMemo(() => mailKeys.emails(sourceIdentity, listQuery), [sourceIdentity, listQuery])
+  // Mail opened from the Unread view stays listed, now read, until the view
+  // changes (mailbox, filter or search), so rows do not vanish under the reader.
+  // The ids ride along with every fetch of this list but are not part of its
+  // key: opening a message must not start the list over from its first page.
+  const viewKey = JSON.stringify(listKey)
+  // Coming back to the same view later starts with nothing kept.
+  if (kept.ids.length > 0 && kept.view !== viewKey) setKept({ view: '', ids: NO_IDS })
+  const keptIds = kept.view === viewKey ? kept.ids : NO_IDS
+  const keptRef = useRef(keptIds)
+  useEffect(() => { keptRef.current = keptIds }, [keptIds])
+  const hasKept = keptIds.length > 0
+  useEffect(() => {
+    if (!hasKept) return
+    // Its cached pages hold the kept rows; the next visit starts without them.
+    return () => queryClient.removeQueries({ queryKey: listKey, exact: true })
+  }, [hasKept, listKey, queryClient])
+  const selectQuery = useMemo(() => (keptIds.length > 0 ? { ...listQuery, keepIds: keptIds } : listQuery), [listQuery, keptIds])
 
   const list = useInfiniteQuery({
     queryKey: listKey,
-    queryFn: ({ pageParam }) => client.listEmails({ ...listQuery, cursor: pageParam }),
+    queryFn: ({ pageParam }) => client.listEmails({ ...listQuery, keepIds: keptRef.current, cursor: pageParam }),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     enabled: !treeLoading && mailView,
@@ -428,7 +450,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [])
   const archiveEmails = useArchiveEmails(client, hideOpened)
   const selectionActions = useSelectionActions({
-    client, selection, listQuery, folders, archivedView: archivedView && !contactView,
+    client, selection, listQuery: selectQuery, folders, archivedView: archivedView && !contactView,
     deleteMany: deleteEmail.requestBatch,
     archiveMany: archiveEmails,
     flagMany: setFlags,
@@ -573,8 +595,17 @@ export function Workbench({ client }: { client: MailxClient }) {
   const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
   const selectedOutbox = outbox.data?.find((item) => item.id === outboxChoice) ?? null
 
+  // A listed message opened in the Unread view stays in it once read; see `keptIds`.
+  const keepListed = (id: string) => {
+    if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
+    setKept((current) => {
+      const ids = current.view === viewKey ? current.ids : NO_IDS
+      return ids.includes(id) ? current : { view: viewKey, ids: [...ids, id].slice(-MAX_KEPT) }
+    })
+  }
   // Every way of opening a message (list click, search result, notification) shows the reader.
   const openEmail = (email: { id: string; accountId: string }) => {
+    keepListed(email.id)
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
     setAnchorId(email.id)
     setReaderCollapsed(false)
@@ -584,6 +615,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   // Expanding a message inside the thread opens it like any other (read mark, toolbar,
   // body) but keeps the anchor, so the same conversation stays on screen.
   const expandInThread = (email: EmailSummary) => {
+    keepListed(email.id)
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
   }
   const toggleReader = () => setReaderCollapsed(!readerCollapsed)

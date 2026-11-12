@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@/test/render'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { searchFor } from '@/test/search'
@@ -82,6 +82,37 @@ describe('workbench', () => {
     await searchFor('不存在的关键词')
     expect(await screen.findByText('没有匹配的邮件')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+  })
+
+  it('keeps mail opened from the Unread view listed once read, until the view changes', async () => {
+    const client = createMockClient()
+    let writtenBack: Parameters<typeof client.onFlagWriteBack>[0] | undefined
+    client.onFlagWriteBack = (listener) => { writtenBack = listener; return () => undefined }
+    const listEmails = vi.spyOn(client, 'listEmails')
+    render(withTitleBar(<Workbench client={client} />))
+    const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
+    await screen.findByRole('list', { name: '邮件列表' })
+    await userEvent.click(screen.getByRole('tab', { name: '未读' }))
+    await waitFor(() => {
+      for (const row of rows()) expect(within(row).getByLabelText('未读')).toBeInTheDocument()
+    })
+    const unreadCount = rows().length
+    const first = rows()[0]
+    const subject = first.textContent
+    await userEvent.click(first)
+    await waitFor(() => expect(within(rows()[0]).queryByLabelText('未读')).not.toBeInTheDocument())
+
+    // The write-back refetches the list; the opened message stays, now read.
+    act(() => writtenBack?.({ localOnlyStars: 0 } as Parameters<NonNullable<typeof writtenBack>>[0]))
+    await waitFor(() => expect(listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ unread: true, keepIds: expect.any(Array) })))
+    expect(rows()).toHaveLength(unreadCount)
+    expect(rows()[0]).toHaveTextContent(subject!)
+    expect(rows()[0]).toHaveAttribute('aria-current', 'true')
+
+    // Leaving the view lets it go.
+    await userEvent.click(screen.getByRole('tab', { name: '全部' }))
+    await userEvent.click(screen.getByRole('tab', { name: '未读' }))
+    await waitFor(() => expect(rows()).toHaveLength(unreadCount - 1))
   })
 
   it('opens general settings from the sidebar', async () => {

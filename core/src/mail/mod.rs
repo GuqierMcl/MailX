@@ -190,6 +190,9 @@ pub const LOCAL_SENT_PREFIX: &str = "local-sent:";
 /// The most messages one "select all" returns, matching the batch action limit.
 pub const MAX_SELECTION: u32 = 500;
 
+/// The most ids one list query may keep past its read filter.
+pub const MAX_KEEP_IDS: usize = 500;
+
 /// Which locally archived inbox messages a list contains. This is the local
 /// archive, not the server's `FolderRole::Archive` folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -219,6 +222,10 @@ pub struct EmailListQuery {
     pub archive: Option<ArchiveScope>,
     pub text: Option<String>,
     pub unread: Option<bool>,
+    /// Messages that pass the `unread` filter whatever their read state, so
+    /// mail opened from an Unread view stays listed after it is read. Every
+    /// other filter still applies. At most [`MAX_KEEP_IDS`].
+    pub keep_ids: Vec<String>,
     /// Match the local desired star state, including pending server writes.
     pub starred: Option<bool>,
     pub has_attachment: Option<bool>,
