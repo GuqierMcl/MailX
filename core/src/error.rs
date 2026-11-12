@@ -55,6 +55,21 @@ pub enum ErrorCode {
     /// An organization account was used in the personal entry.
     #[serde(rename = "oauthUseOrganizationEntry")]
     OAuthUseOrganizationEntry,
+    /// No translation service is chosen yet, or its key is missing.
+    TranslationNotConfigured,
+    /// The user has not agreed to send mail text to the chosen service.
+    TranslationConsentRequired,
+    TranslationKeyRejected,
+    TranslationQuotaExceeded,
+    TranslationRateLimited,
+    TranslationNetwork,
+    TranslationProxy,
+    TranslationTimeout,
+    TranslationUnavailable,
+    TranslationInvalidResponse,
+    TranslationLanguageUnsupported,
+    TranslationTooLarge,
+    TranslationCancelled,
     StorageUnavailable,
     StorageIncompatible,
     AlreadyOpen,
@@ -110,6 +125,23 @@ impl AppError {
             ErrorCode::OAuthUseOrganizationEntry => {
                 "这是工作或学校账号，请改用“Microsoft 365 / Exchange”入口添加。"
             }
+            ErrorCode::TranslationNotConfigured => "还没有设置翻译服务，请先在设置中选择并填写。",
+            ErrorCode::TranslationConsentRequired => {
+                "使用翻译前，需要先同意把邮件文字发送给所选的翻译服务。"
+            }
+            ErrorCode::TranslationKeyRejected => "翻译服务没有接受这个密钥，请检查后重新填写。",
+            ErrorCode::TranslationQuotaExceeded => {
+                "翻译服务的可用额度已用完，请到服务商处查看或更换密钥。"
+            }
+            ErrorCode::TranslationRateLimited => "翻译请求太频繁，请稍等一会儿再试。",
+            ErrorCode::TranslationNetwork => "暂时连不上翻译服务，请检查网络后重试。",
+            ErrorCode::TranslationProxy => "无法通过你设置的代理连接翻译服务，请检查代理设置。",
+            ErrorCode::TranslationTimeout => "翻译服务响应太慢，请稍后重试。",
+            ErrorCode::TranslationUnavailable => "翻译服务暂时不可用，请稍后重试。",
+            ErrorCode::TranslationInvalidResponse => "翻译服务返回的内容无法使用，请稍后重试。",
+            ErrorCode::TranslationLanguageUnsupported => "所选的翻译服务不支持这种目标语言。",
+            ErrorCode::TranslationTooLarge => "这封邮件太大，无法翻译。",
+            ErrorCode::TranslationCancelled => "翻译已取消。",
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",
             ErrorCode::AlreadyOpen => "此数据目录已由另一个 MailX 实例打开。",

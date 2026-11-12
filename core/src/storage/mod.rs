@@ -27,6 +27,7 @@ pub(crate) mod outbox;
 pub(crate) mod previews;
 mod removal;
 pub(crate) mod search_index;
+pub(crate) mod translations;
 
 pub(crate) struct Storage {
     pub db: Connection,

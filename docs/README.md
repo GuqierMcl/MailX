@@ -17,6 +17,7 @@
 - 桌面后台运行：阅读[关闭窗口、托盘与退出](architecture/desktop-lifecycle.md)，默认每次询问、平台差异和草稿安全退出已有实现，三平台实机证据分别记录。
 - 修改界面：先看[界面设计语言](architecture/ui-design.md)，了解画布与岛屿结构、无分割线约定和外壳组件。
 - 国际化适配：查看[中英文文本适配](architecture/internationalization.md)，首版已实现界面与错误文本、语言设置、多窗口同步及 Rust 通知 / 引用模板；三平台打包体验与原生通知待验，日期等区域格式化仍为 Planned。
+- 邮件翻译：阅读[邮件翻译](architecture/translation.md)，了解数据披露与同意、分段回写的安全不变量、专用网络路由、缓存与限额；仅有自动测试，真实服务与桌面手测证据见验证记录。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 适配服务商差异：阅读[邮箱服务商兼容层](architecture/provider-compatibility.md)，主干提供中立接口，具体服务商规则在独立模块中实现。
 - 实现 AI / Agent：阅读[工具层与调用入口](architecture/agent-tools.md)、[AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。

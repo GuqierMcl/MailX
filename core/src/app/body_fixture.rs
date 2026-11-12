@@ -63,7 +63,99 @@ impl MailxCore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(AppError::new(ErrorCode::StorageUnavailable)),
         }
-        let core = Self::open(path, Arc::new(NoSecrets), runtime, events)?;
+        Self::body_fixture_open(path, runtime, raws, events, Arc::new(NoSecrets))
+    }
+
+    /// As [`Self::body_test_fixture`], with a secret store the test controls.
+    #[cfg(test)]
+    pub(crate) fn body_test_fixture_with_secrets(
+        path: &Path,
+        runtime: Handle,
+        raws: &[&[u8]],
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<(Self, Vec<String>), AppError> {
+        Self::body_fixture_open(
+            path,
+            runtime,
+            raws,
+            Arc::new(|_: &crate::events::CoreEvent| {}),
+            secrets,
+        )
+    }
+
+    /// Caches a synthetic translation of a fixture message: every text piece
+    /// becomes `"[<target>] <text>"`, placeholders stay. Test-only; no network.
+    pub fn body_test_translation(
+        &self,
+        email_id: &str,
+        target: &str,
+        include_quotes: bool,
+    ) -> Result<(), AppError> {
+        use crate::{
+            settings::TranslationProviderId,
+            storage::translations::NewTranslation,
+            translate::{self, Piece, SEGMENTER_VERSION, wire},
+        };
+        let mut service = self.accounts()?;
+        let identity = service.body_identity(email_id)?;
+        let body = service
+            .body_cache(&identity)?
+            .ok_or_else(|| AppError::new(ErrorCode::BodyNotCached))?;
+        let html = body
+            .rendered
+            .sanitized_html
+            .ok_or_else(|| AppError::new(ErrorCode::BodyNotCached))?;
+        let translate::Extraction {
+            segments,
+            truncated,
+        } = translate::extract_checked(&render::fold_quotes(&html, "x"), include_quotes)
+            .map_err(|_| AppError::new(ErrorCode::Validation))?;
+        let stored: Vec<Option<String>> = segments
+            .iter()
+            .map(|segment| {
+                let pieces = segment
+                    .pieces()
+                    .iter()
+                    .map(|piece| match piece {
+                        Piece::Text(text) => Piece::Text(format!("[{target}] {text}")),
+                        other => other.clone(),
+                    })
+                    .collect();
+                Some(wire::encode(&translate::Segment::new(pieces)))
+            })
+            .collect();
+        let written = service.translation_put(
+            &identity,
+            &(body.raw.clone(), body.sanitizer_version),
+            &NewTranslation {
+                message_id: email_id,
+                target_language: target,
+                include_quotes,
+                raw_sha256: &body.raw.sha256,
+                sanitizer_version: body.sanitizer_version,
+                segmenter_version: SEGMENTER_VERSION,
+                provider: TranslationProviderId::ALL[0],
+                source_language: None,
+                subject: None,
+                segments: &stored,
+                partial: truncated,
+            },
+        )?;
+        if written {
+            Ok(())
+        } else {
+            Err(AppError::new(ErrorCode::BodyNotCached))
+        }
+    }
+
+    fn body_fixture_open(
+        path: &Path,
+        runtime: Handle,
+        raws: &[&[u8]],
+        events: crate::events::Events,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<(Self, Vec<String>), AppError> {
+        let core = Self::open(path, secrets, runtime, events)?;
         let identities = core
             .accounts()?
             .body_fixture_seed(&raws.iter().map(|raw| raw.len()).collect::<Vec<_>>())?;

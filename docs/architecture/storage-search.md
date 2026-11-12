@@ -55,6 +55,10 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 `messages` 追加 body_state（missing / fetching / ready / failed）、body_failure 和 preview。
 `message_bodies` 以 message_id 为主键，保存 raw_sha256、raw_size、plain_text、sanitized_html、sanitizer_version、links、remote_images_blocked、truncated、fetched_at；`message_parts` 以 (message_id, part_index) 为主键，保存 content_id、filename、mime_type、size、is_inline，另有 CID 索引。两表随 messages 级联删除。净化版本由 [SANITIZER_VERSION](../../core/src/mail/render.rs) 定义，版本落后的结果可从本地 blob 按需重建；重建同样验证当前身份，不触发网络下载。没有 text/plain 部分的邮件，plain_text 由净化后的 HTML 按块级元素分行生成（段落、`<br>`、表格行断行，列表项带 `- `，`<pre>` 保留换行，空行最多一个）；列表预览与 `partial_text` 仍折叠为单行。旧缓存按净化版本在读取时重建，不主动全量回填。
 
+### 邮件译文缓存
+
+`message_translations`（迁移 0029）保存邮件翻译结果，键为（message_id、target_language、include_quotes），并记录正文原始哈希、净化版本与分段版本，三者不一致时不使用。译文是邮件派生的敏感数据：随邮件或账号删除，可在设置中清除，不进入全文索引，也不整体加密。详见[邮件翻译](translation.md#8-存储与失效)。
+
 ### 远程图片缓存
 
 远程图片不建表、不写入邮件 blob。成功验证后的图片同时保存在阅读绑定的内存和 `image-cache/` 磁盘缓存中。当前阅读按 URL 复用，成功图片累计最多 64 MiB，超限返回明确错误；磁盘键按账号、邮箱来源、连接版本与 URL 隔离并哈希，TTL 为 30 天。磁盘缓存与头像共用容量管理，超过 200 MiB 时淘汰至 160 MiB，长时间未使用的项会清理。

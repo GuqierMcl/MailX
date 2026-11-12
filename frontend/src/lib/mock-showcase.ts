@@ -114,6 +114,68 @@ Sara`,
   },
   {
     account: WORK,
+    from: { name: 'Priscilla Hart', address: 'priscilla.hart@example.com' },
+    subject: 'Quarterly roadmap: what we need from you',
+    html: true,
+    text: `Hello Alex,
+
+Thank you for joining the planning call yesterday. Below is a short summary of what we agreed, and the three decisions we still need from your side before the roadmap is final.
+
+What we agreed
+  • The beta ships in the first week of December.
+  • We keep the current pricing until the end of the year.
+  • Support hours stay the same, but we add a Saturday on-call rotation.
+
+What we need from you
+  1. Confirm the list of languages for the launch.
+  2. Choose which of the two onboarding flows to keep.
+  3. Tell us who will own the migration guide.
+
+If you can reply by Friday, we can still include everything in the next planning round. Please let me know if anything above looks wrong.
+
+Best regards,
+Priscilla`,
+    translatedSubject: '季度路线图：我们需要你的确认',
+    hoursAgo: 0.2,
+  },
+  {
+    account: PERSONAL,
+    from: { name: '田中 ゆき', address: 'tanaka.yuki@example.org' },
+    subject: '来週の打ち合わせについて',
+    html: true,
+    text: `アレックスさん
+
+お世話になっております。来週の打ち合わせについて、日程のご相談です。
+
+火曜日の午後三時、または水曜日の午前十時はいかがでしょうか。場所は駅前のカフェを予定しています。資料は前日までにメールでお送りしますので、事前にご確認いただけると助かります。
+
+ご都合が悪い場合は、遠慮なくお知らせください。別の日程をすぐに調整します。
+
+どうぞよろしくお願いいたします。
+
+田中`,
+    translatedSubject: 'Regarding next week\'s meeting',
+    hoursAgo: 0.8,
+  },
+  {
+    account: STUDIO,
+    from: { name: 'Lena Fischer', address: 'lena.fischer@example.net' },
+    subject: 'Ihre Bestellung wurde versendet',
+    html: true,
+    text: `Hallo Alex,
+
+wir freuen uns, Ihnen mitzuteilen, dass Ihre Bestellung heute versendet wurde. Die Lieferung ist für Donnerstag geplant und wird von einem unserer Partner zugestellt.
+
+Die Sendungsverfolgung finden Sie in Ihrem Kundenkonto. Wenn Sie nicht zu Hause sind, wird das Paket bei Ihrem Nachbarn abgegeben oder in einer Filiale hinterlegt.
+
+Vielen Dank für Ihr Vertrauen und einen schönen Tag noch.
+
+Lena Fischer`,
+    translatedSubject: 'Your order has been shipped',
+    hoursAgo: 3.2,
+  },
+  {
+    account: WORK,
     from: { name: '陈思远', address: 'chen.siyuan@example.com' },
     subject: '下周评审会议改期通知',
     text: '大家好，原定周二的评审会议改到周三下午 15:00，地点不变。请大家提前阅读评审材料，有问题可以直接回复这封邮件。',

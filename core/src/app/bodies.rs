@@ -18,9 +18,9 @@ use crate::{
 /// cannot construct a binding from an untrusted URL or frontend request.
 #[derive(Clone)]
 pub struct BodyBinding {
-    identity: BodyIdentity,
-    raw: StoredBlob,
-    sanitizer_version: u32,
+    pub(super) identity: BodyIdentity,
+    pub(super) raw: StoredBlob,
+    pub(super) sanitizer_version: u32,
     remote_images: Arc<Mutex<RemoteImages>>,
     remote_cancelled: tokio::sync::watch::Sender<bool>,
 }
@@ -147,7 +147,7 @@ fn internal() -> AppError {
     AppError::new(ErrorCode::Internal)
 }
 
-fn check(service: &AccountService, binding: &BodyBinding) -> Result<(), AppError> {
+pub(super) fn check(service: &AccountService, binding: &BodyBinding) -> Result<(), AppError> {
     if binding.sanitizer_version != SANITIZER_VERSION
         || service.body_stamp(&binding.identity)?.as_ref()
             != Some(&(binding.raw.clone(), binding.sanitizer_version))

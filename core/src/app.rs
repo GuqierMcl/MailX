@@ -47,6 +47,7 @@ mod draft_bodies;
 mod flags;
 mod oauth;
 mod organize;
+mod translation;
 pub use oauth::{
     BeginOAuthAccount, BeginOAuthReauthorization, ConfirmOAuthMailbox, CreateOAuthAccount,
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
@@ -60,6 +61,10 @@ pub use draft_bodies::DraftBodyBinding;
 pub use flags::{FlagChange, MessageFlag};
 pub use organize::{
     ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
+};
+pub use translation::{
+    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
+    TranslationStatus, TranslationTest,
 };
 pub use verification::{
     AccountConnectionVerification, CancelConnectionVerification, CancelDraftVerification,
@@ -95,6 +100,7 @@ pub struct MailxCore {
     draft_verification: Arc<verification::VerificationRegistry>,
     archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
     oauth_sessions: Arc<crate::accounts::oauth_sessions::SessionCoordinator>,
+    translation: Arc<translation::Translations>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -159,6 +165,7 @@ impl MailxCore {
     ) -> Result<Self, AppError> {
         // Create and lock the profile before touching its shared image cache.
         // On first launch the profile directory may not exist yet.
+        let translation = Arc::new(translation::Translations::new(secrets.clone()));
         let service = AccountService::open(path, secrets)?;
         let images = Arc::new(crate::storage::image_cache::ImageCache::open(path)?);
         let accounts = service.list()?;
@@ -239,6 +246,7 @@ impl MailxCore {
             draft_verification: Arc::default(),
             archive_undo: Arc::default(),
             oauth_sessions: Arc::default(),
+            translation,
         })
     }
 

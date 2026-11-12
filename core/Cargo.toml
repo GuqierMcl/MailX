@@ -46,6 +46,7 @@ uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
 resvg = { version = "0.48.1", default-features = false }
 schemars = "1"
+whatlang = "0.18.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }

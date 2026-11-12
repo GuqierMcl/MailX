@@ -195,6 +195,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["messages"],
         sql: include_str!("migrations/0028_conversation_rethread.sql"),
     },
+    Migration {
+        version: 29,
+        description: "cached message translations",
+        required_tables: &["message_translations"],
+        sql: include_str!("migrations/0029_message_translations.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -599,7 +605,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 28);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 29);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1156,6 +1162,48 @@ mod tests {
             )
             .unwrap();
         assert_eq!(row, (None, 0, "Hi".into()));
+    }
+
+    #[test]
+    fn message_translations_migration_adds_a_table_that_follows_its_message() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(28)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+               attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'INBOX', 'Inbox', 'inbox', 1, '[]', 0, 1, 't');
+             INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+               message_id_header, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
+               received_at, is_read, is_flagged, flags, has_attachment, remote_state, updated_at)
+             VALUES ('m', 'a', 'source', 'f', 7, 42, 'x@example.invalid', 'Hi', 'a@example.invalid',
+               '[]', '[]', '[]', 't', 1, 1, '[]', 0, 'present', 't');",
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let insert = |message: &str| {
+            db.execute(
+                "INSERT INTO message_translations(message_id, target_language, include_quotes, raw_sha256,
+                   sanitizer_version, segmenter_version, provider, segments, partial, created_at)
+                 VALUES (?1, 'en', 0, 'h', 1, 1, 'deepl', '[]', 0, 't')",
+                [message],
+            )
+        };
+        insert("m").unwrap();
+        // Rows cannot outlive or precede their message.
+        assert!(insert("missing").is_err());
+        db.execute("DELETE FROM folders WHERE id = 'f'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM message_translations", [], |row| row
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
     }
 
     #[test]

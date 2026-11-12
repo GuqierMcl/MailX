@@ -22,6 +22,8 @@ import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
 import { ConversationFrame, type ThreadMode } from './conversation-view'
 import { EmailView, RemoveLocalCopyDialog } from './email-view'
+import { TranslationConsentDialog } from './translation/translation-consent-dialog'
+import { useEmailTranslation } from './translation/use-email-translation'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
 import { clampListWidth, LIST_DEFAULT, LIST_MIN, READER_MIN } from '@/features/shell/layout-defaults'
@@ -362,6 +364,8 @@ export function Workbench({ client }: { client: MailxClient }) {
     openedState && body.detail.isError && clientFailureCode(body.detail.error) === 'notFound',
   )
   const opened = openedState && !closedByAccount && !closedByLoss ? openedState : null
+  // Translation of the opened message; the toolbar, notice bar, body, consent dialog and palette share it.
+  const translation = useEmailTranslation(client, opened ? body.email : null, () => setSettings({ section: 'translation' }))
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
   const conversation = useQuery({
@@ -654,6 +658,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
           onOpenSettings={setSettings}
+          translation={mailView && !selecting && !readerCollapsed && translation.available ? translation : null}
         />
         {/* The saved list width is only read when the group mounts, so it waits for the settings. */}
         {!layoutReady ? <div className="min-h-0 flex-1 bg-muted/40" /> : (
@@ -774,6 +779,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onDownload={body.download}
               onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
               onRemoveLocal={removeLocalCopy}
+              translation={translation}
               onDelete={deleteEmail.request}
               frame={threaded && threadPage && opened ? (content) => (
                 <ConversationFrame
@@ -797,6 +803,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}
+      <TranslationConsentDialog translation={translation} />
       <DeleteForGoodDialog {...deleteEmail.confirmation} />
       <RemoveLocalCopyDialog
         open={removeLocalChoice !== null}

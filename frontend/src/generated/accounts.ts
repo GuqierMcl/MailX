@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "translationNotConfigured" | "translationConsentRequired" | "translationKeyRejected" | "translationQuotaExceeded" | "translationRateLimited" | "translationNetwork" | "translationProxy" | "translationTimeout" | "translationUnavailable" | "translationInvalidResponse" | "translationLanguageUnsupported" | "translationTooLarge" | "translationCancelled" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -504,9 +504,9 @@ showMenuBarIcon: boolean,
  */
 silentStart: boolean, };
 
-export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, };
+export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
 
-export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, };
+export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -786,3 +786,65 @@ errorReason: string | null, };
 export type DraftChange = "created" | "updated" | "locked" | "unlocked" | "deleted";
 
 export type DraftChanged = { draftId: string, accountId: string, change: DraftChange, };
+
+export type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree";
+
+export type TranslationRoute = { "kind": "direct" } | { "kind": "proxy", proxyKind: ProxyKind, host: string, port: number, username: string, };
+
+export type TranslationSettings = {
+/**
+ * `None` means the user turned translation off; a missing field is the default.
+ */
+provider: TranslationProviderId | null,
+/**
+ * Azure resource region; `""` for a global resource.
+ */
+microsoftRegion: string, route: TranslationRoute,
+/**
+ * `"auto"` (follow the UI language) or one of `translate::languages::TARGETS`.
+ */
+targetLanguage: string,
+/**
+ * Offer to translate when a mail is in another language.
+ */
+suggest: boolean,
+/**
+ * Base language codes that never get the offer.
+ */
+neverSuggest: Array<string>,
+/**
+ * Base language codes translated without asking.
+ */
+alwaysTranslate: Array<string>,
+/**
+ * Translate folded quoted text too.
+ */
+includeQuotes: boolean, consentedProvider: TranslationProviderId | null, };
+
+export type TranslationKeyState = { provider: TranslationProviderId, configured: boolean, };
+
+export type TranslationProxyPasswordState = { configured: boolean, };
+
+export type TranslationTest = { translated: string, };
+
+export type TranslationStatus = { emailId: string,
+/**
+ * Resolved: the explicit target, else the setting, with `auto` following the UI language.
+ */
+targetLanguage: string,
+/**
+ * Base code from local detection; `None` when unknown.
+ */
+detectedLanguage: string | null, detectionReliable: boolean, suggested: boolean, autoTranslate: boolean,
+/**
+ * Present when a current cached translation exists for the target and quote setting.
+ */
+translation: TranslationInfo | null, };
+
+export type TranslationInfo = { provider: TranslationProviderId, sourceLanguage: string | null, subject: string | null,
+/**
+ * Some text was left untranslated (size budget).
+ */
+partial: boolean, };
+
+export type TranslationCacheStats = { count: number, bytes: number, };

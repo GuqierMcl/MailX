@@ -1,7 +1,7 @@
 import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { ImageFetchError, RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { useUpdateSecurity } from '@/features/settings/settings-queries'
+import { cn } from '@/lib/utils'
 import { useBodyEnvironment } from './use-body-environment'
 
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
@@ -24,7 +25,24 @@ function bodyDocumentUrl(emailId: string, documentToken: string, dark: boolean) 
   return url.href
 }
 
-export function BodyDocument({ client, emailId, hasRemoteImages = false }: { client: MailxClient; emailId: string; hasRemoteImages?: boolean }) {
+/** The translated variant of the body, which exists only once a translation has been made. */
+export type BodyTranslation = {
+  /** Target language the document is prepared for. */
+  target: string
+  /** Changes whenever a new translation replaces the old one. */
+  version: number
+  /** Whether the translation, rather than the original, is the one on screen. */
+  showing: boolean
+  /** The translated document could not be prepared. */
+  onFailed: (failure: unknown) => void
+}
+
+export function BodyDocument({ client, emailId, hasRemoteImages = false, banner, translated = null }: {
+  client: MailxClient; emailId: string; hasRemoteImages?: boolean
+  /** A notice shown above the body's own notices, inside the same column. */
+  banner?: ReactNode
+  translated?: BodyTranslation | null
+}) {
   const { visible, settings, dark } = useBodyEnvironment(client)
   const [version, setVersion] = useState(0)
   if (!visible) return null
@@ -32,23 +50,32 @@ export function BodyDocument({ client, emailId, hasRemoteImages = false }: { cli
   // A settings read failure never silently grants remote access.
   const policy = settings.data?.settings.security.remoteImages ?? 'ask'
   return <Reader key={`${emailId}:${version}:${policy}:${dark}`} client={client} emailId={emailId} policy={policy} dark={dark}
-    hasRemoteImages={hasRemoteImages} onReload={() => setVersion((value) => value + 1)} />
+    hasRemoteImages={hasRemoteImages} banner={banner} translated={translated} onReload={() => setVersion((value) => value + 1)} />
 }
 
-function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
-  client: MailxClient; emailId: string; policy: RemoteImagePolicy; dark: boolean; hasRemoteImages: boolean; onReload: () => void
+function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, translated, onReload }: {
+  client: MailxClient; emailId: string; policy: RemoteImagePolicy; dark: boolean; hasRemoteImages: boolean; banner: ReactNode
+  translated: BodyTranslation | null; onReload: () => void
 }) {
   useTranslation()
   const [granted, setGranted] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [remember, setRemember] = useState(false)
   const update = useUpdateSecurity(client)
+  // The translated document is prepared the first time it is shown, then kept alongside the original.
+  const translationKey = translated ? `${translated.target}:${translated.version}` : null
+  const [mountedKey, setMountedKey] = useState<string | null>(null)
+  const [failedKey, setFailedKey] = useState<string | null>(null)
+  if (translated?.showing && mountedKey !== translationKey) setMountedKey(translationKey)
+  const translationMounted = translated !== null && mountedKey === translationKey && failedKey !== translationKey
+  const showTranslated = translationMounted && translated.showing
   const allowImages = policy === 'automatic' || (policy === 'ask' && granted)
   const load = () => {
     if (remember) update.mutate({ remoteImages: 'automatic' })
     else setGranted(true)
   }
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
+    {banner}
     {policy === 'ask' && hasRemoteImages && !granted && !dismissed &&
       <div role="status" aria-label={t('mail:remoteImagesNotice')} className="flex h-9 w-full shrink-0 items-center gap-3 rounded-md bg-muted px-3 text-xs">
         <span className="min-w-0 flex-1 truncate" title={t('mail:containsRemoteImages')}>{t('mail:containsRemoteImages')}</span>
@@ -57,14 +84,31 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, onReload }: {
         <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label={t('mail:closeRemoteImagesNotice')} onClick={() => setDismissed(true)} disabled={update.isPending}>×</Button>
       </div>}
     {update.isError && <Alert variant="destructive"><AlertTitle>{t('mail:settingsSaveFailed')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
-    {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
-      <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
+    {/* Both documents stay mounted and share one cell, so each keeps its scroll position and nothing reloads on a switch. */}
+    <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
+      <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', showTranslated && 'invisible')} inert={showTranslated}>
+        {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
+          <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
+      </div>
+      {translationMounted && <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', !showTranslated && 'invisible')} inert={!showTranslated}>
+        {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody translated /></Suspense> :
+          <BodySession key={`${allowImages}:${translationKey}`} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages}
+            dark={dark} translation={translated.target} title={t('mail:htmlBodyTranslated')} onReload={onReload}
+            onPrepareFailed={(failure) => { setFailedKey(translationKey); translated.onFailed(failure) }} />}
+      </div>}
+    </div>
   </div>
 }
 
 /** The host binds this read-only session to either a saved draft revision or an email. */
-export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, dark, draftRevision, onReload }: {
-  client: MailxClient; emailId: string; allowImages?: boolean; hasRemoteImages?: boolean; dark: boolean; draftRevision?: number; onReload: () => void
+export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, dark, draftRevision, translation, title, onPrepareFailed, onReload }: {
+  client: MailxClient; emailId: string; allowImages?: boolean; hasRemoteImages?: boolean; dark: boolean; draftRevision?: number
+  /** Target language of the translated variant of the email body; the original when absent. */
+  translation?: string
+  title?: string
+  /** Called when the document could not be prepared (the failure also shows in place). */
+  onPrepareFailed?: (failure: ClientFailure) => void
+  onReload: () => void
 }) {
   useTranslation()
   const [documentToken, setDocumentToken] = useState<string | null>(null)
@@ -91,14 +135,18 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
         if (live && active.current) setError(clientFailure(failure))
       })
     })
-    const preparation = draftRevision === undefined
-      ? client.prepareBody(emailId, allowImages)
-      : client.prepareDraftBody(emailId, draftRevision)
+    const preparation = draftRevision !== undefined
+      ? client.prepareDraftBody(emailId, draftRevision)
+      : translation === undefined ? client.prepareBody(emailId, allowImages) : client.prepareBody(emailId, allowImages, translation)
     void preparation.then((prepared) => {
       if (!live) { release(prepared.documentToken); return }
       currentToken.current = prepared.documentToken
       setDocumentToken(prepared.documentToken)
-    }).catch((failure: unknown) => { if (live) setError(clientFailure(failure)) })
+    }).catch((failure: unknown) => {
+      if (!live) return
+      setError(clientFailure(failure))
+      onPrepareFailed?.(clientFailure(failure))
+    })
     return () => {
       live = false
       active.current = false
@@ -106,7 +154,8 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       if (currentToken.current) release(currentToken.current)
       currentToken.current = null
     }
-  }, [client, emailId, allowImages, draftRevision])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the failure callback is only read when preparing fails
+  }, [client, emailId, allowImages, draftRevision, translation])
 
   useEffect(() => {
     if (!cooldown) return
@@ -171,7 +220,7 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>{t('mail:retryImages')}</Button>
     </div>}
     {!documentToken ? !error && <BodySkeleton /> :
-      <iframe key={documentToken} title={t('mail:htmlBody')} sandbox="" referrerPolicy="no-referrer"
+      <iframe key={documentToken} title={title ?? t('mail:htmlBody')} sandbox="" referrerPolicy="no-referrer"
         src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => {
           if (loaded.current) { active.current = false; onReload() }

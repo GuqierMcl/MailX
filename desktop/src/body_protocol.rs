@@ -9,6 +9,7 @@ use std::{
 use mailx_core::{
     AppError, BodyBinding, ErrorCode, MailxCore,
     mail::render::{self, ResourceBinding},
+    translate,
 };
 use serde::Serialize;
 use tauri::{
@@ -135,6 +136,9 @@ struct Document {
     expires_at: Instant,
     remote_images: bool,
     explicit_images: bool,
+    /// Translated variant of a received message: validated target language and
+    /// the quote setting it was prepared with. Never set for drafts.
+    translation: Option<(String, bool)>,
 }
 
 #[derive(Clone)]
@@ -370,7 +374,11 @@ impl BodyProtocol {
             confirmations: Mutex::new(HashMap::new()),
         }
     }
-    fn issue(&self, binding: impl Into<BodySource>) -> Result<String, AppError> {
+    fn issue(
+        &self,
+        binding: impl Into<BodySource>,
+        translation: Option<(String, bool)>,
+    ) -> Result<String, AppError> {
         let binding = binding.into();
         let mut documents = self.documents.lock().map_err(|_| missing())?;
         documents.retain(|_, document| {
@@ -399,9 +407,20 @@ impl BodyProtocol {
                 expires_at: Instant::now() + TOKEN_LIFETIME,
                 remote_images: false,
                 explicit_images: false,
+                translation,
             },
         );
         Ok(token)
+    }
+
+    /// Untranslated preparation, for tests.
+    #[cfg(test)]
+    pub(crate) async fn prepare(
+        &self,
+        core: &MailxCore,
+        id: String,
+    ) -> Result<PreparedBody, AppError> {
+        self.prepare_variant(core, id, None).await
     }
 
     /// Each preparation creates an independent capability. There is deliberately
@@ -409,14 +428,26 @@ impl BodyProtocol {
     /// the token selected by a newer A -> B -> A view. The trusted UI accepts
     /// results/events only for its current view generation and exact token.
     /// The UI releases unselected tokens; TTL/eviction is a fallback.
-    pub(crate) async fn prepare(
+    ///
+    /// `translation` is `(target, include_quotes)`. No token is issued for a
+    /// translated document that could not be served right now.
+    async fn prepare_variant(
         &self,
         core: &MailxCore,
         id: String,
+        translation: Option<(String, bool)>,
     ) -> Result<PreparedBody, AppError> {
         let links = core.body_links(id, None).await?;
+        if let Some((target, include_quotes)) = &translation
+            && core
+                .body_translation(&links.binding, target.clone(), *include_quotes)
+                .await?
+                .is_none()
+        {
+            return Err(missing());
+        }
         Ok(PreparedBody {
-            document_token: self.issue(links.binding)?,
+            document_token: self.issue(links.binding, translation)?,
         })
     }
 
@@ -426,8 +457,9 @@ impl BodyProtocol {
         id: String,
         allow: bool,
         explicit: bool,
+        translation: Option<(String, bool)>,
     ) -> Result<PreparedBody, AppError> {
-        let prepared = self.prepare(core, id).await?;
+        let prepared = self.prepare_variant(core, id, translation).await?;
         if allow {
             let mut documents = self.documents.lock().map_err(|_| missing())?;
             let document = documents
@@ -447,7 +479,7 @@ impl BodyProtocol {
     ) -> Result<PreparedBody, AppError> {
         let binding = core.prepare_draft_body(draft_id, expected_revision).await?;
         Ok(PreparedBody {
-            document_token: self.issue(BodySource::Draft(binding))?,
+            document_token: self.issue(BodySource::Draft(binding), None)?,
         })
     }
 
@@ -559,6 +591,7 @@ impl BodyProtocol {
                     expires_at: Instant::now() + TOKEN_LIFETIME,
                     remote_images: true,
                     explicit_images: current.explicit_images,
+                    translation: current.translation.clone(),
                 },
             );
             documents.remove(token);
@@ -669,6 +702,21 @@ impl BodyProtocol {
                 } else {
                     html
                 };
+                // Translation follows folding and precedes binding, so image and
+                // link slots survive it. No translation is a 404, never the original.
+                let html = match (&document.translation, &document.binding) {
+                    (Some((target, include_quotes)), BodySource::Email(binding)) => {
+                        let translations = core
+                            .body_translation(binding, target.clone(), *include_quotes)
+                            .await?
+                            .ok_or_else(missing)?;
+                        self.resolve(&id, &token)?;
+                        translate::apply(&html, *include_quotes, &translations)
+                            .ok_or_else(missing)?
+                    }
+                    (Some(_), BodySource::Draft(_)) => return Err(missing()),
+                    (None, _) => html,
+                };
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
                         ResourceBinding::Remote { index } => {
@@ -690,8 +738,13 @@ impl BodyProtocol {
                 } else {
                     render::bind_resources(&html, resolve)
                 };
+                // The target was checked against core's fixed table at prepare time.
+                let lang = document
+                    .translation
+                    .as_ref()
+                    .map_or_else(String::new, |(target, _)| format!(" lang=\"{target}\""));
                 let html = format!(
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
+                    "<!doctype html><html{lang}><head><meta charset=\"utf-8\"><style>{base_css}{dark_css}</style></head><body><div class=\"mailx-page\">{html}</div></body></html>",
                     base_css = self.base_css.lock().map_err(|_| missing())?,
                     dark_css = if dark { DARK_CSS } else { "" }
                 );

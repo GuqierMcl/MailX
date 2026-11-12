@@ -22,6 +22,8 @@ import type {
   MailAddress,
   MailStateChanged,
   RouteConfig,
+  TranslationProviderId,
+  TranslationStatus,
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
@@ -71,7 +73,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const emails = buildEmails(dataset)
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -81,7 +83,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
-        settings = { ...value, settings: { ...value.settings, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+        settings = { ...value, settings: { ...value.settings, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }
@@ -111,6 +113,39 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const mailStateListeners = new Set<(change: MailStateChanged) => void>()
 
   const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
+  const MOCK_TRANSLATION_KEYS: TranslationProviderId[] = ['deepl', 'microsoft', 'google']
+  const isKeyless = (provider: TranslationProviderId) => provider === 'microsoftFree' || provider === 'googleFree'
+  /** A chosen service that is ready: keyless ones always, keyed ones once a key is saved. */
+  const providerReady = (provider: TranslationProviderId | null) => provider !== null && (isKeyless(provider) || translationSecrets.has(provider))
+  const MOCK_TRANSLATION_MS = 900
+  // Keys live only in memory, like the real ones live only in the secret store: nothing reads them back out.
+  const translationSecrets = new Map<TranslationProviderId, string>()
+  let proxyPassword: string | null = null
+  const translations = new Map<string, { provider: TranslationProviderId; sourceLanguage: string | null; subject: string }>()
+  const translationRuns = new Map<string, { cancel: () => void }>()
+  const translationKey = (emailId: string, target: string) => `${emailId}|${target}|${settings.settings.translation.includeQuotes}`
+  const translationFailure = (code: Extract<import('@/generated/accounts').ErrorCode, `translation${string}`>) =>
+    new MailxClientError({ code, message: '翻译未完成。', field: null })
+  const resolvedTarget = () => {
+    const { targetLanguage } = settings.settings.translation
+    return targetLanguage === 'auto' ? (settings.effectiveLocale === 'zh-CN' ? 'zh-Hans' : 'en') : targetLanguage
+  }
+  function translationStatusOf(emailId: string, explicitTarget?: string): TranslationStatus {
+    const email = emails.find((row) => row.summary.id === emailId)
+    if (!email) throw notFound()
+    const config = settings.settings.translation
+    const target = explicitTarget ?? resolvedTarget()
+    const detected = detectLanguage(email.body?.text ?? '')
+    const keyed = providerReady(config.provider)
+    const reliable = detected !== null
+    const suggested = keyed && config.suggest && reliable && detected !== target.split('-')[0] && !config.neverSuggest.includes(detected)
+    const found = translations.get(translationKey(emailId, target))
+    return {
+      emailId, targetLanguage: target, detectedLanguage: detected, detectionReliable: reliable, suggested,
+      autoTranslate: suggested && config.consentedProvider === config.provider && config.alwaysTranslate.includes(detected),
+      translation: found ? { ...found, partial: false } : null,
+    }
+  }
   const MOCK_ATTACHMENT_SAMPLES: [string, string, number][] = [
     ['季度报表.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 86_000],
     ['产品演示.pdf', 'application/pdf', 1_840_000],
@@ -666,7 +701,79 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     getAvatar: async () => null,
     saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
-    prepareBody: async () => ({ documentToken: crypto.randomUUID() }),
+    translationStatus: async (emailId) => translationStatusOf(emailId),
+    async translateEmail(emailId, targetLanguage) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email) throw notFound()
+      if (email.summary.localOnly || !email.body?.hasHtml) throw new MailxClientError({ code: 'unsupported', message: '此邮件无法翻译。', field: null })
+      const config = settings.settings.translation
+      if (!config.provider || !providerReady(config.provider)) throw translationFailure('translationNotConfigured')
+      if (config.consentedProvider !== config.provider) throw translationFailure('translationConsentRequired')
+      // Preview only: the keyless Google channel is out of reach without a proxy, as in mainland China.
+      if (config.provider === 'googleFree' && config.route.kind === 'direct') throw translationFailure('translationNetwork')
+      const target = targetLanguage ?? resolvedTarget()
+      // A newer request for the same message supersedes the running one.
+      translationRuns.get(emailId)?.cancel()
+      const translated = await new Promise<true>((resolve, reject) => {
+        const timer = setTimeout(() => { translationRuns.delete(emailId); resolve(true) }, MOCK_TRANSLATION_MS)
+        translationRuns.set(emailId, { cancel: () => { clearTimeout(timer); translationRuns.delete(emailId); reject(translationFailure('translationCancelled')) } })
+      })
+      if (translated) {
+        const source = detectLanguage(email.body?.text ?? '')
+        const seed = dataset.seeds[emails.indexOf(email)]
+        translations.set(translationKey(emailId, target), {
+          provider: config.provider, sourceLanguage: source,
+          subject: seed?.translatedSubject ?? `[${target}] ${email.summary.subject}`,
+        })
+      }
+      return translationStatusOf(emailId, target)
+    },
+    cancelTranslation: async (emailId) => { translationRuns.get(emailId)?.cancel() },
+    clearTranslation: async (emailId) => {
+      for (const key of [...translations.keys()]) if (key.startsWith(`${emailId}|`)) translations.delete(key)
+    },
+    clearTranslations: async () => { translations.clear() },
+    translationCacheStats: async () => {
+      const count = new Set([...translations.keys()].map((key) => key.split('|')[0])).size
+      return { count, bytes: count * 41_000 }
+    },
+    translationKeys: async () => MOCK_TRANSLATION_KEYS.map((provider) => ({ provider, configured: translationSecrets.has(provider) })),
+    setTranslationKey: async (provider, key) => {
+      if (!MOCK_TRANSLATION_KEYS.includes(provider)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'translation.provider' })
+      if (!key.trim()) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'key' })
+      translationSecrets.set(provider, key.trim())
+      return MOCK_TRANSLATION_KEYS.map((id) => ({ provider: id, configured: translationSecrets.has(id) }))
+    },
+    removeTranslationKey: async (provider) => {
+      translationSecrets.delete(provider)
+      return MOCK_TRANSLATION_KEYS.map((id) => ({ provider: id, configured: translationSecrets.has(id) }))
+    },
+    translationProxyPassword: async () => ({ configured: proxyPassword !== null }),
+    setTranslationProxyPassword: async (password) => {
+      // Not trimmed: a password may start or end with a space.
+      if (!password || /\p{Cc}/u.test(password)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'translation.route.password' })
+      proxyPassword = password
+      return { configured: true }
+    },
+    removeTranslationProxyPassword: async () => {
+      proxyPassword = null
+      return { configured: false }
+    },
+    // Browser preview only: a key containing "bad" is refused, so the failure text can be seen.
+    testTranslation: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const { provider, route } = settings.settings.translation
+      if (!provider || !providerReady(provider)) throw translationFailure('translationNotConfigured')
+      if (provider === 'googleFree' && route.kind === 'direct') throw translationFailure('translationNetwork')
+      const key = translationSecrets.get(provider) ?? ''
+      if (key.includes('bad')) throw translationFailure('translationKeyRejected')
+      if (route.kind === 'proxy' && (route.host.includes('bad') || (route.username !== '' && proxyPassword?.includes('bad')))) throw translationFailure('translationProxy')
+      return { translated: resolvedTarget().startsWith('zh') ? '你好，这是一条测试。' : 'Hello, this is a test.' }
+    },
+    prepareBody: async (emailId, _images, translation) => {
+      if (translation !== undefined && !translations.has(translationKey(emailId, translation))) throw notFound()
+      return { documentToken: crypto.randomUUID() }
+    },
     prepareDraftBody: async (draftId, expectedRevision) => {
       const draft = requireDraft(draftId)
       if (draft.revision !== expectedRevision) throw new MailxClientError({ code: 'conflict', message: '草稿已被修改，请重新加载后重试。', field: null })
@@ -855,6 +962,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (next.general && !['system', 'zh-CN', 'en'].includes(next.general.language)) {
         throw new MailxClientError({ code: 'validation', field: 'general.language', message: '配置参数无效。' })
       }
+      if (next.translation?.alwaysTranslate.some((code) => next.translation?.neverSuggest.includes(code))) {
+        throw new MailxClientError({ code: 'validation', field: 'translation.alwaysTranslate', message: '配置参数无效。' })
+      }
       const appearance = next.appearance ?? settings.settings.appearance
       const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
       const mailFont = parseFontFamilies(appearance.mailFont).join(', ')
@@ -884,6 +994,25 @@ const PREVIEW_UPDATE = {
   date: Math.floor(Date.parse('2026-11-01T08:00:00Z') / 1000),
   notes: `## 新功能\n\n- 应用内更新：发现新版本后可在设置里查看说明并下载\n- **写信附件** 与 **已发送副本** 的列表展示\n- 修复未命名附件显示为空白的问题\n\n> 预览页面只展示说明，不能安装更新。\n\n\`bun run check\` 通过。`,
 } as const
+
+/** A rough guess from the script and common words; the real core detects on the device the same way, only better. */
+function detectLanguage(text: string): string | null {
+  const sample = text.slice(0, 600)
+  if (sample.replace(/\s/g, '').length < 12) return null
+  if (/[\u3040-\u30ff]/.test(sample)) return 'ja'
+  if (/[\uac00-\ud7af]/.test(sample)) return 'ko'
+  if (/[\u4e00-\u9fff]/.test(sample)) return 'zh'
+  const words = sample.toLowerCase().match(/[a-zäöüßéèàçñ]+/g) ?? []
+  const score = (list: string[]) => words.filter((word) => list.includes(word)).length
+  const candidates: [string, number][] = [
+    ['de', score(['der', 'die', 'das', 'und', 'ist', 'nicht', 'wir', 'ich', 'für', 'mit'])],
+    ['fr', score(['le', 'la', 'les', 'des', 'est', 'nous', 'vous', 'pour', 'avec', 'une'])],
+    ['es', score(['el', 'los', 'las', 'una', 'para', 'con', 'que', 'por', 'es', 'nos'])],
+    ['en', score(['the', 'and', 'is', 'are', 'to', 'of', 'we', 'you', 'for', 'with', 'this', 'on'])],
+  ]
+  const best = candidates.sort((a, b) => b[1] - a[1])[0]
+  return best[1] >= 2 ? best[0] : null
+}
 
 const missing = { code: 'notFound', message: '内容不存在。', field: null } as const
 
@@ -1135,6 +1264,10 @@ export type Seed = {
   read?: boolean
   starred?: boolean
   attachments?: [string, string, number][]
+  /** The body has an HTML document, so it can be translated. */
+  html?: boolean
+  /** What the subject reads once translated; defaults to a bracketed copy. */
+  translatedSubject?: string
 }
 
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }
@@ -1397,7 +1530,7 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       to: recipients,
       cc: [],
       replyTo: [],
-      body: { text: seed.text, hasHtml: htmlFirst && index === 0, truncated: false, remoteImagesBlocked: htmlFirst && index === 0 ? 1 : 0 },
+      body: { text: seed.text, hasHtml: (htmlFirst && index === 0) || seed.html === true, truncated: false, remoteImagesBlocked: htmlFirst && index === 0 ? 1 : 0 },
       bodyFailure: null,
       attachments: (seed.attachments ?? []).map(([filename, mimeType, size], position) => ({
         id: `${id}-attachment-${position + 1}`,

@@ -11,6 +11,14 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- Translate the message you are reading in place, keeping its layout, with no setup (Microsoft Translate by default and Google Translate, which use the channels browsers' built-in translators use and are not official services for other apps, so they may stop working) or with a DeepL, Microsoft Translator or Google Cloud Translation key of your own; nothing is sent until you agree and translate. / 在阅读区原位翻译当前邮件并保留版式：无需设置（默认 Microsoft 翻译，另有 Google 翻译，借用浏览器内置翻译的通道，并非正式开放给其他应用的服务，可能失效），也可用你自己的 DeepL、Microsoft Translator 或 Google Cloud Translation 密钥；你同意并点击翻译之前不会发送任何内容。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
+
+### 🔄 Changed
+
+- The local database upgrades to v29 to keep saved translations; older versions cannot open the upgraded database. / 本地数据库升级到 v29 以保存译文，旧版本无法打开升级后的数据库。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
+
 ## [0.2.0] - 2026-11-12
 
 ### 🚀 Feature

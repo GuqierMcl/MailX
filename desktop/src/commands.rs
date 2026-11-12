@@ -584,6 +584,9 @@ struct PrepareBodyArgs {
     email_id: String,
     #[serde(default)]
     load_remote_images: bool,
+    /// Target language of the translated variant to prepare.
+    #[serde(default)]
+    translation: Option<String>,
 }
 
 #[tauri::command]
@@ -597,12 +600,8 @@ pub(crate) async fn emails_prepare_body(
         .and_then(|_| parse::<PrepareBodyArgs>(request.body()));
     let result = async {
         let args = args?;
-        let policy = state
-            .settings(|store| store.get())
-            .await?
-            .settings
-            .security
-            .remote_images;
+        let settings = state.settings(|store| store.get()).await?.settings;
+        let policy = settings.security.remote_images;
         let allow = match policy {
             mailx_core::RemoteImagePolicy::Automatic => true,
             mailx_core::RemoteImagePolicy::Ask => args.load_remote_images,
@@ -614,6 +613,8 @@ pub(crate) async fn emails_prepare_body(
                 args.email_id,
                 allow,
                 policy == mailx_core::RemoteImagePolicy::Ask && args.load_remote_images,
+                args.translation
+                    .map(|target| (target, settings.translation.include_quotes)),
             )
             .await
     }
@@ -1610,5 +1611,279 @@ pub(crate) async fn notifications_preview_sound(
         .and_then(|_| parse::<SoundArgs>(request.body()));
     Ok(respond(
         args.map(|args| crate::notifications::preview(args.sound)),
+    ))
+}
+
+// ------------------------------------------------------------ translation
+
+/// The saved settings, never anything the webview sends, plus the UI language
+/// as its wire code.
+async fn translation_inputs(
+    state: &DesktopState,
+) -> Result<(mailx_core::settings::TranslationSettings, String), AppError> {
+    let snapshot = state.settings(|store| store.get()).await?;
+    let language = serde_json::to_value(snapshot.effective_locale)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
+    Ok((snapshot.settings.translation, language))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TranslateArgs {
+    email_id: String,
+    #[serde(default)]
+    target_language: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetTranslationKeyArgs {
+    provider: mailx_core::settings::TranslationProviderId,
+    key: mailx_core::secrets::SecretValue,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetTranslationProxyPasswordArgs {
+    password: mailx_core::secrets::SecretValue,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemoveTranslationKeyArgs {
+    provider: mailx_core::settings::TranslationProviderId,
+}
+
+#[tauri::command]
+pub(crate) async fn translation_status(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationStatus>, ()> {
+    let args = authorize(&window, "translation_status")
+        .and_then(|_| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let (settings, language) = translation_inputs(&state).await?;
+            state
+                .core()?
+                .translation_status(args.email_id, settings, language)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_translate(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationStatus>, ()> {
+    let args = authorize(&window, "translation_translate")
+        .and_then(|_| parse::<TranslateArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let (settings, language) = translation_inputs(&state).await?;
+            state
+                .core()?
+                .translate_email(args.email_id, settings, language, args.target_language)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_cancel(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "translation_cancel")
+        .and_then(|_| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(args.and_then(|args| {
+        if !window_access::valid_email_id(&args.email_id) {
+            return Err(AppError::validation("emailId"));
+        }
+        state.core()?.cancel_translation(&args.email_id);
+        Ok(())
+    })))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_clear(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args =
+        authorize(&window, "translation_clear").and_then(|_| parse::<EmailGetArgs>(request.body()));
+    Ok(respond(
+        async { state.core()?.clear_translation(args?.email_id).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_clear_all(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "translation_clear_all")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.clear_translations().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_cache_stats(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationCacheStats>, ()> {
+    let args = authorize(&window, "translation_cache_stats")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.translation_cache_stats().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_keys(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::TranslationKeyState>>, ()> {
+    let args =
+        authorize(&window, "translation_keys").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.translation_keys().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_set_key(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::TranslationKeyState>>, ()> {
+    let args = authorize(&window, "translation_set_key")
+        .and_then(|_| parse::<SetTranslationKeyArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let core = state.core()?;
+            core.set_translation_key(args.provider, args.key).await?;
+            core.translation_keys().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_remove_key(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::TranslationKeyState>>, ()> {
+    let args = authorize(&window, "translation_remove_key")
+        .and_then(|_| parse::<RemoveTranslationKeyArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let core = state.core()?;
+            core.remove_translation_key(args.provider).await?;
+            core.translation_keys().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_proxy_password")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.translation_proxy_password().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_set_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_set_proxy_password")
+        .and_then(|_| parse::<SetTranslationProxyPasswordArgs>(request.body()));
+    Ok(respond(
+        async {
+            state
+                .core()?
+                .set_translation_proxy_password(args?.password)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_remove_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_remove_proxy_password")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.remove_translation_proxy_password().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_test(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationTest>, ()> {
+    let args =
+        authorize(&window, "translation_test").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            let (settings, _) = translation_inputs(&state).await?;
+            state.core()?.test_translation(settings).await
+        }
+        .await,
     ))
 }

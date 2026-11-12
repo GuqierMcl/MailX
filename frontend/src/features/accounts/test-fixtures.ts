@@ -32,7 +32,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
@@ -86,6 +86,19 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),
     saveAttachment: vi.fn<MailxClient['saveAttachment']>().mockResolvedValue('saved'),
     clearImageCache: vi.fn<MailxClient['clearImageCache']>().mockResolvedValue(undefined),
+    translationStatus: vi.fn<MailxClient['translationStatus']>().mockImplementation(async (emailId) => ({ emailId, targetLanguage: 'en', detectedLanguage: null, detectionReliable: false, suggested: false, autoTranslate: false, translation: null })),
+    translateEmail: vi.fn<MailxClient['translateEmail']>().mockRejectedValue(new Error('not configured')),
+    cancelTranslation: vi.fn<MailxClient['cancelTranslation']>().mockResolvedValue(undefined),
+    clearTranslation: vi.fn<MailxClient['clearTranslation']>().mockResolvedValue(undefined),
+    clearTranslations: vi.fn<MailxClient['clearTranslations']>().mockResolvedValue(undefined),
+    translationCacheStats: vi.fn<MailxClient['translationCacheStats']>().mockResolvedValue({ count: 0, bytes: 0 }),
+    translationKeys: vi.fn<MailxClient['translationKeys']>().mockResolvedValue([]),
+    setTranslationKey: vi.fn<MailxClient['setTranslationKey']>().mockResolvedValue([]),
+    removeTranslationKey: vi.fn<MailxClient['removeTranslationKey']>().mockResolvedValue([]),
+    translationProxyPassword: vi.fn<MailxClient['translationProxyPassword']>().mockResolvedValue({ configured: false }),
+    setTranslationProxyPassword: vi.fn<MailxClient['setTranslationProxyPassword']>().mockResolvedValue({ configured: true }),
+    removeTranslationProxyPassword: vi.fn<MailxClient['removeTranslationProxyPassword']>().mockResolvedValue({ configured: false }),
+    testTranslation: vi.fn<MailxClient['testTranslation']>().mockRejectedValue(new Error('not configured')),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),

@@ -10,6 +10,7 @@ import {
   File01Icon,
   Folder01Icon,
   InboxIcon,
+  LanguagesIcon,
   Mail01Icon,
   PaintBoardIcon,
   PencilEdit02Icon,
@@ -35,6 +36,7 @@ import {
 import { useShell } from '@/features/shell/shell-context'
 import { useSettings, useUpdateAppearance } from '@/features/settings/settings-queries'
 import type { SettingsTarget } from '@/features/settings/settings-dialog'
+import type { EmailTranslation } from './translation/use-email-translation'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { displayName, emailQuery, formatListTime } from './format'
@@ -68,6 +70,8 @@ export type CommandPaletteProps = {
   onAddAccount: () => void
   onOpenSettings: (target: SettingsTarget) => void
   onCompose: () => void
+  /** Translation of the open message; null when no translatable message is on screen. */
+  translation?: EmailTranslation | null
 }
 
 type Entry = { id: string; title: string; keywords?: string; icon: Parameters<typeof HugeiconsIcon>[0]['icon']; run: () => void }
@@ -88,7 +92,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 
 function PaletteBody({
   client, onOpenChange, scope, search, scopeQuery, sourceIdentity, accounts, folders,
-  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose,
+  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose, translation,
 }: CommandPaletteProps) {
   useTranslation()
   const [text, setText] = useState('')
@@ -145,7 +149,17 @@ function PaletteBody({
     }),
   ]
 
+  const translationCommand: Entry[] = !translation ? [] : [translation.translationVisible
+    ? { id: 'cmd:translation', title: t('mail:translationShowOriginal'), keywords: 'translate translation original 翻译 原文', icon: LanguagesIcon, run: translation.showOriginal }
+    : translation.status?.translation
+      ? { id: 'cmd:translation', title: t('mail:translationShowTranslation'), keywords: 'translate translation 翻译 译文', icon: LanguagesIcon, run: translation.showTranslation }
+      : {
+        id: 'cmd:translation', title: t('mail:translationCommand'), keywords: 'translate translation 翻译', icon: LanguagesIcon,
+        // Without a service there is nothing to run: go to where it is set up.
+        run: () => translation.configured ? translation.translate() : onOpenSettings({ section: 'translation' }),
+      }]
   const commands: Entry[] = [
+    ...translationCommand,
     ...(accounts.length > 0 ? [{ id: 'cmd:compose', title: t('mail:compose'), keywords: 'compose new mail 新邮件 撰写 发信', icon: PencilEdit02Icon, run: onCompose }] : []),
     { id: 'cmd:settings', title: t('mail:openSettings'), keywords: 'settings 偏好', icon: Settings01Icon, run: () => onOpenSettings({ section: 'general' }) },
     { id: 'cmd:accounts', title: t('mail:manageAccounts'), keywords: 'account 账号 邮箱', icon: AtSignIcon, run: onOpenAccounts },
