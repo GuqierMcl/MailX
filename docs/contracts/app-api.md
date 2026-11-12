@@ -633,6 +633,48 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | `translationTooLarge` | 邮件正文过大（净化 HTML 超过 2 MiB） |
 | `translationCancelled` | 翻译已被取消 |
 
+### AI 服务商与模型（主窗口）
+
+设计见 [AI 服务商与模型配置](../architecture/ai-providers.md)。状态：已实现，仅有自动测试，没有调用过真实服务商；目前没有功能使用模型。命令只开放给主窗口，参数拒绝未知字段。AI 设置保存在设置文件的 `ai` 字段，不在 `AppSettings` 类型里，`settings_update` 不接受也不改动它；前端经 `ai_state` 读取，经下列命令修改。
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `aiState()` | `ai_state`，`{}` | `AiState` |
+| `aiSaveConnection(input)` | `ai_save_connection`，`SaveAiConnection`（`id` 为 null 表示新建；`providerId`、`name`、`protocol`、`baseUrl`、`useProxy`、`apiKey`、`verify`） | `SavedAiConnection { state, connectionId, models }`；`apiKey` 为 null 不改密钥、空串清除；`verify` 为真时先获取模型列表，失败不保存，成功时 `models` 有值 |
+| `aiRemoveConnection(id)` | `ai_remove_connection`，`{ id }` | `AiState`；同时删除该连接的密钥，默认模型指向它时清空 |
+| `aiSetDefaultModel(model)` | `ai_set_default_model`，`{ model: AiModelRef \| null }` | `AiState`；连接必须存在 |
+| `aiSetRoute(route)` | `ai_set_route`，`{ route: ServiceRoute }` | `AiState` |
+| `aiSetProxyPassword(password)` | `ai_set_proxy_password`，`{ password }` | `AiState` |
+| `aiRemoveProxyPassword()` | `ai_remove_proxy_password`，`{}` | `AiState` |
+| `aiCatalog(refresh)` | `ai_catalog`，`{ refresh }` | `AiCatalog`；`refresh` 为真时联网刷新 models.dev 目录 |
+| `aiListModels(connectionId)` | `ai_list_models`，`{ connectionId }` | `AiModel[]`，实时获取，不持久化 |
+| `aiTest(connectionId, modelId)` | `ai_test`，`{ connectionId, modelId }` | `AiTestResult { latencyMs }`；发送固定英文句子 |
+| `aiProviderIcon(providerId)` | `ai_provider_icon`，`{ providerId }` | `AiProviderIcon \| null` |
+
+```ts
+type AiProtocol = "openaiCompatible" | "anthropic";
+type AiConnectionState = {         // 连接加 hasKey；没有任何接口返回密钥
+  id: string; providerId: string; name: string; protocol: AiProtocol;
+  baseUrl: string; useProxy: boolean; hasKey: boolean;
+};
+type AiState = {
+  connections: AiConnectionState[]; // 最多 20 个
+  defaultModel: AiModelRef | null;
+  route: ServiceRoute;              // AI 专用代理，类型与翻译路由相同
+  proxyPasswordSet: boolean;
+};
+type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null };
+type AiModel = { id: string; name: string; contextLength: number | null; outputLength: number | null; toolCall: boolean | null; source: "provider" | "catalog" };
+type AiCatalog = { providers: AiCatalogProvider[]; updatedAt: string | null; stale: boolean; refreshError: ErrorCode | null };
+type AiCatalogProvider = { id: string; name: string; protocol: AiProtocol; baseUrl: string; builtIn: boolean; local?: boolean };
+type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 SVG 文本的 base64
+```
+
+- 翻译与 AI 共用代理路由类型 `ServiceRoute`（原名 `TranslationRoute`，JSON 形状不变）。
+- 密钥必须是可打印 ASCII，最长 4096 字节，可以为空（本机 Ollama、LM Studio 不需要）；接口地址只接受带主机的 `http` / `https`，不带账号、查询参数或片段；名称 1–64 字符。校验失败返回 `validation`，错误中不含密钥原值。密钥存入 `SecretStore` 的 `mailx/ai/<connectionId>/api-key`，代理密码为 `mailx/ai/proxy-password`。
+- 图标 `data` 只能作为 CSS 遮罩使用，不能插入为标记。
+- 服务商返回的原文不传给界面，只返回固定错误码：`aiNotConfigured`（连接不存在）、`aiKeyRejected`（401 / 403）、`aiQuotaExceeded`（402）、`aiModelNotFound`（测试调用 404）、`aiRateLimited`（429）、`aiRequestRejected`（其他 3xx / 4xx，含不跟随的重定向）、`aiUnavailable`（5xx）、`aiNetwork`、`aiProxy`（代理失败，不回退直连）、`aiTimeout`、`aiInvalidResponse`。
+
 ### 全局提示（Toast）
 
 所有短提示都经由 `@/components/ui/toast` 的 `toast.info / success / error`，可在 React 之外调用，唯一的出口 `Toaster` 挂在应用根部、启动闸门之外，核心启动失败时也能提示。位置只有一处常量（`VIEWPORT_POSITION`），默认右下角。普通提示自动消失（信息 5 秒、成功 3 秒、错误 8 秒），最多同时显示 4 条；错误以 `role="alert"` 立即播报，其余走礼貌的 live region。关闭按钮在鼠标悬停或键盘聚焦进入提示后才对辅助技术可见，这是 Base UI 的设计。

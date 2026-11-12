@@ -60,5 +60,16 @@
   "translationInvalidResponse": "The translation service sent back something unexpected. Try again.",
   "translationLanguageUnsupported": "The translation service doesn't support this language. Try another service or language.",
   "translationTooLarge": "This message is too large to translate.",
-  "translationCancelled": "Translation was cancelled."
+  "translationCancelled": "Translation was cancelled.",
+  "aiNotConfigured": "This provider was removed",
+  "aiKeyRejected": "The key was rejected",
+  "aiQuotaExceeded": "Out of credit or quota",
+  "aiModelNotFound": "Model not found",
+  "aiRateLimited": "Too many requests, try again later",
+  "aiRequestRejected": "The provider refused the request",
+  "aiUnavailable": "The provider is unavailable",
+  "aiNetwork": "Can't reach the provider",
+  "aiProxy": "Can't connect through the proxy",
+  "aiTimeout": "The provider took too long",
+  "aiInvalidResponse": "Unexpected answer from the provider"
 }

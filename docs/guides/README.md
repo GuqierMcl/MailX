@@ -115,6 +115,26 @@ Finished translations are kept on this computer so reopening a message does not 
 - If a service drops a link or picture from a paragraph, MailX keeps that paragraph in the original language.
 - Translation is not available to MCP clients, and a side-by-side view is not available.
 
+## AI
+
+Settings → Integrations → AI connects MailX to AI model providers. No MailX feature uses the model yet (AI translation is coming), so nothing you read or write is sent to a model.
+
+### Add a provider
+
+1. Open Settings → Integrations → AI and choose "Add provider" under "Providers".
+2. Pick a provider from the list, or choose Custom and enter the address and API type yourself (OpenAI-compatible or Anthropic-compatible).
+3. Enter your API key and choose "Connect". MailX asks the provider for its list of models; if that fails, you see why, and "Save anyway" keeps the provider without checking it. Then pick a model.
+
+The key is kept on this device and is never shown again. MailX shows which host the key is sent to. Local services such as Ollama and LM Studio run on this computer and need no key.
+
+### Default model and Test
+
+Under "Default model", choose one of the models of a provider you added. "Test" sends one short fixed sentence (no mail content) and shows how long the reply took, or why it failed.
+
+### Use a proxy for AI
+
+AI connects directly by default. Under "Advanced" you can set a proxy (SOCKS5 or HTTP, with an optional username and password) used only for AI; then choose per provider whether it goes through it. The proxy you set on a mail account is not used. If the proxy fails, the request fails and never connects directly.
+
 ## Composing and sending
 
 New mail, reply, reply all and forward use a separate compose window, and drafts save locally as you type. You can attach files, insert pictures or paste screenshots; attachments and inline images together default to a 20 MiB limit, and providers may impose a lower one. Drafts do not sync to other clients.

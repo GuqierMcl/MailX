@@ -60,5 +60,16 @@
   "translationInvalidResponse": "翻译服务返回了无法识别的结果，请重试。",
   "translationLanguageUnsupported": "所选的翻译服务不支持这种语言，可以换一个服务或语言试试。",
   "translationTooLarge": "邮件太大，无法翻译。",
-  "translationCancelled": "翻译已取消。"
+  "translationCancelled": "翻译已取消。",
+  "aiNotConfigured": "这个服务商已被移除",
+  "aiKeyRejected": "密钥无效或没有权限",
+  "aiQuotaExceeded": "余额或额度不足",
+  "aiModelNotFound": "找不到这个模型",
+  "aiRateLimited": "请求太频繁，稍后再试",
+  "aiRequestRejected": "服务商拒绝了这次请求",
+  "aiUnavailable": "服务商暂时不可用",
+  "aiNetwork": "连不上服务商",
+  "aiProxy": "无法通过代理连接",
+  "aiTimeout": "服务商响应超时",
+  "aiInvalidResponse": "服务商返回的内容无法使用"
 }

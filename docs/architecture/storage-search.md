@@ -86,7 +86,7 @@ WAL 允许并发读取但仍只有一个写入者，且依赖本机共享内存�
 | mcp_grants | client_id, account_scope, action_scope, expires_at, revoked_at | 后续逐客户端授权时启用，首版本地 MCP 只用开关与统一授权；随时可撤销；不存邮箱凭证 |
 | audit_events | id, time, actor_id, account_id, action, resource_id, outcome, request_id | 不记录正文、地址列表、OTP、密钥 |
 
-Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未来多租户预建租户系统。模型提供商配置由 `AiService` 管理，配置与密钥引用保存，凭证本身交给 `SecretStore`。
+Web 在 M5 增加单管理员认证、Session 与 TOTP 恢复码表；不为未来多租户预建租户系统。模型提供商配置由 `AiService` 管理，配置保存在设置文件，凭证本身交给 `SecretStore`（见[AI 服务商与模型配置](ai-providers.md)）。
 
 ## 3. 事务与文件一致性
 

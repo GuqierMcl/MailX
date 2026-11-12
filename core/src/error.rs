@@ -70,6 +70,24 @@ pub enum ErrorCode {
     TranslationLanguageUnsupported,
     TranslationTooLarge,
     TranslationCancelled,
+    /// The AI connection does not exist.
+    AiNotConfigured,
+    /// 401 / 403: the key is wrong or lacks permission.
+    AiKeyRejected,
+    /// 402: out of credit.
+    AiQuotaExceeded,
+    /// 404 on a test call: no such model.
+    AiModelNotFound,
+    AiRateLimited,
+    /// Any other 3xx / 4xx.
+    AiRequestRejected,
+    /// 5xx.
+    AiUnavailable,
+    AiNetwork,
+    AiProxy,
+    AiTimeout,
+    /// The answer cannot be read, or is over the size cap.
+    AiInvalidResponse,
     StorageUnavailable,
     StorageIncompatible,
     AlreadyOpen,
@@ -142,6 +160,17 @@ impl AppError {
             ErrorCode::TranslationLanguageUnsupported => "所选的翻译服务不支持这种目标语言。",
             ErrorCode::TranslationTooLarge => "这封邮件太大，无法翻译。",
             ErrorCode::TranslationCancelled => "翻译已取消。",
+            ErrorCode::AiNotConfigured => "这个 AI 服务已不存在，请重新选择。",
+            ErrorCode::AiKeyRejected => "服务商没有接受这个密钥，请检查后重新填写。",
+            ErrorCode::AiQuotaExceeded => "服务商的余额或额度不足。",
+            ErrorCode::AiModelNotFound => "服务商找不到这个模型，请换一个。",
+            ErrorCode::AiRateLimited => "请求太频繁，请稍等一会儿再试。",
+            ErrorCode::AiRequestRejected => "服务商拒绝了这个请求，请检查接口地址和模型。",
+            ErrorCode::AiUnavailable => "服务商暂时不可用，请稍后重试。",
+            ErrorCode::AiNetwork => "连不上服务商，请检查网络和接口地址。",
+            ErrorCode::AiProxy => "无法通过你设置的代理连接服务商，请检查代理设置。",
+            ErrorCode::AiTimeout => "服务商响应太慢，请稍后重试。",
+            ErrorCode::AiInvalidResponse => "服务商返回的内容无法使用，请检查接口地址和协议。",
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",
             ErrorCode::AlreadyOpen => "此数据目录已由另一个 MailX 实例打开。",
