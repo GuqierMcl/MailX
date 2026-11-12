@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🩹 Fixed
+
+- On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。
+
 ## [0.2.1] - 2026-11-12
 
 ### 🚀 Feature

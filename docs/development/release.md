@@ -97,10 +97,10 @@ Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEM
 
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
 - **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先，且该提交在 `main` 上的 `CI result` 必须已经通过（发版 PR 只跑轻量检查，全量检查以合并后的这次为准）。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
-- **build**：macOS arm64（`macos-15`）、macOS x64（`macos-15-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
+- **build**：macOS arm64（`macos-26`）、macOS x64（`macos-26-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。macOS 包必须用 SDK 26 或更新版本构建：macOS 26 起，用旧 SDK 构建的应用会进入兼容模式，红绿灯的大小和位置与标题栏布局不符。构建后会用 `otool` 检查 `.app` 内每个可执行文件的 SDK 版本，低于 26 就失败；本地开发构建使用本机的 Xcode 或命令行工具，版本可能与 CI 不同。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
-改动工作流或 runner 标签（如 `macos-15-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。
+改动工作流或 runner 标签（如 `macos-26-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。
 
 ## 7. 出问题时
 

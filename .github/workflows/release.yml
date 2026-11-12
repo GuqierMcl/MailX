@@ -105,9 +105,12 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { name: macos-arm64, os: macos-15 }
+          # macOS 26 and later give apps the current window frame and traffic
+          # lights only when they are built with SDK 26 or later; the default
+          # Xcode on these images provides it, and a later step checks it.
+          - { name: macos-arm64, os: macos-26 }
           # Intel runner label: confirm it still exists when the matrix changes.
-          - { name: macos-x64, os: macos-15-intel }
+          - { name: macos-x64, os: macos-26-intel }
           - { name: windows-x64, os: windows-2025 }
           # Build on the oldest supported Ubuntu LTS so the app and bundled
           # libraries do not require a newer glibc than Ubuntu 22.04 provides.
@@ -192,6 +195,23 @@ jobs:
           bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"
       - run: bun run tauri build
         if: runner.os != 'Linux'
+      # A binary built with an older SDK runs in compatibility mode on macOS 26
+      # and later: the traffic lights change size and no longer sit where the
+      # title bar layout expects them.
+      - name: Check the macOS SDK
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          test -n "$app"
+          for bin in "$app"/Contents/MacOS/*; do
+            sdk=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "sdk" { print $2; exit }')
+            echo "$bin: SDK ${sdk:-unknown}"
+            if ! [ "${sdk%%.*}" -ge 26 ] 2>/dev/null; then
+              echo "::error::$bin was built with macOS SDK ${sdk:-unknown}; SDK 26 or later is required."
+              exit 1
+            fi
+          done
       - name: Collect and rename installers
         shell: bash
         run: |
