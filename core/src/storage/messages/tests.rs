@@ -786,6 +786,45 @@ fn list_filters_accounts_folder_role_flags_text_and_normalized_time() {
         }),
         ["Subject 2"]
     );
+    // A kept message passes the read filter; every other filter still applies.
+    let read_id = f
+        .service
+        .list_emails(&EmailListQuery {
+            unread: Some(false),
+            ..scoped.clone()
+        })
+        .unwrap()
+        .items[0]
+        .id
+        .clone();
+    assert_eq!(
+        subjects(EmailListQuery {
+            unread: Some(true),
+            keep_ids: vec![read_id.clone()],
+            ..scoped.clone()
+        }),
+        ["Subject 2", "税务 100%_\\ note"]
+    );
+    assert_eq!(
+        subjects(EmailListQuery {
+            unread: Some(true),
+            keep_ids: vec![read_id.clone()],
+            has_attachment: Some(true),
+            ..scoped.clone()
+        }),
+        ["税务 100%_\\ note"]
+    );
+    assert_eq!(
+        f.service
+            .list_emails(&EmailListQuery {
+                keep_ids: vec!["not an id".into()],
+                ..scoped.clone()
+            })
+            .unwrap_err()
+            .field
+            .as_deref(),
+        Some("keepIds")
+    );
     assert_eq!(
         subjects(EmailListQuery {
             has_attachment: Some(true),

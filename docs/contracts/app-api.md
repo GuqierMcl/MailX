@@ -59,7 +59,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 - `accountIds` 为 null 或省略时查询所有本地账号，空数组返回空结果；数组元素必须为有效 UUID。当前只有受信本地 UI 入口，未来 HTTP / MCP 再与宿主授权账号范围取交集。
 - `folderId` 指定本地文件夹 UUID；`folderRole` 在选定账号间按角色匹配，`inbox` 即统一收件箱。二者不能同时给出，否则返回 `validation`。
 - `excludeFolderRoles` 可省略（默认空数组，不排除），列出的角色所在文件夹不出现在结果中；侧栏“星标”用 `{ starred: true, archive: 'include', excludeFolderRoles: ['junk', 'trash'] }`。它只缩小结果，显式的 `folderRole` 不受影响；MCP 工具在未指定文件夹时也用它排除垃圾邮件与已删除。
-- `unread=true` 仅未读，false 仅已读，null 不限；`hasAttachment` 同样按 true / false / null 筛选。`starred` 按 true / false / null 筛选星标，核心 SQL 在分页前处理，本机已发送副本不带星标；标记写回见后文。
+- `unread=true` 仅未读，false 仅已读，null 不限；`keepIds`（可省略，默认空数组，最多 500 个有效邮件 ID，否则返回 `validation`，字段 `keepIds`）中的邮件不受 `unread` 限制，其他条件照常生效，用于“未读”视图里已打开的邮件读后仍留在列表，直到视图改变；`hasAttachment` 同样按 true / false / null 筛选。`starred` 按 true / false / null 筛选星标，核心 SQL 在分页前处理，本机已发送副本不带星标；标记写回见后文。
 - `text` 为本地全文搜索（[存储与搜索 5.1](../architecture/storage-search.md#51-本地全文搜索第一批已实现尚未手测)）：按 Unicode 空白拆词，所有词都须命中，双引号括起的部分作为整体；最多 16 个词、256 个字符，超出返回 `validation`（字段 `text`）；空白文本视为不限。检索主题、人员（发件人、收件人、抄送的名字与地址）、预览、已缓存正文（每封最多 64 KiB）与附件名，全角 ASCII 与半角互相匹配；不少于 3 个字符的词用 FTS5 trigram，少于 3 个字符的词退回参数化 LIKE；用户文本不作为 SQL 或 FTS 表达式执行，不调用服务商搜索。`EmailSummary.matchSnippet` 为命中片段 `SnippetSegment[] | null`（`{ text, hit }` 纯文本分段，无 HTML，仅在正文或附件名命中时给出），`coverage.indexedBodies` 为作用域内已收进索引的正文数。
 - `fromAddress` 只列发件地址等于它的邮件，不区分大小写（ASCII 小写，与 SQLite `lower()` 一致）；去除首尾空白后须非空、不超过 320 个字符、含 `@` 且无控制字符，否则返回 `validation`（字段 `fromAddress`）。本机已发送副本按所属账号自己的地址匹配。只按完整地址匹配，不按域名，也不合并同一个人的多个地址。
 - `groupSenders`（缺省 false）为 true 时，有聚合规则的发件人（见下文“联系人聚合”）的邮件在列表中折叠为每个发件人一行；存在 `text` 或 `fromAddress` 时被忽略（搜索和单个联系人视图从不折叠）。

@@ -7,7 +7,8 @@ pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
 use crate::{
     AppError,
     mail::{
-        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_SELECTION,
+        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_KEEP_IDS,
+        MAX_SELECTION,
     },
     storage::messages::{PageCursor, ValidatedEmailQuery},
     sync::headers::MessageRecord,
@@ -258,6 +259,12 @@ fn validate_query(query: &EmailListQuery) -> Result<ValidatedEmailQuery, AppErro
     }
     if let Some(folder_id) = &query.folder_id {
         validate_uuid(folder_id, "folderId")?;
+    }
+    if query.keep_ids.len() > MAX_KEEP_IDS {
+        return Err(AppError::validation("keepIds"));
+    }
+    for id in &query.keep_ids {
+        validate_email_id(id).map_err(|_| AppError::validation("keepIds"))?;
     }
     let limit = query.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {

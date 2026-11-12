@@ -1023,7 +1023,18 @@ fn base_filters(
     // sent-role folder join keeps them out of every other scope.
     let mut local = ScopeFilter::new(query)?;
     if let Some(unread) = query.unread {
-        filter.add("m.is_read = ?", i64::from(!unread));
+        if query.keep_ids.is_empty() {
+            filter.add("m.is_read = ?", i64::from(!unread));
+        } else {
+            filter.clauses.push(format!(
+                "(m.is_read = ? OR m.id IN ({}))",
+                vec!["?"; query.keep_ids.len()].join(",")
+            ));
+            filter.values.push(i64::from(!unread).into());
+            filter
+                .values
+                .extend(query.keep_ids.iter().cloned().map(Value::from));
+        }
         if unread {
             // Local copies are always read.
             local.clauses.push("0 = 1".into());

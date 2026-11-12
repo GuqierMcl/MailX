@@ -472,6 +472,7 @@ fn search_emails(
         },
         text: input.query,
         unread: input.unread,
+        keep_ids: Vec::new(),
         starred: input.starred,
         archive: input.archive.map(ArchiveScope::from),
         has_attachment: input.has_attachment,

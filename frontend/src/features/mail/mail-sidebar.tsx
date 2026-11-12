@@ -238,7 +238,8 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                 const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
                 const countsKnown = tree.every((node) => node.countsKnown)
                 const sync = syncStates[account.id]
-                const rowStyle = { paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 4 : 2.5}rem)` }
+                // Room for the one shared slot (and the warning beside it), never more.
+                const rowStyle = { paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 2.5 : 1}rem)` }
                 const status = (
                   <>
                     <AccountSyncSlot
@@ -458,10 +459,13 @@ function SyncIcon({ spinning, className }: { spinning: boolean; className?: stri
 }
 
 /**
- * Unread counts remain visible during every sync. The separate refresh button
- * appears on this row's hover/focus, or while its own manual refresh is running.
- * Automatic rounds never animate or announce a status. `--show` is local to
- * this row because the account's `li` also contains its whole folder subtree.
+ * One slot at the end of the account row, shared by the unread count, the
+ * refresh button and the spinner of a refresh the user started. The count
+ * shows at rest; hovering or focusing this row puts the refresh button in its
+ * place, and a manual refresh keeps the turning button there until it ends.
+ * Automatic rounds never animate or announce a status, so the count stays.
+ * `--show` is local to this row because the account's `li` also contains its
+ * whole folder subtree.
  */
 function AccountSyncSlot({ unread, countsKnown, sync, label, onRefresh, className }: {
   unread: number
@@ -481,11 +485,16 @@ function AccountSyncSlot({ unread, countsKnown, sync, label, onRefresh, classNam
     <div
       data-slot="account-sync"
       className={cn(
-        'absolute top-1.5 right-1 flex h-5 items-center gap-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
+        'absolute top-1.5 right-1 flex h-5 min-w-5 items-center justify-center text-xs font-medium tabular-nums text-sidebar-foreground select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-hover/menu-button:[--show:1] hover:[--show:1] focus-within:[--show:1]',
         refreshing || turning ? '[--show:1]' : '[--show:0]',
         className,
       )}
     >
+      <span className="pointer-events-none flex items-center px-1 opacity-[calc(1-var(--show))] transition-opacity motion-reduce:transition-none">
+        {showCount && (
+          <span aria-label={!countsKnown ? t('mail:unreadCountUnknown') : undefined}>{countsKnown ? unread : '—'}</span>
+        )}
+      </span>
       <Tooltip>
         <TooltipTrigger
           render={(
@@ -494,7 +503,7 @@ function AccountSyncSlot({ unread, countsKnown, sync, label, onRefresh, classNam
               aria-label={actionLabel}
               aria-disabled={busy}
               onClick={() => { if (!busy) refresh() }}
-              className="flex size-5 shrink-0 items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              className="absolute inset-0 flex items-center justify-center rounded-md opacity-(--show) outline-hidden transition-opacity motion-reduce:transition-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             />
           )}
         >
@@ -507,11 +516,6 @@ function AccountSyncSlot({ unread, countsKnown, sync, label, onRefresh, classNam
           {sync?.lastSyncedAt && <p>{t('mail:lastSyncSucceededAt', { time: formatFullTime(sync.lastSyncedAt) })}</p>}
         </TooltipContent>
       </Tooltip>
-      <span className="pointer-events-none flex min-w-5 items-center justify-center px-1">
-        {showCount && (
-          <span aria-label={!countsKnown ? t('mail:unreadCountUnknown') : undefined}>{countsKnown ? unread : '—'}</span>
-        )}
-      </span>
     </div>
   )
 }

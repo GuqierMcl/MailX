@@ -62,7 +62,7 @@ describe('account sync indicator', () => {
     expect(screen.queryByRole('status', { name: '正在同步' })).not.toBeInTheDocument()
   })
 
-  it('animates a manual refresh through completion without replacing the count or animating the next automatic round', async () => {
+  it('animates a manual refresh through completion in the shared slot without animating the next automatic round', async () => {
     const onRefresh = vi.fn().mockResolvedValue(undefined)
     const state = (phase: AccountSyncState['phase'], sequence: number) => exampleSyncState({ phase, sequence })
     const view = render(<Harness sync={state('idle', 1)} onRefresh={onRefresh} />)
@@ -70,8 +70,9 @@ describe('account sync indicator', () => {
     expect(onRefresh).toHaveBeenCalledOnce()
     expect(syncSlot().getByRole('button')).toHaveAttribute('aria-disabled', 'true')
     view.rerender(<Harness sync={state('syncing', 2)} onRefresh={onRefresh} />)
-    expect((await screen.findByRole('status', { name: '正在同步' })).querySelector('svg')).toHaveClass('animate-spin')
-    expect(syncSlot().getByText('3')).toBeVisible()
+    expect((await syncSlot().findByRole('status', { name: '正在同步' })).querySelector('svg')).toHaveClass('animate-spin')
+    // The spinner takes the count's place until the refresh ends.
+    expect(accountRow().querySelector('[data-slot="account-sync"]')).toHaveClass('[--show:1]')
     await userEvent.click(syncSlot().getByRole('button'))
     expect(onRefresh).toHaveBeenCalledOnce()
 
@@ -81,6 +82,15 @@ describe('account sync indicator', () => {
     view.rerender(<Harness sync={state('syncing', 4)} onRefresh={onRefresh} />)
     expect(syncSlot().queryByRole('status')).not.toBeInTheDocument()
     expect(syncSlot().getByText('3')).toBeVisible()
+    expect(accountRow().querySelector('[data-slot="account-sync"]')).toHaveClass('[--show:0]')
+  })
+
+  it('reserves room for one slot only, so the name keeps the space the hidden refresh button does not use', () => {
+    sidebar(exampleSyncState({ accountId: account.id, mailboxSourceId: account.mailboxSourceId, phase: 'idle' }))
+    const row = screen.getByTitle(account.emailAddress)
+    expect(row.style.paddingRight).toBe('calc(2ch + 1rem)')
+    // Count and refresh button sit in the same box: the button covers it.
+    expect(syncSlot().getByRole('button')).toHaveClass('absolute', 'inset-0')
   })
 
   it('exposes background sync and the last successful sync on hover and focus without restarting it', async () => {

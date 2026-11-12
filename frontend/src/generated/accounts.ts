@@ -298,6 +298,12 @@ excludeFolderRoles: Array<FolderRole>,
  */
 archive: ArchiveScope | null, text: string | null, unread: boolean | null,
 /**
+ * Messages that pass the `unread` filter whatever their read state, so
+ * mail opened from an Unread view stays listed after it is read. Every
+ * other filter still applies. At most [`MAX_KEEP_IDS`].
+ */
+keepIds: Array<string>,
+/**
  * Match the local desired star state, including pending server writes.
  */
 starred: boolean | null, hasAttachment: boolean | null,
