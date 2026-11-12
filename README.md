@@ -111,6 +111,7 @@ Prerequisites:
 ```sh
 bun install --frozen-lockfile
 bun tauri dev       # run the desktop app in development mode
+bun run desktop:dev:isolated  # same, with its own data, passwords and app identity
 # Build unsigned local installers without the project's updater signing key
 bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 bun run check       # run the version, type, lint, test, build and Rust checks

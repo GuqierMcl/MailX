@@ -22,6 +22,7 @@
     "typecheck": "bun run frontend:typecheck",
     "tauri": "bun scripts/tauri.mjs",
     "desktop:dev": "bun run tauri dev",
+    "desktop:dev:isolated": "bun scripts/dev-isolated.mjs",
     "desktop:build": "bun run tauri build",
     "version:check": "bun scripts/check-version.mjs",
     "version:bump": "bun scripts/bump-version.mjs",
