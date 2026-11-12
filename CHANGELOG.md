@@ -4,8 +4,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings exactly as written, emoji included: `### 🚀 Feature`, `### ✨ Optimization`, `### 🩹 Fixed`, `### 🔐 Security`, `### ✨ Optimization
 
-- In the Unread view, a message you open stays in the list after it is marked read, until you switch mailbox, filter or search. / 在“未读”视图中打开的邮件标为已读后仍留在列表中，直到切换邮箱、筛选或搜索。
-- Account names in the sidebar get more room: the unread count, refresh button and refresh spinner share one spot at the end of the row again. / 侧栏账号名称可显示得更完整：未读数、刷新按钮和刷新进度重新共用行尾的同一位置。
+- In the Unread view, a message you open stays in the list after it is marked read, until you switch mailbox, filter or search. / 在“未读”视图中打开的邮件标为已读后仍留在列表中，直到切换邮箱、筛选或搜索。 ([#122](https://github.com/GuqierMcl/MailX/pull/122))
+- Account names in the sidebar get more room: the unread count, refresh button and refresh spinner share one spot at the end of the row again. / 侧栏账号名称可显示得更完整：未读数、刷新按钮和刷新进度重新共用行尾的同一位置。 ([#122](https://github.com/GuqierMcl/MailX/pull/122))
 
 ### 🔄 Changed`.
 - Write entries for users, one sentence per line. Do not list tests, CI, refactors or documentation. End with the PR link, for example `- 修复远程图片加载失败后无法重试 ([#25](https://github.com/GuqierMcl/MailX/pull/25))`.
