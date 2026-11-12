@@ -299,9 +299,8 @@
   "translationShowingOriginal": "Showing the original",
   "translationDismiss": "Dismiss translation notice",
   "translationConsentTitle": "Send this message to {{service}}?",
-  "translationConsentBody": "To translate, the subject and text of this message are sent to {{service}}. Attachments, images and your mailbox password are never sent. You won't be asked again for other messages unless you switch to a different translation service.",
-  "translationConsentConfirm": "Agree and translate",
-  "translationConsentKeyless": "This is the channel browsers' built-in translators use, not a service {{company}} offers to other apps, so it may stop working at any time.",
+  "translationConsentBody": "The subject and text of this message are sent to {{service}}. Attachments and images are not.",
+  "translationConsentConfirm": "Translate",
   "translationUseAnotherService": "Use another service",
   "translationCommand": "Translate this message",
   "htmlBodyTranslated": "HTML message body (translated)"

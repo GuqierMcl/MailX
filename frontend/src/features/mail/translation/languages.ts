@@ -19,8 +19,6 @@ export const KEYED_PROVIDERS = ['deepl', 'microsoft', 'google'] as const satisfi
 
 export const needsKey = (provider: TranslationProviderId) => !(KEYLESS_PROVIDERS as readonly string[]).includes(provider)
 
-/** Who receives the text of a keyless service, for the consent sentence. */
-export const KEYLESS_COMPANY: Record<(typeof KEYLESS_PROVIDERS)[number], string> = { microsoftFree: 'Microsoft', googleFree: 'Google' }
 
 /** Display names; the two keyless services follow the interface language, the keyed ones are brand names. Read at render time. */
 export const TRANSLATION_PROVIDER_NAMES: Record<TranslationProviderId, string> = {

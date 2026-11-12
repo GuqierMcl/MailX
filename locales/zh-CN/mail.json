@@ -267,9 +267,8 @@
   "translationShowingOriginal": "正在显示原文",
   "translationDismiss": "关闭翻译提示",
   "translationConsentTitle": "把邮件内容发送给{{service}}？",
-  "translationConsentBody": "翻译时，这封邮件的主题和正文文字会发送给{{service}}处理。附件、图片和邮箱密码不会发送。以后翻译其他邮件时不再询问；更换翻译服务后会再问一次。",
-  "translationConsentConfirm": "同意并翻译",
-  "translationConsentKeyless": "这是浏览器内置翻译使用的通道，不是{{company}}正式提供给其他应用的服务，可能随时失效。",
+  "translationConsentBody": "邮件的主题和正文会发送给{{service}}，附件和图片不会发送。",
+  "translationConsentConfirm": "翻译",
   "translationUseAnotherService": "换一种翻译服务",
   "translationCommand": "翻译这封邮件",
   "htmlBodyTranslated": "邮件 HTML 正文（译文）"

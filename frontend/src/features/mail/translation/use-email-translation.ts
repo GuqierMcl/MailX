@@ -4,7 +4,7 @@ import type { EmailDetail, TranslationSettings, TranslationStatus } from '@/gene
 import { useSettings, useUpdateTranslation } from '@/features/settings/settings-queries'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { translationKeys } from '@/lib/query-client'
-import { KEYLESS_COMPANY, needsKey, TRANSLATION_PROVIDER_NAMES } from './languages'
+import { needsKey, TRANSLATION_PROVIDER_NAMES } from './languages'
 
 /** How many messages the session remembers a choice for; the oldest are forgotten first. */
 const MEMORY_LIMIT = 200
@@ -298,8 +298,6 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
     alwaysTranslating: detected !== null && Boolean(settings?.alwaysTranslate.includes(detected)),
     neverSuggesting: detected !== null && Boolean(settings?.neverSuggest.includes(detected)),
     consentService: state.consent && provider ? TRANSLATION_PROVIDER_NAMES[provider] : null,
-    /** Who receives the text when the service is a keyless browser channel. */
-    consentKeylessCompany: state.consent && provider && !needsKey(provider) ? KEYLESS_COMPANY[provider as keyof typeof KEYLESS_COMPANY] : null,
     translate, cancel, toggle, showOriginal, showTranslation, dismiss, dismissError, failBody, retranslate,
     confirmConsent, cancelConsent, toggleLanguageList, openSettings,
   }

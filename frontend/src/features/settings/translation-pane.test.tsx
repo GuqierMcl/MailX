@@ -41,7 +41,7 @@ describe('translation settings: service and key', () => {
   it('starts on Microsoft Translate with no key, region or key test, only the test button', async () => {
     await setup()
     expect(await screen.findByRole('combobox', { name: '服务' })).toHaveTextContent('Microsoft 翻译')
-    expect(screen.getByText(/不是微软正式开放的服务，可能随时失效/)).toBeInTheDocument()
+    expect(screen.getByText('无需注册或密钥，直接可用。')).toBeInTheDocument()
     expect(screen.queryByText(/在中国大陆通常需要代理/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('区域')).not.toBeInTheDocument()
@@ -230,7 +230,7 @@ describe('translation settings: the advanced group', () => {
   it('saves the username with the route and clears it again', async () => {
     const { client, saved } = await setup({ route: PROXY })
     await openAdvanced()
-    expect(screen.getByText('代理需要登录时才填写；多数本机代理不需要。')).toBeInTheDocument()
+    expect(screen.getByText('代理需要登录时才填写。')).toBeInTheDocument()
     await userEvent.type(await screen.findByLabelText('用户名'), 'alice')
     expect(client.updateSettings).not.toHaveBeenCalled()
     await userEvent.tab()
@@ -314,7 +314,7 @@ describe('translation settings: the advanced group', () => {
     expect(toggle).toHaveTextContent('Through proxy proxy.example.com:1080')
     await userEvent.click(toggle)
     expect(await screen.findByRole('combobox', { name: 'Connection' })).toHaveTextContent('Through a proxy')
-    expect(screen.getByText('Only needed if your proxy asks you to sign in; most proxies on this computer don\'t.')).toBeInTheDocument()
+    expect(screen.getByText('Only if your proxy requires you to sign in.')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeDisabled()
     expect(screen.getByText('Enter a username first; a password is only used together with one.')).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText('Username'), 'alice')
@@ -402,7 +402,7 @@ describe('translation settings page', () => {
     const { client } = await setup({ provider: 'deepl' }, [{ provider: 'deepl', configured: true }])
     client.translationCacheStats.mockResolvedValue({ count: 1, bytes: 300_000 })
     expect(await screen.findByRole('combobox', { name: 'Service' })).toHaveTextContent('DeepL')
-    expect(screen.getByText('When you translate, the subject and text of the message are sent to the service you choose.')).toBeInTheDocument()
+    expect(screen.getByText('Message text is sent to the service you choose.')).toBeInTheDocument()
     expect(await screen.findByText('Saved')).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Offer to translate' })).toBeChecked()
     expect(await screen.findByText('1 message, about 0.3 MB')).toBeInTheDocument()
@@ -412,13 +412,12 @@ describe('translation settings page', () => {
 })
 
 describe('keyless services in English', () => {
-  it('reads in plain English, with the groups and the unofficial notice', async () => {
+  it('reads in plain English, with the groups and the service note', async () => {
     await i18n.changeLanguage('en')
     await setup({ provider: 'googleFree' })
     const select = await screen.findByRole('combobox', { name: 'Service' })
     expect(select).toHaveTextContent('Google Translate')
-    expect(screen.getByText(/doesn't officially offer it to other apps/)).toBeInTheDocument()
-    expect(screen.getByText(/In mainland China it usually needs a proxy/)).toBeInTheDocument()
+    expect(screen.getByText('No sign-up or key needed. Usually needs a proxy in mainland China.')).toBeInTheDocument()
     await userEvent.click(select)
     const listbox = await screen.findByRole('listbox')
     expect(within(listbox).getByText('No setup needed')).toBeInTheDocument()
