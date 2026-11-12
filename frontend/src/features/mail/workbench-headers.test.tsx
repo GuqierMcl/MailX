@@ -13,12 +13,6 @@ import { Workbench } from './workbench'
 import { expandAccount } from '@/test/sidebar'
 
 const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' as const }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }
-/**
- * Tests that render a full 100-row page plus a second page. They take about
- * 1.5 s on a laptop and 2.5-5 s on shared CI runners, so the 5 s default is too
- * tight for them; a real hang still fails.
- */
-const FULL_PAGE_TIMEOUT = 15_000
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',
@@ -104,7 +98,7 @@ describe('synced inbox headers', () => {
     expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, cursor: 'page-two', folderRole: 'inbox' }))
     expect(new Set(rows().map((row) => row.textContent)).size).toBe(103)
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
-  }, FULL_PAGE_TIMEOUT)
+  })
 
   it('retains both loaded pages and the selection when a body completes and refreshes previews', async () => {
     const first = email('first')
@@ -335,9 +329,11 @@ describe('synced inbox headers', () => {
     render(withTitleBar(<Workbench client={client} />))
     await screen.findByRole('list', { name: '邮件列表' })
     await searchFor('邮件')
-    await waitFor(() => expect(client.listEmails).toHaveBeenLastCalledWith(expect.objectContaining({ text: '邮件' })))
-    // The search starts a new query; its first page renders a notification tick after the call.
-    // Until then the previous query's 103 rows are shown dimmed (aria-busy), so wait past them.
+    // The palette runs its own short search while the text is typed, so a call with
+    // this text alone does not mean the list has switched: on a slow runner the old
+    // 103 rows are still shown, not dimmed yet, and the row clicked next is replaced.
+    // Only the list asks for the second page, after its first page has rendered.
+    await waitFor(() => expect(client.listEmails).toHaveBeenCalledWith(expect.objectContaining({ text: '邮件', cursor: 'page-two' })))
     await waitFor(() => {
       expect(screen.getByRole('list', { name: '邮件列表' })).not.toHaveAttribute('aria-busy')
       expect(rows()).toHaveLength(103)
@@ -352,7 +348,7 @@ describe('synced inbox headers', () => {
     expect(rows()).toHaveLength(103)
     expect(rows()[102]).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('邮件')
-  }, FULL_PAGE_TIMEOUT)
+  })
 
   it('shows committed folder results before the account finishes and refreshes all loaded pages', async () => {
     let items = Array.from({ length: 103 }, (_, index) => email(String(index)))
@@ -372,7 +368,7 @@ describe('synced inbox headers', () => {
     expect(within(rows()[103]).queryByLabelText('未读')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '邮件 102' })).toBeInTheDocument()
     expect(screen.queryByText('正在同步邮件…')).not.toBeInTheDocument()
-  }, FULL_PAGE_TIMEOUT)
+  })
 
   it('rejects stale source and task events without replacing cache or the current status', async () => {
     const { client, emit } = setup([email('cached')])
