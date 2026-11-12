@@ -1266,6 +1266,24 @@ fn proxy(host: &str, port: u16) -> TranslationRoute {
         proxy_kind: ProxyKind::Socks5,
         host: host.into(),
         port,
+        username: String::new(),
+    }
+}
+
+fn proxy_as(username: &str) -> TranslationRoute {
+    match proxy("proxy.example", 1080) {
+        TranslationRoute::Proxy {
+            proxy_kind,
+            host,
+            port,
+            ..
+        } => TranslationRoute::Proxy {
+            proxy_kind,
+            host,
+            port,
+            username: username.into(),
+        },
+        TranslationRoute::Direct => unreachable!(),
     }
 }
 
@@ -1297,7 +1315,7 @@ fn translation_settings_serialize_in_the_documented_shape() {
     assert_eq!(json["targetLanguage"], "auto");
     assert_eq!(
         json["route"],
-        serde_json::json!({"kind": "proxy", "proxyKind": "socks5", "host": "proxy.example", "port": 1080})
+        serde_json::json!({"kind": "proxy", "proxyKind": "socks5", "host": "proxy.example", "port": 1080, "username": ""})
     );
     assert_eq!(
         serde_json::to_value(TranslationRoute::Direct).unwrap(),
@@ -1403,6 +1421,69 @@ fn translation_proxy_needs_a_plain_host_and_a_port() {
         field_of(translation(|s| s.route = proxy("host", 0))).as_deref(),
         Some("translation.route.port")
     );
+}
+
+#[test]
+fn translation_proxy_username_follows_the_account_proxy_rule() {
+    for ok in ["", "alice", " padded ", "名字", &"u".repeat(255)] {
+        let normalized = translation(|s| s.route = proxy_as(ok))
+            .normalized()
+            .unwrap();
+        assert_eq!(normalized.route, proxy_as(ok), "kept as typed: {ok:?}");
+    }
+    for bad in [
+        "   ",
+        "\t",
+        "a\nb",
+        "a\u{0}b",
+        &"u".repeat(256),
+        &"名".repeat(86),
+    ] {
+        assert_eq!(
+            field_of(translation(|s| s.route = proxy_as(bad))).as_deref(),
+            Some("translation.route.username"),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
+fn a_route_saved_without_a_username_still_loads() {
+    let route: TranslationRoute = serde_json::from_str(
+        r#"{"kind":"proxy","proxyKind":"httpConnect","host":"p","port":8080}"#,
+    )
+    .unwrap();
+    assert!(matches!(route, TranslationRoute::Proxy { username, .. } if username.is_empty()));
+}
+
+#[test]
+fn a_bad_stored_username_is_dropped_but_the_proxy_stays() {
+    let directory = TempDir::new().unwrap();
+    for (username, expected) in [(r#""bad\nname""#, ""), ("42", ""), (r#""alice""#, "alice")] {
+        fs::write(
+            directory.path().join(SETTINGS_FILE_NAME),
+            format!(
+                r#"{{"version":1,"settings":{{"translation":{{
+                "route":{{"kind":"proxy","proxyKind":"socks5","host":"p","port":1080,"username":{username}}}}}}}}}"#
+            ),
+        )
+        .unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.recovered);
+        assert_eq!(
+            snapshot.settings.translation.route,
+            TranslationRoute::Proxy {
+                proxy_kind: ProxyKind::Socks5,
+                host: "p".into(),
+                port: 1080,
+                username: expected.into(),
+            }
+        );
+        assert!(snapshot.settings.translation.clone().normalized().is_ok());
+    }
 }
 
 #[test]

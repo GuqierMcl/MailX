@@ -4,7 +4,8 @@
 //! the cached sanitized HTML, sends only its text segments (plus the subject)
 //! to the service the user consented to, and caches the answers as wire
 //! strings; they only become HTML through `translate::apply` in the isolated
-//! body protocol. Service keys live in the `SecretStore` and are never returned.
+//! body protocol. Service keys and the proxy password live in the
+//! `SecretStore` and are never returned.
 use std::{
     collections::HashMap,
     sync::{
@@ -20,7 +21,7 @@ use ts_rs::TS;
 use super::{MailxCore, bodies::BodyBinding};
 use crate::{
     AppError, ErrorCode,
-    accounts::AccountService,
+    accounts::{AccountService, MAX_SECRET_BYTES},
     mail::{LOCAL_SENT_PREFIX, render},
     net::{NetRoute, ProxyRoute},
     secrets::{SecretStore, SecretValue},
@@ -46,11 +47,19 @@ const FOLD_LABEL: &str = "x";
 const TEST_SENTENCE: &str = "Hello, this is a test.";
 const TEST_RESULT_CHARS: usize = 200;
 const MAX_KEY_CHARS: usize = 512;
+/// Cannot collide with the per-service names above.
+const PROXY_PASSWORD_SECRET: &str = "mailx/translation/proxy-password";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslationKeyState {
     pub provider: TranslationProviderId,
+    pub configured: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationProxyPasswordState {
     pub configured: bool,
 }
 
@@ -153,6 +162,8 @@ pub(crate) struct TestCall {
     pub target: String,
     pub region: String,
     pub proxy: Option<(String, u16)>,
+    /// Proxy username and password, when the request would sign in.
+    pub proxy_auth: Option<(String, String)>,
     pub key: String,
 }
 
@@ -219,10 +230,10 @@ impl Translations {
         &self,
         provider: TranslationProviderId,
         key: &SecretValue,
+        route: &NetRoute,
         settings: &TranslationSettings,
         request: &TranslateRequest<'_>,
     ) -> Result<TranslateResponse, ErrorCode> {
-        let route = net_route(&settings.route);
         #[cfg(test)]
         {
             let backend = self.backend.lock().unwrap().clone();
@@ -233,6 +244,10 @@ impl Translations {
                     target: request.target.to_owned(),
                     region: settings.microsoft_region.clone(),
                     proxy: route.proxy.as_ref().map(|p| (p.host.clone(), p.port)),
+                    proxy_auth: route.proxy.as_ref().and_then(|p| {
+                        let (user, password) = p.auth.as_ref()?;
+                        Some((user.clone(), password.expose_secret().to_owned()))
+                    }),
                     key: key.expose_secret().to_owned(),
                 })
                 .await;
@@ -241,7 +256,7 @@ impl Translations {
         let context = Context {
             key,
             microsoft_region: &settings.microsoft_region,
-            route: &route,
+            route,
             #[cfg(test)]
             base: None,
         };
@@ -249,28 +264,48 @@ impl Translations {
     }
 }
 
+/// Who a request goes to and how it gets there.
+struct Service<'a> {
+    provider: TranslationProviderId,
+    key: &'a SecretValue,
+    route: &'a NetRoute,
+}
+
 fn secret_name(provider: TranslationProviderId) -> String {
     format!("mailx/translation/{}", provider.as_str())
 }
 
-/// The mail account's own proxy is never used here.
-fn net_route(route: &TranslationRoute) -> NetRoute {
+/// The mail account's own proxy is never used here. Signing in needs a
+/// username; a password stored without one is ignored.
+fn net_route(route: &TranslationRoute, password: Option<SecretValue>) -> NetRoute {
     match route {
         TranslationRoute::Direct => NetRoute::default(),
         TranslationRoute::Proxy {
             proxy_kind,
             host,
             port,
+            username,
         } => NetRoute {
             proxy: Some(ProxyRoute {
                 kind: *proxy_kind,
                 host: host.clone(),
                 port: *port,
-                auth: None,
+                auth: (!username.is_empty())
+                    .then(|| (username.clone(), password.unwrap_or_else(empty_secret))),
             }),
             image_proxy_dns: false,
         },
     }
+}
+
+fn empty_secret() -> SecretValue {
+    SecretValue::new(String::new())
+}
+
+/// Not trimmed: a password may start or end with a space.
+fn valid_proxy_password(password: &SecretValue) -> bool {
+    let text = password.expose_secret();
+    !text.is_empty() && text.len() <= MAX_SECRET_BYTES && !text.chars().any(char::is_control)
 }
 
 fn internal() -> AppError {
@@ -488,6 +523,60 @@ impl MailxCore {
             .await
     }
 
+    /// Builds the route for one request. A secret store that cannot be read
+    /// while a username is set fails the request; it never goes out unsigned.
+    async fn translation_route(&self, route: &TranslationRoute) -> Result<NetRoute, AppError> {
+        let needs_password =
+            matches!(route, TranslationRoute::Proxy { username, .. } if !username.is_empty());
+        let password = if needs_password {
+            let secrets = self.translation.secrets.clone();
+            self.blocking(move |_| Ok(secrets.get(PROXY_PASSWORD_SECRET)?))
+                .await?
+        } else {
+            None
+        };
+        Ok(net_route(route, password))
+    }
+
+    async fn proxy_password_state(&self) -> Result<TranslationProxyPasswordState, AppError> {
+        let secrets = self.translation.secrets.clone();
+        self.blocking(move |_| {
+            Ok(TranslationProxyPasswordState {
+                configured: secrets.get(PROXY_PASSWORD_SECRET)?.is_some(),
+            })
+        })
+        .await
+    }
+
+    /// Stores the proxy password. It is never read back out.
+    pub async fn set_translation_proxy_password(
+        &self,
+        password: SecretValue,
+    ) -> Result<TranslationProxyPasswordState, AppError> {
+        if !valid_proxy_password(&password) {
+            return Err(AppError::validation("translation.route.password"));
+        }
+        let secrets = self.translation.secrets.clone();
+        self.blocking(move |_| Ok(secrets.set(PROXY_PASSWORD_SECRET, &password)?))
+            .await?;
+        self.proxy_password_state().await
+    }
+
+    pub async fn remove_translation_proxy_password(
+        &self,
+    ) -> Result<TranslationProxyPasswordState, AppError> {
+        let secrets = self.translation.secrets.clone();
+        self.blocking(move |_| Ok(secrets.delete(PROXY_PASSWORD_SECRET)?))
+            .await?;
+        self.proxy_password_state().await
+    }
+
+    pub async fn translation_proxy_password(
+        &self,
+    ) -> Result<TranslationProxyPasswordState, AppError> {
+        self.proxy_password_state().await
+    }
+
     /// Stores the key for a service. The key is trimmed; it is never read back out.
     pub async fn set_translation_key(
         &self,
@@ -542,12 +631,14 @@ impl MailxCore {
             "auto" => "zh-Hans",
             explicit => explicit,
         };
+        let route = self.translation_route(&settings.route).await?;
         let texts = [text_wire(TEST_SENTENCE)];
         let response = self
             .translation
             .call(
                 provider,
                 &key,
+                &route,
                 &settings,
                 &TranslateRequest {
                     texts: &texts,
@@ -647,13 +738,17 @@ impl MailxCore {
             return Err(AppError::new(ErrorCode::TranslationConsentRequired));
         }
         let target = resolve_target(&settings, &ui_language, target.as_deref())?;
+        let route = self.translation_route(&settings.route).await?;
         let registration = self.translation.start(&email_id);
         let mut cancel = registration.receiver();
         let work = self.translate_inner(
             &email_id,
             &settings,
-            provider,
-            &key,
+            Service {
+                provider,
+                key: &key,
+                route: &route,
+            },
             &target,
             registration.receiver(),
         );
@@ -670,11 +765,15 @@ impl MailxCore {
         &self,
         email_id: &str,
         settings: &TranslationSettings,
-        provider: TranslationProviderId,
-        key: &SecretValue,
+        service: Service<'_>,
         target: &str,
         cancel: watch::Receiver<bool>,
     ) -> Result<(), AppError> {
+        let Service {
+            provider,
+            key,
+            route,
+        } = service;
         // Local Sent copies have no message row to hang a cache entry on.
         if email_id.starts_with(LOCAL_SENT_PREFIX) {
             return Err(AppError::validation("emailId"));
@@ -737,6 +836,7 @@ impl MailxCore {
                 .call(
                     provider,
                     key,
+                    route,
                     settings,
                     &TranslateRequest {
                         texts: &items[range],

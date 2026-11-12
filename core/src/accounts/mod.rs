@@ -656,13 +656,17 @@ pub(crate) fn validate_email_id(value: &str) -> Result<(), AppError> {
         "emailId",
     )
 }
-fn valid_text(value: &str, maximum: usize) -> bool {
+/// Proxy sign-in limits, shared with the translation proxy settings.
+pub(crate) const MAX_PROXY_USERNAME_BYTES: usize = 255;
+pub(crate) const MAX_SECRET_BYTES: usize = 16384;
+
+pub(crate) fn valid_text(value: &str, maximum: usize) -> bool {
     !value.trim().is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
 }
 fn validate_secret(value: &SecretValue, field: &str) -> Result<(), AppError> {
     let text = value.expose_secret();
     if text.trim().is_empty()
-        || text.len() > 16384
+        || text.len() > MAX_SECRET_BYTES
         || text.chars().all(|c| c == '*' || c == '•')
         || text.contains('\0')
     {
@@ -743,7 +747,7 @@ fn validate_route(route: &mut RouteInput) -> Result<(), AppError> {
             return Err(AppError::validation("route.port"));
         }
         if let Some(auth) = authentication {
-            if !valid_text(&auth.username, 255) {
+            if !valid_text(&auth.username, MAX_PROXY_USERNAME_BYTES) {
                 return Err(AppError::validation("route.authentication.username"));
             }
             if let SecretUpdate::Replace { value } = &auth.password {

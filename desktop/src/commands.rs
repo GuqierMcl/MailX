@@ -1646,6 +1646,12 @@ struct SetTranslationKeyArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct SetTranslationProxyPasswordArgs {
+    password: mailx_core::secrets::SecretValue,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RemoveTranslationKeyArgs {
     provider: mailx_core::settings::TranslationProviderId,
 }
@@ -1806,6 +1812,59 @@ pub(crate) async fn translation_remove_key(
             let core = state.core()?;
             core.remove_translation_key(args.provider).await?;
             core.translation_keys().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_proxy_password")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.translation_proxy_password().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_set_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_set_proxy_password")
+        .and_then(|_| parse::<SetTranslationProxyPasswordArgs>(request.body()));
+    Ok(respond(
+        async {
+            state
+                .core()?
+                .set_translation_proxy_password(args?.password)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn translation_remove_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::TranslationProxyPasswordState>, ()> {
+    let args = authorize(&window, "translation_remove_proxy_password")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.core()?.remove_translation_proxy_password().await
         }
         .await,
     ))

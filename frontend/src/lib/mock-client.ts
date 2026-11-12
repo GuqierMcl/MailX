@@ -117,6 +117,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const MOCK_TRANSLATION_MS = 900
   // Keys live only in memory, like the real ones live only in the secret store: nothing reads them back out.
   const translationSecrets = new Map<TranslationProviderId, string>()
+  let proxyPassword: string | null = null
   const translations = new Map<string, { provider: TranslationProviderId; sourceLanguage: string | null; subject: string }>()
   const translationRuns = new Map<string, { cancel: () => void }>()
   const translationKey = (emailId: string, target: string) => `${emailId}|${target}|${settings.settings.translation.includeQuotes}`
@@ -741,6 +742,17 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       translationSecrets.delete(provider)
       return MOCK_TRANSLATION_KEYS.map((id) => ({ provider: id, configured: translationSecrets.has(id) }))
     },
+    translationProxyPassword: async () => ({ configured: proxyPassword !== null }),
+    setTranslationProxyPassword: async (password) => {
+      // Not trimmed: a password may start or end with a space.
+      if (!password || /\p{Cc}/u.test(password)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'translation.route.password' })
+      proxyPassword = password
+      return { configured: true }
+    },
+    removeTranslationProxyPassword: async () => {
+      proxyPassword = null
+      return { configured: false }
+    },
     // Browser preview only: a key containing "bad" is refused, so the failure text can be seen.
     testTranslation: async () => {
       await new Promise((resolve) => setTimeout(resolve, 500))
@@ -748,7 +760,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const key = provider ? translationSecrets.get(provider) : undefined
       if (!provider || key === undefined) throw translationFailure('translationNotConfigured')
       if (key.includes('bad')) throw translationFailure('translationKeyRejected')
-      if (route.kind === 'proxy' && route.host.includes('bad')) throw translationFailure('translationProxy')
+      if (route.kind === 'proxy' && (route.host.includes('bad') || (route.username !== '' && proxyPassword?.includes('bad')))) throw translationFailure('translationProxy')
       return { translated: resolvedTarget().startsWith('zh') ? '你好，这是一条测试。' : 'Hello, this is a test.' }
     },
     prepareBody: async (emailId, _images, translation) => {

@@ -315,7 +315,8 @@ impl TranslationProviderId {
 }
 
 /// How translation requests reach the service. The mail accounts' own proxies
-/// are never used. Proxy credentials are not supported in this version.
+/// are never used. The proxy password is a secret kept outside the settings;
+/// an empty `username` means no sign-in.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
@@ -329,6 +330,8 @@ pub enum TranslationRoute {
         proxy_kind: ProxyKind,
         host: String,
         port: u16,
+        #[serde(default)]
+        username: String,
     },
 }
 
@@ -376,6 +379,12 @@ impl Default for TranslationSettings {
     }
 }
 
+/// Same rule as a mail account's proxy username; empty means no sign-in.
+fn valid_proxy_username(username: &str) -> bool {
+    username.is_empty()
+        || crate::accounts::valid_text(username, crate::accounts::MAX_PROXY_USERNAME_BYTES)
+}
+
 fn normalize_language_codes(codes: &[String]) -> Option<Vec<String>> {
     if codes.len() > MAX_LANGUAGE_RULES {
         return None;
@@ -418,7 +427,13 @@ impl TranslationSettings {
         {
             return Err(AppError::validation("translation.microsoftRegion"));
         }
-        if let TranslationRoute::Proxy { host, port, .. } = &self.route {
+        if let TranslationRoute::Proxy {
+            host,
+            port,
+            username,
+            ..
+        } = &self.route
+        {
             let bad_host = host.is_empty()
                 || host.chars().count() > MAX_PROXY_HOST_CHARS
                 || host.chars().any(|c| c.is_whitespace() || c.is_control());
@@ -427,6 +442,9 @@ impl TranslationSettings {
             }
             if *port == 0 {
                 return Err(AppError::validation("translation.route.port"));
+            }
+            if !valid_proxy_username(username) {
+                return Err(AppError::validation("translation.route.username"));
             }
         }
         Ok(Self {
@@ -442,8 +460,16 @@ impl TranslationSettings {
         let mut never_suggest = normalize_language_codes(&self.never_suggest).unwrap_or_default();
         let always_translate = normalize_language_codes(&self.always_translate).unwrap_or_default();
         never_suggest.retain(|code| !always_translate.contains(code));
+        // A bad username is dropped alone: the proxy stays, so traffic never
+        // silently falls back to a direct connection.
+        let mut route = self.route.clone();
+        if let TranslationRoute::Proxy { username, .. } = &mut route
+            && !valid_proxy_username(username)
+        {
+            username.clear();
+        }
         let valid_route = Self {
-            route: self.route.clone(),
+            route: route.clone(),
             ..defaults.clone()
         }
         .normalized()
@@ -463,11 +489,7 @@ impl TranslationSettings {
             } else {
                 defaults.microsoft_region
             },
-            route: if valid_route {
-                self.route
-            } else {
-                defaults.route
-            },
+            route: if valid_route { route } else { defaults.route },
             target_language: if valid_target {
                 self.target_language
             } else {
@@ -495,6 +517,12 @@ fn repair_translation(value: &mut serde_json::Value) {
         v.as_array()
             .is_some_and(|a| a.iter().all(serde_json::Value::is_string))
     };
+    // A username of the wrong type loses only itself, not the proxy.
+    if let Some(route) = section.get_mut("route").and_then(|v| v.as_object_mut())
+        && route.get("username").is_some_and(|v| !v.is_string())
+    {
+        route.remove("username");
+    }
     section.retain(|key, v| match key.as_str() {
         "provider" | "consentedProvider" => is_provider(v),
         "route" => serde_json::from_value::<TranslationRoute>(v.clone()).is_ok(),

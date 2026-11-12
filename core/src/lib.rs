@@ -39,7 +39,8 @@ pub use app::{
     FlagBatchOutcome, FlagChange, MailxCore, MessageFlag, OAuthBrowserAuthorization,
     OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult, ProtocolVerification,
     RemoteImageStatus, TranslationCacheStats, TranslationInfo, TranslationKeyState,
-    TranslationStatus, TranslationTest, VerifyAccountConnection, VerifyDraftConnection,
+    TranslationProxyPasswordState, TranslationStatus, TranslationTest, VerifyAccountConnection,
+    VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

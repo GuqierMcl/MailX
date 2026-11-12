@@ -157,6 +157,7 @@ fn main() {
         TranslationRoute,
         TranslationSettings,
         TranslationKeyState,
+        TranslationProxyPasswordState,
         TranslationTest,
         TranslationStatus,
         TranslationInfo,

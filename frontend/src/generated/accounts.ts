@@ -789,7 +789,7 @@ export type DraftChanged = { draftId: string, accountId: string, change: DraftCh
 
 export type TranslationProviderId = "deepl" | "microsoft" | "google";
 
-export type TranslationRoute = { "kind": "direct" } | { "kind": "proxy", proxyKind: ProxyKind, host: string, port: number, };
+export type TranslationRoute = { "kind": "direct" } | { "kind": "proxy", proxyKind: ProxyKind, host: string, port: number, username: string, };
 
 export type TranslationSettings = {
 /**
@@ -822,6 +822,8 @@ alwaysTranslate: Array<string>,
 includeQuotes: boolean, consentedProvider: TranslationProviderId | null, };
 
 export type TranslationKeyState = { provider: TranslationProviderId, configured: boolean, };
+
+export type TranslationProxyPasswordState = { configured: boolean, };
 
 export type TranslationTest = { translated: string, };
 

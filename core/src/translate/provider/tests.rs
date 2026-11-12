@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -516,6 +517,91 @@ async fn the_request_goes_to_the_proxy_which_resolves_the_service_host() {
     assert_eq!(captured.lock().unwrap().len(), 1);
 }
 
+/// HTTP CONNECT proxy that records the whole CONNECT head, then forwards to
+/// `upstream`, or refuses with 407 when `refuse` is set.
+async fn recording_connect_proxy(upstream: u16, refuse: bool) -> (u16, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let heads = Arc::new(Mutex::new(Vec::new()));
+    let record = heads.clone();
+    tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.unwrap();
+        let head = read_request(&mut client).await.head;
+        record.lock().unwrap().push(head);
+        if refuse {
+            let _ = client
+                .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                .await;
+            return;
+        }
+        let mut server = tokio::net::TcpStream::connect(("127.0.0.1", upstream))
+            .await
+            .unwrap();
+        client.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+    });
+    (port, heads)
+}
+
+fn signed_route(port: u16, auth: Option<(&str, &str)>) -> NetRoute {
+    let mut route = proxy_route(ProxyKind::HttpConnect, port);
+    route.proxy.as_mut().unwrap().auth =
+        auth.map(|(user, password)| (user.to_owned(), SecretValue::new(password.to_owned())));
+    route
+}
+
+async fn deepl_through(route: &NetRoute, upstream: u16) -> Result<TranslateResponse, ErrorCode> {
+    let key = SecretValue::new(KEY.into());
+    let texts = texts();
+    translate(
+        TranslationProviderId::Deepl,
+        &context(&key, "", route, upstream),
+        &TranslateRequest {
+            texts: &texts,
+            target: "de",
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_signed_in_proxy_gets_basic_credentials_and_only_then() {
+    let answer = json!({"translations": [{"text": "a"}, {"text": "b"}]}).to_string();
+    for (auth, expected) in [
+        // A leading space and a colon in the password are sent as typed.
+        (Some((" alice", "s3:cret ")), Some(" alice:s3:cret ")),
+        (Some(("alice", "")), Some("alice:")),
+        (None, None),
+    ] {
+        let (upstream, _) = serve(vec![(200, answer.clone().into_bytes())]).await;
+        let (proxy_port, heads) = recording_connect_proxy(upstream, false).await;
+        let route = signed_route(proxy_port, auth);
+        let response = deepl_through(&route, upstream).await.unwrap();
+        assert_eq!(response.texts, ["a", "b"]);
+        let heads = heads.lock().unwrap();
+        let header = heads[0]
+            .lines()
+            .find_map(|line| line.strip_prefix("Proxy-Authorization: "));
+        let wanted = expected.map(|pair| format!("Basic {}", STANDARD.encode(pair)));
+        assert_eq!(header.map(str::to_owned), wanted, "{auth:?}");
+        // The service key never reaches the proxy, signed in or not.
+        assert!(!heads[0].contains(KEY));
+    }
+}
+
+#[tokio::test]
+async fn a_proxy_that_rejects_the_sign_in_is_a_proxy_error() {
+    let (upstream, captured) = serve(vec![(200, b"{}".to_vec())]).await;
+    let (proxy_port, heads) = recording_connect_proxy(upstream, true).await;
+    let route = signed_route(proxy_port, Some(("alice", "wrong")));
+    assert_eq!(
+        error_of(deepl_through(&route, upstream).await),
+        ErrorCode::TranslationProxy
+    );
+    assert_eq!(heads.lock().unwrap().len(), 1);
+    assert!(captured.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_refused_proxy_is_a_proxy_error_and_never_a_direct_connection() {
     let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -544,6 +630,12 @@ fn nothing_holding_a_key_prints_it() {
     let route = NetRoute::default();
     let context = context(&key, "", &route, 1);
     assert!(!format!("{context:?}").contains(KEY));
+    let signed = signed_route(1, Some(("alice", "s3cret-proxy")));
+    let with_password = super::Context {
+        route: &signed,
+        ..context
+    };
+    assert!(!format!("{with_password:?} {signed:?}").contains("s3cret-proxy"));
     let header = http::secret_header(KEY).unwrap();
     assert!(!format!("{header:?}").contains(KEY));
 }

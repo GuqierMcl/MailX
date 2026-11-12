@@ -207,7 +207,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | 命令 | main | composer | 说明 |
 | --- | --- | --- | --- |
 | `accounts_list`、`settings_get`、`window_get_chrome`、`window_perform`、`window_set_theme` | 是 | 是 | 窗口命令只作用于调用窗口 |
-| `translation_status`、`translation_translate`、`translation_cancel`、`translation_clear`、`translation_clear_all`、`translation_cache_stats`、`translation_keys`、`translation_set_key`、`translation_remove_key`、`translation_test` | 是 | 否 | 仅 main 的 capability（`capabilities/main.json`）授予；写信窗口没有这些权限，见“邮件翻译（主窗口）” |
+| `translation_status`、`translation_translate`、`translation_cancel`、`translation_clear`、`translation_clear_all`、`translation_cache_stats`、`translation_keys`、`translation_set_key`、`translation_remove_key`、`translation_proxy_password`、`translation_set_proxy_password`、`translation_remove_proxy_password`、`translation_test` | 是 | 否 | 仅 main 的 capability（`capabilities/main.json`）授予；写信窗口没有这些权限，见“邮件翻译（主窗口）” |
 | `drafts_get`、`drafts_update`、`drafts_delete` | 是 | 仅自己的草稿 | 草稿 id 必须等于窗口标签里的 id，否则拒绝 |
 | `drafts_prepare_body { draftId, expectedRevision }` | 是 | 否 | 为已保存版本创建只读正文令牌；HTML、内嵌图片及链接使用隔离正文协议，见“按需正文与外链” |
 | `attachments_add { request: { draftId, expectedRevision } }`、`attachments_add_dropped { request: { draftId, expectedRevision } }`、`attachments_remove { request: { draftId, attachmentId, expectedRevision } }` | 否（`validation`） | 仅自己的草稿 | 请求里没有本地路径：`attachments_add` 由宿主打开系统多选对话框（取消返回 `null`），`attachments_add_dropped` 认领宿主收到的系统文件拖入（`composer://files-dropped` 通知页面，无载荷；没有待认领路径返回 `null`）。均返回最新 `Draft`；已入队的草稿返回 `draftLocked`，revision 不符返回 `conflict`，超限返回 `attachmentTooLarge` / `tooManyAttachments` |
@@ -559,9 +559,12 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 | `translationKeys()` | `translation_keys`，`{}` | `TranslationKeyState[]` |
 | `setTranslationKey(provider, key)` | `translation_set_key`，`{ provider, key }` | `TranslationKeyState[]`（更新后的状态） |
 | `removeTranslationKey(provider)` | `translation_remove_key`，`{ provider }` | `TranslationKeyState[]` |
+| `translationProxyPassword()` | `translation_proxy_password`，`{}` | `TranslationProxyPasswordState { configured }` |
+| `setTranslationProxyPassword(password)` | `translation_set_proxy_password`，`{ password }` | `TranslationProxyPasswordState`（更新后的状态）；不去首尾空白，空值、控制字符、超过 16384 字节返回 `validation`（字段 `translation.route.password`） |
+| `removeTranslationProxyPassword()` | `translation_remove_proxy_password`，`{}` | `TranslationProxyPasswordState` |
 | `testTranslation()` | `translation_test`，`{}` | `TranslationTest` |
 
-宿主处理这些命令时始终使用**已保存**的设置和当前界面语言，调用方不能在命令里传入服务、路由或同意状态。没有任何命令返回密钥。
+宿主处理这些命令时始终使用**已保存**的设置和当前界面语言，调用方不能在命令里传入服务、路由或同意状态。没有任何命令返回密钥或代理密码。代理密码只存在于凭据库（`mailx/translation/proxy-password`）；路由里的 `username` 非空时，翻译与测试请求才读取它并登录代理，没存密码时使用空密码，凭据库不可用时请求以对应错误失败，不会不登录就发出。
 
 ```ts
 type TranslationProviderId = "deepl" | "microsoft" | "google";
@@ -598,7 +601,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | --- | --- | --- |
 | `provider` | `deepl` / `microsoft` / `google` / `null`，默认 `null` | 所选翻译服务 |
 | `microsoftRegion` | 字符串，默认 `""`，最多 40 字符 | Azure 资源区域，仅 Microsoft 使用，空表示全局资源 |
-| `route` | `{ kind: "direct" }`（默认）或 `{ kind: "proxy", proxyKind, host, port }` | 翻译专用路由；不使用邮箱账号的代理；本版无代理用户名 / 密码；代理失败不回退直连 |
+| `route` | `{ kind: "direct" }`（默认）或 `{ kind: "proxy", proxyKind, host, port, username }` | 翻译专用路由；不使用邮箱账号的代理；`username` 默认 `""`（旧文件缺省时同），空表示不登录，非空时与存放在凭据库的代理密码一起登录，规则同账号代理用户名（非空白、最多 255 字节、无控制字符）；代理失败或拒绝登录不回退直连 |
 | `targetLanguage` | `auto`（默认，跟随界面语言）或 26 种目标之一 | `zh-Hans`、`zh-Hant`、`en`、`ja`、`ko`、`fr`、`de`、`es`、`pt`、`it`、`ru`、`nl`、`pl`、`tr`、`ar`、`id`、`uk`、`sv`、`da`、`fi`、`cs`、`el`、`hu`、`ro`、`bg`、`nb` |
 | `suggest` | 布尔，默认 true | 是否显示邮件语言提示 |
 | `neverSuggest` | 小写语言码数组，默认 `[]`，最多 64 项 | 不再提示的语言 |
@@ -606,7 +609,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | `includeQuotes` | 布尔，默认 false | 是否翻译已折叠的引用内容 |
 | `consentedProvider` | 服务 id 或 `null` | 用户已同意向其发送邮件文字的服务；与 `provider` 不同时同意无效 |
 
-校验失败返回 `validation`，字段如 `translation.targetLanguage`、`translation.neverSuggest`、`translation.alwaysTranslate`、`translation.microsoftRegion`、`translation.route.host`、`translation.route.port`，不落盘。旧文件缺少该节时使用默认值；文件中类型或取值非法的单个字段回到默认并保留其余设置。这是设置文件扩展。
+校验失败返回 `validation`，字段如 `translation.targetLanguage`、`translation.neverSuggest`、`translation.alwaysTranslate`、`translation.microsoftRegion`、`translation.route.host`、`translation.route.port`、`translation.route.username`，不落盘。旧文件缺少该节时使用默认值；文件中类型或取值非法的单个字段回到默认并保留其余设置；非法的 `route.username` 只回到空，代理本身保留。这是设置文件扩展。
 
 翻译缓存表 `message_translations`（迁移 0029）见[存储与搜索](../architecture/storage-search.md)与[数据库迁移](../architecture/database-migrations.md)。
 

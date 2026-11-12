@@ -7,6 +7,7 @@ use tempfile::TempDir;
 use tokio::sync::Notify;
 
 use super::*;
+use crate::accounts::MAX_SECRET_BYTES;
 use crate::secrets::test_support::MemorySecrets;
 
 const KEY: &str = "sk-service-test-key";
@@ -368,10 +369,12 @@ async fn the_route_comes_from_the_translation_settings() {
         proxy_kind: crate::accounts::types::ProxyKind::Socks5,
         host: "proxy.example".into(),
         port: 1080,
+        username: String::new(),
     };
     translate_to_de(&f, 0, &s).await.unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls[0].proxy, Some(("proxy.example".into(), 1080)));
+    assert_eq!(calls[0].proxy_auth, None);
     assert_eq!(calls[0].region, "westeurope");
     assert_eq!(calls[0].provider, TranslationProviderId::Microsoft);
 }
@@ -955,6 +958,219 @@ async fn keys_are_trimmed_validated_listed_and_never_returned() {
         .await
         .unwrap();
     assert!(!f.core.translation_keys().await.unwrap()[1].configured);
+}
+
+const PROXY_PASSWORD: &str = " p@ss word ";
+
+fn signed_in(username: &str) -> TranslationSettings {
+    let mut s = settings(TranslationProviderId::Deepl);
+    s.route = TranslationRoute::Proxy {
+        proxy_kind: crate::accounts::types::ProxyKind::HttpConnect,
+        host: "proxy.example".into(),
+        port: 8080,
+        username: username.into(),
+    };
+    s
+}
+
+#[tokio::test]
+async fn the_proxy_password_is_validated_stored_and_never_returned() {
+    let f = fixture(&["<p>Hello</p>"]);
+    assert!(
+        !f.core
+            .translation_proxy_password()
+            .await
+            .unwrap()
+            .configured
+    );
+
+    let state = f
+        .core
+        .set_translation_proxy_password(SecretValue::new(PROXY_PASSWORD.into()))
+        .await
+        .unwrap();
+    assert!(state.configured);
+    // Stored as typed, without trimming, under its own name.
+    assert_eq!(
+        f.secrets
+            .get("mailx/translation/proxy-password")
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        PROXY_PASSWORD
+    );
+    assert!(
+        f.core
+            .translation_proxy_password()
+            .await
+            .unwrap()
+            .configured
+    );
+    assert!(f.secrets.get("mailx/translation/deepl").unwrap().is_none());
+    let shown = format!("{state:?}{}", serde_json::to_string(&state).unwrap());
+    assert!(!shown.contains("p@ss"));
+    assert_eq!(
+        serde_json::to_value(state).unwrap(),
+        serde_json::json!({"configured": true})
+    );
+
+    let too_long = "p".repeat(MAX_SECRET_BYTES + 1);
+    for bad in ["", "a\nb", "a\tb", "a\u{0}b", too_long.as_str()] {
+        let error = f
+            .core
+            .set_translation_proxy_password(SecretValue::new(bad.into()))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::Validation, Some("translation.route.password"))
+        );
+        assert!(!format!("{error:?} {error}").contains("pppp"));
+    }
+    // Rejected input leaves the stored password alone.
+    assert_eq!(
+        f.secrets
+            .get("mailx/translation/proxy-password")
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        PROXY_PASSWORD
+    );
+    f.core
+        .set_translation_proxy_password(SecretValue::new("p".repeat(MAX_SECRET_BYTES)))
+        .await
+        .unwrap();
+
+    assert!(
+        !f.core
+            .remove_translation_proxy_password()
+            .await
+            .unwrap()
+            .configured
+    );
+    assert!(
+        !f.core
+            .remove_translation_proxy_password()
+            .await
+            .unwrap()
+            .configured
+    );
+    assert!(
+        f.secrets
+            .get("mailx/translation/proxy-password")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn the_request_signs_in_to_the_proxy_only_with_a_username() {
+    let f = fixture(&["<p>Hello</p>"]);
+    let calls = echo(&f);
+    with_key(&f, TranslationProviderId::Deepl).await;
+
+    // A username without a stored password signs in with an empty one.
+    translate_to_de(&f, 0, &signed_in("alice")).await.unwrap();
+    f.core.clear_translations().await.unwrap();
+    f.core
+        .set_translation_proxy_password(SecretValue::new(PROXY_PASSWORD.into()))
+        .await
+        .unwrap();
+    translate_to_de(&f, 0, &signed_in("alice")).await.unwrap();
+    f.core.test_translation(signed_in("bob")).await.unwrap();
+    // A stored password alone is ignored, on a proxy and on a direct route.
+    f.core.test_translation(signed_in("")).await.unwrap();
+    let mut direct = signed_in("alice");
+    direct.route = TranslationRoute::Direct;
+    f.core.test_translation(direct).await.unwrap();
+
+    let seen: Vec<_> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|call| (call.proxy.is_some(), call.proxy_auth.clone()))
+        .collect();
+    let pair = |user: &str, password: &str| Some((user.to_owned(), password.to_owned()));
+    assert_eq!(
+        seen,
+        [
+            (true, pair("alice", "")),
+            (true, pair("alice", PROXY_PASSWORD)),
+            (true, pair("bob", PROXY_PASSWORD)),
+            (true, None),
+            (false, None),
+        ]
+    );
+}
+
+/// A store that refuses to read one name, like a locked keychain.
+struct LockedFor {
+    inner: MemorySecrets,
+    name: &'static str,
+}
+
+impl SecretStore for LockedFor {
+    fn get(&self, key: &str) -> Result<Option<SecretValue>, crate::secrets::SecretStoreError> {
+        if key == self.name {
+            return Err(crate::secrets::SecretStoreError::Locked);
+        }
+        self.inner.get(key)
+    }
+    fn set(&self, key: &str, value: &SecretValue) -> Result<(), crate::secrets::SecretStoreError> {
+        self.inner.set(key, value)
+    }
+    fn delete(&self, key: &str) -> Result<(), crate::secrets::SecretStoreError> {
+        self.inner.delete(key)
+    }
+}
+
+#[tokio::test]
+async fn a_locked_store_with_a_username_fails_without_calling_the_service() {
+    let directory = TempDir::new().unwrap();
+    let store = Arc::new(LockedFor {
+        inner: MemorySecrets::default(),
+        name: "mailx/translation/proxy-password",
+    });
+    store
+        .set("mailx/translation/deepl", &SecretValue::new(KEY.into()))
+        .unwrap();
+    let raw = mail("<p>Hello</p>");
+    let (core, ids) = MailxCore::body_test_fixture_with_secrets(
+        directory.path(),
+        tokio::runtime::Handle::current(),
+        &[raw.as_slice()],
+        store,
+    )
+    .unwrap();
+    let calls: Calls = Arc::default();
+    let record = calls.clone();
+    core.translation
+        .set_backend(Arc::new(move |call: TestCall| {
+            record.lock().unwrap().push(call);
+            Box::pin(async {
+                Ok(TranslateResponse {
+                    texts: vec![],
+                    detected_source: None,
+                })
+            })
+        }));
+
+    let translated = core
+        .translate_email(ids[0].clone(), signed_in("alice"), "en".into(), None)
+        .await;
+    assert_eq!(code(translated), ErrorCode::SecretStoreLocked);
+    assert_eq!(
+        code(core.test_translation(signed_in("alice")).await),
+        ErrorCode::SecretStoreLocked
+    );
+    assert_eq!(
+        code(core.translation_proxy_password().await),
+        ErrorCode::SecretStoreLocked
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    // Without a username the password is never read.
+    core.test_translation(signed_in("")).await.unwrap_err();
+    assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

@@ -97,7 +97,7 @@ MailX sends the message's subject and text to the service you chose, and only af
 
 ### Use a proxy for translation
 
-Translation connects directly by default. Under Settings → Translation → Connection you can choose "Through a proxy" (SOCKS5 or HTTP) that is used only for translation; proxy usernames and passwords are not supported yet. The proxy you set on a mail account is not used for translation. If the proxy cannot connect, translation fails with an error and never quietly connects directly.
+Translation connects directly by default. Most people never need to change this, so it sits in the "Advanced" group at the bottom of Settings → Translation, which is folded until you open it; while it is folded, it shows the current connection ("Direct connection" or "Through proxy host:port") next to its title. Open it and choose "Through a proxy" under "Connection" (SOCKS5 or HTTP) to use a proxy only for translation. If your proxy asks you to sign in, fill in "Username" and "Password"; they are optional, and most proxies on this computer do not need them. The password is kept on this device, is never shown again, and is only used together with a username. The proxy you set on a mail account is not used for translation. If the proxy cannot connect or does not accept the sign-in, translation fails with an error and never quietly connects directly.
 
 ### Saved translations
 

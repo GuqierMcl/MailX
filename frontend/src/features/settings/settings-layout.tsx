@@ -1,4 +1,7 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet, FieldTitle } from '@/components/ui/field'
 
 /**
@@ -35,6 +38,32 @@ export function SettingsGroup({ title, badge, description, children }: {
         {description && <FieldDescription className="-mt-2">{description}</FieldDescription>}
         <FieldGroup>{children}</FieldGroup>
       </FieldSet>
+    </section>
+  )
+}
+
+/**
+ * A group that starts folded, for settings most people never need. The header
+ * looks like a group title and is the toggle; `summary` stays visible beside it
+ * while folded. The state is not remembered: the group is folded on every visit.
+ */
+export function SettingsDisclosure({ title, summary, children }: {
+  title: ReactNode
+  summary?: ReactNode
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="border-t pt-6">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="group/disclosure flex w-full items-center gap-2 rounded-md text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
+          {title}
+          {!open && summary && <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{summary}</span>}
+          <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} aria-hidden
+            className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/disclosure:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-6"><FieldGroup>{children}</FieldGroup></CollapsibleContent>
+      </Collapsible>
     </section>
   )
 }

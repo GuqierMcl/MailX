@@ -19,6 +19,9 @@ async function setup(translation: Partial<TranslationSettings> = {}, keys: Trans
 }
 
 const failure = (code: 'translationKeyRejected' | 'translationNetwork') => new MailxClientError({ code, message: 'x', field: null })
+const openAdvanced = async (name: string | RegExp = /^高级/) => {
+  await userEvent.click(await screen.findByRole('button', { name }))
+}
 const choose = async (trigger: string | RegExp, option: string) => {
   await userEvent.click(await screen.findByRole('combobox', { name: trigger }))
   await userEvent.click(await screen.findByRole('option', { name: option }))
@@ -121,7 +124,8 @@ describe('translation settings: region, test and network', () => {
 
   it('saves a proxy only once the address and port are valid, and direct at once', async () => {
     const { client, saved } = await setup()
-    await choose('网络', '通过代理')
+    await openAdvanced()
+    await choose('连接方式', '通过代理')
     expect(await screen.findByRole('alert')).toHaveTextContent('端口为 1 到 65535')
     expect(client.updateSettings).not.toHaveBeenCalled()
     const host = screen.getByLabelText('代理地址')
@@ -134,13 +138,158 @@ describe('translation settings: region, test and network', () => {
     await userEvent.clear(port)
     await userEvent.type(port, '1080')
     await userEvent.tab()
-    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { kind: 'proxy', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080 } })))
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { kind: 'proxy', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080, username: '' } })))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     await choose('代理类型', 'HTTP')
-    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { kind: 'proxy', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 1080 } })))
-    await choose('网络', '直接连接')
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { kind: 'proxy', proxyKind: 'httpConnect', host: 'proxy.example.com', port: 1080, username: '' } })))
+    await choose('连接方式', '直接连接')
     await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { kind: 'direct' } })))
     expect(screen.queryByLabelText('代理地址')).not.toBeInTheDocument()
+  })
+})
+
+const PROXY: TranslationSettings['route'] = { kind: 'proxy', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080, username: '' }
+
+describe('translation settings: the advanced group', () => {
+  it('is folded by default, with the network controls out of reach and the connection in view', async () => {
+    await setup()
+    const toggle = await screen.findByRole('button', { name: /^高级/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent('直接连接')
+    expect(screen.queryByRole('combobox', { name: '连接方式' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('代理地址')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('用户名')).not.toBeInTheDocument()
+    // The service group no longer carries the network rows.
+    expect(screen.getByRole('combobox', { name: '服务' })).toBeInTheDocument()
+  })
+
+  it('shows the proxy address while folded and the rows once opened', async () => {
+    await setup({ route: PROXY })
+    const toggle = await screen.findByRole('button', { name: /^高级/ })
+    expect(toggle).toHaveTextContent('通过代理 proxy.example.com:1080')
+    expect(screen.queryByLabelText('代理地址')).not.toBeInTheDocument()
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByLabelText('代理地址')).toHaveValue('proxy.example.com')
+    expect(screen.getByLabelText('端口')).toHaveValue('1080')
+    expect(screen.getByRole('combobox', { name: '连接方式' })).toHaveTextContent('通过代理')
+    expect(toggle).not.toHaveTextContent('proxy.example.com:1080')
+    await userEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByLabelText('代理地址')).not.toBeInTheDocument())
+    expect(toggle).toHaveTextContent('通过代理 proxy.example.com:1080')
+  })
+
+  it('opens from the keyboard', async () => {
+    await setup()
+    const toggle = await screen.findByRole('button', { name: /^高级/ })
+    toggle.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByRole('combobox', { name: '连接方式' })).toBeInTheDocument()
+    await userEvent.keyboard(' ')
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: '连接方式' })).not.toBeInTheDocument())
+  })
+
+  it('saves the username with the route and clears it again', async () => {
+    const { client, saved } = await setup({ route: PROXY })
+    await openAdvanced()
+    expect(screen.getByText('代理需要登录时才填写；多数本机代理不需要。')).toBeInTheDocument()
+    await userEvent.type(await screen.findByLabelText('用户名'), 'alice')
+    expect(client.updateSettings).not.toHaveBeenCalled()
+    await userEvent.tab()
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { ...PROXY, username: 'alice' } })))
+    await userEvent.clear(screen.getByLabelText('用户名'))
+    await userEvent.tab()
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { ...PROXY, username: '' } })))
+  })
+
+  it('waits for a valid address and port before saving a username', async () => {
+    const { client, saved } = await setup()
+    await openAdvanced()
+    await choose('连接方式', '通过代理')
+    await userEvent.type(screen.getByLabelText('用户名'), 'alice')
+    await userEvent.tab()
+    expect(client.updateSettings).not.toHaveBeenCalled()
+    await userEvent.type(screen.getByLabelText('代理地址'), 'proxy.example.com')
+    await userEvent.type(screen.getByLabelText('端口'), '1080')
+    await userEvent.tab()
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { ...PROXY, username: 'alice' } })))
+  })
+
+  it('takes a password only once there is a username', async () => {
+    await setup({ route: PROXY })
+    await openAdvanced()
+    const password = await screen.findByLabelText('密码')
+    expect(password).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.getByText('先填写用户名，密码才会被使用。')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('用户名'), 'alice')
+    expect(screen.getByLabelText('密码')).toBeEnabled()
+    expect(screen.queryByText('先填写用户名，密码才会被使用。')).not.toBeInTheDocument()
+  })
+
+  it('saves, replaces and removes the password without ever showing it again', async () => {
+    const { client } = await setup({ route: { ...PROXY, username: 'alice' } })
+    client.setTranslationProxyPassword.mockResolvedValue({ configured: true })
+    await openAdvanced()
+    const input = await screen.findByLabelText('密码')
+    expect(input).toHaveAttribute('type', 'password')
+    expect(input).toHaveAttribute('autocomplete', 'off')
+    await userEvent.type(input, ' pw one ')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    // Sent as typed, spaces included.
+    expect(client.setTranslationProxyPassword).toHaveBeenCalledExactlyOnceWith(' pw one ')
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    expect(screen.queryByLabelText('密码')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue(' pw one ')).not.toBeInTheDocument()
+    expect(document.body.innerHTML).not.toContain('pw one')
+
+    await userEvent.click(screen.getByRole('button', { name: '更换' }))
+    const again = await screen.findByLabelText('密码')
+    expect(again).toHaveValue('')
+    await userEvent.type(again, 'pw-two')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(client.setTranslationProxyPassword).toHaveBeenLastCalledWith('pw-two')
+    await screen.findByText('已保存')
+    expect(document.body.innerHTML).not.toContain('pw-two')
+
+    client.removeTranslationProxyPassword.mockResolvedValue({ configured: false })
+    await userEvent.click(screen.getByRole('button', { name: '移除' }))
+    expect(client.removeTranslationProxyPassword).toHaveBeenCalledOnce()
+    expect(await screen.findByLabelText('密码')).toHaveValue('')
+  })
+
+  it('shows a failed password save in place and keeps nothing in the field', async () => {
+    const { client } = await setup({ route: { ...PROXY, username: 'alice' } })
+    client.setTranslationProxyPassword.mockRejectedValue(failure('translationNetwork'))
+    await openAdvanced()
+    await userEvent.type(await screen.findByLabelText('密码'), 'nope')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法连接翻译服务')
+    expect(screen.getByLabelText('密码')).toHaveValue('')
+  })
+
+  it('reads in plain English', async () => {
+    await i18n.changeLanguage('en')
+    const { client, saved } = await setup({ route: PROXY })
+    const toggle = await screen.findByRole('button', { name: /^Advanced/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent('Through proxy proxy.example.com:1080')
+    await userEvent.click(toggle)
+    expect(await screen.findByRole('combobox', { name: 'Connection' })).toHaveTextContent('Through a proxy')
+    expect(screen.getByText('Only needed if your proxy asks you to sign in; most proxies on this computer don\'t.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeDisabled()
+    expect(screen.getByText('Enter a username first; a password is only used together with one.')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Username'), 'alice')
+    await userEvent.tab()
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ route: { ...PROXY, username: 'alice' } })))
+    await userEvent.type(screen.getByLabelText('Password'), 'pw')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(client.setTranslationProxyPassword).toHaveBeenCalledExactlyOnceWith('pw')
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Replace' })).toBeEnabled()
+    client.removeTranslationProxyPassword.mockResolvedValue({ configured: false })
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByLabelText('Password')).toHaveValue('')
   })
 })
 

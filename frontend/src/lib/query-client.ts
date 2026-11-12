@@ -58,4 +58,5 @@ export const translationKeys = {
   all: ['translation'] as const,
   keys: () => [...translationKeys.all, 'keys'] as const,
   cache: () => [...translationKeys.all, 'cache'] as const,
+  proxyPassword: () => [...translationKeys.all, 'proxyPassword'] as const,
 }

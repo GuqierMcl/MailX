@@ -10,11 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import type { ProxyKind, TranslationProviderId, TranslationSettings } from '@/generated/accounts'
+import type { ProxyKind, TranslationKeyState, TranslationProviderId, TranslationProxyPasswordState, TranslationSettings } from '@/generated/accounts'
 import { COMMON_LANGUAGES, languageName, nativeLanguageName, TRANSLATION_PROVIDER_NAMES, TRANSLATION_TARGETS } from '@/features/mail/translation/languages'
 import type { MailxClient } from '@/lib/mailx-client'
 import { translationKeys } from '@/lib/query-client'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateTranslation } from './settings-queries'
 
 /** What the core accepts for the Microsoft resource region. */
@@ -40,6 +40,7 @@ export function TranslationPane({ client }: { client: MailxClient }) {
     <TranslateGroup translation={translation} update={update} />
     <ForeignGroup translation={translation} update={update} />
     <SavedGroup client={client} />
+    <AdvancedGroup client={client} translation={translation} update={update} />
   </SettingsPage>
 }
 
@@ -62,7 +63,6 @@ function ServiceGroup({ client, translation, update }: { client: MailxClient; tr
       {provider === 'microsoft' && <RegionRow region={translation.microsoftRegion} update={update} />}
       <TestRow key={`${provider}:${configured}`} client={client} configured={configured} />
     </>}
-    <NetworkRows route={translation.route} update={update} />
   </SettingsGroup>
 }
 
@@ -70,40 +70,53 @@ function ServiceGroup({ client, translation, update }: { client: MailxClient; tr
 function KeyRow({ client, provider, configured }: { client: MailxClient; provider: TranslationProviderId; configured: boolean }) {
   useTranslation()
   const queryClient = useQueryClient()
+  const publish = (states: TranslationKeyState[]) => queryClient.setQueryData(translationKeys.keys(), states)
+  return <StoredSecretRow id="translation.key" label={t('settings:translationKey')} description={t('settings:translationKeyDescription')}
+    placeholder={t('settings:translationKeyPlaceholder')} configured={configured} trim
+    onSave={(value) => client.setTranslationKey(provider, value).then(publish)} onRemove={() => client.removeTranslationKey(provider).then(publish)} />
+}
+
+/**
+ * A secret typed once: not saved, a password field and Save; saved, only "Saved" with Replace and Remove.
+ * The value never outlives the save attempt in the page, and a failed save keeps nothing in the field.
+ * A key is trimmed; a password is stored as typed.
+ */
+function StoredSecretRow({ id, label, description, placeholder, configured, trim = false, disabled = false, onSave, onRemove }: {
+  id: string; label: string; description?: string; placeholder: string; configured: boolean; trim?: boolean; disabled?: boolean
+  onSave: (value: string) => Promise<unknown>; onRemove: () => Promise<unknown>
+}) {
+  useTranslation()
   const [replacing, setReplacing] = useState(false)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  const publish = (states: Awaited<ReturnType<MailxClient['setTranslationKey']>>) => queryClient.setQueryData(translationKeys.keys(), states)
+  const ready = (trim ? value.trim() : value) !== ''
   const save = (event: FormEvent) => {
     event.preventDefault()
-    if (!value.trim() || busy) return
+    if (!ready || busy || disabled) return
     setBusy(true)
     setFailure(null)
-    client.setTranslationKey(provider, value.trim()).then((states) => {
-      publish(states)
-      setReplacing(false)
-    }, (error: unknown) => setFailure(errorText(error))).finally(() => { setValue(''); setBusy(false) })
+    onSave(trim ? value.trim() : value).then(() => setReplacing(false), (error: unknown) => setFailure(errorText(error))).finally(() => { setValue(''); setBusy(false) })
   }
   const remove = () => {
     setBusy(true)
     setFailure(null)
-    client.removeTranslationKey(provider).then(publish, (error: unknown) => setFailure(errorText(error))).finally(() => setBusy(false))
+    onRemove().catch((error: unknown) => setFailure(errorText(error))).finally(() => setBusy(false))
   }
   const showSaved = configured && !replacing
-  return <SettingsRow label={t('settings:translationKey')} htmlFor={showSaved ? undefined : 'translation.key'} description={t('settings:translationKeyDescription')}>
+  return <SettingsRow label={label} htmlFor={showSaved ? undefined : id} description={description}>
     <div className="flex flex-col items-end gap-1">
       {showSaved ? (
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{t('settings:translationKeySaved')}</span>
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => setReplacing(true)}>{t('settings:translationKeyReplace')}</Button>
+          <Button variant="outline" size="sm" disabled={busy || disabled} onClick={() => setReplacing(true)}>{t('settings:translationKeyReplace')}</Button>
           <Button variant="outline" size="sm" disabled={busy} onClick={remove}>{t('settings:translationKeyRemove')}</Button>
         </div>
       ) : (
         <form className="flex items-center gap-2" onSubmit={save}>
-          <Input id="translation.key" type="password" autoComplete="off" spellCheck={false} className="w-48" value={value} disabled={busy}
-            placeholder={t('settings:translationKeyPlaceholder')} aria-invalid={failure !== null || undefined} onChange={(event) => setValue(event.target.value)} />
-          <Button type="submit" variant="outline" size="sm" disabled={busy || !value.trim()}>{t('settings:translationKeySave')}</Button>
+          <Input id={id} type="password" autoComplete="off" spellCheck={false} className="w-48" value={value} disabled={busy || disabled}
+            placeholder={placeholder} aria-invalid={failure !== null || undefined} onChange={(event) => setValue(event.target.value)} />
+          <Button type="submit" variant="outline" size="sm" disabled={busy || disabled || !ready}>{t('settings:translationKeySave')}</Button>
           {replacing && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { setReplacing(false); setValue(''); setFailure(null) }}>{t('settings:translationKeyCancel')}</Button>}
         </form>
       )}
@@ -147,23 +160,38 @@ function TestRow({ client, configured }: { client: MailxClient; configured: bool
   </SettingsRow>
 }
 
-function NetworkRows({ route, update }: { route: TranslationSettings['route']; update: Update }) {
+/** The connection is the only advanced setting for now; most people never open this, so it says where it points while folded. */
+function AdvancedGroup({ client, translation, update }: { client: MailxClient; translation: TranslationSettings; update: Update }) {
+  useTranslation()
+  const { route } = translation
+  const summary = route.kind === 'proxy' ? t('settings:translationAdvancedProxy', { host: route.host, port: route.port }) : t('settings:translationNetworkDirect')
+  return <SettingsDisclosure title={t('settings:translationAdvanced')} summary={summary}>
+    <NetworkRows client={client} route={route} update={update} />
+  </SettingsDisclosure>
+}
+
+type NetworkEdit = { mode?: 'direct' | 'proxy'; proxyKind?: ProxyKind; host?: string; port?: string; username?: string }
+
+function NetworkRows({ client, route, update }: { client: MailxClient; route: TranslationSettings['route']; update: Update }) {
   useTranslation()
   const [mode, setMode] = useState<'direct' | 'proxy'>(route.kind)
   const [proxyKind, setProxyKind] = useState<ProxyKind>(route.kind === 'proxy' ? route.proxyKind : 'socks5')
   const [host, setHost] = useState(route.kind === 'proxy' ? route.host : '')
   const [port, setPort] = useState(route.kind === 'proxy' ? String(route.port) : '')
+  const [username, setUsername] = useState(route.kind === 'proxy' ? route.username : '')
   const modes: Record<string, string> = { direct: t('settings:translationNetworkDirect'), proxy: t('settings:translationNetworkProxy') }
   const kinds: Record<string, string> = { socks5: 'SOCKS5', httpConnect: 'HTTP' }
   const portNumber = /^\d{1,5}$/.test(port.trim()) ? Number(port.trim()) : 0
   const complete = host.trim() !== '' && portNumber >= 1 && portNumber <= 65535
   // Nothing half-filled is ever saved: until the address and port are right, the saved route stays as it was.
-  const commit = (next: { mode?: 'direct' | 'proxy'; proxyKind?: ProxyKind; host?: string; port?: string }) => {
+  const commit = (next: NetworkEdit) => {
     const kind = next.mode ?? mode
     if (kind === 'direct') { update.mutate({ route: { kind: 'direct' } }); return }
     const nextHost = (next.host ?? host).trim()
     const nextPort = /^\d{1,5}$/.test((next.port ?? port).trim()) ? Number((next.port ?? port).trim()) : 0
-    if (nextHost && nextPort >= 1 && nextPort <= 65535) update.mutate({ route: { kind: 'proxy', proxyKind: next.proxyKind ?? proxyKind, host: nextHost, port: nextPort } })
+    if (nextHost && nextPort >= 1 && nextPort <= 65535) {
+      update.mutate({ route: { kind: 'proxy', proxyKind: next.proxyKind ?? proxyKind, host: nextHost, port: nextPort, username: (next.username ?? username).trim() } })
+    }
   }
   return <>
     <SettingsRow label={t('settings:translationNetwork')} htmlFor="translation.network" description={t('settings:translationNetworkDescription')}>
@@ -198,8 +226,25 @@ function NetworkRows({ route, update }: { route: TranslationSettings['route']; u
           {!complete && <p role="alert" className="max-w-56 text-right text-xs text-destructive">{t('settings:translationProxyInvalid')}</p>}
         </div>
       </SettingsRow>
+      <SettingsRow label={t('settings:translationProxyUser')} htmlFor="translation.proxyUser" description={t('settings:translationProxyUserDescription')}>
+        <Input id="translation.proxyUser" className="w-56" value={username} autoComplete="off" spellCheck={false}
+          onChange={(event) => setUsername(event.target.value)} onBlur={() => commit({})} />
+      </SettingsRow>
+      <ProxyPasswordRow client={client} hasUsername={username.trim() !== ''} />
     </>}
   </>
+}
+
+/** Stored apart from the settings and never read back; without a username it would not be used, so it cannot be set. */
+function ProxyPasswordRow({ client, hasUsername }: { client: MailxClient; hasUsername: boolean }) {
+  useTranslation()
+  const queryClient = useQueryClient()
+  const state = useQuery({ queryKey: translationKeys.proxyPassword(), queryFn: () => client.translationProxyPassword() })
+  const publish = (next: TranslationProxyPasswordState) => queryClient.setQueryData(translationKeys.proxyPassword(), next)
+  return <StoredSecretRow id="translation.proxyPassword" label={t('settings:translationProxyPassword')}
+    description={hasUsername ? undefined : t('settings:translationProxyPasswordNeedsUser')} placeholder={t('settings:translationProxyPasswordPlaceholder')}
+    configured={state.data?.configured ?? false} disabled={!hasUsername}
+    onSave={(value) => client.setTranslationProxyPassword(value).then(publish)} onRemove={() => client.removeTranslationProxyPassword().then(publish)} />
 }
 
 function TranslateGroup({ translation, update }: { translation: TranslationSettings; update: Update }) {

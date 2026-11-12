@@ -63,7 +63,8 @@ pub use organize::{
     ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
 };
 pub use translation::{
-    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationStatus, TranslationTest,
+    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
+    TranslationStatus, TranslationTest,
 };
 pub use verification::{
     AccountConnectionVerification, CancelConnectionVerification, CancelDraftVerification,

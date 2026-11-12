@@ -55,6 +55,7 @@ import type {
   TranslationCacheStats,
   TranslationKeyState,
   TranslationProviderId,
+  TranslationProxyPasswordState,
   TranslationStatus,
   TranslationTest,
 } from '@/generated/accounts'
@@ -201,6 +202,11 @@ export interface MailxClient {
   /** Stores a service key and returns the list after the change. */
   setTranslationKey(provider: TranslationProviderId, key: string): Promise<TranslationKeyState[]>
   removeTranslationKey(provider: TranslationProviderId): Promise<TranslationKeyState[]>
+  /** Whether a translation proxy password is stored; the password itself is never returned. */
+  translationProxyPassword(): Promise<TranslationProxyPasswordState>
+  /** Stores the proxy password exactly as typed and returns the state after the change. */
+  setTranslationProxyPassword(password: string): Promise<TranslationProxyPasswordState>
+  removeTranslationProxyPassword(): Promise<TranslationProxyPasswordState>
   /** Translates a fixed sentence with the saved settings to check key, region and route. */
   testTranslation(): Promise<TranslationTest>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
@@ -499,6 +505,9 @@ export function createDesktopClient(): MailxClient {
     translationKeys: () => call<TranslationKeyState[]>('translation_keys'),
     setTranslationKey: (provider, key) => call<TranslationKeyState[]>('translation_set_key', { provider, key }),
     removeTranslationKey: (provider) => call<TranslationKeyState[]>('translation_remove_key', { provider }),
+    translationProxyPassword: () => call<TranslationProxyPasswordState>('translation_proxy_password'),
+    setTranslationProxyPassword: (password) => call<TranslationProxyPasswordState>('translation_set_proxy_password', { password }),
+    removeTranslationProxyPassword: () => call<TranslationProxyPasswordState>('translation_remove_proxy_password'),
     testTranslation: () => call<TranslationTest>('translation_test'),
     onSyncState(listener) {
       if (!available) return () => undefined
