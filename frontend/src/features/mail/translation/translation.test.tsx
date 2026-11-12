@@ -31,7 +31,7 @@ const statusOf = (changes: Partial<TranslationStatus> = {}): TranslationStatus =
   emailId: 'mail-1', targetLanguage: 'zh-Hans', detectedLanguage: 'ja', detectionReliable: true, suggested: true, autoTranslate: false, translation: null, ...changes,
 })
 const translatedInfo = (changes: Partial<TranslationInfo> = {}): TranslationInfo => ({ provider: 'deepl', sourceLanguage: 'ja', subject: 'Translated subject', partial: false, ...changes })
-const failure = (code: 'translationCancelled' | 'translationNetwork' | 'translationNotConfigured' | 'notFound') => new MailxClientError({ code, message: 'x', field: null })
+const failure = (code: 'translationCancelled' | 'translationNetwork' | 'translationNotConfigured' | 'translationUnavailable' | 'translationRateLimited' | 'translationKeyRejected' | 'notFound') => new MailxClientError({ code, message: 'x', field: null })
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -209,7 +209,7 @@ describe('translating', () => {
     client.translateEmail.mockRejectedValueOnce(failure('translationNotConfigured'))
     const { openSettings } = await mount(client)
     await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
-    expect(await screen.findByText(/还没有设置翻译服务或密钥/)).toBeInTheDocument()
+    expect(await screen.findByText(/翻译已关闭，或所选服务还没有保存密钥/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '去设置' }))
     expect(openSettings).toHaveBeenCalledOnce()
@@ -228,6 +228,59 @@ describe('translating', () => {
     expect(translatedFrame()).not.toBeInTheDocument()
     expect(original().closest('[inert]')).toBeNull()
     expect(screen.getByRole('button', { name: '翻译' })).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+describe('keyless services', () => {
+  it('translate with no saved key at all, asking for consent once', async () => {
+    const client = await setup({ provider: 'microsoftFree', consented: false, keyed: false })
+    produces(client, statusOf({ translation: translatedInfo({ provider: 'microsoftFree' }) }))
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('把邮件内容发送给Microsoft 翻译？')
+    expect(dialog).toHaveTextContent('不是Microsoft正式提供给其他应用的服务，可能随时失效')
+    await userEvent.click(within(dialog).getByRole('button', { name: '同意并翻译' }))
+    expect(await screen.findByText(/已从日语翻译/)).toHaveTextContent('Microsoft 翻译')
+    expect(client.updateSettings).toHaveBeenCalledOnce()
+    expect(client.translateEmail).toHaveBeenCalledOnce()
+    expect(screen.queryByText('还没有设置翻译服务')).not.toBeInTheDocument()
+  })
+
+  it('name Google in the consent sentence', async () => {
+    const client = await setup({ provider: 'googleFree', consented: false, keyed: false })
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('不是Google正式提供给其他应用的服务')
+  })
+
+  it.each(['translationUnavailable', 'translationRateLimited', 'translationNetwork'] as const)('offer another service next to retry after %s', async (code) => {
+    const client = await setup({ provider: 'microsoftFree', keyed: false })
+    client.translateEmail.mockRejectedValueOnce(failure(code))
+    const { openSettings } = await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    const notice = await screen.findByRole('status', { name: '邮件翻译' })
+    await waitFor(() => expect(within(notice).getByRole('button', { name: '重试' })).toBeInTheDocument())
+    await userEvent.click(within(notice).getByRole('button', { name: '换一种翻译服务' }))
+    expect(openSettings).toHaveBeenCalledOnce()
+  })
+
+  it('do not offer another service for a keyed service that fails', async () => {
+    const client = await setup()
+    client.translateEmail.mockRejectedValueOnce(failure('translationUnavailable'))
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    await waitFor(() => expect(screen.getByRole('status', { name: '邮件翻译' })).toHaveTextContent('重试'))
+    expect(screen.queryByRole('button', { name: '换一种翻译服务' })).not.toBeInTheDocument()
+  })
+
+  it('show the toolbar button without a setup popover', async () => {
+    const client = await setup({ provider: 'googleFree', keyed: false, status: { suggested: false } })
+    produces(client, statusOf({ translation: translatedInfo({ provider: 'googleFree' }) }))
+    await mount(client)
+    await userEvent.click(await screen.findByRole('button', { name: '翻译' }))
+    expect(screen.queryByText('还没有设置翻译服务')).not.toBeInTheDocument()
+    await waitFor(() => expect(client.translateEmail).toHaveBeenCalledOnce())
   })
 })
 
@@ -366,5 +419,24 @@ describe('in English', () => {
     expect(screen.getByRole('status', { name: 'Translation' })).toHaveTextContent('DeepL')
     await userEvent.click(screen.getByRole('button', { name: 'Show original' }))
     expect(await screen.findByText('Showing the original')).toBeInTheDocument()
+  })
+})
+
+describe('keyless services in English', () => {
+  it('words the consent sentence and the failure buttons in plain English', async () => {
+    await i18n.changeLanguage('en')
+    const client = await setup({ provider: 'googleFree', consented: false, keyed: false })
+    client.translateEmail.mockRejectedValueOnce(failure('translationNetwork'))
+    const { openSettings } = await mount(client)
+    const notice = await screen.findByRole('status', { name: 'Translation' })
+    await userEvent.click(within(notice).getByRole('button', { name: 'Translate to Simplified Chinese' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Send this message to Google Translate?')
+    expect(dialog).toHaveTextContent("not a service Google offers to other apps, so it may stop working at any time.")
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Agree and translate' }))
+    const failed = await screen.findByRole('status', { name: 'Translation' })
+    await waitFor(() => expect(within(failed).getByRole('button', { name: 'Retry' })).toBeInTheDocument())
+    await userEvent.click(within(failed).getByRole('button', { name: 'Use another service' }))
+    expect(openSettings).toHaveBeenCalledOnce()
   })
 })

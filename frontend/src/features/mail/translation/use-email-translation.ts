@@ -4,7 +4,7 @@ import type { EmailDetail, TranslationSettings, TranslationStatus } from '@/gene
 import { useSettings, useUpdateTranslation } from '@/features/settings/settings-queries'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { translationKeys } from '@/lib/query-client'
-import { TRANSLATION_PROVIDER_NAMES } from './languages'
+import { KEYLESS_COMPANY, needsKey, TRANSLATION_PROVIDER_NAMES } from './languages'
 
 /** How many messages the session remembers a choice for; the oldest are forgotten first. */
 const MEMORY_LIMIT = 200
@@ -60,7 +60,9 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
   // Device-only sent copies and messages without an HTML document have nothing to translate.
   const eligible = Boolean(email && !email.summary.localOnly && email.summary.bodyState === 'ready' && email.body?.hasHtml)
   const provider = settings?.provider ?? null
-  const configured = provider !== null && Boolean(keys.data?.some((key) => key.provider === provider && key.configured))
+  // A keyless service is ready as it is; a keyed one needs its saved key.
+  const keyless = provider !== null && !needsKey(provider)
+  const configured = provider !== null && (keyless || Boolean(keys.data?.some((key) => key.provider === provider && key.configured)))
 
   const [memory] = useState(() => new Map<string, Remembered>())
   const [stored, setStored] = useState<State>(() => fresh(id, memory))
@@ -276,8 +278,9 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
   return {
     /** Whether this message can be translated at all; otherwise the feature is absent. */
     available: eligible,
-    /** A service with a saved key is chosen. */
+    /** A service is chosen and ready: a keyless one, or one with a saved key. */
     configured,
+    keyless,
     serviceName: provider ? TRANSLATION_PROVIDER_NAMES[provider] : null,
     phase,
     showing: state.showing,
@@ -295,6 +298,8 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
     alwaysTranslating: detected !== null && Boolean(settings?.alwaysTranslate.includes(detected)),
     neverSuggesting: detected !== null && Boolean(settings?.neverSuggest.includes(detected)),
     consentService: state.consent && provider ? TRANSLATION_PROVIDER_NAMES[provider] : null,
+    /** Who receives the text when the service is a keyless browser channel. */
+    consentKeylessCompany: state.consent && provider && !needsKey(provider) ? KEYLESS_COMPANY[provider as keyof typeof KEYLESS_COMPANY] : null,
     translate, cancel, toggle, showOriginal, showTranslation, dismiss, dismissError, failBody, retranslate,
     confirmConsent, cancelConsent, toggleLanguageList, openSettings,
   }

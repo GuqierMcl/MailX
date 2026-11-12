@@ -300,17 +300,34 @@ pub enum TranslationProviderId {
     Deepl,
     Microsoft,
     Google,
+    /// The channel Edge's built-in translator uses; no key.
+    MicrosoftFree,
+    /// The channel Google's web translate widget uses; no key.
+    GoogleFree,
 }
 
 impl TranslationProviderId {
-    pub const ALL: [Self; 3] = [Self::Deepl, Self::Microsoft, Self::Google];
+    pub const ALL: [Self; 5] = [
+        Self::Deepl,
+        Self::Microsoft,
+        Self::Google,
+        Self::MicrosoftFree,
+        Self::GoogleFree,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Deepl => "deepl",
             Self::Microsoft => "microsoft",
             Self::Google => "google",
+            Self::MicrosoftFree => "microsoftFree",
+            Self::GoogleFree => "googleFree",
         }
+    }
+
+    /// The two browser-channel services work without a key.
+    pub fn needs_key(self) -> bool {
+        !matches!(self, Self::MicrosoftFree | Self::GoogleFree)
     }
 }
 
@@ -345,7 +362,7 @@ const MAX_MICROSOFT_REGION_CHARS: usize = 40;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TranslationSettings {
-    /// `None` until a service is chosen.
+    /// `None` means the user turned translation off; a missing field is the default.
     pub provider: Option<TranslationProviderId>,
     /// Azure resource region; `""` for a global resource.
     pub microsoft_region: String,
@@ -366,7 +383,7 @@ pub struct TranslationSettings {
 impl Default for TranslationSettings {
     fn default() -> Self {
         Self {
-            provider: None,
+            provider: Some(TranslationProviderId::MicrosoftFree),
             microsoft_region: String::new(),
             route: TranslationRoute::Direct,
             target_language: "auto".into(),

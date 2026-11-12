@@ -2,12 +2,18 @@
 //! fixed per service; the only inputs are the key, the Azure region and the
 //! route. An answer is just a list of strings: whether it fits its source
 //! segment is decided later by `translate::apply`.
+//!
+//! Every client takes and returns the HTML wire form. The keyless Microsoft
+//! client converts to the tag-name form on the way out and back on the way in,
+//! so nothing past this module knows that form exists.
 use crate::{ErrorCode, net::NetRoute, secrets::SecretValue, settings::TranslationProviderId};
 
 mod deepl;
 mod google;
+mod google_free;
 mod http;
 mod microsoft;
+mod microsoft_free;
 #[cfg(test)]
 mod tests;
 
@@ -19,7 +25,7 @@ const MAX_GROWTH_RATIO: usize = 10;
 const MAX_GROWTH_SLACK: usize = 1000;
 
 pub(crate) struct TranslateRequest<'a> {
-    /// Wire strings (see `translate::wire`) or plain escaped text.
+    /// HTML wire strings (see `translate::wire`).
     pub texts: &'a [String],
     /// A MailX code from `translate::languages::TARGETS`.
     pub target: &'a str,
@@ -82,6 +88,18 @@ pub(crate) fn limits(provider: TranslationProviderId) -> Limits {
             max_items: 128,
             max_bytes: 80_000,
         },
+        // UNVERIFIED: no published limits for either browser channel. The
+        // item count is below what a probe of 60 short items returned, and the
+        // bytes follow the well-known ~5,000 character cap of Google's web
+        // endpoint (Edge gets a larger, equally unverified budget).
+        TranslationProviderId::MicrosoftFree => Limits {
+            max_items: 50,
+            max_bytes: 20_000,
+        },
+        TranslationProviderId::GoogleFree => Limits {
+            max_items: 50,
+            max_bytes: 5_000,
+        },
     }
 }
 
@@ -100,6 +118,8 @@ pub(crate) async fn translate(
         TranslationProviderId::Deepl => deepl::translate(context, request).await,
         TranslationProviderId::Microsoft => microsoft::translate(context, request).await,
         TranslationProviderId::Google => google::translate(context, request).await,
+        TranslationProviderId::MicrosoftFree => microsoft_free::translate(context, request).await,
+        TranslationProviderId::GoogleFree => google_free::translate(context, request).await,
     }?;
     check_shape(request.texts, &response)?;
     Ok(response)

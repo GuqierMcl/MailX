@@ -1,4 +1,4 @@
-import { i18n } from '@/i18n'
+import { i18n, t } from '@/i18n'
 import type { TranslationProviderId } from '@/generated/accounts'
 
 /** The languages a message can be translated into; the core accepts exactly these. */
@@ -13,11 +13,22 @@ export const COMMON_LANGUAGES = [
   'sv', 'da', 'fi', 'cs', 'el', 'hu', 'ro', 'bg', 'nb', 'vi', 'th', 'hi', 'he',
 ] as const
 
-/** Brand names are not translated. */
+/** The two services that need no key, in the order the settings list them. */
+export const KEYLESS_PROVIDERS = ['microsoftFree', 'googleFree'] as const satisfies readonly TranslationProviderId[]
+export const KEYED_PROVIDERS = ['deepl', 'microsoft', 'google'] as const satisfies readonly TranslationProviderId[]
+
+export const needsKey = (provider: TranslationProviderId) => !(KEYLESS_PROVIDERS as readonly string[]).includes(provider)
+
+/** Who receives the text of a keyless service, for the consent sentence. */
+export const KEYLESS_COMPANY: Record<(typeof KEYLESS_PROVIDERS)[number], string> = { microsoftFree: 'Microsoft', googleFree: 'Google' }
+
+/** Display names; the two keyless services follow the interface language, the keyed ones are brand names. Read at render time. */
 export const TRANSLATION_PROVIDER_NAMES: Record<TranslationProviderId, string> = {
   deepl: 'DeepL',
   microsoft: 'Microsoft Translator',
   google: 'Google Cloud Translation',
+  get microsoftFree() { return t('settings:translationProviderMicrosoftFree') },
+  get googleFree() { return t('settings:translationProviderGoogleFree') },
 }
 
 function displayName(code: string, locale: string): string | null {

@@ -15,11 +15,14 @@ async function openFirstMessage(client = createMockClient()) {
 
 describe('translation in the workbench', () => {
   it('sends "去设置" from the toolbar popover to the translation page of the settings', async () => {
-    await openFirstMessage()
+    const client = createMockClient()
+    const settings = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...settings, provider: null } })
+    await openFirstMessage(client)
     await userEvent.click(await screen.findByRole('button', { name: '翻译' }))
     await userEvent.click(await screen.findByRole('button', { name: '去设置' }))
     const dialog = await screen.findByRole('dialog', { name: '设置' })
-    expect(await within(dialog).findByRole('combobox', { name: '服务' })).toHaveTextContent('未设置')
+    expect(await within(dialog).findByRole('combobox', { name: '服务' })).toHaveTextContent('不使用翻译')
     expect(within(dialog).getByRole('heading', { level: 2, name: '翻译' })).toBeInTheDocument()
   })
 
@@ -40,8 +43,23 @@ describe('translation in the workbench', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '翻译' })).toHaveAttribute('aria-pressed', 'false'))
   })
 
-  it('without a service the palette command goes to the settings instead', async () => {
+  it('translates out of the box: hint, consent, translated, without opening the settings', async () => {
     await openFirstMessage()
+    expect(screen.queryByRole('dialog', { name: '设置' })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: '翻译' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('把邮件内容发送给Microsoft 翻译？')
+    expect(dialog).toHaveTextContent('浏览器内置翻译使用的通道')
+    await userEvent.click(within(dialog).getByRole('button', { name: '同意并翻译' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '翻译' })).toHaveAttribute('aria-pressed', 'true'), { timeout: 3000 })
+    expect(screen.queryByRole('dialog', { name: '设置' })).not.toBeInTheDocument()
+  })
+
+  it('without a service the palette command goes to the settings instead', async () => {
+    const client = createMockClient()
+    const settings = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...settings, provider: null } })
+    await openFirstMessage(client)
     await userEvent.click(screen.getByRole('button', { name: '搜索邮件' }))
     await userEvent.type(await screen.findByRole('combobox'), '翻译')
     await userEvent.click(await screen.findByRole('option', { name: '翻译这封邮件' }))

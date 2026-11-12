@@ -17,6 +17,7 @@ import type { EmailTranslation } from './use-email-translation'
 export function TranslationConsentDialog({ translation }: { translation: EmailTranslation }) {
   useTranslation()
   const service = translation.consentService
+  const company = translation.consentKeylessCompany
   // Sending mail text out is the careful choice's opposite: the default is to decline.
   const cancel = useRef<HTMLButtonElement>(null)
   return (
@@ -24,7 +25,10 @@ export function TranslationConsentDialog({ translation }: { translation: EmailTr
       <AlertDialogContent initialFocus={cancel}>
         <AlertDialogHeader>
           <AlertDialogTitle>{t('mail:translationConsentTitle', { service: service ?? '' })}</AlertDialogTitle>
-          <AlertDialogDescription>{t('mail:translationConsentBody', { service: service ?? '' })}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {t('mail:translationConsentBody', { service: service ?? '' })}
+          </AlertDialogDescription>
+          {company && <AlertDialogDescription>{t('mail:translationConsentKeyless', { company })}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel ref={cancel}>{t('mail:cancel')}</AlertDialogCancel>

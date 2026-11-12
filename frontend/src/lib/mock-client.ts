@@ -73,7 +73,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const emails = buildEmails(dataset)
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -114,6 +114,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
 
   const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
   const MOCK_TRANSLATION_KEYS: TranslationProviderId[] = ['deepl', 'microsoft', 'google']
+  const isKeyless = (provider: TranslationProviderId) => provider === 'microsoftFree' || provider === 'googleFree'
+  /** A chosen service that is ready: keyless ones always, keyed ones once a key is saved. */
+  const providerReady = (provider: TranslationProviderId | null) => provider !== null && (isKeyless(provider) || translationSecrets.has(provider))
   const MOCK_TRANSLATION_MS = 900
   // Keys live only in memory, like the real ones live only in the secret store: nothing reads them back out.
   const translationSecrets = new Map<TranslationProviderId, string>()
@@ -133,7 +136,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     const config = settings.settings.translation
     const target = explicitTarget ?? resolvedTarget()
     const detected = detectLanguage(email.body?.text ?? '')
-    const keyed = config.provider !== null && translationSecrets.has(config.provider)
+    const keyed = providerReady(config.provider)
     const reliable = detected !== null
     const suggested = keyed && config.suggest && reliable && detected !== target.split('-')[0] && !config.neverSuggest.includes(detected)
     const found = translations.get(translationKey(emailId, target))
@@ -704,8 +707,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!email) throw notFound()
       if (email.summary.localOnly || !email.body?.hasHtml) throw new MailxClientError({ code: 'unsupported', message: '此邮件无法翻译。', field: null })
       const config = settings.settings.translation
-      if (!config.provider || !translationSecrets.has(config.provider)) throw translationFailure('translationNotConfigured')
+      if (!config.provider || !providerReady(config.provider)) throw translationFailure('translationNotConfigured')
       if (config.consentedProvider !== config.provider) throw translationFailure('translationConsentRequired')
+      // Preview only: the keyless Google channel is out of reach without a proxy, as in mainland China.
+      if (config.provider === 'googleFree' && config.route.kind === 'direct') throw translationFailure('translationNetwork')
       const target = targetLanguage ?? resolvedTarget()
       // A newer request for the same message supersedes the running one.
       translationRuns.get(emailId)?.cancel()
@@ -734,7 +739,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     translationKeys: async () => MOCK_TRANSLATION_KEYS.map((provider) => ({ provider, configured: translationSecrets.has(provider) })),
     setTranslationKey: async (provider, key) => {
-      if (!MOCK_TRANSLATION_KEYS.includes(provider) || !key.trim()) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'key' })
+      if (!MOCK_TRANSLATION_KEYS.includes(provider)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'translation.provider' })
+      if (!key.trim()) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'key' })
       translationSecrets.set(provider, key.trim())
       return MOCK_TRANSLATION_KEYS.map((id) => ({ provider: id, configured: translationSecrets.has(id) }))
     },
@@ -757,8 +763,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     testTranslation: async () => {
       await new Promise((resolve) => setTimeout(resolve, 500))
       const { provider, route } = settings.settings.translation
-      const key = provider ? translationSecrets.get(provider) : undefined
-      if (!provider || key === undefined) throw translationFailure('translationNotConfigured')
+      if (!provider || !providerReady(provider)) throw translationFailure('translationNotConfigured')
+      if (provider === 'googleFree' && route.kind === 'direct') throw translationFailure('translationNetwork')
+      const key = translationSecrets.get(provider) ?? ''
       if (key.includes('bad')) throw translationFailure('translationKeyRejected')
       if (route.kind === 'proxy' && (route.host.includes('bad') || (route.username !== '' && proxyPassword?.includes('bad')))) throw translationFailure('translationProxy')
       return { translated: resolvedTarget().startsWith('zh') ? '你好，这是一条测试。' : 'Hello, this is a test.' }

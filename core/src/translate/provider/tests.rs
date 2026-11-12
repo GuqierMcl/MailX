@@ -649,3 +649,305 @@ fn limits_leave_room_inside_the_documented_maximums() {
     let google = limits(TranslationProviderId::Google);
     assert!(google.max_bytes < 100_000 && google.max_items <= 128);
 }
+
+// ---------------------------------------------------------- keyless channels
+
+async fn keyless_call(
+    provider: TranslationProviderId,
+    target: &str,
+    status: u16,
+    body: impl Into<Vec<u8>>,
+) -> (
+    Result<TranslateResponse, ErrorCode>,
+    Arc<Mutex<Vec<Captured>>>,
+) {
+    let (port, captured) = serve(vec![(status, body.into())]).await;
+    // A key in the context must never reach a keyless request.
+    let key = SecretValue::new(KEY.into());
+    let route = NetRoute::default();
+    let texts = texts();
+    let result = translate(
+        provider,
+        &context(&key, "westeurope", &route, port),
+        &TranslateRequest {
+            texts: &texts,
+            target,
+        },
+    )
+    .await;
+    (result, captured)
+}
+
+fn assert_no_credentials(request: &Captured) {
+    for name in [
+        "authorization",
+        "ocp-apim-subscription-key",
+        "ocp-apim-subscription-region",
+        "x-goog-api-key",
+    ] {
+        assert_eq!(request.header(name), None, "{name}");
+    }
+    assert_eq!(request.secret_occurrences(KEY), 0);
+    assert_eq!(request.secret_occurrences("westeurope"), 0);
+    assert_eq!(request.header("user-agent"), Some("MailX"));
+}
+
+#[tokio::test]
+async fn microsoft_free_sends_tag_names_and_returns_the_html_wire_form() {
+    let answer = json!([
+        {"detectedLanguage": {"language": "en", "score": 1.0},
+         "translations": [{"text": "Hallo <g1>Welt</g1> &lt;3", "to": "zh-Hans"}]},
+        {"detectedLanguage": {"language": "en", "score": 1.0},
+         "translations": [{"text": "Zweite &amp; letzte<n2/><x3 />", "to": "zh-Hans"}]},
+    ]);
+    let (result, captured) = keyless_call(
+        TranslationProviderId::MicrosoftFree,
+        "zh-Hans",
+        200,
+        answer.to_string(),
+    )
+    .await;
+    let response = result.unwrap();
+    assert_eq!(
+        response.texts,
+        [
+            r#"Hallo <span id="1">Welt</span> &lt;3"#,
+            r#"Zweite &amp; letzte<br id="2"><img id="3">"#,
+        ]
+    );
+    assert_eq!(response.detected_source.as_deref(), Some("en"));
+    let captured = captured.lock().unwrap();
+    let request = &captured[0];
+    assert_eq!(
+        request.request_line(),
+        "POST /translate/translatetext?from=&to=zh-Hans&isEnterpriseClient=false HTTP/1.1"
+    );
+    assert_eq!(request.header("content-type"), Some("application/json"));
+    assert_eq!(
+        request.json(),
+        json!(["Hello <g1>world</g1>", "Second &amp; last"])
+    );
+    assert_no_credentials(request);
+}
+
+#[tokio::test]
+async fn microsoft_free_statuses_and_shapes_are_handled() {
+    for (status, expected) in [
+        (401, ErrorCode::TranslationUnavailable),
+        (403, ErrorCode::TranslationUnavailable),
+        (404, ErrorCode::TranslationUnavailable),
+        (410, ErrorCode::TranslationUnavailable),
+        (429, ErrorCode::TranslationRateLimited),
+        (500, ErrorCode::TranslationUnavailable),
+        (503, ErrorCode::TranslationUnavailable),
+        (400, ErrorCode::TranslationInvalidResponse),
+    ] {
+        let (result, _) =
+            keyless_call(TranslationProviderId::MicrosoftFree, "de", status, "{}").await;
+        assert_eq!(error_of(result), expected, "status {status}");
+    }
+    for body in [
+        "<html>",
+        r#"[{"translations": []}, {"translations": []}]"#,
+        r#"[{"translations": [{"text": "a"}, {"text": "b"}]}]"#,
+        r#"{"translations": [{"text": "a"}]}"#,
+    ] {
+        let (result, _) = keyless_call(TranslationProviderId::MicrosoftFree, "de", 200, body).await;
+        assert_eq!(error_of(result), ErrorCode::TranslationInvalidResponse);
+    }
+}
+
+#[tokio::test]
+async fn microsoft_free_hostile_text_stays_text() {
+    let answer = json!([
+        {"translations": [{"text": "<script>x</script><g1 onclick=1>a</g1><g99999>b"}]},
+        {"translations": [{"text": "<img src=x onerror=1>"}]},
+    ]);
+    let (result, _) = keyless_call(
+        TranslationProviderId::MicrosoftFree,
+        "de",
+        200,
+        answer.to_string(),
+    )
+    .await;
+    assert_eq!(
+        result.unwrap().texts,
+        [
+            // The stray `</g1>` makes the answer unbalanced, so only its text is kept.
+            "&lt;script&gt;x&lt;/script&gt;&lt;g1 onclick=1&gt;a&lt;g99999&gt;b",
+            "&lt;img src=x onerror=1&gt;"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn microsoft_free_crossed_tags_keep_only_their_text() {
+    let answer = json!([
+        {"translations": [{"text": "<g1>a<g2>b</g1>c</g2>"}]},
+        {"translations": [{"text": "x<g1>y</g1><n2/>z"}]},
+    ]);
+    let (result, _) = keyless_call(
+        TranslationProviderId::MicrosoftFree,
+        "de",
+        200,
+        answer.to_string(),
+    )
+    .await;
+    assert_eq!(
+        result.unwrap().texts,
+        ["abc", "x<span id=\"1\">y</span><br id=\"2\">z"]
+    );
+}
+
+#[tokio::test]
+async fn google_free_posts_a_form_and_reads_every_known_shape() {
+    for (body, expected_detected) in [
+        (
+            json!([
+                ["Hallo <span id=\"1\">Welt</span>", "en"],
+                ["Zweite &amp; letzte", "en"]
+            ]),
+            Some("en"),
+        ),
+        (
+            json!(["Hallo <span id=\"1\">Welt</span>", "Zweite &amp; letzte"]),
+            None,
+        ),
+    ] {
+        let (result, captured) = keyless_call(
+            TranslationProviderId::GoogleFree,
+            "zh-Hant",
+            200,
+            body.to_string(),
+        )
+        .await;
+        let response = result.unwrap();
+        assert_eq!(
+            response.texts,
+            ["Hallo <span id=\"1\">Welt</span>", "Zweite &amp; letzte"]
+        );
+        assert_eq!(response.detected_source.as_deref(), expected_detected);
+        let captured = captured.lock().unwrap();
+        let request = &captured[0];
+        assert_eq!(
+            request.request_line(),
+            "POST /translate_a/t?client=gtx&sl=auto&tl=zh-TW&format=html HTTP/1.1"
+        );
+        assert_eq!(
+            request.header("content-type"),
+            Some("application/x-www-form-urlencoded")
+        );
+        let fields: Vec<(String, String)> = url::form_urlencoded::parse(&request.body)
+            .into_owned()
+            .collect();
+        let expected: Vec<(String, String)> =
+            texts().into_iter().map(|t| ("q".to_owned(), t)).collect();
+        assert_eq!(fields, expected);
+        assert_no_credentials(request);
+    }
+}
+
+#[tokio::test]
+async fn google_free_reads_a_single_item_answer() {
+    let (port, _) = serve(vec![(200, br#"[["Hallo","en"]]"#.to_vec())]).await;
+    let key = SecretValue::new(String::new());
+    let route = NetRoute::default();
+    let one = vec!["Hello".to_owned()];
+    let response = translate(
+        TranslationProviderId::GoogleFree,
+        &context(&key, "", &route, port),
+        &TranslateRequest {
+            texts: &one,
+            target: "de",
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.texts, ["Hallo"]);
+    assert_eq!(response.detected_source.as_deref(), Some("en"));
+}
+
+#[tokio::test]
+async fn google_free_statuses_and_shapes_are_handled() {
+    for (status, expected) in [
+        (401, ErrorCode::TranslationUnavailable),
+        (403, ErrorCode::TranslationUnavailable),
+        (404, ErrorCode::TranslationUnavailable),
+        (410, ErrorCode::TranslationUnavailable),
+        (429, ErrorCode::TranslationRateLimited),
+        (503, ErrorCode::TranslationUnavailable),
+        (400, ErrorCode::TranslationInvalidResponse),
+    ] {
+        let (result, _) = keyless_call(TranslationProviderId::GoogleFree, "de", status, "x").await;
+        assert_eq!(error_of(result), expected, "status {status}");
+    }
+    for body in ["<html>", "{}", "[[]]", "[1, 2]", r#"["only one"]"#] {
+        let (result, _) = keyless_call(TranslationProviderId::GoogleFree, "de", 200, body).await;
+        assert_eq!(
+            error_of(result),
+            ErrorCode::TranslationInvalidResponse,
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn keyless_requests_go_through_the_proxy_and_never_around_it() {
+    let answer = json!([
+        {"translations": [{"text": "a"}]},
+        {"translations": [{"text": "b"}]},
+    ]);
+    let (upstream, captured) = serve(vec![(200, answer.to_string().into_bytes())]).await;
+    let (proxy_port, proxy_requests) = fake_http_connect(upstream).await;
+    let route = proxy_route(ProxyKind::HttpConnect, proxy_port);
+    let key = SecretValue::new(String::new());
+    let texts = texts();
+    let response = translate(
+        TranslationProviderId::MicrosoftFree,
+        &context(&key, "", &route, upstream),
+        &TranslateRequest {
+            texts: &texts,
+            target: "de",
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.texts, ["a", "b"]);
+    assert_eq!(
+        proxy_requests.lock().unwrap().as_slice(),
+        [format!("CONNECT 127.0.0.1:{upstream} HTTP/1.1")]
+    );
+    assert_eq!(captured.lock().unwrap().len(), 1);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let direct_port = listener.local_addr().unwrap().port();
+    let dead = proxy_route(ProxyKind::Socks5, dead_port().await);
+    for provider in [
+        TranslationProviderId::MicrosoftFree,
+        TranslationProviderId::GoogleFree,
+    ] {
+        let result = translate(
+            provider,
+            &context(&key, "", &dead, direct_port),
+            &TranslateRequest {
+                texts: &texts,
+                target: "de",
+            },
+        )
+        .await;
+        assert_eq!(error_of(result), ErrorCode::TranslationProxy);
+    }
+    let direct =
+        tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept()).await;
+    assert!(direct.is_err(), "the channel was reached without the proxy");
+}
+
+#[test]
+fn keyless_limits_are_conservative() {
+    assert!(!TranslationProviderId::MicrosoftFree.needs_key());
+    assert!(!TranslationProviderId::GoogleFree.needs_key());
+    let edge = limits(TranslationProviderId::MicrosoftFree);
+    assert_eq!((edge.max_items, edge.max_bytes), (50, 20_000));
+    let google = limits(TranslationProviderId::GoogleFree);
+    assert_eq!((google.max_items, google.max_bytes), (50, 5_000));
+}

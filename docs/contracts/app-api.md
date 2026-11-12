@@ -546,7 +546,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 邮件翻译（主窗口）
 
-把已缓存的邮件正文经用户选定的翻译服务翻译，设计见[邮件翻译](../architecture/translation.md)。状态：已实现，仅有自动测试；没有用真实密钥调用过翻译服务。命令只开放给主窗口，参数拒绝未知字段。
+把已缓存的邮件正文经用户选定的翻译服务翻译，设计见[邮件翻译](../architecture/translation.md)。状态：已实现，仅有自动测试；DeepL 与 Google Cloud 没有用真实密钥调用过，两个免设置通道只用固定测试句子探测过，见[验证记录](../development/validation.md#translation-validation)。命令只开放给主窗口，参数拒绝未知字段。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -567,7 +567,8 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 宿主处理这些命令时始终使用**已保存**的设置和当前界面语言，调用方不能在命令里传入服务、路由或同意状态。没有任何命令返回密钥或代理密码。代理密码只存在于凭据库（`mailx/translation/proxy-password`）；路由里的 `username` 非空时，翻译与测试请求才读取它并登录代理，没存密码时使用空密码，凭据库不可用时请求以对应错误失败，不会不登录就发出。
 
 ```ts
-type TranslationProviderId = "deepl" | "microsoft" | "google";
+// microsoftFree / googleFree 是两个免设置通道（浏览器内置翻译所用，非官方），没有密钥。
+type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree";
 
 type TranslationStatus = {
   emailId: string;
@@ -589,9 +590,10 @@ type TranslationKeyState = { provider: TranslationProviderId; configured: boolea
 type TranslationTest = { translated: string }; // 固定英文句子的译文，最多 200 字符
 ```
 
-- `translationStatus` 在未选服务、密钥未保存、邮件为本机已发送副本、正文尚未缓存或缓存的净化版本过旧时，`suggested` 与 `autoTranslate` 为 false 或语言未知；`translation` 仅在缓存键（邮件、目标语言、是否含引用、正文哈希、净化版本、分段版本）全部匹配时有值。
-- `translateEmail` 的检查顺序：设置校验、服务已选（`translationNotConfigured`）、密钥已保存（`translationNotConfigured`）、已同意当前服务（`translationConsentRequired`）、目标语言有效（`validation`，字段 `target`）、正文已缓存（`bodyNotCached`）、大小（`translationTooLarge`）。同一邮件再次翻译会取消上一次；全应用最多 2 个并行。本机已发送副本返回 `validation`（字段 `emailId`）。
-- `testTranslation` 只翻译一句固定英文，用于检查密钥、区域与网络，不含邮件内容，不要求同意；目标语言为 `auto` 时译成简体中文。
+- `translationStatus` 在未选服务、所选的需要密钥的服务没有保存密钥（免设置服务无需密钥）、邮件为本机已发送副本、正文尚未缓存或缓存的净化版本过旧时，`suggested` 与 `autoTranslate` 为 false 或语言未知；`translation` 仅在缓存键（邮件、目标语言、是否含引用、正文哈希、净化版本、分段版本）全部匹配时有值。
+- `translateEmail` 的检查顺序：设置校验、服务已选（`translationNotConfigured`）、需要密钥的服务已保存密钥（`translationNotConfigured`，免设置服务跳过这一步）、已同意当前服务（`translationConsentRequired`）、目标语言有效（`validation`，字段 `target`）、正文已缓存（`bodyNotCached`）、大小（`translationTooLarge`）。同一邮件再次翻译会取消上一次；全应用最多 2 个并行。本机已发送副本返回 `validation`（字段 `emailId`）。
+- `testTranslation` 只翻译一句固定英文，用于检查密钥（如果该服务有密钥）、区域与网络，不含邮件内容，不要求同意，免设置服务无需密钥也可测试；目标语言为 `auto` 时译成简体中文。
+- `translationKeys` 只返回三个需要密钥的服务（`deepl`、`microsoft`、`google`）的状态；对 `microsoftFree` / `googleFree` 调用 `setTranslationKey` 或 `removeTranslationKey` 返回 `validation`（字段 `translation.provider`）。
 - `setTranslationKey` 去掉首尾空白，拒绝空值、控制字符与超过 512 字符，返回 `validation`（字段 `translation.key`），错误中不含密钥原值。密钥存入 SecretStore 的 `mailx/translation/<provider>`。
 - `prepareBody` 的 `translation` 为译文目标语言（必须是 26 种目标之一，否则 `validation`，字段 `target`）。宿主按当前邮件正文身份读取缓存译文，并在引用折叠之后、资源绑定之前应用；译文取自当前已保存的“翻译引用内容”设置。没有当前有效的缓存译文时不签发令牌，准备返回 `notFound`，协议请求也返回 404，不会退回提供原文。译文文档使用自己的文档令牌，其余绑定与 `releaseBody` 规则不变；草稿预览不支持译文。
 
@@ -599,7 +601,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 
 | 字段 | 取值 / 默认 | 说明 |
 | --- | --- | --- |
-| `provider` | `deepl` / `microsoft` / `google` / `null`，默认 `null` | 所选翻译服务 |
+| `provider` | `deepl` / `microsoft` / `google` / `microsoftFree` / `googleFree` / `null`，默认 `microsoftFree` | 所选翻译服务；`null` 表示用户关闭了翻译。设置文件里显式保存的 `null` 保持关闭，字段缺失或值未知时取默认 |
 | `microsoftRegion` | 字符串，默认 `""`，最多 40 字符 | Azure 资源区域，仅 Microsoft 使用，空表示全局资源 |
 | `route` | `{ kind: "direct" }`（默认）或 `{ kind: "proxy", proxyKind, host, port, username }` | 翻译专用路由；不使用邮箱账号的代理；`username` 默认 `""`（旧文件缺省时同），空表示不登录，非空时与存放在凭据库的代理密码一起登录，规则同账号代理用户名（非空白、最多 255 字节、无控制字符）；代理失败或拒绝登录不回退直连 |
 | `targetLanguage` | `auto`（默认，跟随界面语言）或 26 种目标之一 | `zh-Hans`、`zh-Hant`、`en`、`ja`、`ko`、`fr`、`de`、`es`、`pt`、`it`、`ru`、`nl`、`pl`、`tr`、`ar`、`id`、`uk`、`sv`、`da`、`fi`、`cs`、`el`、`hu`、`ro`、`bg`、`nb` |
@@ -617,7 +619,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 
 | code | 含义 / 处理 |
 | --- | --- |
-| `translationNotConfigured` | 未选择翻译服务或未保存密钥，到设置中完成 |
+| `translationNotConfigured` | 翻译已关闭，或所选的需要密钥的服务未保存密钥，到设置中完成 |
 | `translationConsentRequired` | 需先同意向所选服务发送邮件文字，由界面询问后保存 `consentedProvider` |
 | `translationKeyRejected` | 服务拒绝了密钥，重新填写 |
 | `translationQuotaExceeded` | 服务额度用尽 |
@@ -625,7 +627,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | `translationNetwork` | 无法连接翻译服务 |
 | `translationProxy` | 无法通过所设代理连接，不回退直连 |
 | `translationTimeout` | 单个请求超过 30 秒 |
-| `translationUnavailable` | 服务端暂时故障（5xx） |
+| `translationUnavailable` | 服务端暂时故障（5xx）；免设置通道还包括 401 / 403 / 404 / 410（通道拒绝或已迁移） |
 | `translationInvalidResponse` | 服务返回的内容无法使用（条数不符、过长或无法解析） |
 | `translationLanguageUnsupported` | 所选服务不支持该目标语言 |
 | `translationTooLarge` | 邮件正文过大（净化 HTML 超过 2 MiB） |

@@ -29,13 +29,51 @@ const choose = async (trigger: string | RegExp, option: string) => {
 
 describe('translation settings: service and key', () => {
   it('chooses a service, and only then asks for its key', async () => {
-    const { saved } = await setup()
-    expect(await screen.findByRole('combobox', { name: '服务' })).toHaveTextContent('未设置')
+    const { saved } = await setup({ provider: null })
+    expect(await screen.findByRole('combobox', { name: '服务' })).toHaveTextContent('不使用翻译')
     expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '测试' })).not.toBeInTheDocument()
     await choose('服务', 'DeepL')
     await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ provider: 'deepl', consentedProvider: null })))
     expect(await screen.findByLabelText('密钥')).toBeInTheDocument()
+  })
+
+  it('starts on Microsoft Translate with no key, region or key test, only the test button', async () => {
+    await setup()
+    expect(await screen.findByRole('combobox', { name: '服务' })).toHaveTextContent('Microsoft 翻译')
+    expect(screen.getByText(/不是微软正式开放的服务，可能随时失效/)).toBeInTheDocument()
+    expect(screen.queryByText(/在中国大陆通常需要代理/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('区域')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试' })).toBeEnabled()
+  })
+
+  it('tests a keyless service without any saved key', async () => {
+    const { client } = await setup({ provider: 'googleFree' })
+    expect(await screen.findByText(/在中国大陆通常需要代理/)).toBeInTheDocument()
+    client.testTranslation.mockResolvedValue({ translated: '你好' })
+    await userEvent.click(await screen.findByRole('button', { name: '测试' }))
+    expect(await screen.findByText('可以使用：你好')).toBeInTheDocument()
+  })
+
+  it('groups the services: no setup first, then own key, then off', async () => {
+    await setup()
+    await userEvent.click(await screen.findByRole('combobox', { name: '服务' }))
+    const listbox = await screen.findByRole('listbox')
+    const labels = within(listbox).getAllByRole('group').map((group) => group.textContent)
+    expect(labels).toEqual([
+      expect.stringMatching(/^免设置Microsoft 翻译Google 翻译$/),
+      expect.stringMatching(/^使用自己的密钥DeepLMicrosoft TranslatorGoogle Cloud Translation$/),
+      '不使用翻译',
+    ])
+  })
+
+  it('switching from a keyless to a keyed service shows the key row', async () => {
+    const { saved } = await setup()
+    await choose('服务', 'Microsoft Translator')
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ provider: 'microsoft', consentedProvider: null })))
+    expect(await screen.findByLabelText('密钥')).toBeInTheDocument()
+    expect(screen.getByLabelText('区域')).toBeInTheDocument()
   })
 
   it('keeps consent as it was when the service changes', async () => {
@@ -370,5 +408,21 @@ describe('translation settings page', () => {
     expect(await screen.findByText('1 message, about 0.3 MB')).toBeInTheDocument()
     await act(async () => undefined)
     expect(within(document.body).getByRole('combobox', { name: 'Translate into' })).toHaveTextContent('Same as the app language')
+  })
+})
+
+describe('keyless services in English', () => {
+  it('reads in plain English, with the groups and the unofficial notice', async () => {
+    await i18n.changeLanguage('en')
+    await setup({ provider: 'googleFree' })
+    const select = await screen.findByRole('combobox', { name: 'Service' })
+    expect(select).toHaveTextContent('Google Translate')
+    expect(screen.getByText(/doesn't officially offer it to other apps/)).toBeInTheDocument()
+    expect(screen.getByText(/In mainland China it usually needs a proxy/)).toBeInTheDocument()
+    await userEvent.click(select)
+    const listbox = await screen.findByRole('listbox')
+    expect(within(listbox).getByText('No setup needed')).toBeInTheDocument()
+    expect(within(listbox).getByText('Use your own key')).toBeInTheDocument()
+    expect(within(listbox).getByRole('option', { name: "Don't translate" })).toBeInTheDocument()
   })
 })

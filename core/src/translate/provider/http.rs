@@ -1,4 +1,4 @@
-//! One HTTPS JSON POST over the translation route. Everything except the
+//! One HTTPS POST (JSON unless the caller overrides the content type) over the translation route. Everything except the
 //! request body is bounded: 30 s in total, 4 MiB of answer.
 use std::time::Duration;
 
@@ -162,5 +162,14 @@ pub(super) fn common_status_error(status: u16) -> ErrorCode {
         413 => ErrorCode::TranslationTooLarge,
         500..=599 => ErrorCode::TranslationUnavailable,
         _ => ErrorCode::TranslationInvalidResponse,
+    }
+}
+
+/// For the keyless browser channels: there is no key to reject, so a refusal
+/// means the channel itself is closed, blocked or gone.
+pub(super) fn keyless_status_error(status: u16) -> ErrorCode {
+    match status {
+        401 | 403 | 404 | 410 => ErrorCode::TranslationUnavailable,
+        _ => common_status_error(status),
     }
 }

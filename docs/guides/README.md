@@ -67,25 +67,29 @@ Remote images ask first by default, and attachments can be saved as local files.
 
 ## Translate messages
 
-MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation uses an online translation service that you choose and pay for yourself; it is not built into MailX and not an AI assistant. This feature is new and has only been checked with automated tests and a preview with sample data, not yet with real service accounts or by hand on every system.
+MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation works out of the box with Microsoft Translate, which needs no sign-up and no key. It uses an online translation service, not an AI assistant, and it is not built into MailX. If you want something steadier, you can switch to a service with a key of your own. This feature is new and has only been checked with automated tests, a few test sentences and a preview with sample data, not yet by hand on every system.
 
-### Set up a service
+### Choose a service
 
-1. Open Settings → Translation and, under Translation service, choose DeepL, Microsoft Translator or Google Cloud Translation. You need a key from the service you choose; get it from that service's own website. For Microsoft there is also an optional Region, which is the region you picked when you created the resource; leave it empty for a global resource.
-2. Paste the key and click Save. MailX keeps it securely on this device and never shows it again; the row then says Saved, and you can Replace or Remove it. Use Test to translate a short sample sentence and check that the key and connection work. The test does not send any of your mail.
+Microsoft Translate and Google Translate need no setup. They use the same channel as the translator built into the Edge and Chrome browsers. That channel is not something Microsoft or Google officially offers to other apps, so it can stop working or slow down at any time, and neither company makes any promise about it. If it fails, the line above the message offers Retry and "Use another service". Google Translate usually needs a proxy in mainland China. For something steadier, choose a service with your own key.
+
+To use your own key:
+
+1. Open Settings → Translation and, under Translation service, choose DeepL, Microsoft Translator or Google Cloud Translation from the "Use your own key" group. You need a key from the service you choose; get it from that service's own website. For Microsoft Translator there is also an optional Region, which is the region you picked when you created the resource; leave it empty for a global resource.
+2. Paste the key and click Save. MailX keeps it securely on this device and never shows it again; the row then says Saved, and you can Replace or Remove it. Use Test to translate a short sample sentence and check that the key and connection work (it also works for the no-setup services, which have no key). The test does not send any of your mail.
 3. Under Translating, choose what to translate into: "Same as the app language" (the default) or one of 26 languages.
 
 ### Translate and switch back
 
 Open a message and click the translate button in the reading toolbar, just after the read and star buttons. The small arrow beside it opens a menu: Translate to (pick another language), Translate again, and Translation settings…. You can also choose Translate this message in the command palette. The original stays readable while the translation runs, and you can cancel. Click the button again to go back to the original, and again for the translation. Both versions stay loaded, so switching is instant and each remembers where you scrolled. If a translation fails, the reason and a Retry button appear in the line above the message.
 
-If no translation service or key is set up yet, the button tells you ("No translation service is set up yet") and offers Open settings. Only messages that have been downloaded and have a formatted (HTML) body can be translated.
+If you turned translation off ("Don't translate"), or chose a service with your own key and have not saved one yet, the button tells you ("No translation service is set up yet") and offers Open settings. Only messages that have been downloaded and have a formatted (HTML) body can be translated.
 
-The first time you use a service, MailX asks "Send this message to …?" before anything is sent, and you can Cancel. Switching to another service asks again. While you stay in MailX, it remembers for each message whether you were viewing the translation and whether you closed the hint; this is not kept after you quit.
+The first time you use a service, MailX asks "Send this message to …?" before anything is sent, and you can Cancel. For Microsoft Translate and Google Translate the question also says that this is the channel browsers use, not an official service for other apps, so it may stop working, and that your text goes to Microsoft or Google. Switching to another service asks again. While you stay in MailX, it remembers for each message whether you were viewing the translation and whether you closed the hint; this is not kept after you quit.
 
 ### The language hint
 
-Once a service and key are set up, a message that looks like it is in a language other than yours gets a line above it, for example "This message is in French" with a Translate to … button. Its More menu lets you choose "Always translate …" or "Don't suggest translating …" for that language, and the close button hides the hint for this message only. The same two choices are in the toolbar menu. The language is detected on your computer; nothing is sent until you translate. Short messages and mixed-language messages may not be recognized, and Simplified and Traditional Chinese are not told apart. Under Settings → Translation → Foreign-language mail you can turn the hint off ("Offer to translate").
+Once a service is ready (the no-setup services always are), a message that looks like it is in a language other than yours gets a line above it, for example "This message is in French" with a Translate to … button. Its More menu lets you choose "Always translate …" or "Don't suggest translating …" for that language, and the close button hides the hint for this message only. The same two choices are in the toolbar menu. The language is detected on your computer; nothing is sent until you translate. Short messages and mixed-language messages may not be recognized, and Simplified and Traditional Chinese are not told apart. Under Settings → Translation → Foreign-language mail you can turn the hint off ("Offer to translate").
 
 ### Translate automatically by language
 
@@ -93,7 +97,7 @@ Choose "Always translate …" for a language, and messages in that language are 
 
 ### What is sent and what is not
 
-MailX sends the message's subject and text to the service you chose, and only after you agree. It does not send attachments, pictures, link addresses or your mailbox passwords. Quoted earlier messages at the end of a reply are not translated unless you turn on "Translate quoted earlier messages" (off by default). Code and plain web or email addresses are left as they are. What each service does with your text is governed by that service's own terms, so check them before you use it for private mail.
+MailX sends the message's subject and text to the service you chose (Microsoft, Google, or the one whose key you saved), and only after you agree. It does not send attachments, pictures, link addresses or your mailbox passwords. Quoted earlier messages at the end of a reply are not translated unless you turn on "Translate quoted earlier messages" (off by default). Code and plain web or email addresses are left as they are. What each service does with your text is governed by that service's own terms, so check them before you use it for private mail. The no-setup services have no terms and no data-processing statement for this use, so for private or sensitive mail prefer a service with your own key and terms you have read.
 
 ### Use a proxy for translation
 

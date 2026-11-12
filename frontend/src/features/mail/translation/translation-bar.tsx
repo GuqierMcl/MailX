@@ -12,6 +12,7 @@ import { DetectedLanguageItems } from './translation-toolbar'
 import type { EmailTranslation } from './use-email-translation'
 
 const action = 'h-6 shrink-0 text-xs'
+const KEYLESS_FAILURES: string[] = ['translationUnavailable', 'translationRateLimited', 'translationNetwork', 'translationTimeout']
 
 /**
  * One quiet line above the message that follows the translation: an offer, the
@@ -44,11 +45,15 @@ export function TranslationBar({ translation }: { translation: EmailTranslation 
   }
   if (phase === 'error') {
     const message = errorText(error)
+    const code = clientFailureCode(error)
+    // A keyless channel that refuses, is limited or cannot be reached has no key to fix: offer another service next to the retry.
+    const channelFailed = translation.keyless && code !== null && KEYLESS_FAILURES.includes(code)
     return shell(<>
       {text(message)}
-      {clientFailureCode(error) === 'translationNotConfigured'
+      {code === 'translationNotConfigured'
         ? <Button size="sm" variant="outline" className={action} onClick={translation.openSettings}>{t('mail:translationOpenSettings')}</Button>
         : <Button size="sm" variant="outline" className={action} onClick={() => translation.translate(translation.target ?? undefined)}>{t('mail:retry')}</Button>}
+      {channelFailed && <Button size="sm" variant="ghost" className={`${action} text-muted-foreground`} onClick={translation.openSettings}>{t('mail:translationUseAnotherService')}</Button>}
       {close(translation.dismissError)}
     </>)
   }

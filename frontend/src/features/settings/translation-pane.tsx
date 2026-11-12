@@ -7,11 +7,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import type { ProxyKind, TranslationKeyState, TranslationProviderId, TranslationProxyPasswordState, TranslationSettings } from '@/generated/accounts'
-import { COMMON_LANGUAGES, languageName, nativeLanguageName, TRANSLATION_PROVIDER_NAMES, TRANSLATION_TARGETS } from '@/features/mail/translation/languages'
+import { COMMON_LANGUAGES, KEYED_PROVIDERS, KEYLESS_PROVIDERS, languageName, nativeLanguageName, needsKey, TRANSLATION_PROVIDER_NAMES, TRANSLATION_TARGETS } from '@/features/mail/translation/languages'
 import type { MailxClient } from '@/lib/mailx-client'
 import { translationKeys } from '@/lib/query-client'
 import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
@@ -49,20 +49,34 @@ function ServiceGroup({ client, translation, update }: { client: MailxClient; tr
   const keys = useQuery({ queryKey: translationKeys.keys(), queryFn: () => client.translationKeys() })
   const { provider } = translation
   const configured = provider !== null && Boolean(keys.data?.some((key) => key.provider === provider && key.configured))
+  const keyless = provider !== null && !needsKey(provider)
   const services: Record<string, string> = { [NONE]: t('settings:translationServiceNone'), ...TRANSLATION_PROVIDER_NAMES }
+  const option = (value: string) => <SelectItem key={value} value={value}>{services[value]}</SelectItem>
+  const description = provider === 'microsoftFree' ? t('settings:translationFreeMicrosoft')
+    : provider === 'googleFree' ? t('settings:translationFreeGoogle') : t('settings:translationServiceDescription')
   return <SettingsGroup title={t('settings:translationService')}>
-    <SettingsRow label={t('settings:translationServiceLabel')} htmlFor="translation.provider" description={t('settings:translationServiceDescription')}>
+    <SettingsRow label={t('settings:translationServiceLabel')} htmlFor="translation.provider" description={description}>
       <Select value={provider ?? NONE} items={services}
         onValueChange={(value: string | null) => value && update.mutate({ provider: value === NONE ? null : value as TranslationProviderId })}>
         <SelectTrigger id="translation.provider" className="w-56"><SelectValue /></SelectTrigger>
-        <SelectContent>{Object.entries(services).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>{t('settings:translationGroupNoSetup')}</SelectLabel>
+            {KEYLESS_PROVIDERS.map(option)}
+          </SelectGroup>
+          <SelectGroup>
+            <SelectLabel>{t('settings:translationGroupOwnKey')}</SelectLabel>
+            {KEYED_PROVIDERS.map(option)}
+          </SelectGroup>
+          <SelectGroup>{option(NONE)}</SelectGroup>
+        </SelectContent>
       </Select>
     </SettingsRow>
-    {provider && <>
+    {provider && !keyless && <>
       <KeyRow key={provider} client={client} provider={provider} configured={configured} />
       {provider === 'microsoft' && <RegionRow region={translation.microsoftRegion} update={update} />}
-      <TestRow key={`${provider}:${configured}`} client={client} configured={configured} />
     </>}
+    {provider && <TestRow key={`${provider}:${configured}`} client={client} configured={keyless || configured} keyless={keyless} />}
   </SettingsGroup>
 }
 
@@ -141,7 +155,7 @@ function RegionRow({ region, update }: { region: string; update: Update }) {
 
 type TestState = { kind: 'idle' } | { kind: 'running' } | { kind: 'works'; sample: string } | { kind: 'failed'; reason: string }
 
-function TestRow({ client, configured }: { client: MailxClient; configured: boolean }) {
+function TestRow({ client, configured, keyless }: { client: MailxClient; configured: boolean; keyless: boolean }) {
   useTranslation()
   const [state, setState] = useState<TestState>({ kind: 'idle' })
   const run = () => {
@@ -151,7 +165,7 @@ function TestRow({ client, configured }: { client: MailxClient; configured: bool
       (error: unknown) => setState({ kind: 'failed', reason: errorText(error) }),
     )
   }
-  return <SettingsRow label={t('settings:translationTest')} description={t('settings:translationTestDescription')}>
+  return <SettingsRow label={t('settings:translationTest')} description={keyless ? t('settings:translationTestDescriptionFree') : t('settings:translationTestDescription')}>
     {state.kind === 'works' && <span role="status" className="max-w-56 truncate text-xs text-muted-foreground" title={state.sample}>{t('settings:translationTestWorks', { sample: state.sample })}</span>}
     {state.kind === 'failed' && <span role="alert" className="max-w-56 text-right text-xs text-destructive">{state.reason}</span>}
     <Button variant="outline" size="sm" disabled={!configured || state.kind === 'running'} onClick={run}>

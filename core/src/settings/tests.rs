@@ -356,7 +356,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0 },
                 "mcp": { "enabled": false },
                 "translation": {
-                    "provider": null,
+                    "provider": "microsoftFree",
                     "microsoftRegion": "",
                     "route": { "kind": "direct" },
                     "targetLanguage": "auto",
@@ -1292,9 +1292,12 @@ fn field_of(settings: TranslationSettings) -> Option<String> {
 }
 
 #[test]
-fn translation_defaults_are_off_and_private() {
+fn translation_defaults_use_the_keyless_service_and_stay_private() {
     let defaults = TranslationSettings::default();
-    assert_eq!(defaults.provider, None);
+    assert_eq!(
+        defaults.provider,
+        Some(TranslationProviderId::MicrosoftFree)
+    );
     assert_eq!(defaults.consented_provider, None);
     assert_eq!(defaults.route, TranslationRoute::Direct);
     assert_eq!(defaults.target_language, "auto");
@@ -1546,7 +1549,8 @@ fn a_hand_edited_translation_section_falls_back_per_field() {
     );
     assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
     let t = snapshot.settings.translation;
-    assert_eq!(t.provider, None);
+    // An unknown service loses only itself and falls back to the default.
+    assert_eq!(t.provider, Some(TranslationProviderId::MicrosoftFree));
     assert_eq!(t.consented_provider, Some(TranslationProviderId::Deepl));
     assert_eq!(t.microsoft_region, "");
     assert_eq!(t.route, TranslationRoute::Direct);
@@ -1576,5 +1580,51 @@ fn a_translation_section_of_the_wrong_type_is_ignored() {
     assert_eq!(
         snapshot.settings.translation,
         TranslationSettings::default()
+    );
+}
+
+#[test]
+fn a_saved_off_choice_survives_and_a_missing_one_gets_the_default() {
+    let load = |translation: &str| {
+        let directory = TempDir::new().unwrap();
+        fs::write(
+            directory.path().join(SETTINGS_FILE_NAME),
+            format!(r#"{{"version":1,"settings":{{"translation":{translation}}}}}"#),
+        )
+        .unwrap();
+        SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .settings
+            .translation
+    };
+    assert_eq!(load(r#"{"provider":null}"#).provider, None);
+    assert_eq!(
+        load(r#"{"suggest":false}"#).provider,
+        Some(TranslationProviderId::MicrosoftFree)
+    );
+    assert_eq!(
+        load(r#"{"provider":"googleFree"}"#).provider,
+        Some(TranslationProviderId::GoogleFree)
+    );
+}
+
+#[test]
+fn only_the_browser_channels_work_without_a_key() {
+    let keyless: Vec<_> = TranslationProviderId::ALL
+        .into_iter()
+        .filter(|p| !p.needs_key())
+        .collect();
+    assert_eq!(
+        keyless,
+        [
+            TranslationProviderId::MicrosoftFree,
+            TranslationProviderId::GoogleFree
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(TranslationProviderId::GoogleFree).unwrap(),
+        "googleFree"
     );
 }

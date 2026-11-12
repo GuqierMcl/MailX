@@ -595,8 +595,32 @@ describe('mock translation', () => {
     return { client, foreign }
   }
 
+  it('works out of the box with the keyless default, after consent', async () => {
+    const { client, foreign } = await ready()
+    const section = (await client.getSettings()).settings.translation
+    expect(section).toMatchObject({ provider: 'microsoftFree', consentedProvider: null })
+    expect(await client.translationStatus(foreign.id)).toMatchObject({ detectedLanguage: 'ja', suggested: true, autoTranslate: false })
+    await expect(client.translateEmail(foreign.id)).rejects.toMatchObject({ failure: { code: 'translationConsentRequired' } })
+    await client.updateSettings({ translation: { ...section, consentedProvider: 'microsoftFree' } })
+    expect((await client.translateEmail(foreign.id)).translation).toMatchObject({ provider: 'microsoftFree' })
+    expect(await client.translationKeys()).toEqual([
+      { provider: 'deepl', configured: false }, { provider: 'microsoft', configured: false }, { provider: 'google', configured: false },
+    ])
+    await expect(client.setTranslationKey('googleFree', 'key')).rejects.toMatchObject({ failure: { field: 'translation.provider' } })
+  })
+
+  it('simulates the keyless Google channel being out of reach without a proxy', async () => {
+    const { client, foreign } = await ready()
+    const section = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...section, provider: 'googleFree', consentedProvider: 'googleFree' } })
+    await expect(client.translateEmail(foreign.id)).rejects.toMatchObject({ failure: { code: 'translationNetwork' } })
+    await expect(client.testTranslation()).rejects.toMatchObject({ failure: { code: 'translationNetwork' } })
+  })
+
   it('detects the language of the foreign showcase mail and enforces setup and consent like the core', async () => {
     const { client, foreign } = await ready()
+    const off = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...off, provider: null } })
     expect(await client.translationStatus(foreign.id)).toMatchObject({ detectedLanguage: 'ja', suggested: false, translation: null })
     await expect(client.translateEmail(foreign.id)).rejects.toMatchObject({ failure: { code: 'translationNotConfigured' } })
     await client.setTranslationKey('deepl', 'key')
@@ -626,6 +650,8 @@ describe('mock translation', () => {
 
   it('keeps keys out of reach and tests with a sample', async () => {
     const { client } = await ready()
+    const off = (await client.getSettings()).settings.translation
+    await client.updateSettings({ translation: { ...off, provider: 'deepl' } })
     await expect(client.testTranslation()).rejects.toMatchObject({ failure: { code: 'translationNotConfigured' } })
     expect(await client.setTranslationKey('google', 'secret')).toContainEqual({ provider: 'google', configured: true })
     const section = (await client.getSettings()).settings.translation

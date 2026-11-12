@@ -52,7 +52,7 @@ export const useUpdateLayout = (client: MailxClient) => useSettingsSection(clien
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
 export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
 export const DEFAULT_TRANSLATION: TranslationSettings = {
-  provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,
+  provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)

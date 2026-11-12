@@ -514,13 +514,19 @@ impl MailxCore {
             .map_err(|_| internal())?
     }
 
+    /// What a request to `provider` signs with: the saved key, or nothing for
+    /// a keyless service. A keyed service without a key is not configured.
     async fn translation_key(
         &self,
         provider: TranslationProviderId,
-    ) -> Result<Option<SecretValue>, AppError> {
+    ) -> Result<SecretValue, AppError> {
+        if !provider.needs_key() {
+            return Ok(empty_secret());
+        }
         let secrets = self.translation.secrets.clone();
         self.blocking(move |_| Ok(secrets.get(&secret_name(provider))?))
-            .await
+            .await?
+            .ok_or_else(not_configured)
     }
 
     /// Builds the route for one request. A secret store that cannot be read
@@ -583,6 +589,9 @@ impl MailxCore {
         provider: TranslationProviderId,
         key: SecretValue,
     ) -> Result<(), AppError> {
+        if !provider.needs_key() {
+            return Err(AppError::validation("translation.provider"));
+        }
         let key = valid_key(&key).ok_or_else(|| AppError::validation("translation.key"))?;
         let secrets = self.translation.secrets.clone();
         self.blocking(move |_| Ok(secrets.set(&secret_name(provider), &key)?))
@@ -593,6 +602,9 @@ impl MailxCore {
         &self,
         provider: TranslationProviderId,
     ) -> Result<(), AppError> {
+        if !provider.needs_key() {
+            return Err(AppError::validation("translation.provider"));
+        }
         let secrets = self.translation.secrets.clone();
         self.blocking(move |_| Ok(secrets.delete(&secret_name(provider))?))
             .await
@@ -603,6 +615,7 @@ impl MailxCore {
         self.blocking(move |_| {
             TranslationProviderId::ALL
                 .into_iter()
+                .filter(|provider| provider.needs_key())
                 .map(|provider| {
                     Ok(TranslationKeyState {
                         provider,
@@ -614,7 +627,7 @@ impl MailxCore {
         .await
     }
 
-    /// Translates a fixed English sentence, to check key, region and route. It
+    /// Translates a fixed English sentence, to check key (if the service has one), region and route. It
     /// carries no mail text, so it needs no consent. With the target set to
     /// `auto` there is no UI language to follow, so Simplified Chinese is used.
     pub async fn test_translation(
@@ -623,10 +636,7 @@ impl MailxCore {
     ) -> Result<TranslationTest, AppError> {
         let settings = settings.normalized()?;
         let provider = settings.provider.ok_or_else(not_configured)?;
-        let key = self
-            .translation_key(provider)
-            .await?
-            .ok_or_else(not_configured)?;
+        let key = self.translation_key(provider).await?;
         let target = match settings.target_language.as_str() {
             "auto" => "zh-Hans",
             explicit => explicit,
@@ -682,6 +692,7 @@ impl MailxCore {
             let (id, settings, target) = (email_id.clone(), settings.clone(), target.clone());
             self.blocking(move |core| {
                 let ready = match settings.provider {
+                    Some(provider) if !provider.needs_key() => true,
                     Some(provider) => secrets.get(&secret_name(provider))?.is_some(),
                     None => false,
                 };
@@ -729,10 +740,7 @@ impl MailxCore {
     ) -> Result<TranslationStatus, AppError> {
         let settings = settings.normalized()?;
         let provider = settings.provider.ok_or_else(not_configured)?;
-        let key = self
-            .translation_key(provider)
-            .await?
-            .ok_or_else(not_configured)?;
+        let key = self.translation_key(provider).await?;
         // Checked here so that no host can skip the user's agreement.
         if settings.consented_provider != Some(provider) {
             return Err(AppError::new(ErrorCode::TranslationConsentRequired));

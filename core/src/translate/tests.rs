@@ -940,6 +940,167 @@ fn decode_survives_deep_nesting() {
     assert_eq!(wire::decode(&input).len(), depth * 2 + 1);
 }
 
+// ------------------------------------------------------- tag-name encoding
+
+#[test]
+fn tag_encoding_writes_the_documented_tokens_and_inverts() {
+    let html = r#"<p>Tom &amp; <b>x &lt;g1&gt; 3 &gt; 2</b><br>y <img data-mailx-cid="1"> "q"</p>"#;
+    for segment in extract(html, true).unwrap() {
+        let tags = wire::encode_tags(segment.pieces());
+        assert_eq!(
+            tags,
+            r#"Tom &amp; <g1>x &lt;g1&gt; 3 &gt; 2</g1><n2/>y <x3/> "q""#
+        );
+        assert_eq!(wire::decode_tags(&tags), segment.pieces());
+    }
+}
+
+#[test]
+fn tag_decoding_accepts_only_exact_tokens() {
+    let d = wire::decode_tags;
+    assert_eq!(
+        d("a<g1>b<n22/>c<x3 />d</g1>"),
+        [
+            text("a"),
+            Piece::Open(1),
+            text("b"),
+            Piece::Break(22),
+            text("c"),
+            Piece::Object(3),
+            text("d"),
+            Piece::Close(1),
+        ]
+    );
+    // Five digits, no digits, wrong kind, attributes, case, closing forms of n / x.
+    for literal in [
+        "<g12345>",
+        "<g>",
+        "</g>",
+        "<n1>",
+        "<x1>",
+        "</n1/>",
+        "</x1>",
+        "<g1 onclick=alert(1)>",
+        "<g1/>",
+        "<G1>",
+        "<g1 >",
+        "<n1  />",
+        "<n1/ >",
+        "<g-1>",
+        "<g+1>",
+        "<g１>",
+        "<script>x</script>",
+        "<span id=\"1\">",
+        "<g1",
+        "<",
+    ] {
+        assert_eq!(d(literal), [text(literal)], "{literal}");
+    }
+    // Entities: the agreed set, once; anything else stays literal.
+    assert_eq!(
+        d("&lt;g1&gt; &amp;lt; &quot;&#39;&apos; &nbsp; &#60; &unknown; & &"),
+        [text("<g1> &lt; \"'' &nbsp; &#60; &unknown; & &")]
+    );
+    assert_eq!(d(""), []);
+    assert_eq!(
+        d("\u{0}<g1>\u{0}</g1>"),
+        [
+            text("\u{0}"),
+            Piece::Open(1),
+            text("\u{0}"),
+            Piece::Close(1)
+        ]
+    );
+    assert_eq!(
+        d("日本<g1>語</g1>"),
+        [text("日本"), Piece::Open(1), text("語"), Piece::Close(1)]
+    );
+}
+
+#[test]
+fn tag_decoding_survives_deep_and_wrong_nesting() {
+    let depth = 50_000;
+    let input = format!("{}x{}", "<g1>".repeat(depth), "</g1>".repeat(depth));
+    assert_eq!(wire::decode_tags(&input).len(), depth * 2 + 1);
+    // Wrong order and unbalanced tags decode to pieces; the applier decides.
+    assert_eq!(
+        wire::decode_tags("</g1>a<g2>b</g1>"),
+        [
+            Piece::Close(1),
+            text("a"),
+            Piece::Open(2),
+            text("b"),
+            Piece::Close(1)
+        ]
+    );
+}
+
+#[test]
+fn tag_balance_requires_matching_nesting() {
+    let balanced = |answer: &str| wire::tags_balanced(&wire::decode_tags(answer));
+    assert!(balanced("a<g1>b<g2>c</g2></g1><n3/><x4/>"));
+    assert!(balanced("plain text"));
+    assert!(!balanced("<g1>a<g2>b</g1>c</g2>"), "crossed");
+    assert!(!balanced("</g1>a"), "close before open");
+    assert!(!balanced("<g1>a"), "left open");
+}
+
+#[test]
+fn hostile_tag_answers_never_add_elements_or_attributes() {
+    let with_link = r#"<div>Visit <a href="https://e.test/x" data-mailx-link="1" class="k">the page</a> and <img data-mailx-cid="2" alt="logo"> then <b>read</b>.</div><p>Second <i>part</i> here</p>"#;
+    let no_required = "<div>Plain <b>bold</b> sentence<br>again</div><p>Other <u>part</u> text</p>";
+    let hostile = [
+        "<script>alert(1)</script>Hello",
+        "<img src=x onerror=alert(1)>Hello <x2/>",
+        "<g1 onclick=\"alert(1)\" href=\"//evil\">Hi</g1><x2/>",
+        "<g99999>a</g99999><g65536>b</g65536><n0/><x00002/>",
+        "<g1><g1><g1>deep</g1></g1></g1><x2/><x2/>",
+        "</g1></g1>text<g1>",
+        "<g1>Hi<g2>unbalanced",
+        "&lt;script&gt;alert(1)&lt;/script&gt; &amp;lt; &#x3c;b&#x3e; &lt;g1&gt;",
+        "Hello\u{0}<g1>x\u{0}</g1>\u{0}",
+        "<n1/><n1/><n1/><x1/><x1/>",
+        "<span id=\"1\">a</span><br id=\"2\"><img id=\"2\"> text",
+        "<![CDATA[ <script> ]]> <!-- <img src=x> --> text",
+    ];
+    for html in [with_link, no_required] {
+        for answer in hostile {
+            // The same normalisation the Edge client applies before caching.
+            let normalized = wire::encode_pieces(&wire::decode_tags(answer));
+            let list: Vec<Option<String>> = (0..extract(html, true).unwrap().len())
+                .map(|_| Some(normalized.clone()))
+                .collect();
+            let out = apply(html, true, &list).unwrap();
+            assert_subset(&out, html);
+            for forbidden in ["alert(1)\"", "//evil", "onerror", "onclick", "javascript:"] {
+                assert!(
+                    !shape(&out).keys().any(|k| k.contains(forbidden)),
+                    "{forbidden}: {out}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_edge_style_answer_is_rewritten_in_the_original_elements() {
+    let html = r#"<p>Your order <b>#4521</b> has shipped.<br>Track it <a href="u" data-mailx-link="1">on <i>our website</i></a> now <img data-mailx-cid="1"></p>"#;
+    let segment = &extract(html, true).unwrap()[0];
+    assert_eq!(
+        wire::encode_tags(segment.pieces()),
+        "Your order <g1>#4521</g1> has shipped.<n2/>Track it <g3>on <g4>our website</g4></g3> now <x5/>"
+    );
+    let answer = "您的订单<g1>#4521</g1>已发货。<n2/>请<g3>在<g4>我们的网站上</g4></g3>追踪<x5/>";
+    let normalized = wire::encode_pieces(&wire::decode_tags(answer));
+    let out = apply(html, true, &[Some(normalized)]).unwrap();
+    assert_eq!(
+        out,
+        norm(
+            r#"<p>您的订单<b>#4521</b>已发货。<br>请<a href="u" data-mailx-link="1">在<i>我们的网站上</i></a>追踪<img data-mailx-cid="1"></p>"#
+        )
+    );
+}
+
 // ------------------------------------------------------------- languages
 
 #[test]

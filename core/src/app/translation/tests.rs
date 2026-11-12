@@ -124,8 +124,14 @@ fn code(result: Result<impl std::fmt::Debug, AppError>) -> ErrorCode {
 async fn preconditions_fail_in_the_documented_order() {
     let f = fixture(&["<p>Hello</p>"]);
     let calls = echo(&f);
+    // The default is a keyless service: it only waits for consent.
     let mut s = TranslationSettings::default();
+    assert_eq!(
+        code(translate_to_de(&f, 0, &s).await),
+        ErrorCode::TranslationConsentRequired
+    );
 
+    s.provider = None;
     assert_eq!(
         code(translate_to_de(&f, 0, &s).await),
         ErrorCode::TranslationNotConfigured
@@ -1297,6 +1303,9 @@ fn four_byte_text_is_split_so_no_json_body_exceeds_the_documented_cap() {
         (TranslationProviderId::Deepl, 128 * 1024),
         (TranslationProviderId::Google, 100_000),
         (TranslationProviderId::Microsoft, 200_000),
+        // UNVERIFIED caps: the browser channels publish none.
+        (TranslationProviderId::MicrosoftFree, 100_000),
+        (TranslationProviderId::GoogleFree, 100_000),
     ] {
         let limits = provider::limits(provider);
         let planned = plan(&segments, limits);
@@ -1318,6 +1327,23 @@ fn four_byte_text_is_split_so_no_json_body_exceeds_the_documented_cap() {
                 TranslationProviderId::Google => serde_json::to_vec(&serde_json::json!({
                     "q": items, "target": "en", "format": "html"
                 })),
+                TranslationProviderId::MicrosoftFree => serde_json::to_vec(
+                    &items
+                        .iter()
+                        .map(|t| translate::wire::encode_tags(&translate::wire::decode(t)))
+                        .collect::<Vec<_>>(),
+                ),
+                TranslationProviderId::GoogleFree => Ok(items
+                    .iter()
+                    .fold(
+                        url::form_urlencoded::Serializer::new(String::new()),
+                        |mut form, t| {
+                            form.append_pair("q", t);
+                            form
+                        },
+                    )
+                    .finish()
+                    .into_bytes()),
             }
             .unwrap();
             assert!(body.len() <= cap, "{provider:?}: {} > {cap}", body.len());
@@ -1339,4 +1365,91 @@ async fn a_body_past_the_segment_cap_is_stored_as_partial() {
     assert!(over.translation.unwrap().partial);
     let exact = translate_to_de(&f, 1, &s).await.unwrap();
     assert!(!exact.translation.unwrap().partial);
+}
+
+#[tokio::test]
+async fn keyless_services_translate_without_a_key_and_after_consent() {
+    for provider in [
+        TranslationProviderId::MicrosoftFree,
+        TranslationProviderId::GoogleFree,
+    ] {
+        let f = fixture(&["<p>Hello <b>big</b> world</p>"]);
+        let calls = echo(&f);
+        let mut s = settings(provider);
+        s.consented_provider = None;
+        assert_eq!(
+            code(translate_to_de(&f, 0, &s).await),
+            ErrorCode::TranslationConsentRequired
+        );
+        s.consented_provider = Some(provider);
+        let status = translate_to_de(&f, 0, &s).await.unwrap();
+        assert_eq!(status.translation.unwrap().provider, provider);
+        {
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].key, "");
+        }
+        // The offer needs no saved key either.
+        let offered = f
+            .core
+            .translation_status(f.ids[0].clone(), s.clone(), "en".into())
+            .await
+            .unwrap();
+        assert_eq!(offered.target_language, "de");
+    }
+}
+
+#[tokio::test]
+async fn test_translation_works_for_a_keyless_service_without_a_key() {
+    let f = fixture(&["<p>Hello</p>"]);
+    echo(&f);
+    let s = settings(TranslationProviderId::MicrosoftFree);
+    let result = f.core.test_translation(s).await.unwrap();
+    assert!(!result.translated.is_empty());
+}
+
+#[tokio::test]
+async fn keyless_services_have_no_key_to_set_remove_or_list() {
+    let f = fixture(&["<p>Hello</p>"]);
+    for provider in [
+        TranslationProviderId::MicrosoftFree,
+        TranslationProviderId::GoogleFree,
+    ] {
+        let set = f
+            .core
+            .set_translation_key(provider, SecretValue::new(KEY.into()))
+            .await
+            .unwrap_err();
+        assert_eq!(set.field.as_deref(), Some("translation.provider"));
+        let removed = f.core.remove_translation_key(provider).await.unwrap_err();
+        assert_eq!(removed.field.as_deref(), Some("translation.provider"));
+    }
+    let listed: Vec<_> = f
+        .core
+        .translation_keys()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|state| state.provider)
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            TranslationProviderId::Deepl,
+            TranslationProviderId::Microsoft,
+            TranslationProviderId::Google
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_keyed_service_without_a_key_is_still_not_ready() {
+    let f = fixture(&[&format!("<p>{ENGLISH}</p>")]);
+    let s = settings(TranslationProviderId::Deepl);
+    let status = f
+        .core
+        .translation_status(f.ids[0].clone(), s, "zh-CN".into())
+        .await
+        .unwrap();
+    assert!(!status.suggested);
 }

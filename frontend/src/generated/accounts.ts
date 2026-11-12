@@ -787,13 +787,13 @@ export type DraftChange = "created" | "updated" | "locked" | "unlocked" | "delet
 
 export type DraftChanged = { draftId: string, accountId: string, change: DraftChange, };
 
-export type TranslationProviderId = "deepl" | "microsoft" | "google";
+export type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree";
 
 export type TranslationRoute = { "kind": "direct" } | { "kind": "proxy", proxyKind: ProxyKind, host: string, port: number, username: string, };
 
 export type TranslationSettings = {
 /**
- * `None` until a service is chosen.
+ * `None` means the user turned translation off; a missing field is the default.
  */
 provider: TranslationProviderId | null,
 /**
