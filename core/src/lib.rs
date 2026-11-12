@@ -14,6 +14,7 @@ pub mod auth;
 pub mod drafts;
 pub mod error;
 pub mod events;
+mod ews;
 mod imap;
 pub mod localization;
 pub mod mail;

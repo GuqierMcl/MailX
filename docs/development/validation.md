@@ -1232,4 +1232,50 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - Windows、Linux 没有手测；经代理的真实路径、系统凭据库中密钥的读写没有单独验证。
 - 没有用真实密钥测过 `aiKeyRejected` 等错误码在真实服务上的对应关系。
 
-自动测试通过不代表上述项目已验收。
+自动测试通过不代表上述项目已验收。<a id="exchange-ews-validation"></a>
+
+## 43. Exchange 邮箱探测与 EWS + NTLMv2 传输层（2026-11-12）
+
+### 43.1 被探测的服务器
+
+对一个本地部署的 Exchange 邮箱做了被动能力探测，没有尝试任何认证。目的：判断该类账号在 MailX 里该走哪条路。下文主机名、IP、证书主体与账号均为示意占位（`contoso.com` 为保留示例域），真实的组织标识不在仓库中出现。
+
+| 通道 | 结果 |
+| --- | --- |
+| MX / 主机 | `mail.contoso.com`（公网直连）；无 `_autodiscover._tcp` SRV |
+| 内部系统 | Microsoft Exchange Server 2016（IMAP BYE 横幅自报） |
+| SMTP 前置 | 第三方邮件安全网关，25 与 465 均指向它；587 端口开但无响应 |
+| IMAP | 143 **必须 STARTTLS**（明文不吐横幅），CAPABILITY：`IMAP4rev1 AUTH=PLAIN AUTH=NTLM AUTH=GSSAPI SASL-IR UIDPLUS MOVE ID UNSELECT CHILDREN IDLE NAMESPACE LITERAL+`；**无 XOAUTH2**；993 关闭 |
+| POP3 | 110 端口开但协议无响应（已禁用）；995 关闭 |
+| 443 | `/ews/exchange.asmx`、`/autodiscover/autodiscover.xml`、`/owa/`、`/Microsoft-Server-ActiveSync`、`/mapi/emsmdb` 均存在（401 或跳登录页） |
+
+证书与信任：
+
+- IMAP 143：企业内网 CA 签发（主体形如 `contoso-DC-CA`），SAN 含 `mail.contoso.com`、`AutoDiscover.contoso.com` 等。该根证书在本机“受信任的根证书颁发机构”里，用 Windows 系统验证栈实测 STARTTLS **握手成功**（Tls12/Aes256）。
+- SMTP 25 与 465：网关的**自签**证书（主体是网关厂商域名，**无 SAN**），主机名不匹配且不可验证，因此 MailX 发信必然 TLS 失败；`TlsMode` 只有 `implicit`/`startTls`，没有明文选项，这是有意的。
+- 443：`*.contoso.com`，公网 DV 证书。
+
+结论：这台服务器上**收信可以走 IMAP，发信走不通**，而同类桌面客户端之所以能用，是因为它选了“Exchange 类型 + 使用 HTTP 连接 + NTLM”，即 EWS over 443，绕开了 IMAP/SMTP。EWS 的 `WWW-Authenticate` 只给 `Negotiate` 与 `NTLM`（只有 Autodiscover 给 `Basic realm="mail.contoso.com"`），所以基本认证不是选项。
+
+### 43.2 已实现
+
+`core/src/ews/`（尚未接入账号模型，模块内 `allow(dead_code)`）：
+
+- `crypto.rs`：MD4、MD5、HMAC-MD5 自实现，RFC 1320/1321/2202 向量通过。
+- `ntlm.rs`：`Type 1` 构造、`Type 2` 有界解析（越界即拒、缺 NTLM 即拒，不做 NTLMv1/LM）、`Type 3` 构造（NTLMv2，含 `MsvAvChannelBindings` 插槽）、用户名 `DOMAIN\user` / `domain/user` / `user@realm` 拆分、FILETIME。MS-NLMP 4.2.4.1.1 向量通过。
+- `http.rs`：基于 `hyper` 的 **单连接** HTTP/1.1（不池化，NTLM 连接绑定），`401 → Type1 → 401(挑战) → Type3 → 200` 循环，每个响应当场 drain 以便同一连接继续用；请求 30 秒超时、响应体 32 MiB 上限；401/403 归“凭证被拒”，无 NTLM 归“不支持”，网络/TLS 归传输失败。
+- `soap.rs`：信封与服务端版本头、`FindFolder` 请求、按本地名匹配的有界扫描（前缀无关、支持自闭合元素、拒绝 `<!DOCTYPE>`/`<!ENTITY>`）、`ResponseClass="Error"` 映射为服务端错误（不回传其文本）。
+- `mod.rs`：`Endpoint`（默认 `/EWS/Exchange.asmx`:443）、`EwsClient::connect`（走账号路由 + TLS + NTLM）、`folders()`。
+
+### 43.3 执行的检查
+
+- `cargo test -p mailx-core --lib`：1026 项通过（新增 42 项 EWS 测试），1 项忽略（真机）。覆盖：三条哈希的 RFC 向量、NTLMv2 向量、`Type 2` 越界与降级拒绝、`Type 3` 字段布局、**一条 TCP 连接上完成的四次请求**（假服务器只 accept 一次，客户端若重连即失败）、错误密码 → `Rejected`、无 NTLM → `NoNtlm`、多挑战合并头解析、SOAP 的 DTD/前缀/自闭合/错误类。
+- `cargo clippy -p mailx-core --all-targets -- -D warnings`、`cargo fmt --all` 通过。
+
+### 43.4 未验证
+
+- **真实账号的 EWS 登录**：需要该邮箱的密码。入口已备好，用环境变量传入，不落库、不打印：
+  `MAILX_EWS_HOST` / `MAILX_EWS_USER` / `MAILX_EWS_PASSWORD` 后运行 `cargo test -p mailx-core --lib a_real_exchange -- --ignored --nocapture`。
+- 该服务器是否启用扩展保护（EPA）：若启用，`Type 3` 会被拒，需要补通道绑定哈希（`MsvAvChannelBindings` 的插槽已就位，哈希尚未接线）。
+- 多 CAS 部署是否必须 `X-AnchorMailbox`：需要在真实拓扑上观察。
+- 账号模型、`mail_connections.protocol='ews'`、`ews_folder_state` / `ews_items` 迁移与账号表单入口：均未开始。

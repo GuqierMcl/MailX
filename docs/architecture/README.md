@@ -12,6 +12,7 @@
 | [数据库迁移与启动](database-migrations.md) | Implemented：版本化迁移、v1 兼容和业务启动准入 |
 | [同步与发信](mail-sync.md) | 账号生命周期、增量同步、断网恢复与防重复发送 |
 | [邮箱服务商兼容层](provider-compatibility.md) | 主干接口与服务商模块边界、服务商识别、已发送副本身份与对账 |
+| [EWS 邮件后端](ews-backend.md) | 本地部署 Exchange 走 EWS over HTTPS 的方案、NTLMv2 认证与接线阶段（传输层已实现，账号模型未接线） |
 | [写信与发送](sending.md) | 富文本草稿、写信窗口、附件与内嵌图片、SMTP 队列与已发送副本 |
 | [存储与搜索](storage-search.md) | 数据身份、表结构、缓存、全文索引和一致性备份 |
 | [网络与安全](network-security.md) | 代理、OAuth、密钥、HTML、日志和外部数据访问 |
