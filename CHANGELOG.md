@@ -11,6 +11,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-12
+
 ### 🚀 Feature
 
 - Translate the message you are reading in place, keeping its layout, with no setup (Microsoft Translate by default and Google Translate, which use the channels browsers' built-in translators use and are not official services for other apps, so they may stop working) or with a DeepL, Microsoft Translator or Google Cloud Translation key of your own; nothing is sent until you agree and translate. / 在阅读区原位翻译当前邮件并保留版式：无需设置（默认 Microsoft 翻译，另有 Google 翻译，借用浏览器内置翻译的通道，并非正式开放给其他应用的服务，可能失效），也可用你自己的 DeepL、Microsoft Translator 或 Google Cloud Translation 密钥；你同意并点击翻译之前不会发送任何内容。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
@@ -165,7 +167,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/GuqierMcl/MailX/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GuqierMcl/MailX/compare/v0.1.0...v0.1.1
