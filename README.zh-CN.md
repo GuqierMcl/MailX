@@ -111,6 +111,7 @@ Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Excha
 ```sh
 bun install --frozen-lockfile
 bun tauri dev       # 以开发模式运行桌面应用
+bun run desktop:dev:isolated  # 同上，但使用独立的数据、密码与应用标识
 # 无项目更新签名私钥时，构建当前平台未签名的本地安装包
 bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 bun run check       # 运行版本、类型、Lint、测试、构建与 Rust 检查

@@ -27,6 +27,9 @@ bun run dev
 # 前端 + Tauri 桌面开发环境（Bun shorthand）
 bun tauri dev
 
+# 使用独立开发配置（数据、凭据、identifier 均与已安装版分开）；首次可加 -- --copy-installed 复制已安装版数据
+bun run desktop:dev:isolated
+
 # 前端静态资源构建
 bun run build
 
@@ -82,7 +85,7 @@ git diff --check
 
 当前桌面前端先通过 `MailxClient → app_get_startup_status` 等启动 IPC 等待宿主 Ready，再进入账号导航和邮件工作台；应用偏好可在核心启动失败时单独读取。账号配置经 `accounts_* IPC → AccountService` 完成读写，保存配置本身不访问邮箱服务器，连接测试与同步另行触发。普通浏览器的 `bun run dev` 使用合成 mock，语言等预览设置可保存在浏览器，但没有系统凭据及真实核心能力；生产构建在普通浏览器打开时会显示需要桌面应用。两者均不是桌面已保存配置的替代后端。
 
-桌面数据目录是以产品名命名的 `MailX`（Tauri `app_data_dir()` 的同级，不含 identifier；macOS 为 `~/Library/Application Support/MailX`），包含 `mailx.sqlite3`、`mailx.lock` 与应用偏好 `settings.json`，不写入仓库或当前工作目录；系统凭据 service 固定为 `MailX`。应用标识（`com.mailxapp.desktop`）仍决定 Tauri 的 WebView 存储、缓存和窗口位置文件的位置，这些可重建。`bun run tauri dev` 与已安装版共用同一数据目录和 `mailx.lock`，不要同时运行。需要隔离的临时配置（冒烟测试、试验）时设置环境变量 `MAILX_DATA_DIR` 为一个绝对路径：数据改放该目录，凭据 service 同时改为 `MailX.<目录名>`，不会读到或覆盖正式密码。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
+桌面数据目录是以产品名命名的 `MailX`（Tauri `app_data_dir()` 的同级，不含 identifier；macOS 为 `~/Library/Application Support/MailX`），包含 `mailx.sqlite3`、`mailx.lock` 与应用偏好 `settings.json`，不写入仓库或当前工作目录；系统凭据 service 固定为 `MailX`。应用标识（`com.mailxapp.desktop`）仍决定 Tauri 的 WebView 存储、缓存和窗口位置文件的位置，这些可重建。`bun run tauri dev` 与已安装版共用同一数据目录、凭据和 identifier：已安装版运行时，单实例插件（按 identifier 识别）会让开发版把已安装版的窗口调到前台后直接退出；不运行已安装版时，开发版会读写真实数据，较新的迁移还会升级数据库，使旧版本无法打开。日常开发建议用 `bun run desktop:dev:isolated`：它把 `MAILX_DATA_DIR` 设为与 `MailX` 同级的 `MailX-dev`（已设置 `MAILX_DATA_DIR` 时用该值），凭据 service 随之变为 `MailX.MailX-dev`，并以 `--config` 把 identifier 覆盖为 `com.mailxapp.desktop.dev`，因此单实例锁、WebView 存储和窗口位置也与已安装版分开，两者可以同时运行；只改其中一项不足以隔离（数据目录按产品名定位，与 identifier 无关）。首次使用可加 `-- --copy-installed` 复制已安装版的数据：数据库用 `VACUUM INTO` 取一份一致快照（已安装版运行时也可以），另复制 `settings.json`、`blobs/` 与 `image-cache/`，不复制锁文件、MCP 端点与窗口状态；目标目录非空时拒绝，需加 `--replace` 才会清空重建，`--copy-only` 只复制不启动。密码与密钥保存在系统凭据库，不会被复制，需在开发配置里重新输入或重新登录。复制出的账号连的仍是真实邮箱：在开发版里标记、删除或发信同样作用于服务器。需要隔离的临时配置（冒烟测试、试验）时设置环境变量 `MAILX_DATA_DIR` 为一个绝对路径：数据改放该目录，凭据 service 同时改为 `MailX.<目录名>`，不会读到或覆盖正式密码。测试通过宿主/核心显式注入隔离临时目录；不要用真实邮箱或秘密做公开测试样本。
 
 正常 Tauri 开发和构建使用 `frontend/dist`，不再在 `desktop/` 内维护另一份前端资源。Tauri 生成的 schema 与命令权限文件忽略提交，由 `build.rs` 重新生成。`git diff --check` 不覆盖未跟踪文件，新文件需额外检查。
 
