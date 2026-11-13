@@ -42,6 +42,8 @@ export type ContactHeading = {
 
 type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'> & {
   title: string
+  /** The account owning this folder or local archive, shown beside the title. */
+  accountName?: string
   /** Set in the contact view: back button and the contact's name replace the plain title. */
   contact?: ContactHeading
   /** Where the list starts scrolling, in px; used to come back to a remembered position. */
@@ -100,7 +102,7 @@ export type RevealRequest = { id: string; seq: number }
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
-  const { title, contact, filter, onFilterChange, selection, selectionActions } = props
+  const { title, accountName, contact, filter, onFilterChange, selection, selectionActions } = props
   const selecting = Boolean(selection?.active && selectionActions)
   useSelectionKeys(selecting ? selection : undefined, selectionActions)
   return (
@@ -117,7 +119,12 @@ export function EmailList(props: EmailListProps) {
           </>
         ) : (
           <>
-            {contact ? <ContactTitle contact={contact} /> : <h1 className="truncate text-base font-semibold">{title}</h1>}
+            {contact ? <ContactTitle contact={contact} /> : (
+              <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                <h1 className="truncate text-base font-semibold">{title}</h1>
+                {accountName && <span className="max-w-1/2 truncate text-xs font-normal text-muted-foreground">{accountName}</span>}
+              </div>
+            )}
             {selection && selectionActions && (
               <Button variant="ghost" size="sm" className="ml-auto" onClick={selection.enter}>{t('mail:select')}</Button>
             )}

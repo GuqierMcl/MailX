@@ -820,6 +820,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             <EmailList
               onRequestPreviews={requestPreviews}
               title={contactView ? contactView.name ?? contactView.address : baseTitle}
+              accountName={accounts.find((account) => account.id === selectedAccountId)?.displayName}
               contact={contactView ? { name: contactView.name, address: contactView.address, backTitle: baseTitle, onBack: leaveContact } : undefined}
               initialScrollTop={contactView ? undefined : restoreScroll}
               onScrollOffset={contactView ? undefined : trackScroll}

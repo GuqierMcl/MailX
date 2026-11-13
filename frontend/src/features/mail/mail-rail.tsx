@@ -175,7 +175,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
                     />
                   )}
                 >
-                  <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className={cn('size-6 text-[11px]', active && 'ring-2 ring-primary ring-offset-1 ring-offset-sidebar')} />
+                  <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-6 text-[11px]" />
                   {(failure || unread > 0) && <RailDot alert={failure} />}
                 </TooltipTrigger>
                 <TooltipContent side="right">{name}</TooltipContent>

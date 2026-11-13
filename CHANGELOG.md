@@ -20,6 +20,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- When viewing one account's folder or local archive, its name appears in muted text beside the message list heading. / 查看某个账号的文件夹或本机归档时，邮件列表标题旁会以弱化小字显示邮箱名称。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
+- In the collapsed sidebar, the current account is highlighted only by its button background, with the avatar's selection ring removed. / 折叠侧栏中，当前邮箱仅以按钮背景高亮，移除头像选中圆环。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
 - The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
 - New appearance setting to show a message's mailbox as a name or a small icon on the sender's avatar. / 新增外观设置：可把邮件所属邮箱显示为名称，或显示为发件人头像上的小图标。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
 - The account page is tidier: a header with the address and sync status, actions in a fixed bar at the bottom, connection details folded away, shorter check results, and a marker in the account list on the account that has a problem. / 账号页更简洁：顶部显示地址和同步状态，操作固定在底部，连接详情默认折叠，验证结果更简短，账号列表会标出有问题的账号。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
