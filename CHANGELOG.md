@@ -13,7 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model; no MailX feature uses the model yet. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型；目前还没有 MailX 功能使用该模型。
+- AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model; no MailX feature uses the model yet. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型；目前还没有 MailX 功能使用该模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 
 ## [0.2.1] - 2026-11-12
 
