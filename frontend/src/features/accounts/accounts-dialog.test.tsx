@@ -6,6 +6,9 @@ import { MailxClientError } from '@/lib/mailx-client'
 import { exampleAccount, exampleSyncState, testClient } from './test-fixtures'
 import { AccountsDialog } from './accounts-dialog'
 import { i18n } from '@/i18n'
+import { toast } from '@/components/ui/toast'
+
+vi.mock('@/components/ui/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), close: vi.fn() } }))
 
 const second = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人邮箱', emailAddress: 'me@example.com', color: '#16a34a' })
 
@@ -36,9 +39,11 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog([account])
     expect(await within(dialog).findByLabelText('账号名称')).toHaveValue('工作邮箱')
     expect(client.getAccount).toHaveBeenCalledWith(account.id)
+    expect(within(dialog).getByText('连接方式')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('IMAP/SMTP').length).toBeGreaterThan(0)
+    await userEvent.click(within(dialog).getByRole('button', { name: '连接详情' }))
     expect(within(dialog).getByText(/IMAP · imap\.example\.com:993 · TLS/)).toBeInTheDocument()
     expect(within(dialog).getByText('直接连接')).toBeInTheDocument()
-    expect(within(dialog).getByText('IMAP/SMTP')).toBeInTheDocument()
     // Connection fields are not editable here.
     expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
   })
@@ -73,7 +78,7 @@ describe('accounts dialog', () => {
       accountId: first.id,
       profile: { displayName: first.displayName, color: first.color, senderName: first.senderName, useProviderIcon: false },
     }))
-    await userEvent.click(within(dialog).getByRole('button', { name: other.displayName }))
+    await userEvent.click(within(dialog).getByRole('button', { name: new RegExp('^' + other.displayName) }))
     const otherPreference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
     expect(otherPreference).not.toBeChecked()
     await userEvent.click(otherPreference)
@@ -129,20 +134,21 @@ describe('accounts dialog', () => {
     expect(client.updateProfile).not.toHaveBeenCalled()
   })
 
-  it('reports a failed profile save', async () => {
+  it('reports a failed profile save with a toast', async () => {
     const client = testClient([exampleAccount()])
     client.updateProfile.mockRejectedValue(new MailxClientError({ code: 'storageUnavailable', field: null, message: '无法写入本机数据。' }))
     const { dialog } = renderDialog([exampleAccount()], {}, client)
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '红' }))
-    expect(await within(dialog).findByText('资料未保存')).toBeInTheDocument()
-    expect(within(dialog).getByText('无法读写本地数据，请检查可用空间与访问权限。')).toBeInTheDocument()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('资料未保存', { description: '无法读写本地数据，请检查可用空间与访问权限。' }))
+    // An event, not a state: nothing about it stays in the page.
+    expect(within(dialog).queryByText('资料未保存')).not.toBeInTheDocument()
   })
 
   it('saves a name typed but not committed when switching accounts', async () => {
     const { client, dialog } = renderDialog([exampleAccount(), second])
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '没按回车' } })
-    await userEvent.click(within(dialog).getByRole('button', { name: '个人邮箱' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: /^个人邮箱/ }))
     await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null, useProviderIcon: true } }))
     await waitFor(() => expect(client.getAccount).toHaveBeenCalledWith(second.id))
   })
@@ -179,16 +185,169 @@ describe('accounts dialog', () => {
     expect(within(again.dialog).getByText(/邮箱服务器拒绝了账号登录/)).toBeInTheDocument()
   })
 
+  it('keeps removing on the left of the fixed footer, and verifying and editing on the right', async () => {
+    const { dialog } = renderDialog()
+    const remove = await within(dialog).findByRole('button', { name: '移除账号' })
+    const footer = dialog.querySelector('footer')!
+    expect(remove.parentElement).toBe(footer)
+    expect(remove).toHaveClass('text-destructive')
+    const verify = within(dialog).getByRole('button', { name: '验证收发连接' })
+    const edit = footer.querySelector('button:last-child')!
+    expect(edit).toHaveTextContent('修改连接')
+    expect(verify.parentElement).toBe(edit.parentElement)
+    expect(verify.parentElement).not.toBe(footer)
+    expect(footer.firstElementChild).toBe(remove)
+    expect(footer.lastElementChild).toBe(verify.parentElement)
+  })
+
+  it('folds the connection details, and opens them with the reason under the failing server after a failed check', async () => {
+    const account = exampleAccount()
+    const client = testClient([account])
+    client.verifyAccountConnection.mockImplementation(async (accountId, revision) => ({
+      accountId, revision,
+      imap: { status: 'verified', stage: 'complete', code: null },
+      smtp: { status: 'failed', stage: 'authentication', code: 'authentication' },
+    }))
+    const { dialog } = renderDialog([account], {}, client)
+    const details = await within(dialog).findByRole('button', { name: '连接详情' })
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(within(dialog).getByRole('button', { name: '验证收发连接' }))
+    expect(await within(dialog).findByText('· 发信未通过')).toHaveClass('text-destructive')
+    expect(details).toHaveAttribute('aria-expanded', 'true')
+    const smtpRow = within(dialog).getByText(/SMTP · smtp\.example\.com/).parentElement!.parentElement!
+    expect(within(smtpRow).getByText(/邮箱服务器拒绝了账号登录/)).toHaveClass('text-xs', 'text-destructive')
+    const imapRow = within(dialog).getByText(/IMAP · imap\.example\.com/).parentElement!.parentElement!
+    expect(within(imapRow).getByText('已通过')).toBeInTheDocument()
+    // The user can still fold it again.
+    await userEvent.click(details)
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('says a passed check does not test delivery', async () => {
+    const { dialog } = renderDialog()
+    expect(await within(dialog).findByText('验证已保存的连接和登录，不发送邮件。')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '验证收发连接' }))
+    expect(await within(dialog).findByText('· 收发均已通过')).toHaveClass('text-muted-foreground')
+    expect(within(dialog).getByText('登录验证通过，尚未测试实际投递。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '连接详情' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('shows a whole-request failure as a small line in the connection group, not a toast', async () => {
+    const client = testClient([exampleAccount()])
+    client.verifyAccountConnection.mockRejectedValue(new MailxClientError({ code: 'internal', field: null, message: 'x' }))
+    const { dialog } = renderDialog([exampleAccount()], {}, client)
+    await userEvent.click(await within(dialog).findByRole('button', { name: '验证收发连接' }))
+    await waitFor(() => expect(dialog.querySelector('[role="status"].text-xs p.text-destructive')).not.toBeNull())
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('shows credentials that need confirming or a missing password on the method row without opening the details', async () => {
+    const pending = exampleAccount({ authentication: { kind: 'password', mode: 'shared', imap: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' }, smtp: { id: 'a', generation: 1, passwordConfigured: true, trust: 'needsConfirmation' } } })
+    const { dialog, view } = renderDialog([pending])
+    const details = await within(dialog).findByRole('button', { name: '连接详情' })
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+    expect(within(dialog).getByText('· 凭证需要确认')).toHaveClass('text-destructive')
+    view.unmount()
+
+    const missing = exampleAccount({ authentication: { kind: 'password', mode: 'shared', imap: { id: 'a', generation: 1, passwordConfigured: false, trust: 'trusted' }, smtp: { id: 'a', generation: 1, passwordConfigured: false, trust: 'trusted' } } })
+    const again = renderDialog([missing])
+    expect(await within(again.dialog).findByText('· 缺少密码')).toHaveClass('text-destructive')
+  })
+
+  it('shows who the account is in the header, with the last sync time when healthy', async () => {
+    const account = exampleAccount({ providerId: 'qq' })
+    const { dialog } = renderDialog([account], {}, testClient([account]), { [account.id]: exampleSyncState() })
+    await within(dialog).findByLabelText('账号名称')
+    const header = dialog.querySelector('header')!
+    expect(within(header).getByRole('heading', { name: '工作邮箱' })).toBeInTheDocument()
+    expect(within(header).getByText('work@example.com')).toHaveClass('text-muted-foreground')
+    expect(within(header).getByText(/^最近同步：/)).toHaveClass('text-muted-foreground')
+    expect(header.querySelector('[data-slot="provider-badge"]')).not.toBeNull()
+    // The header follows the name as it is typed.
+    fireEvent.change(within(dialog).getByLabelText('账号名称'), { target: { value: '改名中' } })
+    expect(within(header).getByRole('heading', { name: '改名中' })).toBeInTheDocument()
+  })
+
+  it('tells a failure that will retry from one that stopped, in the header', async () => {
+    const account = exampleAccount()
+    const failure = (willRetry: boolean) => ({ [account.id]: exampleSyncState({ phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry } }) })
+    const retrying = renderDialog([account], {}, testClient([account]), failure(true))
+    expect(await within(retrying.dialog).findByText(/^同步遇到问题，会自动重试：/)).not.toHaveClass('text-destructive')
+    expect(within(retrying.dialog).queryByText('同步已停止')).not.toBeInTheDocument()
+    expect(within(retrying.dialog).queryByText(/^最近同步：/)).not.toBeInTheDocument()
+    expect(within(retrying.dialog).getAllByRole('button', { name: '修改连接' })).toHaveLength(1)
+    retrying.view.unmount()
+
+    const stopped = renderDialog([account], {}, testClient([account]), failure(false))
+    expect(await within(stopped.dialog).findByText('同步已停止')).toHaveClass('text-destructive')
+    expect(within(stopped.dialog).queryByText(/^同步遇到问题/)).not.toBeInTheDocument()
+    // The repair action lives in the footer only.
+    expect(within(stopped.dialog).getAllByRole('button', { name: '修改连接' })).toHaveLength(1)
+  })
+
+  it('lists each account with its address and marks the ones that have a problem', async () => {
+    const failing = (willRetry: boolean) => exampleSyncState({ accountId: second.id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry } })
+    const { dialog, view } = renderDialog([exampleAccount(), second], {}, testClient([exampleAccount(), second]), { [second.id]: failing(true) })
+    const row = within(dialog).getByTitle('me@example.com · IMAP/SMTP')
+    expect(within(row).getByText('me@example.com')).toHaveClass('opacity-70')
+    expect(within(row).getByRole('img', { name: '同步遇到问题，会自动重试' })).toHaveTextContent('!')
+    expect(within(row).getByRole('img', { name: '同步遇到问题，会自动重试' })).toHaveClass('text-amber-600')
+    expect(within(within(dialog).getByTitle('work@example.com · IMAP/SMTP')).queryByRole('img')).not.toBeInTheDocument()
+    view.unmount()
+
+    const stopped = renderDialog([exampleAccount(), second], {}, testClient([exampleAccount(), second]), { [second.id]: failing(false) })
+    expect(within(within(stopped.dialog).getByTitle('me@example.com · IMAP/SMTP')).getByRole('img', { name: '同步已停止' })).toHaveClass('text-destructive')
+  })
+
+  it('opens on the first account with a problem, stopped before retrying, unless a target is given', async () => {
+    const third = exampleAccount({ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', displayName: '备用邮箱', emailAddress: 'backup@example.com' })
+    const rows = [exampleAccount(), second, third]
+    const states = {
+      [exampleAccount().id]: exampleSyncState({ accountId: exampleAccount().id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry: true } }),
+      [third.id]: exampleSyncState({ accountId: third.id, phase: 'failed', failure: { code: 'authentication', message: '', detail: null, willRetry: false } }),
+    }
+    const first = renderDialog(rows, {}, testClient(rows), states)
+    await waitFor(() => expect(within(first.dialog).getByLabelText('账号名称')).toHaveValue('备用邮箱'))
+    expect(first.client.getAccount).not.toHaveBeenCalledWith(exampleAccount().id)
+    first.view.unmount()
+
+    const explicit = renderDialog(rows, { accountId: second.id }, testClient(rows), states)
+    await waitFor(() => expect(within(explicit.dialog).getByLabelText('账号名称')).toHaveValue('个人邮箱'))
+    explicit.view.unmount()
+
+    const healthy = renderDialog(rows)
+    await waitFor(() => expect(within(healthy.dialog).getByLabelText('账号名称')).toHaveValue('工作邮箱'))
+  })
+
+  it('saves a custom color when the picker settles, previewing it before that, with readable avatar text', async () => {
+    const { client, dialog } = renderDialog()
+    await within(dialog).findByLabelText('账号名称')
+    const picker = within(dialog).getByLabelText('自定义颜色')
+    const avatar = () => dialog.querySelector('header [data-slot="account-avatar"]')!
+    expect(avatar()).toHaveClass('bg-muted')
+    fireEvent.input(picker, { target: { value: '#fde68a' } })
+    expect(avatar()).toHaveStyle({ backgroundColor: '#fde68a', color: '#000000' })
+    expect(picker.closest('label')).toHaveAttribute('data-checked')
+    expect(client.updateProfile).not.toHaveBeenCalled()
+    fireEvent.change(picker)
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledOnce())
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#fde68a', senderName: null, useProviderIcon: true } })
+    // A preset still works and takes the selection from the custom color.
+    await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
+    expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
+    expect(picker.closest('label')).not.toHaveAttribute('data-checked')
+    expect(avatar()).toHaveStyle({ color: '#ffffff' })
+  })
+
   it('shows an empty state with an add button when there are no accounts', async () => {
     const { dialog, onAddAccount } = renderDialog([])
     await userEvent.click(within(dialog).getByRole('button', { name: '添加第一个账号' }))
     expect(onAddAccount).toHaveBeenCalledOnce()
   })
 
-  it('confirms removal beside edit connection, and cancellation leaves the account intact', async () => {
+  it('confirms removal from the footer, and cancellation leaves the account intact', async () => {
     const { client, dialog } = renderDialog()
     const remove = await within(dialog).findByRole('button', { name: '移除账号' })
-    expect(remove.previousElementSibling).toHaveTextContent('修改连接')
     await userEvent.click(remove)
     const confirmation = await screen.findByRole('alertdialog')
     expect(within(confirmation).getByText('work@example.com')).toBeInTheDocument()
@@ -209,7 +368,7 @@ describe('accounts dialog', () => {
     await userEvent.click(within(confirmation).getByRole('button', { name: '移除账号' }))
     expect(client.removeAccount).toHaveBeenCalledWith({ accountId: exampleAccount().id, expectedRevision: 3 })
     await waitFor(() => expect(within(dialog).getByLabelText('账号名称')).toHaveValue('个人邮箱'))
-    expect(within(dialog).queryByRole('button', { name: /工作邮箱/ })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /^工作邮箱/ })).not.toBeInTheDocument()
   })
 
   it('shows the empty state after removing the last account and does not flush its unsaved profile', async () => {
@@ -348,6 +507,8 @@ describe('accounts dialog', () => {
     it('has no edit-connection button, but keeps removing and verifying, and shows the real servers', async () => {
       const account = oauthAccount()
       const { dialog } = renderDialog([account])
+      expect(await within(dialog).findByText('Microsoft 365 / Exchange · 浏览器登录')).toBeInTheDocument()
+      await userEvent.click(within(dialog).getByRole('button', { name: '连接详情' }))
       expect(await within(dialog).findByText(/IMAP · outlook\.office365\.com:993 · TLS · lin@contoso\.com/)).toBeInTheDocument()
       expect(within(dialog).getByText(/SMTP · smtp\.office365\.com:587 · STARTTLS · lin@contoso\.com/)).toBeInTheDocument()
       expect(within(dialog).queryByRole('button', { name: '修改连接' })).not.toBeInTheDocument()
@@ -356,24 +517,24 @@ describe('accounts dialog', () => {
       expect(within(dialog).getByRole('button', { name: '重新登录' })).toBeInTheDocument()
     })
 
-    it('puts a routine sign-in renewal among the connection actions, and only a needed one at the top', async () => {
-      const connected = oauthAccount()
-      const { dialog, view } = renderDialog([connected])
+    it('puts the sign-in renewal in the footer, and only a needed one in the header', async () => {
+      const { dialog, view } = renderDialog([oauthAccount()])
       const remove = await within(dialog).findByRole('button', { name: '移除账号' })
       const signIn = within(dialog).getByRole('button', { name: '重新登录' })
-      // Same row as removing, below the profile settings, with no warning above the account.
-      expect(signIn.parentElement).toBe(remove.parentElement)
-      expect(within(dialog).getByLabelText('账号名称').compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // Beside verifying on the right of the footer; removing stays on the left.
+      const footer = dialog.querySelector('footer')!
+      expect(footer.contains(signIn) && footer.contains(remove)).toBe(true)
+      expect(signIn.parentElement).toBe(within(dialog).getByRole('button', { name: '验证收发连接' }).parentElement)
+      expect(remove.parentElement).toBe(footer)
       expect(within(dialog).queryByText('需要重新登录，这个邮箱才能继续使用')).not.toBeInTheDocument()
       view.unmount()
 
-      const needed = oauthAccount('needsReauthorization')
-      const second = renderDialog([needed])
+      const second = renderDialog([oauthAccount('needsReauthorization')])
       const warning = await within(second.dialog).findByText('需要重新登录，这个邮箱才能继续使用')
       const buttons = within(second.dialog).getAllByRole('button', { name: '重新登录' })
       expect(buttons).toHaveLength(1)
-      expect(warning.compareDocumentPosition(within(second.dialog).getByLabelText('账号名称')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-      expect(buttons[0].parentElement).not.toBe(within(second.dialog).getByRole('button', { name: '移除账号' }).parentElement)
+      expect(second.dialog.querySelector('footer')).toContainElement(buttons[0])
+      expect(second.dialog.querySelector('header')).toContainElement(warning)
     })
 
     it('offers signing in again instead of editing when the sign-in is no longer valid', async () => {
@@ -407,7 +568,7 @@ describe('accounts dialog', () => {
     it('leaves password accounts unchanged', async () => {
       const { dialog } = renderDialog([exampleAccount()], {}, testClient([exampleAccount()]), { [exampleAccount().id]: exampleSyncState({ phase: 'failed', failure: { code: 'authentication', message: '', detail: null, willRetry: false } }) })
       expect(await within(dialog).findByText('同步已停止')).toBeInTheDocument()
-      expect(within(dialog).getAllByRole('button', { name: '修改连接' })).toHaveLength(2)
+      expect(within(dialog).getAllByRole('button', { name: '修改连接' })).toHaveLength(1)
       expect(within(dialog).queryByRole('button', { name: '重新登录' })).not.toBeInTheDocument()
     })
   })

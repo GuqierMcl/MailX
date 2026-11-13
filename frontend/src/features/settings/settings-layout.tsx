@@ -46,16 +46,24 @@ export function SettingsGroup({ title, badge, description, children }: {
  * A group that starts folded, for settings most people never need. The header
  * looks like a group title and is the toggle; `summary` stays visible beside it
  * while folded. The state is not remembered: the group is folded on every visit.
+ * A caller that must open it on its own (to show a problem) controls it with
+ * `open` and `onOpenChange`.
  */
-export function SettingsDisclosure({ title, summary, children }: {
+export function SettingsDisclosure({ title, summary, open: controlled, onOpenChange, children }: {
   title: ReactNode
   summary?: ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
+  const [own, setOwn] = useState(false)
+  const open = controlled ?? own
   return (
     <section className="border-t pt-6">
-      <Collapsible open={open} onOpenChange={setOpen}>
+      <Collapsible open={open} onOpenChange={(next) => {
+        setOwn(next)
+        onOpenChange?.(next)
+      }}>
         <CollapsibleTrigger className="group/disclosure flex w-full items-center gap-2 rounded-md text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
           {title}
           {!open && summary && <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{summary}</span>}

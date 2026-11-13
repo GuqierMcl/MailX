@@ -22,3 +22,24 @@ export function nextAccountColor(accounts: Pick<Account, 'color'>[]): string {
 export function accountInitial(displayName: string): string {
   return Array.from(displayName.trim())[0]?.toUpperCase() ?? '@'
 }
+
+/** WCAG relative luminance of a `#rrggbb` color, or null for anything else. */
+function luminance(color: string): number | null {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color)
+  if (!match) return null
+  const [r, g, b] = [match[1], match[2], match[3]].map((hex) => {
+    const channel = parseInt(hex, 16) / 255
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/**
+ * Text color for a mark on an identification color. White unless its contrast
+ * falls below 3:1 (luminance above 0.3), so every preset keeps white text and
+ * only light custom colors switch to black.
+ */
+export function accountTextColor(color: string): '#ffffff' | '#000000' {
+  const value = luminance(color)
+  return value !== null && value > 0.3 ? '#000000' : '#ffffff'
+}

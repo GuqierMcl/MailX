@@ -55,7 +55,6 @@
   "mailboxLabel": "Show mailbox as",
   "mailboxLabelName": "Name",
   "mailboxLabelIcon": "Icon",
-  "customColor": "Custom color",
   "customAccent": "Custom accent color",
   "reset": "Reset to default",
   "fontHint": "Separate multiple font names with commas.",

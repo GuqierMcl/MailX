@@ -58,7 +58,7 @@ describe('testing a connection before saving an account', () => {
     const report = within(result.closest('[role="status"]')!)
     expect(report.getByText(/IMAP/)).toBeInTheDocument()
     expect(report.getByText(/SMTP/)).toBeInTheDocument()
-    expect(report.getAllByText('登录成功')).toHaveLength(2)
+    expect(report.getAllByText('已通过')).toHaveLength(2)
     expect(client.verifyDraftConnection).toHaveBeenCalledOnce()
     const [connection, signal] = client.verifyDraftConnection.mock.calls[0]
     expect(connection).toMatchObject({
@@ -90,10 +90,11 @@ describe('testing a connection before saving an account', () => {
     await select(NETEASE_163_PROVIDER)
     fill(NETEASE_163_PROVIDER)
     await userEvent.click(screen.getByRole('button', { name: '测试登录' }))
-    const result = await screen.findByText('登录验证未通过')
-    const report = within(result.closest('[role="status"]')!)
-    expect(report.getAllByText('登录成功')).toHaveLength(1)
-    expect(report.getByText('邮箱服务器拒绝了账号登录，请检查密码或授权码。')).toBeInTheDocument()
+    const reason = await screen.findByText('邮箱服务器拒绝了账号登录，请检查密码或授权码。')
+    expect(reason).toHaveClass('text-xs', 'text-destructive')
+    const report = within(reason.closest('[role="status"]')!)
+    expect(report.getAllByText('已通过')).toHaveLength(1)
+    expect(report.getByText('未通过')).toBeInTheDocument()
     expect(screen.queryByText(succeeded)).not.toBeInTheDocument()
     const help = screen.getAllByRole('button', { name: '如何获取授权码' }).at(-1)!
     await userEvent.click(help)
@@ -165,7 +166,7 @@ describe('testing a connection before saving an account', () => {
     expect(client.verifyDraftConnection.mock.calls[1][0].imap.username).toBe('changed-user')
     await act(async () => pending.resolve({ ...success, smtp: { status: 'failed', stage: 'authentication', code: 'authentication' } }))
     expect(screen.getByText(succeeded)).toBeInTheDocument()
-    expect(screen.queryByText('登录验证未通过')).not.toBeInTheDocument()
+    expect(screen.queryByText('未通过')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('收发密码'), { target: { value: 'changed-secret' } })
     expect(screen.queryByText(succeeded)).not.toBeInTheDocument()
   })

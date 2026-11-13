@@ -55,7 +55,6 @@
   "mailboxLabel": "所属邮箱显示为",
   "mailboxLabelName": "名称",
   "mailboxLabelIcon": "图标",
-  "customColor": "自定义颜色",
   "customAccent": "自定义强调色",
   "reset": "恢复默认",
   "fontHint": "可填多个，用英文逗号隔开。",
