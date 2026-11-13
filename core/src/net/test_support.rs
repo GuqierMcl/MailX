@@ -129,3 +129,145 @@ impl TestTls {
         }
     }
 }
+
+/// One request as the mock HTTP server saw it.
+#[derive(Clone, Debug)]
+pub(crate) struct Recorded {
+    pub method: String,
+    /// Path and query.
+    pub target: String,
+    /// Lowercase names.
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Recorded {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    pub(crate) fn json(&self) -> serde_json::Value {
+        serde_json::from_slice(&self.body).unwrap()
+    }
+}
+
+pub(crate) struct MockReply {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl MockReply {
+    pub(crate) fn json(status: u16, body: &str) -> Self {
+        Self {
+            status,
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    pub(crate) fn status(status: u16) -> Self {
+        Self {
+            status,
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
+    }
+
+    pub(crate) fn header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+}
+
+type Responder = Arc<dyn Fn(&Recorded) -> MockReply + Send + Sync>;
+
+/// A plain-HTTP server on 127.0.0.1 that answers every request through
+/// `responder` and records what it received. One request per connection.
+pub(crate) struct MockHttp {
+    pub port: u16,
+    pub requests: Arc<Mutex<Vec<Recorded>>>,
+}
+
+impl MockHttp {
+    pub(crate) fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+
+    pub(crate) fn last(&self) -> Recorded {
+        self.requests.lock().unwrap().last().cloned().unwrap()
+    }
+}
+
+pub(crate) async fn mock_http(
+    responder: impl Fn(&Recorded) -> MockReply + Send + Sync + 'static,
+) -> MockHttp {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let responder: Responder = Arc::new(responder);
+    let record = requests.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let (record, responder) = (record.clone(), responder.clone());
+            tokio::spawn(async move {
+                let mut stream = BufReader::new(stream);
+                let mut line = String::new();
+                stream.read_line(&mut line).await.unwrap();
+                let mut parts = line.split_whitespace();
+                let method = parts.next().unwrap_or_default().to_owned();
+                let target = parts.next().unwrap_or_default().to_owned();
+                let mut headers = Vec::new();
+                loop {
+                    line.clear();
+                    stream.read_line(&mut line).await.unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.trim_end().split_once(':') {
+                        headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
+                    }
+                }
+                let length = headers
+                    .iter()
+                    .find(|(name, _)| name == "content-length")
+                    .and_then(|(_, value)| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0u8; length];
+                stream.read_exact(&mut body).await.unwrap();
+                let request = Recorded {
+                    method,
+                    target,
+                    headers,
+                    body,
+                };
+                let reply = responder(&request);
+                record.lock().unwrap().push(request);
+                let mut head = format!(
+                    "HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n",
+                    reply.status,
+                    reply.body.len()
+                );
+                for (name, value) in &reply.headers {
+                    head.push_str(&format!("{name}: {value}\r\n"));
+                }
+                head.push_str("\r\n");
+                let stream = stream.get_mut();
+                let _ = stream.write_all(head.as_bytes()).await;
+                let _ = stream.write_all(&reply.body).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    MockHttp { port, requests }
+}

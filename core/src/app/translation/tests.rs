@@ -371,7 +371,7 @@ async fn the_route_comes_from_the_translation_settings() {
     with_key(&f, TranslationProviderId::Microsoft).await;
     let mut s = settings(TranslationProviderId::Microsoft);
     s.microsoft_region = "westeurope".into();
-    s.route = TranslationRoute::Proxy {
+    s.route = ServiceRoute::Proxy {
         proxy_kind: crate::accounts::types::ProxyKind::Socks5,
         host: "proxy.example".into(),
         port: 1080,
@@ -970,7 +970,7 @@ const PROXY_PASSWORD: &str = " p@ss word ";
 
 fn signed_in(username: &str) -> TranslationSettings {
     let mut s = settings(TranslationProviderId::Deepl);
-    s.route = TranslationRoute::Proxy {
+    s.route = ServiceRoute::Proxy {
         proxy_kind: crate::accounts::types::ProxyKind::HttpConnect,
         host: "proxy.example".into(),
         port: 8080,
@@ -1087,7 +1087,7 @@ async fn the_request_signs_in_to_the_proxy_only_with_a_username() {
     // A stored password alone is ignored, on a proxy and on a direct route.
     f.core.test_translation(signed_in("")).await.unwrap();
     let mut direct = signed_in("alice");
-    direct.route = TranslationRoute::Direct;
+    direct.route = ServiceRoute::Direct;
     f.core.test_translation(direct).await.unwrap();
 
     let seen: Vec<_> = calls

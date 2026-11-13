@@ -1,4 +1,8 @@
 import type {
+  AiCatalogProvider,
+  AiConnectionState,
+  AiModel,
+  AiState,
   EmailListQuery,
   Account,
   AccountRemoval,
@@ -111,6 +115,36 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const pendingDeletions = new Map<string, { timer: ReturnType<typeof setTimeout>; emails: typeof emails }>()
   const archiveReceipts = new Map<string, { emailIds: string[]; before: boolean; expires: number }>()
   const mailStateListeners = new Set<(change: MailStateChanged) => void>()
+
+  // AI providers: in memory only, like the real keys live only in the secret store and are never read back.
+  const MOCK_AI_PROVIDERS: AiCatalogProvider[] = [
+    { id: 'openai', name: 'OpenAI', protocol: 'openaiCompatible', baseUrl: 'https://api.openai.com/v1', builtIn: true },
+    { id: 'anthropic', name: 'Anthropic', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', builtIn: true },
+    { id: 'deepseek', name: 'DeepSeek', protocol: 'openaiCompatible', baseUrl: 'https://api.deepseek.com', builtIn: true },
+    { id: 'ollama', name: 'Ollama', protocol: 'openaiCompatible', baseUrl: 'http://localhost:11434/v1', builtIn: true, local: true },
+    { id: 'groq', name: 'Groq', protocol: 'openaiCompatible', baseUrl: 'https://api.groq.com/openai/v1', builtIn: false },
+    { id: 'mistral', name: 'Mistral', protocol: 'openaiCompatible', baseUrl: 'https://api.mistral.ai/v1', builtIn: false },
+  ]
+  const MOCK_AI_MODELS: AiModel[] = [
+    { id: 'large-1', name: 'Large 1', contextLength: 200000, outputLength: 32000, toolCall: true, source: 'provider' },
+    { id: 'small-1', name: 'Small 1', contextLength: 128000, outputLength: 16000, toolCall: true, source: 'provider' },
+    { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: null, source: 'catalog' },
+  ]
+  const aiKeys = new Map<string, string>()
+  let aiConnections: Omit<AiConnectionState, 'hasKey'>[] = []
+  let aiDefault: AiState['defaultModel'] = null
+  let aiRoute: AiState['route'] = { kind: 'direct' }
+  let aiProxyPassword: string | null = null
+  const aiState = (): AiState => ({
+    connections: aiConnections.map((connection) => ({ ...connection, hasKey: aiKeys.has(connection.id) })),
+    defaultModel: aiDefault, route: aiRoute, proxyPasswordSet: aiProxyPassword !== null,
+  })
+  const aiFailure = (code: Extract<import('@/generated/accounts').ErrorCode, `ai${string}`>) => new MailxClientError({ code, message: '服务商未响应。', field: null })
+  const aiDelay = () => new Promise((resolve) => setTimeout(resolve, 400))
+  // Browser preview only: a key containing "bad" is refused, so the failure text can be seen.
+  const aiCheckKey = (id: string | null, key: string | null) => {
+    if ((key !== null ? key : id ? aiKeys.get(id) ?? '' : '').includes('bad')) throw aiFailure('aiKeyRejected')
+  }
 
   const MOCK_ATTACHMENT_LIMIT = 20 * 1024 * 1024
   const MOCK_TRANSLATION_KEYS: TranslationProviderId[] = ['deepl', 'microsoft', 'google']
@@ -770,6 +804,53 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (route.kind === 'proxy' && (route.host.includes('bad') || (route.username !== '' && proxyPassword?.includes('bad')))) throw translationFailure('translationProxy')
       return { translated: resolvedTarget().startsWith('zh') ? '你好，这是一条测试。' : 'Hello, this is a test.' }
     },
+    aiState: async () => aiState(),
+    aiSaveConnection: async (request) => {
+      if (!request.name.trim() || !/^https?:\/\/[^/\s]+/.test(request.baseUrl)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'baseUrl' })
+      if (request.id !== null && !aiConnections.some((connection) => connection.id === request.id)) throw aiFailure('aiNotConfigured')
+      if (request.verify) { await aiDelay(); aiCheckKey(request.id, request.apiKey) }
+      const id = request.id ?? crypto.randomUUID()
+      const saved = { id, providerId: request.providerId, name: request.name.trim(), protocol: request.protocol, baseUrl: request.baseUrl.replace(/\/+$/, ''), useProxy: request.useProxy }
+      aiConnections = request.id === null ? [...aiConnections, saved] : aiConnections.map((connection) => connection.id === id ? saved : connection)
+      if (request.apiKey === '') aiKeys.delete(id)
+      else if (request.apiKey !== null) aiKeys.set(id, request.apiKey)
+      return { state: aiState(), connectionId: id, models: request.verify ? clone(MOCK_AI_MODELS) : null }
+    },
+    aiRemoveConnection: async (id) => {
+      aiConnections = aiConnections.filter((connection) => connection.id !== id)
+      aiKeys.delete(id)
+      if (aiDefault?.connectionId === id) aiDefault = null
+      return aiState()
+    },
+    aiSetDefaultModel: async (model) => {
+      if (model && !aiConnections.some((connection) => connection.id === model.connectionId)) throw aiFailure('aiNotConfigured')
+      aiDefault = model
+      return aiState()
+    },
+    aiSetRoute: async (route) => { aiRoute = route; return aiState() },
+    aiSetProxyPassword: async (password) => {
+      if (!password || /\p{Cc}/u.test(password)) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'password' })
+      aiProxyPassword = password
+      return aiState()
+    },
+    aiRemoveProxyPassword: async () => { aiProxyPassword = null; return aiState() },
+    aiCatalog: async () => ({ providers: clone(MOCK_AI_PROVIDERS), updatedAt: new Date().toISOString(), stale: false, refreshError: null }),
+    aiListModels: async (connectionId) => {
+      await aiDelay()
+      if (!aiConnections.some((connection) => connection.id === connectionId)) throw aiFailure('aiNotConfigured')
+      aiCheckKey(connectionId, null)
+      return clone(MOCK_AI_MODELS)
+    },
+    aiTest: async (connectionId, modelId) => {
+      await aiDelay()
+      if (!aiConnections.some((connection) => connection.id === connectionId)) throw aiFailure('aiNotConfigured')
+      aiCheckKey(connectionId, null)
+      if (modelId.includes('missing')) throw aiFailure('aiModelNotFound')
+      return { latencyMs: 1234 }
+    },
+    // Only the providers that are not bundled ask for an icon; a plain mark is enough to see the mask at work.
+    aiProviderIcon: async (providerId) => providerId === 'groq' || providerId === 'mistral'
+      ? { mimeType: 'image/svg+xml', data: btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2 22 20H2z"/></svg>') } : null,
     prepareBody: async (emailId, _images, translation) => {
       if (translation !== undefined && !translations.has(translationKey(emailId, translation))) throw notFound()
       return { documentToken: crypto.randomUUID() }

@@ -23,9 +23,9 @@ use crate::{
     AppError, ErrorCode,
     accounts::{AccountService, MAX_SECRET_BYTES},
     mail::{LOCAL_SENT_PREFIX, render},
-    net::{NetRoute, ProxyRoute},
+    net::NetRoute,
     secrets::{SecretStore, SecretValue},
-    settings::{TranslationProviderId, TranslationRoute, TranslationSettings},
+    settings::{ServiceRoute, TranslationProviderId, TranslationSettings},
     storage::{
         bodies::{BodyIdentity, StoredBlob},
         translations::{NewTranslation, StoredTranslation, TranslationKey},
@@ -275,35 +275,12 @@ fn secret_name(provider: TranslationProviderId) -> String {
     format!("mailx/translation/{}", provider.as_str())
 }
 
-/// The mail account's own proxy is never used here. Signing in needs a
-/// username; a password stored without one is ignored.
-fn net_route(route: &TranslationRoute, password: Option<SecretValue>) -> NetRoute {
-    match route {
-        TranslationRoute::Direct => NetRoute::default(),
-        TranslationRoute::Proxy {
-            proxy_kind,
-            host,
-            port,
-            username,
-        } => NetRoute {
-            proxy: Some(ProxyRoute {
-                kind: *proxy_kind,
-                host: host.clone(),
-                port: *port,
-                auth: (!username.is_empty())
-                    .then(|| (username.clone(), password.unwrap_or_else(empty_secret))),
-            }),
-            image_proxy_dns: false,
-        },
-    }
-}
-
 fn empty_secret() -> SecretValue {
     SecretValue::new(String::new())
 }
 
 /// Not trimmed: a password may start or end with a space.
-fn valid_proxy_password(password: &SecretValue) -> bool {
+pub(super) fn valid_proxy_password(password: &SecretValue) -> bool {
     let text = password.expose_secret();
     !text.is_empty() && text.len() <= MAX_SECRET_BYTES && !text.chars().any(char::is_control)
 }
@@ -531,17 +508,15 @@ impl MailxCore {
 
     /// Builds the route for one request. A secret store that cannot be read
     /// while a username is set fails the request; it never goes out unsigned.
-    async fn translation_route(&self, route: &TranslationRoute) -> Result<NetRoute, AppError> {
-        let needs_password =
-            matches!(route, TranslationRoute::Proxy { username, .. } if !username.is_empty());
-        let password = if needs_password {
+    async fn translation_route(&self, route: &ServiceRoute) -> Result<NetRoute, AppError> {
+        let password = if route.needs_password() {
             let secrets = self.translation.secrets.clone();
             self.blocking(move |_| Ok(secrets.get(PROXY_PASSWORD_SECRET)?))
                 .await?
         } else {
             None
         };
-        Ok(net_route(route, password))
+        Ok(route.net_route(password))
     }
 
     async fn proxy_password_state(&self) -> Result<TranslationProxyPasswordState, AppError> {

@@ -60,3 +60,12 @@ export const translationKeys = {
   cache: () => [...translationKeys.all, 'cache'] as const,
   proxyPassword: () => [...translationKeys.all, 'proxyPassword'] as const,
 }
+
+/** The AI settings, the provider catalog, each connection's model list and downloaded provider icons. Model lists are never persisted. */
+export const aiKeys = {
+  all: ['ai'] as const,
+  state: () => [...aiKeys.all, 'state'] as const,
+  catalog: () => [...aiKeys.all, 'catalog'] as const,
+  models: (connectionId: string) => [...aiKeys.all, 'models', connectionId] as const,
+  icon: (providerId: string) => [...aiKeys.all, 'icon', providerId] as const,
+}
