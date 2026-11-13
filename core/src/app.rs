@@ -44,6 +44,7 @@ mod avatars;
 mod bodies;
 #[cfg(any(test, feature = "test-support"))]
 mod body_fixture;
+mod discovery;
 mod draft_bodies;
 mod flags;
 mod oauth;
@@ -59,6 +60,10 @@ pub use ai::{AiConnectionState, AiService, AiState, SaveAiConnection, SavedAiCon
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};
+pub use discovery::{
+    DiscoverMailSettingsRequest, DiscoveredEwsEndpoint, DiscoveredMailEndpoint,
+    MailSettingsDiscovery, MailSettingsDiscoveryStatus,
+};
 pub use draft_bodies::DraftBodyBinding;
 pub use flags::{FlagChange, MessageFlag};
 pub use organize::{

@@ -16,6 +16,22 @@ export type TlsMode = "implicit" | "startTls";
 
 export type ConnectionConfig = { host: string, port: number, tls: TlsMode, username: string, };
 
+export type EwsAuth = "ntlm" | "basic";
+
+export type EwsConnectionConfig = {
+/**
+ * Full HTTPS URL of `Exchange.asmx`.
+ */
+url: string, auth: EwsAuth,
+/**
+ * Login name for NTLM, commonly `DOMAIN\user`.
+ */
+username: string,
+/**
+ * `msstd:...` certificate principal published by Outlook Anywhere.
+ */
+certPrincipalName: string | null, };
+
 export type SecretUpdate = { "action": "keep" } | { "action": "replace", value: string, };
 
 export type AuthenticationMode = "shared" | "separate";
@@ -75,7 +91,13 @@ senderName: string | null,
  */
 useProviderIcon: boolean, };
 
-export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput,
+/**
+ * When present the account reads and sends through EWS over HTTPS. The
+ * IMAP and SMTP rows are kept as compatibility placeholders for storage,
+ * search and outbox code that still expects both endpoints to exist.
+ */
+ews: EwsConnectionConfig | null, };
 
 export type AccountConfigInput = { displayName: string,
 /**
@@ -89,11 +111,43 @@ senderName: string | null,
 /**
  * Prefer known provider artwork when available; omitted defaults to true.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, ews: EwsConnectionConfig | null, };
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
 export type UpdateConnectionRequest = { accountId: string, expectedRevision: number, connection: ConnectionInput, };
+
+export type DiscoverMailSettingsRequest = {
+/**
+ * The mailbox to look up. Its domain decides which hosts may be contacted.
+ */
+emailAddress: string,
+/**
+ * Sent only to the Autodiscover endpoint of that domain, and only when the
+ * form has a password to offer. An unauthenticated lookup still works on
+ * servers that publish settings without credentials.
+ */
+password: string | null,
+/**
+ * Follows the same proxy the form selected; never falls back to direct.
+ */
+route: RouteInput, };
+
+export type MailSettingsDiscoveryStatus = "found" | "needsCredentials" | "rejected" | "notFound" | "network" | "proxy" | "tls" | "timeout" | "unsupported";
+
+export type DiscoveredMailEndpoint = { host: string, port: number, tls: TlsMode,
+/**
+ * `null` leaves the form's default (the mailbox address) untouched.
+ */
+username: string | null, };
+
+export type DiscoveredEwsEndpoint = { url: string, auth: EwsAuth, username: string | null, certPrincipalName: string | null, };
+
+export type MailSettingsDiscovery = { status: MailSettingsDiscoveryStatus, imap: DiscoveredMailEndpoint | null, smtp: DiscoveredMailEndpoint | null, ews: DiscoveredEwsEndpoint | null,
+/**
+ * Origin that answered, so the user can see where the values came from.
+ */
+source: string | null, };
 
 export type UpdateProfileRequest = { accountId: string, profile: AccountProfileInput, };
 
@@ -150,7 +204,12 @@ senderName: string | null,
 /**
  * Appearance only. Defaults to true for credential journals from older builds.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig,
+/**
+ * Present for accounts that use EWS instead of IMAP/SMTP. Defaulted so
+ * credential journals written before EWS existed still load.
+ */
+ews: EwsConnectionConfig | null, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */

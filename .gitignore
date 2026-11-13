@@ -128,3 +128,4 @@ Desktop.ini
 # Local secret-scan reports
 gitleaks-*.json
 trufflehog-*.json
+.workbuddy/

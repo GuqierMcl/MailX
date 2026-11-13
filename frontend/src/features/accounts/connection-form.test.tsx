@@ -256,7 +256,7 @@ describe('connection form', () => {
     render(
       <ConnectionForm account={null} intro={{ title: '说明', description: '说明' }} submitLabel="下一步" submittingLabel="下一步"
         initialError={{ code: 'validation', field: 'imap.host', message: '无法使用这个主机。' }}
-        initialDraft={{ ...(() => { const d = { emailAddress: 'me@example.com' }; return d })(), imap: { host: 'bad', port: '993', tls: 'implicit', username: 'me' }, smtp: { host: 'smtp.example.com', port: '465', tls: 'implicit', username: 'me' }, mode: 'shared', sharedPassword: { replace: true, value: '' }, imapPassword: { replace: true, value: '' }, smtpPassword: { replace: true, value: '' }, routeKind: 'direct', proxyKind: 'socks5', proxyHost: '', proxyPort: '1080', proxyAuth: false, proxyUsername: '', proxyPassword: { replace: true, value: '' }, imageProxyDns: false, confirmImageProxyDns: false }}
+        initialDraft={{ ...(() => { const d = { emailAddress: 'me@example.com' }; return d })(), imap: { host: 'bad', port: '993', tls: 'implicit', username: 'me' }, smtp: { host: 'smtp.example.com', port: '465', tls: 'implicit', username: 'me' }, ews: null, mode: 'shared', sharedPassword: { replace: true, value: '' }, imapPassword: { replace: true, value: '' }, smtpPassword: { replace: true, value: '' }, routeKind: 'direct', proxyKind: 'socks5', proxyHost: '', proxyPort: '1080', proxyAuth: false, proxyUsername: '', proxyPassword: { replace: true, value: '' }, imageProxyDns: false, confirmImageProxyDns: false }}
         onSubmit={vi.fn()} onBusyChange={vi.fn()} onDirtyChange={vi.fn()} />,
     )
     expect(screen.getByLabelText('邮箱地址')).toHaveValue('me@example.com')

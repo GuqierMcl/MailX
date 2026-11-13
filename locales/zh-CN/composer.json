@@ -205,7 +205,7 @@
     "network": "网络中断",
     "protocol": "发信服务器返回了无法识别的回复",
     "server": "发信服务器拒绝了这封邮件",
-    "tlsVerification": "发信服务器的证书验证失败",
+    "tlsVerification": "发信服务器的证书验证失败（自建 Exchange 的发信端口常用自签名证书，可在账号连接设置里重新探测，改走 Exchange 通道）",
     "tlsUnavailable": "发信服务器不支持加密连接",
     "authUnavailable": "发信服务器不支持 MailX 可用的登录方式",
     "authRejected": "发信服务器拒绝了账号登录，请检查密码或授权码",

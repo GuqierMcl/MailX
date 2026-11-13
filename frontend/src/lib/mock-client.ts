@@ -450,6 +450,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const verified = { status: 'verified' as const, stage: 'complete' as const, code: null }
       return { verificationId: crypto.randomUUID(), imap: { ...verified }, smtp: { ...verified } }
     },
+    async discoverMailSettings() {
+      return { status: 'notFound' as const, imap: null, smtp: null, ews: null, source: null }
+    },
     async openProviderHelp(providerId) {
       const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
         : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
@@ -1210,6 +1213,7 @@ function oauthAccountFromSession(id: string, session: CreateSession, profile: Pi
       ...profile, emailAddress: address, providerId, route: session.route,
       ...registeredServers(providerId, address),
       authentication: { kind: 'oauth2', configuration: { providerId, ...placeholder } },
+      ews: null,
     }),
     authentication: {
       kind: 'oauth2',
@@ -1254,6 +1258,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     mailboxSourceId: `mock-${id}`,
     imap: config.imap,
     smtp: config.smtp,
+    ews: config.ews ?? null,
     authentication: separate
       ? { kind: 'password', mode: 'separate', imap: auth('imap'), smtp: auth('smtp') }
       : { kind: 'password', mode: 'shared', imap: auth('shared'), smtp: auth('shared') },
@@ -1278,6 +1283,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'lin.wei@example.com' },
     authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     route: { kind: 'direct' },
+    ews: null,
   }),
   accountFromConfig(PERSONAL, 1, {
     displayName: '个人邮箱',
@@ -1290,6 +1296,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
     smtp: { host: 'smtp.example.org', port: 587, tls: 'startTls', username: 'linwei.home@example.org' },
     authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     route: { kind: 'direct' },
+    ews: null,
   }),
 ]
 

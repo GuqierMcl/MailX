@@ -29,6 +29,32 @@ pub enum SecretUpdate {
     },
 }
 
+/// How an account authenticates against an Exchange Web Services endpoint.
+/// On-premises deployments commonly answer `WWW-Authenticate: NTLM,
+/// Negotiate` and refuse Basic, which is why NTLM is a first-class choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum EwsAuth {
+    Ntlm,
+    Basic,
+}
+
+/// An Exchange mailbox reached over EWS instead of IMAP and SMTP. This is the
+/// "Exchange + use HTTP + NTLM" configuration Outlook and Foxmail expose:
+/// one HTTPS endpoint carries both reading and sending.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EwsConnectionConfig {
+    /// Full HTTPS URL of `Exchange.asmx`.
+    pub url: String,
+    pub auth: EwsAuth,
+    /// Login name for NTLM, commonly `DOMAIN\user`.
+    pub username: String,
+    /// `msstd:...` certificate principal published by Outlook Anywhere.
+    #[serde(default)]
+    pub cert_principal_name: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AuthenticationMode {
@@ -151,6 +177,11 @@ pub struct ConnectionInput {
     pub smtp: ConnectionConfig,
     pub authentication: AuthenticationInput,
     pub route: RouteInput,
+    /// When present the account reads and sends through EWS over HTTPS. The
+    /// IMAP and SMTP rows are kept as compatibility placeholders for storage,
+    /// search and outbox code that still expects both endpoints to exist.
+    #[serde(default)]
+    pub ews: Option<EwsConnectionConfig>,
 }
 
 /// A new account: its profile and its connection in one request.
@@ -173,6 +204,8 @@ pub struct AccountConfigInput {
     pub smtp: ConnectionConfig,
     pub authentication: AuthenticationInput,
     pub route: RouteInput,
+    #[serde(default)]
+    pub ews: Option<EwsConnectionConfig>,
 }
 
 impl AccountConfigInput {
@@ -191,6 +224,7 @@ impl AccountConfigInput {
                 smtp: self.smtp,
                 authentication: self.authentication,
                 route: self.route,
+                ews: self.ews,
             },
         )
     }
@@ -423,6 +457,10 @@ pub struct Account {
     pub mailbox_source_id: String,
     pub imap: ConnectionConfig,
     pub smtp: ConnectionConfig,
+    /// Present for accounts that use EWS instead of IMAP/SMTP. Defaulted so
+    /// credential journals written before EWS existed still load.
+    #[serde(default)]
+    pub ews: Option<EwsConnectionConfig>,
     pub authentication: AccountAuthenticationSummary,
     pub route: RouteConfig,
     #[ts(type = "number")]

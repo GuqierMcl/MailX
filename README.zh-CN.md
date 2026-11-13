@@ -44,9 +44,9 @@ Gmail 接受 `@gmail.com` 和 `@googlemail.com` 地址，使用 Google 应用专
 
 iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 Apple 应用专用密码。账号前提和用户名设置见[添加账号指南](docs/guides/zh-CN/README.md#icloud-邮箱)。
 
-Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Exchange（工作或学校邮箱）通过浏览器中的微软登录页登录，不需要在 MailX 中输入密码。Outlook.com 需要先在 Outlook 设置中开启 IMAP；工作或学校账号可能需要管理员批准 MailX，或为邮箱允许 IMAP 和 SMTP。公司自己搭建的 Exchange 服务器不在这个入口范围内，如果它提供 IMAP 和 SMTP，可以手动添加。详见[添加账号指南](docs/guides/zh-CN/README.md#microsoftoutlook--microsoft-365)。
+Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Exchange（工作或学校邮箱）通过浏览器中的微软登录页登录，不需要在 MailX 中输入密码。Outlook.com 需要先在 Outlook 设置中开启 IMAP；工作或学校账号可能需要管理员批准 MailX，或为邮箱允许 IMAP 和 SMTP。公司自己搭建的 Exchange 服务器不在这个浏览器登录入口范围内，但可以走通用「IMAP/SMTP」入口：MailX 输入地址后做只读探测，发现提供 NTLM 的 EWS 端点时即切到 Exchange(EWS) 通道收发。这需要 `DOMAIN\user` 形式的域名账户、HTTPS 端点，以及由邮箱域名派生的主机；并非所有自建 Exchange 部署都能用。边界见[自建 Exchange 指南](docs/guides/zh-CN/README.md#企业自建-exchangeews)，浏览器登录细节见[添加账号指南](docs/guides/zh-CN/README.md#microsoftoutlook--microsoft-365)。
 
-其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail 的浏览器登录（无需应用专用密码）在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
+通用「IMAP/SMTP」入口不再一上来就让你手填服务器。输入邮箱地址后，MailX 先做一次只读探测；成功就自动填好 IMAP/SMTP，或切到 Exchange(EWS) 通道；失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示手动填写 IMAP 与 SMTP 信息，并提供「重新探测」与「改为手动填写」。编辑已保存账号时不会重新探测。其他支持 IMAP / SMTP 密码登录的邮箱仍可手动填写服务器添加。Gmail 的浏览器登录（无需应用专用密码）在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
 
 <sub>服务商名称与 Logo 为其各自所有者的商标，仅用于标识服务商。</sub>
 
@@ -68,6 +68,7 @@ Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Excha
 | 桌面端：在已发送文件夹中显示发出的邮件 | ✅ 已实现 |
 | 本地内容全文搜索 | ✅ 已实现 |
 | 浏览器登录：Outlook、Microsoft 365 / Exchange | ✅ 已实现 |
+| 邮箱设置自动探测与自建 Exchange 的 EWS 收发 | ✅ 已实现（覆盖有边界） |
 | 浏览器登录：Gmail | 🗓️ 规划中 |
 | 内置 AI 助手 | 🗓️ 规划中 |
 | 翻译邮件，免设置或使用你自己的密钥 | ✅ 已实现（仅自动测试） |
@@ -78,7 +79,9 @@ Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365 / Excha
 
 ## 已知限制
 
-- 当前支持使用密码、授权码或应用专用密码的 IMAP 和 SMTP 账号，以及 Outlook 和 Microsoft 365 的浏览器登录；Gmail 等其他服务商的浏览器登录、内置 AI 助手和自托管 Web 版本尚未提供。
+- 当前支持使用密码、授权码或应用专用密码的 IMAP 和 SMTP 账号、Outlook 和 Microsoft 365 的浏览器登录，以及通过 EWS + NTLM 接入的企业自建 Exchange 账号；Gmail 等其他服务商的浏览器登录、内置 AI 助手和自托管 Web 版本尚未提供。
+- EWS 覆盖仍有边界：与真实 Exchange 服务器的端到端收发未做真机验证；没有增量同步与删除同步（当前每轮用 FindItem 取前 500 封）；EPA 通道绑定、EWS 模式的「测试登录」按钮、共享邮箱、世纪互联运营的 Microsoft 365 和用于 EWS 的 OAuth 均未提供。IMAP / SMTP 账号的行为保持零改动。
+- 自动探测是添加账号前的一次性只读发现：只用于填好设置或选择通道，不改变已保存账号的路由与兼容策略；编辑已保存账号不会重新探测。
 - 首次同步从固定的最近 30 天窗口开始，每轮补齐各文件夹窗口中最新的一千封邮件头，已缓存的邮件会保留。搜索只覆盖本机内容，未打开过的正文可能不在结果中；附件按名称搜索，不搜索文件内容。
 - 归档只在本机生效；移动到任意服务器文件夹和把本地草稿同步到服务器尚未实现。已发送的本机副本不会上传到服务器。
 - 提供 Windows、macOS 和 Linux 构建，但各功能与服务商的覆盖范围不同。已验证的组合和剩余缺口见[验证记录](docs/development/validation.md)。

@@ -13,12 +13,24 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+### 🚀 Feature
+
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
+- The generic IMAP / SMTP entry now runs a read-only discovery probe after you enter an address, filling in IMAP / SMTP settings or switching to an Exchange (EWS) channel; only a failed probe (a password being needed, a refusal, a network / TLS / timeout error, no result or an unsupported setup) asks you to enter the servers by hand, with Retry discovery and Enter manually. / 通用「IMAP/SMTP」入口现在输入邮箱地址后先做一次只读探测，自动填好 IMAP/SMTP 或切换到 Exchange(EWS) 通道；仅探测失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）时才提示手动填写服务器，并提供「重新探测」与「改为手动填写」。
+- Self-hosted Exchange mailboxes that expose an EWS endpoint over HTTPS with NTLM can be added through discovery and receive and send mail over EWS, without IMAP IDLE or SMTP. / 暴露 HTTPS + NTLM 的 EWS 端点的企业自建 Exchange 邮箱现在可经自动探测添加，并通过 EWS 收发邮件，不依赖 IMAP IDLE 与 SMTP。
+
+### ✨ Optimization
+
+- The getting-started guides and the architecture, contract and validation documents now describe discovery and the EWS coverage limits in both languages. / 使用入门、架构、契约与验证文档已用中英文同步说明自动探测与 EWS 的覆盖边界。
 
 ### 🩹 Fixed
 
 - On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。 ([#125](https://github.com/GuqierMcl/MailX/pull/125))
+
+### 🔄 Changed
+
+- Account inputs and summaries gain an optional `ews` connection, and the local database adds EWS endpoint, ItemId-to-local-uid mapping and folder-state tables; existing IMAP / SMTP accounts behave exactly as before. / 账号输入与摘要新增可空的 `ews` 连接，本地数据库加入 EWS 端点、ItemId 到本地 uid 的映射与文件夹状态表；已有 IMAP/SMTP 账号行为不变。
 
 ## [0.2.1] - 2026-11-12
 

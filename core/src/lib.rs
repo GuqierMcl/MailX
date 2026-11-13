@@ -11,6 +11,7 @@ pub mod accounts;
 pub mod ai;
 mod app;
 pub mod auth;
+mod discovery;
 pub mod drafts;
 pub mod error;
 pub mod events;
@@ -37,13 +38,15 @@ pub use ai::{
     AiProtocol, AiProviderIcon, AiSettings, AiTestResult,
 };
 pub use app::{
-    AccountConnectionVerification, Activity, AiConnectionState, AiService, AiState, ArchiveOutcome,
-    AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BeginOAuthAccount,
-    BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
-    CancelDraftVerification, ConfirmOAuthMailbox, ConnectionVerificationCode,
-    ConnectionVerificationStage, ConnectionVerificationStatus, CreateOAuthAccount,
-    DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagBatchItem,
-    FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailxCore, MessageFlag,
+    AccountConnectionVerification, Activity, AiConnectionState, AiService, AiState,
+    ArchiveOutcome, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind,
+    BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks,
+    CancelConnectionVerification, CancelDraftVerification, ConfirmOAuthMailbox,
+    ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
+    CreateOAuthAccount, DiscoverMailSettingsRequest, DiscoveredEwsEndpoint,
+    DiscoveredMailEndpoint, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
+    FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,
+    MailSettingsDiscovery, MailSettingsDiscoveryStatus, MailxCore, MessageFlag,
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
     ProtocolVerification, RemoteImageStatus, SaveAiConnection, SavedAiConnection,
     TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,

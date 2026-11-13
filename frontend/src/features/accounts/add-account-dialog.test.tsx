@@ -155,6 +155,7 @@ describe('add account wizard', () => {
       smtp: { host: 'smtp.mail.me.com', port: 587, tls: 'startTls', username: emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'abcd-efgh-ijkl-mnop' } },
       route: { kind: 'direct' },
+      ews: null,
     }
     expect(client.verifyDraftConnection.mock.calls[0][0]).toEqual(expected)
     expect(client.createAccount).not.toHaveBeenCalled()
@@ -186,6 +187,7 @@ describe('add account wizard', () => {
       smtp: { host: 'smtp.gmail.com', port: 465, tls: 'implicit', username: emailAddress },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'abcdefghijklmnop' } },
       route: { kind: 'direct' },
+      ews: null,
     }
     expect(client.verifyDraftConnection.mock.calls[0][0]).toEqual(expected)
     await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))

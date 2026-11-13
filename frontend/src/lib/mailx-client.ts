@@ -33,6 +33,8 @@ import type {
   MailStateChanged,
   ArchiveOutcome,
   CreateAccountRequest,
+  DiscoverMailSettingsRequest,
+  MailSettingsDiscovery,
   CreateDraftFromRequest,
   CreateDraftRequest,
   Draft,
@@ -104,6 +106,8 @@ export interface MailxClient {
   verifyAccountConnection(accountId: string, expectedRevision: number, signal?: AbortSignal): Promise<AccountConnectionVerification>
   /** Tests the supplied connection without saving an account or sending mail. */
   verifyDraftConnection(connection: ConnectionInput, signal?: AbortSignal): Promise<DraftConnectionVerification>
+  /** Read-only lookup of the servers published for an address; saves nothing. */
+  discoverMailSettings(request: DiscoverMailSettingsRequest): Promise<MailSettingsDiscovery>
   /** Opens the fixed, reviewed help page for the selected supported provider. */
   openProviderHelp(providerId: string): Promise<void>
   createAccount(request: CreateAccountRequest): Promise<Account>
@@ -473,6 +477,7 @@ export function createDesktopClient(): MailxClient {
         signal?.removeEventListener('abort', abort)
       }
     },
+    discoverMailSettings: (request) => call<MailSettingsDiscovery>('accounts_discover_mail_settings', { request }),
     openProviderHelp: (providerId) => call<void>('accounts_open_provider_help', { providerId }),
     createAccount: (request) => call<Account>('accounts_create', { request }),
     beginOAuthAccount: (request) => call<OAuthSessionHandle>('accounts_oauth_begin', { request }),

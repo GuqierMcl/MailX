@@ -6,6 +6,8 @@
 //! module asks for. Element prefixes (`t:`, `m:`) are matched by local name
 //! because Exchange and its load balancers do not always agree on them.
 
+use base64::{Engine, engine::general_purpose::STANDARD};
+
 /// Message namespace, used for the body element of each request.
 const MESSAGES: &str = "http://schemas.microsoft.com/exchange/services/2006/messages";
 /// Type namespace, used for every value type.
@@ -13,6 +15,17 @@ const TYPES: &str = "http://schemas.microsoft.com/exchange/services/2006/types";
 /// The schema version MailX speaks. Exchange 2013 answers this and newer servers
 /// accept it too.
 const SERVER_VERSION: &str = "Exchange2013";
+/// A decoded MIME message larger than this is refused instead of returned.
+const MAX_MIME_BYTES: usize = 32 * 1024 * 1024;
+/// `t:Item` subclasses this reader treats as mail items.
+const ITEM_ELEMENTS: [&str; 6] = [
+    "Message",
+    "Item",
+    "MeetingMessage",
+    "MeetingRequest",
+    "MeetingResponse",
+    "MeetingCancellation",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SoapError {
@@ -28,6 +41,34 @@ pub(crate) struct Folder {
     pub id: String,
     pub display_name: String,
     pub total_count: u32,
+}
+
+/// One message as FindItem reports it. Addresses are already decoded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Party {
+    pub name: Option<String>,
+    pub address: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Item {
+    pub id: String,
+    pub change_key: Option<String>,
+    pub subject: String,
+    pub from: Option<Party>,
+    pub to: Vec<Party>,
+    pub cc: Vec<Party>,
+    pub reply_to: Vec<Party>,
+    /// RFC 3339 / ISO 8601 strings straight from EWS; caller parses them.
+    pub sent_at: Option<String>,
+    pub received_at: Option<String>,
+    pub is_read: bool,
+    pub is_flagged: bool,
+    pub has_attachments: bool,
+    pub size: Option<u32>,
+    pub message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
 }
 
 /// Wraps a request body in an envelope naming the schema version.
@@ -58,14 +99,21 @@ pub(crate) fn find_folders() -> String {
     ))
 }
 
-/// Rejects anything this reader must not walk: a DTD, or a body that is not an
-/// envelope at all.
-fn checked(xml: &str) -> Result<&str, SoapError> {
+/// Refuses a DTD: without entity expansion the reader cannot be tricked into
+/// walking anything a server smuggles in.
+fn checked_dtd(xml: &str) -> Result<&str, SoapError> {
     let upper = xml.to_ascii_uppercase();
     if upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
         return Err(SoapError::Malformed);
     }
-    if !upper.contains("ENVELOPE") {
+    Ok(xml)
+}
+
+/// Rejects anything this reader must not walk: a DTD, or a body that is not an
+/// envelope at all.
+fn checked(xml: &str) -> Result<&str, SoapError> {
+    let xml = checked_dtd(xml)?;
+    if !xml.to_ascii_uppercase().contains("ENVELOPE") {
         return Err(SoapError::Malformed);
     }
     Ok(xml)
@@ -110,12 +158,211 @@ pub(crate) fn parse_folders(xml: &str) -> Result<Vec<Folder>, SoapError> {
     Ok(folders)
 }
 
-/// The element text of `<…:name>` in `xml`, first match.
+/// `FindItem` in one folder, shallow, one page of `max_entries` messages.
+pub(crate) fn find_items(folder_id: &str, max_entries: usize) -> String {
+    let folder = escape(folder_id);
+    envelope(&format!(
+        concat!(
+            r#"<m:FindItem Traversal="Shallow">"#,
+            r#"<m:ItemShape>"#,
+            r#"<t:BaseShape>IdOnly</t:BaseShape>"#,
+            r#"<t:AdditionalProperties>"#,
+            r#"<t:FieldURI FieldURI="item:Subject"/>"#,
+            r#"<t:FieldURI FieldURI="message:From"/>"#,
+            r#"<t:FieldURI FieldURI="message:ToRecipients"/>"#,
+            r#"<t:FieldURI FieldURI="message:CcRecipients"/>"#,
+            r#"<t:FieldURI FieldURI="message:ReplyTo"/>"#,
+            r#"<t:FieldURI FieldURI="item:DateTimeSent"/>"#,
+            r#"<t:FieldURI FieldURI="item:DateTimeReceived"/>"#,
+            r#"<t:FieldURI FieldURI="message:IsRead"/>"#,
+            r#"<t:FieldURI FieldURI="item:HasAttachments"/>"#,
+            r#"<t:FieldURI FieldURI="item:Size"/>"#,
+            r#"<t:FieldURI FieldURI="message:InternetMessageId"/>"#,
+            r#"<t:FieldURI FieldURI="message:InReplyTo"/>"#,
+            r#"<t:FieldURI FieldURI="message:References"/>"#,
+            r#"<t:FieldURI FieldURI="item:Flag"/>"#,
+            r#"</t:AdditionalProperties>"#,
+            r#"</m:ItemShape>"#,
+            r#"<m:IndexedPageItemView MaxEntriesReturned="{max_entries}" Offset="0" BasePoint="Beginning"/>"#,
+            r#"<m:ParentFolderIds><t:FolderId Id="{folder}"/></m:ParentFolderIds>"#,
+            r#"</m:FindItem>"#,
+        ),
+        max_entries = max_entries,
+        folder = folder,
+    ))
+}
+
+/// Reads the messages out of a `FindItem` response.
+pub(crate) fn parse_items(xml: &str) -> Result<Vec<Item>, SoapError> {
+    let xml = checked(xml)?;
+    // A per-message failure is reported inside a 200, so the class decides.
+    if has_server_error(xml, "FindItemResponseMessage") {
+        return Err(SoapError::Server);
+    }
+    let Some(root) = blocks(xml, "RootFolder").first().copied() else {
+        return Err(SoapError::Malformed);
+    };
+    let mut items = Vec::new();
+    for name in ITEM_ELEMENTS {
+        for block in blocks(root, name) {
+            items.push(parse_item(block));
+        }
+    }
+    Ok(items)
+}
+
+/// `GetItem` asking for the raw MIME content of one message.
+pub(crate) fn get_item_mime(item_id: &str, change_key: Option<&str>) -> String {
+    let item = item_id_tag(item_id, change_key);
+    envelope(&format!(
+        concat!(
+            r#"<m:GetItem>"#,
+            r#"<m:ItemShape>"#,
+            r#"<t:BaseShape>IdOnly</t:BaseShape>"#,
+            r#"<t:IncludeMimeContent>true</t:IncludeMimeContent>"#,
+            r#"</m:ItemShape>"#,
+            r#"<m:ItemIds>{item}</m:ItemIds>"#,
+            r#"</m:GetItem>"#,
+        ),
+        item = item,
+    ))
+}
+
+/// Decodes `<t:MimeContent>` base64. Refuses empty or oversized payloads (>32 MiB).
+pub(crate) fn parse_mime(xml: &str) -> Result<Vec<u8>, SoapError> {
+    let xml = checked(xml)?;
+    if has_server_error(xml, "GetItemResponseMessage") {
+        return Err(SoapError::Server);
+    }
+    let Some(raw) = raw_text(xml, "MimeContent") else {
+        return Err(SoapError::Malformed);
+    };
+    // The transport already bounds the response; this also guards callers that
+    // hand us a larger string directly, before any base64 decoding.
+    if raw.len() > MAX_MIME_BYTES {
+        return Err(SoapError::Malformed);
+    }
+    // Exchange wraps base64 across lines; whitespace is not part of the data.
+    let compact: String = raw
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    if compact.is_empty() {
+        return Err(SoapError::Malformed);
+    }
+    let decoded = STANDARD
+        .decode(compact.as_bytes())
+        .map_err(|_| SoapError::Malformed)?;
+    if decoded.is_empty() || decoded.len() > MAX_MIME_BYTES {
+        return Err(SoapError::Malformed);
+    }
+    Ok(decoded)
+}
+
+/// `UpdateItem` writing back the read / flag state of one message.
+pub(crate) fn update_flags(
+    item_id: &str,
+    change_key: Option<&str>,
+    read: Option<bool>,
+    flagged: Option<bool>,
+) -> String {
+    let mut updates = String::new();
+    if let Some(read) = read {
+        let value = if read { "true" } else { "false" };
+        updates.push_str(&format!(
+            concat!(
+                r#"<t:SetItemField>"#,
+                r#"<t:FieldURI FieldURI="message:IsRead"/>"#,
+                r#"<t:Message><t:IsRead>{value}</t:IsRead></t:Message>"#,
+                r#"</t:SetItemField>"#,
+            ),
+            value = value
+        ));
+    }
+    if let Some(flagged) = flagged {
+        let value = if flagged { "Flagged" } else { "NotFlagged" };
+        updates.push_str(&format!(
+            concat!(
+                r#"<t:SetItemField>"#,
+                r#"<t:FieldURI FieldURI="item:Flag"/>"#,
+                r#"<t:Message><t:Flag><t:FlagStatus>{value}</t:FlagStatus></t:Flag></t:Message>"#,
+                r#"</t:SetItemField>"#,
+            ),
+            value = value
+        ));
+    }
+    let item = item_id_tag(item_id, change_key);
+    envelope(&format!(
+        concat!(
+            r#"<m:UpdateItem MessageDisposition="SaveOnly" ConflictResolution="AutoResolve">"#,
+            r#"<m:ItemChanges><t:ItemChange>"#,
+            r#"{item}"#,
+            r#"<t:Updates>{updates}</t:Updates>"#,
+            r#"</t:ItemChange></m:ItemChanges>"#,
+            r#"</m:UpdateItem>"#,
+        ),
+        item = item,
+        updates = updates,
+    ))
+}
+
+/// `DeleteItem` moving one message to Deleted Items.
+pub(crate) fn delete_item(item_id: &str, change_key: Option<&str>) -> String {
+    let item = item_id_tag(item_id, change_key);
+    envelope(&format!(
+        concat!(
+            r#"<m:DeleteItem DeleteType="MoveToDeletedItems" SendMeetingCancellations="None">"#,
+            r#"<m:ItemIds>{item}</m:ItemIds>"#,
+            r#"</m:DeleteItem>"#,
+        ),
+        item = item,
+    ))
+}
+
+/// CreateItem MessageDisposition="SendAndSaveCopy" with a raw MIME message.
+pub(crate) fn create_and_send(mime: &[u8]) -> String {
+    let encoded = STANDARD.encode(mime);
+    envelope(&format!(
+        concat!(
+            r#"<m:CreateItem MessageDisposition="SendAndSaveCopy">"#,
+            r#"<m:SavedItemFolderId><t:DistinguishedFolderId Id="sentitems"/></m:SavedItemFolderId>"#,
+            r#"<m:Items>"#,
+            r#"<t:Message>"#,
+            r#"<t:MimeContent CharacterSet="UTF-8">{encoded}</t:MimeContent>"#,
+            r#"</t:Message>"#,
+            r#"</m:Items>"#,
+            r#"</m:CreateItem>"#,
+        ),
+        encoded = encoded,
+    ))
+}
+
+/// Checks the ResponseClass / ResponseCode of one action's response.
+pub(crate) fn response_ok(xml: &str, response_message: &str) -> Result<(), SoapError> {
+    let xml = checked_dtd(xml)?;
+    let Some(block) = blocks(xml, response_message).first().copied() else {
+        return Err(SoapError::Malformed);
+    };
+    if attribute(block, "ResponseClass").is_some_and(|class| class != "Success") {
+        return Err(SoapError::Server);
+    }
+    if text(block, "ResponseCode").is_some_and(|code| code.trim() != "NoError") {
+        return Err(SoapError::Server);
+    }
+    Ok(())
+}
+
+/// The element text of `<…:name>` in `xml`, first match, entities decoded.
 fn text(xml: &str, name: &str) -> Option<String> {
+    raw_text(xml, name).map(unescape)
+}
+
+/// The raw element text of `<…:name>` in `xml`, first match.
+fn raw_text<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
     let block = blocks(xml, name).into_iter().next()?;
     let open_end = block.find('>')? + 1;
     let close = block.rfind("</")?;
-    (open_end <= close).then(|| unescape(&block[open_end..close]))
+    (open_end <= close).then(|| &block[open_end..close])
 }
 
 /// Every `<…:name …>…</…:name>` block in `xml`, outermost first.
@@ -214,6 +461,92 @@ fn unescape(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// Escapes a value before it is written into XML. Order matters: `&` first.
+fn escape(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// `<t:ItemId Id="…" ChangeKey="…"/>`; the ChangeKey is optional.
+fn item_id_tag(item_id: &str, change_key: Option<&str>) -> String {
+    let id = escape(item_id);
+    match change_key {
+        Some(key) => {
+            let key = escape(key);
+            format!(r#"<t:ItemId Id="{id}" ChangeKey="{key}"/>"#)
+        }
+        None => format!(r#"<t:ItemId Id="{id}"/>"#),
+    }
+}
+
+/// `true` when a `…ResponseMessage` is present but reports a failure.
+fn has_server_error(xml: &str, message: &str) -> bool {
+    blocks(xml, message)
+        .iter()
+        .any(|block| attribute(block, "ResponseClass").is_some_and(|class| class != "Success"))
+}
+
+/// Every `<t:Mailbox>` inside a recipient container, as decoded parties.
+fn parse_parties(container: &str) -> Vec<Party> {
+    let mut parties = Vec::new();
+    for mailbox in blocks(container, "Mailbox") {
+        let Some(address) = text(mailbox, "EmailAddress") else {
+            continue;
+        };
+        parties.push(Party {
+            name: text(mailbox, "Name").filter(|name| !name.is_empty()),
+            address,
+        });
+    }
+    parties
+}
+
+/// The first `<…:name>` container, parsed as a recipient list.
+fn field_parties(block: &str, name: &str) -> Vec<Party> {
+    blocks(block, name)
+        .first()
+        .copied()
+        .map(parse_parties)
+        .unwrap_or_default()
+}
+
+/// One `t:Item` subclass block into an `Item`; missing fields take defaults.
+fn parse_item(block: &str) -> Item {
+    let (id, change_key) = blocks(block, "ItemId")
+        .first()
+        .copied()
+        .map(|id| {
+            (
+                attribute(id, "Id").unwrap_or_default(),
+                attribute(id, "ChangeKey"),
+            )
+        })
+        .unwrap_or_default();
+    Item {
+        id,
+        change_key,
+        subject: text(block, "Subject").unwrap_or_default(),
+        from: field_parties(block, "From").into_iter().next(),
+        to: field_parties(block, "ToRecipients"),
+        cc: field_parties(block, "CcRecipients"),
+        reply_to: field_parties(block, "ReplyTo"),
+        sent_at: text(block, "DateTimeSent"),
+        received_at: text(block, "DateTimeReceived"),
+        is_read: text(block, "IsRead")
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("true")),
+        is_flagged: text(block, "FlagStatus").is_some_and(|value| value.trim() == "Flagged"),
+        has_attachments: text(block, "HasAttachments")
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("true")),
+        size: text(block, "Size").and_then(|value| value.trim().parse().ok()),
+        message_id: text(block, "InternetMessageId"),
+        in_reply_to: text(block, "InReplyTo"),
+        references: text(block, "References"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +638,448 @@ mod tests {
         let hostile = RESPONSE.replace("收件箱", "&lt;script&gt;alert(1)&lt;/script&gt;");
         let folders = parse_folders(&hostile).unwrap();
         assert_eq!(folders[0].display_name, "<script>alert(1)</script>");
+    }
+
+    const ITEMS_RESPONSE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <m:FindItemResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+        xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+      <m:ResponseMessages>
+        <m:FindItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:RootFolder TotalItemsInView="1" IncludesLastItemInRange="true">
+            <t:Items>
+              <t:Message>
+                <t:ItemId Id="AAMkAGI2==" ChangeKey="CQAAABYAAA"/>
+                <t:Subject>Quarterly &amp; notes</t:Subject>
+                <t:From>
+                  <t:Mailbox>
+                    <t:Name>Alice Example</t:Name>
+                    <t:EmailAddress>alice@example.com</t:EmailAddress>
+                  </t:Mailbox>
+                </t:From>
+                <t:ToRecipients>
+                  <t:Mailbox>
+                    <t:Name>Bob</t:Name>
+                    <t:EmailAddress>bob@example.com</t:EmailAddress>
+                  </t:Mailbox>
+                  <t:Mailbox>
+                    <t:EmailAddress>carol@contoso.com</t:EmailAddress>
+                  </t:Mailbox>
+                </t:ToRecipients>
+                <t:CcRecipients>
+                  <t:Mailbox><t:EmailAddress>dave@example.com</t:EmailAddress></t:Mailbox>
+                </t:CcRecipients>
+                <t:ReplyTo>
+                  <t:Mailbox><t:EmailAddress>reply@example.com</t:EmailAddress></t:Mailbox>
+                </t:ReplyTo>
+                <t:DateTimeSent>2026-01-02T03:04:05Z</t:DateTimeSent>
+                <t:DateTimeReceived>2026-01-02T03:04:06Z</t:DateTimeReceived>
+                <t:IsRead>false</t:IsRead>
+                <t:HasAttachments>true</t:HasAttachments>
+                <t:Size>4096</t:Size>
+                <t:InternetMessageId>&lt;mid-1@example.com&gt;</t:InternetMessageId>
+                <t:InReplyTo>&lt;mid-0@example.com&gt;</t:InReplyTo>
+                <t:References>&lt;mid-a@example.com&gt; &lt;mid-b@example.com&gt;</t:References>
+                <t:Flag><t:FlagStatus>Flagged</t:FlagStatus></t:Flag>
+              </t:Message>
+            </t:Items>
+          </m:RootFolder>
+        </m:FindItemResponseMessage>
+      </m:ResponseMessages>
+    </m:FindItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+
+    fn mime_response(body: &str) -> String {
+        format!(
+            concat!(
+                r#"<?xml version="1.0"?>"#,
+                r#"<s:Envelope><s:Body>"#,
+                r#"<m:GetItemResponse><m:ResponseMessages>"#,
+                r#"<m:GetItemResponseMessage ResponseClass="Success">"#,
+                r#"<m:ResponseCode>NoError</m:ResponseCode>"#,
+                r#"<m:Items><t:Message><t:ItemId Id="id-1"/>"#,
+                r#"<t:MimeContent CharacterSet="UTF-8">{body}</t:MimeContent>"#,
+                r#"</t:Message></m:Items>"#,
+                r#"</m:GetItemResponseMessage></m:ResponseMessages>"#,
+                r#"</m:GetItemResponse></s:Body></s:Envelope>"#,
+            ),
+            body = body,
+        )
+    }
+
+    fn action_response(class: &str, code: &str) -> String {
+        format!(
+            concat!(
+                r#"<?xml version="1.0"?>"#,
+                r#"<s:Envelope><s:Body>"#,
+                r#"<m:UpdateItemResponse><m:ResponseMessages>"#,
+                r#"<m:UpdateItemResponseMessage ResponseClass="{class}">"#,
+                r#"<m:ResponseCode>{code}</m:ResponseCode>"#,
+                r#"</m:UpdateItemResponseMessage></m:ResponseMessages>"#,
+                r#"</m:UpdateItemResponse></s:Body></s:Envelope>"#,
+            ),
+            class = class,
+            code = code,
+        )
+    }
+
+    #[test]
+    fn a_full_find_item_response_yields_every_field() {
+        let items = parse_items(ITEMS_RESPONSE).unwrap();
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.id, "AAMkAGI2==");
+        assert_eq!(item.change_key.as_deref(), Some("CQAAABYAAA"));
+        assert_eq!(item.subject, "Quarterly & notes");
+        assert_eq!(
+            item.from,
+            Some(Party {
+                name: Some("Alice Example".to_owned()),
+                address: "alice@example.com".to_owned(),
+            })
+        );
+        assert_eq!(item.to.len(), 2);
+        assert_eq!(item.to[0].name.as_deref(), Some("Bob"));
+        assert_eq!(item.to[0].address, "bob@example.com");
+        assert_eq!(item.to[1].name, None);
+        assert_eq!(item.to[1].address, "carol@contoso.com");
+        assert_eq!(item.cc.len(), 1);
+        assert_eq!(item.cc[0].address, "dave@example.com");
+        assert_eq!(item.reply_to.len(), 1);
+        assert_eq!(item.reply_to[0].address, "reply@example.com");
+        assert_eq!(item.sent_at.as_deref(), Some("2026-01-02T03:04:05Z"));
+        assert_eq!(item.received_at.as_deref(), Some("2026-01-02T03:04:06Z"));
+        assert!(!item.is_read);
+        assert!(item.is_flagged);
+        assert!(item.has_attachments);
+        assert_eq!(item.size, Some(4096));
+        assert_eq!(item.message_id.as_deref(), Some("<mid-1@example.com>"));
+        assert_eq!(item.in_reply_to.as_deref(), Some("<mid-0@example.com>"));
+        assert_eq!(
+            item.references.as_deref(),
+            Some("<mid-a@example.com> <mid-b@example.com>")
+        );
+    }
+
+    #[test]
+    fn an_error_class_is_reported_as_a_server_failure() {
+        let xml = ITEMS_RESPONSE.replace(r#"ResponseClass="Success""#, r#"ResponseClass="Error""#);
+        assert_eq!(parse_items(&xml), Err(SoapError::Server));
+    }
+
+    #[test]
+    fn a_dtd_or_a_foreign_body_is_refused_by_every_reader() {
+        let xml = r#"<!DOCTYPE x [<!ENTITY e "x">]><Envelope/>"#;
+        assert_eq!(parse_items(xml), Err(SoapError::Malformed));
+        assert_eq!(parse_mime(xml), Err(SoapError::Malformed));
+        assert_eq!(
+            response_ok(xml, "AnyResponseMessage"),
+            Err(SoapError::Malformed)
+        );
+        assert_eq!(parse_items("<html>hi</html>"), Err(SoapError::Malformed));
+        assert_eq!(parse_mime("<html>hi</html>"), Err(SoapError::Malformed));
+    }
+
+    #[test]
+    fn prefixes_and_self_closing_ids_are_accepted() {
+        let plain = ITEMS_RESPONSE
+            .replace("m:", "")
+            .replace("t:", "")
+            .replace("s:", "");
+        let items = parse_items(&plain).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "AAMkAGI2==");
+        assert_eq!(items[0].to.len(), 2);
+        assert!(items[0].is_flagged);
+    }
+
+    #[test]
+    fn unprefixed_item_elements_are_read_too() {
+        let xml = concat!(
+            r#"<?xml version="1.0"?><Envelope><Body><FindItemResponse>"#,
+            r#"<ResponseMessages><FindItemResponseMessage ResponseClass="Success">"#,
+            r#"<ResponseCode>NoError</ResponseCode><RootFolder><Items><Message>"#,
+            r#"<ItemId Id="raw-id"/><Subject>Raw</Subject><IsRead>true</IsRead>"#,
+            r#"<HasAttachments>false</HasAttachments><Size>7</Size>"#,
+            r#"<InternetMessageId>raw-mid</InternetMessageId>"#,
+            r#"</Message></Items></RootFolder></FindItemResponseMessage>"#,
+            r#"</ResponseMessages></FindItemResponse></Body></Envelope>"#,
+        );
+        let items = parse_items(xml).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "raw-id");
+        assert_eq!(items[0].subject, "Raw");
+        assert!(items[0].is_read);
+        assert!(!items[0].has_attachments);
+        assert_eq!(items[0].size, Some(7));
+        assert_eq!(items[0].message_id.as_deref(), Some("raw-mid"));
+    }
+
+    #[test]
+    fn missing_and_false_fields_take_defaults() {
+        let xml = concat!(
+            r#"<?xml version="1.0"?><s:Envelope><s:Body>"#,
+            r#"<m:FindItemResponse><m:ResponseMessages>"#,
+            r#"<m:FindItemResponseMessage ResponseClass="Success">"#,
+            r#"<m:ResponseCode>NoError</m:ResponseCode>"#,
+            r#"<m:RootFolder><t:Items><t:Message>"#,
+            r#"<t:ItemId Id="only-id"/>"#,
+            r#"<t:Flag><t:FlagStatus>NotFlagged</t:FlagStatus></t:Flag>"#,
+            r#"</t:Message></t:Items></m:RootFolder>"#,
+            r#"</m:FindItemResponseMessage></m:ResponseMessages>"#,
+            r#"</m:FindItemResponse></s:Body></s:Envelope>"#,
+        );
+        let items = parse_items(xml).unwrap();
+        let item = &items[0];
+        assert_eq!(item.id, "only-id");
+        assert_eq!(item.change_key, None);
+        assert_eq!(item.subject, "");
+        assert_eq!(item.from, None);
+        assert!(item.to.is_empty());
+        assert!(item.cc.is_empty());
+        assert!(item.reply_to.is_empty());
+        assert_eq!(item.sent_at, None);
+        assert_eq!(item.received_at, None);
+        assert!(!item.is_read);
+        assert!(!item.is_flagged);
+        assert!(!item.has_attachments);
+        assert_eq!(item.size, None);
+        assert_eq!(item.message_id, None);
+        assert_eq!(item.in_reply_to, None);
+        assert_eq!(item.references, None);
+    }
+
+    #[test]
+    fn entities_in_item_text_are_decoded() {
+        let xml = ITEMS_RESPONSE.replace(
+            "Quarterly &amp; notes",
+            "A &amp; B &lt;x&gt; &quot;q&quot; &apos;s",
+        );
+        let items = parse_items(&xml).unwrap();
+        assert_eq!(items[0].subject, "A & B <x> \"q\" 's");
+    }
+
+    #[test]
+    fn a_folder_id_is_escaped_before_it_reaches_the_request() {
+        let request = find_items("a&b\"c<d>e'f", 10);
+        assert!(request.contains(r#"Traversal="Shallow""#));
+        assert!(request.contains("a&amp;b&quot;c&lt;d&gt;e&apos;f"));
+        assert!(!request.contains("a&b"));
+    }
+
+    #[test]
+    fn max_entries_is_rendered_as_a_plain_number() {
+        let request = find_items("inbox", 37);
+        assert!(request.contains(r#"MaxEntriesReturned="37""#));
+        assert!(request.contains(r#"Offset="0" BasePoint="Beginning""#));
+
+        let huge = find_items("inbox", usize::MAX);
+        let marker = "MaxEntriesReturned=\"";
+        let start = huge.find(marker).unwrap() + marker.len();
+        let tail = &huge[start..];
+        let digits = &tail[..tail.find('"').unwrap()];
+        assert!(digits.chars().all(|character| character.is_ascii_digit()));
+        assert_eq!(digits, usize::MAX.to_string());
+    }
+
+    #[test]
+    fn find_item_asks_for_every_field_the_item_needs() {
+        let request = find_items("inbox", 5);
+        for field in [
+            "item:Subject",
+            "message:From",
+            "message:ToRecipients",
+            "message:CcRecipients",
+            "message:ReplyTo",
+            "item:DateTimeSent",
+            "item:DateTimeReceived",
+            "message:IsRead",
+            "item:HasAttachments",
+            "item:Size",
+            "message:InternetMessageId",
+            "message:InReplyTo",
+            "message:References",
+            "item:Flag",
+        ] {
+            assert!(
+                request.contains(&format!("FieldURI=\"{field}\"")),
+                "missing {field}"
+            );
+        }
+        assert!(request.contains(r#"<t:BaseShape>IdOnly</t:BaseShape>"#));
+        assert!(request.contains("RequestServerVersion Version=\"Exchange2013\""));
+        assert!(request.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn get_item_asks_for_mime_content() {
+        let request = get_item_mime("AAMkAGI2==", Some("CQAAABYAAA"));
+        assert!(request.contains(r#"<m:GetItem>"#));
+        assert!(request.contains(r#"<t:IncludeMimeContent>true</t:IncludeMimeContent>"#));
+        assert!(request.contains(r#"<t:BaseShape>IdOnly</t:BaseShape>"#));
+        assert!(request.contains(r#"<t:ItemId Id="AAMkAGI2==" ChangeKey="CQAAABYAAA"/>"#));
+        assert!(request.contains(r#"<m:ItemIds>"#));
+    }
+
+    #[test]
+    fn the_change_key_is_optional_on_item_references() {
+        let with = get_item_mime("id-1", Some("ck-1"));
+        assert!(with.contains(r#"ChangeKey="ck-1""#));
+        let without = get_item_mime("id-1", None);
+        assert!(!without.contains("ChangeKey"));
+        assert!(without.contains(r#"<t:ItemId Id="id-1"/>"#));
+
+        let delete_with = delete_item("id-2", Some("ck-2"));
+        assert!(delete_with.contains(r#"ChangeKey="ck-2""#));
+        let delete_without = delete_item("id-2", None);
+        assert!(!delete_without.contains("ChangeKey"));
+    }
+
+    #[test]
+    fn item_ids_are_escaped_in_every_request() {
+        let hostile = "id&\"<>'";
+        for request in [
+            get_item_mime(hostile, None),
+            update_flags(hostile, None, Some(true), None),
+            delete_item(hostile, None),
+        ] {
+            assert!(request.contains("id&amp;&quot;&lt;&gt;&apos;"), "{request}");
+            assert!(!request.contains("id&\""), "{request}");
+        }
+    }
+
+    #[test]
+    fn update_item_builds_one_set_field_per_flag() {
+        let both = update_flags("id-1", Some("ck-1"), Some(true), Some(false));
+        assert!(both.contains(r#"MessageDisposition="SaveOnly" ConflictResolution="AutoResolve""#));
+        assert!(both.contains(r#"<t:FieldURI FieldURI="message:IsRead"/>"#));
+        assert!(both.contains(r#"<t:IsRead>true</t:IsRead>"#));
+        assert!(both.contains(r#"<t:FieldURI FieldURI="item:Flag"/>"#));
+        assert!(both.contains(r#"<t:FlagStatus>NotFlagged</t:FlagStatus>"#));
+        assert_eq!(both.matches("<t:SetItemField>").count(), 2);
+
+        let read_only = update_flags("id-1", None, Some(false), None);
+        assert_eq!(read_only.matches("<t:SetItemField>").count(), 1);
+        assert!(read_only.contains(r#"<t:IsRead>false</t:IsRead>"#));
+        assert!(!read_only.contains("FlagStatus"));
+
+        let flagged_only = update_flags("id-1", None, None, Some(true));
+        assert!(flagged_only.contains(r#"<t:FlagStatus>Flagged</t:FlagStatus>"#));
+        assert_eq!(flagged_only.matches("<t:SetItemField>").count(), 1);
+    }
+
+    #[test]
+    fn update_item_with_no_flags_is_still_well_formed() {
+        let request = update_flags("id-1", None, None, None);
+        assert!(request.contains("<m:UpdateItem"));
+        assert!(request.contains("<t:Updates></t:Updates>"));
+        assert!(!request.contains("<t:SetItemField>"));
+        assert!(request.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn delete_item_moves_to_deleted_items_without_cancellations() {
+        let request = delete_item("id-1", Some("ck-1"));
+        assert!(request.contains(
+            r#"<m:DeleteItem DeleteType="MoveToDeletedItems" SendMeetingCancellations="None">"#
+        ));
+        assert!(
+            request.contains(r#"<m:ItemIds><t:ItemId Id="id-1" ChangeKey="ck-1"/></m:ItemIds>"#)
+        );
+    }
+
+    #[test]
+    fn create_item_sends_and_keeps_a_copy() {
+        let request = create_and_send(b"hello");
+        assert!(request.contains(r#"<m:CreateItem MessageDisposition="SendAndSaveCopy">"#));
+        assert!(request.contains(r#"<t:DistinguishedFolderId Id="sentitems"/>"#));
+        assert!(
+            request.contains(r#"<t:MimeContent CharacterSet="UTF-8">aGVsbG8=</t:MimeContent>"#)
+        );
+        assert!(request.contains("<m:Items><t:Message>"));
+        assert!(request.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn mime_content_is_decoded_and_whitespace_is_ignored() {
+        let xml = mime_response("SGVsbG8s\nIHdvcmxk\nIQ==\n");
+        assert_eq!(parse_mime(&xml).unwrap(), b"Hello, world!".to_vec());
+    }
+
+    #[test]
+    fn mime_reads_report_an_error_class_as_a_server_failure() {
+        let xml = mime_response("aGVsbG8=")
+            .replace(r#"ResponseClass="Success""#, r#"ResponseClass="Error""#);
+        assert_eq!(parse_mime(&xml), Err(SoapError::Server));
+    }
+
+    #[test]
+    fn an_empty_or_self_closing_mime_content_is_refused() {
+        assert_eq!(parse_mime(&mime_response("")), Err(SoapError::Malformed));
+        let xml = mime_response("").replace(
+            r#"<t:MimeContent CharacterSet="UTF-8"></t:MimeContent>"#,
+            r#"<t:MimeContent CharacterSet="UTF-8"/>"#,
+        );
+        assert_eq!(parse_mime(&xml), Err(SoapError::Malformed));
+    }
+
+    #[test]
+    fn an_oversized_mime_payload_is_refused_without_decoding() {
+        let oversized = "A".repeat(MAX_MIME_BYTES + 1);
+        let xml = mime_response(&oversized);
+        assert_eq!(parse_mime(&xml), Err(SoapError::Malformed));
+    }
+
+    #[test]
+    fn response_ok_accepts_a_success_with_no_error() {
+        assert_eq!(
+            response_ok(
+                &action_response("Success", "NoError"),
+                "UpdateItemResponseMessage"
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn response_ok_accepts_a_bare_response_message() {
+        let fragment = concat!(
+            r#"<m:UpdateItemResponseMessage ResponseClass="Success">"#,
+            r#"<m:ResponseCode>NoError</m:ResponseCode>"#,
+            r#"</m:UpdateItemResponseMessage>"#,
+        );
+        assert_eq!(response_ok(fragment, "UpdateItemResponseMessage"), Ok(()));
+    }
+
+    #[test]
+    fn response_ok_rejects_an_error_class_or_a_failure_code() {
+        assert_eq!(
+            response_ok(
+                &action_response("Error", "NoError"),
+                "UpdateItemResponseMessage"
+            ),
+            Err(SoapError::Server)
+        );
+        assert_eq!(
+            response_ok(
+                &action_response("Success", "ErrorAccessDenied"),
+                "UpdateItemResponseMessage"
+            ),
+            Err(SoapError::Server)
+        );
+    }
+
+    #[test]
+    fn response_ok_needs_the_named_response_message() {
+        assert_eq!(
+            response_ok(
+                &action_response("Success", "NoError"),
+                "DeleteItemResponseMessage"
+            ),
+            Err(SoapError::Malformed)
+        );
     }
 }

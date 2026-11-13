@@ -5,6 +5,7 @@ mod contacts;
 mod deletions;
 pub(crate) mod draft_connection;
 mod drafts;
+pub(crate) mod ews;
 pub(crate) mod oauth;
 pub(crate) mod oauth_sessions;
 pub(crate) mod outbox;
@@ -323,6 +324,7 @@ impl AccountService {
         let id = old.map(|s| s.account.id.clone()).unwrap_or_else(new_id);
         let imap_endpoint = TrustEndpoint::mail("imap", &config.imap);
         let smtp_endpoint = TrustEndpoint::mail("smtp", &config.smtp);
+        let ews_endpoint = config.ews.as_ref().map(TrustEndpoint::ews);
         let old_imap = old.and_then(|s| s.profile(&s.account.authentication.imap().id));
         let old_smtp = old.and_then(|s| s.profile(&s.account.authentication.smtp().id));
         let mut writes = vec![];
@@ -331,14 +333,12 @@ impl AccountService {
         };
         let (profiles, mode, imap_summary, smtp_summary) = match credentials {
             PasswordAuthenticationInput::Shared { password } => {
-                let profile = self.build_profile(
-                    &id,
-                    old_imap,
-                    password,
-                    &[imap_endpoint.clone(), smtp_endpoint.clone()],
-                    false,
-                    &mut writes,
-                )?;
+                let mut endpoints = vec![imap_endpoint.clone(), smtp_endpoint.clone()];
+                if let Some(ews) = &ews_endpoint {
+                    endpoints.push(ews.clone());
+                }
+                let profile =
+                    self.build_profile(&id, old_imap, password, &endpoints, false, &mut writes)?;
                 let imap = profile.summary(&imap_endpoint);
                 let smtp = profile.summary(&smtp_endpoint);
                 (vec![profile], AuthenticationMode::Shared, imap, smtp)
@@ -405,6 +405,7 @@ impl AccountService {
             mailbox_source_id: source,
             imap: config.imap,
             smtp: config.smtp,
+            ews: config.ews,
             authentication: AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
                 mode,
                 imap: imap_summary,
@@ -758,6 +759,22 @@ fn validate_route(route: &mut RouteInput) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Normalizes an address typed into the add-account form before its domain is
+/// used to derive discovery hosts. Never accepts whitespace or a second `@`.
+pub(crate) fn normalize_email_address(email: &str) -> Result<String, AppError> {
+    let email = email.trim().to_owned();
+    if !valid_text(&email, 320) || email.chars().any(char::is_whitespace) {
+        return Err(AppError::validation("emailAddress"));
+    }
+    let parts: Vec<_> = email.split('@').collect();
+    if parts.len() != 2 || parts[0].is_empty() {
+        return Err(AppError::validation("emailAddress"));
+    }
+    let mut domain = parts[1].to_owned();
+    validate_host(&mut domain, "emailAddress")?;
+    Ok(email)
+}
+
 fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
     config.email_address = config.email_address.trim().to_owned();
     if !valid_text(&config.email_address, 320)
@@ -795,6 +812,51 @@ fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
         }
         if !valid_text(&connection.username, 320) {
             return Err(AppError::validation(&format!("{name}.username")));
+        }
+    }
+    if let Some(ews) = &mut config.ews {
+        ews.url = ews.url.trim().to_owned();
+        ews.username = ews
+            .username
+            .trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
+            .to_owned();
+        ews.cert_principal_name = ews
+            .cert_principal_name
+            .take()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let parsed = url::Url::parse(&ews.url).map_err(|_| AppError::validation("ews.url"))?;
+        if parsed.scheme() != "https"
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return Err(AppError::validation("ews.url"));
+        }
+        let mut host = parsed.host_str().unwrap_or_default().to_owned();
+        validate_host(&mut host, "ews.url")?;
+        if !valid_text(&ews.url, 2048) || !valid_text(&ews.username, 320) || ews.username.is_empty()
+        {
+            return Err(AppError::validation("ews.username"));
+        }
+        if ews
+            .cert_principal_name
+            .as_ref()
+            .is_some_and(|value| !valid_text(value, 512))
+        {
+            return Err(AppError::validation("ews.certPrincipalName"));
+        }
+        // One HTTPS channel serves both reading and sending, so a single
+        // credential is the only meaningful shape for an EWS account.
+        if matches!(
+            &config.authentication,
+            AuthenticationInput::Password {
+                credentials: PasswordAuthenticationInput::Separate { .. }
+            }
+        ) {
+            return Err(AppError::validation("authentication"));
         }
     }
     validate_route(&mut config.route)?;
@@ -882,6 +944,9 @@ fn canonical_config(
         }
     };
     let mut canonical = serde_json::json!({"displayName":profile.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"imap":config.imap,"smtp":config.smtp,"authenticationMode":mode,"route":route});
+    if let Some(ews) = &config.ews {
+        canonical["ews"] = serde_json::json!(ews);
+    }
     // Added only when set, so requests recorded before colors existed still match.
     if let Some(color) = &profile.color {
         canonical["color"] = serde_json::json!(color);

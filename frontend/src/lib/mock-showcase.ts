@@ -27,6 +27,7 @@ function config(displayName: string, color: string, address: string, domain: str
     smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit', username: address },
     authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     route: { kind: 'direct' },
+    ews: null,
   }
 }
 

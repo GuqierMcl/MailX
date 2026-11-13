@@ -1,6 +1,6 @@
 # MailX 文档入口
 
-状态：**桌面收发、本地全文搜索与本地 MCP 已有实现；通用 OAuth 基础已有实现但生产服务商未开放；内置 AI 与服务器 Web 宿主为后续规划**。此目录记录产品行为、架构边界、开发流程和设计依据，接口与技术选型仍可演化。平台、服务商、客户端的具体测试结果统一记录在[验证策略](development/validation.md)，发布状态以 [CHANGELOG](../CHANGELOG.md) 与 [GitHub Releases](https://github.com/GuqierMcl/MailX/releases) 为准。
+状态：**桌面收发、本地全文搜索与本地 MCP 已有实现；通用 OAuth 基础已有实现但生产服务商未开放；内置 AI 与服务器 Web 宿主为后续规划**。通用入口的邮箱设置自动探测与自建 Exchange 经 EWS + NTLM 的收发已有实现，但覆盖仍有边界，真实 Exchange 端到端收发与三平台打包仍待验证。此目录记录产品行为、架构边界、开发流程和设计依据，接口与技术选型仍可演化。平台、服务商、客户端的具体测试结果统一记录在[验证策略](development/validation.md)，发布状态以 [CHANGELOG](../CHANGELOG.md) 与 [GitHub Releases](https://github.com/GuqierMcl/MailX/releases) 为准。
 
 **演化约定：** 后续可以出现新的设计，技术栈、模块边界、产品范围、接口和里程碑都允许调整或替换。文中的“采用”“必须”“不允许”描述的是该草案内部为保证一致性所需的条件，不意味着永久冻结该方案。新方案落地时更新相关文档与状态即可，无需为偏离初始设想单独取得批准。
 
@@ -12,8 +12,8 @@
 - 安装与使用：阅读[用户入门](guides/README.md)（[简体中文](guides/zh-CN/README.md)），了解账号接入、本地缓存、发送、MCP 配置与已知限制。
 - 开始编码：先看[开发指南](development/README.md)和[实施路线图](roadmap/README.md)，根据当前实现与验证缺口选择任务。
 - 准备发布：阅读[发版流程](development/release.md)和[验证策略](development/validation.md)，核对版本、更新日志、安装包与实际平台证据。
-- 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)和[应用 API](contracts/app-api.md)。
-- 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，迁移覆盖账号、邮件缓存、草稿、发件箱、全文索引与邮件整理等状态；具体编号清单以 `core/src/storage/migrations.rs` 为准，启动准入和失败重试已实现。
+- 理解当前账号能力：阅读[账号配置与凭证生命周期](architecture/account-configuration.md)、[应用 API](contracts/app-api.md)、[Exchange 自动发现与邮箱设置探测](architecture/exchange-autodiscovery.md)和 [EWS 邮件后端](architecture/ews-backend.md)。
+- 数据库启动与迁移：阅读[应用数据库版本化迁移与启动](architecture/database-migrations.md)，迁移覆盖账号、邮件缓存、草稿、发件箱、全文索引、邮件整理与 EWS 本地映射等状态；具体编号清单以 `core/src/storage/migrations.rs` 为准，启动准入和失败重试已实现。
 - 桌面后台运行：阅读[关闭窗口、托盘与退出](architecture/desktop-lifecycle.md)，默认每次询问、平台差异和草稿安全退出已有实现，三平台实机证据分别记录。
 - 修改界面：先看[界面设计语言](architecture/ui-design.md)，了解画布与岛屿结构、无分割线约定和外壳组件。
 - 国际化适配：查看[中英文文本适配](architecture/internationalization.md)，首版已实现界面与错误文本、语言设置、多窗口同步及 Rust 通知 / 引用模板；三平台打包体验与原生通知待验，日期等区域格式化仍为 Planned。

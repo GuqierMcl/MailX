@@ -44,9 +44,9 @@ Gmail accepts `@gmail.com` and `@googlemail.com` addresses with a Google app pas
 
 iCloud Mail accepts `@icloud.com`, `@me.com` and `@mac.com` addresses with an Apple app-specific password. See the [account setup guide](docs/guides/README.md#icloud-mail) for the requirements and username settings.
 
-Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 / Exchange (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. A company-hosted Exchange server isn't covered by this entry; add it manually if it offers IMAP and SMTP. See the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for details.
+Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 / Exchange (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. A company-hosted Exchange server isn't covered by this browser sign-in entry. Such a mailbox can be added through the generic IMAP / SMTP entry instead: MailX probes the address read-only and, when it finds an EWS endpoint offering NTLM, sets up an Exchange (EWS) channel for receiving and sending. This needs a domain account such as `DOMAIN\user`, an HTTPS endpoint and a host derived from the mailbox domain; not every self-hosted Exchange deployment will work. See the [self-hosted Exchange guide](docs/guides/README.md#self-hosted-exchange-ews) for the limits and the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for the browser sign-in details.
 
-Any other mailbox that offers IMAP and SMTP with password sign-in can be added by entering its servers manually. Browser sign-in for Gmail (without an app password) is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
+The generic IMAP / SMTP entry no longer starts with a blank server form. After you enter the address, MailX runs a read-only discovery probe and fills in the IMAP / SMTP settings, or switches to the Exchange (EWS) channel, when it succeeds. When the probe fails — including a password being needed, a refusal, a network / TLS / timeout error, no result or an unsupported setup — it asks you to enter the IMAP and SMTP details by hand, with Retry discovery and Enter manually. Editing an already saved account never probes again. Any mailbox that offers IMAP and SMTP with password sign-in can still be added by entering its servers manually. Browser sign-in for Gmail (without an app password) is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
 
 <sub>Provider names and logos are trademarks of their respective owners and are shown only to identify the service.</sub>
 
@@ -68,6 +68,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 | Desktop app: showing sent copies in the Sent folder | ✅ Implemented |
 | Full-text search of local content | ✅ Implemented |
 | Browser sign-in: Outlook, Microsoft 365 / Exchange | ✅ Implemented |
+| Automatic discovery of mail settings and EWS send / receive for self-hosted Exchange | ✅ Implemented (limited coverage) |
 | Browser sign-in: Gmail | 🗓️ Planned |
 | Built-in AI assistant | 🗓️ Planned |
 | Message translation, with no setup or with a key of your own | ✅ Implemented (automated tests only) |
@@ -78,7 +79,9 @@ What changed in each release is in the [CHANGELOG](CHANGELOG.md); the detailed r
 
 ## Known Limitations
 
-- MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, and browser sign-in for Outlook and Microsoft 365. Browser sign-in for Gmail and other providers, a built-in AI assistant, and the self-hosted web version are not available yet.
+- MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, browser sign-in for Outlook and Microsoft 365, and self-hosted Exchange accounts over EWS with NTLM. Browser sign-in for Gmail and other providers, a built-in AI assistant, and the self-hosted web version are not available yet.
+- EWS coverage still has limits: end-to-end send and receive against a real Exchange server is not verified; there is no incremental or deletion sync (each round fetches up to the newest 500 items with FindItem); EPA channel binding, a Test sign-in button in EWS mode, shared mailboxes, China-operated Microsoft 365 and OAuth for EWS are not available. IMAP / SMTP accounts keep exactly the behaviour they had before.
+- Discovery is a one-time read-only check made before an account is saved: it fills in settings or picks a channel, but never changes the routing or compatibility rules of accounts already saved. Editing a saved account never probes again.
 - Initial synchronization starts with a fixed 30-day window and fills up to the newest 1,000 messages per folder per round, retaining previously cached messages. Search covers local content; unopened message bodies may be missing from results. Attachments are searched by name, not by their contents.
 - Archive is local to this computer. Moving messages to arbitrary server folders and synchronizing local drafts to the server are not implemented. Sent copies do not upload to the server.
 - Builds are available for Windows, macOS and Linux, but feature and provider coverage differs. See the [validation record](docs/development/validation.md) for tested combinations and remaining gaps.

@@ -243,6 +243,7 @@ fn main() {
             commands::accounts_cancel_verification,
             commands::accounts_verify_draft_connection,
             commands::accounts_cancel_draft_verification,
+            commands::accounts_discover_mail_settings,
             commands::accounts_open_provider_help,
             commands::folders_list,
             commands::emails_list,

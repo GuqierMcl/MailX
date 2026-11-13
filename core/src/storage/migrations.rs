@@ -201,6 +201,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_translations"],
         sql: include_str!("migrations/0029_message_translations.sql"),
     },
+    Migration {
+        version: 30,
+        description: "Exchange EWS endpoints and item identity mapping",
+        required_tables: &["exchange_endpoints", "ews_items", "ews_folder_state"],
+        sql: include_str!("migrations/0030_exchange_ews.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -605,7 +611,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 29);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 30);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()

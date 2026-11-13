@@ -97,6 +97,8 @@ frontend/src/features/startup/
 
 `0029_message_translations.sql` 新建 `message_translations`，按（邮件、目标语言、是否含引用）保存译文：正文原始哈希、净化版本与分段版本、所用服务、源语言、译后主题、每段译文（JSON 数组）与是否部分翻译；邮件删除时级联删除。行只在这三项版本与当前邮件一致时被使用，因此正文或算法变化后无需清理任务即自然失效。译文属于邮件派生的敏感数据，设计见[邮件翻译](translation.md)。
 
+`0030_exchange_ews.sql` 为 [EWS 邮件后端](ews-backend.md) 追加三张表，属于 append-only 结构变更，不改写历史 SQL、不联网、不读写 `SecretStore`：`exchange_endpoints` 保存账号的 EWS 端点；`ews_items` 保存 `ItemId` → 稳定本地 uid 的映射，让邮件缓存、搜索索引、分页、删除队列与已发送副本对账沿用既有本地身份；`ews_folder_state` 保存每个文件夹的 uid 水位（分配器），保证同一 `ItemId` 始终映射到同一本地 uid。没有 `ews` 连接的账号完全走原路径，行为零改动。账号删除时随既有移除事务清理这三张表；当前不含 `SyncState` 增量游标（EWS 增量同步仍为后续方向）。端点发现见[Exchange 自动发现与邮箱设置探测](exchange-autodiscovery.md)。
+
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则

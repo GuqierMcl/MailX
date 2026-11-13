@@ -159,6 +159,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
         saved = await client.createOAuthAccount({ sessionId: step.signedIn.sessionId, requestId, profile })
         signedInSession.current = null
       } else if (step.connection) {
+        // The connection carries the detected `ews` config straight into the account.
         saved = await client.createAccount({ requestId, config: { ...step.connection, providerId: step.method.id, ...profile } })
       } else return
       guard.setDirty(false)
@@ -218,6 +219,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   account={null}
                   provider={step.method}
                   verificationClient={client}
+                  discoveryClient={client}
                   verificationResetKey={`${open}:${verificationResetVersion}`}
                   onOpenHelp={() => client.openProviderHelp(step.method.id ?? '')}
                   initialDraft={step.resume}

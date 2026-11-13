@@ -396,7 +396,24 @@ async fn remote_cache_is_reading_scoped_and_rechecks_identity() {
         db.pragma_query_value(None, "data_version", |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    let before = version();
+    // Start-up search and rethread backfills commit every 20 ms. Wait for a
+    // sustained quiet window so the baseline is not taken between two of
+    // their commits; the assertion then measures only this test's reads.
+    let mut before = version();
+    let mut quiet = 0;
+    for _ in 0..120 {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let current = version();
+        if current == before {
+            quiet += 1;
+            if quiet >= 12 {
+                break;
+            }
+        } else {
+            before = current;
+            quiet = 0;
+        }
+    }
     first
         .binding
         .cache_remote_image(url.into(), &image)

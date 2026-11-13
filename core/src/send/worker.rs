@@ -16,11 +16,17 @@ use tokio::task::JoinHandle;
 use super::Clock;
 use super::schedule::{self, Transition};
 use super::types::{OutboxChanged, OutboxError};
+use crate::accounts::sync_plan::EwsPlan;
 use crate::accounts::{AccountService, Next, SendAdmission};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
+use crate::ews::http::HttpError;
+use crate::ews::{EwsClient, EwsError};
 use crate::send::types::OutboxState;
-use crate::smtp::{self, DataStarted, SmtpOutcome, Timeouts, TlsSource, plan_failure};
+use crate::smtp::{
+    self, DataStarted, FailureReason, PreDataFailure, ServerReply, SmtpOutcome, Timeouts,
+    TlsSource, UnknownReason, plan_failure,
+};
 use crate::storage::outbox::{Changed, ClaimedJob};
 
 /// What tests replace: the clock, the SMTP time budgets and the trust store.
@@ -385,33 +391,57 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                     Ok(plan) if !plan.sender_address.eq_ignore_ascii_case(&job.envelope.from) => {
                         Err(OutboxError::reason("accountChanged"))
                     }
-                    Ok(plan) => match read_snapshot(&job).await {
-                        // The frozen bytes are gone or damaged: fail before any
-                        // data goes out, and never rebuild them from the draft.
-                        None => Err(OutboxError::reason("snapshotMissing")),
-                        Some(mime) => {
-                            let hook = data_started(&shared, &service, item_id.clone());
-                            let attempt = smtp::send_with_tls(
-                                &plan.route,
-                                &plan.login,
-                                &job.envelope,
-                                &mime,
-                                &shared.config.timeouts,
-                                &shared.config.tls,
-                                hook,
-                            )
-                            .await;
-                            let account_id = job.item.account_id.clone();
-                            let size = attempt.advertised_size;
-                            blocking(&service, move |service| {
-                                service.record_smtp_size(&account_id, size);
-                                Ok(())
-                            })
-                            .await
-                            .ok();
-                            Ok(attempt.outcome)
+                    Ok(plan) => {
+                        // EWS accounts use their HTTPS endpoint for sending
+                        // instead of SMTP. The queue, undo window, sent-copy
+                        // reconciliation and outbox state machine stay shared.
+                        let account_id = job.item.account_id.clone();
+                        let ews = blocking(&service, {
+                            let id = account_id.clone();
+                            move |service| Ok(service.ews_plan(&id).ok().flatten())
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+                        match read_snapshot(&job).await {
+                            // The frozen bytes are gone or damaged: fail before any
+                            // data goes out, and never rebuild them from the draft.
+                            None => Err(OutboxError::reason("snapshotMissing")),
+                            Some(mime) if ews.is_some() => {
+                                let now = shared.config.clock.now();
+                                let hook_id = item_id.clone();
+                                blocking(&service, move |service| {
+                                    let _ = service.outbox_data_started(&hook_id, now);
+                                    Ok(())
+                                })
+                                .await
+                                .ok();
+                                Ok(send_via_ews(ews.as_ref().expect("checked above"), &mime).await)
+                            }
+                            Some(mime) => {
+                                let hook = data_started(&shared, &service, item_id.clone());
+                                let attempt = smtp::send_with_tls(
+                                    &plan.route,
+                                    &plan.login,
+                                    &job.envelope,
+                                    &mime,
+                                    &shared.config.timeouts,
+                                    &shared.config.tls,
+                                    hook,
+                                )
+                                .await;
+                                let account_id = job.item.account_id.clone();
+                                let size = attempt.advertised_size;
+                                blocking(&service, move |service| {
+                                    service.record_smtp_size(&account_id, size);
+                                    Ok(())
+                                })
+                                .await
+                                .ok();
+                                Ok(attempt.outcome)
+                            }
                         }
-                    },
+                    }
                 };
                 let first_queued = job.retry_started_at;
                 record(
@@ -425,6 +455,27 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                 .await;
             }
         }
+    }
+}
+
+/// Sends one MIME message through Exchange Web Services. A failure after the
+/// request was written is reported as unknown: the server may already have
+/// accepted the message and MailX must never resend it on its own.
+async fn send_via_ews(plan: &EwsPlan, mime: &[u8]) -> SmtpOutcome {
+    let mut client =
+        match EwsClient::connect(&plan.route, &plan.endpoint, &plan.user, &plan.password).await {
+            Ok(client) => client,
+            Err(EwsError::Http(HttpError::Rejected)) => {
+                return SmtpOutcome::Permanent(PreDataFailure::new(FailureReason::AuthRejected));
+            }
+            Err(_) => return SmtpOutcome::Transient(PreDataFailure::new(FailureReason::Connect)),
+        };
+    match client.send(mime).await {
+        Ok(()) => SmtpOutcome::Accepted(ServerReply {
+            code: 250,
+            text: "accepted over EWS".to_owned(),
+        }),
+        Err(_) => SmtpOutcome::Unknown(UnknownReason::ConnectionLost),
     }
 }
 

@@ -1238,11 +1238,11 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 
 ### 43.1 被探测的服务器
 
-对一个本地部署的 Exchange 邮箱做了被动能力探测，没有尝试任何认证。目的：判断该类账号在 MailX 里该走哪条路。下文主机名、IP、证书主体与账号均为示意占位（`contoso.com` 为保留示例域），真实的组织标识不在仓库中出现。
+对一个本地部署的 Exchange 邮箱做了被动能力探测，没有尝试任何认证。目的：判断该类账号在 MailX 里该走哪条路。**真实标识不入仓库**：下文主机名、IP、证书主体与账号均为示意占位（统一用 `example.com` / `mail.example.com` 等），真实组织名、人名、公网 IP、企业 CA 名与网关厂商名都不出现。
 
 | 通道 | 结果 |
 | --- | --- |
-| MX / 主机 | `mail.contoso.com`（公网直连）；无 `_autodiscover._tcp` SRV |
+| MX / 主机 | `mail.example.com`（公网直连）；无 `_autodiscover._tcp` SRV |
 | 内部系统 | Microsoft Exchange Server 2016（IMAP BYE 横幅自报） |
 | SMTP 前置 | 第三方邮件安全网关，25 与 465 均指向它；587 端口开但无响应 |
 | IMAP | 143 **必须 STARTTLS**（明文不吐横幅），CAPABILITY：`IMAP4rev1 AUTH=PLAIN AUTH=NTLM AUTH=GSSAPI SASL-IR UIDPLUS MOVE ID UNSELECT CHILDREN IDLE NAMESPACE LITERAL+`；**无 XOAUTH2**；993 关闭 |
@@ -1251,11 +1251,11 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 
 证书与信任：
 
-- IMAP 143：企业内网 CA 签发（主体形如 `contoso-DC-CA`），SAN 含 `mail.contoso.com`、`AutoDiscover.contoso.com` 等。该根证书在本机“受信任的根证书颁发机构”里，用 Windows 系统验证栈实测 STARTTLS **握手成功**（Tls12/Aes256）。
-- SMTP 25 与 465：网关的**自签**证书（主体是网关厂商域名，**无 SAN**），主机名不匹配且不可验证，因此 MailX 发信必然 TLS 失败；`TlsMode` 只有 `implicit`/`startTls`，没有明文选项，这是有意的。
-- 443：`*.contoso.com`，公网 DV 证书。
+- IMAP 143：企业内网 CA 签发（主体以示例域示意，不代表任何真实 CA），SAN 含 `mail.example.com`、`AutoDiscover.example.com` 等。该根证书在本机“受信任的根证书颁发机构”里，用 Windows 系统验证栈实测 STARTTLS **握手成功**（Tls12/Aes256）。
+- SMTP 25 与 465：网关的**自签**证书（主体与主机名不匹配，**无 SAN**，不含真实厂商标识），主机名不匹配且不可验证，因此 MailX 发信必然 TLS 失败；`TlsMode` 只有 `implicit`/`startTls`，没有明文选项，这是有意的。
+- 443：`*.example.com`，公网 DV 证书。
 
-结论：这台服务器上**收信可以走 IMAP，发信走不通**，而同类桌面客户端之所以能用，是因为它选了“Exchange 类型 + 使用 HTTP 连接 + NTLM”，即 EWS over 443，绕开了 IMAP/SMTP。EWS 的 `WWW-Authenticate` 只给 `Negotiate` 与 `NTLM`（只有 Autodiscover 给 `Basic realm="mail.contoso.com"`），所以基本认证不是选项。
+结论：这台服务器上**收信可以走 IMAP，发信走不通**，而同类桌面客户端之所以能用，是因为它选了“Exchange 类型 + 使用 HTTP 连接 + NTLM”，即 EWS over 443，绕开了 IMAP/SMTP。EWS 的 `WWW-Authenticate` 只给 `Negotiate` 与 `NTLM`（只有 Autodiscover 给 `Basic realm="mail.example.com"`），所以基本认证不是选项。
 
 ### 43.2 已实现
 
@@ -1279,3 +1279,27 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 该服务器是否启用扩展保护（EPA）：若启用，`Type 3` 会被拒，需要补通道绑定哈希（`MsvAvChannelBindings` 的插槽已就位，哈希尚未接线）。
 - 多 CAS 部署是否必须 `X-AnchorMailbox`：需要在真实拓扑上观察。
 - 账号模型、`mail_connections.protocol='ews'`、`ews_folder_state` / `ews_items` 迁移与账号表单入口：均未开始。
+
+## 42. 邮箱设置自动探测与 Exchange(EWS) / NTLM 完整收发（本次实现）
+
+本节记录本次实现范围与验证边界。**真实标识不入仓库**：探测、示例与诊断中的主机名、账号、证书主体与端点统一用 `example.com` / `mail.example.com` / `msstd:mail.example.com` / `DOMAIN\user` / `alice` 等占位，真实组织名、人名、公网 IP、企业 CA 名与网关厂商名不进入任何文档或验证记录。§41 是上一阶段传输层落地时的历史记录（当时账号模型尚未接线），其主机名占位已统一为上述示例域；本次已完成账号接线，§41 的“均未开始”清单不再代表当前状态。
+
+### 42.1 实现范围
+
+- 添加账号：通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）输入邮箱地址后前端自动发起只读探测；成功自动填好 IMAP / SMTP 或切到 Exchange(EWS) 通道，失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示手动填写 IMAP 与 SMTP，并提供「重新探测」与「改为手动填写」；编辑已保存账号不自动探测。
+- 探测（`core/src/discovery/`）：Exchange Autodiscover POX，只向邮箱域名派生主机发请求、HTTPS-only、可选 Basic 凭据、最多 2 跳 redirect、20 秒总预算、拒绝 DTD、错误固定枚举不泄露服务端文本、自定义代理失败不回退直连；除 IMAP / SMTP 外解析 `EXCH` / `EXPR` / `EXHTTP` / `HTTP` / `WEB`，读 `EwsUrl` / `ASUrl` / `OOFUrl` / `Server`、`<SSL>On</SSL>`、`AuthPackage`、`CertPrinName`、`LoginName`。Autodiscover 无结果时对 `https://mail.<domain>` 与 `https://<domain>` 的 `/EWS/Exchange.asmx` 做不带凭据的匿名探测，仅看 `WWW-Authenticate` 是否含 NTLM / Negotiate。
+- 新命令 `accounts_discover_mail_settings`：`{ request: { emailAddress, password: string|null, route: RouteInput } }` → `MailSettingsDiscovery { status, imap, smtp, ews, source }`，`status` 固定词表 `found | needsCredentials | rejected | notFound | network | proxy | tls | timeout | unsupported`；只读、不创建账号、不写凭证、不改已存连接；类型由 `cargo run -p mailx-core --example export_types` 生成到 `frontend/src/generated/accounts.ts`。
+- 账号契约与存储：`ConnectionInput` / `AccountConfigInput` / `Account` 新增可空 `ews: EwsConnectionConfig | null`（`{ url(https), auth: "ntlm"|"basic", username, certPrincipalName|null }`）；EWS 账号仍保留 imap / smtp 占位，密码只用 shared 模式，端点变更即失去凭证信任。迁移 `0030_exchange_ews.sql` 新增 `exchange_endpoints`、`ews_items`（ItemId → 稳定本地 uid）、`ews_folder_state`（uid 水位），账号删除时清理三张表。
+- 后端收发：`core/src/ews/`（NTLMv2 + SOAP）补齐 FindItem / GetItem(MimeContent) / UpdateItem / DeleteItem / CreateItem(SendAndSaveCopy)；EWS 账号在 `sync/manager.rs::restart` 走独立轮询 round（`sync/ews.rs`），沿用 Cadence，不启动 IMAP IDLE、不启动 IMAP 标记写回，每轮 FindFolder → FindItem → 写 `MessageRecord` / flags → 取 MIME 并预渲染缓存正文 → 处理本地标记写回；发信在 `send/worker.rs` 分派到 `CreateItem(SendAndSaveCopy)`，成功包装为 `Accepted` 复用 outbox 状态机、已发送副本对账与草稿清理，写出后失败记为 `Unknown`（绝不自动重发）。IMAP / SMTP 账号行为零改动。
+
+### 42.2 未做真机验证 / 待验证
+
+- 真实 Exchange 服务器上的端到端收发闭环：**未做真机验证**。
+- 三平台（Windows / macOS / Linux）打包与桌面行为：**待验证**。
+- EWS 的 `SyncFolderItems` 增量同步与删除同步：未实现，当前每轮 `FindItem` 取前 500 封。
+- EPA 通道绑定哈希：未接线；启用扩展保护的部署待验证。
+- EWS 账号的「测试登录」按钮：EWS 模式隐藏，未提供。
+- 共享邮箱、世纪互联运营的 Microsoft 365、用于 EWS 的 OAuth：未提供。
+- `X-AnchorMailbox` 在多 CAS 部署中的必要性、通过企业代理访问 EWS 的稳定性、`SendAndSaveCopy` 后副本与本地快照的对账时机、Exchange 各版本 EWS 行为差异：待真实环境确认。
+
+受控测试按既有方式覆盖协议向量、SOAP 往返、NTLMv2 计算、DTO 生成一致性、迁移幂等与旧账号行为不变；这些都是本机自动检查，不能外推为真实 Exchange 或三平台桌面行为已验证。本节不复制具体执行数字、启动命令或性能数据，也不把上述边界写成已验证。实现与边界见[EWS 邮件后端](../architecture/ews-backend.md)、[Exchange 自动发现与邮箱设置探测](../architecture/exchange-autodiscovery.md)与[应用 API](../contracts/app-api.md)。

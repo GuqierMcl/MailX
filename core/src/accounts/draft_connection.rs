@@ -16,6 +16,32 @@ pub(crate) struct DraftConnectionPlan {
     pub smtp: SmtpLogin,
 }
 
+/// Turns a form route into a real network route. Also used by server
+/// discovery, so a lookup can never bypass the proxy the form selected.
+pub(crate) fn route_from_input(input: RouteInput) -> Result<NetRoute, AppError> {
+    match input {
+        // Matches the saved-account route until an application proxy exists.
+        RouteInput::Direct | RouteInput::Inherit => Ok(NetRoute::default()),
+        RouteInput::Custom {
+            proxy_kind,
+            host,
+            port,
+            authentication,
+            ..
+        } => Ok(NetRoute {
+            image_proxy_dns: false,
+            proxy: Some(ProxyRoute {
+                kind: proxy_kind,
+                host,
+                port,
+                auth: authentication
+                    .map(|auth| Ok::<_, AppError>((auth.username, replacement(auth.password)?)))
+                    .transpose()?,
+            }),
+        }),
+    }
+}
+
 pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan, AppError> {
     validate_connection(&mut input)?;
     validate_create_secrets(&input)?;
@@ -32,27 +58,7 @@ pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan,
             smtp_password,
         } => (replacement(imap_password)?, replacement(smtp_password)?),
     };
-    let route = match input.route {
-        // Matches the saved-account route until an application proxy exists.
-        RouteInput::Direct | RouteInput::Inherit => NetRoute::default(),
-        RouteInput::Custom {
-            proxy_kind,
-            host,
-            port,
-            authentication,
-            ..
-        } => NetRoute {
-            image_proxy_dns: false,
-            proxy: Some(ProxyRoute {
-                kind: proxy_kind,
-                host,
-                port,
-                auth: authentication
-                    .map(|auth| Ok::<_, AppError>((auth.username, replacement(auth.password)?)))
-                    .transpose()?,
-            }),
-        },
-    };
+    let route = route_from_input(input.route)?;
     Ok(DraftConnectionPlan {
         route,
         imap: ImapLogin {

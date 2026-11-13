@@ -156,6 +156,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `createAccount(request)` | `accounts_create`，`{ request: { requestId, config } }` | `AccountService::create` | `Account` |
 | `updateConnection(request)` | `accounts_update_connection`，`{ request: { accountId, expectedRevision, connection } }` | `AccountService::update_connection` | `Account` |
 | `updateProfile(request)` | `accounts_update_profile`，`{ request: { accountId, profile } }` | `AccountService::update_profile` | `Account` |
+| `discoverMailSettings(request)` | `accounts_discover_mail_settings`，`{ request: { emailAddress, password: string \| null, route } }` | 只读发现（`core/src/discovery/`），不创建账号 | `MailSettingsDiscovery` |
 
 账号分两部分，各自一个修改请求，生命周期不同：
 
@@ -168,9 +169,31 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color`、`senderName` 与 `useProviderIcon`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。已有数据库账号升级后、旧账号快照或 journal 缺少 `useProviderIcon` 时，默认值均为 `true`。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
+连接与账号契约新增可空 `ews`：`ConnectionInput` / `AccountConfigInput` / `Account` 均带 `ews: EwsConnectionConfig | null`，结构为 `{ url: string(https), auth: "ntlm" | "basic", username: string, certPrincipalName: string | null }`。`null` 表示沿用 IMAP / SMTP 连接，旧客户端与旧账号不受影响。EWS 账号仍保留 `imap` / `smtp` 两行作为存储与发件箱兼容占位，收发与发信实际走 EWS（见[EWS 邮件后端](../architecture/ews-backend.md)）；密码只用 `shared` 模式，不新增认证类型。保存时把 EWS 端点加入凭证信任范围，端点身份含 `https` + 主机 + 端口 + 路径 + 登录用户名 + 认证方式，**URL 或登录名变更即不再信任**，需重新输入密码确认。EWS 模式隐藏「测试登录」按钮。
+
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
 
 创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改连接必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。修改资料只校验账号存在，`expectedRevision` 不参与。
+
+### 添加账号前的邮箱设置自动探测
+
+`discoverMailSettings` / `accounts_discover_mail_settings` 仅可信 main 窗口且核心 Ready 时可调用，不向写信窗口、邮件正文或 MCP 开放。输入 `{ request: { emailAddress, password: string | null, route: RouteInput } }`，返回 `MailSettingsDiscovery`：
+
+```ts
+type MailSettingsDiscovery = {
+  status: 'found' | 'needsCredentials' | 'rejected' | 'notFound'
+    | 'network' | 'proxy' | 'tls' | 'timeout' | 'unsupported';
+  imap: /* 探测到的 IMAP 设置或空 */;
+  smtp: /* 探测到的 SMTP 设置或空 */;
+  ews:  /* 探测到的 EWS 端点或空 */;
+  source: /* 结果来源 */;
+};
+```
+
+- 命令**只读**：不创建账号、不写凭证、不改动已保存连接，也不启动同步或发信。重复以相同输入调用得到一致结论，不产生副作用；不使用 `requestId` 去重，也不参与 `expectedRevision` 乐观锁。
+- `status` 为固定词表，不含服务端原文；`needsCredentials` 表示需要密码才能继续，`rejected` 为被拒绝，`notFound` 为无可用结果，`network` / `proxy` / `tls` / `timeout` / `unsupported` 分别对应网络、代理、TLS、超时与不可用。`source` 标识结果来自 Autodiscover 还是匿名 EWS 回退探测。
+- `route` 遵循 `RouteInput` 既有约束，探测与后续账号连接使用同一套路由；自定义代理失败返回 `proxy`，**不回退直连**。`password` 为可空字符串，`null` 表示不带凭据的匿名 / 无密码探测；密码只在本次请求中使用，不入库、不写入 SecretStore。
+- 探测只向邮箱域名派生的主机发请求、HTTPS-only、最多 2 跳 redirect、20 秒总预算；`imap` / `smtp` / `ews` 为探测到的设置或空，结果只用于填充添加账号表单或选择通道。编辑已保存账号不调用本命令。协议与安全边界见[Exchange 自动发现与邮箱设置探测](../architecture/exchange-autodiscovery.md)。
 
 ### OAuth 专用宿主命令
 
