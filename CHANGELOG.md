@@ -15,11 +15,13 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
+- Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
 
 ### ✨ Optimization
 
 - The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
 - New appearance setting to show a message's mailbox as a name or a small icon on the sender's avatar. / 新增外观设置：可把邮件所属邮箱显示为名称，或显示为发件人头像上的小图标。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
+- The account page is tidier: a header with the address and sync status, actions in a fixed bar at the bottom, connection details folded away, shorter check results, and a marker in the account list on the account that has a problem. / 账号页更简洁：顶部显示地址和同步状态，操作固定在底部，连接详情默认折叠，验证结果更简短，账号列表会标出有问题的账号。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
 
 ### 🩹 Fixed
 

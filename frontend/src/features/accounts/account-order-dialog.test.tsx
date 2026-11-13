@@ -5,6 +5,9 @@ import { exampleAccount, testClient } from './test-fixtures'
 import { MailxClientError } from '@/lib/mailx-client'
 import { i18n } from '@/i18n'
 import type { Account } from '@/generated/accounts'
+import { toast } from '@/components/ui/toast'
+
+vi.mock('@/components/ui/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), close: vi.fn() } }))
 
 const first = exampleAccount()
 const second = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人邮箱' })
@@ -97,7 +100,7 @@ describe('account order in the dialog', () => {
     expect(handles()[0]).toBe(handle)
   })
 
-  it('rolls back the display order and reports a failed save', async () => {
+  it('rolls back the display order and reports a failed save with a toast', async () => {
     const client = testClient(rows)
     client.updateSettings.mockRejectedValue(new MailxClientError({ code: 'storageUnavailable', field: null, message: '' }))
     const { handles } = setup(client)
@@ -105,7 +108,7 @@ describe('account order in the dialog', () => {
     await lift(handle)
     await moveDown(handle)
     fireEvent.keyDown(handle, { key: 'Enter', code: 'Enter' })
-    expect(await screen.findByText('账号顺序未保存')).toBeInTheDocument()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('账号顺序未保存', { description: expect.any(String) }))
     await waitFor(() => expect(handles()[0]).toBe(handle))
     expect(handle).toBeEnabled()
   })
