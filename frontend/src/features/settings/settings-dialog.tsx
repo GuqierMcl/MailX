@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { AiMagicIcon, ComputerIcon, InformationCircleIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { AiMagicIcon, ComputerIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
   Sidebar,
@@ -27,8 +27,9 @@ import { ContactsPane } from './contacts-pane'
 import { GeneralPane } from './general-pane'
 import { McpPane } from './mcp-pane'
 import { AboutPane } from './about-pane'
+import { ShortcutsPane } from './shortcuts-pane'
 
-export type SettingsSection = 'general' | 'appearance' | 'notifications' | 'compose' | 'contacts' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -52,6 +53,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       items: [
         { id: 'general', name: t('settings:general'), icon: ComputerIcon },
         { id: 'appearance', name: t('settings:appearance'), icon: PaintBoardIcon },
+        { id: 'shortcuts', name: t('settings:shortcuts'), icon: KeyboardIcon },
         { id: 'notifications', name: t('settings:notifications'), icon: Notification03Icon },
       ],
     },
@@ -113,6 +115,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {section === 'general' && <GeneralPane client={client} />}
               {section === 'appearance' && <AppearancePane client={client} />}
+              {section === 'shortcuts' && <ShortcutsPane client={client} />}
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'contacts' && <ContactsPane client={client} />}

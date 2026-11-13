@@ -510,7 +510,12 @@ showMenuBarIcon: boolean,
  * Hide the main window only on a registered desktop login launch. The
  * desktop host still requires an available Dock/tray recovery entry.
  */
-silentStart: boolean, };
+silentStart: boolean,
+/**
+ * Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
+ * Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
+ */
+singleKeyShortcuts: boolean, };
 
 export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
 

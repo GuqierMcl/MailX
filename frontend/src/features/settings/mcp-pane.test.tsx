@@ -30,7 +30,7 @@ describe('settings dialog navigation', () => {
     const groups = within(dialog).getAllByTestId(/^settings-nav-group-/)
     expect(groups.map((group) => group.getAttribute('data-testid'))).toEqual(['settings-nav-group-app', 'settings-nav-group-mail', 'settings-nav-group-integrations'])
     const names = (group: HTMLElement) => within(group).getAllByRole('button').map((button) => button.textContent)
-    expect(groups.map(names)).toEqual([['通用', '外观', '通知'], ['发信', '联系人', '安全性', '翻译'], ['AI', 'MCP']])
+    expect(groups.map(names)).toEqual([['通用', '外观', '快捷键', '通知'], ['发信', '联系人', '安全性', '翻译'], ['AI', 'MCP']])
     expect(groups.map((group) => group.firstElementChild?.textContent)).toEqual(['应用', '邮件', '集成'])
     const about = within(dialog).getByRole('button', { name: '关于' })
     expect(groups.some((group) => group.contains(about))).toBe(false)

@@ -333,5 +333,11 @@
   "aiChooseModel": "选择默认模型",
   "aiSkip": "稍后再选",
   "aiReadFailed": "无法读取 AI 设置",
-  "aiModel": "模型"
+  "aiModel": "模型",
+  "shortcuts": "快捷键",
+  "shortcutsSwitchGroup": "按键",
+  "singleKeyShortcuts": "单键快捷键",
+  "singleKeyShortcutsHint": "按单个按键处理邮件，例如 E 归档、S 加星标。用语音输入或辅助工具时可关闭，以免误操作。",
+  "shortcutsList": "全部快捷键",
+  "singleKeyShortcutsOff": "单键快捷键已关闭，带修饰键的快捷键和 Esc 仍可用。"
 }

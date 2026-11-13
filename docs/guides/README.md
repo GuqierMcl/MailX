@@ -69,6 +69,8 @@ To act on several messages at once, click Select above the message list, or Cmd/
 
 When a reply ends with the earlier message it quotes, MailX folds that quoted text behind a Show quoted text button so the new part stands out; click it to expand. MailX recognizes the quoting styles of common mail apps; quotes it cannot recognize, replies written between quoted lines, and forwarded messages are shown in full as before. Folding only changes how the message is displayed: replying or forwarding still includes the full original.
 
+Keyboard shortcuts work in the main window when you are not typing in a field: J or ↓ opens the next message and K or ↑ the previous one; Enter or O opens the first message; / opens search and ? lists every shortcut. On the open message, E archives (or moves back to the inbox), # or Delete deletes, S stars, U marks read or unread, and R, A and F reply, reply to all and forward; after archiving or deleting, the next message opens. While selecting several messages, E, #, S and U act on the selection. If you use voice input or assistive tools, turn off single-key shortcuts under Settings → Keyboard shortcuts; shortcuts with Cmd/Ctrl and Esc keep working.
+
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
 ## Translate messages

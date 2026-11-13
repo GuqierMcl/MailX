@@ -16,6 +16,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
 - Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
+- Keyboard shortcuts for mail: J/K to move between messages, E to archive, # to delete, S to star, U for read or unread, R/A/F to reply, reply all or forward, / to search and ? to list them all; single-key shortcuts can be turned off in Settings → Keyboard shortcuts. / 邮件键盘快捷键：J/K 切换邮件，E 归档，# 删除，S 加星标，U 标为已读或未读，R/A/F 回复、全部回复或转发，/ 搜索，? 查看全部；可在“设置 → 快捷键”中关闭单键快捷键。
 
 ### ✨ Optimization
 
