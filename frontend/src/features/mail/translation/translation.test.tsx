@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { testClient } from '@/features/accounts/test-fixtures'
 import { DEFAULT_TRANSLATION } from '@/features/settings/settings-queries'
-import type { EmailDetail, TranslationInfo, TranslationProviderId, TranslationStatus } from '@/generated/accounts'
+import type { AiConsent, EmailDetail, TranslationInfo, TranslationProviderId, TranslationStatus } from '@/generated/accounts'
 import { i18n } from '@/i18n'
 import { MailxClientError } from '@/lib/mailx-client'
 import { EmailView } from '../email-view'
@@ -31,7 +31,7 @@ const statusOf = (changes: Partial<TranslationStatus> = {}): TranslationStatus =
   emailId: 'mail-1', targetLanguage: 'zh-Hans', detectedLanguage: 'ja', detectionReliable: true, suggested: true, autoTranslate: false, translation: null, ...changes,
 })
 const translatedInfo = (changes: Partial<TranslationInfo> = {}): TranslationInfo => ({ provider: 'deepl', sourceLanguage: 'ja', subject: 'Translated subject', partial: false, ...changes })
-const failure = (code: 'translationCancelled' | 'translationNetwork' | 'translationNotConfigured' | 'translationUnavailable' | 'translationRateLimited' | 'translationKeyRejected' | 'notFound') => new MailxClientError({ code, message: 'x', field: null })
+const failure = (code: 'translationCancelled' | 'translationNetwork' | 'translationNotConfigured' | 'translationUnavailable' | 'translationRateLimited' | 'translationKeyRejected' | 'aiModelNotFound' | 'aiRequestRejected' | 'notFound') => new MailxClientError({ code, message: 'x', field: null })
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -265,6 +265,17 @@ describe('keyless services', () => {
     expect(openSettings).toHaveBeenCalledOnce()
   })
 
+  it.each([['aiModelNotFound', '找不到这个模型'], ['aiRequestRejected', '服务商拒绝了这次请求']] as const)('show the AI error %s and offer another service', async (code, text) => {
+    const client = await setupAi({ consentedAi: { connectionId: 'c1', baseUrl: 'https://api.example/v1' } })
+    client.translateEmail.mockRejectedValueOnce(failure(code))
+    const { openSettings } = await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    const notice = await screen.findByRole('status', { name: '邮件翻译' })
+    await waitFor(() => expect(notice).toHaveTextContent(text))
+    await userEvent.click(within(notice).getByRole('button', { name: '换一种翻译服务' }))
+    expect(openSettings).toHaveBeenCalledOnce()
+  })
+
   it('do not offer another service for a keyed service that fails', async () => {
     const client = await setup()
     client.translateEmail.mockRejectedValueOnce(failure('translationUnavailable'))
@@ -295,6 +306,62 @@ describe('no translation service', () => {
     await userEvent.click(screen.getByRole('button', { name: '去设置' }))
     expect(openSettings).toHaveBeenCalledOnce()
     await waitFor(() => expect(screen.queryByText('还没有设置翻译服务')).not.toBeInTheDocument())
+  })
+})
+
+async function setupAi(options: { consentedAi?: AiConsent | null; baseUrl?: string } = {}) {
+  const client = await setup({ provider: 'ai', consented: options.consentedAi !== undefined, keyed: false })
+  const baseUrl = options.baseUrl ?? 'https://api.example/v1'
+  client.aiState.mockResolvedValue({
+    connections: [{ id: 'c1', providerId: 'custom', name: 'Acme AI', protocol: 'openaiCompatible', baseUrl, useProxy: false, hasKey: true }],
+    defaultModel: { connectionId: 'c1', modelId: 'm1', name: 'M1', contextLength: null, outputLength: null }, translationModel: null,
+    route: { kind: 'direct' }, proxyPasswordSet: false,
+  })
+  if (options.consentedAi !== undefined) await client.updateSettings({ translation: { ...DEFAULT_TRANSLATION, provider: 'ai', consentedProvider: 'ai', consentedAi: options.consentedAi } })
+  client.updateSettings.mockClear()
+  return client
+}
+
+describe('consent for the AI service', () => {
+  it('names the connection that gets the text and saves it with the consent', async () => {
+    const client = await setupAi()
+    produces(client, statusOf({ translation: translatedInfo({ provider: 'ai' }) }))
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('把邮件内容发送给Acme AI？')
+    expect(dialog).toHaveTextContent('邮件的主题和正文会发送给Acme AI')
+    await userEvent.click(within(dialog).getByRole('button', { name: '翻译' }))
+    await waitFor(() => expect(client.translateEmail).toHaveBeenCalledOnce())
+    expect(client.updateSettings).toHaveBeenCalledWith({ translation: expect.objectContaining({
+      provider: 'ai', consentedProvider: 'ai', consentedAi: { connectionId: 'c1', baseUrl: 'https://api.example/v1' } }) })
+  })
+
+  it('does not ask again for the same connection and address', async () => {
+    const client = await setupAi({ consentedAi: { connectionId: 'c1', baseUrl: 'https://api.example/v1' } })
+    produces(client, statusOf({ translation: translatedInfo({ provider: 'ai' }) }))
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    await waitFor(() => expect(client.translateEmail).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('asks again when the connection address changed, before any request', async () => {
+    const client = await setupAi({ consentedAi: { connectionId: 'c1', baseUrl: 'https://old.example/v1' } })
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('把邮件内容发送给Acme AI？')
+    expect(client.translateEmail).not.toHaveBeenCalled()
+  })
+
+  it('leaves consentedAi alone when agreeing to another service', async () => {
+    const client = await setup({ provider: 'deepl', consented: false })
+    produces(client, statusOf({ translation: translatedInfo() }))
+    await mount(client)
+    await userEvent.click(within(await bar()).getByRole('button', { name: '翻译成简体中文' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '翻译' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalled())
+    expect(client.updateSettings.mock.calls[0][0].translation).toEqual(expect.objectContaining({ consentedProvider: 'deepl', consentedAi: null }))
   })
 })
 

@@ -307,15 +307,18 @@ pub enum TranslationProviderId {
     MicrosoftFree,
     /// The channel Google's web translate widget uses; no key.
     GoogleFree,
+    /// A model from the AI settings; the key and route are the AI connection's.
+    Ai,
 }
 
 impl TranslationProviderId {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Deepl,
         Self::Microsoft,
         Self::Google,
         Self::MicrosoftFree,
         Self::GoogleFree,
+        Self::Ai,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -325,12 +328,14 @@ impl TranslationProviderId {
             Self::Google => "google",
             Self::MicrosoftFree => "microsoftFree",
             Self::GoogleFree => "googleFree",
+            Self::Ai => "ai",
         }
     }
 
-    /// The two browser-channel services work without a key.
+    /// The two browser-channel services work without a key, and `ai` uses the
+    /// key of its AI connection.
     pub fn needs_key(self) -> bool {
-        !matches!(self, Self::MicrosoftFree | Self::GoogleFree)
+        !matches!(self, Self::MicrosoftFree | Self::GoogleFree | Self::Ai)
     }
 }
 
@@ -435,6 +440,28 @@ impl ServiceRoute {
     }
 }
 
+/// The AI connection the user agreed to send mail text to: its id and its
+/// normalized base URL. Changing either needs a new agreement; the model and
+/// the key may change freely.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConsent {
+    pub connection_id: String,
+    pub base_url: String,
+}
+
+impl AiConsent {
+    /// Canonical form, or `None` for an id that is not a UUID or a URL the AI
+    /// layer would not accept.
+    pub(crate) fn normalized(self) -> Option<Self> {
+        uuid::Uuid::parse_str(&self.connection_id).ok()?;
+        Some(Self {
+            base_url: crate::ai::validation::normalize_base_url(&self.base_url)?,
+            ..self
+        })
+    }
+}
+
 const MAX_LANGUAGE_RULES: usize = 64;
 const MAX_PROXY_HOST_CHARS: usize = 255;
 const MAX_MICROSOFT_REGION_CHARS: usize = 40;
@@ -461,6 +488,8 @@ pub struct TranslationSettings {
     /// Translate folded quoted text too.
     pub include_quotes: bool,
     pub consented_provider: Option<TranslationProviderId>,
+    /// With `consented_provider = ai`: which connection the agreement covers.
+    pub consented_ai: Option<AiConsent>,
 }
 
 impl Default for TranslationSettings {
@@ -475,6 +504,7 @@ impl Default for TranslationSettings {
             always_translate: Vec::new(),
             include_quotes: false,
             consented_provider: None,
+            consented_ai: None,
         }
     }
 }
@@ -528,9 +558,18 @@ impl TranslationSettings {
             return Err(AppError::validation("translation.microsoftRegion"));
         }
         self.route.validate("translation.route")?;
+        let consented_ai = match self.consented_ai {
+            Some(consent) => Some(
+                consent
+                    .normalized()
+                    .ok_or_else(|| AppError::validation("translation.consentedAi"))?,
+            ),
+            None => None,
+        };
         Ok(Self {
             never_suggest,
             always_translate,
+            consented_ai,
             ..self
         })
     }
@@ -568,6 +607,7 @@ impl TranslationSettings {
             always_translate,
             include_quotes: self.include_quotes,
             consented_provider: self.consented_provider,
+            consented_ai: self.consented_ai.and_then(AiConsent::normalized),
         }
     }
 }
@@ -593,6 +633,7 @@ fn repair_translation(value: &mut serde_json::Value) {
     }
     section.retain(|key, v| match key.as_str() {
         "provider" | "consentedProvider" => is_provider(v),
+        "consentedAi" => v.is_null() || serde_json::from_value::<AiConsent>(v.clone()).is_ok(),
         "route" => serde_json::from_value::<ServiceRoute>(v.clone()).is_ok(),
         "microsoftRegion" | "targetLanguage" => v.is_string(),
         "suggest" | "includeQuotes" => v.is_boolean(),

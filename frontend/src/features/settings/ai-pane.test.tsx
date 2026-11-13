@@ -29,7 +29,7 @@ const connection = (over: Partial<AiConnectionState> = {}): AiConnectionState =>
 /** A client whose AI settings behave like the real ones: saved changes come back in the next state. */
 function setup(initial: Partial<AiState> = {}, catalog: AiCatalog = CATALOG) {
   const client = testClient()
-  let state: AiState = { connections: [], defaultModel: null, route: { kind: 'direct' }, proxyPasswordSet: false, ...initial }
+  let state: AiState = { connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false, ...initial }
   client.aiState.mockImplementation(async () => state)
   client.aiCatalog.mockResolvedValue(catalog)
   client.aiListModels.mockResolvedValue(MODELS)
@@ -42,7 +42,7 @@ function setup(initial: Partial<AiState> = {}, catalog: AiCatalog = CATALOG) {
     return { state, connectionId: id, models: request.verify ? MODELS : null }
   })
   client.aiRemoveConnection.mockImplementation(async (id: string) => {
-    state = { ...state, connections: state.connections.filter((entry) => entry.id !== id), defaultModel: state.defaultModel?.connectionId === id ? null : state.defaultModel }
+    state = { ...state, connections: state.connections.filter((entry) => entry.id !== id), defaultModel: state.defaultModel?.connectionId === id ? null : state.defaultModel, translationModel: state.translationModel?.connectionId === id ? null : state.translationModel }
     return state
   })
   client.aiSetDefaultModel.mockImplementation(async (model) => { state = { ...state, defaultModel: model }; return state })

@@ -14,6 +14,7 @@ use std::{
     },
 };
 
+use futures_util::{StreamExt, TryStreamExt, stream};
 use serde::Serialize;
 use tokio::sync::{Semaphore, watch};
 use ts_rs::TS;
@@ -22,10 +23,11 @@ use super::{MailxCore, bodies::BodyBinding};
 use crate::{
     AppError, ErrorCode,
     accounts::{AccountService, MAX_SECRET_BYTES},
+    ai::AiModelTarget,
     mail::{LOCAL_SENT_PREFIX, render},
     net::NetRoute,
     secrets::{SecretStore, SecretValue},
-    settings::{ServiceRoute, TranslationProviderId, TranslationSettings},
+    settings::{AiConsent, ServiceRoute, TranslationProviderId, TranslationSettings},
     storage::{
         bodies::{BodyIdentity, StoredBlob},
         translations::{NewTranslation, StoredTranslation, TranslationKey},
@@ -165,6 +167,8 @@ pub(crate) struct TestCall {
     /// Proxy username and password, when the request would sign in.
     pub proxy_auth: Option<(String, String)>,
     pub key: String,
+    /// The model of an `ai` request.
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
@@ -233,6 +237,7 @@ impl Translations {
         route: &NetRoute,
         settings: &TranslationSettings,
         request: &TranslateRequest<'_>,
+        ai: Option<&AiModelTarget>,
     ) -> Result<TranslateResponse, ErrorCode> {
         #[cfg(test)]
         {
@@ -248,7 +253,12 @@ impl Translations {
                         let (user, password) = p.auth.as_ref()?;
                         Some((user.clone(), password.expose_secret().to_owned()))
                     }),
-                    key: key.expose_secret().to_owned(),
+                    // The `ai` service signs with its connection's key.
+                    key: ai
+                        .map_or(key, |target| &target.key)
+                        .expose_secret()
+                        .to_owned(),
+                    model: ai.map(|target| target.model_id.clone()),
                 })
                 .await;
             }
@@ -257,6 +267,7 @@ impl Translations {
             key,
             microsoft_region: &settings.microsoft_region,
             route,
+            ai,
             #[cfg(test)]
             base: None,
         };
@@ -269,6 +280,20 @@ struct Service<'a> {
     provider: TranslationProviderId,
     key: &'a SecretValue,
     route: &'a NetRoute,
+    /// Present exactly when `provider` is `Ai`.
+    ai: Option<&'a AiModelTarget>,
+}
+
+/// The user's agreement covers this send: the saved provider is the one
+/// agreed to and, for `ai`, so is the connection (id and base URL) that would
+/// be used now. `ai` is the connection translation resolves to, if any.
+fn consented(settings: &TranslationSettings, ai: Option<&AiConsent>) -> bool {
+    let Some(provider) = settings.provider else {
+        return false;
+    };
+    settings.consented_provider == Some(provider)
+        && (provider != TranslationProviderId::Ai
+            || ai.is_some_and(|binding| settings.consented_ai.as_ref() == Some(binding)))
 }
 
 fn secret_name(provider: TranslationProviderId) -> String {
@@ -403,6 +428,8 @@ struct StatusInput<'a> {
     settings: &'a TranslationSettings,
     target: String,
     provider_ready: bool,
+    /// The connection `ai` translation would use.
+    ai: Option<&'a AiConsent>,
     detection: Option<Detection>,
     translation: Option<StoredTranslation>,
 }
@@ -413,6 +440,7 @@ fn build_status(input: StatusInput<'_>) -> TranslationStatus {
         settings,
         target,
         provider_ready,
+        ai,
         detection,
         translation,
     } = input;
@@ -431,7 +459,7 @@ fn build_status(input: StatusInput<'_>) -> TranslationStatus {
             .as_deref()
             .is_some_and(|code| list.iter().any(|entry| entry == code))
     };
-    let consented = settings.provider.is_some() && settings.consented_provider == settings.provider;
+    let consented = consented(settings, ai);
     TranslationStatus {
         email_id: email_id.to_owned(),
         target_language: target,
@@ -608,27 +636,37 @@ impl MailxCore {
     pub async fn test_translation(
         &self,
         settings: TranslationSettings,
+        ai: Option<AiModelTarget>,
     ) -> Result<TranslationTest, AppError> {
         let settings = settings.normalized()?;
         let provider = settings.provider.ok_or_else(not_configured)?;
+        let ai = ai_for(provider, ai)?;
         let key = self.translation_key(provider).await?;
         let target = match settings.target_language.as_str() {
             "auto" => "zh-Hans",
             explicit => explicit,
         };
-        let route = self.translation_route(&settings.route).await?;
+        let own_route;
+        let route = match &ai {
+            Some(target) => &target.route,
+            None => {
+                own_route = self.translation_route(&settings.route).await?;
+                &own_route
+            }
+        };
         let texts = [text_wire(TEST_SENTENCE)];
         let response = self
             .translation
             .call(
                 provider,
                 &key,
-                &route,
+                route,
                 &settings,
                 &TranslateRequest {
                     texts: &texts,
                     target,
                 },
+                ai.as_ref(),
             )
             .await
             .map_err(AppError::new)?;
@@ -650,10 +688,11 @@ impl MailxCore {
         email_id: String,
         settings: TranslationSettings,
         ui_language: String,
+        ai: Option<AiConsent>,
     ) -> Result<TranslationStatus, AppError> {
         let settings = settings.normalized()?;
         let target = resolve_target(&settings, &ui_language, None)?;
-        self.status_for(email_id, settings, target).await
+        self.status_for(email_id, settings, target, ai).await
     }
 
     async fn status_for(
@@ -661,12 +700,15 @@ impl MailxCore {
         email_id: String,
         settings: TranslationSettings,
         target: String,
+        ai: Option<AiConsent>,
     ) -> Result<TranslationStatus, AppError> {
         let secrets = self.translation.secrets.clone();
         let (provider_ready, html, translation) = {
             let (id, settings, target) = (email_id.clone(), settings.clone(), target.clone());
+            let ai_ready = ai.is_some();
             self.blocking(move |core| {
                 let ready = match settings.provider {
+                    Some(TranslationProviderId::Ai) => ai_ready,
                     Some(provider) if !provider.needs_key() => true,
                     Some(provider) => secrets.get(&secret_name(provider))?.is_some(),
                     None => false,
@@ -699,6 +741,7 @@ impl MailxCore {
             settings: &settings,
             target,
             provider_ready,
+            ai: ai.as_ref(),
             detection,
             translation,
         }))
@@ -712,16 +755,26 @@ impl MailxCore {
         settings: TranslationSettings,
         ui_language: String,
         target: Option<String>,
+        ai: Option<AiModelTarget>,
     ) -> Result<TranslationStatus, AppError> {
         let settings = settings.normalized()?;
         let provider = settings.provider.ok_or_else(not_configured)?;
+        let ai = ai_for(provider, ai)?;
         let key = self.translation_key(provider).await?;
         // Checked here so that no host can skip the user's agreement.
-        if settings.consented_provider != Some(provider) {
+        if !consented(&settings, ai.as_ref().map(|target| &target.binding)) {
             return Err(AppError::new(ErrorCode::TranslationConsentRequired));
         }
         let target = resolve_target(&settings, &ui_language, target.as_deref())?;
-        let route = self.translation_route(&settings.route).await?;
+        // The `ai` service goes through its connection's own route.
+        let own_route;
+        let route = match &ai {
+            Some(target) => &target.route,
+            None => {
+                own_route = self.translation_route(&settings.route).await?;
+                &own_route
+            }
+        };
         let registration = self.translation.start(&email_id);
         let mut cancel = registration.receiver();
         let work = self.translate_inner(
@@ -730,7 +783,8 @@ impl MailxCore {
             Service {
                 provider,
                 key: &key,
-                route: &route,
+                route,
+                ai: ai.as_ref(),
             },
             &target,
             registration.receiver(),
@@ -741,7 +795,8 @@ impl MailxCore {
             done = work => done?,
         }
         drop(registration);
-        self.status_for(email_id, settings, target).await
+        let binding = ai.map(|target| target.binding);
+        self.status_for(email_id, settings, target, binding).await
     }
 
     async fn translate_inner(
@@ -756,6 +811,7 @@ impl MailxCore {
             provider,
             key,
             route,
+            ai,
         } = service;
         // Local Sent copies have no message row to hang a cache entry on.
         if email_id.starts_with(LOCAL_SENT_PREFIX) {
@@ -793,7 +849,7 @@ impl MailxCore {
         .map_err(|_| internal())?
         .map_err(|_| too_large())?;
 
-        let limits = provider::limits(provider);
+        let limits = provider::limits_for(provider, ai);
         let Plan {
             unique,
             slots,
@@ -811,23 +867,31 @@ impl MailxCore {
         let mut items: Vec<String> = subject.into_iter().collect();
         items.extend(unique);
 
+        // Only a model call runs several batches at once; the order of the
+        // answers is the order of the batches either way.
+        let concurrency = if ai.is_some() {
+            provider::ai::CONCURRENT_BATCHES
+        } else {
+            1
+        };
+        let items_ref = &items;
+        let responses: Vec<TranslateResponse> = stream::iter(batches(&items, limits))
+            .map(|range| async move {
+                let request = TranslateRequest {
+                    texts: &items_ref[range],
+                    target,
+                };
+                self.translation
+                    .call(provider, key, route, settings, &request, ai)
+                    .await
+                    .map_err(AppError::new)
+            })
+            .buffered(concurrency)
+            .try_collect()
+            .await?;
         let mut answers: Vec<String> = Vec::with_capacity(items.len());
         let mut detected_source = None;
-        for range in batches(&items, limits) {
-            let response = self
-                .translation
-                .call(
-                    provider,
-                    key,
-                    route,
-                    settings,
-                    &TranslateRequest {
-                        texts: &items[range],
-                        target,
-                    },
-                )
-                .await
-                .map_err(AppError::new)?;
+        for response in responses {
             detected_source = detected_source.or(response.detected_source);
             answers.extend(response.texts);
         }
@@ -932,6 +996,18 @@ impl MailxCore {
                 .map(|row| row.segments))
         })
         .await
+    }
+}
+
+/// The model target belongs to the `ai` service only; it is required there.
+fn ai_for(
+    provider: TranslationProviderId,
+    ai: Option<AiModelTarget>,
+) -> Result<Option<AiModelTarget>, AppError> {
+    if provider == TranslationProviderId::Ai {
+        ai.map(Some).ok_or_else(not_configured)
+    } else {
+        Ok(None)
     }
 }
 

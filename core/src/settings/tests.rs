@@ -335,7 +335,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
-                "ai": { "connections": [], "defaultModel": null, "route": { "kind": "direct" } },
+                "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
                 "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
                 "appearance": {
                     "theme": "system",
@@ -366,7 +366,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "neverSuggest": [],
                     "alwaysTranslate": [],
                     "includeQuotes": false,
-                    "consentedProvider": null
+                    "consentedProvider": null,
+                    "consentedAi": null
                 }
             },
             "stored": false,
@@ -1622,7 +1623,8 @@ fn only_the_browser_channels_work_without_a_key() {
         keyless,
         [
             TranslationProviderId::MicrosoftFree,
-            TranslationProviderId::GoogleFree
+            TranslationProviderId::GoogleFree,
+            TranslationProviderId::Ai
         ]
     );
     assert_eq!(
@@ -1780,4 +1782,91 @@ fn the_shared_route_keeps_its_wire_shape() {
         bad.validate("ai.route").unwrap_err().field.as_deref(),
         Some("ai.route.port")
     );
+}
+
+const AI_ID: &str = "6f1f3d3e-8a40-4a39-9d3c-0f5f7a6b2c11";
+
+fn consent(id: &str, url: &str) -> AiConsent {
+    AiConsent {
+        connection_id: id.into(),
+        base_url: url.into(),
+    }
+}
+
+#[test]
+fn the_ai_consent_is_validated_and_normalized_with_the_ai_url_rules() {
+    assert_eq!(TranslationSettings::default().consented_ai, None);
+    let ok = translation(|s| {
+        s.provider = Some(TranslationProviderId::Ai);
+        s.consented_ai = Some(consent(AI_ID, " https://api.example.com/v1/ "));
+    })
+    .normalized()
+    .unwrap();
+    assert_eq!(
+        ok.consented_ai,
+        Some(consent(AI_ID, "https://api.example.com/v1"))
+    );
+    for bad in [
+        consent("not-a-uuid", "https://api.example.com/v1"),
+        consent(AI_ID, "ftp://api.example.com"),
+        consent(AI_ID, ""),
+        consent(AI_ID, "https://user:pw@api.example.com/v1"),
+    ] {
+        assert_eq!(
+            field_of(translation(|s| s.consented_ai = Some(bad))).as_deref(),
+            Some("translation.consentedAi")
+        );
+    }
+    let json = serde_json::to_value(translation(|s| {
+        s.provider = Some(TranslationProviderId::Ai);
+        s.consented_ai = Some(consent(AI_ID, "https://api.example.com/v1"));
+    }))
+    .unwrap();
+    assert_eq!(json["provider"], "ai");
+    assert_eq!(
+        json["consentedAi"],
+        serde_json::json!({"connectionId": AI_ID, "baseUrl": "https://api.example.com/v1"})
+    );
+    assert!(!TranslationProviderId::Ai.needs_key());
+    assert_eq!(TranslationProviderId::Ai.as_str(), "ai");
+}
+
+#[test]
+fn a_hand_edited_ai_consent_and_translation_model_are_repaired() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"translation":{
+                "provider":"ai","consentedProvider":"ai","consentedAi":{"connectionId":5}},
+              "ai":{"connections":[],"translationModel":{"connectionId":7}}}}"#,
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(!snapshot.recovered);
+    let t = snapshot.settings.translation;
+    assert_eq!(t.provider, Some(TranslationProviderId::Ai));
+    assert_eq!(t.consented_provider, Some(TranslationProviderId::Ai));
+    assert_eq!(t.consented_ai, None);
+    assert_eq!(snapshot.settings.ai.translation_model, None);
+
+    // A well-formed value with an unusable URL loses only itself.
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        format!(
+            r#"{{"version":1,"settings":{{"translation":{{
+                "provider":"ai","consentedAi":{{"connectionId":"{AI_ID}","baseUrl":"ftp://x"}}}}}}}}"#
+        ),
+    )
+    .unwrap();
+    let t = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .translation;
+    assert_eq!(t.consented_ai, None);
+    assert!(t.normalized().is_ok());
 }

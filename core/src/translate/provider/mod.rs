@@ -6,8 +6,12 @@
 //! Every client takes and returns the HTML wire form. The keyless Microsoft
 //! client converts to the tag-name form on the way out and back on the way in,
 //! so nothing past this module knows that form exists.
-use crate::{ErrorCode, net::NetRoute, secrets::SecretValue, settings::TranslationProviderId};
+use crate::{
+    ErrorCode, ai::AiModelTarget, net::NetRoute, secrets::SecretValue,
+    settings::TranslationProviderId,
+};
 
+pub(crate) mod ai;
 mod deepl;
 mod google;
 mod google_free;
@@ -31,6 +35,7 @@ pub(crate) struct TranslateRequest<'a> {
     pub target: &'a str,
 }
 
+#[derive(Debug)]
 pub(crate) struct TranslateResponse {
     pub texts: Vec<String>,
     /// Lowercase code the service reported for the source, if any.
@@ -52,6 +57,8 @@ pub(crate) struct Context<'a> {
     /// Azure resource region; empty for a global resource.
     pub microsoft_region: &'a str,
     pub route: &'a NetRoute,
+    /// The model and connection of the `ai` service; `None` for the others.
+    pub ai: Option<&'a AiModelTarget>,
     /// Tests point the client at a local plain-HTTP listener.
     #[cfg(test)]
     pub base: Option<Base>,
@@ -67,8 +74,18 @@ impl Context<'_> {
     }
 }
 
+/// What one request may carry; the `ai` service's depends on its model.
+pub(crate) fn limits_for(provider: TranslationProviderId, ai: Option<&AiModelTarget>) -> Limits {
+    match (provider, ai) {
+        (TranslationProviderId::Ai, Some(target)) => ai::limits(target.output_length),
+        _ => limits(provider),
+    }
+}
+
 pub(crate) fn limits(provider: TranslationProviderId) -> Limits {
     match provider {
+        // The model is not known here: see `limits_for`.
+        TranslationProviderId::Ai => ai::limits(None),
         // Documented cap: 128 KiB request body; 100,000 bytes of text leave
         // room for quoting and escaping. The item count is not documented
         // (UNVERIFIED: 50 is the long-standing value).
@@ -120,6 +137,7 @@ pub(crate) async fn translate(
         TranslationProviderId::Google => google::translate(context, request).await,
         TranslationProviderId::MicrosoftFree => microsoft_free::translate(context, request).await,
         TranslationProviderId::GoogleFree => google_free::translate(context, request).await,
+        TranslationProviderId::Ai => ai::translate(context, request).await,
     }?;
     check_shape(request.texts, &response)?;
     Ok(response)

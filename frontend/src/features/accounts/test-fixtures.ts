@@ -32,7 +32,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
@@ -99,10 +99,11 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     setTranslationProxyPassword: vi.fn<MailxClient['setTranslationProxyPassword']>().mockResolvedValue({ configured: true }),
     removeTranslationProxyPassword: vi.fn<MailxClient['removeTranslationProxyPassword']>().mockResolvedValue({ configured: false }),
     testTranslation: vi.fn<MailxClient['testTranslation']>().mockRejectedValue(new Error('not configured')),
-    aiState: vi.fn<MailxClient['aiState']>().mockResolvedValue({ connections: [], defaultModel: null, route: { kind: 'direct' }, proxyPasswordSet: false }),
+    aiState: vi.fn<MailxClient['aiState']>().mockResolvedValue({ connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false }),
     aiSaveConnection: vi.fn<MailxClient['aiSaveConnection']>().mockRejectedValue(new Error('not configured')),
     aiRemoveConnection: vi.fn<MailxClient['aiRemoveConnection']>().mockRejectedValue(new Error('not configured')),
     aiSetDefaultModel: vi.fn<MailxClient['aiSetDefaultModel']>().mockRejectedValue(new Error('not configured')),
+    aiSetTranslationModel: vi.fn<MailxClient['aiSetTranslationModel']>().mockRejectedValue(new Error('not configured')),
     aiSetRoute: vi.fn<MailxClient['aiSetRoute']>().mockRejectedValue(new Error('not configured')),
     aiSetProxyPassword: vi.fn<MailxClient['aiSetProxyPassword']>().mockRejectedValue(new Error('not configured')),
     aiRemoveProxyPassword: vi.fn<MailxClient['aiRemoveProxyPassword']>().mockRejectedValue(new Error('not configured')),

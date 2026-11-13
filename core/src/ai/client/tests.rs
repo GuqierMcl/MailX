@@ -178,6 +178,7 @@ async fn complete_returns_the_reply_text_for_both_protocols() {
         Some("Be brief."),
         "Hi",
         Some(100),
+        CHAT_TIMEOUT,
     )
     .await
     .unwrap();
@@ -200,6 +201,7 @@ async fn complete_returns_the_reply_text_for_both_protocols() {
         Some("S"),
         "U",
         None,
+        CHAT_TIMEOUT,
     )
     .await
     .unwrap();
@@ -352,7 +354,9 @@ async fn wrong_shapes_and_oversized_answers_are_invalid_responses() {
     );
     assert!(test(&ep, "m").await.is_ok());
     assert_eq!(
-        complete(&ep, "m", None, "x", None).await.unwrap_err(),
+        complete(&ep, "m", None, "x", None, CHAT_TIMEOUT)
+            .await
+            .unwrap_err(),
         ErrorCode::AiInvalidResponse
     );
     let big = "x".repeat(MAX_RESPONSE_BYTES + 1);

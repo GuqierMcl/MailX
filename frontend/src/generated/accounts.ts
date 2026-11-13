@@ -793,9 +793,11 @@ export type DraftChange = "created" | "updated" | "locked" | "unlocked" | "delet
 
 export type DraftChanged = { draftId: string, accountId: string, change: DraftChange, };
 
-export type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree";
+export type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree" | "ai";
 
 export type ServiceRoute = { "kind": "direct" } | { "kind": "proxy", proxyKind: ProxyKind, host: string, port: number, username: string, };
+
+export type AiConsent = { connectionId: string, baseUrl: string, };
 
 export type TranslationSettings = {
 /**
@@ -825,7 +827,11 @@ alwaysTranslate: Array<string>,
 /**
  * Translate folded quoted text too.
  */
-includeQuotes: boolean, consentedProvider: TranslationProviderId | null, };
+includeQuotes: boolean, consentedProvider: TranslationProviderId | null,
+/**
+ * With `consented_provider = ai`: which connection the agreement covers.
+ */
+consentedAi: AiConsent | null, };
 
 export type TranslationKeyState = { provider: TranslationProviderId, configured: boolean, };
 
@@ -879,6 +885,10 @@ export type AiModelRef = { connectionId: string, modelId: string, name: string, 
 
 export type AiSettings = { connections: Array<AiConnection>, defaultModel: AiModelRef | null,
 /**
+ * The model that translates mail; `None` follows `default_model`.
+ */
+translationModel: AiModelRef | null,
+/**
  * The AI proxy, shared by every connection that uses it and by the
  * catalog and icon downloads.
  */
@@ -902,7 +912,7 @@ baseUrl: string,
  */
 useProxy: boolean, };
 
-export type AiState = { connections: Array<AiConnectionState>, defaultModel: AiModelRef | null, route: ServiceRoute, proxyPasswordSet: boolean, };
+export type AiState = { connections: Array<AiConnectionState>, defaultModel: AiModelRef | null, translationModel: AiModelRef | null, route: ServiceRoute, proxyPasswordSet: boolean, };
 
 export type SaveAiConnection = { id: string | null, providerId: string, name: string, protocol: AiProtocol, baseUrl: string, useProxy: boolean, apiKey: string | null, verify: boolean, };
 

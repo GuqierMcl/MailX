@@ -32,8 +32,8 @@ pub mod translate;
 pub use accounts::AccountService;
 pub use accounts::types::*;
 pub use ai::{
-    AiCatalog, AiCatalogProvider, AiConnection, AiModel, AiModelRef, AiModelSource, AiProtocol,
-    AiProviderIcon, AiSettings, AiTestResult,
+    AiCatalog, AiCatalogProvider, AiConnection, AiModel, AiModelRef, AiModelSource, AiModelTarget,
+    AiProtocol, AiProviderIcon, AiSettings, AiTestResult,
 };
 pub use app::{
     AccountConnectionVerification, Activity, AiConnectionState, AiService, AiState, ArchiveOutcome,
@@ -63,10 +63,10 @@ pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings,
-    LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings, NotificationSettings,
-    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, ServiceRoute,
-    SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
+    AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
+    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings,
+    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
+    ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
     TranslationProviderId, TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;

@@ -155,6 +155,7 @@ fn main() {
         DraftChanged,
         TranslationProviderId,
         ServiceRoute,
+        AiConsent,
         TranslationSettings,
         TranslationKeyState,
         TranslationProxyPasswordState,

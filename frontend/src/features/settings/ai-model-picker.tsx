@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -19,13 +19,14 @@ export type ModelGroup = {
 }
 
 /** A searchable list of models, grouped by connection. Any typed text can be used as a model id. */
-export function ModelList({ client, groups, onPick }: { client: MailxClient; groups: ModelGroup[]; onPick: (model: AiModelRef) => void }) {
+export function ModelList({ client, groups, onPick, leading }: { client: MailxClient; groups: ModelGroup[]; onPick: (model: AiModelRef) => void; leading?: ReactNode }) {
   useTranslation()
   const [search, setSearch] = useState('')
   const typed = search.trim()
   return <Command>
     <CommandInput autoFocus value={search} onValueChange={setSearch} placeholder={t('settings:aiModelSearch')} />
     <CommandList>
+      {leading}
       {groups.map((group) => {
         const heading = <span className="inline-flex items-center gap-1.5">
           <AiProviderIcon client={client} providerId={group.providerId} name={group.name} className="size-4 text-[10px]" />

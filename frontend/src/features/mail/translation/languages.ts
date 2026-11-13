@@ -17,8 +17,10 @@ export const COMMON_LANGUAGES = [
 export const KEYLESS_PROVIDERS = ['microsoftFree', 'googleFree'] as const satisfies readonly TranslationProviderId[]
 export const KEYED_PROVIDERS = ['deepl', 'microsoft', 'google'] as const satisfies readonly TranslationProviderId[]
 
-export const needsKey = (provider: TranslationProviderId) => !(KEYLESS_PROVIDERS as readonly string[]).includes(provider)
+/** The model of the AI settings: it needs no key of its own and has its own consent. */
+export const AI_PROVIDER = 'ai' as const satisfies TranslationProviderId
 
+export const needsKey = (provider: TranslationProviderId) => provider !== 'ai' && !(KEYLESS_PROVIDERS as readonly string[]).includes(provider)
 
 /** Display names; the two keyless services follow the interface language, the keyed ones are brand names. Read at render time. */
 export const TRANSLATION_PROVIDER_NAMES: Record<TranslationProviderId, string> = {
@@ -27,6 +29,7 @@ export const TRANSLATION_PROVIDER_NAMES: Record<TranslationProviderId, string> =
   google: 'Google Cloud Translation',
   get microsoftFree() { return t('settings:translationProviderMicrosoftFree') },
   get googleFree() { return t('settings:translationProviderGoogleFree') },
+  get ai() { return t('settings:translationProviderAi') },
 }
 
 function displayName(code: string, locale: string): string | null {

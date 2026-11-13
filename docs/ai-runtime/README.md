@@ -10,7 +10,7 @@
 
 待办结果只是当前界面的建议列表，不自动创建外部任务；邮件里的日期可能不完整，输出原始依据、推断时区和不确定状态，不擅自补一个确定截止日。AI 关闭、离线或失败时，收发和本地搜索继续可用。
 
-> 邮件翻译已作为**非 AI 功能**实现：用户自带 DeepL、Microsoft Translator 或 Google Cloud Translation 的密钥，经专用路由翻译，设计见[邮件翻译](../architecture/translation.md)。本文的 AI 运行时尚未实现；日后若增加由模型提供的翻译来源，将复用这里的内容披露与 Run 规则，并沿用邮件翻译的分段与不可信回写。当前没有任何模型被用于翻译。
+> 邮件翻译作为**非 AI 功能**实现，默认服务不使用模型：用户自带 DeepL、Microsoft Translator 或 Google Cloud Translation 的密钥，经专用路由翻译，设计见[邮件翻译](../architecture/translation.md)。本文的 AI 运行时尚未实现；由模型提供的翻译来源已作为可选服务实现：直接用[AI 服务商与模型配置](../architecture/ai-providers.md)的非流式调用，沿用邮件翻译的同意、分段与不可信回写，没有经过本文的 Run、内容披露或取消机制；这些仍待实现。
 
 ## 2. 模型适配
 

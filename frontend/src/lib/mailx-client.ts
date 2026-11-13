@@ -224,6 +224,7 @@ export interface MailxClient {
   aiSaveConnection(request: SaveAiConnection): Promise<SavedAiConnection>
   aiRemoveConnection(id: string): Promise<AiState>
   aiSetDefaultModel(model: AiModelRef | null): Promise<AiState>
+  aiSetTranslationModel(model: AiModelRef | null): Promise<AiState>
   aiSetRoute(route: ServiceRoute): Promise<AiState>
   aiSetProxyPassword(password: string): Promise<AiState>
   aiRemoveProxyPassword(): Promise<AiState>
@@ -537,6 +538,7 @@ export function createDesktopClient(): MailxClient {
     aiSaveConnection: (request) => call<SavedAiConnection>('ai_save_connection', { request }),
     aiRemoveConnection: (id) => call<AiState>('ai_remove_connection', { id }),
     aiSetDefaultModel: (model) => call<AiState>('ai_set_default_model', { model }),
+    aiSetTranslationModel: (model) => call<AiState>('ai_set_translation_model', { model }),
     aiSetRoute: (route) => call<AiState>('ai_set_route', { route }),
     aiSetProxyPassword: (password) => call<AiState>('ai_set_proxy_password', { password }),
     aiRemoveProxyPassword: () => call<AiState>('ai_remove_proxy_password'),

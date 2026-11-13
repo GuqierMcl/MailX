@@ -12,7 +12,7 @@ import { DetectedLanguageItems } from './translation-toolbar'
 import type { EmailTranslation } from './use-email-translation'
 
 const action = 'h-6 shrink-0 text-xs'
-const KEYLESS_FAILURES: string[] = ['translationUnavailable', 'translationRateLimited', 'translationNetwork', 'translationTimeout']
+const KEYLESS_FAILURES: string[] = ['translationUnavailable', 'translationRateLimited', 'translationNetwork', 'translationTimeout', 'aiModelNotFound', 'aiRequestRejected']
 
 /**
  * One quiet line above the message that follows the translation: an offer, the
@@ -47,6 +47,7 @@ export function TranslationBar({ translation }: { translation: EmailTranslation 
     const message = errorText(error)
     const code = clientFailureCode(error)
     // A keyless channel that refuses, is limited or cannot be reached has no key to fix: offer another service next to the retry.
+    // A model that is gone or a request it refuses is fixed the same way, in the translation settings.
     const channelFailed = translation.keyless && code !== null && KEYLESS_FAILURES.includes(code)
     return shell(<>
       {text(message)}

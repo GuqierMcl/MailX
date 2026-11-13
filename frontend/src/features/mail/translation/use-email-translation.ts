@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { EmailDetail, TranslationSettings, TranslationStatus } from '@/generated/accounts'
+import type { AiConsent, EmailDetail, TranslationSettings, TranslationStatus } from '@/generated/accounts'
+import { translationTarget, useAiState } from '@/features/settings/ai-queries'
 import { useSettings, useUpdateTranslation } from '@/features/settings/settings-queries'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { translationKeys } from '@/lib/query-client'
-import { needsKey, TRANSLATION_PROVIDER_NAMES } from './languages'
+import { AI_PROVIDER, needsKey, TRANSLATION_PROVIDER_NAMES } from './languages'
 
 /** How many messages the session remembers a choice for; the oldest are forgotten first. */
 const MEMORY_LIMIT = 200
@@ -41,6 +42,13 @@ const fresh = (id: string, memory: Map<string, Remembered>): State => {
   }
 }
 
+/** Whether the user has agreed to send mail to what translation would use now; the core enforces the same rule. */
+const hasConsent = (settings: TranslationSettings, binding: AiConsent | null) => {
+  if (settings.consentedProvider !== settings.provider) return false
+  if (settings.provider !== AI_PROVIDER) return true
+  return binding !== null && settings.consentedAi?.connectionId === binding.connectionId && settings.consentedAi.baseUrl === binding.baseUrl
+}
+
 /** Settings that change what the status call answers, or whether a translation can run. */
 const basisOf = (settings: TranslationSettings) => `${settings.targetLanguage}|${settings.includeQuotes}`
 
@@ -62,19 +70,24 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
   const provider = settings?.provider ?? null
   // A keyless service is ready as it is; a keyed one needs its saved key.
   const keyless = provider !== null && !needsKey(provider)
-  const configured = provider !== null && (keyless || Boolean(keys.data?.some((key) => key.provider === provider && key.configured)))
+  // The AI service is ready once a model resolves; the connection it reaches is who gets the text, so consent is tied to it.
+  const ai = useAiState(client, provider === AI_PROVIDER)
+  const aiTarget = provider === AI_PROVIDER ? translationTarget(ai.data) : null
+  const aiBinding: AiConsent | null = aiTarget ? { connectionId: aiTarget.connection.id, baseUrl: aiTarget.connection.baseUrl } : null
+  const configured = provider === AI_PROVIDER ? aiBinding !== null
+    : provider !== null && (keyless || Boolean(keys.data?.some((key) => key.provider === provider && key.configured)))
 
   const [memory] = useState(() => new Map<string, Remembered>())
   const [stored, setStored] = useState<State>(() => fresh(id, memory))
   const stateRef = useRef(stored)
   const idRef = useRef(id)
-  const latest = useRef({ settings, configured })
+  const latest = useRef({ settings, configured, aiBinding })
   const runs = useRef(0)
   /** Moves whenever a translation starts, ends or is stopped, so a status answer asked for earlier can be told apart. */
   const epoch = useRef(0)
   useLayoutEffect(() => {
     idRef.current = id
-    latest.current = { settings, configured }
+    latest.current = { settings, configured, aiBinding }
   })
   // A message other than the one the state belongs to starts from scratch.
   const state = stored.id === id ? stored : fresh(id, memory)
@@ -120,10 +133,10 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
   const translate = useCallback((target?: string) => {
     const forId = idRef.current
     if (!forId) return
-    const { settings: current, configured: ready } = latest.current
+    const { settings: current, configured: ready, aiBinding: binding } = latest.current
     if (!current?.provider || !ready) {
       patch(forId, { error: { failure: { code: 'translationNotConfigured' } } })
-    } else if (current.consentedProvider !== current.provider) patch(forId, { consent: { target } })
+    } else if (!hasConsent(current, binding)) patch(forId, { consent: { target } })
     else begin(forId, target)
   }, [begin, patch])
 
@@ -150,7 +163,7 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
 
   const signature = settings
     ? JSON.stringify([configured, settings.provider, settings.targetLanguage, settings.suggest, settings.neverSuggest,
-      settings.alwaysTranslate, settings.includeQuotes, settings.consentedProvider])
+      settings.alwaysTranslate, settings.includeQuotes, settings.consentedProvider, settings.consentedAi, aiBinding])
     : null
   useEffect(() => {
     if (!id || !eligible || signature === null) return
@@ -243,12 +256,13 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
   const confirmConsent = useCallback(async () => {
     const forId = idRef.current
     const wanted = stateRef.current.consent
-    const current = latest.current.settings
-    if (!forId || !wanted || !current?.provider) return
+    const { settings: current, aiBinding: binding } = latest.current
+    if (!forId || !wanted || !current?.provider || (current.provider === AI_PROVIDER && !binding)) return
     // The dialog closes at once; a second click cannot save twice.
     patch(forId, { consent: null })
     try {
-      await update.mutateAsync({ consentedProvider: current.provider })
+      // The other services leave `consentedAi` as it was.
+      await update.mutateAsync(current.provider === AI_PROVIDER ? { consentedProvider: current.provider, consentedAi: binding } : { consentedProvider: current.provider })
     } catch (failure) {
       patch(forId, { error: { failure } })
       return
@@ -297,7 +311,8 @@ export function useEmailTranslation(client: MailxClient, email: EmailDetail | nu
     detectedLanguage: detected,
     alwaysTranslating: detected !== null && Boolean(settings?.alwaysTranslate.includes(detected)),
     neverSuggesting: detected !== null && Boolean(settings?.neverSuggest.includes(detected)),
-    consentService: state.consent && provider ? TRANSLATION_PROVIDER_NAMES[provider] : null,
+    // For the AI service the dialog names the connection that gets the text, not "AI".
+    consentService: state.consent && provider ? (aiTarget ? aiTarget.connection.name : TRANSLATION_PROVIDER_NAMES[provider]) : null,
     translate, cancel, toggle, showOriginal, showTranslation, dismiss, dismissError, failBody, retranslate,
     confirmConsent, cancelConsent, toggleLanguageList, openSettings,
   }

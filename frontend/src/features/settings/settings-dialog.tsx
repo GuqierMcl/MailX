@@ -117,7 +117,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'contacts' && <ContactsPane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
-              {section === 'translation' && <TranslationPane client={client} />}
+              {section === 'translation' && <TranslationPane client={client} onNavigate={setSection} />}
               {section === 'ai' && <AiPane client={client} />}
               {section === 'mcp' && <McpPane client={client} />}
               {section === 'about' && <AboutPane client={client} />}

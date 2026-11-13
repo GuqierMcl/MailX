@@ -193,6 +193,7 @@ async fn chat(
     system: Option<&str>,
     user: &str,
     max_output: Option<u32>,
+    timeout: Duration,
 ) -> Result<Value, ErrorCode> {
     let (suffix, body) = match endpoint.protocol {
         AiProtocol::OpenaiCompatible => {
@@ -219,7 +220,7 @@ async fn chat(
             ("/messages", body)
         }
     };
-    let reply = request(endpoint, Method::POST, suffix, Some(&body), CHAT_TIMEOUT).await?;
+    let reply = request(endpoint, Method::POST, suffix, Some(&body), timeout).await?;
     if reply.status != 200 {
         return Err(status_error(reply.status, true));
     }
@@ -270,15 +271,17 @@ fn completion_text(protocol: AiProtocol, value: &Value) -> Option<String> {
 /// The non-streaming completion primitive: one system prompt (optional), one
 /// user message, the reply text. `max_output` caps the reply; OpenAI-compatible
 /// servers get no cap when it is `None` (newer OpenAI models reject
-/// `max_tokens`), Anthropic needs one and defaults to 1024.
+/// `max_tokens`), Anthropic needs one and defaults to 1024. `timeout` bounds
+/// the whole request.
 pub(crate) async fn complete(
     endpoint: &Endpoint<'_>,
     model: &str,
     system: Option<&str>,
     user: &str,
     max_output: Option<u32>,
+    timeout: Duration,
 ) -> Result<String, ErrorCode> {
-    let value = chat(endpoint, model, system, user, max_output).await?;
+    let value = chat(endpoint, model, system, user, max_output, timeout).await?;
     completion_text(endpoint.protocol, &value).ok_or(ErrorCode::AiInvalidResponse)
 }
 
@@ -287,7 +290,7 @@ pub(crate) async fn complete(
 pub(crate) async fn test(endpoint: &Endpoint<'_>, model: &str) -> Result<u32, ErrorCode> {
     let max_output = (endpoint.protocol == AiProtocol::Anthropic).then_some(16);
     let started = Instant::now();
-    chat(endpoint, model, None, TEST_PROMPT, max_output).await?;
+    chat(endpoint, model, None, TEST_PROMPT, max_output, CHAT_TIMEOUT).await?;
     Ok(u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX))
 }
 
