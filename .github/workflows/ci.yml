@@ -129,7 +129,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-15, windows-2025]
+        # The macOS runner matches the release build's, so tests use the same SDK.
+        os: [ubuntu-22.04, macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
