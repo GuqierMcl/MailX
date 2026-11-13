@@ -18,8 +18,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。
-- New appearance setting to show a message's mailbox as a name or a small icon on the sender's avatar. / 新增外观设置：可把邮件所属邮箱显示为名称，或显示为发件人头像上的小图标。
+- The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
+- New appearance setting to show a message's mailbox as a name or a small icon on the sender's avatar. / 新增外观设置：可把邮件所属邮箱显示为名称，或显示为发件人头像上的小图标。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
 
 ### 🩹 Fixed
 
