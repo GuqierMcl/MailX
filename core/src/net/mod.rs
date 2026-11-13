@@ -5,6 +5,7 @@
 //! failure is reported as such and never falls back to a direct connection.
 //! TLS is verified against the operating system trust store.
 
+pub(crate) mod http;
 pub(crate) mod images;
 mod proxy;
 #[cfg(test)]

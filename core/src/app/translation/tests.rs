@@ -9,6 +9,7 @@ use tokio::sync::Notify;
 use super::*;
 use crate::accounts::MAX_SECRET_BYTES;
 use crate::secrets::test_support::MemorySecrets;
+use crate::settings::AiConsent;
 
 const KEY: &str = "sk-service-test-key";
 const ENGLISH: &str = "The quarterly report is attached to this message. Please review the numbers carefully before our meeting on Thursday, and let me know if anything looks wrong or if you need more details from the finance team.";
@@ -110,7 +111,7 @@ async fn translate_to_de(
     s: &TranslationSettings,
 ) -> Result<TranslationStatus, AppError> {
     f.core
-        .translate_email(f.ids[index].clone(), s.clone(), "en".into(), None)
+        .translate_email(f.ids[index].clone(), s.clone(), "en".into(), None, None)
         .await
 }
 
@@ -152,7 +153,13 @@ async fn preconditions_fail_in_the_documented_order() {
     s.consented_provider = Some(TranslationProviderId::Deepl);
     let bad_target = f
         .core
-        .translate_email(f.ids[0].clone(), s.clone(), "en".into(), Some("xx".into()))
+        .translate_email(
+            f.ids[0].clone(),
+            s.clone(),
+            "en".into(),
+            Some("xx".into()),
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(
@@ -371,7 +378,7 @@ async fn the_route_comes_from_the_translation_settings() {
     with_key(&f, TranslationProviderId::Microsoft).await;
     let mut s = settings(TranslationProviderId::Microsoft);
     s.microsoft_region = "westeurope".into();
-    s.route = TranslationRoute::Proxy {
+    s.route = ServiceRoute::Proxy {
         proxy_kind: crate::accounts::types::ProxyKind::Socks5,
         host: "proxy.example".into(),
         port: 1080,
@@ -446,7 +453,11 @@ async fn a_row_is_stale_once_the_body_or_the_segmenter_changes() {
     translate_to_de(&f, 0, &s).await.unwrap();
     let status = |f: &Fixture, s: &TranslationSettings| {
         let (core, id, s) = (f.core.clone(), f.ids[0].clone(), s.clone());
-        async move { core.translation_status(id, s, "en".into()).await.unwrap() }
+        async move {
+            core.translation_status(id, s, "en".into(), None)
+                .await
+                .unwrap()
+        }
     };
     assert!(status(&f, &s).await.translation.is_some());
     let document = f.core.body_document(f.ids[0].clone()).await.unwrap();
@@ -560,7 +571,7 @@ async fn cancelling_stops_the_request_and_writes_nothing() {
     let s = settings(TranslationProviderId::Deepl);
     let task = tokio::spawn({
         let (core, id) = (f.core.clone(), f.ids[0].clone());
-        async move { core.translate_email(id, s, "en".into(), None).await }
+        async move { core.translate_email(id, s, "en".into(), None, None).await }
     });
     until(|| started.load(Ordering::SeqCst) == 1).await;
     f.core.cancel_translation(&f.ids[0]);
@@ -597,7 +608,7 @@ async fn a_second_translation_of_the_same_message_cancels_the_first() {
     let s = settings(TranslationProviderId::Deepl);
     let first = tokio::spawn({
         let (core, id, s) = (f.core.clone(), f.ids[0].clone(), s.clone());
-        async move { core.translate_email(id, s, "en".into(), None).await }
+        async move { core.translate_email(id, s, "en".into(), None, None).await }
     });
     until(|| started.load(Ordering::SeqCst) == 1).await;
     let second = translate_to_de(&f, 0, &s).await.unwrap();
@@ -621,7 +632,7 @@ async fn at_most_two_translations_run_at_once_and_waiting_ones_can_be_cancelled(
     let s = settings(TranslationProviderId::Deepl);
     let spawn = |index: usize| {
         let (core, id, s) = (f.core.clone(), f.ids[index].clone(), s.clone());
-        tokio::spawn(async move { core.translate_email(id, s, "en".into(), None).await })
+        tokio::spawn(async move { core.translate_email(id, s, "en".into(), None, None).await })
     };
     let (a, b, c) = (spawn(0), spawn(1), spawn(2));
     until(|| started.load(Ordering::SeqCst) == 2).await;
@@ -657,7 +668,11 @@ async fn status_detects_the_language_without_the_network() {
     };
     let status = |index: usize, ui: &'static str, s: TranslationSettings| {
         let (core, id) = (f.core.clone(), f.ids[index].clone());
-        async move { core.translation_status(id, s, ui.into()).await.unwrap() }
+        async move {
+            core.translation_status(id, s, ui.into(), None)
+                .await
+                .unwrap()
+        }
     };
 
     let english = status(0, "zh-CN", s.clone()).await;
@@ -703,7 +718,11 @@ async fn status_flags_follow_the_lists_the_key_and_the_consent() {
     };
     let status = |s: TranslationSettings| {
         let (core, id) = (f.core.clone(), f.ids[0].clone());
-        async move { core.translation_status(id, s, "en".into()).await.unwrap() }
+        async move {
+            core.translation_status(id, s, "en".into(), None)
+                .await
+                .unwrap()
+        }
     };
 
     // No key yet: nothing is offered, but the language is still detected.
@@ -755,7 +774,7 @@ async fn short_text_gives_no_reliable_detection_and_no_offer() {
     let s = settings(TranslationProviderId::Deepl);
     let status = f
         .core
-        .translation_status(f.ids[0].clone(), s, "zh-CN".into())
+        .translation_status(f.ids[0].clone(), s, "zh-CN".into(), None)
         .await
         .unwrap();
     assert!(!status.detection_reliable && !status.suggested && !status.auto_translate);
@@ -770,7 +789,7 @@ async fn status_without_a_cached_body_does_not_know_the_language() {
     let s = settings(TranslationProviderId::Deepl);
     let status = f
         .core
-        .translation_status(f.ids[0].clone(), s, "en".into())
+        .translation_status(f.ids[0].clone(), s, "en".into(), None)
         .await
         .unwrap();
     assert_eq!(status.detected_language, None);
@@ -791,7 +810,7 @@ async fn status_of_a_body_over_the_html_limit_has_no_detection() {
     let s = settings(TranslationProviderId::Deepl);
     let status = f
         .core
-        .translation_status(f.ids[0].clone(), s, "en".into())
+        .translation_status(f.ids[0].clone(), s, "en".into(), None)
         .await
         .unwrap();
     assert_eq!(status.detected_language, None);
@@ -807,6 +826,7 @@ fn input<'a>(
         settings,
         target: "zh-Hans".into(),
         provider_ready: true,
+        ai: None,
         detection: detection.map(|(language, reliable)| Detection {
             language: language.into(),
             reliable,
@@ -970,7 +990,7 @@ const PROXY_PASSWORD: &str = " p@ss word ";
 
 fn signed_in(username: &str) -> TranslationSettings {
     let mut s = settings(TranslationProviderId::Deepl);
-    s.route = TranslationRoute::Proxy {
+    s.route = ServiceRoute::Proxy {
         proxy_kind: crate::accounts::types::ProxyKind::HttpConnect,
         host: "proxy.example".into(),
         port: 8080,
@@ -1083,12 +1103,15 @@ async fn the_request_signs_in_to_the_proxy_only_with_a_username() {
         .await
         .unwrap();
     translate_to_de(&f, 0, &signed_in("alice")).await.unwrap();
-    f.core.test_translation(signed_in("bob")).await.unwrap();
+    f.core
+        .test_translation(signed_in("bob"), None)
+        .await
+        .unwrap();
     // A stored password alone is ignored, on a proxy and on a direct route.
-    f.core.test_translation(signed_in("")).await.unwrap();
+    f.core.test_translation(signed_in(""), None).await.unwrap();
     let mut direct = signed_in("alice");
-    direct.route = TranslationRoute::Direct;
-    f.core.test_translation(direct).await.unwrap();
+    direct.route = ServiceRoute::Direct;
+    f.core.test_translation(direct, None).await.unwrap();
 
     let seen: Vec<_> = calls
         .lock()
@@ -1162,11 +1185,11 @@ async fn a_locked_store_with_a_username_fails_without_calling_the_service() {
         }));
 
     let translated = core
-        .translate_email(ids[0].clone(), signed_in("alice"), "en".into(), None)
+        .translate_email(ids[0].clone(), signed_in("alice"), "en".into(), None, None)
         .await;
     assert_eq!(code(translated), ErrorCode::SecretStoreLocked);
     assert_eq!(
-        code(core.test_translation(signed_in("alice")).await),
+        code(core.test_translation(signed_in("alice"), None).await),
         ErrorCode::SecretStoreLocked
     );
     assert_eq!(
@@ -1175,7 +1198,9 @@ async fn a_locked_store_with_a_username_fails_without_calling_the_service() {
     );
     assert!(calls.lock().unwrap().is_empty());
     // Without a username the password is never read.
-    core.test_translation(signed_in("")).await.unwrap_err();
+    core.test_translation(signed_in(""), None)
+        .await
+        .unwrap_err();
     assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
@@ -1221,11 +1246,11 @@ async fn the_test_translation_needs_a_key_not_consent_and_is_short() {
         ..TranslationSettings::default()
     };
     assert_eq!(
-        code(f.core.test_translation(s.clone()).await),
+        code(f.core.test_translation(s.clone(), None).await),
         ErrorCode::TranslationNotConfigured
     );
     with_key(&f, TranslationProviderId::Google).await;
-    let result = f.core.test_translation(s.clone()).await.unwrap();
+    let result = f.core.test_translation(s.clone(), None).await.unwrap();
     assert_eq!(result.translated.chars().count(), 200);
     assert!(
         result.translated.starts_with("zh-Hans<x"),
@@ -1236,7 +1261,7 @@ async fn the_test_translation_needs_a_key_not_consent_and_is_short() {
     s.target_language = "fr".into();
     assert!(
         f.core
-            .test_translation(s)
+            .test_translation(s, None)
             .await
             .unwrap()
             .translated
@@ -1284,6 +1309,7 @@ async fn local_sent_copies_are_not_translated() {
             id,
             settings(TranslationProviderId::Deepl),
             "en".into(),
+            None,
             None,
         )
         .await;
@@ -1333,6 +1359,9 @@ fn four_byte_text_is_split_so_no_json_body_exceeds_the_documented_cap() {
                         .map(|t| translate::wire::encode_tags(&translate::wire::decode(t)))
                         .collect::<Vec<_>>(),
                 ),
+                TranslationProviderId::Ai => {
+                    serde_json::to_vec(&serde_json::json!({"items": items}))
+                }
                 TranslationProviderId::GoogleFree => Ok(items
                     .iter()
                     .fold(
@@ -1392,7 +1421,7 @@ async fn keyless_services_translate_without_a_key_and_after_consent() {
         // The offer needs no saved key either.
         let offered = f
             .core
-            .translation_status(f.ids[0].clone(), s.clone(), "en".into())
+            .translation_status(f.ids[0].clone(), s.clone(), "en".into(), None)
             .await
             .unwrap();
         assert_eq!(offered.target_language, "de");
@@ -1404,7 +1433,7 @@ async fn test_translation_works_for_a_keyless_service_without_a_key() {
     let f = fixture(&["<p>Hello</p>"]);
     echo(&f);
     let s = settings(TranslationProviderId::MicrosoftFree);
-    let result = f.core.test_translation(s).await.unwrap();
+    let result = f.core.test_translation(s, None).await.unwrap();
     assert!(!result.translated.is_empty());
 }
 
@@ -1448,8 +1477,318 @@ async fn a_keyed_service_without_a_key_is_still_not_ready() {
     let s = settings(TranslationProviderId::Deepl);
     let status = f
         .core
-        .translation_status(f.ids[0].clone(), s, "zh-CN".into())
+        .translation_status(f.ids[0].clone(), s, "zh-CN".into(), None)
         .await
         .unwrap();
     assert!(!status.suggested);
+}
+
+// ------------------------------------------------------- the AI service
+
+const AI_KEY: &str = "sk-ai-secret-key";
+const CONNECTION: &str = "6f1f3d3e-8a40-4a39-9d3c-0f5f7a6b2c11";
+const BASE_URL: &str = "https://api.example.com/v1";
+
+fn binding(connection: &str, base_url: &str) -> AiConsent {
+    AiConsent {
+        connection_id: connection.into(),
+        base_url: base_url.into(),
+    }
+}
+
+fn ai_target(model: &str, key: &str) -> AiModelTarget {
+    AiModelTarget::new(
+        binding(CONNECTION, BASE_URL),
+        crate::ai::AiProtocol::OpenaiCompatible,
+        model.into(),
+        None,
+        key.into(),
+        NetRoute::default(),
+    )
+}
+
+fn ai_settings() -> TranslationSettings {
+    TranslationSettings {
+        consented_ai: Some(binding(CONNECTION, BASE_URL)),
+        ..settings(TranslationProviderId::Ai)
+    }
+}
+
+async fn ai_translate(
+    f: &Fixture,
+    s: &TranslationSettings,
+    ai: Option<AiModelTarget>,
+) -> Result<TranslationStatus, AppError> {
+    f.core
+        .translate_email(f.ids[0].clone(), s.clone(), "en".into(), None, ai)
+        .await
+}
+
+fn stored_provider(f: &Fixture) -> String {
+    f.db.query_row("SELECT provider FROM message_translations", [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_ai_translation_needs_a_model_and_consent_bound_to_the_connection() {
+    let f = fixture(&["<p>Hello</p>"]);
+    let calls = echo(&f);
+    let s = ai_settings();
+
+    // No resolvable model: not configured, before anything else.
+    assert_eq!(
+        code(ai_translate(&f, &s, None).await),
+        ErrorCode::TranslationNotConfigured
+    );
+
+    // No agreement to a connection, another connection, another address.
+    let mut missing = s.clone();
+    missing.consented_ai = None;
+    let mut other = s.clone();
+    other.consented_ai = Some(binding("0a1b2c3d-0000-4000-8000-000000000001", BASE_URL));
+    let mut moved = s.clone();
+    moved.consented_ai = Some(binding(CONNECTION, "https://other.example.com/v1"));
+    // The provider agreement alone (another service) is not enough either.
+    let mut elsewhere = s.clone();
+    elsewhere.consented_provider = Some(TranslationProviderId::Deepl);
+    for refused in [missing, other, moved, elsewhere] {
+        assert_eq!(
+            code(ai_translate(&f, &refused, Some(ai_target("m1", AI_KEY))).await),
+            ErrorCode::TranslationConsentRequired
+        );
+    }
+    assert!(calls.lock().unwrap().is_empty());
+
+    // A matching agreement works; a different model or key keeps it.
+    ai_translate(&f, &s, Some(ai_target("m1", AI_KEY)))
+        .await
+        .unwrap();
+    assert_eq!(stored_provider(&f), "ai");
+    ai_translate(&f, &s, Some(ai_target("m2", "another-key")))
+        .await
+        .unwrap();
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].provider, TranslationProviderId::Ai);
+    assert_eq!(calls[0].model.as_deref(), Some("m1"));
+    assert_eq!(calls[0].key, AI_KEY);
+    assert_eq!(calls[1].model.as_deref(), Some("m2"));
+}
+
+#[tokio::test]
+async fn the_ai_service_ignores_a_target_when_another_service_is_saved() {
+    let f = fixture(&["<p>Hello</p>"]);
+    let calls = echo(&f);
+    let s = settings(TranslationProviderId::MicrosoftFree);
+    ai_translate(&f, &s, Some(ai_target("m1", AI_KEY)))
+        .await
+        .unwrap();
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].provider, TranslationProviderId::MicrosoftFree);
+    assert_eq!(calls[0].model, None);
+    assert_eq!(calls[0].key, "");
+}
+
+#[tokio::test]
+async fn ai_status_follows_whether_a_model_resolves_and_the_consent() {
+    let f = fixture(&[&format!("<p>{ENGLISH}</p>")]);
+    let status = |s: TranslationSettings, ai: Option<AiConsent>| {
+        let (core, id) = (f.core.clone(), f.ids[0].clone());
+        async move {
+            core.translation_status(id, s, "en".into(), ai)
+                .await
+                .unwrap()
+        }
+    };
+    let s = TranslationSettings {
+        always_translate: vec!["en".into()],
+        ..ai_settings()
+    };
+    let same = binding(CONNECTION, BASE_URL);
+    // No model resolves: the language is known, nothing is offered.
+    let none = status(s.clone(), None).await;
+    assert_eq!(none.detected_language.as_deref(), Some("en"));
+    assert!(!none.suggested && !none.auto_translate);
+    // No key is needed for the offer; a model is.
+    let ready = status(s.clone(), Some(same.clone())).await;
+    assert!(ready.suggested && ready.auto_translate);
+    // Another connection or address than the one agreed to: offered, not automatic.
+    let moved = status(
+        s.clone(),
+        Some(binding(CONNECTION, "https://other.example.com")),
+    )
+    .await;
+    assert!(moved.suggested && !moved.auto_translate);
+    let unconsented = TranslationSettings {
+        consented_ai: None,
+        ..s
+    };
+    let flags = status(unconsented, Some(same)).await;
+    assert!(flags.suggested && !flags.auto_translate);
+}
+
+#[test]
+fn consent_for_ai_must_match_the_resolved_connection() {
+    let s = ai_settings();
+    let same = binding(CONNECTION, BASE_URL);
+    assert!(consented(&s, Some(&same)));
+    assert!(!consented(&s, None));
+    assert!(!consented(
+        &s,
+        Some(&binding(CONNECTION, "https://x.example.com"))
+    ));
+    assert!(!consented(
+        &s,
+        Some(&binding("0a1b2c3d-0000-4000-8000-000000000001", BASE_URL))
+    ));
+    let mut other = s.clone();
+    other.consented_provider = Some(TranslationProviderId::Deepl);
+    assert!(!consented(&other, Some(&same)));
+    // The other services do not look at the connection.
+    let plain = settings(TranslationProviderId::Deepl);
+    assert!(consented(&plain, None));
+}
+
+#[test]
+fn auto_translate_for_ai_needs_the_matching_consent() {
+    let mut s = ai_settings();
+    s.always_translate = vec!["en".into()];
+    let detection = || {
+        Some(Detection {
+            language: "en".into(),
+            reliable: true,
+        })
+    };
+    let same = binding(CONNECTION, BASE_URL);
+    let build = |s: &TranslationSettings, ai: Option<&AiConsent>, ready: bool| {
+        build_status(StatusInput {
+            email_id: "m",
+            settings: s,
+            target: "de".into(),
+            provider_ready: ready,
+            ai,
+            detection: detection(),
+            translation: None,
+        })
+    };
+    assert!(build(&s, Some(&same), true).auto_translate);
+    assert!(
+        !build(
+            &s,
+            Some(&binding(CONNECTION, "https://x.example.com")),
+            true
+        )
+        .auto_translate
+    );
+    assert!(!build(&s, None, false).auto_translate);
+    s.consented_ai = None;
+    assert!(!build(&s, Some(&same), true).auto_translate);
+}
+
+#[tokio::test]
+async fn the_ai_test_translation_needs_a_model_but_no_consent() {
+    let f = fixture(&["<p>Hello</p>"]);
+    let calls = echo(&f);
+    let mut s = settings(TranslationProviderId::Ai);
+    s.consented_provider = None;
+    assert_eq!(
+        code(f.core.test_translation(s.clone(), None).await),
+        ErrorCode::TranslationNotConfigured
+    );
+    let result = f
+        .core
+        .test_translation(s, Some(ai_target("m1", AI_KEY)))
+        .await
+        .unwrap();
+    assert_eq!(result.translated, "Hallo, this is a test.");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].provider, TranslationProviderId::Ai);
+    assert_eq!(calls[0].model.as_deref(), Some("m1"));
+    assert_eq!(calls[0].target, "de");
+}
+
+#[tokio::test]
+async fn ai_batches_run_together_and_keep_their_order() {
+    let paragraphs: String = (0..130)
+        .map(|n| format!("<p>Hello number {n}</p>"))
+        .collect();
+    let f = fixture(&[&paragraphs]);
+    let running = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let batches = Arc::new(AtomicUsize::new(0));
+    let (r, p, b) = (running.clone(), peak.clone(), batches.clone());
+    f.core
+        .translation
+        .set_backend(Arc::new(move |call: TestCall| {
+            let (r, p, b) = (r.clone(), p.clone(), b.clone());
+            Box::pin(async move {
+                let now = r.fetch_add(1, Ordering::SeqCst) + 1;
+                p.fetch_max(now, Ordering::SeqCst);
+                let index = b.fetch_add(1, Ordering::SeqCst);
+                // Earlier batches answer later, so completion order is reversed.
+                tokio::time::sleep(Duration::from_millis(60 - 15 * index.min(3) as u64)).await;
+                r.fetch_sub(1, Ordering::SeqCst);
+                Ok(TranslateResponse {
+                    texts: call.texts.iter().map(|text| translated(text)).collect(),
+                    detected_source: None,
+                })
+            })
+        }));
+    let s = ai_settings();
+    ai_translate(&f, &s, Some(ai_target("m1", AI_KEY)))
+        .await
+        .unwrap();
+    assert_eq!(batches.load(Ordering::SeqCst), 4);
+    assert_eq!(peak.load(Ordering::SeqCst), 3);
+    let document = f.core.body_document(f.ids[0].clone()).await.unwrap();
+    let segments = f
+        .core
+        .body_translation(&document.binding, "de".into(), false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(segments.len(), 130);
+    for (n, segment) in segments.iter().enumerate() {
+        assert_eq!(
+            segment.as_deref(),
+            Some(format!("Hallo number {n}").as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn other_services_still_send_their_batches_one_at_a_time() {
+    let paragraphs: String = (0..130)
+        .map(|n| format!("<p>Hello number {n}</p>"))
+        .collect();
+    let f = fixture(&[&paragraphs]);
+    let running = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let (r, p) = (running.clone(), peak.clone());
+    f.core
+        .translation
+        .set_backend(Arc::new(move |call: TestCall| {
+            let (r, p) = (r.clone(), p.clone());
+            Box::pin(async move {
+                p.fetch_max(r.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                r.fetch_sub(1, Ordering::SeqCst);
+                Ok(TranslateResponse {
+                    texts: call.texts.iter().map(|text| translated(text)).collect(),
+                    detected_source: None,
+                })
+            })
+        }));
+    // Google (free) carries 50 items per request, so 130 paragraphs need 3.
+    let s = settings(TranslationProviderId::GoogleFree);
+    ai_translate(&f, &s, None).await.unwrap();
+    assert_eq!(peak.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ai_targets_never_print_their_key() {
+    let target = ai_target("m1", AI_KEY);
+    assert!(!format!("{target:?}").contains(AI_KEY));
 }

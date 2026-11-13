@@ -107,6 +107,7 @@ fn context<'a>(
         key,
         microsoft_region: region,
         route,
+        ai: None,
         base: Some(Base::plain(port)),
     }
 }
@@ -139,7 +140,7 @@ async fn call(
 }
 
 fn error_of(result: Result<TranslateResponse, ErrorCode>) -> ErrorCode {
-    result.err().expect("expected an error")
+    result.expect_err("expected an error")
 }
 
 #[tokio::test]

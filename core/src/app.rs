@@ -38,6 +38,7 @@ use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
 use crate::sync::previews::PreviewManager;
 
+mod ai;
 mod attachments;
 mod avatars;
 mod bodies;
@@ -54,6 +55,7 @@ pub use oauth::{
 };
 mod verification;
 pub use crate::sync::cadence::Activity;
+pub use ai::{AiConnectionState, AiService, AiState, SaveAiConnection, SavedAiConnection};
 pub use attachments::{AttachmentFile, AttachmentInfo};
 pub use avatars::{AvatarImage, AvatarKind};
 pub use bodies::{BodyBinding, BodyDocument, BodyLinks, RemoteImageStatus};

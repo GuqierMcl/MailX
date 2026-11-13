@@ -4,9 +4,11 @@
 //! account configuration, IMAP sync and IDLE, cached message reading and search,
 //! flag writes, deletion, local archiving, drafts, attachments and the SMTP send queue.
 //! The transport-independent tool layer exposes authorized operations to local MCP;
-//! built-in AI and the server host are not implemented yet.
+//! AI provider connections are configured here; no mail goes to a model yet, and
+//! the server host is not implemented.
 
 pub mod accounts;
+pub mod ai;
 mod app;
 pub mod auth;
 pub mod drafts;
@@ -29,18 +31,22 @@ pub mod translate;
 
 pub use accounts::AccountService;
 pub use accounts::types::*;
+pub use ai::{
+    AiCatalog, AiCatalogProvider, AiConnection, AiModel, AiModelRef, AiModelSource, AiModelTarget,
+    AiProtocol, AiProviderIcon, AiSettings, AiTestResult,
+};
 pub use app::{
-    AccountConnectionVerification, Activity, ArchiveOutcome, AttachmentFile, AttachmentInfo,
-    AvatarImage, AvatarKind, BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding,
-    BodyDocument, BodyLinks, CancelConnectionVerification, CancelDraftVerification,
-    ConfirmOAuthMailbox, ConnectionVerificationCode, ConnectionVerificationStage,
-    ConnectionVerificationStatus, CreateOAuthAccount, DraftBodyBinding,
-    DraftConnectionVerification, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome,
-    FlagBatchOutcome, FlagChange, MailxCore, MessageFlag, OAuthBrowserAuthorization,
-    OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult, ProtocolVerification,
-    RemoteImageStatus, TranslationCacheStats, TranslationInfo, TranslationKeyState,
-    TranslationProxyPasswordState, TranslationStatus, TranslationTest, VerifyAccountConnection,
-    VerifyDraftConnection,
+    AccountConnectionVerification, Activity, AiConnectionState, AiService, AiState, ArchiveOutcome,
+    AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind, BeginOAuthAccount,
+    BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks, CancelConnectionVerification,
+    CancelDraftVerification, ConfirmOAuthMailbox, ConnectionVerificationCode,
+    ConnectionVerificationStage, ConnectionVerificationStatus, CreateOAuthAccount,
+    DraftBodyBinding, DraftConnectionVerification, EmailFlagResult, FlagBatchItem,
+    FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailxCore, MessageFlag,
+    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
+    ProtocolVerification, RemoteImageStatus, SaveAiConnection, SavedAiConnection,
+    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
+    TranslationStatus, TranslationTest, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -57,11 +63,11 @@ pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings,
-    LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings, NotificationSettings,
-    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, SettingsChanged,
-    SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode, TranslationProviderId,
-    TranslationRoute, TranslationSettings, mail_body_css,
+    AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
+    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings,
+    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
+    ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
+    TranslationProviderId, TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

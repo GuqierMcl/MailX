@@ -7,6 +7,8 @@
 
 use crate::SupportedLocale;
 use crate::accounts::types::ProxyKind;
+use crate::ai::AiSettings;
+use crate::ai::settings::repair_ai;
 use crate::error::{AppError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -19,7 +21,8 @@ use uuid::Uuid;
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 const BACKUP_FILE_NAME: &str = "settings.json.bak";
 const CURRENT_VERSION: u32 = 1;
-const MAX_FILE_BYTES: u64 = 64 * 1024;
+// Twenty AI connections with long addresses alone can pass 64 KiB.
+const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 pub const NAV_WIDTH_MIN: u32 = 220;
 pub const NAV_WIDTH_MAX: u32 = 420;
@@ -304,15 +307,18 @@ pub enum TranslationProviderId {
     MicrosoftFree,
     /// The channel Google's web translate widget uses; no key.
     GoogleFree,
+    /// A model from the AI settings; the key and route are the AI connection's.
+    Ai,
 }
 
 impl TranslationProviderId {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Deepl,
         Self::Microsoft,
         Self::Google,
         Self::MicrosoftFree,
         Self::GoogleFree,
+        Self::Ai,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -322,25 +328,27 @@ impl TranslationProviderId {
             Self::Google => "google",
             Self::MicrosoftFree => "microsoftFree",
             Self::GoogleFree => "googleFree",
+            Self::Ai => "ai",
         }
     }
 
-    /// The two browser-channel services work without a key.
+    /// The two browser-channel services work without a key, and `ai` uses the
+    /// key of its AI connection.
     pub fn needs_key(self) -> bool {
-        !matches!(self, Self::MicrosoftFree | Self::GoogleFree)
+        !matches!(self, Self::MicrosoftFree | Self::GoogleFree | Self::Ai)
     }
 }
 
-/// How translation requests reach the service. The mail accounts' own proxies
-/// are never used. The proxy password is a secret kept outside the settings;
-/// an empty `username` means no sign-in.
+/// How requests to a third-party service (translation, AI) reach it. The mail
+/// accounts' own proxies are never used. The proxy password is a secret kept
+/// outside the settings; an empty `username` means no sign-in.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-pub enum TranslationRoute {
+pub enum ServiceRoute {
     #[default]
     Direct,
     Proxy {
@@ -350,6 +358,108 @@ pub enum TranslationRoute {
         #[serde(default)]
         username: String,
     },
+}
+
+impl ServiceRoute {
+    /// Validates a hand- or client-supplied route. `field` is the settings path
+    /// of the route, used in the error (`translation.route`).
+    pub(crate) fn validate(&self, field: &str) -> Result<(), AppError> {
+        if let Self::Proxy {
+            host,
+            port,
+            username,
+            ..
+        } = self
+        {
+            let bad_host = host.is_empty()
+                || host.chars().count() > MAX_PROXY_HOST_CHARS
+                || host.chars().any(|c| c.is_whitespace() || c.is_control());
+            if bad_host {
+                return Err(AppError::validation(&format!("{field}.host")));
+            }
+            if *port == 0 {
+                return Err(AppError::validation(&format!("{field}.port")));
+            }
+            if !valid_proxy_username(username) {
+                return Err(AppError::validation(&format!("{field}.username")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Hand-edited files fall back per field: a bad username is dropped alone
+    /// (the proxy stays, so traffic never silently falls back to a direct
+    /// connection); a route that is still invalid becomes `Direct`.
+    pub(crate) fn sanitized(mut self) -> Self {
+        if let Self::Proxy { username, .. } = &mut self
+            && !valid_proxy_username(username)
+        {
+            username.clear();
+        }
+        if self.validate("route").is_ok() {
+            self
+        } else {
+            Self::Direct
+        }
+    }
+
+    /// Signing in needs a username.
+    pub(crate) fn needs_password(&self) -> bool {
+        matches!(self, Self::Proxy { username, .. } if !username.is_empty())
+    }
+
+    /// The route a request takes. The mail account's own proxy is never used;
+    /// a password stored without a username is ignored.
+    pub(crate) fn net_route(
+        &self,
+        password: Option<crate::secrets::SecretValue>,
+    ) -> crate::net::NetRoute {
+        match self {
+            Self::Direct => crate::net::NetRoute::default(),
+            Self::Proxy {
+                proxy_kind,
+                host,
+                port,
+                username,
+            } => crate::net::NetRoute {
+                proxy: Some(crate::net::ProxyRoute {
+                    kind: *proxy_kind,
+                    host: host.clone(),
+                    port: *port,
+                    auth: (!username.is_empty()).then(|| {
+                        (
+                            username.clone(),
+                            password
+                                .unwrap_or_else(|| crate::secrets::SecretValue::new(String::new())),
+                        )
+                    }),
+                }),
+                image_proxy_dns: false,
+            },
+        }
+    }
+}
+
+/// The AI connection the user agreed to send mail text to: its id and its
+/// normalized base URL. Changing either needs a new agreement; the model and
+/// the key may change freely.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConsent {
+    pub connection_id: String,
+    pub base_url: String,
+}
+
+impl AiConsent {
+    /// Canonical form, or `None` for an id that is not a UUID or a URL the AI
+    /// layer would not accept.
+    pub(crate) fn normalized(self) -> Option<Self> {
+        uuid::Uuid::parse_str(&self.connection_id).ok()?;
+        Some(Self {
+            base_url: crate::ai::validation::normalize_base_url(&self.base_url)?,
+            ..self
+        })
+    }
 }
 
 const MAX_LANGUAGE_RULES: usize = 64;
@@ -366,7 +476,7 @@ pub struct TranslationSettings {
     pub provider: Option<TranslationProviderId>,
     /// Azure resource region; `""` for a global resource.
     pub microsoft_region: String,
-    pub route: TranslationRoute,
+    pub route: ServiceRoute,
     /// `"auto"` (follow the UI language) or one of `translate::languages::TARGETS`.
     pub target_language: String,
     /// Offer to translate when a mail is in another language.
@@ -378,6 +488,8 @@ pub struct TranslationSettings {
     /// Translate folded quoted text too.
     pub include_quotes: bool,
     pub consented_provider: Option<TranslationProviderId>,
+    /// With `consented_provider = ai`: which connection the agreement covers.
+    pub consented_ai: Option<AiConsent>,
 }
 
 impl Default for TranslationSettings {
@@ -385,13 +497,14 @@ impl Default for TranslationSettings {
         Self {
             provider: Some(TranslationProviderId::MicrosoftFree),
             microsoft_region: String::new(),
-            route: TranslationRoute::Direct,
+            route: ServiceRoute::Direct,
             target_language: "auto".into(),
             suggest: true,
             never_suggest: Vec::new(),
             always_translate: Vec::new(),
             include_quotes: false,
             consented_provider: None,
+            consented_ai: None,
         }
     }
 }
@@ -444,29 +557,19 @@ impl TranslationSettings {
         {
             return Err(AppError::validation("translation.microsoftRegion"));
         }
-        if let TranslationRoute::Proxy {
-            host,
-            port,
-            username,
-            ..
-        } = &self.route
-        {
-            let bad_host = host.is_empty()
-                || host.chars().count() > MAX_PROXY_HOST_CHARS
-                || host.chars().any(|c| c.is_whitespace() || c.is_control());
-            if bad_host {
-                return Err(AppError::validation("translation.route.host"));
-            }
-            if *port == 0 {
-                return Err(AppError::validation("translation.route.port"));
-            }
-            if !valid_proxy_username(username) {
-                return Err(AppError::validation("translation.route.username"));
-            }
-        }
+        self.route.validate("translation.route")?;
+        let consented_ai = match self.consented_ai {
+            Some(consent) => Some(
+                consent
+                    .normalized()
+                    .ok_or_else(|| AppError::validation("translation.consentedAi"))?,
+            ),
+            None => None,
+        };
         Ok(Self {
             never_suggest,
             always_translate,
+            consented_ai,
             ..self
         })
     }
@@ -477,20 +580,7 @@ impl TranslationSettings {
         let mut never_suggest = normalize_language_codes(&self.never_suggest).unwrap_or_default();
         let always_translate = normalize_language_codes(&self.always_translate).unwrap_or_default();
         never_suggest.retain(|code| !always_translate.contains(code));
-        // A bad username is dropped alone: the proxy stays, so traffic never
-        // silently falls back to a direct connection.
-        let mut route = self.route.clone();
-        if let TranslationRoute::Proxy { username, .. } = &mut route
-            && !valid_proxy_username(username)
-        {
-            username.clear();
-        }
-        let valid_route = Self {
-            route: route.clone(),
-            ..defaults.clone()
-        }
-        .normalized()
-        .is_ok();
+        let route = self.route.clone().sanitized();
         let valid_region = Self {
             microsoft_region: self.microsoft_region.clone(),
             ..defaults.clone()
@@ -506,7 +596,7 @@ impl TranslationSettings {
             } else {
                 defaults.microsoft_region
             },
-            route: if valid_route { route } else { defaults.route },
+            route,
             target_language: if valid_target {
                 self.target_language
             } else {
@@ -517,6 +607,7 @@ impl TranslationSettings {
             always_translate,
             include_quotes: self.include_quotes,
             consented_provider: self.consented_provider,
+            consented_ai: self.consented_ai.and_then(AiConsent::normalized),
         }
     }
 }
@@ -542,7 +633,8 @@ fn repair_translation(value: &mut serde_json::Value) {
     }
     section.retain(|key, v| match key.as_str() {
         "provider" | "consentedProvider" => is_provider(v),
-        "route" => serde_json::from_value::<TranslationRoute>(v.clone()).is_ok(),
+        "consentedAi" => v.is_null() || serde_json::from_value::<AiConsent>(v.clone()).is_ok(),
+        "route" => serde_json::from_value::<ServiceRoute>(v.clone()).is_ok(),
         "microsoftRegion" | "targetLanguage" => v.is_string(),
         "suggest" | "includeQuotes" => v.is_boolean(),
         "neverSuggest" | "alwaysTranslate" => is_codes(v),
@@ -673,6 +765,11 @@ pub struct AppSettings {
     pub compose: ComposeSettings,
     pub mcp: McpSettings,
     pub translation: TranslationSettings,
+    /// Only the AI commands change it; `SettingsPatch` has no such field. The
+    /// interface reads it through `ai_state`, so it is not part of the
+    /// generated settings type.
+    #[ts(skip)]
+    pub ai: AiSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -754,6 +851,7 @@ impl AppSettings {
             compose,
             mcp: self.mcp,
             translation: self.translation.normalized()?,
+            ai: self.ai.normalized()?,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
                     .ok_or_else(|| AppError::validation("appearance.accentColor"))?,
@@ -796,6 +894,7 @@ impl AppSettings {
             compose,
             mcp: self.mcp,
             translation: self.translation.sanitized(),
+            ai: self.ai.sanitized(),
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
                 nav_collapsed: self.layout.nav_collapsed,
@@ -1037,6 +1136,7 @@ impl SettingsStore {
             translation: patch
                 .translation
                 .unwrap_or_else(|| state.settings.translation.clone()),
+            ai: state.settings.ai.clone(),
         }
         .normalized()?;
         write_file(&self.directory, &settings)?;
@@ -1084,12 +1184,38 @@ impl SettingsStore {
         Ok(state.snapshot(self.system_locale))
     }
 
-    /// Replaces all settings except `mcp`. The file is written atomically
+    /// Changes only the `ai` section, under the store lock, so it merges with
+    /// concurrent edits elsewhere. The result is validated before anything is
+    /// written; on error nothing changes.
+    pub fn update_ai<R>(
+        &self,
+        change: impl FnOnce(&mut AiSettings) -> Result<R, AppError>,
+    ) -> Result<R, AppError> {
+        let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let mut ai = state.settings.ai.clone();
+        let result = change(&mut ai)?;
+        let settings = AppSettings {
+            ai,
+            ..state.settings.clone()
+        }
+        .normalized()?;
+        write_file(&self.directory, &settings)?;
+        *state = State {
+            revision: state.revision.saturating_add(1),
+            settings,
+            stored: true,
+            recovered: false,
+        };
+        Ok(result)
+    }
+
+    /// Replaces all settings except `mcp` and `ai`. The file is written atomically
     /// before the in-memory copy changes, so a failed write leaves both untouched.
     pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
         let settings = AppSettings {
             mcp: state.settings.mcp,
+            ai: state.settings.ai.clone(),
             ..settings
         }
         .normalized()?;
@@ -1126,6 +1252,13 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 repair_translation(translation);
             } else {
                 settings.remove("translation");
+            }
+        }
+        if let Some(ai) = settings.get_mut("ai") {
+            if ai.is_object() {
+                repair_ai(ai);
+            } else {
+                settings.remove("ai");
             }
         }
         match settings.get_mut("general") {

@@ -22,6 +22,7 @@
 | [桌面与 Web](desktop-web.md) | 两种宿主、前端数据流、进程生命周期和部署 |
 | [界面设计语言](ui-design.md) | 画布与浮动岛屿、无分割线、自有外壳组件、标题栏插槽与命令面板 |
 | [邮件翻译](translation.md) | Implemented（仅自动测试）：打开邮件后经用户选定的翻译服务保留版式翻译，数据披露与同意、分段回写的安全不变量、专用网络路由、本机缓存与限额 |
+| [AI 服务商与模型配置](ai-providers.md) | Implemented（仅自动测试）：连接模型服务商、内置服务商表、models.dev 目录、模型列表与测试调用、图标和密钥保存；尚无功能使用模型 |
 | [中英文文本适配](internationalization.md) | Implemented：界面、错误、语言设置、多窗口同步及 Rust 文本；三平台体验待验，区域格式化 Planned |
 
 接口结构以[应用契约](../contracts/app-api.md)与 [MCP 契约](../contracts/mcp.md)为入口；模型执行另见 [AI Runtime](../ai-runtime/README.md)，两者共用的工具层见[工具层与调用入口](agent-tools.md)。

@@ -67,11 +67,13 @@ Remote images ask first by default, and attachments can be saved as local files.
 
 ## Translate messages
 
-MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation works out of the box with Microsoft Translate, which needs no sign-up and no key. It uses an online translation service, not an AI assistant, and it is not built into MailX. If you want something steadier, you can switch to a service with a key of your own. This feature is new and has only been checked with automated tests, a few test sentences and a preview with sample data, not yet by hand on every system.
+MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation works out of the box with Microsoft Translate, which needs no sign-up and no key. It uses an online translation service, not an AI assistant, and it is not built into MailX; if you have connected an AI model (see AI below), you can also choose that. If you want something steadier, you can switch to a service with a key of your own. This feature is new and has only been checked with automated tests, a few test sentences and a preview with sample data, not yet by hand on every system.
 
 ### Choose a service
 
 Microsoft Translate and Google Translate need no setup. They use the same channel as the translator built into the Edge and Chrome browsers. That channel is not something Microsoft or Google officially offers to other apps, so it can stop working or slow down at any time, and neither company makes any promise about it. If it fails, the line above the message offers Retry and "Use another service". Google Translate usually needs a proxy in mainland China. For something steadier, choose a service with your own key.
+
+To use an AI model instead, first connect a provider under Settings → Integrations → AI, then choose "AI model" as the Translation service. It uses your default model unless you pick another under "Model" ("Same as default" follows the default model). If no model is ready, the button offers "Open AI settings". Models can be slower than the other services and can make mistakes, and sample tests with real models have not been done yet.
 
 To use your own key:
 
@@ -85,7 +87,7 @@ Open a message and click the translate button in the reading toolbar, just after
 
 If you turned translation off ("Don't translate"), or chose a service with your own key and have not saved one yet, the button tells you ("No translation service is set up yet") and offers Open settings. Only messages that have been downloaded and have a formatted (HTML) body can be translated.
 
-The first time you use a service, MailX asks "Send this message to …?" before anything is sent, and you can Cancel. For Microsoft Translate and Google Translate the question also says that this is the channel browsers use, not an official service for other apps, so it may stop working, and that your text goes to Microsoft or Google. Switching to another service asks again. While you stay in MailX, it remembers for each message whether you were viewing the translation and whether you closed the hint; this is not kept after you quit.
+The first time you use a service, MailX asks "Send this message to …?" before anything is sent, and you can Cancel. For Microsoft Translate and Google Translate the question also says that this is the channel browsers use, not an official service for other apps, so it may stop working, and that your text goes to Microsoft or Google. Switching to another service asks again. For an AI model it asks before the first message is sent to that provider, and again if you switch to a different provider. While you stay in MailX, it remembers for each message whether you were viewing the translation and whether you closed the hint; this is not kept after you quit.
 
 ### The language hint
 
@@ -97,7 +99,7 @@ Choose "Always translate …" for a language, and messages in that language are 
 
 ### What is sent and what is not
 
-MailX sends the message's subject and text to the service you chose (Microsoft, Google, or the one whose key you saved), and only after you agree. It does not send attachments, pictures, link addresses or your mailbox passwords. Quoted earlier messages at the end of a reply are not translated unless you turn on "Translate quoted earlier messages" (off by default). Code and plain web or email addresses are left as they are. What each service does with your text is governed by that service's own terms, so check them before you use it for private mail. The no-setup services have no terms and no data-processing statement for this use, so for private or sensitive mail prefer a service with your own key and terms you have read.
+MailX sends the message's subject and text to the service you chose (Microsoft, Google, the one whose key you saved, or your AI model's provider), and only after you agree. It does not send attachments, pictures, link addresses or your mailbox passwords. Quoted earlier messages at the end of a reply are not translated unless you turn on "Translate quoted earlier messages" (off by default). Code and plain web or email addresses are left as they are. What each service does with your text is governed by that service's own terms, so check them before you use it for private mail. The no-setup services have no terms and no data-processing statement for this use, so for private or sensitive mail prefer a service with your own key and terms you have read.
 
 ### Use a proxy for translation
 
@@ -115,6 +117,26 @@ Finished translations are kept on this computer so reopening a message does not 
 - If a service drops a link or picture from a paragraph, MailX keeps that paragraph in the original language.
 - Translation is not available to MCP clients, and a side-by-side view is not available.
 
+## AI
+
+Settings → Integrations → AI connects MailX to AI model providers. Translation can use a model (choose "AI model" under Translation); nothing else in MailX does yet, and nothing you read or write is sent to a model unless you choose that.
+
+### Add a provider
+
+1. Open Settings → Integrations → AI and choose "Add provider" under "Providers".
+2. Pick a provider from the list, or choose Custom and enter the address and API type yourself (OpenAI-compatible or Anthropic-compatible).
+3. Enter your API key and choose "Connect". MailX asks the provider for its list of models; if that fails, you see why, and "Save anyway" keeps the provider without checking it. Then pick a model.
+
+The key is kept on this device and is never shown again. MailX shows which host the key is sent to. Local services such as Ollama and LM Studio run on this computer and need no key.
+
+### Default model and Test
+
+Under "Default model", choose one of the models of a provider you added. "Test" sends one short fixed sentence (no mail content) and shows how long the reply took, or why it failed. Translation follows this default unless you choose another under Settings → Translation → "Model".
+
+### Use a proxy for AI
+
+AI connects directly by default. Under "Advanced" you can set a proxy (SOCKS5 or HTTP, with an optional username and password) used only for AI; then choose per provider whether it goes through it. The proxy you set on a mail account is not used. If the proxy fails, the request fails and never connects directly.
+
 ## Composing and sending
 
 New mail, reply, reply all and forward use a separate compose window, and drafts save locally as you type. You can attach files, insert pictures or paste screenshots; attachments and inline images together default to a 20 MiB limit, and providers may impose a lower one. Drafts do not sync to other clients.
@@ -129,7 +151,7 @@ The Sent folder shows a local copy until MailX matches it to the provider's save
 
 ## Connecting external AI clients (MCP)
 
-MailX includes a local MCP server. A built-in AI assistant or model settings are not available yet. MCP is off by default.
+MailX includes a local MCP server. A built-in AI assistant is not available yet. MCP is off by default.
 
 1. Open Settings → MCP, turn it on and read the authorization confirmation. The master switch gives connected local clients reading, mail organizing, draft and local file attachment management, and direct sending for all accounts, **with no per-message send confirmation**.
 2. Click Copy client configuration and add it to a compatible MCP client. The configuration uses the bridge installed with the app; copy it again if you move the installation. Follow each client's own documentation for importing it.

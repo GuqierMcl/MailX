@@ -10,15 +10,13 @@
 
 待办结果只是当前界面的建议列表，不自动创建外部任务；邮件里的日期可能不完整，输出原始依据、推断时区和不确定状态，不擅自补一个确定截止日。AI 关闭、离线或失败时，收发和本地搜索继续可用。
 
-> 邮件翻译已作为**非 AI 功能**实现：用户自带 DeepL、Microsoft Translator 或 Google Cloud Translation 的密钥，经专用路由翻译，设计见[邮件翻译](../architecture/translation.md)。本文的 AI 运行时尚未实现；日后若增加由模型提供的翻译来源，将复用这里的内容披露与 Run 规则，并沿用邮件翻译的分段与不可信回写。当前没有任何模型被用于翻译。
+> 邮件翻译作为**非 AI 功能**实现，默认服务不使用模型：用户自带 DeepL、Microsoft Translator 或 Google Cloud Translation 的密钥，经专用路由翻译，设计见[邮件翻译](../architecture/translation.md)。本文的 AI 运行时尚未实现；由模型提供的翻译来源已作为可选服务实现：直接用[AI 服务商与模型配置](../architecture/ai-providers.md)的非流式调用，沿用邮件翻译的同意、分段与不可信回写，没有经过本文的 Run、内容披露或取消机制；这些仍待实现。
 
 ## 2. 模型适配
 
-后续在 core 内按需定义 `ModelProvider` 接口，并在同一包的模型模块实现 OpenAI 兼容 HTTP 流接口与 Ollama 原生接口，不另设 infra 包。两类适配器分别解析流与错误，不能假设所有提供商支持相同参数、工具调用或 JSON 输出。具体 API 版本与 SDK 在 M3 对接时核验。
+服务商与模型配置已实现，见 [AI 服务商与模型配置](../architecture/ai-providers.md)：多个连接（OpenAI 兼容与 Anthropic 兼容两种协议，Ollama 经其 OpenAI 兼容接口作为内置预设）、密钥存 `SecretStore`、模型列表、测试调用、默认模型和 AI 专用代理，以及 core 内一个非流式的 `complete` 原语。目前没有任何功能调用它。
 
-模型配置包含 providerId、baseUrl、modelId、secretRef、routeId、超时及可选上下文预算。所谓“兼容接口”先通过真实请求测试才标记可用。Anthropic 原生协议单独适配，不把一个 Key 输入框当作已经支持所有模型。
-
-前端只调用 MailX 核心，不直接请求模型或保存 Key。用户可以输入 Key，后台保存后前端只得到已配置状态；本地端点由用户启用，不启动即扫描模型服务。
+仍为计划：按需在 core 内定义 `ModelProvider` 接口与流式输出，不能假设所有提供商支持相同参数、工具调用或 JSON 输出；Ollama 原生接口；按用途单独指定模型。前端只调用 MailX 核心，不直接请求模型或保存 Key。
 
 ## 3. 上下文与数据披露
 

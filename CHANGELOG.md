@@ -11,6 +11,11 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
+- Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
+
 ### 🩹 Fixed
 
 - On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。 ([#125](https://github.com/GuqierMcl/MailX/pull/125))

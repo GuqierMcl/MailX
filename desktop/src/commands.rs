@@ -1629,6 +1629,35 @@ async fn translation_inputs(
     Ok((snapshot.settings.translation, language))
 }
 
+/// The model translation would use, resolved only when the saved service is
+/// `ai`, so the other services never depend on the AI service building.
+async fn translation_ai_target(
+    state: &DesktopState,
+    settings: &mailx_core::settings::TranslationSettings,
+) -> Result<Option<mailx_core::AiModelTarget>, AppError> {
+    if settings.provider != Some(mailx_core::settings::TranslationProviderId::Ai) {
+        return Ok(None);
+    }
+    match state.ai()?.translation_target().await {
+        Ok(target) => Ok(Some(target)),
+        Err(error) if error.code == ErrorCode::AiNotConfigured => {
+            Err(AppError::new(ErrorCode::TranslationNotConfigured))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Which connection `ai` translation would use, from the settings alone.
+async fn translation_ai_binding(
+    state: &DesktopState,
+    settings: &mailx_core::settings::TranslationSettings,
+) -> Result<Option<mailx_core::settings::AiConsent>, AppError> {
+    if settings.provider != Some(mailx_core::settings::TranslationProviderId::Ai) {
+        return Ok(None);
+    }
+    state.ai()?.translation_binding().await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TranslateArgs {
@@ -1668,9 +1697,10 @@ pub(crate) async fn translation_status(
         async {
             let args = args?;
             let (settings, language) = translation_inputs(&state).await?;
+            let ai = translation_ai_binding(&state, &settings).await?;
             state
                 .core()?
-                .translation_status(args.email_id, settings, language)
+                .translation_status(args.email_id, settings, language, ai)
                 .await
         }
         .await,
@@ -1689,9 +1719,10 @@ pub(crate) async fn translation_translate(
         async {
             let args = args?;
             let (settings, language) = translation_inputs(&state).await?;
+            let ai = translation_ai_target(&state, &settings).await?;
             state
                 .core()?
-                .translate_email(args.email_id, settings, language, args.target_language)
+                .translate_email(args.email_id, settings, language, args.target_language, ai)
                 .await
         }
         .await,
@@ -1882,8 +1913,226 @@ pub(crate) async fn translation_test(
         async {
             args?;
             let (settings, _) = translation_inputs(&state).await?;
-            state.core()?.test_translation(settings).await
+            let ai = translation_ai_target(&state, &settings).await?;
+            state.core()?.test_translation(settings, ai).await
         }
         .await,
+    ))
+}
+
+// --------------------------------------------------------------------- ai
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AiIdArgs {
+    id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiDefaultModelArgs {
+    model: Option<mailx_core::AiModelRef>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiRouteArgs {
+    route: mailx_core::settings::ServiceRoute,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiPasswordArgs {
+    password: mailx_core::secrets::SecretValue,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiCatalogArgs {
+    refresh: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AiConnectionArgs {
+    connection_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AiTestArgs {
+    connection_id: String,
+    model_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AiProviderArgs {
+    provider_id: String,
+}
+
+#[tauri::command]
+pub(crate) async fn ai_state(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_state").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.ai()?.state().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_save_connection(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::SavedAiConnection>, ()> {
+    let args = authorize(&window, "ai_save_connection")
+        .and_then(|_| parse::<WriteArgs<mailx_core::SaveAiConnection>>(request.body()));
+    Ok(respond(
+        async { state.ai()?.save_connection(args?.request).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_remove_connection(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args =
+        authorize(&window, "ai_remove_connection").and_then(|_| parse::<AiIdArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.remove_connection(&args?.id).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_set_default_model(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_set_default_model")
+        .and_then(|_| parse::<AiDefaultModelArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.set_default_model(args?.model).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_set_translation_model(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_set_translation_model")
+        .and_then(|_| parse::<AiDefaultModelArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.set_translation_model(args?.model).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_set_route(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args =
+        authorize(&window, "ai_set_route").and_then(|_| parse::<AiRouteArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.set_route(args?.route).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_set_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_set_proxy_password")
+        .and_then(|_| parse::<AiPasswordArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.set_proxy_password(args?.password).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_remove_proxy_password(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_remove_proxy_password")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.ai()?.remove_proxy_password().await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_catalog(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiCatalog>, ()> {
+    let args =
+        authorize(&window, "ai_catalog").and_then(|_| parse::<AiCatalogArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.catalog(args?.refresh).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_list_models(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::AiModel>>, ()> {
+    let args = authorize(&window, "ai_list_models")
+        .and_then(|_| parse::<AiConnectionArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.list_models(&args?.connection_id).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_test(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiTestResult>, ()> {
+    let args = authorize(&window, "ai_test").and_then(|_| parse::<AiTestArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            state.ai()?.test(&args.connection_id, &args.model_id).await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_provider_icon(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Option<mailx_core::AiProviderIcon>>, ()> {
+    let args = authorize(&window, "ai_provider_icon")
+        .and_then(|_| parse::<AiProviderArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.provider_icon(&args?.provider_id).await }.await,
     ))
 }

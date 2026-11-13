@@ -8,7 +8,8 @@ use std::{
 
 pub(crate) use mailx_core::StartupStatus;
 use mailx_core::{
-    Activity, AppError, ErrorCode, Events, MailxCore, SettingsStore, secrets::SecretStore,
+    Activity, AiService, AppError, ErrorCode, Events, MailxCore, SettingsStore,
+    secrets::SecretStore,
 };
 
 struct Inner {
@@ -20,6 +21,9 @@ struct Inner {
     /// before the core has opened, so it is kept here and handed over when it does.
     activity: Mutex<Activity>,
     settings: Mutex<Option<Arc<SettingsStore>>>,
+    /// AI provider settings need only the settings, secrets and data
+    /// directory, so they work even when the mail store could not open.
+    ai: Mutex<Option<Arc<AiService>>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
     /// Called each time the core becomes ready (also after a retry).
@@ -44,6 +48,7 @@ impl DesktopState {
             core: Mutex::new(None),
             activity: Mutex::new(Activity::default()),
             settings: Mutex::new(None),
+            ai: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
@@ -220,6 +225,23 @@ impl DesktopState {
     )> {
         let snapshot = self.settings_store().ok()?.get().ok()?;
         Some((snapshot.settings.notifications, snapshot.effective_locale))
+    }
+
+    /// The AI provider service, created on first use.
+    pub(crate) fn ai(&self) -> Result<Arc<AiService>, AppError> {
+        let store = self.settings_store()?;
+        let mut slot = self
+            .0
+            .ai
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        if let Some(service) = slot.as_ref() {
+            return Ok(service.clone());
+        }
+        let directory = self.0.data_dir.as_ref().map_err(Clone::clone)?;
+        let service = Arc::new(AiService::new(store, self.0.secrets.clone(), directory));
+        *slot = Some(service.clone());
+        Ok(service)
     }
 
     fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {

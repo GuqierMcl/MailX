@@ -10,6 +10,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
         translation: TranslationSettings::default(),
+        ai: AiSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
             interface_font: interface_font.into(),
@@ -334,6 +335,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         value,
         serde_json::json!({
             "settings": {
+                "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
                 "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
                 "appearance": {
                     "theme": "system",
@@ -364,7 +366,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "neverSuggest": [],
                     "alwaysTranslate": [],
                     "includeQuotes": false,
-                    "consentedProvider": null
+                    "consentedProvider": null,
+                    "consentedAi": null
                 }
             },
             "stored": false,
@@ -1261,8 +1264,8 @@ fn translation(edit: impl FnOnce(&mut TranslationSettings)) -> TranslationSettin
     settings
 }
 
-fn proxy(host: &str, port: u16) -> TranslationRoute {
-    TranslationRoute::Proxy {
+fn proxy(host: &str, port: u16) -> ServiceRoute {
+    ServiceRoute::Proxy {
         proxy_kind: ProxyKind::Socks5,
         host: host.into(),
         port,
@@ -1270,20 +1273,20 @@ fn proxy(host: &str, port: u16) -> TranslationRoute {
     }
 }
 
-fn proxy_as(username: &str) -> TranslationRoute {
+fn proxy_as(username: &str) -> ServiceRoute {
     match proxy("proxy.example", 1080) {
-        TranslationRoute::Proxy {
+        ServiceRoute::Proxy {
             proxy_kind,
             host,
             port,
             ..
-        } => TranslationRoute::Proxy {
+        } => ServiceRoute::Proxy {
             proxy_kind,
             host,
             port,
             username: username.into(),
         },
-        TranslationRoute::Direct => unreachable!(),
+        ServiceRoute::Direct => unreachable!(),
     }
 }
 
@@ -1299,7 +1302,7 @@ fn translation_defaults_use_the_keyless_service_and_stay_private() {
         Some(TranslationProviderId::MicrosoftFree)
     );
     assert_eq!(defaults.consented_provider, None);
-    assert_eq!(defaults.route, TranslationRoute::Direct);
+    assert_eq!(defaults.route, ServiceRoute::Direct);
     assert_eq!(defaults.target_language, "auto");
     assert!(defaults.suggest && !defaults.include_quotes);
     assert!(defaults.never_suggest.is_empty() && defaults.always_translate.is_empty());
@@ -1321,7 +1324,7 @@ fn translation_settings_serialize_in_the_documented_shape() {
         serde_json::json!({"kind": "proxy", "proxyKind": "socks5", "host": "proxy.example", "port": 1080, "username": ""})
     );
     assert_eq!(
-        serde_json::to_value(TranslationRoute::Direct).unwrap(),
+        serde_json::to_value(ServiceRoute::Direct).unwrap(),
         serde_json::json!({"kind": "direct"})
     );
 }
@@ -1452,11 +1455,11 @@ fn translation_proxy_username_follows_the_account_proxy_rule() {
 
 #[test]
 fn a_route_saved_without_a_username_still_loads() {
-    let route: TranslationRoute = serde_json::from_str(
+    let route: ServiceRoute = serde_json::from_str(
         r#"{"kind":"proxy","proxyKind":"httpConnect","host":"p","port":8080}"#,
     )
     .unwrap();
-    assert!(matches!(route, TranslationRoute::Proxy { username, .. } if username.is_empty()));
+    assert!(matches!(route, ServiceRoute::Proxy { username, .. } if username.is_empty()));
 }
 
 #[test]
@@ -1478,7 +1481,7 @@ fn a_bad_stored_username_is_dropped_but_the_proxy_stays() {
         assert!(!snapshot.recovered);
         assert_eq!(
             snapshot.settings.translation.route,
-            TranslationRoute::Proxy {
+            ServiceRoute::Proxy {
                 proxy_kind: ProxyKind::Socks5,
                 host: "p".into(),
                 port: 1080,
@@ -1553,7 +1556,7 @@ fn a_hand_edited_translation_section_falls_back_per_field() {
     assert_eq!(t.provider, Some(TranslationProviderId::MicrosoftFree));
     assert_eq!(t.consented_provider, Some(TranslationProviderId::Deepl));
     assert_eq!(t.microsoft_region, "");
-    assert_eq!(t.route, TranslationRoute::Direct);
+    assert_eq!(t.route, ServiceRoute::Direct);
     assert_eq!(t.target_language, "auto");
     assert!(!t.suggest, "a valid field keeps its value");
     assert!(!t.include_quotes);
@@ -1620,11 +1623,250 @@ fn only_the_browser_channels_work_without_a_key() {
         keyless,
         [
             TranslationProviderId::MicrosoftFree,
-            TranslationProviderId::GoogleFree
+            TranslationProviderId::GoogleFree,
+            TranslationProviderId::Ai
         ]
     );
     assert_eq!(
         serde_json::to_value(TranslationProviderId::GoogleFree).unwrap(),
         "googleFree"
     );
+}
+
+// ------------------------------------------------------------------- ai
+
+fn ai_connection(name: &str) -> crate::ai::AiConnection {
+    crate::ai::AiConnection {
+        id: Uuid::new_v4().to_string(),
+        provider_id: "custom".into(),
+        name: name.into(),
+        protocol: crate::ai::AiProtocol::OpenaiCompatible,
+        base_url: "https://api.example.com/v1".into(),
+        use_proxy: false,
+    }
+}
+
+#[test]
+fn only_the_ai_update_changes_the_ai_section() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let connection = ai_connection("A");
+    let id = connection.id.clone();
+    store
+        .update_ai(|ai| {
+            ai.connections.push(connection);
+            Ok(())
+        })
+        .unwrap();
+
+    // The general patch has no `ai` field, so a client cannot send one.
+    assert!(serde_json::from_str::<SettingsPatch>(r#"{"ai":{"connections":[]}}"#).is_err());
+    let patched = store
+        .patch(serde_json::from_str::<SettingsPatch>(r#"{"appearance":{"theme":"dark"}}"#).unwrap())
+        .unwrap();
+    assert_eq!(patched.settings.ai.connections.len(), 1);
+    // `update` replaces everything else but keeps `ai`.
+    let replaced = store.update(AppSettings::default()).unwrap();
+    assert_eq!(replaced.settings.ai.connections[0].id, id);
+    let reopened = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(reopened.get().unwrap().settings.ai.connections[0].id, id);
+}
+
+#[test]
+fn a_failed_ai_update_changes_nothing() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let before = store.get().unwrap();
+    let error = store
+        .update_ai(|ai| {
+            ai.connections.push(ai_connection("  "));
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("ai.connections"));
+    let error: Result<(), AppError> = store.update_ai(|_| Err(AppError::validation("x")));
+    assert!(error.is_err());
+    assert_eq!(store.get().unwrap(), before);
+    assert!(!directory.path().join(SETTINGS_FILE_NAME).exists());
+}
+
+#[test]
+fn a_damaged_ai_section_loses_only_the_damaged_part() {
+    let directory = TempDir::new().unwrap();
+    let good = ai_connection("Good");
+    let other = ai_connection("Other");
+    let text = serde_json::json!({
+        "version": 1,
+        "settings": {
+            "appearance": {"theme": "dark"},
+            "ai": {
+                "connections": [good, {"id": 7}, "junk", other],
+                "defaultModel": {"connectionId": good.id, "modelId": "m", "name": "M", "contextLength": null, "outputLength": null},
+                "route": {"kind": "proxy", "proxyKind": "socks5", "host": "p.example", "port": 1080, "username": 5}
+            }
+        }
+    });
+    fs::write(directory.path().join(SETTINGS_FILE_NAME), text.to_string()).unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(!snapshot.recovered);
+    assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+    let ai = snapshot.settings.ai;
+    assert_eq!(ai.connections.len(), 2);
+    assert_eq!(ai.default_model.unwrap().connection_id, good.id);
+    // A bad username is dropped; the proxy itself stays.
+    assert!(
+        matches!(ai.route, ServiceRoute::Proxy { ref host, ref username, .. } if host == "p.example" && username.is_empty())
+    );
+
+    // Wrong types all the way down: the rest of the file survives.
+    for ai in [
+        serde_json::json!("text"),
+        serde_json::json!(null),
+        serde_json::json!({"connections": 5, "defaultModel": 3, "route": "x"}),
+        serde_json::json!({"connections": [{"id": "not-a-uuid", "providerId": "x", "name": "n", "protocol": "anthropic", "baseUrl": "ftp://x", "useProxy": false}]}),
+    ] {
+        let text = serde_json::json!({
+            "version": 1,
+            "settings": {"appearance": {"theme": "dark"}, "ai": ai}
+        });
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), text.to_string()).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.recovered, "{ai}");
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert_eq!(snapshot.settings.ai, AiSettings::default(), "{ai}");
+    }
+}
+
+#[test]
+fn a_default_model_on_a_missing_connection_is_dropped_when_loading() {
+    let directory = TempDir::new().unwrap();
+    let text = serde_json::json!({
+        "version": 1,
+        "settings": {"ai": {
+            "connections": [],
+            "defaultModel": {"connectionId": Uuid::new_v4().to_string(), "modelId": "m", "name": "M", "contextLength": 1, "outputLength": 2}
+        }}
+    });
+    fs::write(directory.path().join(SETTINGS_FILE_NAME), text.to_string()).unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(snapshot.settings.ai.default_model, None);
+}
+
+#[test]
+fn the_shared_route_keeps_its_wire_shape() {
+    let route: ServiceRoute = serde_json::from_str(
+        r#"{"kind":"proxy","proxyKind":"httpConnect","host":"h","port":8080,"username":"u"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&route).unwrap(),
+        serde_json::json!({"kind":"proxy","proxyKind":"httpConnect","host":"h","port":8080,"username":"u"})
+    );
+    assert_eq!(route.validate("ai.route"), Ok(()));
+    let bad = ServiceRoute::Proxy {
+        proxy_kind: ProxyKind::Socks5,
+        host: "h".into(),
+        port: 0,
+        username: String::new(),
+    };
+    assert_eq!(
+        bad.validate("ai.route").unwrap_err().field.as_deref(),
+        Some("ai.route.port")
+    );
+}
+
+const AI_ID: &str = "6f1f3d3e-8a40-4a39-9d3c-0f5f7a6b2c11";
+
+fn consent(id: &str, url: &str) -> AiConsent {
+    AiConsent {
+        connection_id: id.into(),
+        base_url: url.into(),
+    }
+}
+
+#[test]
+fn the_ai_consent_is_validated_and_normalized_with_the_ai_url_rules() {
+    assert_eq!(TranslationSettings::default().consented_ai, None);
+    let ok = translation(|s| {
+        s.provider = Some(TranslationProviderId::Ai);
+        s.consented_ai = Some(consent(AI_ID, " https://api.example.com/v1/ "));
+    })
+    .normalized()
+    .unwrap();
+    assert_eq!(
+        ok.consented_ai,
+        Some(consent(AI_ID, "https://api.example.com/v1"))
+    );
+    for bad in [
+        consent("not-a-uuid", "https://api.example.com/v1"),
+        consent(AI_ID, "ftp://api.example.com"),
+        consent(AI_ID, ""),
+        consent(AI_ID, "https://user:pw@api.example.com/v1"),
+    ] {
+        assert_eq!(
+            field_of(translation(|s| s.consented_ai = Some(bad))).as_deref(),
+            Some("translation.consentedAi")
+        );
+    }
+    let json = serde_json::to_value(translation(|s| {
+        s.provider = Some(TranslationProviderId::Ai);
+        s.consented_ai = Some(consent(AI_ID, "https://api.example.com/v1"));
+    }))
+    .unwrap();
+    assert_eq!(json["provider"], "ai");
+    assert_eq!(
+        json["consentedAi"],
+        serde_json::json!({"connectionId": AI_ID, "baseUrl": "https://api.example.com/v1"})
+    );
+    assert!(!TranslationProviderId::Ai.needs_key());
+    assert_eq!(TranslationProviderId::Ai.as_str(), "ai");
+}
+
+#[test]
+fn a_hand_edited_ai_consent_and_translation_model_are_repaired() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"translation":{
+                "provider":"ai","consentedProvider":"ai","consentedAi":{"connectionId":5}},
+              "ai":{"connections":[],"translationModel":{"connectionId":7}}}}"#,
+    )
+    .unwrap();
+    let snapshot = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert!(!snapshot.recovered);
+    let t = snapshot.settings.translation;
+    assert_eq!(t.provider, Some(TranslationProviderId::Ai));
+    assert_eq!(t.consented_provider, Some(TranslationProviderId::Ai));
+    assert_eq!(t.consented_ai, None);
+    assert_eq!(snapshot.settings.ai.translation_model, None);
+
+    // A well-formed value with an unusable URL loses only itself.
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        format!(
+            r#"{{"version":1,"settings":{{"translation":{{
+                "provider":"ai","consentedAi":{{"connectionId":"{AI_ID}","baseUrl":"ftp://x"}}}}}}}}"#
+        ),
+    )
+    .unwrap();
+    let t = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .translation;
+    assert_eq!(t.consented_ai, None);
+    assert!(t.normalized().is_ok());
 }

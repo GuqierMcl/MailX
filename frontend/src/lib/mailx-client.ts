@@ -1,6 +1,15 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
+  AiCatalog,
+  AiModel,
+  AiModelRef,
+  AiProviderIcon,
+  AiState,
+  AiTestResult,
+  SaveAiConnection,
+  SavedAiConnection,
+  ServiceRoute,
   Account,
   AccountRemoval,
   AccountConnectionVerification,
@@ -209,6 +218,22 @@ export interface MailxClient {
   removeTranslationProxyPassword(): Promise<TranslationProxyPasswordState>
   /** Translates a fixed sentence with the saved settings to check key, region and route. */
   testTranslation(): Promise<TranslationTest>
+  /** The AI connections (never their keys), the default model and the AI proxy. */
+  aiState(): Promise<AiState>
+  /** Creates (`id` null) or edits a connection; `apiKey` null keeps the key, `""` clears it. With `verify`, nothing is saved unless the provider answers. */
+  aiSaveConnection(request: SaveAiConnection): Promise<SavedAiConnection>
+  aiRemoveConnection(id: string): Promise<AiState>
+  aiSetDefaultModel(model: AiModelRef | null): Promise<AiState>
+  aiSetTranslationModel(model: AiModelRef | null): Promise<AiState>
+  aiSetRoute(route: ServiceRoute): Promise<AiState>
+  aiSetProxyPassword(password: string): Promise<AiState>
+  aiRemoveProxyPassword(): Promise<AiState>
+  /** The provider list; `refresh` asks the network, otherwise only the local copy is read. */
+  aiCatalog(refresh: boolean): Promise<AiCatalog>
+  aiListModels(connectionId: string): Promise<AiModel[]>
+  aiTest(connectionId: string, modelId: string): Promise<AiTestResult>
+  /** A downloaded provider logo as an SVG data payload, only ever used as a CSS mask; `null` when there is none. */
+  aiProviderIcon(providerId: string): Promise<AiProviderIcon | null>
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
@@ -509,6 +534,18 @@ export function createDesktopClient(): MailxClient {
     setTranslationProxyPassword: (password) => call<TranslationProxyPasswordState>('translation_set_proxy_password', { password }),
     removeTranslationProxyPassword: () => call<TranslationProxyPasswordState>('translation_remove_proxy_password'),
     testTranslation: () => call<TranslationTest>('translation_test'),
+    aiState: () => call<AiState>('ai_state'),
+    aiSaveConnection: (request) => call<SavedAiConnection>('ai_save_connection', { request }),
+    aiRemoveConnection: (id) => call<AiState>('ai_remove_connection', { id }),
+    aiSetDefaultModel: (model) => call<AiState>('ai_set_default_model', { model }),
+    aiSetTranslationModel: (model) => call<AiState>('ai_set_translation_model', { model }),
+    aiSetRoute: (route) => call<AiState>('ai_set_route', { route }),
+    aiSetProxyPassword: (password) => call<AiState>('ai_set_proxy_password', { password }),
+    aiRemoveProxyPassword: () => call<AiState>('ai_remove_proxy_password'),
+    aiCatalog: (refresh) => call<AiCatalog>('ai_catalog', { refresh }),
+    aiListModels: (connectionId) => call<AiModel[]>('ai_list_models', { connectionId }),
+    aiTest: (connectionId, modelId) => call<AiTestResult>('ai_test', { connectionId, modelId }),
+    aiProviderIcon: (providerId) => call<AiProviderIcon | null>('ai_provider_icon', { providerId }),
     onSyncState(listener) {
       if (!available) return () => undefined
       let disposed = false
