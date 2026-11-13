@@ -40,6 +40,8 @@ function renderDialog(client = testClient()) {
 async function chooseImap(dialog: HTMLElement) {
   await userEvent.click(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ }))
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+  // The generic path now opens on the sign-in card; manual setup reveals the lookup form.
+  await userEvent.click(within(dialog).getByRole('button', { name: '手工设置' }))
 }
 
 function enterAddress(dialog: HTMLElement, address = 'alice@example.com') {
@@ -88,21 +90,22 @@ describe('automatic server discovery for IMAP/SMTP', () => {
     expect(within(dialog).getByRole('button', { name: '重新探测' })).toBeInTheDocument()
   })
 
-  it('hides server fields, shows Exchange/NTLM details and submits the detected ews config', async () => {
+  it('hides server fields, shows editable Exchange/NTLM details and submits the detected ews config', async () => {
     const client = testClient()
     client.discoverMailSettings.mockResolvedValue(ewsFound())
     const { dialog, onCreated } = renderDialog(client)
     await chooseImap(dialog)
     enterAddress(dialog, 'alice@contoso.com')
-    await waitFor(() => expect(dialog).toHaveTextContent(EWS_URL), WAIT)
+    await waitFor(() => expect(within(dialog).getByLabelText('Exchange 服务器 URL')).toHaveValue(EWS_URL), WAIT)
     expect(within(dialog).queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('SMTP 主机')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('radio', { name: '收发分别设置密码' })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: '测试登录' })).not.toBeInTheDocument()
+    // Exchange details can be tested in place; the backend verifies EWS drafts too.
+    expect(within(dialog).getByRole('button', { name: '测试登录' })).toBeInTheDocument()
     expect(within(dialog).getByText('通过 HTTPS 使用 Exchange Web Services 收发邮件。')).toBeInTheDocument()
-    expect(within(dialog).getByText('认证方式: NTLM')).toBeInTheDocument()
-    expect(within(dialog).getByText('登录名: EXAMPLE\\alice')).toBeInTheDocument()
-    expect(within(dialog).getByText('证书主体: msstd:mail.example.com')).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: '认证方式' })).toHaveTextContent('NTLM')
+    expect(within(dialog).getByLabelText('登录名')).toHaveValue('EXAMPLE\\alice')
+    expect(within(dialog).getByLabelText('证书主体')).toHaveValue('msstd:mail.example.com')
     expect(within(dialog).getByText(`探测来源：${SOURCE}`)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '改为手动填写' })).toBeInTheDocument()
 
@@ -200,7 +203,7 @@ describe('automatic server discovery for IMAP/SMTP', () => {
     const { dialog, onCreated } = renderDialog(client)
     await chooseImap(dialog)
     enterAddress(dialog, 'alice@contoso.com')
-    await waitFor(() => expect(within(dialog).getByText('认证方式: Basic')).toBeInTheDocument(), WAIT)
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '认证方式' })).toHaveTextContent('Basic'), WAIT)
     await userEvent.click(within(dialog).getByRole('button', { name: '改为手动填写' }))
     expect(within(dialog).getByLabelText('IMAP 主机')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('SMTP 主机')).toBeInTheDocument()

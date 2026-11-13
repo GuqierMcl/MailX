@@ -1286,7 +1286,8 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 
 ### 42.1 实现范围
 
-- 添加账号：通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）输入邮箱地址后前端自动发起只读探测；成功自动填好 IMAP / SMTP 或切到 Exchange(EWS) 通道，失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示手动填写 IMAP 与 SMTP，并提供「重新探测」与「改为手动填写」；编辑已保存账号不自动探测。
+- 添加账号：通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）的连接步骤先只显示邮箱地址、密码与折叠的网络路由；「下一步」自动探测服务器并按**推荐协议**登录——服务器提供 Exchange（HTTP/NTLM，即 EWS over HTTPS）时优先用 EWS，否则用 IMAP/SMTP——`verifyDraftConnection` 双 protocol verified 才进入下一步（保存）。「手工设置」进入完整表单，已填邮箱地址则自动探测并用结果预填（Exchange 端点或 IMAP/SMTP 主机/端口/加密）；登录失败或探测无结果自动转手工填写表单，保留已预填的值与失败报告，可修正后再次提交；手工表单新增「账号类型」选择——Exchange（HTTP/NTLM，可编辑服务器 URL、登录名、认证方式与证书主体）、IMAP/SMTP、POP3——POP3 暂不支持（单选置灰并提示改用 IMAP/SMTP）；编辑已保存账号不自动探测。
+- 草稿登录验证支持 EWS：`verifyDraftConnection` 对带 `ews` 的连接改为一次 EWS NTLM 握手加 `FindFolder`（不读取邮件数据），同一结果同时填 `imap` / `smtp` 两个 protocol 槽；401 / 凭据错误→`authentication`，TLS→`tls`，代理→`proxy`，超时→`timeout`，连接失败→`network` 等，沿用既有 stage / code 词表；密码用 `shared` 模式的收信密码。EWS 账号的「测试登录」按钮由隐藏改为可用。
 - 探测（`core/src/discovery/`）：Exchange Autodiscover POX，只向邮箱域名派生主机发请求、HTTPS-only、可选 Basic 凭据、最多 2 跳 redirect、20 秒总预算、拒绝 DTD、错误固定枚举不泄露服务端文本、自定义代理失败不回退直连；除 IMAP / SMTP 外解析 `EXCH` / `EXPR` / `EXHTTP` / `HTTP` / `WEB`，读 `EwsUrl` / `ASUrl` / `OOFUrl` / `Server`、`<SSL>On</SSL>`、`AuthPackage`、`CertPrinName`、`LoginName`。Autodiscover 无结果时对 `https://mail.<domain>` 与 `https://<domain>` 的 `/EWS/Exchange.asmx` 做不带凭据的匿名探测，仅看 `WWW-Authenticate` 是否含 NTLM / Negotiate。
 - 新命令 `accounts_discover_mail_settings`：`{ request: { emailAddress, password: string|null, route: RouteInput } }` → `MailSettingsDiscovery { status, imap, smtp, ews, source }`，`status` 固定词表 `found | needsCredentials | rejected | notFound | network | proxy | tls | timeout | unsupported`；只读、不创建账号、不写凭证、不改已存连接；类型由 `cargo run -p mailx-core --example export_types` 生成到 `frontend/src/generated/accounts.ts`。
 - 账号契约与存储：`ConnectionInput` / `AccountConfigInput` / `Account` 新增可空 `ews: EwsConnectionConfig | null`（`{ url(https), auth: "ntlm"|"basic", username, certPrincipalName|null }`）；EWS 账号仍保留 imap / smtp 占位，密码只用 shared 模式，端点变更即失去凭证信任。迁移 `0030_exchange_ews.sql` 新增 `exchange_endpoints`、`ews_items`（ItemId → 稳定本地 uid）、`ews_folder_state`（uid 水位），账号删除时清理三张表。
@@ -1298,8 +1299,22 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 三平台（Windows / macOS / Linux）打包与桌面行为：**待验证**。
 - EWS 的 `SyncFolderItems` 增量同步与删除同步：未实现，当前每轮 `FindItem` 取前 500 封。
 - EPA 通道绑定哈希：未接线；启用扩展保护的部署待验证。
-- EWS 账号的「测试登录」按钮：EWS 模式隐藏，未提供。
+- EWS 草稿登录验证：语义已实现（见 42.1），真实 Exchange 服务器上的实测待验证。
 - 共享邮箱、世纪互联运营的 Microsoft 365、用于 EWS 的 OAuth：未提供。
 - `X-AnchorMailbox` 在多 CAS 部署中的必要性、通过企业代理访问 EWS 的稳定性、`SendAndSaveCopy` 后副本与本地快照的对账时机、Exchange 各版本 EWS 行为差异：待真实环境确认。
 
 受控测试按既有方式覆盖协议向量、SOAP 往返、NTLMv2 计算、DTO 生成一致性、迁移幂等与旧账号行为不变；这些都是本机自动检查，不能外推为真实 Exchange 或三平台桌面行为已验证。本节不复制具体执行数字、启动命令或性能数据，也不把上述边界写成已验证。实现与边界见[EWS 邮件后端](../architecture/ews-backend.md)、[Exchange 自动发现与邮箱设置探测](../architecture/exchange-autodiscovery.md)与[应用 API](../contracts/app-api.md)。
+
+### 42.3 自建 Exchange Server 2019 的实测观察（标识已脱敏）
+
+对一台自建 Exchange Server 2019（响应头 `X-OWA-Version` 15.2；域名以 `example.com` 占位，真实组织名、人名、公网 IP 与 CA 名不入仓库）做了无凭据实测：
+
+- `/EWS/Exchange.asmx` 匿名 GET 返回 401 + `WWW-Authenticate: Negotiate`，探测据此识别 EWS + NTLM。
+- `autodiscover.example.com` 返回 401 Negotiate，裸域返回 403（WAF 拦截页），Autodiscover 在该部署上均不可用；匿名 EWS 兜底探测成为唯一可用的识别途径。
+- 发信端口 25（前置网关）STARTTLS 后出示**自签名证书**，因此该部署上 IMAP/SMTP 发信必然证书验证失败，只能走 EWS（443 证书有效）；收信 IMAP 143 STARTTLS 可用。
+- 探测命令（`accounts_discover_mail_settings`）在该域名上无凭据或带错误密码均约 0.7 秒返回 `found` + `ews`。
+- **端到端收发仍未验证**：见 42.2。
+
+### 42.4 注意事项：Tauri v2 自定义命令的三处 ACL 同步
+
+Tauri v2 的自定义命令除了 `desktop/src/window_access.rs` 的来源白名单，还必须同时出现在 `desktop/build.rs` 的 `AppManifest::commands` 清单与 `desktop/capabilities/main.json` 的 permissions 里（权限 toml 由 tauri-build 自动生成、已被 gitignore）。漏掉后两者时前端 invoke 报 "Command … not allowed by ACL"。本次 `accounts_discover_mail_settings` 漏了后两处，表现为探测永远显示「无法连接服务器以探测设置」。新增桌面命令务必三处同步。

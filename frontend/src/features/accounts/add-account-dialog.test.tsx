@@ -26,6 +26,8 @@ function fillConnection(dialog: HTMLElement, password = 'synthetic-secret') {
 async function chooseImap(dialog: HTMLElement) {
   await userEvent.click(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ }))
   await userEvent.click(within(dialog).getByRole('button', { name: '下一步' }))
+  // The generic path now opens on the sign-in card; manual setup reveals the servers.
+  await userEvent.click(within(dialog).getByRole('button', { name: '手工设置' }))
 }
 
 async function chooseQq(dialog: HTMLElement, query = 'qq') {

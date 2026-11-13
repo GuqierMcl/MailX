@@ -14,8 +14,8 @@
 ## 安装与添加账号
 
 1. 在 Releases 选择对应平台的安装包，按该版本安装说明打开。macOS 区分 Apple 芯片与 Intel；Windows 提供 x64 安装程序；Linux 提供 x64 AppImage、deb 和 rpm。安装包尚未做代码签名，可用同一版本的 `SHA256SUMS.txt` 核对下载文件。
-2. 在邮箱服务商网站准备客户端访问，按服务商要求启用 IMAP / SMTP，并取得客户端密码、授权码或应用专用密码。MailX 内置 Gmail、iCloud、Outlook、Microsoft 365 / Exchange、QQ / Foxmail、163、126、yeah.net 和 139 入口。其他邮箱走通用「IMAP/SMTP」入口：先做一次只读探测，成功就自动填好设置（或切到 Exchange(EWS) 通道），失败才需要手动填写服务器与端口。Outlook 和 Microsoft 365 在浏览器中登录，不需要密码或授权码（见下文）；其他服务商暂不支持浏览器登录。
-3. 在 MailX 添加账号，填写地址与客户端凭证；需要代理时，为该账号设置 SOCKS5 或 HTTP CONNECT。使用通用入口时先输入邮箱地址：MailX 做一次只读探测，成功就自动填好设置（或提供 Exchange(EWS) 通道）；失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示手动填写 IMAP 与 SMTP 信息，并提供「重新探测」与「改为手动填写」。编辑已保存账号不会重新探测。IMAP / SMTP 账号可在保存前测试收发登录并分别查看结果，EWS 账号隐藏「测试登录」按钮。登录测试成功只表示可以认证，实际投递仍需用自己的测试收件人确认。
+2. 在邮箱服务商网站准备客户端访问，按服务商要求启用 IMAP / SMTP，并取得客户端密码、授权码或应用专用密码。MailX 内置 Gmail、iCloud、Outlook、Microsoft 365 / Exchange、QQ / Foxmail、163、126、yeah.net 和 139 入口。其他邮箱走通用「IMAP/SMTP」入口：先填邮箱地址和密码并按推荐协议登录，不行时再手工填写服务器（见第 3 步）。Outlook 和 Microsoft 365 在浏览器中登录，不需要密码或授权码（见下文）；其他服务商暂不支持浏览器登录。
+3. 在 MailX 添加账号，填写地址与客户端凭证；需要代理时，为该账号设置 SOCKS5 或 HTTP CONNECT。使用通用入口时，连接步骤先只显示邮箱地址与密码，网络路由折叠、需要时再展开。点击「下一步」，MailX 先做只读探测，再按推荐协议登录——服务器提供 EWS over HTTPS 的 Exchange（HTTP/NTLM）时优先用 EWS，否则用 IMAP/SMTP；登录验证通过才进入保存。「手工设置」打开完整表单，已填邮箱地址时会自动探测并用结果预填（Exchange 端点，或 IMAP/SMTP 主机/端口/加密）。登录失败或探测无结果时，MailX 自动转为手工表单，保留已预填的值与失败报告，可修正后再次提交。手工表单提供「账号类型」选择：Exchange（HTTP/NTLM）——可编辑服务器 URL、登录名（如 `DOMAIN\user`）、认证方式（NTLM 或 Basic）与证书主体（`msstd:...`）——IMAP/SMTP，或 POP3；POP3 暂不支持并置灰，请改用 IMAP/SMTP。编辑已保存账号不会重新探测。保存前可测试登录并分别查看收发结果，EWS 账号一次登录即同时覆盖收发。登录测试成功只表示可以认证，实际投递仍需用自己的测试收件人确认。
 4. 保存后等待同步。侧栏顶部汇总所有账号的收件箱、星标、草稿和已发送，归档、垃圾邮件和已删除收在“更多”里；有多个账号时，悬停某一行并点它的箭头可按账号分别列出。下方的各账号默认折叠，展开后可以看到该账号的全部文件夹，包括收件箱和已发送。想给邮件更多空间时，用标题栏按钮或 Cmd/Ctrl+B 收起侧栏：它会变成一列图标，入口不变，悬停显示名称和未读数，“更多”和账号改为弹出菜单；选择会被记住。服务商拒绝连接时，检查客户端协议是否开启、授权码是否有效以及网络路由。
 
 ### Gmail
@@ -48,9 +48,9 @@ Outlook 入口已用个人 Outlook.com 账号测试；Microsoft 365 入口尚未
 
 ### 企业自建 Exchange（EWS）
 
-公司自己搭建的 Exchange 服务器不在 Microsoft 365 浏览器登录入口范围内，但可以尝试通过通用「IMAP/SMTP」入口添加：输入邮箱地址后，MailX 先做只读探测，发现提供 NTLM 的 EWS 端点时即切到 Exchange(EWS) 通道，经 EWS over HTTPS 收发邮件，不依赖 IMAP IDLE 与 SMTP。
+公司自己搭建的 Exchange 服务器不在 Microsoft 365 浏览器登录入口范围内，但可以尝试通过通用「IMAP/SMTP」入口添加：输入邮箱地址和密码后，MailX 先做只读探测，发现提供 NTLM 的 EWS 端点时，「下一步」的推荐协议即为 Exchange（HTTP/NTLM），经 EWS over HTTPS 收发邮件，不依赖 IMAP IDLE 与 SMTP。
 
-这需要 `DOMAIN\user` 形式的域名账户、HTTPS 端点，以及由邮箱域名派生的主机（例如 `mail.example.com`）；这条通道面向的是只在 EWS 上开放 NTLM 的自建部署。并非所有自建 Exchange 都能用：只提供 Basic 的 EWS、仅 Kerberos 的认证、OAuth、共享邮箱和世纪互联运营的 Microsoft 365 均不在支持范围内，与真实 Exchange 服务器的端到端收发也尚未做真机验证。当前每轮同步用 FindItem 取前 500 封，没有增量同步与删除同步；EWS 账号隐藏「测试登录」按钮。探测失败时会退回手动 IMAP / SMTP 配置，服务器信息请向管理员获取。已验证与未验证范围见[验证记录](../../development/validation.md)。
+这需要 `DOMAIN\user` 形式的域名账户、HTTPS 端点，以及由邮箱域名派生的主机（例如 `mail.example.com`）；这条通道面向的是只在 EWS 上开放 NTLM 的自建部署。并非所有自建 Exchange 都能用：只提供 Basic 的 EWS、仅 Kerberos 的认证、OAuth、共享邮箱和世纪互联运营的 Microsoft 365 均不在支持范围内，与真实 Exchange 服务器的端到端收发也尚未做真机验证。当前每轮同步用 FindItem 取前 500 封，没有增量同步与删除同步；EWS 账号同样可使用「测试登录」，一次登录即同时覆盖收发。登录失败或探测无结果时会转为手工表单，「账号类型」选择提供 Exchange（HTTP/NTLM），含服务器 URL、登录名、认证方式与证书主体字段，服务器信息请向管理员获取。已验证与未验证范围见[验证记录](../../development/validation.md)。
 
 ## 收信、搜索与整理
 

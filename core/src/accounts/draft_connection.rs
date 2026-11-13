@@ -14,6 +14,17 @@ pub(crate) struct DraftConnectionPlan {
     pub route: NetRoute,
     pub imap: ImapLogin,
     pub smtp: SmtpLogin,
+    /// Present when the form described an Exchange account: one HTTPS endpoint
+    /// carries both reading and sending, so verification signs in over EWS
+    /// instead of the placeholder IMAP/SMTP rows.
+    pub ews: Option<EwsDraft>,
+}
+
+/// The unsaved form of an EWS endpoint plus the password the form offered.
+pub(crate) struct EwsDraft {
+    pub endpoint: crate::ews::Endpoint,
+    pub user: String,
+    pub password: SecretValue,
 }
 
 /// Turns a form route into a real network route. Also used by server
@@ -59,6 +70,22 @@ pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan,
         } => (replacement(imap_password)?, replacement(smtp_password)?),
     };
     let route = route_from_input(input.route)?;
+    let ews = input.ews.as_ref().and_then(|ews| {
+        // Validation already rejected anything but an HTTPS URL with a host.
+        let url = url::Url::parse(&ews.url).ok()?;
+        let host = url.host_str()?.to_owned();
+        Some(EwsDraft {
+            endpoint: crate::ews::Endpoint {
+                host,
+                port: url.port_or_known_default().unwrap_or(443),
+                path: url.path().to_owned(),
+            },
+            user: ews.username.clone(),
+            // An Exchange account only supports the shared password mode; the
+            // IMAP row carries it because that is the receive-side secret.
+            password: imap_password.clone(),
+        })
+    });
     Ok(DraftConnectionPlan {
         route,
         imap: ImapLogin {
@@ -75,6 +102,7 @@ pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan,
             username: input.smtp.username,
             credential: crate::imap::ProtocolCredential::Password(smtp_password),
         },
+        ews,
     })
 }
 
@@ -122,6 +150,42 @@ mod tests {
             " smtp-secret "
         );
         assert!(plan.route.proxy.is_none());
+    }
+
+    #[test]
+    fn an_exchange_form_carries_the_ews_endpoint_and_the_shared_password() {
+        let mut input = config(json!({"kind":"direct"}));
+        input["authentication"] = json!({
+            "kind":"password","mode":"shared",
+            "password":{"action":"replace","value":" mailbox-secret "}
+        });
+        input["ews"] = json!({
+            "url":"https://mail.example.test/EWS/Exchange.asmx",
+            "auth":"ntlm",
+            "username":"EXAMPLE\\alice",
+            "certPrincipalName":"msstd:mail.example.test"
+        });
+        let plan = prepare(connection(input)).unwrap();
+        let ews = plan.ews.as_ref().expect("the exchange endpoint");
+        assert_eq!(ews.endpoint.host, "mail.example.test");
+        assert_eq!(ews.endpoint.port, 443);
+        assert_eq!(ews.endpoint.path, "/EWS/Exchange.asmx");
+        assert_eq!(ews.user, "EXAMPLE\\alice");
+        assert_eq!(
+            ews.password.expose_secret(),
+            " mailbox-secret ",
+            "verification signs in with the shared receive secret"
+        );
+    }
+
+    #[test]
+    fn a_plain_imap_form_has_no_ews_leg() {
+        let mut input = config(json!({"kind":"direct"}));
+        input["authentication"] = json!({
+            "kind":"password","mode":"shared",
+            "password":{"action":"replace","value":"mailbox-secret"}
+        });
+        assert!(prepare(connection(input)).unwrap().ews.is_none());
     }
 
     #[test]

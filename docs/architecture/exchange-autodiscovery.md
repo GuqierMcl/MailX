@@ -1,6 +1,6 @@
 # Exchange 自动发现与邮箱设置探测
 
-状态：**已实现**。本文说明添加账号前的一次性只读探测：服务商列表里的通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）输入邮箱地址后，先由 `core/src/discovery/` 尝试发现邮箱设置，成功则自动填好 IMAP / SMTP 或切到 Exchange(EWS) 通道，失败才退回手动填写。实现与边界以代码为准，真实 Exchange 服务器与三平台的实测范围见[验证记录](../development/validation.md)；相关命令契约见[应用 API](../contracts/app-api.md)，账号与凭证语义见[账号配置](account-configuration.md)，EWS 后端见 [EWS 邮件后端](ews-backend.md)。
+状态：**已实现**。本文说明添加账号时的一次性只读探测：服务商列表里的通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）的连接步骤先只显示邮箱地址、密码与折叠的网络路由，「下一步」由 `core/src/discovery/` 尝试发现邮箱设置，并按**推荐协议**登录——发现可用 EWS 端点时优先 Exchange(EWS)，否则 IMAP / SMTP——登录验证通过才进入下一步（保存）；登录失败或探测无结果转手工表单（保留预填值与失败报告），「手工设置」进入完整表单并可用探测结果预填（详见 1 与 4 节）。实现与边界以代码为准，真实 Exchange 服务器与三平台的实测范围见[验证记录](../development/validation.md)；相关命令契约见[应用 API](../contracts/app-api.md)，账号与凭证语义见[账号配置](account-configuration.md)，EWS 后端见 [EWS 邮件后端](ews-backend.md)。
 
 ## 1. 定位与边界
 
@@ -9,9 +9,9 @@
 - 它是添加账号前的一次性只读发现，不创建账号、不写凭证、不改动已保存的连接，也不启动同步或发信。
 - 探测结果只用于填充表单或选择通道（IMAP / SMTP 或 EWS）；它不改变[服务商兼容层](provider-compatibility.md)的策略，不凭邮箱后缀或 UI 图标启用品牌分支，也不改变已保存账号的路由与兼容规则。
 - **编辑已保存账号不自动探测**：已有账号的连接按原配置读写，IMAP / SMTP 账号的行为零改动。
-- 探测成功时前端自动填好 IMAP / SMTP 设置，或在发现可用 EWS 端点时切换到 Exchange(EWS) 通道；探测失败（含需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示用户手动填写 IMAP 与 SMTP 信息，并提供「重新探测」与「改为手动填写」。
+- 连接步骤先只显示邮箱地址、密码与折叠的网络路由；「下一步」在探测完成后按推荐协议登录——发现可用 EWS 端点（HTTP/NTLM）时优先 EWS，否则 IMAP / SMTP——登录验证通过才进入下一步（保存）。「手工设置」进入完整表单，已填邮箱地址则自动探测并用结果预填（Exchange 端点或 IMAP/SMTP 主机/端口/加密）；登录失败或探测无结果（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）自动转手工填写表单，保留已预填的值与失败报告，可修正后再次提交。
 
-探测不是登录验证，也不证明邮件可收发；保存账号后仍沿用现有的连接、凭证信任与按需测试登录流程。
+探测本身不是登录验证，也不证明邮件可收发；「下一步」在探测之后另行完成登录验证（`verifyDraftConnection`，对带 `ews` 的连接为一次 NTLM 握手加 `FindFolder`，同一结果填入收发两个协议槽，见[应用 API](../contracts/app-api.md)），保存账号后仍沿用现有的连接与凭证信任规则。
 
 ## 2. 探测范围
 
@@ -93,5 +93,4 @@ type MailSettingsDiscovery = {
 - 用 `SyncFolderItems` 做 EWS 增量同步与删除同步（当前每轮 `FindItem` 取前 500 封）。
 - EPA 通道绑定哈希、EWS 的 `Subscribe` / `GetEvents` 流式订阅与 EWS 附件降级。
 - OAuth 用于 EWS、共享邮箱与世纪互联运营的 Microsoft 365。
-- EWS 账号的「测试登录」按钮（EWS 模式当前隐藏该按钮）。
 - 真实 Exchange 服务器端到端收发与三平台打包验证，见[验证记录](../development/validation.md)。

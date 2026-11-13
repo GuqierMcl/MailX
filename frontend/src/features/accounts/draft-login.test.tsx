@@ -29,6 +29,8 @@ function setup(client = testClient()) {
 async function select(provider: MailProvider) {
   await userEvent.click(screen.getByRole('radio', { name: provider.name }))
   await userEvent.click(screen.getByRole('button', { name: '下一步' }))
+  // A generic mailbox now opens on the sign-in card; manual setup reveals the servers.
+  if (!provider.setup) await userEvent.click(screen.getByRole('button', { name: '手工设置' }))
 }
 
 function fill(provider: MailProvider = GENERIC_PROVIDER) {

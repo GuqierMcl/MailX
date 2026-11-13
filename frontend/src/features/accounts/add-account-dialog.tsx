@@ -224,6 +224,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   onOpenHelp={() => client.openProviderHelp(step.method.id ?? '')}
                   initialDraft={step.resume}
                   initialError={step.error}
+                  signInFirst={!step.method.signIn && !step.method.setup}
                   intro={step.method.signIn
                     ? { title: step.method.signIn.title, description: step.method.signIn.description }
                     : step.method.setup

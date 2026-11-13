@@ -12,6 +12,8 @@ use crate::accounts::draft_connection;
 use crate::accounts::types::ConnectionInput;
 use crate::accounts::{sync_plan::PlanError, validate_uuid};
 use crate::error::{AppError, ErrorCode};
+use crate::ews::http::HttpError;
+use crate::ews::{EwsClient, EwsError};
 use crate::imap::{self, ImapError};
 use crate::net::{NetError, NetRoute};
 use crate::smtp::{self, FailureReason, SmtpOutcome};
@@ -272,6 +274,12 @@ impl MailxCore {
             })
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
+            // An Exchange form has no separate IMAP and SMTP legs to probe:
+            // one EWS sign-in answers for both slots.
+            if let Some(ews) = &plan.ews {
+                let outcome = verify_ews(&plan.route, ews).await;
+                return Ok::<_, AppError>((outcome.clone(), outcome));
+            }
             Ok::<_, AppError>(tokio::join!(
                 verify_imap(&plan.route, &plan.imap),
                 verify_smtp(&plan.route, &plan.smtp),
@@ -451,6 +459,38 @@ async fn verify_smtp(route: &NetRoute, login: &smtp::SmtpLogin) -> ProtocolVerif
         Ok(()) => ProtocolVerification::verified(),
         Err(error) => smtp_failure(error),
     }
+}
+
+/// Signs in over EWS with the form's own endpoint and password. A successful
+/// NTLM handshake plus one FindFolder proves both the credentials and the URL;
+/// no message data is read.
+async fn verify_ews(route: &NetRoute, draft: &draft_connection::EwsDraft) -> ProtocolVerification {
+    let mut client =
+        match EwsClient::connect(route, &draft.endpoint, &draft.user, &draft.password).await {
+            Ok(client) => client,
+            Err(error) => return ews_failure(error),
+        };
+    match client.folders().await {
+        Ok(_) => ProtocolVerification::verified(),
+        Err(error) => ews_failure(error),
+    }
+}
+
+fn ews_failure(error: EwsError) -> ProtocolVerification {
+    use ConnectionVerificationCode as C;
+    use ConnectionVerificationStage as S;
+    let (stage, code) = match error {
+        EwsError::Http(HttpError::Rejected) => (S::Authentication, C::Authentication),
+        EwsError::Http(HttpError::NoNtlm) => (S::Authentication, C::AuthUnavailable),
+        EwsError::Http(HttpError::Net(NetError::Proxy(_))) => (S::Connection, C::Proxy),
+        EwsError::Http(HttpError::Net(NetError::Tls(_))) => (S::Tls, C::Tls),
+        EwsError::Http(HttpError::Timeout) => (S::Connection, C::Timeout),
+        EwsError::Http(HttpError::Net(NetError::Timeout)) => (S::Connection, C::Timeout),
+        EwsError::Http(HttpError::Net(NetError::Connect(_))) => (S::Connection, C::Network),
+        EwsError::Http(HttpError::Transport) => (S::Connection, C::Network),
+        _ => (S::Mailbox, C::Protocol),
+    };
+    ProtocolVerification::failed(stage, code)
 }
 
 fn check_active(
