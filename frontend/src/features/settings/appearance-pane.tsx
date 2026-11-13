@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
@@ -33,6 +33,7 @@ const FONT_PREVIEW = '敏捷的棕色狐狸跳过了懒狗 · The quick brown fo
 export function AppearancePane({ client }: { client: MailxClient }) {
   useTranslation()
   const PREVIEW_LINE_LABELS: Record<PreviewLines, string> = { none: t('settings:previewNone'), one: t('settings:previewOne'), two: t('settings:previewTwo'), three: t('settings:previewThree') }
+  const MAILBOX_LABELS: Record<MailboxLabel, string> = { name: t('settings:mailboxLabelName'), icon: t('settings:mailboxLabelIcon') }
   const FONT_SIZE_LABELS: Record<FontSize, string> = { small: t('settings:fontSmall'), default: t('settings:fontDefault'), large: t('settings:fontLarge') }
   const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: t('settings:mailThemeFollow'), light: t('settings:mailThemeLight') }
   const settings = useSettings(client)
@@ -128,6 +129,15 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             <SelectTrigger id="appearance.previewLines" className="w-28"><SelectValue /></SelectTrigger>
             <SelectContent>
               {Object.entries(PREVIEW_LINE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+        <SettingsRow label={t('settings:mailboxLabel')} htmlFor="appearance.mailboxLabel">
+          <Select value={appearance.mailboxLabel} items={MAILBOX_LABELS}
+            onValueChange={(mailboxLabel: MailboxLabel | null) => { if (mailboxLabel) change({ mailboxLabel }) }}>
+            <SelectTrigger id="appearance.mailboxLabel" className="w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(MAILBOX_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
         </SettingsRow>

@@ -64,7 +64,7 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
-    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings,
+    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, MailboxLabel, McpSettings,
     NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
     ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
     TranslationProviderId, TranslationSettings, mail_body_css,

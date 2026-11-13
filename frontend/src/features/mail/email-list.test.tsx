@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount } from '@/features/accounts/test-fixtures'
 import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
@@ -49,6 +49,45 @@ describe('which mailbox a message belongs to', () => {
     expect(within(rows[1]).getByText('个人邮箱')).toBeInTheDocument()
   })
 
+  it('shows a badge with the mailbox name instead of the text when set to icon', () => {
+    render(
+      <EmailList
+        title="全部收件箱" emails={[email('a')]} accounts={[work, home]} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one" mailboxLabel="icon"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+    const badge = within(row).getByRole('img', { name: /工作邮箱/ })
+    expect(badge).toHaveAttribute('title', '工作邮箱 <lin.wei@example.com>')
+    expect(within(row).queryByText('工作邮箱')).not.toBeInTheDocument()
+    expect(row.textContent).not.toContain('|')
+  })
+
+  it('shows no badge in a single-account view even when set to icon', () => {
+    render(
+      <EmailList
+        title="收件箱" emails={[email('a')]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one" mailboxLabel="icon"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+      />,
+    )
+    expect(within(screen.getByRole('listitem')).queryByRole('img', { name: /所属邮箱/ })).not.toBeInTheDocument()
+  })
+
+  it('marks an unread message with a dot in a narrow strip and leaves read ones empty', () => {
+    const rows = renderList([email('a', { isRead: false }), email('b')], null)
+    const strip = rows[0].querySelector('[data-slot="email-state"]')!
+    expect(strip).toHaveClass('w-3')
+    expect(within(strip as HTMLElement).getByLabelText('未读')).toBeInTheDocument()
+    expect(within(rows[1]).queryByLabelText('未读')).not.toBeInTheDocument()
+    expect(rows[1].querySelector('[data-slot="email-state"]')).toHaveClass('w-3')
+  })
+
   it('is not shown in a single-account view', () => {
     const [row] = renderList([email('a')], null)
     expect(within(row).queryByText('工作邮箱')).not.toBeInTheDocument()
@@ -72,8 +111,8 @@ describe('starred messages', () => {
     const subject = within(row).getByText('主题 a')
     expect(star).toHaveClass('text-amber-500')
     expect(star.getAttribute('fill')).toBe('currentColor')
-    // The compact row keeps its subject marker; taller rows move it to the state column.
-    expect(subject.parentElement!.contains(star)).toBe(previewLines === 'none')
+    // The marker sits beside the subject in every mode.
+    expect(subject.parentElement!.contains(star)).toBe(true)
     const attachment = within(row).getByLabelText('有附件')
     expect(subject.compareDocumentPosition(attachment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -116,9 +155,7 @@ describe('row actions', () => {
     // Returning with the keyboard must reveal the controls again.
     act(() => within(row).getByRole('button', { name: /GitHub/ }).focus())
     await user.tab()
-    const keyboardAction = within(row).getByRole('button', {
-      name: previewLines === 'none' ? (isRead ? '标为未读' : '标为已读') : '取消星标',
-    })
+    const keyboardAction = within(row).getByRole('button', { name: '取消星标' })
     expect(keyboardAction).toHaveFocus()
     await user.hover(row)
     await user.unhover(row)
@@ -161,7 +198,7 @@ describe('row actions', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
-  it('keeps a starred action visible at rest and follows the vertical order with the keyboard', async () => {
+  it('keeps only the small star at rest and follows the toolbar order with the keyboard', async () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     const target = email('a', { isRead: false, isStarred: true })
     const onSelect = vi.fn()
@@ -178,14 +215,16 @@ describe('row actions', () => {
       />,
     )
     const row = screen.getByRole('listitem')
-    const star = within(row).getByRole('button', { name: '取消星标', pressed: true })
+    // At rest only the small star beside the subject shows; the toolbar waits for hover or focus.
     expect(within(row).getAllByLabelText('已加星标')).toHaveLength(1)
+    expect(within(row).queryByRole('button', { name: '取消星标' })).not.toBeInTheDocument()
     expect(within(row).queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
 
     // Start on the message, then Tab through the visible top-to-bottom actions.
     act(() => within(row).getByRole('button', { name: /GitHub/ }).focus())
     await waitFor(() => expect(within(row).getByRole('button', { name: '标为已读' })).toBeInTheDocument())
     await userEvent.tab()
+    const star = within(row).getByRole('button', { name: '取消星标', pressed: true })
     expect(star).toHaveFocus()
     await userEvent.keyboard(' ')
     expect(onFlag).toHaveBeenCalledWith(target, 'starred', false)
@@ -197,6 +236,56 @@ describe('row actions', () => {
     expect(onArchive).toHaveBeenCalledWith(target, true)
     expect(onSelect).not.toHaveBeenCalled()
     expect(row).toHaveAttribute('aria-current', 'true')
+  })
+
+  it.each(['one', 'none'] as const)('lays the toolbar out as star, read, archive, delete with preview setting %s', async (previewLines) => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    render(
+      <EmailList
+        title="全部收件箱" emails={[email('a')]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines={previewLines}
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        onFlag={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} canArchive={() => true}
+      />,
+    )
+    const row = screen.getByRole('listitem')
+    await userEvent.hover(row)
+    const toolbar = row.querySelector('[data-slot="email-quick-actions"]')!
+    expect(within(toolbar as HTMLElement).getAllByRole('button').map((button) => button.getAttribute('aria-label')))
+      .toEqual(['加星标', '标为未读', '归档', '删除'])
+  })
+
+  it('ignores clicks on a toolbar that has only just appeared', async () => {
+    vi.useFakeTimers()
+    try {
+      const target = email('a')
+      const onFlag = vi.fn()
+      render(
+        <EmailList
+          title="全部收件箱" emails={[target]} accounts={null} loading={false}
+          syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+          hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+          filter="all" search="" selectedId={null} previewLines="one"
+          onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+          onFlag={onFlag} onArchive={vi.fn()} onDelete={vi.fn()} canArchive={() => true}
+        />,
+      )
+      const row = screen.getByRole('listitem')
+      act(() => { fireEvent.mouseEnter(row) })
+      const toolbar = row.querySelector('[data-slot="email-quick-actions"]') as HTMLElement
+      // Still disarmed: the pointer passes through to the row.
+      expect(toolbar).toHaveClass('pointer-events-none')
+      expect(toolbar).not.toHaveAttribute('data-armed')
+      act(() => { vi.advanceTimersByTime(250) })
+      expect(toolbar).toHaveAttribute('data-armed')
+      expect(toolbar).not.toHaveClass('pointer-events-none')
+      fireEvent.click(within(row).getByRole('button', { name: '标为未读' }))
+      expect(onFlag).toHaveBeenCalledWith(target, 'read', false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not offer server flag or delete actions for a local-only copy', () => {

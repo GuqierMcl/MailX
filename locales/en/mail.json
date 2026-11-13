@@ -53,6 +53,7 @@
   "noMatches": "No matching messages, mailboxes, or commands",
   "all": "All",
   "unread": "Unread",
+  "mailboxLabel": "Mailbox: {{name}}",
   "loadingMail": "Loading messages",
   "loadMailFailed": "Could not load messages",
   "waitingForSync": "Waiting to sync messages…",

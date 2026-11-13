@@ -1,5 +1,5 @@
 import { syncWindowTheme } from '@/features/window-chrome/window-host'
-import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   theme: 'system',
@@ -9,6 +9,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   mailTheme: 'follow',
   fontSize: 'default',
   previewLines: 'one',
+  mailboxLabel: 'name',
 }
 
 /** Used only when the user leaves the interface font empty. Keep in sync with `index.css`. */
@@ -155,6 +156,7 @@ const LEGACY_THEME_KEY = 'mailx.theme'
 const THEMES: readonly string[] = ['system', 'light', 'dark'] satisfies ThemeMode[]
 const MAIL_THEMES: readonly string[] = ['follow', 'light'] satisfies MailTheme[]
 const FONT_SIZES: readonly string[] = ['small', 'default', 'large'] satisfies FontSize[]
+const MAILBOX_LABELS: readonly string[] = ['name', 'icon'] satisfies MailboxLabel[]
 const PREVIEW_LINES: readonly string[] = ['none', 'one', 'two', 'three'] satisfies PreviewLines[]
 
 /**
@@ -174,6 +176,7 @@ export function cachedAppearance(): AppearanceSettings {
         mailTheme: MAIL_THEMES.includes(cached.mailTheme as string) ? (cached.mailTheme as MailTheme) : 'follow',
         fontSize: FONT_SIZES.includes(cached.fontSize as string) ? (cached.fontSize as FontSize) : 'default',
         previewLines: PREVIEW_LINES.includes(cached.previewLines as string) ? (cached.previewLines as PreviewLines) : 'one',
+        mailboxLabel: MAILBOX_LABELS.includes(cached.mailboxLabel as string) ? (cached.mailboxLabel as MailboxLabel) : 'name',
       }
     }
   } catch {

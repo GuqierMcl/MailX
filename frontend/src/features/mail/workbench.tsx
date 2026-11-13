@@ -142,6 +142,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
   const navCollapsed = settingsQuery.data?.settings.layout.navCollapsed ?? false
   const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
+  const mailboxLabel = settingsQuery.data?.settings.appearance.mailboxLabel ?? 'name'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
   const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
@@ -747,6 +748,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               indexedBodies={pages?.at(-1)?.coverage.indexedBodies ?? 0}
               selectedId={highlighted}
               previewLines={previewLines}
+              mailboxLabel={mailboxLabel}
               onFilterChange={setFilter}
               onSelect={openEmail}
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}

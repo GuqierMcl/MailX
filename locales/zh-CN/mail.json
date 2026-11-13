@@ -53,6 +53,7 @@
   "noMatches": "没有匹配的邮件、邮箱或命令",
   "all": "全部",
   "unread": "未读",
+  "mailboxLabel": "所属邮箱：{{name}}",
   "loadingMail": "正在加载邮件",
   "loadMailFailed": "无法加载邮件",
   "waitingForSync": "等待同步邮件…",

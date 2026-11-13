@@ -98,6 +98,7 @@ fn main() {
         LayoutSettings,
         LayoutSettingsPatch,
         PreviewLines,
+        MailboxLabel,
         NotificationSound,
         NotificationSettings,
         ComposeSettings,
