@@ -16,7 +16,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
-import { EmailList, type ListFilter } from './email-list'
+import { EmailList, type ListFilter, type RevealRequest } from './email-list'
 import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
@@ -49,8 +49,11 @@ import { loadMailTree } from './mail-tree'
 import { DeleteForGoodDialog } from './delete-for-good-dialog'
 import { canArchive, useArchiveEmail, useArchiveEmails } from './use-archive-email'
 import { useListSelection } from './use-list-selection'
-import { useSelectionActions } from './use-selection-actions'
+import { selectionAvailability, useSelectionActions } from './use-selection-actions'
 import { SelectionSummary } from './selection-summary'
+import { ShortcutHelpDialog } from './shortcut-help'
+import type { SingleKeyShortcutId } from './shortcuts'
+import { useMailShortcuts } from './use-mail-shortcuts'
 import { useDeleteEmail } from './use-delete-email'
 import { useContactAggregation } from './use-contact-aggregation'
 import { useMailStateChanges } from './use-mail-state-changes'
@@ -419,10 +422,22 @@ export function Workbench({ client }: { client: MailxClient }) {
   const latestTree = useRef({ accounts, folders })
   useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
   const [removeError, setRemoveError] = useState<string | null>(null)
+  // A message that left the view lets go of the reader. When a keyboard shortcut
+  // archived or deleted the opened message, its neighbour in the list opens instead.
+  const advanceAfter = useRef<{ id: string; next: EmailSummary | null } | null>(null)
+  const openedRef = useRef(openedState)
+  useEffect(() => { openedRef.current = openedState }, [openedState])
+  const openRef = useRef<(email: EmailSummary) => void>(() => undefined)
+  const letGo = useCallback((email: { id: string }) => {
+    const follow = advanceAfter.current?.id === email.id ? advanceAfter.current : null
+    if (follow) advanceAfter.current = null
+    if (follow?.next && openedRef.current?.id === email.id) openRef.current(follow.next)
+    else setOpened((current) => current?.id === email.id ? null : current)
+  }, [])
   const removeLocalCopy = useCallback((email: { id: string }) => {
     setRemoveError(null)
     client.removeLocalCopy(email.id).then(() => {
-      setOpened((current) => current?.id === email.id ? null : current)
+      letGo(email)
       void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     }).catch((error: unknown) => {
       const message = errorText(error)
@@ -432,7 +447,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         toast.error(t('mail:removeLocalCopyFailed'), { description: message })
       }
     })
-  }, [client, openedState, queryClient, readerCollapsed])
+  }, [client, letGo, openedState, queryClient, readerCollapsed])
   const [removeLocalChoice, setRemoveLocalChoice] = useState<EmailSummary | null>(null)
   const requestRemoveLocal = useCallback((email: EmailSummary) => setRemoveLocalChoice(email), [setRemoveLocalChoice])
   const confirmRemoveLocal = useCallback(() => {
@@ -440,12 +455,8 @@ export function Workbench({ client }: { client: MailxClient }) {
     setRemoveLocalChoice(null)
     if (email) removeLocalCopy(email)
   }, [removeLocalChoice, removeLocalCopy, setRemoveLocalChoice])
-  const deleteEmail = useDeleteEmail(client, folders, useCallback((email: { id: string }) => {
-    setOpened((current) => current?.id === email.id ? null : current)
-  }, []))
-  const archiveEmail = useArchiveEmail(client, useCallback((email: { id: string }) => {
-    setOpened((current) => current?.id === email.id ? null : current)
-  }, []))
+  const deleteEmail = useDeleteEmail(client, folders, letGo)
+  const archiveEmail = useArchiveEmail(client, letGo)
   const hideOpened = useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
   }, [])
@@ -544,6 +555,106 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
 
+  // A listed message opened in the Unread view stays in it once read; see `keptIds`.
+  const keepListed = (id: string) => {
+    if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
+    setKept((current) => {
+      const ids = current.view === viewKey ? current.ids : NO_IDS
+      return ids.includes(id) ? current : { view: viewKey, ids: [...ids, id].slice(-MAX_KEPT) }
+    })
+  }
+  // Every way of opening a message (list click, search result, notification) shows the reader.
+  const openEmail = (email: { id: string; accountId: string }) => {
+    keepListed(email.id)
+    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
+    setAnchorId(email.id)
+    setReaderCollapsed(false)
+    // Opening a message (from search or the palette) ends picking, so the reader can show it.
+    exitSelection()
+  }
+  useEffect(() => { openRef.current = openEmail })
+
+  // Single-key shortcuts (see `shortcuts.ts`). Browsing moves the opened message
+  // like a click on the next or previous row; group rows are not messages and are
+  // skipped. Acting needs the opened message on screen, with the reader toolbar's rules.
+  const singleKeys = settingsQuery.data?.settings.general.singleKeyShortcuts ?? true
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [reveal, setReveal] = useState<RevealRequest | null>(null)
+  const runShortcut = (id: SingleKeyShortcutId): boolean => {
+    if (id === 'help') {
+      setHelpOpen(true)
+      return true
+    }
+    if (id === 'search') {
+      setPaletteOpen(true)
+      return true
+    }
+    if (!mailView) return false
+    if (selecting) {
+      // Picking: the flags, archive and delete go to the picked messages, as in the header.
+      const state = selectionAvailability(selection, selectionActions)
+      if (state.none) return false
+      if (id === 'archive' && !state.archiveBlocked) selectionActions.onArchive()
+      else if (id === 'delete' && state.deletable > 0) selectionActions.onDelete()
+      else if (id === 'star' && state.changeable > 0) selectionActions.onFlag('starred', state.anyUnstarred)
+      else if (id === 'read' && state.changeable > 0) selectionActions.onFlag('read', state.anyUnread)
+      else return false
+      return true
+    }
+    const rows = emails.filter((email) => !email.senderGroup)
+    const own = opened ? rows.findIndex((email) => email.id === opened.id) : -1
+    // A message expanded inside a thread may not be listed; its thread's row is.
+    const at = own >= 0 ? own : opened && anchorId ? rows.findIndex((email) => email.id === anchorId) : -1
+    const go = (email: EmailSummary | undefined) => {
+      if (!email) return false
+      openEmail(email)
+      setReveal((previous) => ({ id: email.id, seq: (previous?.seq ?? 0) + 1 }))
+      return true
+    }
+    if (id === 'next') {
+      if (at >= 0 && at === rows.length - 1) loadMore()
+      return go(at < 0 ? rows[0] : rows[at + 1])
+    }
+    if (id === 'previous') return go(at < 0 ? rows[0] : rows[at - 1])
+    if (id === 'open') {
+      if (!opened) return go(rows[0])
+      if (!readerCollapsed) return false
+      setReaderCollapsed(false)
+      return true
+    }
+    const summary = opened && !readerCollapsed && body.email?.summary.id === opened.id ? body.email.summary : null
+    if (!summary) return false
+    // After archive or delete, the next row opens (the previous one at the end of the list).
+    const advance = () => {
+      advanceAfter.current = { id: summary.id, next: own >= 0 ? rows[own + 1] ?? rows[own - 1] ?? null : null }
+    }
+    switch (id) {
+      case 'archive':
+        if (!canArchive(summary, folders)) return false
+        advance()
+        void archiveEmail(summary, !summary.archived)
+        return true
+      case 'delete':
+        advance()
+        if (summary.localOnly) requestRemoveLocal(summary)
+        else deleteEmail.request(summary)
+        return true
+      case 'star':
+      case 'read': {
+        if (summary.localOnly) return false
+        const flag = id === 'star' ? 'starred' : 'read'
+        void setFlag(summary, flag, !(flag === 'starred' ? summary.isStarred : summary.isRead))
+        return true
+      }
+      case 'reply':
+      case 'replyAll':
+      case 'forward':
+        void compose.respond(summary.id, id)
+        return true
+    }
+  }
+  useMailShortcuts(singleKeys, runShortcut)
+
   const refreshAccounts = () => void queryClient.invalidateQueries({ queryKey: mailKeys.all })
   const dialog = (
     <>
@@ -596,23 +707,6 @@ export function Workbench({ client }: { client: MailxClient }) {
   const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
   const selectedOutbox = outbox.data?.find((item) => item.id === outboxChoice) ?? null
 
-  // A listed message opened in the Unread view stays in it once read; see `keptIds`.
-  const keepListed = (id: string) => {
-    if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
-    setKept((current) => {
-      const ids = current.view === viewKey ? current.ids : NO_IDS
-      return ids.includes(id) ? current : { view: viewKey, ids: [...ids, id].slice(-MAX_KEPT) }
-    })
-  }
-  // Every way of opening a message (list click, search result, notification) shows the reader.
-  const openEmail = (email: { id: string; accountId: string }) => {
-    keepListed(email.id)
-    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
-    setAnchorId(email.id)
-    setReaderCollapsed(false)
-    // Opening a message (from search or the palette) ends picking, so the reader can show it.
-    exitSelection()
-  }
   // Expanding a message inside the thread opens it like any other (read mark, toolbar,
   // body) but keeps the anchor, so the same conversation stays on screen.
   const expandInThread = (email: EmailSummary) => {
@@ -760,6 +854,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onLoadMore={loadMore}
               selection={selection}
               selectionActions={selectionActions}
+              reveal={reveal}
             />
             </div>
             )}
@@ -838,6 +933,14 @@ export function Workbench({ client }: { client: MailxClient }) {
       </AvatarSourceProvider>
       {dialog}
       <TranslationConsentDialog translation={translation} />
+      <ShortcutHelpDialog
+        open={helpOpen}
+        onOpenChange={setHelpOpen}
+        onOpenSettings={() => {
+          setHelpOpen(false)
+          setSettings({ section: 'shortcuts' })
+        }}
+      />
       <DeleteForGoodDialog {...deleteEmail.confirmation} />
       <RemoveLocalCopyDialog
         open={removeLocalChoice !== null}

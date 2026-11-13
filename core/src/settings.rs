@@ -718,6 +718,9 @@ pub struct GeneralSettings {
     /// Hide the main window only on a registered desktop login launch. The
     /// desktop host still requires an available Dock/tray recovery entry.
     pub silent_start: bool,
+    /// Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
+    /// Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
+    pub single_key_shortcuts: bool,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -737,6 +740,7 @@ impl Default for GeneralSettings {
             close_behavior: CloseBehavior::Ask,
             show_menu_bar_icon: true,
             silent_start: false,
+            single_key_shortcuts: true,
         }
     }
 }
@@ -1300,7 +1304,12 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                     {
                         general.insert("autoUpdate".into(), value);
                     }
-                    for key in ["autoUpdate", "showMenuBarIcon", "silentStart"] {
+                    for key in [
+                        "autoUpdate",
+                        "showMenuBarIcon",
+                        "silentStart",
+                        "singleKeyShortcuts",
+                    ] {
                         if general.get(key).is_some_and(|value| !value.is_boolean()) {
                             general.remove(key);
                         }

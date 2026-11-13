@@ -91,7 +91,12 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   selection?: ListSelection
   /** What the selection header does with the picked messages. */
   selectionActions?: SelectionActions
+  /** Scrolls this row into view; a new object each time it is asked (keyboard moves). */
+  reveal?: RevealRequest | null
 }
+
+/** A request to bring a row into view; `seq` repeats a request for the same row. */
+export type RevealRequest = { id: string; seq: number }
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
@@ -175,7 +180,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -249,7 +254,7 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
       selection={selection}
       viewingContact={contact?.address ?? null} onViewContact={onViewContact} onAggregate={onAggregate} isAggregated={isAggregated}
-      initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset}
+      initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset} reveal={reveal}
     />
   )
 }
@@ -300,9 +305,10 @@ type VirtualRowsProps = {
   viewingContact: string | null
   initialScrollTop?: number
   onScrollOffset?: (offset: number) => void
+  reveal?: RevealRequest | null
 } & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // One right-click menu serves the whole list. The snapshot outlives the open
@@ -346,6 +352,18 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
     // Coming back to a list: start where the user left it.
     initialOffset: initialScrollTop,
   })
+
+  // A keyboard move brings its row into view, scrolling only as far as needed.
+  // Only a new request scrolls; the list refreshing under it does not.
+  const latestEmails = useRef(emails)
+  useEffect(() => {
+    latestEmails.current = emails
+  })
+  useEffect(() => {
+    if (!reveal) return
+    const index = latestEmails.current.findIndex((email) => email.id === reveal.id)
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' })
+  }, [reveal, virtualizer])
 
   // Report the scroll offset so the caller can come back to it later.
   useEffect(() => {

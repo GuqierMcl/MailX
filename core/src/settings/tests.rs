@@ -373,7 +373,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         serde_json::json!({
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
-                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
+                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -1171,6 +1171,7 @@ fn saved_background_preferences_recover_independently() {
                 close_behavior,
                 show_menu_bar_icon,
                 silent_start: false,
+                single_key_shortcuts: true,
             },
             "{general}"
         );
@@ -1184,6 +1185,7 @@ fn saved_background_preferences_recover_independently() {
             close_behavior: CloseBehavior::Quit,
             show_menu_bar_icon: true,
             silent_start: true,
+            single_key_shortcuts: true,
         },
         ..Default::default()
     }
@@ -1221,6 +1223,44 @@ fn silent_login_preference_defaults_recovers_and_persists_without_changing_other
             .get()
             .unwrap();
         assert!(restored.settings.general.silent_start);
+        assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+    }
+}
+
+#[test]
+fn single_key_shortcuts_default_on_recover_and_persist_off() {
+    for value in [
+        serde_json::json!({"language": "en", "showMenuBarIcon": false}),
+        serde_json::json!({"language": "en", "singleKeyShortcuts": "no"}),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":{"general":value,"appearance":{"theme":"dark"}}}).to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert!(snapshot.settings.general.single_key_shortcuts, "{value}");
+        assert_eq!(snapshot.settings.general.language, "en");
+        assert!(!snapshot.recovered);
+        let mut general = snapshot.settings.general;
+        general.single_key_shortcuts = false;
+        store
+            .patch(SettingsPatch {
+                general: Some(general),
+                ..Default::default()
+            })
+            .unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+        assert_eq!(
+            persisted["settings"]["general"]["singleKeyShortcuts"],
+            false
+        );
+        let restored = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!restored.settings.general.single_key_shortcuts);
+        assert_eq!(restored.settings.general.language, "en");
         assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
     }
 }

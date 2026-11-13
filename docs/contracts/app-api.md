@@ -269,6 +269,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 仅本地可信 main 可调用，composer / 正文 / MCP 均不可访问；不要求邮件核心 Ready。路径、启动命令、参数由宿主固定，输入拒绝额外字段。操作按进程互斥串行执行，系统注册是事实来源，应用启动和普通设置保存不写系统启动项。开发或隔离运行查询返回 `available=false, enabled=false`，修改返回 `unsupported`。系统读取、写入或读回确认失败使用固定错误 `storageUnavailable`、`field: "autostart"`，不暴露原生错误或路径。
 
+`general.singleKeyShortcuts` 默认 true，控制主窗口的单键邮件快捷键（`j`、`e`、`s` 等）；旧文件缺少或存量值不是布尔值时补 true，保存的 false 保留。带修饰键的快捷键与 Esc 不受影响。这是设置文件扩展，无邮件数据库迁移。
+
 `general.silentStart` 默认 false，属于已有设置快照与事件协议。关闭自启动后保留该偏好但不生效；手动打开显示窗口。静默仅适用于收到固定登录启动标记、系统启动项启用且后台恢复入口可用的本次启动。平台机制、外部系统限制与路径变化见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。
 
 ### 应用偏好设置

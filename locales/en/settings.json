@@ -337,5 +337,11 @@
   "aiChooseModel": "Choose the default model",
   "aiSkip": "Later",
   "aiReadFailed": "Can't read the AI settings",
-  "aiModel": "Model"
+  "aiModel": "Model",
+  "shortcuts": "Keyboard shortcuts",
+  "shortcutsSwitchGroup": "Keys",
+  "singleKeyShortcuts": "Single-key shortcuts",
+  "singleKeyShortcutsHint": "Handle mail with a single key, like E to archive or S to star. Turn this off if you use voice input or assistive tools, to avoid accidental actions.",
+  "shortcutsList": "All shortcuts",
+  "singleKeyShortcutsOff": "Single-key shortcuts are off. Shortcuts with a modifier key and Esc still work."
 }
