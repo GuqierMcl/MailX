@@ -13,7 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- Recognized verification codes get their own notification, with a copy button on Windows and macOS and prominent text on Linux. / 识别到的验证码会单独显示通知，Windows 和 macOS 提供复制按钮，Linux 在通知文字中突出显示。
+- Recognized verification codes get their own notification, with a copy button on Windows and macOS and prominent text on Linux. / 识别到的验证码会单独显示通知，Windows 和 macOS 提供复制按钮，Linux 在通知文字中突出显示。 ([#133](https://github.com/GuqierMcl/MailX/pull/133))
 
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
