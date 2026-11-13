@@ -568,7 +568,8 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ```ts
 // microsoftFree / googleFree 是两个免设置通道（浏览器内置翻译所用，非官方），没有密钥。
-type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree";
+// ai 是 AI 设置里的模型，没有翻译密钥，同意绑定到连接，见下文。
+type TranslationProviderId = "deepl" | "microsoft" | "google" | "microsoftFree" | "googleFree" | "ai";
 
 type TranslationStatus = {
   emailId: string;
@@ -590,8 +591,8 @@ type TranslationKeyState = { provider: TranslationProviderId; configured: boolea
 type TranslationTest = { translated: string }; // 固定英文句子的译文，最多 200 字符
 ```
 
-- `translationStatus` 在未选服务、所选的需要密钥的服务没有保存密钥（免设置服务无需密钥）、邮件为本机已发送副本、正文尚未缓存或缓存的净化版本过旧时，`suggested` 与 `autoTranslate` 为 false 或语言未知；`translation` 仅在缓存键（邮件、目标语言、是否含引用、正文哈希、净化版本、分段版本）全部匹配时有值。
-- `translateEmail` 的检查顺序：设置校验、服务已选（`translationNotConfigured`）、需要密钥的服务已保存密钥（`translationNotConfigured`，免设置服务跳过这一步）、已同意当前服务（`translationConsentRequired`）、目标语言有效（`validation`，字段 `target`）、正文已缓存（`bodyNotCached`）、大小（`translationTooLarge`）。同一邮件再次翻译会取消上一次；全应用最多 2 个并行。本机已发送副本返回 `validation`（字段 `emailId`）。
+- `translationStatus` 在未选服务、所选的需要密钥的服务没有保存密钥（免设置服务无需密钥；`ai` 则是没有可用的翻译模型或默认模型）、邮件为本机已发送副本、正文尚未缓存或缓存的净化版本过旧时，`suggested` 与 `autoTranslate` 为 false 或语言未知；`translation` 仅在缓存键（邮件、目标语言、是否含引用、正文哈希、净化版本、分段版本）全部匹配时有值。
+- `translateEmail` 的检查顺序：设置校验、服务已选（`translationNotConfigured`）、需要密钥的服务已保存密钥（`translationNotConfigured`，免设置服务跳过这一步；`ai` 为有可用模型，否则同样 `translationNotConfigured`）、已同意当前服务（`translationConsentRequired`；`ai` 另要求同意的连接与当前使用的一致，见 `consentedAi`）、目标语言有效（`validation`，字段 `target`）、正文已缓存（`bodyNotCached`）、大小（`translationTooLarge`）。同一邮件再次翻译会取消上一次；全应用最多 2 个并行。本机已发送副本返回 `validation`（字段 `emailId`）。
 - `testTranslation` 只翻译一句固定英文，用于检查密钥（如果该服务有密钥）、区域与网络，不含邮件内容，不要求同意，免设置服务无需密钥也可测试；目标语言为 `auto` 时译成简体中文。
 - `translationKeys` 只返回三个需要密钥的服务（`deepl`、`microsoft`、`google`）的状态；对 `microsoftFree` / `googleFree` 调用 `setTranslationKey` 或 `removeTranslationKey` 返回 `validation`（字段 `translation.provider`）。
 - `setTranslationKey` 去掉首尾空白，拒绝空值、控制字符与超过 512 字符，返回 `validation`（字段 `translation.key`），错误中不含密钥原值。密钥存入 SecretStore 的 `mailx/translation/<provider>`。
@@ -601,7 +602,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 
 | 字段 | 取值 / 默认 | 说明 |
 | --- | --- | --- |
-| `provider` | `deepl` / `microsoft` / `google` / `microsoftFree` / `googleFree` / `null`，默认 `microsoftFree` | 所选翻译服务；`null` 表示用户关闭了翻译。设置文件里显式保存的 `null` 保持关闭，字段缺失或值未知时取默认 |
+| `provider` | `deepl` / `microsoft` / `google` / `microsoftFree` / `googleFree` / `ai` / `null`，默认 `microsoftFree` | 所选翻译服务；`null` 表示用户关闭了翻译。设置文件里显式保存的 `null` 保持关闭，字段缺失或值未知时取默认 |
 | `microsoftRegion` | 字符串，默认 `""`，最多 40 字符 | Azure 资源区域，仅 Microsoft 使用，空表示全局资源 |
 | `route` | `{ kind: "direct" }`（默认）或 `{ kind: "proxy", proxyKind, host, port, username }` | 翻译专用路由；不使用邮箱账号的代理；`username` 默认 `""`（旧文件缺省时同），空表示不登录，非空时与存放在凭据库的代理密码一起登录，规则同账号代理用户名（非空白、最多 255 字节、无控制字符）；代理失败或拒绝登录不回退直连 |
 | `targetLanguage` | `auto`（默认，跟随界面语言）或 26 种目标之一 | `zh-Hans`、`zh-Hant`、`en`、`ja`、`ko`、`fr`、`de`、`es`、`pt`、`it`、`ru`、`nl`、`pl`、`tr`、`ar`、`id`、`uk`、`sv`、`da`、`fi`、`cs`、`el`、`hu`、`ro`、`bg`、`nb` |
@@ -610,6 +611,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | `alwaysTranslate` | 小写语言码数组，默认 `[]`，最多 64 项 | 打开时自动翻译的语言；与 `neverSuggest` 不能重叠 |
 | `includeQuotes` | 布尔，默认 false | 是否翻译已折叠的引用内容 |
 | `consentedProvider` | 服务 id 或 `null` | 用户已同意向其发送邮件文字的服务；与 `provider` 不同时同意无效 |
+| `consentedAi` | `{ connectionId, baseUrl }` 或 `null`，默认 `null` | `consentedProvider = ai` 时同意所覆盖的 AI 连接；`ai` 只有在它与当前实际使用的连接（翻译模型，否则默认模型，所在的连接）的 ID 与规范化接口地址都一致时才算已同意，换连接或改接口地址要重新同意，换模型、换密钥不用；非法值返回 `validation`（字段 `translation.consentedAi`），文件里的非法值只丢弃该字段 |
 
 校验失败返回 `validation`，字段如 `translation.targetLanguage`、`translation.neverSuggest`、`translation.alwaysTranslate`、`translation.microsoftRegion`、`translation.route.host`、`translation.route.port`、`translation.route.username`，不落盘。旧文件缺少该节时使用默认值；文件中类型或取值非法的单个字段回到默认并保留其余设置；非法的 `route.username` 只回到空，代理本身保留。这是设置文件扩展。
 
@@ -635,14 +637,15 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 
 ### AI 服务商与模型（主窗口）
 
-设计见 [AI 服务商与模型配置](../architecture/ai-providers.md)。状态：已实现，仅有自动测试，没有调用过真实服务商；目前没有功能使用模型。命令只开放给主窗口，参数拒绝未知字段。AI 设置保存在设置文件的 `ai` 字段，不在 `AppSettings` 类型里，`settings_update` 不接受也不改动它；前端经 `ai_state` 读取，经下列命令修改。
+设计见 [AI 服务商与模型配置](../architecture/ai-providers.md)。状态：已实现，仅有自动测试，没有调用过真实服务商；目前只有邮件翻译使用模型（见“邮件翻译”）。命令只开放给主窗口，参数拒绝未知字段。AI 设置保存在设置文件的 `ai` 字段，不在 `AppSettings` 类型里，`settings_update` 不接受也不改动它；前端经 `ai_state` 读取，经下列命令修改。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
 | `aiState()` | `ai_state`，`{}` | `AiState` |
 | `aiSaveConnection(input)` | `ai_save_connection`，`SaveAiConnection`（`id` 为 null 表示新建；`providerId`、`name`、`protocol`、`baseUrl`、`useProxy`、`apiKey`、`verify`） | `SavedAiConnection { state, connectionId, models }`；`apiKey` 为 null 不改密钥、空串清除；`verify` 为真时先获取模型列表，失败不保存，成功时 `models` 有值 |
-| `aiRemoveConnection(id)` | `ai_remove_connection`，`{ id }` | `AiState`；同时删除该连接的密钥，默认模型指向它时清空 |
+| `aiRemoveConnection(id)` | `ai_remove_connection`，`{ id }` | `AiState`；同时删除该连接的密钥，默认模型与翻译模型指向它时分别清空 |
 | `aiSetDefaultModel(model)` | `ai_set_default_model`，`{ model: AiModelRef \| null }` | `AiState`；连接必须存在 |
+| `aiSetTranslationModel(model)` | `ai_set_translation_model`，`{ model: AiModelRef \| null }` | `AiState`；`null` 表示翻译跟随默认模型；连接必须存在（否则 `aiNotConfigured`） |
 | `aiSetRoute(route)` | `ai_set_route`，`{ route: ServiceRoute }` | `AiState` |
 | `aiSetProxyPassword(password)` | `ai_set_proxy_password`，`{ password }` | `AiState` |
 | `aiRemoveProxyPassword()` | `ai_remove_proxy_password`，`{}` | `AiState` |
@@ -660,6 +663,7 @@ type AiConnectionState = {         // 连接加 hasKey；没有任何接口返�
 type AiState = {
   connections: AiConnectionState[]; // 最多 20 个
   defaultModel: AiModelRef | null;
+  translationModel: AiModelRef | null; // 翻译用的模型，null 跟随默认模型
   route: ServiceRoute;              // AI 专用代理，类型与翻译路由相同
   proxyPasswordSet: boolean;
 };

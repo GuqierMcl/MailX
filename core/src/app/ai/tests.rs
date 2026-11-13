@@ -825,3 +825,153 @@ async fn keys_never_appear_in_debug_output_errors_or_state() {
     assert_eq!(error.code, ErrorCode::AiNetwork);
     assert!(!format!("{error:?}").contains(SECRET));
 }
+
+// ------------------------------------------------------------ translation
+
+fn model_with_output(connection_id: &str, model_id: &str, output: Option<u32>) -> AiModelRef {
+    AiModelRef {
+        model_id: model_id.into(),
+        output_length: output,
+        ..model_ref(connection_id)
+    }
+}
+
+#[tokio::test]
+async fn the_translation_model_needs_a_connection_and_is_cleared_with_it() {
+    let f = fixture();
+    assert_eq!(
+        f.service
+            .set_translation_model(Some(model_ref(&Uuid::new_v4().to_string())))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AiNotConfigured
+    );
+    let (a, b) = (
+        save(&f, "https://a.example", None).await,
+        save(&f, "https://b.example", None).await,
+    );
+    let mut bad = model_ref(&a);
+    bad.model_id = " x".into();
+    assert_eq!(
+        f.service
+            .set_translation_model(Some(bad))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
+    f.service
+        .set_default_model(Some(model_ref(&a)))
+        .await
+        .unwrap();
+    let state = f
+        .service
+        .set_translation_model(Some(model_ref(&b)))
+        .await
+        .unwrap();
+    assert_eq!(state.translation_model, Some(model_ref(&b)));
+    assert_eq!(state.default_model, Some(model_ref(&a)));
+
+    let state = f.service.remove_connection(&b).await.unwrap();
+    assert_eq!(state.translation_model, None);
+    assert_eq!(state.default_model, Some(model_ref(&a)));
+    assert_eq!(
+        f.settings.get().unwrap().settings.ai.translation_model,
+        None
+    );
+    f.service
+        .set_translation_model(Some(model_ref(&a)))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.service
+            .set_translation_model(None)
+            .await
+            .unwrap()
+            .translation_model,
+        None
+    );
+}
+
+#[tokio::test]
+async fn translation_uses_its_model_else_the_default_else_nothing() {
+    let f = fixture();
+    let (a, b) = (
+        save(&f, "https://a.example", Some("key-a")).await,
+        save(&f, "https://b.example", Some("key-b")).await,
+    );
+    // Nothing chosen: not configured, and no binding.
+    assert_eq!(f.service.translation_binding().await.unwrap(), None);
+    assert_eq!(
+        f.service.translation_target().await.unwrap_err().code,
+        ErrorCode::AiNotConfigured
+    );
+
+    // The default model is what translation follows.
+    f.service
+        .set_default_model(Some(model_with_output(&a, "default-model", Some(4000))))
+        .await
+        .unwrap();
+    let target = f.service.translation_target().await.unwrap();
+    assert_eq!(target.binding.connection_id, a);
+    assert_eq!(target.binding.base_url, "https://a.example/v1");
+    assert_eq!(target.model_id, "default-model");
+    assert_eq!(target.output_length, Some(4000));
+    assert_eq!(target.key.expose_secret(), "key-a");
+    assert_eq!(
+        f.service.translation_binding().await.unwrap(),
+        Some(target.binding.clone())
+    );
+
+    // Its own model wins, with its own connection and key.
+    f.service
+        .set_translation_model(Some(model_with_output(&b, "translate-model", None)))
+        .await
+        .unwrap();
+    let target = f.service.translation_target().await.unwrap();
+    assert_eq!(target.binding.connection_id, b);
+    assert_eq!(target.model_id, "translate-model");
+    assert_eq!(target.key.expose_secret(), "key-b");
+
+    // Clearing it follows the default again.
+    f.service.set_translation_model(None).await.unwrap();
+    assert_eq!(
+        f.service
+            .translation_target()
+            .await
+            .unwrap()
+            .binding
+            .connection_id,
+        a
+    );
+}
+
+#[tokio::test]
+async fn the_translation_target_uses_the_ai_route_and_hides_its_key() {
+    let f = fixture();
+    let id = save(&f, "https://a.example", Some(SECRET)).await;
+    f.service
+        .set_default_model(Some(model_ref(&id)))
+        .await
+        .unwrap();
+    let target = f.service.translation_target().await.unwrap();
+    assert!(target.route.proxy.is_none());
+    assert!(!format!("{target:?}").contains(SECRET));
+
+    // A key that was never set resolves with an empty one (local servers).
+    let keyless = save(&f, "https://c.example", None).await;
+    f.service
+        .set_translation_model(Some(model_ref(&keyless)))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.service
+            .translation_target()
+            .await
+            .unwrap()
+            .key
+            .expose_secret(),
+        ""
+    );
+}

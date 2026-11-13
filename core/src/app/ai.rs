@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::{
     AppError, ErrorCode,
     ai::{
-        AiCatalog, AiConnection, AiModel, AiModelRef, AiProtocol, AiProviderIcon, AiSettings,
-        AiTestResult, catalog,
+        AiCatalog, AiConnection, AiModel, AiModelRef, AiModelTarget, AiProtocol, AiProviderIcon,
+        AiSettings, AiTestResult, catalog,
         client::{self, Endpoint},
         icons, models,
         validation::{
@@ -29,7 +29,7 @@ use crate::{
     },
     net::NetRoute,
     secrets::{SecretStore, SecretValue},
-    settings::{ServiceRoute, SettingsStore},
+    settings::{AiConsent, ServiceRoute, SettingsStore},
 };
 
 const PROXY_PASSWORD_SECRET: &str = "mailx/ai/proxy-password";
@@ -56,6 +56,7 @@ pub struct AiConnectionState {
 pub struct AiState {
     pub connections: Vec<AiConnectionState>,
     pub default_model: Option<AiModelRef>,
+    pub translation_model: Option<AiModelRef>,
     pub route: ServiceRoute,
     pub proxy_password_set: bool,
 }
@@ -192,6 +193,7 @@ impl AiService {
         Ok(AiState {
             connections,
             default_model: ai.default_model,
+            translation_model: ai.translation_model,
             route: ai.route,
             proxy_password_set: self.secrets.get(PROXY_PASSWORD_SECRET)?.is_some(),
         })
@@ -349,6 +351,13 @@ impl AiService {
                 {
                     ai.default_model = None;
                 }
+                if ai
+                    .translation_model
+                    .as_ref()
+                    .is_some_and(|model| model.connection_id == id)
+                {
+                    ai.translation_model = None;
+                }
                 Ok(())
             })?;
             this.state_now()
@@ -375,6 +384,33 @@ impl AiService {
                     return Err(not_configured());
                 }
                 ai.default_model = model;
+                Ok(())
+            })?;
+            this.state_now()
+        })
+        .await
+    }
+
+    /// `None` makes translation follow the default model.
+    pub async fn set_translation_model(
+        self: &Arc<Self>,
+        model: Option<AiModelRef>,
+    ) -> Result<AiState, AppError> {
+        let model = model
+            .map(|model| {
+                model
+                    .normalized()
+                    .ok_or_else(|| AppError::validation("model"))
+            })
+            .transpose()?;
+        self.blocking(move |this| {
+            this.settings.update_ai(|ai| {
+                if let Some(model) = &model
+                    && !ai.connections.iter().any(|c| c.id == model.connection_id)
+                {
+                    return Err(not_configured());
+                }
+                ai.translation_model = model;
                 Ok(())
             })?;
             this.state_now()
@@ -547,9 +583,77 @@ impl AiService {
             key: Some(&key),
             route: &route,
         };
-        client::complete(&endpoint, model_id, system, user, max_output)
-            .await
-            .map_err(AppError::new)
+        client::complete(
+            &endpoint,
+            model_id,
+            system,
+            user,
+            max_output,
+            client::CHAT_TIMEOUT,
+        )
+        .await
+        .map_err(AppError::new)
+    }
+
+    // -------------------------------------------------------- translation
+
+    /// The model that translates: the translation model, else the default
+    /// model, with its connection. `None` when neither is usable.
+    fn translation_choice(ai: &AiSettings) -> Option<(&AiModelRef, &AiConnection)> {
+        let model = ai
+            .translation_model
+            .as_ref()
+            .or(ai.default_model.as_ref())?;
+        let connection = ai
+            .connections
+            .iter()
+            .find(|c| c.id == model.connection_id)?;
+        Some((model, connection))
+    }
+
+    /// Which connection translation would use, from the settings alone: no
+    /// key is read and nothing goes out. `None` when no model is usable.
+    pub async fn translation_binding(self: &Arc<Self>) -> Result<Option<AiConsent>, AppError> {
+        self.blocking(|this| {
+            let ai = this.ai_settings()?;
+            Ok(
+                Self::translation_choice(&ai).map(|(_, connection)| AiConsent {
+                    connection_id: connection.id.clone(),
+                    base_url: connection.base_url.clone(),
+                }),
+            )
+        })
+        .await
+    }
+
+    /// Everything a translation call needs. `AiNotConfigured` when no model
+    /// is usable.
+    pub async fn translation_target(self: &Arc<Self>) -> Result<AiModelTarget, AppError> {
+        let (connection, model, key, ai_route) = self
+            .blocking(|this| {
+                let ai = this.ai_settings()?;
+                let (model, connection) =
+                    Self::translation_choice(&ai).ok_or_else(not_configured)?;
+                let key = this
+                    .secrets
+                    .get(&key_secret(&connection.id))?
+                    .map(|key| key.expose_secret().to_owned())
+                    .unwrap_or_default();
+                Ok((connection.clone(), model.clone(), key, ai.route.clone()))
+            })
+            .await?;
+        let route = self.route(&ai_route, connection.use_proxy).await?;
+        Ok(AiModelTarget::new(
+            AiConsent {
+                connection_id: connection.id,
+                base_url: connection.base_url,
+            },
+            connection.protocol,
+            model.model_id,
+            model.output_length,
+            key,
+            route,
+        ))
     }
 
     // ------------------------------------------------------------ catalog

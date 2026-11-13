@@ -1629,6 +1629,35 @@ async fn translation_inputs(
     Ok((snapshot.settings.translation, language))
 }
 
+/// The model translation would use, resolved only when the saved service is
+/// `ai`, so the other services never depend on the AI service building.
+async fn translation_ai_target(
+    state: &DesktopState,
+    settings: &mailx_core::settings::TranslationSettings,
+) -> Result<Option<mailx_core::AiModelTarget>, AppError> {
+    if settings.provider != Some(mailx_core::settings::TranslationProviderId::Ai) {
+        return Ok(None);
+    }
+    match state.ai()?.translation_target().await {
+        Ok(target) => Ok(Some(target)),
+        Err(error) if error.code == ErrorCode::AiNotConfigured => {
+            Err(AppError::new(ErrorCode::TranslationNotConfigured))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Which connection `ai` translation would use, from the settings alone.
+async fn translation_ai_binding(
+    state: &DesktopState,
+    settings: &mailx_core::settings::TranslationSettings,
+) -> Result<Option<mailx_core::settings::AiConsent>, AppError> {
+    if settings.provider != Some(mailx_core::settings::TranslationProviderId::Ai) {
+        return Ok(None);
+    }
+    state.ai()?.translation_binding().await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TranslateArgs {
@@ -1668,9 +1697,10 @@ pub(crate) async fn translation_status(
         async {
             let args = args?;
             let (settings, language) = translation_inputs(&state).await?;
+            let ai = translation_ai_binding(&state, &settings).await?;
             state
                 .core()?
-                .translation_status(args.email_id, settings, language)
+                .translation_status(args.email_id, settings, language, ai)
                 .await
         }
         .await,
@@ -1689,9 +1719,10 @@ pub(crate) async fn translation_translate(
         async {
             let args = args?;
             let (settings, language) = translation_inputs(&state).await?;
+            let ai = translation_ai_target(&state, &settings).await?;
             state
                 .core()?
-                .translate_email(args.email_id, settings, language, args.target_language)
+                .translate_email(args.email_id, settings, language, args.target_language, ai)
                 .await
         }
         .await,
@@ -1882,7 +1913,8 @@ pub(crate) async fn translation_test(
         async {
             args?;
             let (settings, _) = translation_inputs(&state).await?;
-            state.core()?.test_translation(settings).await
+            let ai = translation_ai_target(&state, &settings).await?;
+            state.core()?.test_translation(settings, ai).await
         }
         .await,
     ))
@@ -1991,6 +2023,19 @@ pub(crate) async fn ai_set_default_model(
         .and_then(|_| parse::<AiDefaultModelArgs>(request.body()));
     Ok(respond(
         async { state.ai()?.set_default_model(args?.model).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn ai_set_translation_model(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<mailx_core::AiState>, ()> {
+    let args = authorize(&window, "ai_set_translation_model")
+        .and_then(|_| parse::<AiDefaultModelArgs>(request.body()));
+    Ok(respond(
+        async { state.ai()?.set_translation_model(args?.model).await }.await,
     ))
 }
 

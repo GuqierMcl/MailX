@@ -74,6 +74,7 @@ fn main() {
             "ai_save_connection",
             "ai_remove_connection",
             "ai_set_default_model",
+            "ai_set_translation_model",
             "ai_set_route",
             "ai_set_proxy_password",
             "ai_remove_proxy_password",

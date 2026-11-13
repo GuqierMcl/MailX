@@ -1,11 +1,11 @@
 # AI 服务商与模型配置
 
-状态：**Implemented（自动测试，另有一次细节未记录的维护者手测）** · 本文是内置 AI 的基础设施：用户连接一个或多个模型服务商，选一个默认模型。已实现配置、模型列表、连接测试、服务商图标和非流式 `complete` 原语；目前没有任何功能使用模型，不会向模型发送邮件内容，首个使用方是计划中的“AI 作为翻译来源”。自动测试只访问本机模拟服务；维护者手测报告没有问题，但没有记录平台与服务商，见[验证记录](../development/validation.md#ai-provider-validation)。
+状态：**Implemented（自动测试，另有一次细节未记录的维护者手测）** · 本文是内置 AI 的基础设施：用户连接一个或多个模型服务商，选一个默认模型。已实现配置、模型列表、连接测试、服务商图标和非流式 `complete` 原语；首个使用方是邮件翻译：用户把翻译服务选为“AI 模型”后，邮件主题与正文文字才会发给所选连接（见[邮件翻译](translation.md#10-ai-模型作为翻译来源已实现仅自动测试)）；不选就不会向模型发送邮件内容。自动测试只访问本机模拟服务；维护者手测报告没有问题，但没有记录平台与服务商，见[验证记录](../development/validation.md#ai-provider-validation)。
 
 ## 1. 概念
 
 - **服务商连接**（`AiConnection`）：一个服务商 + 一把密钥 + 接口地址。可以有多个，同一服务商也可以连多次（例如两把不同的密钥）。
-- **默认模型**（`AiModelRef`）：某个连接下的一个模型。以后各用途（翻译、助手）默认跟随它，也可以单独指定；本 PR 只有默认模型。
+- **默认模型**（`AiModelRef`）：某个连接下的一个模型。各用途默认跟随它，也可以单独指定；目前只有翻译可以单独指定（`translationModel`），助手尚未实现。
 - **目录**：服务商的候选列表，来自应用内置的常用服务商和 [models.dev](https://models.dev) 目录。目录只用来填表和标注模型信息，**保存后的连接不随目录变化**。
 
 ## 2. 数据
@@ -16,6 +16,7 @@ AI 设置保存在设置文件的 `ai` 字段，只能通过下文的 AI 命令�
 AiSettings {
   connections: AiConnection[]          // 最多 20 个
   defaultModel: AiModelRef | null
+  translationModel: AiModelRef | null  // 翻译用的模型；null 表示跟随默认模型
   route: ServiceRoute                  // AI 专用代理；与翻译共用的路由类型（原名 TranslationRoute，JSON 不变）
 }
 AiConnection {
@@ -35,7 +36,7 @@ AiModelRef {
 }
 ```
 
-- 删除连接时同时删除它的密钥；默认模型指向它时清空默认模型。读取设置时，指向不存在连接的默认模型同样清空。
+- 删除连接时同时删除它的密钥；默认模型或翻译模型指向它时分别清空。读取设置时，指向不存在连接的默认模型或翻译模型同样清空。
 - AI 服务（`AiService`）由设置、`SecretStore` 和数据目录构建，**不依赖邮件库**，邮件库打开失败时仍可使用。
 - 密钥存 `SecretStore`：`mailx/ai/<connectionId>/api-key`；AI 代理密码：`mailx/ai/proxy-password`。没有任何接口返回密钥，只返回是否已设置。密钥必须是可打印 ASCII（它要放进 HTTP 头），最长 4096 字节；密钥可以为空（本机的 Ollama、LM Studio 不需要）。
 - macOS 上所有密钥都在同一个钥匙串条目里（[凭据保险库](secret-vault.md)），增加连接不会增加授权弹窗。
@@ -110,6 +111,7 @@ AiModelRef {
 | `ai_save_connection(SaveAiConnection)` → `SavedAiConnection` | 新建（`id` 为 null）或修改连接，返回 `{ state, connectionId, models }`；`apiKey` 为 null 表示不改密钥，空串表示清除。`verify` 为真时先用这些参数获取模型列表，失败则返回错误且不保存；成功时 `models` 为模型列表，否则为 null |
 | `ai_remove_connection({ id })` → `AiState` | 删除连接与密钥 |
 | `ai_set_default_model({ model })` → `AiState` | 设置或清空默认模型；连接必须存在 |
+| `ai_set_translation_model({ model })` → `AiState` | 设置或清空翻译模型（清空即跟随默认模型）；连接必须存在 |
 | `ai_set_route({ route })` → `AiState` | 设置 AI 代理 |
 | `ai_set_proxy_password({ password })` / `ai_remove_proxy_password()` → `AiState` | 代理密码 |
 | `ai_catalog({ refresh })` → `AiCatalog` | 服务商目录（不含模型）、更新时间、是否过期与 `refreshError`；`refresh` 为真时联网刷新 |
@@ -117,6 +119,7 @@ AiModelRef {
 | `ai_test({ connectionId, modelId })` → `AiTestResult` | 测试调用，返回耗时 |
 | `ai_provider_icon({ providerId })` → `AiProviderIcon \| null` | 见第 7 节 |
 
+翻译选用 `ai` 来源时，宿主另从这里取得“翻译用的连接”：翻译模型，否则默认模型，及其连接与密钥（`translation_binding` 只读设置、不读密钥，`translation_target` 才读密钥）；都没有时为 `aiNotConfigured`。
 ## 9. 错误
 
 服务商返回的原文不传给界面，只按状态码归类为固定错误码，界面按错误码显示中英文文案：
@@ -133,12 +136,12 @@ AiModelRef {
 | `aiInvalidResponse` | 答案无法解析或超过大小上限 |
 | `aiNotConfigured` | 连接不存在 |
 
-超时：目录 30 秒，模型列表 15 秒，测试调用 60 秒，图标 10 秒。答案上限：目录 16 MiB，其余 4 MiB。
+超时：目录 30 秒，模型列表 15 秒，测试调用 60 秒，图标 10 秒，翻译调用 120 秒（`complete` 现在由调用方传入超时）。答案上限：目录 16 MiB，其余 4 MiB。
 
 ## 10. 验证
 
-自动测试覆盖：地址校验、两种协议的列表与测试调用（本机模拟服务）、错误码映射、目录裁剪与缓存、图标校验、密钥不出现在调试输出与错误中、删除连接清理密钥与默认模型。范围与未验证项见[验证记录](../development/validation.md#ai-provider-validation)；真实服务商、models.dev 与图标主机尚未调用过。
+自动测试覆盖：翻译模型的保存、校验与随连接清理，翻译用连接的选择（翻译模型优先于默认模型）；地址校验、两种协议的列表与测试调用（本机模拟服务）、错误码映射、目录裁剪与缓存、图标校验、密钥不出现在调试输出与错误中、删除连接清理密钥与默认模型。范围与未验证项见[验证记录](../development/validation.md#ai-provider-validation)；真实服务商、models.dev 与图标主机尚未调用过。
 
 ## 11. 尚未实现
 
-流式输出与 `ModelProvider` 接口、按用途单独指定模型、内容披露与取消、Ollama 原生协议；见 [AI Runtime](../ai-runtime/README.md)。
+流式输出与 `ModelProvider` 接口、助手用途的模型选择、通用的内容披露与取消（翻译的同意与取消由翻译自己处理）、Ollama 原生协议；见 [AI Runtime](../ai-runtime/README.md)。

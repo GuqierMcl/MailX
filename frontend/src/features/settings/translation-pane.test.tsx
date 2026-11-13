@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { act, render, screen, waitFor, within } from '@/test/render'
 import { testClient } from '@/features/accounts/test-fixtures'
-import type { TranslationKeyState, TranslationSettings } from '@/generated/accounts'
+import type { AiConnectionState, AiModelRef, AiState, TranslationKeyState, TranslationSettings } from '@/generated/accounts'
 import { i18n } from '@/i18n'
 import { MailxClientError } from '@/lib/mailx-client'
 import { DEFAULT_TRANSLATION } from './settings-queries'
@@ -64,6 +64,7 @@ describe('translation settings: service and key', () => {
     expect(labels).toEqual([
       expect.stringMatching(/^免设置Microsoft 翻译Google 翻译$/),
       expect.stringMatching(/^使用自己的密钥DeepLMicrosoft TranslatorGoogle Cloud Translation$/),
+      expect.stringMatching(/^使用 AI 服务商AI 模型$/),
       '不使用翻译',
     ])
   })
@@ -423,5 +424,86 @@ describe('keyless services in English', () => {
     expect(within(listbox).getByText('No setup needed')).toBeInTheDocument()
     expect(within(listbox).getByText('Use your own key')).toBeInTheDocument()
     expect(within(listbox).getByRole('option', { name: "Don't translate" })).toBeInTheDocument()
+  })
+})
+
+const conn = (over: Partial<AiConnectionState> = {}): AiConnectionState => ({
+  id: 'c1', providerId: 'openai', name: 'OpenAI', protocol: 'openaiCompatible', baseUrl: 'https://api.openai.com/v1', useProxy: false, hasKey: true, ...over,
+})
+const ref = (modelId: string, name: string, connectionId = 'c1'): AiModelRef => ({ connectionId, modelId, name, contextLength: null, outputLength: null })
+const MODELS = [
+  { id: 'big', name: 'Big Model', contextLength: null, outputLength: null, toolCall: null, source: 'provider' as const },
+  { id: 'small', name: 'Small Model', contextLength: null, outputLength: null, toolCall: null, source: 'provider' as const },
+]
+
+async function setupAi(ai: Partial<AiState> = {}, onNavigate?: (section: 'ai') => void) {
+  const client = testClient()
+  await client.updateSettings({ translation: { ...DEFAULT_TRANSLATION, provider: 'ai' } })
+  client.updateSettings.mockClear()
+  let state: AiState = { connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false, ...ai }
+  client.aiState.mockImplementation(async () => state)
+  client.aiListModels.mockResolvedValue(MODELS)
+  client.aiSetTranslationModel.mockImplementation(async (model) => { state = { ...state, translationModel: model }; return state })
+  render(<TranslationPane client={client} onNavigate={onNavigate} />)
+  return client
+}
+
+describe('translation settings: AI model', () => {
+  it('offers the AI model as a service and picks it', async () => {
+    const { saved } = await setup()
+    await choose('服务', 'AI 模型')
+    await waitFor(() => expect(saved()).toEqual(expect.objectContaining({ provider: 'ai' })))
+  })
+
+  it('follows the default model, and saves a specific one for translation', async () => {
+    const client = await setupAi({ connections: [conn()], defaultModel: ref('big', 'Big Model') })
+    const picker = await screen.findByRole('combobox', { name: '模型' })
+    expect(picker).toHaveTextContent('跟随默认模型（Big Model）')
+    expect(screen.queryByRole('button', { name: '打开 AI 设置' })).not.toBeInTheDocument()
+    await userEvent.click(picker)
+    await userEvent.click(await screen.findByText('Small Model'))
+    await waitFor(() => expect(client.aiSetTranslationModel).toHaveBeenCalledExactlyOnceWith(
+      { connectionId: 'c1', modelId: 'small', name: 'Small Model', contextLength: null, outputLength: null }))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '模型' })).toHaveTextContent('Small Model'))
+
+    await userEvent.click(screen.getByRole('combobox', { name: '模型' }))
+    await userEvent.click(await screen.findByText('跟随默认模型（Big Model）'))
+    await waitFor(() => expect(client.aiSetTranslationModel).toHaveBeenLastCalledWith(null))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '模型' })).toHaveTextContent('跟随默认模型（Big Model）'))
+  })
+
+  it('accepts a typed model id', async () => {
+    const client = await setupAi({ connections: [conn()], defaultModel: ref('big', 'Big Model') })
+    await userEvent.click(await screen.findByRole('combobox', { name: '模型' }))
+    await userEvent.type(await screen.findByPlaceholderText('搜索或输入模型 ID'), 'my-model')
+    await userEvent.click(await screen.findByText('使用“my-model”'))
+    await waitFor(() => expect(client.aiSetTranslationModel).toHaveBeenCalledWith(expect.objectContaining({ connectionId: 'c1', modelId: 'my-model' })))
+  })
+
+  it('without a provider says so and opens the AI settings', async () => {
+    const onNavigate = vi.fn()
+    await setupAi({}, onNavigate)
+    expect(await screen.findByText('先在 AI 设置里添加服务商并选择模型')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '模型' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '打开 AI 设置' }))
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith('ai')
+  })
+
+  it('with providers but no model still asks for one', async () => {
+    await setupAi({ connections: [conn()] })
+    expect(await screen.findByText('先在 AI 设置里添加服务商并选择模型')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '模型' })).toHaveTextContent('跟随默认模型')
+    expect(screen.getByRole('button', { name: '打开 AI 设置' })).toBeInTheDocument()
+  })
+
+  it('hides the key, region and proxy rows but keeps the rest', async () => {
+    await setupAi({ connections: [conn()], defaultModel: ref('big', 'Big Model') })
+    await screen.findByRole('combobox', { name: '模型' })
+    expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('区域')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^高级/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '翻译成' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试' })).toBeEnabled()
   })
 })

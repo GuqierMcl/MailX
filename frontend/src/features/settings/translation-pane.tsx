@@ -1,19 +1,25 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
+import { CommandGroup, CommandItem } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import type { TranslationKeyState, TranslationProviderId, TranslationProxyPasswordState, TranslationSettings } from '@/generated/accounts'
-import { COMMON_LANGUAGES, KEYED_PROVIDERS, KEYLESS_PROVIDERS, languageName, nativeLanguageName, needsKey, TRANSLATION_PROVIDER_NAMES, TRANSLATION_TARGETS } from '@/features/mail/translation/languages'
+import type { AiModelRef, AiState, TranslationKeyState, TranslationProviderId, TranslationProxyPasswordState, TranslationSettings } from '@/generated/accounts'
+import { AI_PROVIDER, COMMON_LANGUAGES, KEYED_PROVIDERS, KEYLESS_PROVIDERS, languageName, nativeLanguageName, needsKey, TRANSLATION_PROVIDER_NAMES, TRANSLATION_TARGETS } from '@/features/mail/translation/languages'
 import type { MailxClient } from '@/lib/mailx-client'
-import { translationKeys } from '@/lib/query-client'
+import { aiKeys, translationKeys } from '@/lib/query-client'
+import { ModelList } from './ai-model-picker'
+import { translationTarget, useAiState, useModelGroups } from './ai-queries'
 import { ProxyPasswordFields, ProxyRows, StoredSecretRow } from './proxy-rows'
 import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateTranslation } from './settings-queries'
@@ -25,7 +31,7 @@ const AUTO = 'auto'
 
 type Update = ReturnType<typeof useUpdateTranslation>
 
-export function TranslationPane({ client }: { client: MailxClient }) {
+export function TranslationPane({ client, onNavigate }: { client: MailxClient; onNavigate?: (section: 'ai') => void }) {
   useTranslation()
   const settings = useSettings(client)
   const update = useUpdateTranslation(client)
@@ -37,19 +43,22 @@ export function TranslationPane({ client }: { client: MailxClient }) {
   const translation = settings.data.settings.translation
   return <SettingsPage>
     {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
-    <ServiceGroup client={client} translation={translation} update={update} />
+    <ServiceGroup client={client} translation={translation} update={update} onNavigate={onNavigate} />
     <TranslateGroup translation={translation} update={update} />
     <ForeignGroup translation={translation} update={update} />
     <SavedGroup client={client} />
-    <AdvancedGroup client={client} translation={translation} update={update} />
+    {/* A model is reached through its AI connection, with that connection's key and proxy. */}
+    {translation.provider !== AI_PROVIDER && <AdvancedGroup client={client} translation={translation} update={update} />}
   </SettingsPage>
 }
 
-function ServiceGroup({ client, translation, update }: { client: MailxClient; translation: TranslationSettings; update: Update }) {
+function ServiceGroup({ client, translation, update, onNavigate }: { client: MailxClient; translation: TranslationSettings; update: Update; onNavigate?: (section: 'ai') => void }) {
   useTranslation()
+  const ai = useAiState(client, translation.provider === AI_PROVIDER)
   const keys = useQuery({ queryKey: translationKeys.keys(), queryFn: () => client.translationKeys() })
   const { provider } = translation
-  const configured = provider !== null && Boolean(keys.data?.some((key) => key.provider === provider && key.configured))
+  const usesAi = provider === AI_PROVIDER
+  const configured = usesAi ? translationTarget(ai.data) !== null : provider !== null && Boolean(keys.data?.some((key) => key.provider === provider && key.configured))
   const keyless = provider !== null && !needsKey(provider)
   const services: Record<string, string> = { [NONE]: t('settings:translationServiceNone'), ...TRANSLATION_PROVIDER_NAMES }
   const option = (value: string) => <SelectItem key={value} value={value}>{services[value]}</SelectItem>
@@ -69,16 +78,64 @@ function ServiceGroup({ client, translation, update }: { client: MailxClient; tr
             <SelectLabel>{t('settings:translationGroupOwnKey')}</SelectLabel>
             {KEYED_PROVIDERS.map(option)}
           </SelectGroup>
+          <SelectGroup>
+            <SelectLabel>{t('settings:translationGroupAi')}</SelectLabel>
+            {option(AI_PROVIDER)}
+          </SelectGroup>
           <SelectGroup>{option(NONE)}</SelectGroup>
         </SelectContent>
       </Select>
     </SettingsRow>
+    {usesAi && ai.data && <ModelRow client={client} ai={ai.data} onNavigate={onNavigate} />}
     {provider && !keyless && <>
       <KeyRow key={provider} client={client} provider={provider} configured={configured} />
       {provider === 'microsoft' && <RegionRow region={translation.microsoftRegion} update={update} />}
     </>}
     {provider && <TestRow key={`${provider}:${configured}`} client={client} configured={keyless || configured} keyless={keyless} />}
   </SettingsGroup>
+}
+
+/** Which model translates: the AI settings' own choice for translation, or whatever the default model is. */
+function ModelRow({ client, ai, onNavigate }: { client: MailxClient; ai: AiState; onNavigate?: (section: 'ai') => void }) {
+  useTranslation()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const groups = useModelGroups(client, ai, open)
+  const resolved = translationTarget(ai)
+  const choose = (model: AiModelRef | null) => {
+    setOpen(false)
+    setFailure(null)
+    client.aiSetTranslationModel(model).then(
+      (next) => queryClient.setQueryData(aiKeys.state(), next),
+      (error: unknown) => setFailure(errorText(error)),
+    )
+  }
+  const follow = ai.defaultModel ? t('settings:translationModelFollow', { name: ai.defaultModel.name }) : t('settings:translationModelFollowBare')
+  const chosen = ai.translationModel
+  const connected = ai.connections.length > 0
+  return <SettingsRow label={t('settings:translationModel')} htmlFor="translation.model"
+    description={resolved ? t('settings:translationModelDescription') : t('settings:translationModelNeedsSetup')}>
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex items-center gap-2">
+        {connected && <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger render={<Button id="translation.model" role="combobox" aria-label={t('settings:translationModel')} aria-expanded={open} variant="outline" className="w-56 justify-between font-normal" />}>
+            <span className="truncate">{chosen ? chosen.name : follow}</span>
+            <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="size-4 shrink-0 text-muted-foreground" />
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 gap-0 p-0">
+            <ModelList client={client} groups={groups} onPick={choose} leading={
+              <CommandGroup>
+                <CommandItem value="follow-default" onSelect={() => choose(null)}>{follow}</CommandItem>
+              </CommandGroup>
+            } />
+          </PopoverContent>
+        </Popover>}
+        {!resolved && <Button variant="outline" size="sm" onClick={() => onNavigate?.('ai')}>{t('settings:translationOpenAi')}</Button>}
+      </div>
+      {failure && <span role="alert" className="max-w-72 text-right text-xs text-destructive">{failure}</span>}
+    </div>
+  </SettingsRow>
 }
 
 /** The key is typed once and kept by the app; it is never read back, so a saved key shows only that it exists. */

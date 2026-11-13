@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon, Delete02Icon, Edit02Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
@@ -19,8 +19,8 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { aiKeys } from '@/lib/query-client'
 import { AiProviderIcon } from './ai-provider-icon'
 import { AiProviderDialog } from './ai-provider-dialog'
-import { useAiCatalog } from './ai-queries'
-import { ModelList, type ModelGroup } from './ai-model-picker'
+import { useAiCatalog, useAiState, useModelGroups } from './ai-queries'
+import { ModelList } from './ai-model-picker'
 import { ProxyPasswordFields, ProxyRows } from './proxy-rows'
 import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 
@@ -33,7 +33,7 @@ const hostOf = (baseUrl: string) => {
 export function AiPane({ client }: { client: MailxClient }) {
   useTranslation()
   const queryClient = useQueryClient()
-  const state = useQuery({ queryKey: aiKeys.state(), queryFn: () => client.aiState() })
+  const state = useAiState(client)
   const catalog = useAiCatalog(client)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [removing, setRemoving] = useState<AiConnectionState | null>(null)
@@ -113,17 +113,7 @@ function DefaultModelRow({ client, ai, onPick }: { client: MailxClient; ai: AiSt
   const [test, setTest] = useState<TestState>({ kind: 'idle' })
   const current = ai.defaultModel
   const currentConnection = ai.connections.find((connection) => connection.id === current?.connectionId)
-  // Lists are fetched live each time the picker opens and are not kept.
-  const lists = useQueries({
-    queries: ai.connections.map((connection) => ({
-      queryKey: aiKeys.models(connection.id), queryFn: () => client.aiListModels(connection.id),
-      enabled: open, staleTime: 0, gcTime: 60_000, refetchOnMount: 'always' as const,
-    })),
-  })
-  const groups: ModelGroup[] = ai.connections.map((connection, index) => {
-    const list = lists[index]
-    return { id: connection.id, name: connection.name, providerId: connection.providerId, models: list.data, loading: list.isFetching && !list.data, failure: list.isError ? errorText(list.error) : null }
-  })
+  const groups = useModelGroups(client, ai, open)
   const run = () => {
     if (!current) return
     setTest({ kind: 'running' })

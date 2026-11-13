@@ -56,6 +56,8 @@ pub struct AiModelRef {
 pub struct AiSettings {
     pub connections: Vec<AiConnection>,
     pub default_model: Option<AiModelRef>,
+    /// The model that translates mail; `None` follows `default_model`.
+    pub translation_model: Option<AiModelRef>,
     /// The AI proxy, shared by every connection that uses it and by the
     /// catalog and icon downloads.
     pub route: ServiceRoute,
@@ -103,21 +105,24 @@ impl AiSettings {
             }
             connections.push(connection);
         }
-        let default_model = match self.default_model {
+        let checked = |model: Option<AiModelRef>, field: &str| match model {
             Some(model) => {
                 let model = model
                     .normalized()
-                    .ok_or_else(|| AppError::validation("ai.defaultModel"))?;
+                    .ok_or_else(|| AppError::validation(field))?;
                 if !ids.contains(&model.connection_id) {
-                    return Err(AppError::validation("ai.defaultModel"));
+                    return Err(AppError::validation(field));
                 }
-                Some(model)
+                Ok(Some(model))
             }
-            None => None,
+            None => Ok(None),
         };
+        let default_model = checked(self.default_model, "ai.defaultModel")?;
+        let translation_model = checked(self.translation_model, "ai.translationModel")?;
         Ok(Self {
             connections,
             default_model,
+            translation_model,
             route: self.route,
         })
     }
@@ -133,13 +138,17 @@ impl AiSettings {
             .filter(|connection| ids.insert(connection.id.clone()))
             .take(MAX_CONNECTIONS)
             .collect();
-        let default_model = self
-            .default_model
-            .and_then(AiModelRef::normalized)
-            .filter(|model| connections.iter().any(|c| c.id == model.connection_id));
+        let usable = |model: Option<AiModelRef>| {
+            model
+                .and_then(AiModelRef::normalized)
+                .filter(|model| connections.iter().any(|c| c.id == model.connection_id))
+        };
+        let default_model = usable(self.default_model);
+        let translation_model = usable(self.translation_model);
         Self {
             connections,
             default_model,
+            translation_model,
             route: self.route.sanitized(),
         }
     }
@@ -158,7 +167,9 @@ pub(crate) fn repair_ai(value: &mut serde_json::Value) {
     }
     section.retain(|key, v| match key.as_str() {
         "connections" => v.is_array(),
-        "defaultModel" => v.is_null() || serde_json::from_value::<AiModelRef>(v.clone()).is_ok(),
+        "defaultModel" | "translationModel" => {
+            v.is_null() || serde_json::from_value::<AiModelRef>(v.clone()).is_ok()
+        }
         "route" => serde_json::from_value::<ServiceRoute>(v.clone()).is_ok(),
         _ => true,
     });
@@ -208,6 +219,7 @@ mod tests {
                 context_length: None,
                 output_length: None,
             }),
+            translation_model: None,
             route: ServiceRoute::Proxy {
                 proxy_kind: crate::accounts::types::ProxyKind::Socks5,
                 host: String::new(),

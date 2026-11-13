@@ -289,6 +289,7 @@ fn main() {
             commands::ai_save_connection,
             commands::ai_remove_connection,
             commands::ai_set_default_model,
+            commands::ai_set_translation_model,
             commands::ai_set_route,
             commands::ai_set_proxy_password,
             commands::ai_remove_proxy_password,

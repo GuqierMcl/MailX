@@ -53,7 +53,7 @@ export const useUpdateNotifications = (client: MailxClient) => useSettingsSectio
 export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
 export const DEFAULT_TRANSLATION: TranslationSettings = {
   provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,
-  neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null,
+  neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
 export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, false)
