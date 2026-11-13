@@ -18,10 +18,13 @@
 | [网络与安全](network-security.md) | 代理、OAuth、密钥、HTML、日志和外部数据访问 |
 | [远程图片调研与优化](remote-image-loading.md) | Implemented：外部项目证据、图片兼容、代理信任策略；真实代理矩阵待补 |
 | [工具层与调用入口](agent-tools.md) | 共享工具、授权和结果整形；本地 MCP 已接入，内置 Agent 与远程 MCP 待接入 |
+| [AI 交互界面](ai-chat-ui.md) | Proposed：自建的 AI 共用构件、各入口形态、动效时长与缓动、流式与长对话的性能要求 |
+| [内置 AI 工具权限](ai-permissions.md) | Proposed：内置 AI 的动作分级、core 强制的逐次确认与确认凭据、范围与限额；修订内置 Agent 发信无需确认的旧约定 |
 | [整理邮件工具](mail-organize-tools.md) | MCP 标记、归档、同步刷新与打开草稿，查询增强、事件和精确撤销 |
 | [发送与附件工具](mail-send-tools.md) | MCP 直接发信、发送结果与取消、草稿附件增删 |
 | [桌面与 Web](desktop-web.md) | 两种宿主、前端数据流、进程生命周期和部署 |
 | [界面设计语言](ui-design.md) | 画布与浮动岛屿、无分割线、自有外壳组件、标题栏插槽与命令面板 |
+| [「此刻」页面](now-page.md) | Proposed：占满主岛的问候与概览页，本地统计为底、AI 概述与对话为可选增强，动效与分期 |
 | [邮件翻译](translation.md) | Implemented（仅自动测试）：打开邮件后经用户选定的翻译服务保留版式翻译，数据披露与同意、分段回写的安全不变量、专用网络路由、本机缓存与限额 |
 | [AI 服务商与模型配置](ai-providers.md) | Implemented（仅自动测试）：连接模型服务商、内置服务商表、models.dev 目录、模型列表与测试调用、图标和密钥保存；尚无功能使用模型 |
 | [中英文文本适配](internationalization.md) | Implemented：界面、错误、语言设置、多窗口同步及 Rust 文本；三平台体验待验，区域格式化 Planned |
