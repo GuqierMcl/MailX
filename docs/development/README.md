@@ -71,6 +71,9 @@ bun run frontend:test
 # 核心账号及存储测试
 cargo test -p mailx-core --locked
 
+# 本地验证码识别探测（合成邮件，无账号与网络访问）
+bun run otp:probe --eml tests/fixtures/verification-code/sample.eml
+
 # 生成 Rust DTO 对应的 TypeScript，并检查提交产物漂移
 bun run types:generate
 bun run types:check

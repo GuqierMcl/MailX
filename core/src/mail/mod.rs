@@ -8,6 +8,7 @@ pub(crate) mod compatibility;
 pub mod filename;
 pub mod preview;
 pub mod render;
+pub mod verification_code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

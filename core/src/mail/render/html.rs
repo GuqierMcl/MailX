@@ -556,7 +556,7 @@ fn srcset_remote_count(value: &str) -> u32 {
 /// and every other run of whitespace collapses to one space. Lines are trimmed
 /// and blank-line runs shrink to a single blank line. Style, script, head and
 /// title content is not text of the message.
-pub(super) fn plain_text(html: &str) -> String {
+pub(crate) fn plain_text(html: &str) -> String {
     enum Visit<'a> {
         Enter(ego_tree::NodeRef<'a, Node>),
         Exit(&'a str),
