@@ -1233,3 +1233,17 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - 没有用真实密钥测过 `aiKeyRejected` 等错误码在真实服务上的对应关系。
 
 自动测试通过不代表上述项目已验收。
+
+<a id="verification-code-validation"></a>
+
+## 43. 验证码识别第一阶段（2026-11-13，仅本地合成样本）
+
+实现与边界见[验证码识别](../architecture/verification-codes.md)。环境为 macOS，使用仓库固定的 Rust 工具链；本阶段没有调用真实邮箱、模型或通知服务。
+
+- `cargo test -p mailx-core --locked` 通过，既有显式忽略项保持忽略。审查补充边界修正后，重新运行 `cargo test -p mailx-core --lib mail::verification_code --locked`（7 项表驱动测试）与 `cargo test -p mailx-core --test verification_code_mime --locked`（11 项）均通过。
+- `cargo clippy -p mailx-core --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`bun run version:check` 与 `git diff --check` 通过。
+- 规则样本覆盖中英文、前导零、混合码大小写、主题 / 正文冲突、重复码、同一关键词的多个候选、引用旧码、普通订单 / 金额 / 电话 / URL、超长或分组数字、不可见字符 / ASCII 控制字符片段、输入和候选数量上限，以及长 token 的扫描行为。Debug 不显示码值，显式探测 JSON 包含码值。
+- MIME 样本覆盖编码主题、Base64、quoted-printable 与字符集解码、HTML 实体和行内文本、纯文本 alternative 优先与空白回退、附件 / 嵌套邮件排除、引用与明显隐藏内容排除、过滤后数字不拼接、无效 MIME 与超限输入拒绝。
+- 执行 `bun run otp:probe --eml tests/fixtures/verification-code/sample.eml`，得到 `found` / `482913`，引用中的旧码未进入候选。另对主题 / stdin 路径模拟了唯一候选、多个候选、普通邮件与 Unicode 片段，分别得到预期状态；无效 MIME、超限 stdin、互斥参数与不存在文件均失败并返回固定错误，不带原文或文件路径。
+
+**未验证：** 脱敏真实模板的识别覆盖率和误识别率；任意 CSS 隐藏与未覆盖的引用格式；Windows / Linux 本地运行。本阶段尚未接入同步获取、系统通知或剪贴板，不能由这些测试推定通知展示、通知中心点击或后台复制已经可用。

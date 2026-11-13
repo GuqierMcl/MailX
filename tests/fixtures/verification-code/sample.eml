@@ -1,0 +1,12 @@
+From: Example Accounts <accounts@example.test>
+To: recipient@example.test
+Subject: Your verification code
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Your verification code is:</p>
+<p><strong>482913</strong></p>
+<p>This code is valid for 5 minutes. Do not share it.</p>
+<blockquote>Previous verification code: 762951</blockquote>
+</body></html>
