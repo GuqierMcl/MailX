@@ -1,3 +1,5 @@
+/* First, so its cascade layer ranks below Tailwind's, like dnd-kit's own tag. */
+@import "./styles/dnd-kit.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";

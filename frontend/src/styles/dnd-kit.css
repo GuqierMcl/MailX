@@ -1,0 +1,81 @@
+/*
+ * Styles that @dnd-kit/dom normally injects as a runtime <style> tag. The
+ * desktop CSP (style-src 'self') blocks that tag, so the app ships the same
+ * rules from its own stylesheet. index.css imports this file first so the
+ * dnd-kit layer stays below Tailwind's layers, as the injected tag would.
+ * dnd-kit still tries to inject its tag; under the CSP that only logs a
+ * console warning. dnd-kit.test.tsx fails when the library's rules change.
+ */
+
+/* Feedback plugin: places the dragged element under the pointer. Copied from
+   CSS_RULES in @dnd-kit/dom with its attribute and variable prefixes filled in. */
+:is(:root,:host) [data-dnd-dragging] {
+  position: fixed !important;
+  pointer-events: none !important;
+  touch-action: none;
+  z-index: calc(infinity);
+  will-change: translate;
+  top: var(--dnd-top, 0px) !important;
+  left: var(--dnd-left, 0px) !important;
+  right: unset !important;
+  bottom: unset !important;
+  width: var(--dnd-width, auto);
+  max-width: var(--dnd-width, auto);
+  height: var(--dnd-height, auto);
+  max-height: var(--dnd-height, auto);
+  transform: var(--dnd-transform, none) !important;
+  transition: var(--dnd-transition) !important;
+}
+
+:is(:root,:host) [data-dnd-placeholder] {
+  transition: none;
+}
+
+:is(:root,:host) [data-dnd-placeholder='hidden'] {
+  visibility: hidden;
+}
+
+[data-dnd-dragging] * {
+  pointer-events: none !important;
+}
+
+[data-dnd-dragging]:not([data-dnd-dropping]) {
+  translate: var(--dnd-translate) !important;
+}
+
+[data-dnd-dragging][style*='--dnd-scale'] {
+  scale: var(--dnd-scale) !important;
+  transform-origin: var(--dnd-transform-origin) !important;
+}
+
+@layer dnd-kit {
+  :where([data-dnd-dragging][popover]) {
+    overflow: visible;
+    background: unset;
+    border: unset;
+    margin: unset;
+    padding: unset;
+    color: inherit;
+
+    &:is(input, button) {
+      border: revert;
+      background: revert;
+    }
+  }
+}
+[data-dnd-dragging]::backdrop, [data-dnd-overlay]:not([data-dnd-dragging]) {
+  display: none;
+  visibility: hidden;
+}
+
+/* The Cursor and PreventSelection plugins inject unscoped `*` rules only while
+   a drag runs. A bundled stylesheet is always loaded, so these apply only while
+   a dragged element is on the page. */
+html:has([data-dnd-dragging]) * {
+  cursor: grabbing !important;
+}
+
+html:has([data-dnd-dragging]) * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
