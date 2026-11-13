@@ -30,6 +30,7 @@ pub(crate) struct VerificationCodes {
 
 #[derive(Clone)]
 struct UndoEntry {
+    #[cfg(any(target_os = "macos", windows))]
     token: String,
     batch_id: String,
     email_id: String,
@@ -118,6 +119,7 @@ pub(crate) fn finish_copy(
             let mut entries = state.undo.lock().unwrap_or_else(|error| error.into_inner());
             entries.retain(|entry| entry.expires > Instant::now());
             entries.push_back(UndoEntry {
+                #[cfg(any(target_os = "macos", windows))]
                 token: token.clone(),
                 batch_id: deletion.batch_id.clone(),
                 email_id: outcome.email_id.clone(),
@@ -202,6 +204,7 @@ pub(crate) fn retire(app: &AppHandle, account_id: &str) {
     }
 }
 
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) fn undo_native(app: &AppHandle, token: &str) -> Result<(), AppError> {
     let state = app.state::<VerificationCodes>();
     let entry = state
