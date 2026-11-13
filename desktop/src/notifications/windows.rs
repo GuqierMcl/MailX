@@ -7,7 +7,10 @@
 //! single-instance callback forwards it to the running process. A cold launch
 //! exits quietly because the parent keeps action tokens only for this launch.
 
-use std::{path::Path, time::SystemTime};
+use std::{
+    path::Path,
+    time::{Duration, SystemTime},
+};
 
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -19,10 +22,11 @@ use windows::{
 };
 use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
-use super::{CODE_ACTION_TTL, CodeAction, CodeActionHandler, CodeNotification};
+use super::{CodeAction, CodeActionHandler, CodeNotification, CodeNotificationKind};
 
 const ACTION_ARGUMENT: &str = "--mailx-notification-action";
 const GROUP: &str = "mailx-verification-codes";
+const UNDO_GROUP: &str = "mailx-verification-code-undo";
 
 struct Native {
     scheme: String,
@@ -68,6 +72,7 @@ pub(super) fn setup(app: &AppHandle, handler: CodeActionHandler) -> Result<(), (
     // their existing lifecycle. Old codes cannot regain a token after restart.
     if let Ok(history) = ToastNotificationManager::History() {
         let _ = history.RemoveGroupWithId(&HSTRING::from(GROUP), &app_id);
+        let _ = history.RemoveGroupWithId(&HSTRING::from(UNDO_GROUP), &app_id);
     }
     app.manage(Native {
         scheme,
@@ -115,7 +120,11 @@ pub(super) fn show(app: &AppHandle, notification: CodeNotification) -> Result<()
     // on the host's blocking worker without a hand-written unsafe COM init.
     let document = document(&native.scheme, &notification).map_err(|_| ())?;
     let toast = ToastNotification::CreateToastNotification(&document).map_err(|_| ())?;
-    toast.SetGroup(&HSTRING::from(GROUP)).map_err(|_| ())?;
+    let group = match notification.kind {
+        CodeNotificationKind::Copy => GROUP,
+        CodeNotificationKind::Undo => UNDO_GROUP,
+    };
+    toast.SetGroup(&HSTRING::from(group)).map_err(|_| ())?;
     // Windows tags are limited to 16 characters. These are random correlation
     // tags only; action authorization always uses the complete UUID token.
     let tag = Uuid::parse_str(&notification.token)
@@ -123,7 +132,7 @@ pub(super) fn show(app: &AppHandle, notification: CodeNotification) -> Result<()
         .simple()
         .to_string();
     toast.SetTag(&HSTRING::from(&tag[..16])).map_err(|_| ())?;
-    let expires = expiration_time(SystemTime::now()).ok_or(())?;
+    let expires = expiration_time(SystemTime::now(), notification.expires_in).ok_or(())?;
     let expires: IReference<DateTime> = PropertyValue::CreateDateTime(expires)
         .and_then(|value| value.cast())
         .map_err(|_| ())?;
@@ -139,7 +148,11 @@ fn document(scheme: &str, notification: &CodeNotification) -> windows::core::Res
     let open = action_uri(scheme, "open", &notification.token).ok_or_else(|| {
         windows::core::Error::from_hresult(windows::core::HRESULT(0x80070057_u32 as i32))
     })?;
-    let copy = action_uri(scheme, "copy", &notification.token).ok_or_else(|| {
+    let action = match notification.kind {
+        CodeNotificationKind::Copy => "copy",
+        CodeNotificationKind::Undo => "undo",
+    };
+    let button_uri = action_uri(scheme, action, &notification.token).ok_or_else(|| {
         windows::core::Error::from_hresult(windows::core::HRESULT(0x80070057_u32 as i32))
     })?;
     let document = XmlDocument::new()?;
@@ -160,7 +173,7 @@ fn document(scheme: &str, notification: &CodeNotification) -> windows::core::Res
     let button = document.CreateElement(h!("action"))?;
     button.SetAttribute(h!("content"), &HSTRING::from(&notification.copy_label))?;
     button.SetAttribute(h!("activationType"), h!("protocol"))?;
-    button.SetAttribute(h!("arguments"), &HSTRING::from(copy))?;
+    button.SetAttribute(h!("arguments"), &HSTRING::from(button_uri))?;
     actions.AppendChild(&button)?;
     toast.AppendChild(&actions)?;
     let audio = document.CreateElement(h!("audio"))?;
@@ -193,7 +206,7 @@ fn registration_command(executable: &Path) -> Option<String> {
 }
 
 fn action_uri(scheme: &str, action: &str, token: &str) -> Option<String> {
-    if !matches!(action, "copy" | "open")
+    if !matches!(action, "copy" | "open" | "undo")
         || Uuid::parse_str(token).ok()?.hyphenated().to_string() != token
     {
         return None;
@@ -212,16 +225,20 @@ fn parse_launch(scheme: &str, args: &[String]) -> Option<CodeAction> {
     match action {
         "copy" => Some(CodeAction::Copy(token.to_owned())),
         "open" => Some(CodeAction::Open(token.to_owned())),
+        "undo" => Some(CodeAction::Undo(token.to_owned())),
         _ => None,
     }
 }
 
-fn expiration_time(now: SystemTime) -> Option<DateTime> {
+fn expiration_time(now: SystemTime, expires_in: Duration) -> Option<DateTime> {
+    if expires_in.is_zero() {
+        return None;
+    }
     // WinRT DateTime counts 100 ns intervals since 1601-01-01 UTC.
     const UNIX_OFFSET_SECONDS: u64 = 11_644_473_600;
     let after_unix = now.duration_since(SystemTime::UNIX_EPOCH).ok()?;
     let ticks = after_unix
-        .checked_add(CODE_ACTION_TTL)?
+        .checked_add(expires_in)?
         .as_nanos()
         .checked_div(100)?
         .checked_add(u128::from(UNIX_OFFSET_SECONDS) * 10_000_000)?;
@@ -252,6 +269,10 @@ mod tests {
         let open = action_uri(&scheme, "open", TOKEN).unwrap();
         assert!(
             matches!(parse_launch(&scheme, &args(&open)), Some(CodeAction::Open(token)) if token == TOKEN)
+        );
+        let undo = action_uri(&scheme, "undo", TOKEN).unwrap();
+        assert!(
+            matches!(parse_launch(&scheme, &args(&undo)), Some(CodeAction::Undo(token)) if token == TOKEN)
         );
         assert_ne!(scheme, super::scheme("com.mailxapp.desktop.dev").unwrap());
     }
@@ -294,6 +315,8 @@ mod tests {
             copy_label: "Copy & continue".into(),
             token: TOKEN.into(),
             sound: None,
+            kind: CodeNotificationKind::Copy,
+            expires_in: Duration::from_secs(300),
         };
         let document = document("com.mailxapp.desktop.notification", &notification).unwrap();
         let xml = document.GetXml().unwrap().to_string();
@@ -307,10 +330,28 @@ mod tests {
 
     #[test]
     fn expiration_is_bounded_and_uses_winrt_epoch() {
-        let at_epoch = expiration_time(SystemTime::UNIX_EPOCH).unwrap();
-        assert_eq!(
-            at_epoch.UniversalTime,
-            (11_644_473_600 + CODE_ACTION_TTL.as_secs() as i64) * 10_000_000
-        );
+        let at_epoch = expiration_time(SystemTime::UNIX_EPOCH, Duration::from_secs(300)).unwrap();
+        assert_eq!(at_epoch.UniversalTime, (11_644_473_600 + 300) * 10_000_000);
+        let undo = expiration_time(SystemTime::UNIX_EPOCH, Duration::from_millis(3500)).unwrap();
+        assert_eq!(undo.UniversalTime, 11_644_473_600 * 10_000_000 + 35_000_000);
+        assert!(expiration_time(SystemTime::UNIX_EPOCH, Duration::ZERO).is_none());
+    }
+
+    #[test]
+    fn undo_notice_has_only_an_undo_button_and_no_code_in_its_arguments() {
+        let notification = CodeNotification {
+            title: "Code copied".into(),
+            body: "The email was moved to Trash.".into(),
+            copy_label: "Undo".into(),
+            token: TOKEN.into(),
+            sound: None,
+            kind: CodeNotificationKind::Undo,
+            expires_in: Duration::from_secs(5),
+        };
+        let document = document("com.mailxapp.desktop.notification", &notification).unwrap();
+        let xml = document.GetXml().unwrap().to_string();
+        assert!(xml.contains(&format!("undo/{TOKEN}")));
+        assert!(xml.contains(&format!("open/{TOKEN}")));
+        assert!(!xml.contains("copy/"));
     }
 }

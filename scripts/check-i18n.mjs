@@ -56,7 +56,7 @@ for (const name of names[0]) {
   // The Rust adapter supports this explicit, bounded subset of resource syntax.
   if (name === 'notifications.json' || name === 'composeTemplates.json') {
     const required = name === 'notifications.json'
-      ? { noSubject: [], newMail: ['count'], newMailFrom: ['count', 'senders', 'more'], moreSenders: [], sent: [], failed: [], unknown: [], test: [], verificationCode: ['code'], copyVerificationCode: [], copyCodeUnavailable: [], copyCodeOpenMail: [] }
+      ? { noSubject: [], newMail: ['count'], newMailFrom: ['count', 'senders', 'more'], moreSenders: [], sent: [], failed: [], unknown: [], test: [], verificationCode: ['code'], copyVerificationCode: [], copyCodeUnavailable: [], copyCodeOpenMail: [], codeCopiedAndTrashed: [], codeUndoHint: [], codeUndo: [], codeUndoFailed: [], codeUndoFailedHint: [], codeCopiedMailKept: [], codeCleanupFailedHint: [], codeUndoUnavailable: [], codeUndoUnavailableHint: [] }
       : { newMailTitle: [], imageAlt: ['alt'], replyIntro: ['date', 'sender'], forwardHeader: ['date', 'sender', 'subject', 'recipients'] }
     for (const [key, parameters] of Object.entries(required)) for (let i = 0; i < sets.length; i++) {
       const entry = sets[i].get(key)

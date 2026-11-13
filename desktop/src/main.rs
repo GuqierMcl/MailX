@@ -20,6 +20,7 @@ mod tray;
 #[cfg(target_os = "linux")]
 mod tray_support;
 mod updater;
+mod verification_codes;
 mod window_access;
 mod window_chrome;
 
@@ -45,6 +46,7 @@ fn main() {
     let notification_launch =
         notifications::is_action_launch(&std::env::args().collect::<Vec<_>>());
     let builder = tauri::Builder::default()
+        .manage(verification_codes::VerificationCodes::default())
         .manage(autostart::StartupIntent::default())
         .manage(autostart::foreground_environment(tauri::Env::default()));
     // AppKit otherwise activates the app even when its initial window is
@@ -181,6 +183,7 @@ fn main() {
                     mailx_core::CoreEvent::AccountRemoved(removed) => {
                         notification_accounts.retire(&removed.account_id);
                         notifications::retire_codes(&handle, &removed.account_id);
+                        verification_codes::retire(&handle, &removed.account_id);
                         if let Some(protocol) =
                             handle.try_state::<std::sync::Arc<body_protocol::BodyProtocol>>()
                         {
@@ -260,6 +263,9 @@ fn main() {
             commands::emails_get,
             commands::emails_get_conversation,
             commands::emails_fetch_body,
+            verification_codes::emails_verification_code_status,
+            verification_codes::emails_copy_verification_code,
+            verification_codes::emails_undo_verification_code_delete,
             commands::emails_request_previews,
             commands::emails_prepare_body,
             commands::emails_image_status,

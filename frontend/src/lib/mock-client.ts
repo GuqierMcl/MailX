@@ -75,9 +75,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const dataset = options.seed === 'showcase' ? showcaseDataset() : DEFAULT_DATASET
   const accounts = dataset.accounts.map((account) => structuredClone(account))
   const emails = buildEmails(dataset)
+  // Explicit screenshot fixtures only: the production recognizer lives in Rust.
+  const verificationCodes = new Map(dataset.seeds.flatMap((seed, index) => seed.verificationCode
+    ? [[emails[index].summary.id, seed.verificationCode] as const] : []))
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -87,7 +90,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
-        settings = { ...value, settings: { ...value.settings, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }
@@ -113,6 +116,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const clone = <T,>(value: T) => structuredClone(value)
   const MOCK_DELETE_UNDO_MS = 5000
   const pendingDeletions = new Map<string, { timer: ReturnType<typeof setTimeout>; emails: typeof emails }>()
+  const verificationDeletions = new Set<string>()
   const archiveReceipts = new Map<string, { emailIds: string[]; before: boolean; expires: number }>()
   const mailStateListeners = new Set<(change: MailStateChanged) => void>()
 
@@ -721,6 +725,44 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       pendingDeletions.set(batchId, { timer, emails: plans.map((plan) => plan.email) })
       return { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent, skippedIds }
     },
+    async getVerificationCode(emailId) {
+      if (!emails.some((email) => email.summary.id === emailId)) throw notFound()
+      const code = verificationCodes.get(emailId)
+      return code ? { emailId, state: 'ready', code, recognitionId: `mock-code:${emailId}` }
+        : { emailId, state: 'notFound', code: null, recognitionId: null }
+    },
+    async copyVerificationCode(emailId, recognitionId) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email || !verificationCodes.has(emailId) || recognitionId !== `mock-code:${emailId}`) throw notFound()
+      // Browser demonstration only: this acknowledges the synthetic copy without
+      // reading or writing the visitor's real clipboard.
+      const base = { emailId, accountId: email.summary.accountId }
+      if (!settings.settings.mail.trashVerificationMailAfterCopy) return { ...base, cleanup: 'disabled', deletion: null }
+      const source = folders.find((folder) => folder.id === email.summary.folderId)
+      const trash = source?.role === 'trash' ? undefined : folders.find((folder) => folder.accountId === email.summary.accountId && folder.role === 'trash' && folder.selectable)
+      if (!trash) return { ...base, cleanup: 'unavailable', deletion: null }
+      emails.splice(emails.indexOf(email), 1)
+      const batchId = crypto.randomUUID()
+      verificationDeletions.add(batchId)
+      const timer = setTimeout(() => {
+        pendingDeletions.delete(batchId)
+        verificationDeletions.delete(batchId)
+        email.summary.folderId = trash.id
+        emails.push(email)
+      }, MOCK_DELETE_UNDO_MS)
+      pendingDeletions.set(batchId, { timer, emails: [email] })
+      return { ...base, cleanup: 'queued', deletion: { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent: false, skippedIds: [] } }
+    },
+    async undoVerificationCodeDelete(batchId) {
+      const pending = verificationDeletions.has(batchId) ? pendingDeletions.get(batchId) : undefined
+      if (!pending) throw notFound()
+      clearTimeout(pending.timer)
+      pendingDeletions.delete(batchId)
+      verificationDeletions.delete(batchId)
+      emails.push(...pending.emails)
+    },
+    onVerificationCodeCopied: () => () => undefined,
+    onVerificationCodeChanged: () => () => undefined,
     async undoDelete(batchId) {
       const pending = pendingDeletions.get(batchId)
       if (!pending) throw notFound()
@@ -1046,7 +1088,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const next = JSON.parse(event.newValue) as typeof settings
           if (typeof next.revision === 'number' && next.revision > settings.revision &&
               (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
-            settings = next
+            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true } } }
             listener({ revision: settings.revision })
           }
         } catch { /* Ignore an invalid preview cache. */ }
@@ -1370,6 +1412,8 @@ export type Seed = {
   html?: boolean
   /** What the subject reads once translated; defaults to a bracketed copy. */
   translatedSubject?: string
+  /** A known synthetic recognition result for browser UI previews. */
+  verificationCode?: string
 }
 
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }

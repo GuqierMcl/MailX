@@ -15,8 +15,8 @@ const PREPARATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct CodeState {
     batches: Arc<tokio::sync::Semaphore>,
-    // Lock order: account retirement -> policy -> action store. Final native
-    // delivery and clipboard writes share this lock with settings revocation.
+    // Copy lock order: account retirement -> core service -> policy -> actions
+    // -> clipboard. Notification preparation queries core before locking policy.
     policy: std::sync::Mutex<Option<Policy>>,
     #[cfg(any(target_os = "macos", windows))]
     actions: std::sync::Mutex<ActionStore>,
@@ -24,10 +24,65 @@ struct CodeState {
     native_available: bool,
 }
 
+/// Called from the core's copy callback after message identity is locked. Read
+/// preferences now, so waiting for the core cannot retain an old cleanup choice.
+/// This function must never call back into core while holding the policy lock.
+pub(crate) fn write_verification_code(
+    app: &AppHandle,
+    snapshot: &SettingsSnapshot,
+    email_id: &str,
+    recognition_id: &str,
+    native_token: Option<&str>,
+    write: impl FnOnce() -> Result<(), mailx_core::AppError>,
+) -> Result<bool, mailx_core::AppError> {
+    let state = app.state::<CodeState>();
+    let mut policy = state
+        .policy
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    apply_policy(
+        &mut policy,
+        snapshot.revision,
+        &snapshot.settings.notifications,
+        snapshot.effective_locale,
+        snapshot.settings.mail.trash_verification_mail_after_copy,
+    );
+    let policy = policy.as_ref().unwrap();
+    #[cfg(any(target_os = "macos", windows))]
+    if let Some(token) = native_token {
+        let mut actions = state
+            .actions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let entry = actions
+            .get(token, std::time::Instant::now())
+            .filter(|entry| {
+                entry.email_id == email_id
+                    && entry.recognition_id == recognition_id
+                    && copy_allowed(&policy.settings, &entry.account_id)
+            })
+            .ok_or_else(|| mailx_core::AppError::new(mailx_core::ErrorCode::Forbidden))?;
+        let _ = entry;
+        write()?;
+        actions.remove(token);
+        return Ok(policy.trash_after_copy);
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = (email_id, recognition_id);
+        if native_token.is_some() {
+            return Err(mailx_core::AppError::new(mailx_core::ErrorCode::Forbidden));
+        }
+    }
+    write()?;
+    Ok(policy.trash_after_copy)
+}
+
 struct Policy {
     revision: u64,
     settings: NotificationSettings,
     locale: SupportedLocale,
+    trash_after_copy: bool,
 }
 
 fn apply_policy(
@@ -35,6 +90,7 @@ fn apply_policy(
     revision: u64,
     settings: &NotificationSettings,
     locale: SupportedLocale,
+    trash_after_copy: bool,
 ) {
     if policy
         .as_ref()
@@ -44,6 +100,7 @@ fn apply_policy(
             revision,
             settings: settings.clone(),
             locale,
+            trash_after_copy,
         });
     }
 }
@@ -127,6 +184,7 @@ pub(crate) fn new_mail(app: &AppHandle, mail: NewMail, accounts: Arc<AccountNoti
                 .await;
                 match result {
                     Ok(Ok(Some(candidate))) => {
+                        crate::verification_codes::recognized(&app, message.email_id.clone());
                         found.insert(message.email_id.clone(), candidate);
                     }
                     Err(_) => break,
@@ -146,9 +204,28 @@ pub(crate) fn new_mail(app: &AppHandle, mail: NewMail, accounts: Arc<AccountNoti
                                 .unwrap_or(false)
                         })
                     });
-                    Some((snapshot, window_in_front(&app), std::mem::take(&mut found)))
+                    let recognitions: HashMap<String, String> = found
+                        .iter()
+                        .filter_map(|(id, candidate)| {
+                            core.as_ref()?
+                                .cached_verification_code_status(id)
+                                .ok()
+                                .filter(|status| {
+                                    status.code.as_deref() == Some(candidate.code.as_str())
+                                })
+                                .and_then(|status| status.recognition_id)
+                                .map(|recognition| (id.clone(), recognition))
+                        })
+                        .collect();
+                    found.retain(|id, _| recognitions.contains_key(id));
+                    Some((
+                        snapshot,
+                        window_in_front(&app),
+                        std::mem::take(&mut found),
+                        recognitions,
+                    ))
                 },
-                |(snapshot, focused, found)| {
+                |(snapshot, focused, found, recognitions)| {
                     let state = app.state::<CodeState>();
                     let mut policy = state.policy.lock().unwrap_or_else(|e| e.into_inner());
                     apply_policy(
@@ -156,12 +233,19 @@ pub(crate) fn new_mail(app: &AppHandle, mail: NewMail, accounts: Arc<AccountNoti
                         snapshot.revision,
                         &snapshot.settings.notifications,
                         snapshot.effective_locale,
+                        snapshot.settings.mail.trash_verification_mail_after_copy,
                     );
                     let policy = policy.as_ref().unwrap();
                     let deliveries =
                         plan_batch(&mail, &policy.settings, focused, policy.locale, &found);
                     for delivery in deliveries {
-                        deliver(&app, delivery, policy.locale);
+                        let recognition = delivery
+                            .shown
+                            .email_id
+                            .as_ref()
+                            .and_then(|id| recognitions.get(id))
+                            .cloned();
+                        deliver(&app, delivery, policy.locale, recognition);
                     }
                 },
             );
@@ -233,13 +317,22 @@ fn plan_batch(
     deliveries
 }
 
-fn deliver(app: &AppHandle, delivery: Delivery, locale: SupportedLocale) {
+fn deliver(
+    app: &AppHandle,
+    delivery: Delivery,
+    locale: SupportedLocale,
+    recognition: Option<String>,
+) {
     #[cfg(any(target_os = "macos", windows))]
-    if let Some(code) = delivery.code {
+    if delivery.code.is_some() {
         let state = app.state::<CodeState>();
         if state.native_available
             && let Some(email_id) = delivery.shown.email_id.clone()
         {
+            let Some(recognition_id) = recognition else {
+                show(app, delivery.shown);
+                return;
+            };
             let token = state
                 .actions
                 .lock()
@@ -247,7 +340,7 @@ fn deliver(app: &AppHandle, delivery: Delivery, locale: SupportedLocale) {
                 .insert(
                     delivery.shown.account_id.clone(),
                     email_id,
-                    code.code,
+                    recognition_id,
                     std::time::Instant::now(),
                 );
             let notice = super::CodeNotification {
@@ -256,6 +349,8 @@ fn deliver(app: &AppHandle, delivery: Delivery, locale: SupportedLocale) {
                 copy_label: locale.copy_verification_code(),
                 token: token.clone(),
                 sound: delivery.shown.system_sound,
+                kind: super::CodeNotificationKind::Copy,
+                expires_in: super::CODE_ACTION_TTL,
             };
             if native::show(app, notice).is_ok() {
                 if let Some(sound) = delivery.shown.own_sound {
@@ -271,7 +366,7 @@ fn deliver(app: &AppHandle, delivery: Delivery, locale: SupportedLocale) {
         }
     }
     #[cfg(not(any(target_os = "macos", windows)))]
-    let _ = (delivery.code, locale);
+    let _ = (delivery.code, locale, recognition);
     show(app, delivery.shown);
 }
 
@@ -283,6 +378,7 @@ pub(crate) fn settings_changed(app: &AppHandle, snapshot: &SettingsSnapshot) {
             snapshot.revision,
             &snapshot.settings.notifications,
             snapshot.effective_locale,
+            snapshot.settings.mail.trash_verification_mail_after_copy,
         );
         #[cfg(any(target_os = "macos", windows))]
         state
@@ -324,7 +420,7 @@ struct CodeEntry {
     token: String,
     account_id: String,
     email_id: String,
-    code: String,
+    recognition_id: String,
     expires: std::time::Instant,
 }
 
@@ -340,7 +436,7 @@ impl ActionStore {
         &mut self,
         account_id: String,
         email_id: String,
-        code: String,
+        recognition_id: String,
         now: std::time::Instant,
     ) -> String {
         self.entries.retain(|entry| entry.expires > now);
@@ -352,7 +448,7 @@ impl ActionStore {
             token: token.clone(),
             account_id,
             email_id,
-            code,
+            recognition_id,
             expires: now + super::CODE_ACTION_TTL,
         });
         token
@@ -385,6 +481,20 @@ fn handle_action(app: &AppHandle, accounts: &AccountNotifications, action: super
     let (copy, token) = match action {
         super::CodeAction::Copy(token) => (true, token),
         super::CodeAction::Open(token) => (false, token),
+        super::CodeAction::Undo(token) => {
+            if crate::verification_codes::undo_native(app, &token).is_err()
+                && let Some((_, locale)) = app.state::<DesktopState>().notification_settings()
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(locale.code_undo_failed())
+                    .body(locale.code_undo_failed_hint())
+                    .show();
+            }
+            return;
+        }
     };
     let Some(state) = app.try_state::<CodeState>() else {
         return;
@@ -415,6 +525,7 @@ fn handle_action(app: &AppHandle, accounts: &AccountNotifications, action: super
             snapshot.revision,
             &snapshot.settings.notifications,
             snapshot.effective_locale,
+            snapshot.settings.mail.trash_verification_mail_after_copy,
         );
         let policy = policy.as_ref().unwrap();
         if policy.settings.enabled && policy.settings.show_preview {
@@ -431,35 +542,38 @@ fn handle_action(app: &AppHandle, accounts: &AccountNotifications, action: super
             }))
         },
         |current| {
-            let mut policy = state.policy.lock().unwrap_or_else(|e| e.into_inner());
-            apply_policy(
-                &mut policy,
-                snapshot.revision,
-                &snapshot.settings.notifications,
-                snapshot.effective_locale,
-            );
-            let policy = policy.as_ref().unwrap();
-            if !copy_allowed(&policy.settings, &entry.account_id) {
-                return;
-            }
-            let locale = policy.locale;
-            let mut actions = state.actions.lock().unwrap_or_else(|e| e.into_inner());
-            // The first lookup is for identity only. Revocation or an earlier
-            // callback may have removed it while the core query was waiting.
-            let Some(live) = actions.get(&token, std::time::Instant::now()) else {
-                copy_unavailable(app, locale, Some(&entry));
-                return;
-            };
             if !current {
-                copy_unavailable(app, locale, Some(&entry));
+                copy_unavailable(app, snapshot.effective_locale, Some(&entry));
                 return;
             }
-            let copied =
-                arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(live.code));
-            if copied.is_err() {
-                copy_unavailable(app, locale, Some(&entry));
-            } else {
-                actions.remove(&token);
+            let copied = desktop.core().and_then(|core| {
+                crate::verification_codes::copy(
+                    app,
+                    &core,
+                    &entry.email_id,
+                    &entry.recognition_id,
+                    Some(&token),
+                )
+                .map(|outcome| (core, outcome))
+            });
+            match copied {
+                Ok((core, outcome)) => {
+                    crate::verification_codes::finish_copy(
+                        app,
+                        &core,
+                        outcome,
+                        true,
+                        snapshot.effective_locale,
+                    );
+                }
+                Err(_) => {
+                    if desktop
+                        .notification_settings()
+                        .is_some_and(|(settings, _)| copy_allowed(&settings, &entry.account_id))
+                    {
+                        copy_unavailable(app, snapshot.effective_locale, Some(&entry));
+                    }
+                }
             }
         },
     );
@@ -479,6 +593,59 @@ fn copy_unavailable(app: &AppHandle, locale: SupportedLocale, entry: Option<&Cod
             .extra(super::EMAIL_KEY, entry.email_id.clone());
     }
     let _ = notice.show();
+}
+
+/// Background cleanup gets its own one-button undo notice. The notification
+/// carries only an opaque undo token and expires with the existing delete queue.
+pub(crate) fn show_code_undo(
+    app: &AppHandle,
+    token: String,
+    expires_in: Duration,
+    locale: SupportedLocale,
+) -> Result<(), ()> {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        if expires_in.is_zero() || !app.state::<CodeState>().native_available {
+            return Err(());
+        }
+        native::show(
+            app,
+            super::CodeNotification {
+                title: locale.code_copied_and_trashed(),
+                body: locale.code_undo_hint(),
+                copy_label: locale.code_undo(),
+                token,
+                sound: None,
+                kind: super::CodeNotificationKind::Undo,
+                expires_in,
+            },
+        )
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = (app, token, expires_in, locale);
+        Err(())
+    }
+}
+
+pub(crate) fn show_code_undo_unavailable(app: &AppHandle, locale: SupportedLocale) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title(locale.code_undo_unavailable())
+        .body(locale.code_undo_unavailable_hint())
+        .show();
+}
+
+pub(crate) fn show_code_cleanup_failed(app: &AppHandle, locale: SupportedLocale) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title(locale.code_copied_mail_kept())
+        .body(locale.code_cleanup_failed_hint())
+        .show();
 }
 
 #[cfg(test)]

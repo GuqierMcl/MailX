@@ -104,12 +104,13 @@ fn a_late_settings_read_cannot_restore_revoked_notification_content() {
         show_preview: false,
         ..NotificationSettings::default()
     };
-    apply_policy(&mut policy, 2, &private, SupportedLocale::ZhCn);
+    apply_policy(&mut policy, 2, &private, SupportedLocale::ZhCn, false);
     apply_policy(
         &mut policy,
         1,
         &NotificationSettings::default(),
         SupportedLocale::En,
+        false,
     );
     let policy = policy.unwrap();
     let deliveries = plan_batch(&mail(), &policy.settings, false, policy.locale, &found());
@@ -149,7 +150,7 @@ fn tokens_are_opaque_bounded_expiring_and_not_recreated_after_restart() {
     let token = store.insert("account".into(), "mail".into(), "001234".into(), now);
     assert!(uuid::Uuid::parse_str(&token).is_ok());
     assert!(!token.contains("001234"));
-    assert_eq!(store.get(&token, now).unwrap().code, "001234");
+    assert_eq!(store.get(&token, now).unwrap().recognition_id, "001234");
     assert!(
         store
             .get(&token, now + super::super::CODE_ACTION_TTL)

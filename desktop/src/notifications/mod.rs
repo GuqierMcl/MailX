@@ -12,7 +12,9 @@ mod sounds;
 #[cfg(windows)]
 mod windows;
 
+pub(crate) use codes::write_verification_code;
 pub(crate) use codes::{new_mail, retire_codes, settings_changed, setup};
+pub(crate) use codes::{show_code_cleanup_failed, show_code_undo, show_code_undo_unavailable};
 #[cfg(windows)]
 pub(crate) use windows::{handle_launch, is_action_launch};
 
@@ -26,12 +28,22 @@ struct CodeNotification {
     copy_label: String,
     token: String,
     sound: Option<&'static str>,
+    kind: CodeNotificationKind,
+    expires_in: std::time::Duration,
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[derive(Clone, Copy)]
+enum CodeNotificationKind {
+    Copy,
+    Undo,
 }
 
 #[cfg(any(target_os = "macos", windows))]
 enum CodeAction {
     Copy(String),
     Open(String),
+    Undo(String),
 }
 
 #[cfg(any(target_os = "macos", windows))]

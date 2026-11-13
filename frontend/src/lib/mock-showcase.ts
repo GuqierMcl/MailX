@@ -263,6 +263,14 @@ Lena Fischer`,
     hoursAgo: 90,
     read: true,
   },
+  {
+    account: PERSONAL,
+    from: { name: 'Example Accounts', address: 'login@example.org' },
+    subject: 'Your MailX verification code',
+    text: 'Hello Alex,\n\nYour verification code is: 001234\n\nUse this code to sign in. This is a synthetic preview message.',
+    verificationCode: '001234',
+    hoursAgo: 0.03,
+  },
 ]
 
 export const SHOWCASE_DATASET = {

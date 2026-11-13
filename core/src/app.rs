@@ -75,6 +75,10 @@ pub use verification::{
     DraftConnectionVerification, ProtocolVerification, VerifyAccountConnection,
     VerifyDraftConnection,
 };
+pub use verification_codes::{
+    VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
+    VerificationCodeStatus,
+};
 
 /// How long after an accepted send the account's sync is woken once to pick
 /// up the server's Sent copy (sending.md section 9.6).
@@ -321,6 +325,7 @@ impl MailxCore {
             // cleanup failure as though the account were still present.
             self.bodies.retire(&removed.account_id);
             self.previews.retire(&removed.account_id);
+            self.notification_codes.retire(&removed.account_id);
             removed
         };
         self.sync.retire(&removed.account_id);

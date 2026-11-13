@@ -2857,6 +2857,7 @@ name = "mailx-desktop"
 version = "0.2.1"
 dependencies = [
  "arboard",
+ "chrono",
  "dunce",
  "gtk",
  "keyring",

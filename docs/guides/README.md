@@ -167,13 +167,29 @@ MailX includes a local MCP server. A built-in AI assistant is not available yet.
 
 A client may send the mail it reads to the AI service it uses, so choose clients and models with your privacy in mind. There is no per-client or per-account authorization yet, and MCP cannot delete mail. Compatibility of clients, platforms and tools is recorded in the [validation record](../development/validation.md).
 
-## Verification codes in notifications
+## Verification codes
 
-When notification contents are enabled, MailX can recognize verification codes in recent incoming messages and show each matching message separately. On Windows and macOS, choose **Copy code** on the system notification to copy it without opening the MailX window. Clicking the notification itself opens the message. Linux shows the code prominently in the notification text.
+### Copy in MailX
 
-MailX must remain running, including in the background. The copy shortcut is available for up to five minutes and becomes unavailable after use, restart, account removal or disabling the relevant notifications. Open the email if the shortcut is unavailable. The operating system controls where the button appears and may require you to expand or hover over the notification.
+When MailX recognizes one verification code in a message, its list-row quick actions show **Copy code** in place of star, read and archive, with Delete still available. Right-click actions, keyboard shortcuts and the star marker remain available. Copying from the row does not open the message or mark it read. Sender groups and multi-select rows do not offer a single-message copy action.
 
-**Settings → Notifications → Show notification contents** controls whether senders, subjects and recognized codes appear. Turning it off also disables code buttons; account muting and the foreground notification setting apply. Recognition happens locally and may briefly read a candidate message from your mail provider without marking it read. Unsupported formats, ambiguous codes or slow downloads use the ordinary notification. A copied code uses the system clipboard and may be retained by clipboard history or system sync.
+The reading pane shows a compact verification-code bar above the message, with the code and a **Copy code** button. A successful copy briefly shows **Copied**. This also works for recognized codes in older, read or archived mail, even when system notifications are off. MailX cannot tell whether the sender still accepts an old code. Unsupported formats or several possible codes do not offer a quick-copy answer.
+
+### Copy from notifications
+
+When notification contents are enabled, MailX can recognize codes in recent incoming messages and show each matching message separately. On Windows and macOS, choose **Copy code** on the system notification without opening the MailX window. Clicking the notification itself opens the message. Linux shows the code prominently in the notification text; use the MailX window to copy it.
+
+MailX must remain running, including in the background. A notification's copy shortcut is available for up to five minutes and becomes unavailable after use, restart, account removal or disabling the relevant notifications. Open the email if the shortcut is unavailable. The operating system controls where the button appears and may require you to expand or hover over the notification.
+
+**Settings → Notifications → Show notification contents** controls senders, subjects and codes in system notifications. Turning it off also disables their code buttons; account muting and the foreground notification setting apply. It does not disable copying inside MailX. Recognition happens locally and may briefly read a candidate message from your mail provider without marking it read. A copied code uses the system clipboard and may be retained by clipboard history or system sync.
+
+### Move mail to Trash after copying
+
+Under **Settings → Mail → Mail enhancements**, **Move email to Trash after copying a code** is off by default. Turn it on to apply the same cleanup to the list, reading pane and system notification copy buttons. Ordinary text selection and copying do not trigger this setting.
+
+The email moves to the account's Trash only after copying succeeds, with a short **Undo** action. In MailX this appears in the copy result notice; a background notification copy provides a system Undo notification. The undo window is five seconds and does not restart when a notice is shown. If copying fails, the email stays. If copying succeeds but cleanup fails, MailX reports the two results separately.
+
+This option never permanently deletes an email. If the message is already in Trash, or the account has no Trash folder, it is copied and kept. If a background Undo notice cannot be prepared, MailX tries to cancel cleanup; if cleanup has already started or cancellation fails, it tells you to check the email's state in MailX.
 
 ## Background operation, launch at login and updates
 

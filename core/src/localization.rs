@@ -91,6 +91,33 @@ impl SupportedLocale {
     pub fn copy_code_open_mail(self) -> String {
         self.text(false, "copyCodeOpenMail", &[])
     }
+    pub fn code_copied_and_trashed(self) -> String {
+        self.text(false, "codeCopiedAndTrashed", &[])
+    }
+    pub fn code_undo_hint(self) -> String {
+        self.text(false, "codeUndoHint", &[])
+    }
+    pub fn code_undo(self) -> String {
+        self.text(false, "codeUndo", &[])
+    }
+    pub fn code_undo_failed(self) -> String {
+        self.text(false, "codeUndoFailed", &[])
+    }
+    pub fn code_undo_failed_hint(self) -> String {
+        self.text(false, "codeUndoFailedHint", &[])
+    }
+    pub fn code_copied_mail_kept(self) -> String {
+        self.text(false, "codeCopiedMailKept", &[])
+    }
+    pub fn code_cleanup_failed_hint(self) -> String {
+        self.text(false, "codeCleanupFailedHint", &[])
+    }
+    pub fn code_undo_unavailable(self) -> String {
+        self.text(false, "codeUndoUnavailable", &[])
+    }
+    pub fn code_undo_unavailable_hint(self) -> String {
+        self.text(false, "codeUndoUnavailableHint", &[])
+    }
 
     pub fn new_mail(self, count: u32) -> String {
         let key = if self == Self::En && count == 1 {

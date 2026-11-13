@@ -326,5 +326,15 @@
   "shortcutStar": "Star or unstar",
   "shortcutRead": "Mark read or unread",
   "shortcutSelectAll": "Select all (while selecting)",
-  "shortcutCompose": "Compose"
+  "shortcutCompose": "Compose",
+  "verificationCodeBar": "Verification code",
+  "verificationCodeLabel": "Verification code",
+  "verificationCopy": "Copy code",
+  "verificationCopiedShort": "Copied",
+  "verificationCopying": "Copying…",
+  "verificationCopied": "Code copied",
+  "verificationCopyFailed": "Could not copy the code",
+  "verificationCopiedAndTrashed": "Code copied; email moved to Trash",
+  "verificationCopiedKept": "Code copied; email kept because it cannot be moved to Trash",
+  "verificationCleanupFailed": "Code copied, but the email could not be moved to Trash"
 }

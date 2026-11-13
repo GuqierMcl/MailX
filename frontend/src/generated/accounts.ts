@@ -350,6 +350,14 @@ export type EmailDetail = { summary: EmailSummary, to: Array<MailAddress>, cc: A
  */
 body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<AttachmentSummary>, };
 
+export type VerificationCodeState = "unchecked" | "ready" | "notFound" | "ambiguous" | "unavailable";
+
+export type VerificationCodeStatus = { emailId: string, state: VerificationCodeState, code: string | null, recognitionId: string | null, };
+
+export type VerificationCodeCleanup = "disabled" | "queued" | "unavailable" | "failed";
+
+export type VerificationCodeCopyOutcome = { emailId: string, accountId: string, cleanup: VerificationCodeCleanup, deletion: EmailDeletion | null, };
+
 export type SyncPhase = "syncing" | "idle" | "failed";
 
 export type SyncFailureCode = "authentication" | "signInRequired" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
@@ -517,9 +525,16 @@ silentStart: boolean,
  */
 singleKeyShortcuts: boolean, };
 
-export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+export type MailSettings = {
+/**
+ * After a dedicated verification-code copy succeeds, move that email to
+ * the account's Trash. Never authorizes a permanent deletion.
+ */
+trashVerificationMailAfterCopy: boolean, };
 
-export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**

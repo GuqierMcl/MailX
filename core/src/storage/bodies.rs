@@ -440,6 +440,22 @@ impl Storage {
         ).optional()?)
     }
 
+    /// The UI may inspect old/read mail in any visible server folder. This
+    /// projection deliberately does not materialize body text or attachments.
+    pub(crate) fn verification_code_header(&self, id: &str) -> Result<Option<String>, AppError> {
+        Ok(self
+            .db
+            .query_row(
+                &format!(
+                    "SELECT m.subject {} AND m.id = ?1",
+                    super::messages::VISIBLE_MESSAGES
+                ),
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub(crate) fn body_begin(&mut self, identity: &BodyIdentity) -> Result<bool, AppError> {
         let tx = self.db.transaction()?;
         if !current(&tx, identity)? {
