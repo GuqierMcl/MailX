@@ -19,6 +19,7 @@ import {
   Settings01Icon,
   SpamIcon,
   StarIcon,
+  SunriseIcon,
 } from '@hugeicons/core-free-icons'
 import type { Account, AccountSyncState, Folder, FolderRole, SyncFailure } from '@/generated/accounts'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -171,6 +172,13 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
             <SidebarMenuButton onClick={onCompose} className="font-medium" title={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })}>
               <HugeiconsIcon icon={PencilEdit02Icon} />
               <span>{t('mail:compose')}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          {/* No count: the page itself is the summary. */}
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={mailbox.kind === 'now'} onClick={() => onSelect({ kind: 'now' })}>
+              <HugeiconsIcon icon={SunriseIcon} />
+              <span>{t('mail:nowView')}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

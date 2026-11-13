@@ -63,12 +63,15 @@ import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/c
 import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
 import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
+import { NowPage } from '@/features/now/now-page'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
 const PAGE_SIZE = 100
 /** The core's limit on kept ids (`MAX_KEEP_IDS`); the oldest drop out first. */
 const MAX_KEPT = 500
+/** Where the window starts unless the settings say the Now page; see `startupApplied`. */
+const INITIAL_MAILBOX: Mailbox = { kind: 'unified', role: 'inbox' }
 const NO_IDS: string[] = []
 /** Mail in these folders never shows up under a contact. */
 const CONTACT_EXCLUDED_ROLES: FolderRole[] = ['junk', 'trash']
@@ -97,7 +100,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const saveLayout = useDebouncedLayoutSave(client)
   const [accountsTarget, setAccountsTarget] = useState<AccountsTarget | null>(null)
   const [addingAccount, setAddingAccount] = useState(false)
-  const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
+  const [mailbox, setMailbox] = useState<Mailbox>(INITIAL_MAILBOX)
   const [filter, setFilter] = useState<ListFilter>('all')
   // Messages opened in one Unread view; see `keptIds` below.
   const [kept, setKept] = useState<{ view: string; ids: string[] }>({ view: '', ids: NO_IDS })
@@ -141,6 +144,13 @@ export function Workbench({ client }: { client: MailxClient }) {
     },
   })
   const settingsQuery = useSettings(client)
+  // The startup view applies once, when the settings first arrive, and never over a
+  // view the user already picked (any pick is a new object) or a message already opened.
+  const [startupApplied, setStartupApplied] = useState(false)
+  if (!startupApplied && settingsQuery.data) {
+    setStartupApplied(true)
+    if (settingsQuery.data.settings.general.startupView === 'now' && mailbox === INITIAL_MAILBOX && !openedState) setMailbox({ kind: 'now' })
+  }
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
   const navCollapsed = settingsQuery.data?.settings.layout.navCollapsed ?? false
@@ -151,12 +161,14 @@ export function Workbench({ client }: { client: MailxClient }) {
   const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
   const readerCollapsed = readerChoice ?? savedCollapsed
   const setReaderCollapsed = setReaderChoice // stable, so effects may use it
+  // The Now page replaces the panels; coming back mounts them anew, and they follow the state again.
+  const nowPage = mailbox.kind === 'now'
   useLayoutEffect(() => {
     const reader = readerPanel.current
-    if (!layoutReady || !reader) return
+    if (!layoutReady || !reader || nowPage) return
     if (readerCollapsed && !reader.isCollapsed()) reader.collapse()
     else if (!readerCollapsed && reader.isCollapsed()) reader.expand()
-  }, [layoutReady, readerCollapsed, readerPanel])
+  }, [layoutReady, readerCollapsed, readerPanel, nowPage])
   // Each change is handed over as it happens; the debounce keeps only the last. Comparing
   // with the saved value here would let an earlier queued value win after a quick toggle back.
   useEffect(() => {
@@ -204,10 +216,11 @@ export function Workbench({ client }: { client: MailxClient }) {
   const treeReloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scheduleTreeReload = useCallback(() => {
     clearTimeout(treeReloadTimer.current)
-    treeReloadTimer.current = setTimeout(
-      () => void queryClient.invalidateQueries({ queryKey: mailKeys.tree() }),
-      TREE_RELOAD_DELAY_MS,
-    )
+    treeReloadTimer.current = setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
+      // The Now page's counts change with the same rounds.
+      void queryClient.invalidateQueries({ queryKey: mailKeys.overviews() })
+    }, TREE_RELOAD_DELAY_MS)
   }, [queryClient])
   useEffect(() => () => clearTimeout(treeReloadTimer.current), [])
 
@@ -573,6 +586,11 @@ export function Workbench({ client }: { client: MailxClient }) {
     exitSelection()
   }
   useEffect(() => { openRef.current = openEmail })
+  // A message on the Now page opens in the unified inbox, where it lives.
+  const openFromNow = (email: { id: string; accountId: string }) => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    openEmail(email)
+  }
 
   // Single-key shortcuts (see `shortcuts.ts`). Browsing moves the opened message
   // like a click on the next or previous row; group rows are not messages and are
@@ -787,8 +805,22 @@ export function Workbench({ client }: { client: MailxClient }) {
           onOpenSettings={setSettings}
           translation={mailView && !selecting && !readerCollapsed && translation.available ? translation : null}
         />
-        {/* The saved list width is only read when the group mounts, so it waits for the settings. */}
-        {!layoutReady ? <div className="min-h-0 flex-1 bg-muted/40" /> : (
+        {activeMailbox.kind === 'now' ? (
+          <NowPage
+            client={client}
+            accounts={displayAccounts}
+            folders={folders}
+            syncStates={currentSyncStates}
+            draftCount={draftCount}
+            outbox={outbox.data ?? []}
+            onSelectMailbox={selectMailbox}
+            onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
+            onOpenEmail={openFromNow}
+          />
+        ) : !layoutReady ? (
+          // The saved list width is only read when the group mounts, so it waits for the settings.
+          <div className="min-h-0 flex-1 bg-muted/40" />
+        ) : (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0" onLayoutChanged={saveListWidth}>
           <ResizablePanel panelRef={listPanel} defaultSize={listWidth} minSize={LIST_MIN} className="bg-muted/40">
             {activeMailbox.kind === 'drafts' ? (
@@ -929,7 +961,8 @@ export function Workbench({ client }: { client: MailxClient }) {
           </ResizablePanel>
         </ResizablePanelGroup>
         )}
-        {accounts.length > 0 && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
+        {/* The Now page has no reader to fold. */}
+        {accounts.length > 0 && !nowPage && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}

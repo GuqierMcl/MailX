@@ -34,6 +34,16 @@ describe('general window behavior settings', () => {
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
   })
 
+  it('saves which page opens at startup', async () => {
+    const { client } = show()
+    const select = await screen.findByRole('combobox', { name: '启动时打开' })
+    await waitFor(() => expect(select).not.toBeDisabled())
+    expect(select).toHaveTextContent('收件箱')
+    await userEvent.click(select)
+    await userEvent.click(await screen.findByRole('option', { name: '此刻' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' } }))
+  })
+
   it('disables background hiding when Linux has no available tray', async () => {
     show({ platform: 'linux', backgroundAvailable: false })
     const select = await screen.findByRole('combobox', { name: '关闭主窗口时' })

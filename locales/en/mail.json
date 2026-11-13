@@ -198,6 +198,7 @@
   "agentUnarchived_other": "{{source}} moved {{count}} messages back to the inbox on this device",
   "undoArchiveFailed": "Couldn’t undo this archive operation",
   "starredView": "Starred",
+  "nowView": "Now",
   "more": "More",
   "toggleAccounts": "{{action}} {{folder}} by account",
   "mailboxes": "Mailboxes",

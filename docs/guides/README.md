@@ -45,6 +45,10 @@ Open **Accounts** in the sidebar to manage a mailbox. The header shows the accou
 
 The name, sender name, provider icon and identification color save as you change them. Pick a preset color, none, or the rainbow swatch at the end to choose any color from the system color picker. **Remove account**, in red, sits at the bottom left; **Verify connection** and **Edit connection** (or **Sign in again** for browser sign-in accounts) sit at the bottom right and stay in view while you scroll. Verifying checks the saved sign-in without sending mail: the connection method line says whether both sides passed, and if one did not, the connection details open with the reason under that server. Passing means sign-in works, not that delivery has been tested. The details (servers, credentials, network route) are folded otherwise.
 
+## Now
+
+**Now**, just below Compose in the sidebar, greets you and sums up your mailbox: what needs attention (an account whose sync stopped, sends that failed or may not have gone out, local drafts), mail that arrived since you last looked at Now, inbox unread and starred unread counts, verification codes from the last 15 minutes with a copy button, and recent attachments. Click any item to open it. Everything on the page is worked out on this computer and nothing is sent anywhere. Verification codes are found only in previews and message bodies already on this computer, so some may be missed. To open MailX on Now instead of the inbox, choose it under Settings → General → Open at startup.
+
 ## Reading, search and organizing
 
 The first sync of each folder starts from the last 30 days and fills up to the newest 1,000 message headers in that window per round, keeping previously cached history. This is not a full download of the mailbox. Accounts that support IMAP IDLE listen for inbox changes; other folders and accounts without IDLE keep polling.
