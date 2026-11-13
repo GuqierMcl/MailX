@@ -660,3 +660,22 @@ describe('mock translation', () => {
     expect(await client.removeTranslationKey('google')).toContainEqual({ provider: 'google', configured: false })
   })
 })
+
+describe('mock mail overview', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => localStorage.clear())
+
+  it('counts new inbox mail per account and finds the synthetic code and attachments', async () => {
+    const client = createMockClient()
+    const overview = await client.getMailOverview({ since: new Date(Date.now() - 6 * 3_600_000).toISOString() })
+    expect(overview.newMail.total).toBeGreaterThan(0)
+    expect(overview.newMail.accounts.length).toBe(2)
+    expect(overview.newMail.accounts.reduce((sum, row) => sum + row.count, 0)).toBe(overview.newMail.total)
+    expect(overview.newMail.latest.length).toBeLessThanOrEqual(5)
+    expect(overview.verificationCodes.map((row) => row.code)).toEqual(['482913'])
+    expect(overview.recentAttachments.length).toBe(2)
+    expect(overview.recentAttachments.some((row) => row.fileNames.length === 0)).toBe(true)
+    expect((await client.getMailOverview({ since: null })).newMail).toEqual({ total: 0, accounts: [], latest: [] })
+    await expect(client.getMailOverview({ since: 'yesterday' })).rejects.toMatchObject({ failure: { code: 'validation', field: 'since' } })
+  })
+})

@@ -61,6 +61,8 @@ import type {
   EmailSelection,
   FlagBatchOutcome,
   ContactAggregation,
+  MailOverview,
+  MailOverviewQuery,
   TranslationCacheStats,
   TranslationKeyState,
   TranslationProviderId,
@@ -237,6 +239,12 @@ export interface MailxClient {
   /** Receives versioned account snapshots, including per-folder progress and cache revisions. */
   onSyncState(listener: (state: AccountSyncState) => void): () => void
   listEmails(query: EmailListQuery): Promise<EmailPage>
+  /**
+   * The Now page's local statistics: inbox mail after `since` per account,
+   * starred unread, recent verification codes and attachments. Read-only;
+   * never downloads a body.
+   */
+  getMailOverview(query: MailOverviewQuery): Promise<MailOverview>
   getEmail(emailId: string): Promise<EmailDetail>
   /** The locally known messages of the email's conversation, oldest first. */
   getConversation(emailId: string): Promise<ConversationPage>
@@ -559,6 +567,7 @@ export function createDesktopClient(): MailxClient {
       }
     },
     listEmails: (query) => call<EmailPage>('emails_list', { query }),
+    getMailOverview: (query) => call<MailOverview>('emails_overview', { query }),
     getEmail: (emailId) => call<EmailDetail>('emails_get', { emailId }),
     getConversation: (emailId) => call<ConversationPage>('emails_get_conversation', { emailId }),
     fetchBody: (emailId) => call<EmailDetail>('emails_fetch_body', { emailId }),

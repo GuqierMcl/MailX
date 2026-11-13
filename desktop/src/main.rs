@@ -246,6 +246,7 @@ fn main() {
             commands::accounts_open_provider_help,
             commands::folders_list,
             commands::emails_list,
+            commands::emails_overview,
             commands::emails_get,
             commands::emails_get_conversation,
             commands::emails_fetch_body,

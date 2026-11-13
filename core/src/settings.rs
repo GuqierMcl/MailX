@@ -699,6 +699,15 @@ pub enum CloseBehavior {
     Quit,
 }
 
+/// The view the main window opens with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum StartupView {
+    #[default]
+    Inbox,
+    Now,
+}
+
 /// Language preference is validated on input; a string lets field validation
 /// report `general.language` rather than a generic deserialization error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -721,6 +730,9 @@ pub struct GeneralSettings {
     /// Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
     /// Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
     pub single_key_shortcuts: bool,
+    /// The view shown when the main window starts: the unified inbox or the
+    /// Now page (now-page.md section 2).
+    pub startup_view: StartupView,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -741,6 +753,7 @@ impl Default for GeneralSettings {
             show_menu_bar_icon: true,
             silent_start: false,
             single_key_shortcuts: true,
+            startup_view: StartupView::Inbox,
         }
     }
 }
@@ -1318,6 +1331,11 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                         serde_json::from_value::<CloseBehavior>(value.clone()).is_err()
                     }) {
                         general.remove("closeBehavior");
+                    }
+                    if general.get("startupView").is_some_and(|value| {
+                        serde_json::from_value::<StartupView>(value.clone()).is_err()
+                    }) {
+                        general.remove("startupView");
                     }
                 }
             }

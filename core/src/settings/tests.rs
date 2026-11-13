@@ -373,7 +373,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         serde_json::json!({
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
-                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true },
+                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true, "startupView": "inbox" },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -1172,6 +1172,7 @@ fn saved_background_preferences_recover_independently() {
                 show_menu_bar_icon,
                 silent_start: false,
                 single_key_shortcuts: true,
+                startup_view: StartupView::Inbox,
             },
             "{general}"
         );
@@ -1186,6 +1187,7 @@ fn saved_background_preferences_recover_independently() {
             show_menu_bar_icon: true,
             silent_start: true,
             single_key_shortcuts: true,
+            startup_view: StartupView::Now,
         },
         ..Default::default()
     }
@@ -1195,6 +1197,7 @@ fn saved_background_preferences_recover_independently() {
     assert_eq!(settings.general.close_behavior, CloseBehavior::Quit);
     assert!(settings.general.show_menu_bar_icon);
     assert!(settings.general.silent_start);
+    assert_eq!(settings.general.startup_view, StartupView::Now);
 }
 
 #[test]
@@ -1263,6 +1266,66 @@ fn single_key_shortcuts_default_on_recover_and_persist_off() {
         assert_eq!(restored.settings.general.language, "en");
         assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
     }
+}
+
+#[test]
+fn startup_view_defaults_to_inbox_recovers_and_persists() {
+    for (value, expected) in [
+        // Files written before the setting existed.
+        (
+            serde_json::json!({"language": "en", "showMenuBarIcon": false}),
+            StartupView::Inbox,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": "home"}),
+            StartupView::Inbox,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": 1}),
+            StartupView::Inbox,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": "now"}),
+            StartupView::Now,
+        ),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":{"general":value,"appearance":{"theme":"dark"}}}).to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert_eq!(snapshot.settings.general.startup_view, expected, "{value}");
+        assert_eq!(snapshot.settings.general.language, "en");
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+    }
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let snapshot = store.get().unwrap();
+    assert_eq!(snapshot.settings.general.startup_view, StartupView::Inbox);
+    let mut general = snapshot.settings.general;
+    general.startup_view = StartupView::Now;
+    store
+        .patch(SettingsPatch {
+            general: Some(general),
+            ..Default::default()
+        })
+        .unwrap();
+    let persisted: serde_json::Value =
+        serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+    assert_eq!(persisted["settings"]["general"]["startupView"], "now");
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(restored.settings.general.startup_view, StartupView::Now);
+    // Client input with an unknown value is rejected, not silently changed.
+    assert!(
+        serde_json::from_value::<SettingsPatch>(
+            serde_json::json!({"general": {"startupView": "home"}})
+        )
+        .is_err()
+    );
 }
 
 #[test]

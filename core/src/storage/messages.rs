@@ -16,7 +16,10 @@ use crate::{
     sync::headers::MessageRecord,
 };
 
+mod overview;
 mod sent_copies;
+
+pub(crate) use overview::{CodeSource, NewMailRows};
 
 /// Identity captured before network I/O; every write checks it again in its transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
