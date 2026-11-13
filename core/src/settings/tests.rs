@@ -324,6 +324,43 @@ fn hand_edited_files_keep_valid_fields_and_reset_invalid_strings() {
     assert_eq!(appearance.font_size, FontSize::Default);
     // Settings saved before the option existed get the one-line default.
     assert_eq!(appearance.preview_lines, PreviewLines::One);
+    assert_eq!(appearance.mailbox_label, MailboxLabel::Name);
+}
+
+#[test]
+fn mailbox_label_persists_and_a_document_without_it_loads_as_name() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    store
+        .patch(SettingsPatch {
+            appearance: Some(AppearanceSettings {
+                mailbox_label: MailboxLabel::Icon,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    let text = file_text(&directory, SETTINGS_FILE_NAME);
+    assert!(text.contains("\"mailboxLabel\": \"icon\""));
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(
+        restored.settings.appearance.mailbox_label,
+        MailboxLabel::Icon
+    );
+
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{ "appearance": { "theme": "dark" } }"#,
+    )
+    .unwrap();
+    let legacy = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(legacy.settings.appearance.mailbox_label, MailboxLabel::Name);
 }
 
 #[test]
@@ -344,7 +381,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailFont": "",
                     "mailTheme": "follow",
                     "fontSize": "default",
-                    "previewLines": "one"
+                    "previewLines": "one",
+                    "mailboxLabel": "name"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
                 "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },

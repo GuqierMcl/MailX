@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Archive02Icon, ArchiveRestoreIcon, ArrowRight01Icon, Attachment01Icon, Delete02Icon, StarIcon, Tick02Icon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary, PreviewLines, SnippetSegment } from '@/generated/accounts'
+import type { Account, EmailSummary, MailboxLabel, PreviewLines, SnippetSegment } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
 import { displayName, formatListTime, recipientsLabel } from './format'
 import { LocalOnlyMarker } from './local-only-marker'
 import { SenderAvatar } from './sender-avatar'
-import { ReadStatusButton } from './read-status-button'
+import { AccountAvatar } from '@/features/accounts/account-avatar'
 
 const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
   one: 'line-clamp-1',
@@ -25,7 +25,9 @@ const PREVIEW_HEIGHT: Record<Exclude<PreviewLines, 'none'>, string> = {
 }
 
 const ACTION_FADE_MS = 150
-const QUICK_ACTION_CLASS = 'bg-transparent transition-colors hover:bg-transparent dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0'
+/** Buttons of a freshly shown toolbar ignore the pointer this long, so a click aimed at the row is not caught by them. */
+const ACTION_ARM_MS = 200
+const QUICK_ACTION_CLASS = 'size-6 min-h-[24px] min-w-[24px] bg-transparent transition-colors hover:bg-transparent dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0 [&_svg]:size-3.5'
 
 type EmailCardProps = {
   email: EmailSummary
@@ -33,6 +35,8 @@ type EmailCardProps = {
   account: Account | null
   selected: boolean
   previewLines: PreviewLines
+  /** How a multi-account view names the owning mailbox on each row. */
+  mailboxLabel?: MailboxLabel
   index: number
   count: number
   style: React.CSSProperties
@@ -55,7 +59,7 @@ type EmailCardProps = {
 export type RowClick = { toggle: boolean; range: boolean }
 
 /** A message row with its state slot and quick actions kept outside the main link. */
-export function EmailCard({ email, sentView, account, selected: opened, previewLines, index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
+export function EmailCard({ email, sentView, account, selected: opened, previewLines, mailboxLabel = 'name', index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
   useTranslation()
   // In a sent view the row is about who the mail went to. The avatar follows
   // the same person, so it never shows the account owner on every row.
@@ -70,11 +74,9 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
   const canDelete = !selectionMode && !group && Boolean(onDelete) && !email.localOnly
   const canRemoveLocal = !selectionMode && !group && Boolean(onRemoveLocal) && email.localOnly
   const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal
-  // The shortest rows cannot fit three comfortable targets beside the avatar.
-  const verticalActions = previewLines !== 'none'
-  const hasCornerActions = canDelete || canRemoveLocal || (!verticalActions && (canChangeFlags || canChangeArchive))
   const [actionsMounted, setActionsMounted] = useState(false)
   const [actionsVisible, setActionsVisible] = useState(false)
+  const [actionsArmed, setActionsArmed] = useState(false)
   const wantsActionsVisible = useRef(false)
   const pointerDown = useRef(false)
   const keyboardFocus = useRef(false)
@@ -115,6 +117,14 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
     })
     return () => window.cancelAnimationFrame(revealFrame)
   }, [actionsMounted])
+  useEffect(() => {
+    if (!actionsMounted) return
+    const armTimer = window.setTimeout(() => setActionsArmed(true), ACTION_ARM_MS)
+    return () => {
+      window.clearTimeout(armTimer)
+      setActionsArmed(false)
+    }
+  }, [actionsMounted])
   useEffect(() => () => {
     if (hideTimer.current !== null) window.clearTimeout(hideTimer.current)
   }, [])
@@ -127,30 +137,44 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
       data-row-action
       label={email.isStarred ? t('mail:unstar') : t('mail:star')}
       aria-pressed={email.isStarred}
-      className={cn(
-        QUICK_ACTION_CLASS,
-        verticalActions && 'size-6 min-h-[24px] min-w-[24px]',
-        email.isStarred && 'text-amber-500 hover:text-amber-500',
-      )}
+      className={cn(QUICK_ACTION_CLASS, email.isStarred && 'text-amber-500 hover:text-amber-500')}
       onClick={() => onFlag?.(email, 'starred', !email.isStarred)}
     >
-      <HugeiconsIcon icon={StarIcon} aria-label={verticalActions && email.isStarred ? t('mail:starred') : undefined} fill={email.isStarred ? 'currentColor' : 'none'} />
+      <HugeiconsIcon icon={StarIcon} fill={email.isStarred ? 'currentColor' : 'none'} />
+    </IconButton>
+  )
+  const readButton = (
+    <IconButton
+      data-row-action
+      label={email.isRead ? t('mail:markUnread') : t('mail:markRead')}
+      className={cn(QUICK_ACTION_CLASS, 'text-foreground/50 hover:text-foreground/70')}
+      onClick={() => onFlag?.(email, 'read', !email.isRead)}
+    >
+      {/* The reader's state ring: empty when read, with the blue dot when unread. */}
+      <span aria-hidden className="flex size-3 items-center justify-center rounded-full border border-current">
+        {!email.isRead && <span className="size-1.5 rounded-full bg-blue-500 dark:bg-blue-400" />}
+      </span>
     </IconButton>
   )
   const archiveButton = (
     <IconButton
       data-row-action
       label={email.archived ? t('mail:unarchive') : t('mail:archive')}
-      className={cn(QUICK_ACTION_CLASS, verticalActions && 'size-6 min-h-[24px] min-w-[24px]')}
+      className={QUICK_ACTION_CLASS}
       onClick={() => onArchive?.(email, !email.archived)}
     >
       <HugeiconsIcon icon={email.archived ? ArchiveRestoreIcon : Archive02Icon} />
     </IconButton>
   )
+  // A starred message keeps a small star beside its subject, whatever the preview setting.
   const starMarker = email.isStarred && !group && (
     <HugeiconsIcon icon={StarIcon} aria-label={t('mail:starred')} fill="currentColor" className="size-3.5 shrink-0 text-amber-500" />
   )
-  const hideTime = hasCornerActions && actionsVisible
+  // In a view spanning accounts the owning mailbox is named after the sender or,
+  // when the user prefers it, marked by a small badge on the avatar.
+  const mailboxBadge = account && !group && mailboxLabel === 'icon'
+  const mailboxName = `${account?.displayName ?? ''} <${account?.emailAddress ?? ''}>`
+  const hideTime = hasActions && actionsVisible
   return (
     <div
       ref={ref}
@@ -197,9 +221,10 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         onSelect({ toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })
       }}
       data-picked={selectionMode && !group && picked ? '' : undefined}
+      data-menu-open={menuOpen ? '' : undefined}
       data-sender-group={group ? '' : undefined}
       className={cn(
-        'group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1.5 text-left text-sm transition-colors focus-within:bg-foreground/5',
+        'mail-row group/row absolute inset-x-3 flex cursor-pointer items-center gap-1 rounded-lg py-3 pr-3 pl-1 text-left text-sm transition-colors focus-within:bg-foreground/5',
         selectionMode && !group
           ? 'mail-pick has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:-outline-offset-1'
           : 'hover:bg-foreground/5',
@@ -220,10 +245,22 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         aria-label={group ? t(group.unread > 0 ? 'mail:senderGroupLabelUnread' : 'mail:senderGroupLabel', { name: displayName(email.from), total: group.total, unread: group.unread }) : undefined}
         className="order-2 flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
       >
-        <SenderAvatar sender={counterpart} accountId={email.accountId} />
+        <span className="relative shrink-0">
+          <SenderAvatar sender={counterpart} accountId={email.accountId} />
+          {mailboxBadge && account && (
+            <span
+              role="img"
+              aria-label={t('mail:mailboxLabel', { name: mailboxName })}
+              title={mailboxName}
+              className="row-backing absolute -right-1 -bottom-1 inline-flex rounded-full p-px"
+            >
+              <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-3.5 text-[8px]" />
+            </span>
+          )}
+        </span>
         <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
           <div className="flex w-full flex-col gap-1">
-            <div className={cn('flex items-center gap-2', !verticalActions && hasActions ? 'pr-24' : 'pr-16')}>
+            <div className="flex items-center gap-2 pr-16">
               {/* Sender first; in a view that spans accounts, the owning mailbox follows it,
                   muted, and gives way to the sender before the time ever does. */}
               <span className="flex min-w-0 items-baseline gap-1.5">
@@ -236,7 +273,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
                     )}
                   </>
                 )}
-                {account && !group && (
+                {account && !group && !mailboxBadge && (
                   <>
                     <span aria-hidden className="shrink-0 text-xs text-muted-foreground">|</span>
                     <span className="min-w-0 truncate text-xs text-muted-foreground" title={account.emailAddress}>{account.displayName}</span>
@@ -248,7 +285,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
             </div>
             {/* The blue dot is the only visual read-state marker in the row. */}
             <div className={cn('flex items-center gap-1.5 text-xs text-foreground/75', group && 'pr-5')}>
-              {!verticalActions && starMarker}
+              {starMarker}
               <span className="truncate">{email.subject || t('mail:noSubject')}</span>
               {email.hasAttachment && (
                 <HugeiconsIcon icon={Attachment01Icon} aria-label={t('mail:hasAttachment')} className="size-3.5 shrink-0 text-muted-foreground" />
@@ -263,28 +300,11 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
           )}
         </div>
       </button>
-      {/* This slot stays centred beside the avatar. Its absolute actions use the
-          space above and below without changing row height or text width.
-          DOM order keeps the main message first, then star, read and archive. */}
-      <div data-slot="email-state-actions" className="relative order-1 flex size-7 shrink-0 items-center justify-center">
-        {verticalActions && (
-          <div className="absolute inset-x-0 -top-6.5 flex h-6 items-center justify-center">
-            {canChangeFlags && (actionsMounted || email.isStarred) ? (
-              <span className={email.isStarred ? undefined : actionVisibility}>{starButton}</span>
-            ) : starMarker}
-          </div>
-        )}
-        <ReadStatusButton
-          data-row-action
-          isRead={group ? group.unread === 0 : email.isRead}
-          interactive={canChangeFlags && actionsMounted}
-          ringClassName={actionVisibility}
-          onClick={() => onFlag?.(email, 'read', !email.isRead)}
-        />
-        {verticalActions && canChangeArchive && actionsMounted && (
-          <div className={cn('absolute inset-x-0 top-7.5 flex h-6 items-center justify-center', actionVisibility)}>
-            {archiveButton}
-          </div>
+      {/* A fixed narrow strip, the same on every row so the dots line up. It only
+          shows the unread dot; read rows leave it empty. */}
+      <div data-slot="email-state" className="order-1 flex h-2 w-3 shrink-0 items-center justify-center">
+        {(group ? group.unread > 0 : !email.isRead) && (
+          <span role="img" aria-label={t('mail:unread')} className="pointer-events-none size-2 rounded-full bg-blue-500 dark:bg-blue-400" />
         )}
       </div>
       <div className="order-3 absolute top-2 right-3 flex h-7 items-center justify-end">
@@ -299,15 +319,25 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         >
           {formatListTime(email.receivedAt)}
         </time>
-        {hasCornerActions && actionsMounted && (
-          <div className={cn('absolute right-0 flex items-center gap-0.5', actionVisibility)}>
-            {!verticalActions && canChangeFlags && starButton}
-            {!verticalActions && canChangeArchive && archiveButton}
+        {hasActions && actionsMounted && (
+          <div
+            data-slot="email-quick-actions"
+            data-armed={actionsArmed ? '' : undefined}
+            className={cn(
+              'row-backing row-actions absolute right-0 flex h-7 items-center',
+              // Until armed, clicks fall through to the row instead of a button that is still fading in.
+              !actionsArmed && 'pointer-events-none',
+              actionVisibility,
+            )}
+          >
+            {canChangeFlags && starButton}
+            {canChangeFlags && readButton}
+            {canChangeArchive && archiveButton}
             {canDelete && (
               <IconButton
                 data-row-action
                 label={t('mail:delete')}
-                className={cn(QUICK_ACTION_CLASS, 'text-destructive hover:text-destructive')}
+                className={cn(QUICK_ACTION_CLASS, 'ml-2 text-destructive hover:text-destructive')}
                 onClick={() => onDelete?.(email)}
               >
                 <HugeiconsIcon icon={Delete02Icon} />
@@ -317,7 +347,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
               <IconButton
                 data-row-action
                 label={t('mail:removeLocalCopy')}
-                className={cn(QUICK_ACTION_CLASS, 'text-destructive hover:text-destructive')}
+                className={cn(QUICK_ACTION_CLASS, 'ml-2 text-destructive hover:text-destructive')}
                 onClick={() => onRemoveLocal?.(email)}
               >
                 <HugeiconsIcon icon={Delete02Icon} />

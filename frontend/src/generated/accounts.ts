@@ -404,7 +404,7 @@ interfaceFont: string,
 /**
  * `""` or comma-separated font families for message bodies, tried in order.
  */
-mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, };
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, mailboxLabel: MailboxLabel, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
@@ -448,6 +448,8 @@ accountOrder: Array<string>, };
 export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, accountOrder?: Array<string>, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
+
+export type MailboxLabel = "name" | "icon";
 
 export type NotificationSound = "system" | "chime" | "ding" | "droplet" | "bubble" | "marimba" | "sparkle" | "knock" | "chord" | "none";
 

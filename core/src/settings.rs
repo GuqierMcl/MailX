@@ -64,6 +64,17 @@ pub enum PreviewLines {
     Three,
 }
 
+/// How a message row names the mailbox it belongs to in views spanning accounts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxLabel {
+    /// The account's display name after the sender.
+    #[default]
+    Name,
+    /// A small account badge on the sender avatar.
+    Icon,
+}
+
 /// How message bodies follow the app's color mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +100,7 @@ pub struct AppearanceSettings {
     pub mail_theme: MailTheme,
     pub font_size: FontSize,
     pub preview_lines: PreviewLines,
+    pub mailbox_label: MailboxLabel,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]

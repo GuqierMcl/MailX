@@ -174,6 +174,46 @@ html[data-translucent].dark .app-canvas {
   --muted-foreground: var(--mail-selection-muted-foreground);
 }
 
+/* What a message row looks like right now, as an opaque backing the quick-action
+   toolbar and the mailbox badge can reuse: the island background, the list
+   panel's `bg-muted/40` tint, then the row's own translucent wash, layered exactly
+   as the page paints them. Keep `--mail-list-tint` in step with that panel. */
+.mail-row {
+  --mail-list-tint: color-mix(in oklab, var(--muted) 40%, transparent);
+  --row-base: var(--background);
+  --row-wash: transparent;
+  --row-backing: linear-gradient(var(--row-wash), var(--row-wash)), linear-gradient(var(--mail-list-tint), var(--mail-list-tint)), var(--row-base);
+}
+.mail-row:hover,
+.mail-row:focus-within,
+.mail-row[data-menu-open] {
+  --row-wash: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+.mail-row.mail-selected {
+  --row-base: var(--mail-selection);
+  --mail-list-tint: transparent;
+  --row-wash: transparent;
+}
+.mail-row.mail-pick[data-picked] {
+  --row-base: var(--mail-pick);
+  --mail-list-tint: transparent;
+  --row-wash: transparent;
+}
+.row-backing {
+  background: var(--row-backing);
+}
+/* A short fade on the left edge lets the text underneath trail off instead of being cut. */
+.row-actions::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  right: 100%;
+  width: 1rem;
+  background: var(--row-backing);
+  mask-image: linear-gradient(to right, transparent, #000);
+  pointer-events: none;
+}
+
 /* Selection mode rows: an inset border (row size never changes), a faint wash
    and a corner check when picked; a lighter border on hover when not. */
 .mail-pick {
