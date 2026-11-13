@@ -687,7 +687,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### 新邮件通知
 
-**判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 只带最新的 3 封（发件人、主题、时间、邮件 id），其余只计数。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
+**判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 保留本轮全部到达邮件（发件人、主题、时间、邮件 id），供宿主从完整候选中识别验证码；普通摘要仍只列最新的 3 封发件人。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
 
 **设置也在核心，所有宿主一致。** `notifications` 设置节：`enabled`（默认开）、`showPreview`（默认开）、`whenFocused`（默认关）、`sound`（`system | chime | ding | droplet | bubble | marimba | sparkle | knock | chord | none`，默认 `system`）、`mutedAccounts`（账号 id 列表）。核心的 `NewMail::for_delivery(&settings)` 统一套用前三项中与内容相关的规则：总开关关闭或账号被静音时什么都不发；关闭预览时把 `messages` 清空，发出的内容里就不含发件人和主题，任何宿主（包括以后的 webhook）都不会泄露。桌面以当前 `effectiveLocale` 调用 `NewMail::summary_localized(locale)` 生成标题和正文：一封时保留发件人与主题，多封时生成当前语言的账号摘要；空主题、计数和摘要模板来自共享资源。`summary()` 保留默认中文的兼容入口。`mutedAccounts` 保存时去空白、排序、去重，含空项或控制字符返回 `validation`（`field` 为 `notifications.mutedAccounts`）；手工编辑出的非法列表加载时整体清空。
 
@@ -699,7 +699,15 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 | `previewSound(sound)` | `notifications_preview_sound`，`{ sound }` | 播放 MailX 自带音效；`system` 与 `none` 不播放 |
 | `onNotificationOpen(listener)` | 事件 `mailx://notification-open` | 通知被点击 |
 
-**平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。
+**普通通知的平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。
+
+### 验证码通知（桌面）
+
+允许通知内容预览时，宿主对真正新到达、主题疑似验证码的近期未读收件箱邮件进行本地识别。`MailxCore::notification_verification_code(email_id)` 是可信宿主使用的内部应用服务，最多 4 秒、2 个并发、完整 MIME 1 MiB；按账号路由只读获取且不改正文缓存或已读状态。下载后核对当前来源、revision、UIDVALIDITY 与邮件可见性。没有新增前端命令或 MCP 工具。
+
+桌面每批最多探测 5 封、总等待上限 5 秒，识别成功后逐封通知并从普通摘要中移除，同批只响一次；失败、歧义、超限或超时沿用普通通知。Windows / macOS 提供显式复制按钮，Linux 只在通知文字中突出验证码。通知总开关、账号静音、前台通知与隐藏预览均适用；隐藏预览不抓取或显示验证码。
+
+原生复制参数为当前进程的短期 UUID，最多保留 5 分钟，成功后消费。`notification_code_is_current(account_id, email_id)` 与最新通知设置共同复核动作，已读邮件可以复制，已删除、过旧或来源失效的邮件不能复制；撤销设置和最终副作用由宿主共享修订号与互斥边界。复制不激活窗口，正文点击继续打开邮件；Windows 通过专用协议和单实例转发支持通知中心激活，旧 token 在冷启动时不恢复。平台实现、预算和实测缺口见[验证码识别](../architecture/verification-codes.md#6-桌面通知接入)。
 
 ### 发送结果通知（桌面）
 

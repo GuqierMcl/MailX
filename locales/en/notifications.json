@@ -1,5 +1,9 @@
 {
   "noSubject": "(No subject)",
+  "verificationCode": "Verification code: {{code}}",
+  "copyVerificationCode": "Copy code",
+  "copyCodeUnavailable": "Code could not be copied",
+  "copyCodeOpenMail": "Open the email to view and copy the code.",
   "newMail_one": "{{count}} new message",
   "newMail_other": "{{count}} new messages",
   "newMailFrom_one": "{{count}} new message from {{senders}}{{more}}",

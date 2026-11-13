@@ -79,6 +79,19 @@ impl SupportedLocale {
         self.text(false, "test", &[])
     }
 
+    pub fn verification_code(self, code: &str) -> String {
+        self.text(false, "verificationCode", &[("code", code)])
+    }
+    pub fn copy_verification_code(self) -> String {
+        self.text(false, "copyVerificationCode", &[])
+    }
+    pub fn copy_code_unavailable(self) -> String {
+        self.text(false, "copyCodeUnavailable", &[])
+    }
+    pub fn copy_code_open_mail(self) -> String {
+        self.text(false, "copyCodeOpenMail", &[])
+    }
+
     pub fn new_mail(self, count: u32) -> String {
         let key = if self == Self::En && count == 1 {
             "newMail_one"

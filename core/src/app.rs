@@ -54,6 +54,7 @@ pub use oauth::{
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
 };
 mod verification;
+mod verification_codes;
 pub use crate::sync::cadence::Activity;
 pub use ai::{AiConnectionState, AiService, AiState, SaveAiConnection, SavedAiConnection};
 pub use attachments::{AttachmentFile, AttachmentInfo};
@@ -103,6 +104,7 @@ pub struct MailxCore {
     archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
     oauth_sessions: Arc<crate::accounts::oauth_sessions::SessionCoordinator>,
     translation: Arc<translation::Translations>,
+    notification_codes: Arc<verification_codes::NotificationCodes>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -249,6 +251,7 @@ impl MailxCore {
             archive_undo: Arc::default(),
             oauth_sessions: Arc::default(),
             translation,
+            notification_codes: Arc::default(),
         })
     }
 

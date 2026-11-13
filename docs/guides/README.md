@@ -167,6 +167,14 @@ MailX includes a local MCP server. A built-in AI assistant is not available yet.
 
 A client may send the mail it reads to the AI service it uses, so choose clients and models with your privacy in mind. There is no per-client or per-account authorization yet, and MCP cannot delete mail. Compatibility of clients, platforms and tools is recorded in the [validation record](../development/validation.md).
 
+## Verification codes in notifications
+
+When notification contents are enabled, MailX can recognize verification codes in recent incoming messages and show each matching message separately. On Windows and macOS, choose **Copy code** on the system notification to copy it without opening the MailX window. Clicking the notification itself opens the message. Linux shows the code prominently in the notification text.
+
+MailX must remain running, including in the background. The copy shortcut is available for up to five minutes and becomes unavailable after use, restart, account removal or disabling the relevant notifications. Open the email if the shortcut is unavailable. The operating system controls where the button appears and may require you to expand or hover over the notification.
+
+**Settings → Notifications → Show notification contents** controls whether senders, subjects and recognized codes appear. Turning it off also disables code buttons; account muting and the foreground notification setting apply. Recognition happens locally and may briefly read a candidate message from your mail provider without marking it read. Unsupported formats, ambiguous codes or slow downloads use the ordinary notification. A copied code uses the system clipboard and may be retained by clipboard history or system sync.
+
 ## Background operation, launch at login and updates
 
 Closing the main window can keep MailX in the background or quit; it asks each time by default, and you can change that in General settings. On macOS, the MailX menu bar icon is on by default and can be turned off; the Dock remains a recovery entry when the main window is hidden. Launch at login and start silently are both off by default; start silently only applies when the app starts automatically at login. When the system or desktop environment has no usable background entry, the main window appears instead of running with no way to get back.

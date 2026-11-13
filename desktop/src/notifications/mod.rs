@@ -5,7 +5,37 @@
 //! by the core for every host (`NewMail::for_delivery`); this module only adds
 //! the desktop's own rules: stay quiet while the window is in front unless the
 //! user asked otherwise, and which sound goes with it.
+mod codes;
+#[cfg(target_os = "macos")]
+mod macos;
 mod sounds;
+#[cfg(windows)]
+mod windows;
+
+pub(crate) use codes::{new_mail, retire_codes, settings_changed, setup};
+#[cfg(windows)]
+pub(crate) use windows::{handle_launch, is_action_launch};
+
+#[cfg(any(target_os = "macos", windows))]
+const CODE_ACTION_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+#[cfg(any(target_os = "macos", windows))]
+struct CodeNotification {
+    title: String,
+    body: String,
+    copy_label: String,
+    token: String,
+    sound: Option<&'static str>,
+}
+
+#[cfg(any(target_os = "macos", windows))]
+enum CodeAction {
+    Copy(String),
+    Open(String),
+}
+
+#[cfg(any(target_os = "macos", windows))]
+type CodeActionHandler = Arc<dyn Fn(CodeAction) + Send + Sync>;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -215,27 +245,6 @@ fn window_in_front<R: Runtime>(app: &AppHandle<R>) -> bool {
     })
 }
 
-/// Handles a `NewMail` event from the core. Runs off the core's worker: asking
-/// the window whether it is in front waits for the main thread.
-pub(crate) fn new_mail<R: Runtime>(
-    app: &AppHandle<R>,
-    mail: NewMail,
-    accounts: Arc<AccountNotifications>,
-    settings: impl FnOnce() -> Option<(NotificationSettings, SupportedLocale)> + Send + 'static,
-) {
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        accounts.deliver(
-            &mail.account_id,
-            || {
-                let (settings, locale) = settings()?;
-                plan_localized(&mail, &settings, window_in_front(&app), locale)
-            },
-            |shown| show(&app, shown),
-        );
-    });
-}
-
 /// Handles a send result from the core, off the core's worker for the same
 /// reason as `new_mail`. `lookup` returns the notification settings and the
 /// item's subject (read only to be shown when previews are on).
@@ -312,6 +321,13 @@ struct OpenRequest {
 pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
     let handle = app.clone();
     let _ = app.notification().on_action(move |performed| {
+        #[cfg(target_os = "macos")]
+        if performed
+            .notification()
+            .is_some_and(|notification| notification.extra().contains_key(macos::TOKEN_KEY))
+        {
+            return;
+        }
         if performed.action_id() != "tap" {
             return;
         }

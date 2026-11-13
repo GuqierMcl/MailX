@@ -41,6 +41,9 @@ const PREVIEWS_EVENT: &str = "mailx://email-previews";
 const SENT_COPIES_EVENT: &str = "mailx://sent-copies";
 
 fn main() {
+    #[cfg(windows)]
+    let notification_launch =
+        notifications::is_action_launch(&std::env::args().collect::<Vec<_>>());
     let builder = tauri::Builder::default()
         .manage(autostart::StartupIntent::default())
         .manage(autostart::foreground_environment(tauri::Env::default()));
@@ -52,6 +55,10 @@ fn main() {
     // Registered first, as the plugin requires. A second launch hands over to the
     // running instance and exits, so it never reaches the data-directory lock.
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        #[cfg(windows)]
+        if notifications::handle_launch(app, &args) {
+            return;
+        }
         if !autostart::is_login_launch(args) {
             window_chrome::focus_main_window(app);
         }
@@ -75,7 +82,14 @@ fn main() {
         builder.plugin(window_chrome::browser_defaults_plugin())
     };
     body_protocol::register(builder)
-        .setup(|app| {
+        .setup(move |app| {
+            // A second process has already forwarded actions to the live instance.
+            // On a cold start its in-memory copy capability no longer exists.
+            #[cfg(windows)]
+            if notification_launch {
+                app.handle().exit(0);
+                return Ok(());
+            }
             let storage = app
                 .path()
                 .app_data_dir()
@@ -97,6 +111,7 @@ fn main() {
             let handle = app.handle().clone();
             let settings_handle = app.handle().clone();
             let notification_accounts = Arc::new(notifications::AccountNotifications::default());
+            notifications::setup(app.handle(), notification_accounts.clone());
             let events: mailx_core::Events =
                 Arc::new(move |event: &mailx_core::CoreEvent| match event {
                     mailx_core::CoreEvent::Sync(sync_state) => {
@@ -165,6 +180,7 @@ fn main() {
                     }
                     mailx_core::CoreEvent::AccountRemoved(removed) => {
                         notification_accounts.retire(&removed.account_id);
+                        notifications::retire_codes(&handle, &removed.account_id);
                         if let Some(protocol) =
                             handle.try_state::<std::sync::Arc<body_protocol::BodyProtocol>>()
                         {
@@ -176,15 +192,10 @@ fn main() {
                         compose::emit_draft(&handle, change);
                     }
                     mailx_core::CoreEvent::NewMail(mail) => {
-                        let app = settings_handle.clone();
                         notifications::new_mail(
                             &handle,
                             mail.clone(),
                             notification_accounts.clone(),
-                            move || {
-                                app.try_state::<state::DesktopState>()?
-                                    .notification_settings()
-                            },
                         );
                     }
                 });

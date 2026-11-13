@@ -167,7 +167,7 @@ impl BlobStore {
         match fs::symlink_metadata(&destination) {
             Ok(_) => {
                 // Never reuse a corrupt or redirected file as a ready cache.
-                self.read_checked(&reference)?;
+                self.read_checked(&reference, MAX_MESSAGE_BYTES)?;
                 return Ok(reference);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -196,12 +196,20 @@ impl BlobStore {
     }
 
     pub(crate) fn read(&self, reference: &StoredBlob) -> Result<Vec<u8>, AppError> {
-        let _files = self.files.lock().map_err(|_| storage_error())?;
-        self.read_checked(reference)
+        self.read_limited(reference, MAX_MESSAGE_BYTES)
     }
 
-    fn read_checked(&self, reference: &StoredBlob) -> Result<Vec<u8>, AppError> {
-        if !valid_hash(&reference.sha256) || reference.size > MAX_MESSAGE_BYTES as u64 {
+    pub(crate) fn read_limited(
+        &self,
+        reference: &StoredBlob,
+        limit: usize,
+    ) -> Result<Vec<u8>, AppError> {
+        let _files = self.files.lock().map_err(|_| storage_error())?;
+        self.read_checked(reference, limit.min(MAX_MESSAGE_BYTES))
+    }
+
+    fn read_checked(&self, reference: &StoredBlob, limit: usize) -> Result<Vec<u8>, AppError> {
+        if !valid_hash(&reference.sha256) || reference.size > limit as u64 {
             return Err(storage_error());
         }
         check_directory(&self.root)?;
@@ -218,7 +226,7 @@ impl BlobStore {
         let mut raw = Vec::new();
         File::open(&path)
             .map_err(|_| storage_error())?
-            .take(MAX_MESSAGE_BYTES as u64 + 1)
+            .take(limit as u64 + 1)
             .read_to_end(&mut raw)
             .map_err(|_| storage_error())?;
         if raw.len() as u64 != reference.size
@@ -416,6 +424,20 @@ impl Storage {
 
     pub(crate) fn body_identity_current(&self, identity: &BodyIdentity) -> Result<bool, AppError> {
         current(&self.db, identity)
+    }
+
+    /// Admission metadata only: never load a possibly large cached body merely
+    /// to decide whether a notification read or copy is still eligible.
+    pub(crate) fn notification_header(
+        &self,
+        id: &str,
+    ) -> Result<Option<(String, String, bool)>, AppError> {
+        Ok(self.db.query_row(
+            &format!("SELECT m.subject, m.received_at, m.is_read {} AND m.id = ?1 AND f.role = 'inbox'",
+                super::messages::VISIBLE_MESSAGES),
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?)
     }
 
     pub(crate) fn body_begin(&mut self, identity: &BodyIdentity) -> Result<bool, AppError> {

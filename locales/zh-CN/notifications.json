@@ -1,5 +1,9 @@
 {
   "noSubject": "（无主题）",
+  "verificationCode": "验证码：{{code}}",
+  "copyVerificationCode": "复制验证码",
+  "copyCodeUnavailable": "无法复制验证码",
+  "copyCodeOpenMail": "请打开邮件查看并复制验证码。",
   "newMail_other": "{{count}} 封新邮件",
   "newMailFrom_other": "{{count}} 封新邮件，来自 {{senders}}{{more}}",
   "moreSenders": " 等",
