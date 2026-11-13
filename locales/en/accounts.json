@@ -211,6 +211,7 @@
   "verificationCancelled": "Verification cancelled",
   "verificationIncoming": "Incoming · IMAP",
   "verificationOutgoing": "Outgoing · SMTP",
+  "verificationExchange": "Exchange (EWS)",
   "verificationPassed": "Signed in",
   "verificationAuthUnavailable": "The server does not support the available authentication methods.",
   "verificationConfiguration": "Connection settings are unavailable. Edit the connection and try again.",

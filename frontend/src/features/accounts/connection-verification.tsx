@@ -67,26 +67,36 @@ function ConnectionVerificationAttempt({ account, client }: { account: Account; 
       <div role="status" aria-live="polite" className="w-full text-sm">
         {state.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
         {state.kind === 'failed' && <p className="text-destructive">{state.failure.code === 'conflict' ? t('accounts:verificationStale') : errorText(state.failure)}</p>}
-        {report && <ConnectionVerificationReport report={report} client={client} providerId={account.providerId} />}
+        {report && <ConnectionVerificationReport report={report} client={client} providerId={account.providerId} isEws={account.ews != null} />}
       </div>
     </div>
   )
 }
 
 /** Saved and unsaved connections share the same protocol results and reviewed help. */
-export function ConnectionVerificationReport({ report, client, providerId }: {
+export function ConnectionVerificationReport({ report, client, providerId, isEws = false }: {
   report: Pick<AccountConnectionVerification, 'imap' | 'smtp'>
   client: MailxClient
   providerId: string | null
+  /** An Exchange (EWS) connection verifies over one HTTPS endpoint, so it shows a single row. */
+  isEws?: boolean
 }) {
   useTranslation()
-  const passed = report.imap.status === 'verified' && report.smtp.status === 'verified'
-  const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
-  const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
+  const slot = report.imap
+  const passed = isEws ? slot.status === 'verified' : report.imap.status === 'verified' && report.smtp.status === 'verified'
+  const authenticationFailed = isEws ? slot.code === 'authentication' : report.imap.code === 'authentication' || report.smtp.code === 'authentication'
+  const policyFailed = isEws ? slot.code === 'providerPolicy' : report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
   return <div className="flex w-full flex-col gap-3 text-sm">
     <p className={passed ? 'text-muted-foreground' : 'text-destructive'}>{t(passed ? 'accounts:verificationSucceeded' : 'accounts:verificationFailed')}</p>
     <div className="flex flex-col gap-2">
-      {(['imap', 'smtp'] as const).map((protocol) => (
+      {isEws ? (
+        <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+          <span>{t('accounts:verificationExchange')}</span>
+          <span className={slot.status === 'verified' ? 'text-muted-foreground' : 'text-destructive'}>
+            {slot.status === 'verified' ? t('accounts:verificationPassed') : failureText(slot.code)}
+          </span>
+        </div>
+      ) : (['imap', 'smtp'] as const).map((protocol) => (
         <div key={protocol} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
           <span>{t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')}</span>
           <span className={report[protocol].status === 'verified' ? 'text-muted-foreground' : 'text-destructive'}>

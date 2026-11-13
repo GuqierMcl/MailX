@@ -785,7 +785,7 @@ export function ConnectionForm({
         </FieldSet>
         <div role="status" aria-live="polite" className="text-sm">
           {signInState.kind === 'checking' && <p className="text-muted-foreground">{t('accounts:signInBusy')}</p>}
-          {signInState.kind === 'report' && verificationClient && <ConnectionVerificationReport report={signInState.report} client={verificationClient} providerId={provider.id} />}
+          {signInState.kind === 'report' && verificationClient && <ConnectionVerificationReport report={signInState.report} client={verificationClient} providerId={provider.id} isEws={ewsMode} />}
           {signInState.kind === 'failed' && <p className="text-muted-foreground">{t('accounts:signInFailedHint')}</p>}
         </div>
       </SettingsPage>
@@ -876,7 +876,7 @@ export function ConnectionForm({
           </div>
           <div role="status" aria-live="polite" className="text-sm">
             {currentTest.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
-            {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} />}
+            {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} isEws={ewsMode} />}
           </div>
         </SettingsGroup>}
     </SettingsPage>

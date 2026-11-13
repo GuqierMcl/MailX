@@ -211,6 +211,7 @@
   "verificationCancelled": "验证已取消",
   "verificationIncoming": "IMAP 收信",
   "verificationOutgoing": "SMTP 发信",
+  "verificationExchange": "Exchange 收发",
   "verificationPassed": "登录成功",
   "verificationAuthUnavailable": "服务器不支持当前认证方式。",
   "verificationConfiguration": "连接配置不可用，请修改连接后重试。",
