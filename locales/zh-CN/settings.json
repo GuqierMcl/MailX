@@ -112,7 +112,7 @@
   "startup": "启动",
   "autostart": "开机自启动",
   "autostartHint": "登录此电脑后自动启动 MailX。",
-  "mailEnhancements": "邮件增强",
+  "mailEnhancements": "增强",
   "verificationCodes": "验证码",
   "trashVerificationMailAfterCopy": "复制验证码后移到已删除",
   "trashVerificationMailAfterCopyHint": "在邮件列表、阅读区或系统通知中使用“复制验证码”后生效。复制失败或没有已删除文件夹时保留邮件，不会永久删除。",

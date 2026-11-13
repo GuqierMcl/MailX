@@ -185,7 +185,7 @@ MailX must remain running, including in the background. A notification's copy sh
 
 ### Move mail to Trash after copying
 
-Under **Settings → Mail → Mail enhancements**, **Move email to Trash after copying a code** is off by default. Turn it on to apply the same cleanup to the list, reading pane and system notification copy buttons. Ordinary text selection and copying do not trigger this setting.
+Under **Settings → Mail → Enhancements**, **Move email to Trash after copying a code** is off by default. Turn it on to apply the same cleanup to the list, reading pane and system notification copy buttons. Ordinary text selection and copying do not trigger this setting.
 
 The email moves to the account's Trash only after copying succeeds, with a short **Undo** action. In MailX this appears in the copy result notice; a background notification copy provides a system Undo notification. The undo window is five seconds and does not restart when a notice is shown. If copying fails, the email stays. If copying succeeds but cleanup fails, MailX reports the two results separately.
 

@@ -57,15 +57,15 @@ describe('settings dialog', () => {
   it('shows a visible title and keeps navigation on narrow windows', () => {
     const { dialog } = renderDialog()
     expect(within(dialog).getByRole('heading', { name: '设置' })).toBeVisible()
-    for (const name of ['外观', '发信', '联系人', '邮件增强', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+    for (const name of ['外观', '发信', '联系人', '增强', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
   })
 
   it('places verification-code cleanup on the mail enhancements page in the mail group', async () => {
     const { dialog } = renderDialog(testClient(), { section: 'general' })
     expect(within(dialog).queryByRole('switch', { name: '复制验证码后移到已删除' })).not.toBeInTheDocument()
     const mailGroup = within(dialog).getByTestId('settings-nav-group-mail')
-    await userEvent.click(within(mailGroup).getByRole('button', { name: '邮件增强' }))
-    expect(within(dialog).getByRole('heading', { name: '邮件增强' })).toBeInTheDocument()
+    await userEvent.click(within(mailGroup).getByRole('button', { name: '增强' }))
+    expect(within(dialog).getByRole('heading', { name: '增强' })).toBeInTheDocument()
     expect(await within(dialog).findByRole('switch', { name: '复制验证码后移到已删除' })).not.toBeChecked()
   })
 
