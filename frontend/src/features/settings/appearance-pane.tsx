@@ -8,6 +8,7 @@ import { Radio } from '@base-ui/react/radio'
 import { RadioGroup } from '@base-ui/react/radio-group'
 import { cn } from 'cn'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { CustomColorSwatch } from '@/components/custom-color-swatch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -200,15 +201,7 @@ function AccentChoice({ value: saved, onChange }: { value: string; onChange: (ac
         })}
       </RadioGroup>
       <span className="h-5 w-px bg-border" aria-hidden />
-      {/* The native picker sits invisibly over the swatch so the OS color panel opens on click. */}
-      <label title={t('settings:customColor')} data-checked={custom || undefined}
-        className={cn(swatch, 'cursor-pointer has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
-          !custom && 'bg-[conic-gradient(#ef4444,#eab308,#22c55e,#06b6d4,#3b82f6,#a855f7,#ef4444)]')}
-        style={custom ? { backgroundColor: value } : undefined}>
-        <input type="color" aria-label={t('settings:customAccent')} className="absolute inset-0 size-full cursor-pointer opacity-0"
-          value={custom ? value : '#2563eb'} onChange={(event) => setPicking(event.target.value.toLowerCase())} />
-        {custom && <span className="pointer-events-none">{tick}</span>}
-      </label>
+      <CustomColorSwatch value={value} checked={custom} label={t('settings:customAccent')} className={swatch} onChange={setPicking} />
     </div>
   )
 }

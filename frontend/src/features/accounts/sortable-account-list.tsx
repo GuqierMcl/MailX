@@ -9,14 +9,18 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { DragDropVerticalIcon } from '@hugeicons/core-free-icons'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
-import type { Account } from '@/generated/accounts'
+import type { Account, AccountSyncState } from '@/generated/accounts'
 import { t } from '@/i18n'
+import { cn } from '@/lib/utils'
 import { AccountAvatar } from './account-avatar'
+import { accountProblem, type AccountProblem } from './account-status'
 import { providerOf } from './providers'
 
 type Props = {
   accounts: Account[]
   activeId: string | null
+  /** Latest sync state by account id, to mark accounts that have a problem. */
+  syncStates: Record<string, AccountSyncState>
   disabled: boolean
   reorderDisabled: boolean
   onSelect: (id: string) => void
@@ -27,7 +31,7 @@ const controlledSorting: NonNullable<Parameters<typeof useSortable>[0]['plugins'
   (defaults) => defaults.filter((plugin) => plugin !== OptimisticSortingPlugin)
 
 /** The library handles pointer/keyboard input, sorting feedback and scrolling. */
-export function SortableAccountList({ accounts, activeId, disabled, reorderDisabled, onSelect, onReorder }: Props) {
+export function SortableAccountList({ accounts, activeId, syncStates, disabled, reorderDisabled, onSelect, onReorder }: Props) {
   useTranslation()
   const reducedMotion = usePrefersReducedMotion()
   const startedWith = useRef<string[]>([])
@@ -81,7 +85,7 @@ export function SortableAccountList({ accounts, activeId, disabled, reorderDisab
       <span id={instructionsId} className="sr-only">{t('accounts:reorderInstructions')}</span>
       <SidebarMenu className="flex-row overflow-x-auto md:flex-col md:overflow-visible" aria-label={t('accounts:emailAccountList')}>
         {displayed.map((account, index) => (
-          <SortableAccountRow key={account.id} account={account} index={index} active={account.id === activeId}
+          <SortableAccountRow key={account.id} account={account} index={index} active={account.id === activeId} problem={accountProblem(account, syncStates[account.id])}
             disabled={disabled} reorderDisabled={reorderDisabled || accounts.length < 2} instructionsId={instructionsId} reducedMotion={reducedMotion} onSelect={onSelect} />
         ))}
       </SidebarMenu>
@@ -89,8 +93,8 @@ export function SortableAccountList({ accounts, activeId, disabled, reorderDisab
   )
 }
 
-function SortableAccountRow({ account, index, active, disabled, reorderDisabled, instructionsId, reducedMotion, onSelect }: {
-  account: Account; index: number; active: boolean; disabled: boolean; reorderDisabled: boolean; instructionsId: string; reducedMotion: boolean; onSelect: (id: string) => void
+function SortableAccountRow({ account, index, active, problem, disabled, reorderDisabled, instructionsId, reducedMotion, onSelect }: {
+  account: Account; index: number; active: boolean; problem: AccountProblem | null; disabled: boolean; reorderDisabled: boolean; instructionsId: string; reducedMotion: boolean; onSelect: (id: string) => void
 }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: account.id, index, disabled: reorderDisabled, transition: reducedMotion ? null : undefined,
@@ -105,9 +109,16 @@ function SortableAccountRow({ account, index, active, disabled, reorderDisabled,
         className="flex h-8 w-6 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-30 disabled:cursor-default disabled:opacity-30">
         <HugeiconsIcon icon={DragDropVerticalIcon} className="size-4" aria-hidden />
       </button>
-      <SidebarMenuButton type="button" disabled={disabled} isActive={active} title={`${account.emailAddress} · ${providerOf(account.providerId).name}`} onClick={() => onSelect(account.id)}>
+      <SidebarMenuButton type="button" size="lg" disabled={disabled} isActive={active} title={`${account.emailAddress} · ${providerOf(account.providerId).name}`} onClick={() => onSelect(account.id)}>
         <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-5 text-[10px]" />
-        <span>{account.displayName}</span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="truncate">{account.displayName}</span>
+          <span className="truncate font-normal opacity-70">{account.emailAddress}</span>
+        </span>
+        {/* The same small "!" as the sidebar's 账号 entry: red when stopped, amber while it retries. On the
+            selected row it takes the row's text colour, like sidebar badges; the header shows the status in colour. */}
+        {problem && <span role="img" aria-label={t(problem === 'stopped' ? 'accounts:syncStopped' : 'accounts:syncRetryingShort')}
+          className={cn('flex min-w-5 shrink-0 items-center justify-center text-xs font-medium tabular-nums select-none', problem === 'stopped' ? 'text-destructive' : 'text-amber-600 dark:text-amber-400', 'group-data-active/menu-button:text-current')}>!</span>}
       </SidebarMenuButton>
     </SidebarMenuItem>
   )

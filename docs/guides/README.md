@@ -39,6 +39,12 @@ If your sign-in expires or is withdrawn, open the account in MailX and click **S
 
 Outlook has been tested with a personal Outlook.com account; the Microsoft 365 entry hasn't been tested with a real work or school account yet. Shared mailboxes and China-operated Microsoft 365 aren't supported.
 
+## Manage accounts
+
+Open **Accounts** in the sidebar to manage a mailbox. The header shows the account's name, address and when it last synced. If a mailbox has a problem, its list entry has the same small exclamation mark as the sidebar's Accounts entry, red when sync has stopped and amber when MailX will retry on its own, and opening Accounts from the sidebar selects the first one with a problem. A stopped sync, credentials that need confirming, or a sign-in that has to be renewed are shown in the header; the buttons to fix them are at the bottom of the page.
+
+The name, sender name, provider icon and identification color save as you change them. Pick a preset color, none, or the rainbow swatch at the end to choose any color from the system color picker. **Remove account**, in red, sits at the bottom left; **Verify connection** and **Edit connection** (or **Sign in again** for browser sign-in accounts) sit at the bottom right and stay in view while you scroll. Verifying checks the saved sign-in without sending mail: the connection method line says whether both sides passed, and if one did not, the connection details open with the reason under that server. Passing means sign-in works, not that delivery has been tested. The details (servers, credentials, network route) are folded otherwise.
+
 ## Reading, search and organizing
 
 The first sync of each folder starts from the last 30 days and fills up to the newest 1,000 message headers in that window per round, keeping previously cached history. This is not a full download of the mailbox. Accounts that support IMAP IDLE listen for inbox changes; other folders and accounts without IDLE keep polling.

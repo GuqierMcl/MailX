@@ -1,6 +1,7 @@
 import { render } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { AccountAvatar } from './account-avatar'
+import { ACCOUNT_COLORS, accountTextColor } from './account-color'
 import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 describe('account avatar', () => {
@@ -62,5 +63,14 @@ describe('account avatar', () => {
     expect(avatars()[0]).toHaveTextContent(/^工$/)
     expect(avatars()[1]).toHaveTextContent(/^个$/)
     expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('keeps white text on every preset and switches to black on a light custom color', () => {
+    for (const preset of ACCOUNT_COLORS) expect(accountTextColor(preset.value)).toBe('#ffffff')
+    expect(accountTextColor('#fde68a')).toBe('#000000')
+    expect(accountTextColor('#FFFFFF')).toBe('#000000')
+    expect(accountTextColor('#000000')).toBe('#ffffff')
+    const { container } = render(<AccountAvatar displayName="浅色" color="#fde68a" providerId={null} />)
+    expect(container.querySelector('[data-slot="account-avatar"]')).toHaveStyle({ backgroundColor: '#fde68a', color: '#000000' })
   })
 })

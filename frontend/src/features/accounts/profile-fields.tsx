@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from '@/components/ui/field'
+import { CustomColorSwatch } from '@/components/custom-color-swatch'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -28,13 +29,17 @@ type ProfileFieldsProps = {
   onDisplayNameChange(value: string): void
   /** Called when editing the name settles (blur or Enter). */
   onDisplayNameCommit?(): void
+  /** A choice that settles: a preset, none, or a custom color once the picker closes. */
   onColorChange(color: string | null): void
+  /** Every step of the custom color picker, to preview before it settles; defaults to `onColorChange`. */
+  onColorPreview?(color: string): void
   disabled?: boolean
 }
 
 /** Name and identification color: how the account looks in MailX, nothing more. */
-export function ProfileFields({ displayName, color, providerId, useProviderIcon = true, onUseProviderIconChange, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, disabled }: ProfileFieldsProps) {
+export function ProfileFields({ displayName, color, providerId, useProviderIcon = true, onUseProviderIconChange, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, onColorPreview, disabled }: ProfileFieldsProps) {
   useTranslation()
+  const customColor = color !== null && !ACCOUNT_COLORS.some((preset) => preset.value === color)
   const choices: { value: string | null; name: string }[] = [{ value: null, name: t('accounts:noColor') }, ...ACCOUNT_COLORS]
   return (
     <div className="flex flex-col gap-6">
@@ -101,6 +106,9 @@ export function ProfileFields({ displayName, color, providerId, useProviderIcon 
               </button>
             )
           })}
+          <CustomColorSwatch value={color ?? '#2563eb'} checked={customColor} label={t('accounts:customColor')} disabled={disabled}
+            className="size-7 ring-offset-2 ring-offset-background data-checked:ring-2 data-checked:ring-foreground"
+            onChange={onColorPreview ?? onColorChange} onCommit={onColorChange} />
         </div>
         <FieldDescription>{t('accounts:identificationColorHint')}</FieldDescription>
       </Field>

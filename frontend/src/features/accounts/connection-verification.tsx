@@ -1,76 +1,80 @@
-import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Account, AccountConnectionVerification } from '@/generated/accounts'
+import type { AccountConnectionVerification } from '@/generated/accounts'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Button } from '@/components/ui/button'
-import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import type { MailxClient } from '@/lib/mailx-client'
 import { ProviderAuthHelp } from './provider-auth-help'
+import { failureText, verificationReport, type ConnectionVerificationHandle, type VerificationState } from './use-connection-verification'
 
-type VerificationState =
-  | { kind: 'idle' | 'checking' | 'cancelled' }
-  | { kind: 'ready'; report: AccountConnectionVerification }
-  | { kind: 'failed'; failure: ClientFailure }
+type Protocol = 'imap' | 'smtp'
+type ProtocolResult = Pick<AccountConnectionVerification, 'imap' | 'smtp'>[Protocol]
 
-function failureText(code: string | null): string {
-  if (code === 'authUnavailable') return t('accounts:verificationAuthUnavailable')
-  if (code === 'configuration') return t('accounts:verificationConfiguration')
-  if (code === 'secretStore') return t('accounts:verificationSecretStore')
-  if (code === 'cancelled') return t('accounts:verificationCancelled')
-  return errorText({ code })
-}
-
-/** A report is scoped to this mounted account revision, never a persistent promise of delivery. */
-export function ConnectionVerification({ account, client }: { account: Account; client: MailxClient }) {
-  return <ConnectionVerificationAttempt key={`${account.id}:${account.revision}`} account={account} client={client} />
-}
-
-function ConnectionVerificationAttempt({ account, client }: { account: Account; client: MailxClient }) {
+/** The check and cancel buttons; `onStart` runs before a new check begins. */
+export function ConnectionVerificationActions({ verification, client, onStart }: {
+  verification: ConnectionVerificationHandle
+  client: MailxClient
+  onStart?: () => void
+}) {
   useTranslation()
-  const [state, setState] = useState<VerificationState>({ kind: 'idle' })
-  const pending = useRef<AbortController | null>(null)
-  useEffect(() => () => { pending.current?.abort(); pending.current = null }, [])
-
-  async function verify() {
-    if (pending.current) return
-    const controller = new AbortController()
-    pending.current = controller
-    setState({ kind: 'checking' })
-    try {
-      const report = await client.verifyAccountConnection(account.id, account.revision, controller.signal)
-      if (pending.current !== controller || controller.signal.aborted) return
-      if (report.accountId !== account.id || report.revision !== account.revision) {
-        setState({ kind: 'failed', failure: { code: 'conflict', field: null, message: '' } })
-      } else setState({ kind: 'ready', report })
-    } catch (cause) {
-      if (pending.current === controller && !controller.signal.aborted) setState({ kind: 'failed', failure: clientFailure(cause) })
-    } finally {
-      if (pending.current === controller) pending.current = null
-    }
-  }
-
-  const report = state.kind === 'ready' ? state.report : null
-
   return (
-    <div className="flex flex-col items-start gap-3">
-      <p className="text-xs text-muted-foreground">{t('accounts:verificationHint')}</p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" disabled={!client.available || state.kind === 'checking'} onClick={() => void verify()}>
-          {t(state.kind === 'checking' ? 'accounts:verifyingConnection' : 'accounts:verifyConnection')}
-        </Button>
-        {state.kind === 'checking' && <Button variant="ghost" onClick={() => {
-          pending.current?.abort()
-          pending.current = null
-          setState({ kind: 'cancelled' })
-        }}>{t('accounts:cancelVerification')}</Button>}
-      </div>
-      <div role="status" aria-live="polite" className="w-full text-sm">
-        {state.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
-        {state.kind === 'failed' && <p className="text-destructive">{state.failure.code === 'conflict' ? t('accounts:verificationStale') : errorText(state.failure)}</p>}
-        {report && <ConnectionVerificationReport report={report} client={client} providerId={account.providerId} />}
-      </div>
+    <>
+      {verification.checking && <Button variant="ghost" onClick={verification.cancel}>{t('accounts:cancelVerification')}</Button>}
+      <Button variant="outline" disabled={!client.available || verification.checking} onClick={() => {
+        onStart?.()
+        void verification.verify()
+      }}>
+        {t(verification.checking ? 'accounts:verifyingConnection' : 'accounts:verifyConnection')}
+      </Button>
+    </>
+  )
+}
+
+/** A short result to append to the connection method: passed, or which side did not. */
+export function VerificationSummary({ state }: { state: VerificationState }) {
+  useTranslation()
+  const report = verificationReport(state)
+  if (!report) return null
+  const incoming = report.imap.status === 'verified'
+  const outgoing = report.smtp.status === 'verified'
+  if (incoming && outgoing) return <span className="text-xs text-muted-foreground">· {t('accounts:verificationBothPassed')}</span>
+  const key = incoming ? 'accounts:verificationOutgoingFailed' : outgoing ? 'accounts:verificationIncomingFailed' : 'accounts:verificationBothFailed'
+  return <span className="text-xs text-destructive">· {t(key)}</span>
+}
+
+/** A request that gave no report at all: cancelled, or failed as a whole. Empty when there is nothing to say. */
+export function VerificationNotice({ state }: { state: VerificationState }) {
+  useTranslation()
+  return (
+    <div role="status" aria-live="polite" className="text-xs empty:hidden">
+      {state.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
+      {state.kind === 'failed' && <p className="text-destructive">{state.failure.code === 'conflict' ? t('accounts:verificationStale') : errorText(state.failure)}</p>}
     </div>
   )
+}
+
+/** One protocol's outcome under its server row: a quiet pass, or the reason it failed. */
+export function ProtocolOutcome({ state, protocol }: { state: VerificationState; protocol: Protocol }) {
+  useTranslation()
+  const report = verificationReport(state)
+  if (!report) return null
+  const result = report[protocol]
+  return result.status === 'verified'
+    ? <p className="text-xs text-muted-foreground">{t('accounts:verificationPassed')}</p>
+    : <p className="text-xs text-destructive">{failureText(result.code)}</p>
+}
+
+/** Reviewed provider guidance for a rejected login or a provider refusal; nothing otherwise. */
+export function VerificationHelp({ report, client, providerId }: {
+  report: Pick<AccountConnectionVerification, 'imap' | 'smtp'> | null
+  client: MailxClient
+  providerId: string | null
+}) {
+  if (!report) return null
+  const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
+  const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
+  if (!authenticationFailed && !policyFailed) return null
+  return <ProviderAuthHelp client={client} providerId={providerId} reason={policyFailed ? 'providerPolicy' : 'authentication'} />
 }
 
 /** Saved and unsaved connections share the same protocol results and reviewed help. */
@@ -81,20 +85,25 @@ export function ConnectionVerificationReport({ report, client, providerId }: {
 }) {
   useTranslation()
   const passed = report.imap.status === 'verified' && report.smtp.status === 'verified'
-  const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
-  const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
-  return <div className="flex w-full flex-col gap-3 text-sm">
-    <p className={passed ? 'text-muted-foreground' : 'text-destructive'}>{t(passed ? 'accounts:verificationSucceeded' : 'accounts:verificationFailed')}</p>
+  return <div className="flex w-full flex-col gap-3">
+    {passed && <p className="text-xs text-muted-foreground">{t('accounts:verificationSucceeded')}</p>}
     <div className="flex flex-col gap-2">
-      {(['imap', 'smtp'] as const).map((protocol) => (
-        <div key={protocol} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-          <span>{t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')}</span>
-          <span className={report[protocol].status === 'verified' ? 'text-muted-foreground' : 'text-destructive'}>
-            {report[protocol].status === 'verified' ? t('accounts:verificationPassed') : failureText(report[protocol].code)}
-          </span>
-        </div>
-      ))}
+      {(['imap', 'smtp'] as const).map((protocol) => <ReportRow key={protocol} result={report[protocol]}
+        label={t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')} />)}
     </div>
-    {(authenticationFailed || policyFailed) && <ProviderAuthHelp client={client} providerId={providerId} reason={policyFailed ? 'providerPolicy' : 'authentication'} />}
+    <VerificationHelp report={report} client={client} providerId={providerId} />
   </div>
+}
+
+function ReportRow({ label, result }: { label: string; result: ProtocolResult }) {
+  const ok = result.status === 'verified'
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-baseline justify-between gap-4 text-sm">
+        <span>{label}</span>
+        <span className={ok ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>{t(ok ? 'accounts:verificationPassed' : 'accounts:verificationNotPassed')}</span>
+      </div>
+      {!ok && <p className="text-xs text-destructive">{failureText(result.code)}</p>}
+    </div>
+  )
 }
