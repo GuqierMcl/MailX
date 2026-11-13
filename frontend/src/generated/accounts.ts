@@ -612,7 +612,8 @@ export type NewMail = { accountId: string, accountName: string,
  */
 count: number,
 /**
- * The newest few, newest first. Empty when previews are turned off.
+ * All arrivals in this sync round, newest first, so a host can identify
+ * verification mail before grouping. Empty when previews are turned off.
  */
 messages: Array<NewMailMessage>, };
 
