@@ -26,6 +26,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🩹 Fixed
 
 - On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。 ([#125](https://github.com/GuqierMcl/MailX/pull/125))
+- In the desktop app, an account dragged in Email accounts stays under the pointer instead of jumping to the window's top-left corner. / 在桌面应用的邮箱账号中拖动账号时，账号会跟随指针，不再跳到窗口左上角。 ([#130](https://github.com/GuqierMcl/MailX/pull/130))
 
 ## [0.2.1] - 2026-11-12
 
