@@ -14,7 +14,7 @@ function injectedRules() {
   const { unmount } = render(
     <SidebarProvider>
       <SortableAccountList accounts={[exampleAccount(), exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' })]}
-        activeId={null} disabled={false} reorderDisabled={false} onSelect={() => {}} onReorder={async () => {}} />
+        activeId={null} syncStates={{}} disabled={false} reorderDisabled={false} onSelect={() => {}} onReorder={async () => {}} />
     </SidebarProvider>,
   )
   const rules = [...new Set(register.mock.calls.map(([css]) => normalize(css)))]
