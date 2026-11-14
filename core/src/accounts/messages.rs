@@ -3,12 +3,14 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{AccountService, validate_email_id, validate_uuid};
-pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
+pub(crate) use crate::storage::messages::{
+    CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient, SyncTarget,
+};
 use crate::{
     AppError,
     mail::{
-        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_KEEP_IDS,
-        MAX_SELECTION,
+        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, EmailSummary,
+        MAX_KEEP_IDS, MAX_SELECTION,
     },
     storage::messages::{PageCursor, ValidatedEmailQuery},
     sync::headers::MessageRecord,
@@ -87,6 +89,96 @@ impl AccountService {
 
     pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
         self.storage.list_emails(&validate_query(query)?)
+    }
+
+    /// Inbox mail received after `since` (RFC 3339, already normalized):
+    /// per-account counts and the newest `latest` messages.
+    pub(crate) fn overview_new_mail(
+        &self,
+        since: &str,
+        latest: u32,
+    ) -> Result<NewMailRows, AppError> {
+        self.storage.overview_new_mail(since, latest)
+    }
+
+    pub(crate) fn overview_starred_unread(&self) -> Result<u32, AppError> {
+        self.storage.overview_starred_unread()
+    }
+
+    pub(crate) fn overview_code_sources(
+        &self,
+        after: &str,
+        limit: u32,
+        max_text_bytes: usize,
+    ) -> Result<Vec<CodeSource>, AppError> {
+        self.storage
+            .overview_code_sources(after, limit, max_text_bytes)
+    }
+
+    pub(crate) fn overview_attachments(
+        &self,
+        after: &str,
+        limit: u32,
+    ) -> Result<Vec<(EmailSummary, Vec<String>)>, AppError> {
+        self.storage.overview_attachments(after, limit)
+    }
+
+    /// Inbox mail received per range `[bounds[i], bounds[i + 1])`, archived
+    /// mail included.
+    pub(crate) fn overview_received(&self, bounds: &[String]) -> Result<Vec<u32>, AppError> {
+        self.storage.overview_received(bounds)
+    }
+
+    pub(crate) fn overview_inbox_unread(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<(u32, u32), AppError> {
+        self.storage.overview_inbox_unread(from, to)
+    }
+
+    pub(crate) fn overview_sent(&self, from: &str, to: &str) -> Result<u32, AppError> {
+        self.storage.overview_sent(from, to)
+    }
+
+    pub(crate) fn overview_history_complete(
+        &self,
+        window_start_by: &str,
+    ) -> Result<bool, AppError> {
+        self.storage.overview_history_complete(window_start_by)
+    }
+
+    pub(crate) fn overview_senders(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<SenderCount>, AppError> {
+        self.storage.overview_senders(from, to)
+    }
+
+    pub(crate) fn overview_sender_name(
+        &self,
+        address: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<(String, String)>, AppError> {
+        self.storage.overview_sender_name(address, from, to)
+    }
+
+    pub(crate) fn overview_sent_recipients(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<SentRecipient>, AppError> {
+        self.storage.overview_sent_recipients(from, to)
+    }
+
+    pub(crate) fn overview_sent_to(&self, candidates: &[String]) -> Result<Vec<String>, AppError> {
+        self.storage.overview_sent_to(candidates)
+    }
+
+    pub(crate) fn overview_own_addresses(&self) -> Result<Vec<String>, AppError> {
+        self.storage.overview_own_addresses()
     }
 
     /// The first [`MAX_SELECTION`] messages `list_emails` would show for the
@@ -234,7 +326,7 @@ impl AccountService {
     }
 }
 
-fn normalized_time(value: &str, field: &str) -> Result<String, AppError> {
+pub(crate) fn normalized_time(value: &str, field: &str) -> Result<String, AppError> {
     let time = DateTime::parse_from_rfc3339(value)
         .map_err(|_| AppError::validation(field))?
         .with_timezone(&Utc);

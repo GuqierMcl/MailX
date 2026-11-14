@@ -270,3 +270,10 @@ html[data-translucent].dark .app-canvas {
     height: 100%;
     overflow: hidden;
     overscroll-behavior: none;}}
+
+/* The Now page's activity chart: a column grows from the baseline once, on the day's first visit. */
+@theme {
+  --animate-now-bar-grow: now-bar-grow 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  @keyframes now-bar-grow {
+    from {
+      transform: scaleY(0);}}}

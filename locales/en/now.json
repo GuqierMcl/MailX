@@ -1,0 +1,163 @@
+{
+  "greeting": {
+    "earlyMorning": "Good morning",
+    "morning": "Good morning",
+    "noon": "Hello",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening",
+    "night": "Hello"
+  },
+  "greetingNamed": {
+    "earlyMorning": "Good morning, {{name}}",
+    "morning": "Good morning, {{name}}",
+    "noon": "Hello, {{name}}",
+    "afternoon": "Good afternoon, {{name}}",
+    "evening": "Good evening, {{name}}",
+    "night": "Hello, {{name}}"
+  },
+  "lines": {
+    "attention": {
+      "a": "A few things need a look.",
+      "b": "Start with the items below. The rest can wait.",
+      "c": "Something is waiting for you below."
+    },
+    "holiday": {
+      "a": "It's {{holiday}}. Your mail can wait a little.",
+      "b": "Happy {{holiday}}.",
+      "c": "It's {{holiday}}. Have a good one."
+    },
+    "solarTerm": {
+      "a": "Today is {{term}}.",
+      "b": "Today is {{term}}. Dress for the weather.",
+      "c": "{{term}} is here. Take it easy."
+    },
+    "newMail": {
+      "a_one": "{{count}} new message since you last looked.",
+      "a_other": "{{count}} new messages since you last looked.",
+      "b_one": "{{count}} new message is waiting for you.",
+      "b_other": "{{count}} new messages are waiting for you.",
+      "c_one": "{{count}} more message came in since your last visit.",
+      "c_other": "{{count}} more messages came in since your last visit."
+    },
+    "monday": {
+      "a": "A new week begins.",
+      "b": "It's Monday. Start with your inbox.",
+      "c": "Take this week one step at a time."
+    },
+    "friday": {
+      "a": "It's Friday. Almost there.",
+      "b": "The week is nearly done.",
+      "c": "It's Friday. Wrap up what matters."
+    },
+    "weekend": {
+      "a": "It's the weekend. Your mail can wait.",
+      "b": "It's the weekend. Get some rest.",
+      "c": "Have a good weekend."
+    },
+    "clear": {
+      "a": "Your inbox is clear. Nothing needs you.",
+      "b": "All done.",
+      "c": "All set. Nothing new for now."
+    },
+    "steady": {
+      "a": "No new mail since you last looked.",
+      "b": "It's quiet for now.",
+      "c": "No new mail. Just the unread ones are left."
+    }
+  },
+  "allClear": "Nothing needs you right now.",
+  "holidays": {
+    "newYear": "New Year's Day",
+    "springFestival": "Spring Festival",
+    "lantern": "Lantern Festival",
+    "dragonBoat": "Dragon Boat Festival",
+    "qixi": "Qixi Festival",
+    "midAutumn": "Mid-Autumn Festival"
+  },
+  "solarTerms": {
+    "xiaohan": "Minor Cold",
+    "dahan": "Major Cold",
+    "lichun": "Start of Spring",
+    "yushui": "Rain Water",
+    "jingzhe": "Awakening of Insects",
+    "chunfen": "Spring Equinox",
+    "qingming": "Pure Brightness",
+    "guyu": "Grain Rain",
+    "lixia": "Start of Summer",
+    "xiaoman": "Grain Buds",
+    "mangzhong": "Grain in Ear",
+    "xiazhi": "Summer Solstice",
+    "xiaoshu": "Minor Heat",
+    "dashu": "Major Heat",
+    "liqiu": "Start of Autumn",
+    "chushu": "End of Heat",
+    "bailu": "White Dew",
+    "qiufen": "Autumn Equinox",
+    "hanlu": "Cold Dew",
+    "shuangjiang": "Frost's Descent",
+    "lidong": "Start of Winter",
+    "xiaoxue": "Minor Snow",
+    "daxue": "Major Snow",
+    "dongzhi": "Winter Solstice"
+  },
+  "attention": "Needs attention",
+  "accountStopped": "{{account}} stopped syncing",
+  "accountSignIn": "{{account}} needs you to sign in again",
+  "accountConfirm": "{{account}} needs you to confirm its settings",
+  "outboxFailed_one": "{{count}} message failed to send",
+  "outboxFailed_other": "{{count}} messages failed to send",
+  "outboxUnknown_one": "{{count}} message may not have been sent",
+  "outboxUnknown_other": "{{count}} messages may not have been sent",
+  "drafts_one": "{{count}} unfinished draft",
+  "drafts_other": "{{count}} unfinished drafts",
+  "inbox": "Inbox",
+  "statNew": "New",
+  "statUnread": "Unread",
+  "starredUnread": "Unread starred",
+  "codes": "Verification codes",
+  "codeLabel": "Code {{code}}",
+  "copyCode": "Copy code {{code}}",
+  "attachments": "Recent attachments",
+  "attachment": "Attachment",
+  "moreFiles_one": "+{{count}} more file",
+  "moreFiles_other": "+{{count}} more files",
+  "justNow": "Just now",
+  "newTag": "New",
+  "viewAllUnread_one": "See {{count}} unread message",
+  "viewAllUnread_other": "See all {{count}} unread",
+  "recent": "Lately",
+  "chartLabel": "Mail received each day, last 14 days",
+  "chartDay_one": "{{weekday}}, {{date}} · {{count}} message",
+  "chartDay_other": "{{weekday}}, {{date}} · {{count}} messages",
+  "chartStart": "14 days ago",
+  "chartToday": "Today",
+  "receivedWeek": {
+    "only_one": "{{count}} message received in the last 7 days",
+    "only_other": "{{count}} messages received in the last 7 days",
+    "same_one": "{{count}} message received in the last 7 days, about the same as the week before",
+    "same_other": "{{count}} messages received in the last 7 days, about the same as the week before",
+    "more_one": "{{count}} message received in the last 7 days, {{diff}} more than the week before",
+    "more_other": "{{count}} messages received in the last 7 days, {{diff}} more than the week before",
+    "fewer_one": "{{count}} message received in the last 7 days, {{diff}} fewer than the week before",
+    "fewer_other": "{{count}} messages received in the last 7 days, {{diff}} fewer than the week before"
+  },
+  "sentWeek": {
+    "only_one": "{{count}} sent",
+    "only_other": "{{count}} sent",
+    "same_one": "{{count}} sent, about the same as the week before",
+    "same_other": "{{count}} sent, about the same as the week before",
+    "more_one": "{{count}} sent, {{diff}} more than the week before",
+    "more_other": "{{count}} sent, {{diff}} more than the week before",
+    "fewer_one": "{{count}} sent, {{diff}} fewer than the week before",
+    "fewer_other": "{{count}} sent, {{diff}} fewer than the week before"
+  },
+  "topContacts": "Most in touch:",
+  "todayNone": "No mail yet today",
+  "todayUnread_one": "{{count}} message today, {{unread}} still unread",
+  "todayUnread_other": "{{count}} messages today, {{unread}} still unread",
+  "todayAllRead_one": "{{count}} message today, already read",
+  "todayAllRead_other": "{{count}} messages today, all read",
+  "syncedAt": "All mailboxes synced · {{time}}",
+  "syncing": "Syncing…",
+  "syncIssue": "Some mailboxes have sync problems"
+}

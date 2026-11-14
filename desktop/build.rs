@@ -31,6 +31,7 @@ fn main() {
             "accounts_open_provider_help",
             "folders_list",
             "emails_list",
+            "emails_overview",
             "emails_get",
             "emails_get_conversation",
             "emails_fetch_body",

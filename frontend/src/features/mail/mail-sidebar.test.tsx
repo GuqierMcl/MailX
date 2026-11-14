@@ -156,7 +156,8 @@ describe('sidebar unread numbers follow read changes', () => {
     await userEvent.click(nav.getByRole('button', { name: '收件箱' }))
     const rows = () => within(screen.getByRole('list', { name: '邮件列表' })).getAllByRole('listitem')
     const before = rows().length
-    await userEvent.click(rows()[0])
+    // A work inbox message, so the work account's archive gets it.
+    await userEvent.click(rows().find((row) => within(row).queryByText('第三季度产品路线图评审'))!)
     const archiveButton = () => within(screen.getByRole('toolbar', { name: '邮件操作' })).getByRole('button', { name: '归档' })
     await waitFor(() => expect(archiveButton()).toBeEnabled())
     await userEvent.click(archiveButton())

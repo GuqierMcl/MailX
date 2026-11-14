@@ -2,8 +2,8 @@ use mailx_core::{
     Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
     CancelConnectionVerification, CancelDraftVerification, ConversationPage, CreateAccountRequest,
     DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage, ErrorCode, Folder,
-    RemoveAccountRequest, SettingsPatch, SettingsSnapshot, UpdateConnectionRequest,
-    UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
+    MailOverview, MailOverviewQuery, RemoveAccountRequest, SettingsPatch, SettingsSnapshot,
+    UpdateConnectionRequest, UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
@@ -504,6 +504,27 @@ pub(crate) async fn emails_list(
         authorize(&window, "emails_list").and_then(|_| parse::<EmailListArgs>(request.body()));
     Ok(respond(match args {
         Ok(args) => state.run(move |core| core.list_emails(&args.query)).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmailOverviewArgs {
+    query: MailOverviewQuery,
+}
+
+/// The Now page's local mail statistics.
+#[tauri::command]
+pub(crate) async fn emails_overview(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<MailOverview>, ()> {
+    let args = authorize(&window, "emails_overview")
+        .and_then(|_| parse::<EmailOverviewArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => state.run(move |core| core.mail_overview(&args.query)).await,
         Err(error) => Err(error),
     }))
 }

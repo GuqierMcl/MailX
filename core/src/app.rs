@@ -48,6 +48,7 @@ mod draft_bodies;
 mod flags;
 mod oauth;
 mod organize;
+mod overview;
 mod translation;
 pub use oauth::{
     BeginOAuthAccount, BeginOAuthReauthorization, ConfirmOAuthMailbox, CreateOAuthAccount,
@@ -64,6 +65,10 @@ pub use draft_bodies::DraftBodyBinding;
 pub use flags::{FlagChange, MessageFlag};
 pub use organize::{
     ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
+};
+pub use overview::{
+    AccountMailCount, DayActivity, MailOverview, MailOverviewQuery, NewMailOverview,
+    OverviewActivity, OverviewCode, OverviewContact, RecentAttachment, TodayActivity,
 };
 pub use translation::{
     TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,

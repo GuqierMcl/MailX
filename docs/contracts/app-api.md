@@ -271,6 +271,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `general.singleKeyShortcuts` 默认 true，控制主窗口的单键邮件快捷键（`j`、`e`、`s` 等）；旧文件缺少或存量值不是布尔值时补 true，保存的 false 保留。带修饰键的快捷键与 Esc 不受影响。这是设置文件扩展，无邮件数据库迁移。
 
+`general.startupView` 为 `now`（默认）或 `inbox`，决定主窗口启动时打开全部收件箱还是「此刻」页面（[此刻页面](../architecture/now-page.md#2-入口)）；旧文件缺少该字段或存量值不是这两个取值时按 `now` 加载，保留其他合法设置；IPC 提交未知取值时整个请求反序列化失败，不落盘。这是设置文件扩展，无邮件数据库迁移。
+
 `general.silentStart` 默认 false，属于已有设置快照与事件协议。关闭自启动后保留该偏好但不生效；手动打开显示窗口。静默仅适用于收到固定登录启动标记、系统启动项启用且后台恢复入口可用的本次启动。平台机制、外部系统限制与路径变化见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。
 
 ### 应用偏好设置
@@ -535,6 +537,26 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 - **跳过不可处理的邮件。** `emails_delete`、`emails_archive`、`emails_unarchive` 新增可选参数 `partial: boolean`（缺省 false，即原来的整批语义）。为 true 时，不可处理的邮件（不可见、已在删除中、来自旧 UID 世代；归档时还包括非收件箱邮件和本机已发送副本）被跳过，其余照常处理，跳过的 id 按输入顺序放进结果的 `skippedIds`；全部被跳过时返回 `notFound`，不改任何状态。`EmailDeletion` 与 `ArchiveOutcome` 新增 `skippedIds: string[]`，非 partial 调用恒为空数组。删除的撤销批次与归档的撤销回执只包含实际处理的邮件。partial 删除中只要有一封需要永久删除而未传 `confirmedPermanent: true`，仍整批返回 `confirmationRequired`。
 - **批量标记。** `setFlags(emailIds, flag, wanted)` 对应 `emails_set_flags`，`{ emailIds, flag: 'read' | 'starred', wanted }`，`emailIds` 去重后 1 到 500 个，否则 `validation`。返回 `FlagBatchOutcome { results: [{ emailId, outcome: 'unchanged' | 'queued' | 'localOnly' | 'failed', code }] }`，按输入顺序逐封报告（重复 id 只报一次），`code` 仅在 failed 时为错误码（如 `notFound`）；一封失败不影响其他邮件。本机已发送副本报告为 failed（`notFound`）。
 - **全选。** `selectEmails(query)` 对应 `emails_select`，`{ query: EmailListQuery }`，返回 `EmailSelection { items: SelectedEmail[], truncated }`：与 `emails_list` 相同条件和顺序（最新在前）下的前 500 封，忽略 `limit` 与 `cursor`；`truncated` 表示还有更多。`SelectedEmail` 为 `{ id, accountId, folderId, isRead, isStarred, archived, localOnly }`，只用于判断按钮状态和确认永久删除，不含主题、地址和正文。
+
+### 邮件概况（主窗口，「此刻」页面使用）
+
+[此刻页面](../architecture/now-page.md#4-内容统计层无需-ai)的统计层由 core 一次只读查询提供，前端不自行拼装多处数据。
+
+| MailxClient 方法 | Tauri 命令与参数 | 核心入口 | 成功结果 |
+| --- | --- | --- | --- |
+| `getMailOverview(query)` | `emails_overview`，`{ query: MailOverviewQuery }` | `MailxCore::mail_overview`（`core/src/app/overview.rs`） | `MailOverview` |
+
+- **参数。** `MailOverviewQuery { since: string | null, dayStarts?: string[] }` 拒绝未知字段。`since` 为 RFC 3339 时间（页面“上次查看时间”），规范化为 UTC 毫秒形式；不可解析返回 `validation`，`field` 为 `since`。`null` 表示不需要新邮件一节，`newMail` 返回空（`total` 为 0）；首次使用时统计起点（如本地今天零点）由调用方决定。验证码与附件的时间窗口以 core 的系统时钟为准，调用方不能指定“现在”。`dayStarts` 为本机最近 14 天每天零点（RFC 3339，升序，最后一个为今天零点，不晚于现在），由调用方按本机时区计算，core 不需要知道时区，夏令时当天为 23 或 25 小时；数量、格式、顺序不符或晚于现在返回 `validation`，`field` 为 `dayStarts`。省略时不返回 `activity`。
+- **结果。** `MailOverview { newMail, starredUnread, verificationCodes, recentAttachments, activity?, generatedAt }`，`generatedAt` 为计算时 core 的时钟（RFC 3339）。
+  - `newMail: { total, accounts: [{ accountId, count }], latest: EmailSummary[] }`：`since` 之后（不含等于）到达的收件箱邮件，所有账号；`accounts` 只列有新邮件的账号，按账号 id 排序；`latest` 为最新 5 封，最新在前。
+  - `starredUnread`：星标且未读的邮件数，范围同星标视图（含本机归档，不含垃圾邮件与已删除）。收件箱未读数来自文件夹树，这里不重复提供。
+  - `verificationCodes: [{ emailId, accountId, folderId, from, code, receivedAt }]`：最近 15 分钟内收件箱邮件中由[验证码识别](../architecture/verification-codes.md)的 `detect(主题, 正文)` 返回唯一结果（`Found`）的，最多 3 条，最新在前。正文已缓存时用缓存的纯文本正文，否则用已保存的预览；从不为此下载正文。缓存正文超过识别预算（64 KiB）、歧义、未找到或识别出错的邮件静默跳过；最多检查最近 50 封。验证码不写日志，`OverviewCode` 的调试输出隐藏码值。
+  - `recentAttachments: [{ email: EmailSummary, fileNames }]`：最近 7 天带附件（`hasAttachment`）的收件箱邮件，最多 5 封，最新在前；`fileNames` 为已下载正文中非内嵌附件的文件名（按部件顺序，每封最多 20 个），正文未下载时为空数组。文件名来自发件人，按纯文本显示。
+  - `verificationCodes` 每项另带 `bodyState`，供页面向共用的验证码识别请求可复制结果。
+  - `activity?: { days: [{ start, received }], receivedLastWeek, receivedPreviousWeek, sentLastWeek, sentPreviousWeek, previousWeekComplete, topContacts: [{ address, name, count }], today: { received, unread } }`（仅在传入 `dayStarts` 时返回）：第 i 天为 `[dayStarts[i], dayStarts[i+1])`，今天为 `[dayStarts[13], 现在]`；前 7 天为第 0–6 天，近 7 天为第 7–13 天。`days` 为每天收到的收件箱邮件数，含本机归档。发信数与“已发送”视图同口径：已发送角色文件夹的邮件加未与服务器副本对上的本机已发送副本，对上后只算一次。`previousWeekComplete` 仅当每个账号都有收件箱，且每个收件箱和已发送文件夹的当前代际都完成过一轮未超同步上限的同步（游标 `history_complete`，迁移 0031，后续每轮进行期间保持不变）、同步窗口起点不晚于 `dayStarts[0]` 前一天时为真。`topContacts` 最多 3 人：近 7 天收到其来信数加你发给对方的邮件数（每封按收件人计，同一封中重复的地址只算一次），只算本机缓存中你发过信的地址，不含自己账号的地址，地址按 ASCII 小写合并，按数量、最近往来时间排序，`name` 为最近一次出现的显示名。`today.received` / `today.unread` 为今天收到的收件箱邮件（不含本机归档）及其中未读数。
+- **范围与隔离。** 所有统计与 `emails_list` 走同一可见行条件：账号当前邮箱来源（`mailbox_source_id`）、文件夹当前 UIDVALIDITY generation、服务器上仍存在、未在本机删除、文件夹可选。“收件箱邮件”指收件箱角色文件夹中未在本机归档的邮件，垃圾邮件、已删除、已发送等其他角色不计入；本机已发送副本不参与。草稿、发件箱与同步问题已有各自接口，这里不提供。
+- **代价。** 只读本地数据库、不访问网络、不改变已读或星标；每项都有上限，可在每次同步事件后调用。星标未读计数使用部分索引 `messages_starred_unread`（迁移 0030）。命令只开放给主窗口，与 `emails_list` 相同的来源与启动 Ready 准入。
+- **TypeScript。** 类型由 Rust 生成（`MailOverviewQuery`、`MailOverview`、`NewMailOverview`、`AccountMailCount`、`OverviewCode`、`RecentAttachment`、`OverviewActivity`、`DayActivity`、`OverviewContact`、`TodayActivity`）；`mock-client` 按同样范围规则从模拟数据计算，验证码只认模拟数据自己的措辞。
 
 ### 联系人聚合（主窗口）
 

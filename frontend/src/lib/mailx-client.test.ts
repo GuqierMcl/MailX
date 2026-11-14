@@ -80,6 +80,14 @@ describe('desktop client boundary', () => {
     expect(invoke).toHaveBeenNthCalledWith(3, 'emails_get_conversation', { emailId: 'email-id' })
   })
 
+  it('forwards the overview query to its own command', async () => {
+    const overview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: '2026-11-14T12:00:00.000Z' }
+    vi.mocked(invoke).mockResolvedValueOnce({ ok: true, data: overview, requestId: 'overview' })
+    const client = createDesktopClient()
+    await expect(client.getMailOverview({ since: '2026-11-14T00:00:00.000Z' })).resolves.toEqual(overview)
+    expect(invoke).toHaveBeenCalledWith('emails_overview', { query: { since: '2026-11-14T00:00:00.000Z' } })
+  })
+
   it('never invokes IPC when the desktop host is absent', async () => {
     vi.mocked(isTauri).mockReturnValue(false)
     const client = createDesktopClient()

@@ -2,13 +2,14 @@ import { t } from '@/i18n'
 import type { Folder, FolderRole } from '@/generated/accounts'
 
 /**
- * What the island shows: one account folder, a role across all accounts, starred
+ * What the island shows: the Now page (now-page.md), one account folder, a role across all accounts, starred
  * mail across all accounts, the two local views that hold unfinished mail
  * (sending.md section 7), or the locally archived inbox mail of one account (or
  * of all). `archived` is the local archive, not the server's `archive` folder,
  * which is an ordinary `folder`.
  */
 export type Mailbox =
+  | { kind: 'now' }
   | { kind: 'unified'; role: FolderRole }
   | { kind: 'folder'; folder: Folder }
   | { kind: 'starred' }
@@ -49,6 +50,7 @@ export function folderLabel(folder: Folder) {
 
 export function mailboxTitle(mailbox: Mailbox) {
   switch (mailbox.kind) {
+    case 'now': return t('mail:nowView')
     case 'unified': return UNIFIED_TITLES[mailbox.role]
     case 'folder': return folderLabel(mailbox.folder)
     case 'starred': return t('mail:starredView')
@@ -58,7 +60,7 @@ export function mailboxTitle(mailbox: Mailbox) {
   }
 }
 
-/** Whether the island shows mail (list and reader) rather than a local view. */
+/** Whether the island shows mail (list and reader) rather than a local view or the Now page. */
 export const isMailView = (mailbox: Mailbox) =>
   mailbox.kind === 'unified' || mailbox.kind === 'folder' || mailbox.kind === 'starred' || mailbox.kind === 'archived'
 
