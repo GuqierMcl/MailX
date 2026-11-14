@@ -669,8 +669,9 @@ silentStart: boolean,
  */
 singleKeyShortcuts: boolean,
 /**
- * The view shown when the main window starts: the unified inbox or the
- * Now page (now-page.md section 2).
+ * The view shown when the main window starts: the Now page (the default,
+ * also for files written before the setting existed) or the unified inbox
+ * (now-page.md section 2).
  */
 startupView: StartupView, };
 

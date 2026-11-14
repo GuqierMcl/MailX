@@ -19,7 +19,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
 - Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
 - Keyboard shortcuts for mail: J/K to move between messages, E to archive, # to delete, S to star, U for read or unread, R/A/F to reply, reply all or forward, / to search and ? to list them all; single-key shortcuts can be turned off in Settings → Keyboard shortcuts. / 邮件键盘快捷键：J/K 切换邮件，E 归档，# 删除，S 加星标，U 标为已读或未读，R/A/F 回复、全部回复或转发，/ 搜索，? 查看全部；可在“设置 → 快捷键”中关闭单键快捷键。 ([#131](https://github.com/GuqierMcl/MailX/pull/131))
-- Now, a new page below Compose, greets you and sums up what needs attention, recent verification codes, your inbox with its newest unread messages, activity over the last two weeks and the people you write with most, recent attachments and sync status, all worked out on this computer; it can be chosen as the startup page in Settings → General. / 新增“此刻”页面（位于“写邮件”下方），向你问好并汇总需要处理的事、最近的验证码、收件箱与最新未读邮件、近两周的收发近况与往来最多的人、最近的附件和同步状态，均在本机计算；可在“设置 → 通用”中设为启动页。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- Now, a new page below Compose, greets you and sums up what needs attention, recent verification codes, your inbox with its newest unread messages, activity over the last two weeks and the people you write with most, recent attachments and sync status, all worked out on this computer; MailX now opens on it, and Settings → General can switch back to the inbox. / 新增“此刻”页面（位于“写邮件”下方），向你问好并汇总需要处理的事、最近的验证码、收件箱与最新未读邮件、近两周的收发近况与往来最多的人、最近的附件和同步状态，均在本机计算；MailX 打开时默认显示该页面，可在“设置 → 通用”中改回收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 
 ### ✨ Optimization
 
@@ -48,6 +48,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🔄 Changed
 
 - The local database upgrades to v29 to keep saved translations; older versions cannot open the upgraded database. / 本地数据库升级到 v29 以保存译文，旧版本无法打开升级后的数据库。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
+- MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 
 ## [0.2.0] - 2026-11-12
 

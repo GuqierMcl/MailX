@@ -703,8 +703,8 @@ pub enum CloseBehavior {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum StartupView {
-    #[default]
     Inbox,
+    #[default]
     Now,
 }
 
@@ -730,8 +730,9 @@ pub struct GeneralSettings {
     /// Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
     /// Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
     pub single_key_shortcuts: bool,
-    /// The view shown when the main window starts: the unified inbox or the
-    /// Now page (now-page.md section 2).
+    /// The view shown when the main window starts: the Now page (the default,
+    /// also for files written before the setting existed) or the unified inbox
+    /// (now-page.md section 2).
     pub startup_view: StartupView,
 }
 
@@ -762,7 +763,7 @@ impl Default for GeneralSettings {
             show_menu_bar_icon: true,
             silent_start: false,
             single_key_shortcuts: true,
-            startup_view: StartupView::Inbox,
+            startup_view: StartupView::Now,
         }
     }
 }

@@ -374,7 +374,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         serde_json::json!({
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
-                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true, "startupView": "inbox" },
+                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true, "startupView": "now" },
                 "mail": { "trashVerificationMailAfterCopy": false },
                 "appearance": {
                     "theme": "system",
@@ -1174,7 +1174,7 @@ fn saved_background_preferences_recover_independently() {
                 show_menu_bar_icon,
                 silent_start: false,
                 single_key_shortcuts: true,
-                startup_view: StartupView::Inbox,
+                startup_view: StartupView::Now,
             },
             "{general}"
         );
@@ -1271,24 +1271,24 @@ fn single_key_shortcuts_default_on_recover_and_persist_off() {
 }
 
 #[test]
-fn startup_view_defaults_to_inbox_recovers_and_persists() {
+fn startup_view_defaults_to_now_recovers_and_persists() {
     for (value, expected) in [
-        // Files written before the setting existed.
+        // Files written before the setting existed open on the Now page.
         (
             serde_json::json!({"language": "en", "showMenuBarIcon": false}),
-            StartupView::Inbox,
+            StartupView::Now,
         ),
         (
             serde_json::json!({"language": "en", "startupView": "home"}),
-            StartupView::Inbox,
+            StartupView::Now,
         ),
         (
             serde_json::json!({"language": "en", "startupView": 1}),
-            StartupView::Inbox,
+            StartupView::Now,
         ),
         (
-            serde_json::json!({"language": "en", "startupView": "now"}),
-            StartupView::Now,
+            serde_json::json!({"language": "en", "startupView": "inbox"}),
+            StartupView::Inbox,
         ),
     ] {
         let directory = TempDir::new().unwrap();
@@ -1304,9 +1304,9 @@ fn startup_view_defaults_to_inbox_recovers_and_persists() {
     let directory = TempDir::new().unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     let snapshot = store.get().unwrap();
-    assert_eq!(snapshot.settings.general.startup_view, StartupView::Inbox);
+    assert_eq!(snapshot.settings.general.startup_view, StartupView::Now);
     let mut general = snapshot.settings.general;
-    general.startup_view = StartupView::Now;
+    general.startup_view = StartupView::Inbox;
     store
         .patch(SettingsPatch {
             general: Some(general),
@@ -1315,12 +1315,12 @@ fn startup_view_defaults_to_inbox_recovers_and_persists() {
         .unwrap();
     let persisted: serde_json::Value =
         serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
-    assert_eq!(persisted["settings"]["general"]["startupView"], "now");
+    assert_eq!(persisted["settings"]["general"]["startupView"], "inbox");
     let restored = SettingsStore::open(directory.path())
         .unwrap()
         .get()
         .unwrap();
-    assert_eq!(restored.settings.general.startup_view, StartupView::Now);
+    assert_eq!(restored.settings.general.startup_view, StartupView::Inbox);
     // Client input with an unknown value is rejected, not silently changed.
     assert!(
         serde_json::from_value::<SettingsPatch>(

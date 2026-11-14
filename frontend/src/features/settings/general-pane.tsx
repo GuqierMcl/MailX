@@ -48,7 +48,7 @@ export function GeneralPane({ client }: { client: MailxClient }) {
         </Select>
       </SettingsRow>
       <SettingsRow label={t('startupView')} description={t('startupViewHint')} htmlFor="general.startupView">
-        <Select value={settings.data?.settings.general.startupView ?? 'inbox'} items={startupItems}
+        <Select value={settings.data?.settings.general.startupView ?? 'now'} items={startupItems}
           disabled={!settings.data || update.isPending}
           onValueChange={(startupView: StartupView | null) => { if (startupView) update.mutate({ startupView }) }}>
           <SelectTrigger id="general.startupView" className="w-40"><SelectValue /></SelectTrigger>
