@@ -2810,7 +2810,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "async-imap",
@@ -2854,7 +2854,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-desktop"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -2892,7 +2892,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-mcp-bridge"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "mailx-core",
  "mailx-mcp-server",
@@ -2903,7 +2903,7 @@ dependencies = [
 
 [[package]]
 name = "mailx-mcp-server"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "getrandom 0.3.4",
  "mailx-core",
