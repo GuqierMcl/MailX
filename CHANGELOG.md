@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。
+
 ## [0.3.0] - 2026-11-14
 
 ### 🚀 Feature
