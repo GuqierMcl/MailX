@@ -63,6 +63,40 @@ export function useFirstVisitToday(): boolean {
 }
 
 /**
+ * The page's one clock for relative times ("5 minutes ago"): ticks once a
+ * minute while the document is visible, stops while it is hidden, and ticks
+ * at once on return.
+ */
+export function useMinuteClock(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined
+    const stop = () => {
+      clearInterval(timer)
+      timer = undefined
+    }
+    const start = () => {
+      stop()
+      timer = setInterval(() => setNow(Date.now()), 60_000)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') stop()
+      else {
+        setNow(Date.now())
+        start()
+      }
+    }
+    if (document.visibilityState !== 'hidden') start()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
+  return now
+}
+
+/**
  * The current time, updated only when the greeting can change (a segment
  * boundary or midnight): one timer at a time, no polling.
  */

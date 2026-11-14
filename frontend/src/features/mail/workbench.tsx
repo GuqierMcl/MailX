@@ -593,6 +593,20 @@ export function Workbench({ client }: { client: MailxClient }) {
     showMailbox({ kind: 'unified', role: 'inbox' })
     openEmail(email)
   }
+  // The Now page's unread links: the unified inbox, Unread filter on, no search left over.
+  const openUnreadFromNow = () => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    setSearch('')
+    setFilter('unread')
+  }
+  // A person on the Now page: all of their mail across accounts, from the unified inbox.
+  const openContactFromNow = (person: { address: string; name: string | null }) => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    setSearch('')
+    setFilter('all')
+    savedScroll.current = 0
+    setContact({ address: person.address.trim(), name: person.name?.trim() || null, accountId: null })
+  }
 
   // Single-key shortcuts (see `shortcuts.ts`). Browsing moves the opened message
   // like a click on the next or previous row; group rows are not messages and are
@@ -816,6 +830,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             draftCount={draftCount}
             outbox={outbox.data ?? []}
             onSelectMailbox={selectMailbox}
+            onOpenUnread={openUnreadFromNow}
+            onOpenContact={openContactFromNow}
             onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
             onOpenEmail={openFromNow}
             verification={verification}

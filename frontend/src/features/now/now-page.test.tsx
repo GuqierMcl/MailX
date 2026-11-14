@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EmailSummary, MailOverview, OutboxItem, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
+import type { Account, AccountSyncState, EmailPage, EmailSummary, Folder, MailOverview, OutboxItem, OverviewActivity, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
 import { exampleAccount, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -10,6 +10,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { useVerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
+import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
 
 const account = exampleAccount({ displayName: '工作邮箱', senderName: '林夕' })
@@ -24,6 +25,24 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
   }
 }
 
+function inbox(unreadCount: number): Folder {
+  return { id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount, totalCount: unreadCount + 2, archivedCount: 0, archivedUnreadCount: 0 }
+}
+
+function page(items: EmailSummary[]): EmailPage {
+  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+}
+
+function activityOf(overrides: Partial<OverviewActivity> = {}): OverviewActivity {
+  return {
+    days: dayStarts(new Date()).map((start, index) => ({ start, received: index === 13 ? 5 : index % 3 })),
+    receivedLastWeek: 40, receivedPreviousWeek: 28, sentLastWeek: 10, sentPreviousWeek: 11, previousWeekComplete: true,
+    topContacts: [{ address: 'zhao@example.com', name: '赵六', count: 6 }, { address: 'qian@example.com', name: null, count: 3 }],
+    today: { received: 5, unread: 2 },
+    ...overrides,
+  }
+}
+
 const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 
 function overviewCode(emailId: string, code: string, overrides: Partial<OverviewCode> = {}): OverviewCode {
@@ -33,7 +52,7 @@ function overviewCode(emailId: string, code: string, overrides: Partial<Overview
   }
 }
 
-type Handlers = Pick<NowPageProps, 'onSelectMailbox' | 'onOpenAccount' | 'onOpenEmail'>
+type Handlers = Pick<NowPageProps, 'onSelectMailbox' | 'onOpenAccount' | 'onOpenEmail' | 'onOpenUnread' | 'onOpenContact'>
 type HarnessProps = { client: MailxClient; accounts: Account[]; handlers: Handlers; props: Partial<NowPageProps>; requested: (targets: VerificationTarget[]) => void }
 
 /** The workbench's shared controller, kept mounted while the page can be closed. */
@@ -50,11 +69,19 @@ function Harness({ client, accounts, handlers, props, requested }: HarnessProps)
   )
 }
 
-function setup({ overview = empty, accounts = [account], props = {}, statuses = {} }: { overview?: MailOverview; accounts?: Account[]; props?: Partial<NowPageProps>; statuses?: Record<string, Omit<VerificationCodeStatus, 'emailId'>> } = {}) {
+function setup({ overview = empty, unread = [], accounts = [account], props = {}, statuses = {} }: {
+  overview?: MailOverview
+  /** What the unread list query returns. */
+  unread?: EmailSummary[]
+  accounts?: Account[]
+  props?: Partial<NowPageProps>
+  statuses?: Record<string, Omit<VerificationCodeStatus, 'emailId'>>
+} = {}) {
   const client = testClient(accounts)
   client.getMailOverview.mockResolvedValue(overview)
+  client.listEmails.mockResolvedValue(page(unread))
   client.getVerificationCode.mockImplementation(async (emailId) => ({ emailId, ...(statuses[emailId] ?? { state: 'notFound', code: null, recognitionId: null }) }))
-  const handlers = { onSelectMailbox: vi.fn(), onOpenAccount: vi.fn(), onOpenEmail: vi.fn() }
+  const handlers = { onSelectMailbox: vi.fn(), onOpenAccount: vi.fn(), onOpenEmail: vi.fn(), onOpenUnread: vi.fn(), onOpenContact: vi.fn() }
   const requested = vi.fn<(targets: VerificationTarget[]) => void>()
   render(
     <TooltipProvider>
@@ -74,6 +101,8 @@ const loaded = async () => {
   await waitFor(() => expect(heading.parentElement!.querySelectorAll('p')[1]).not.toBeEmptyDOMElement())
 }
 
+const synced = (overrides: Partial<AccountSyncState> = {}) => ({ [account.id]: exampleSyncState({ accountId: account.id, lastSyncedAt: new Date(Date.now() - 2 * 60_000).toISOString(), ...overrides }) })
+
 afterEach(() => {
   localStorage.clear()
   vi.restoreAllMocks()
@@ -85,16 +114,38 @@ describe('Now page', () => {
     await loaded()
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/林夕/)
     expect(screen.queryAllByRole('heading', { level: 2 })).toEqual([])
-    // The first visit counts from the start of today.
+    // The first visit counts from the start of today; the chart asks for the last fourteen local days.
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    expect(client.getMailOverview).toHaveBeenCalledWith({ since: start.toISOString() })
+    expect(client.getMailOverview).toHaveBeenCalledWith({ since: start.toISOString(), dayStarts: dayStarts(new Date()) })
   })
 
   it('greets without a name when the sending account has none', async () => {
     setup({ accounts: [exampleAccount({ senderName: null })] })
     await loaded()
     expect(screen.getByRole('heading', { level: 1 }).textContent).not.toMatch(/，/)
+  })
+
+  it('shows only the backdrop until the overview and the unread list have answered', async () => {
+    const client = testClient([account])
+    let answerOverview!: (overview: MailOverview) => void
+    let failList!: (error: Error) => void
+    client.getMailOverview.mockReturnValue(new Promise((resolve) => { answerOverview = resolve }))
+    client.listEmails.mockReturnValue(new Promise((_, reject) => { failList = reject }))
+    const view = render(
+      <TooltipProvider>
+        <NowPage client={client} accounts={[account]} folders={[]} syncStates={{}} draftCount={0} outbox={[]} verification={stubVerification()}
+          onSelectMailbox={vi.fn()} onOpenUnread={vi.fn()} onOpenContact={vi.fn()} onOpenAccount={vi.fn()} onOpenEmail={vi.fn()} />
+      </TooltipProvider>,
+    )
+    await waitFor(() => expect(client.listEmails).toHaveBeenCalled())
+    expect(view.container.querySelector('[data-slot="now-ambient"]')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    await act(async () => answerOverview(empty))
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    // A failed list still lets the page show.
+    await act(async () => failList(new Error('offline')))
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
   })
 
   it('lists what needs attention and opens where it is handled', async () => {
@@ -118,28 +169,184 @@ describe('Now page', () => {
     expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'drafts' })
   })
 
-  it('shows new mail since the last visit and opens a message', async () => {
-    const since = new Date(Date.now() - 3_600_000).toISOString()
-    localStorage.setItem(LAST_VISIT_KEY, since)
-    const latest = email('m1', { subject: '季度报告' })
-    const { client, onOpenEmail } = setup({ overview: { ...empty, newMail: { total: 3, accounts: [{ accountId: account.id, count: 3 }], latest: [latest] } } })
-    const section = await screen.findByRole('region', { name: '自上次查看后的新邮件' })
-    expect(client.getMailOverview).toHaveBeenCalledWith({ since })
-    expect(within(section).getByText('3 封新邮件')).toBeInTheDocument()
-    await userEvent.click(within(section).getByRole('button', { name: /季度报告/ }))
-    expect(onOpenEmail).toHaveBeenCalledWith(latest)
+  describe('inbox', () => {
+    it('opens new mail, unread with the Unread filter, and starred unread', async () => {
+      const { onSelectMailbox, onOpenUnread } = setup({
+        overview: { ...empty, newMail: { total: 3, accounts: [{ accountId: account.id, count: 3 }], latest: [] }, starredUnread: 2 },
+        props: { folders: [inbox(7)] },
+      })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      await userEvent.click(within(section).getByRole('button', { name: '新邮件 3' }))
+      expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'unified', role: 'inbox' })
+      await userEvent.click(within(section).getByRole('button', { name: '未读 7' }))
+      expect(onOpenUnread).toHaveBeenCalledTimes(1)
+      await userEvent.click(within(section).getByRole('button', { name: '星标未读 2' }))
+      expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'starred' })
+    })
+
+    it('hides empty counts but keeps unread, even at zero', async () => {
+      setup({ overview: { ...empty, starredUnread: 1 }, props: { folders: [inbox(0)] } })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      expect(within(section).getByRole('button', { name: '未读 0' })).toBeInTheDocument()
+      expect(within(section).queryByRole('button', { name: /^新邮件/ })).not.toBeInTheDocument()
+    })
+
+    it('is absent with nothing new, unread or starred', async () => {
+      setup({ props: { folders: [inbox(0)] } })
+      await loaded()
+      expect(screen.queryByRole('region', { name: '收件箱' })).not.toBeInTheDocument()
+    })
+
+    it('lists at most six unread messages, marks the ones since the last visit, and opens one', async () => {
+      const since = new Date(Date.now() - 3_600_000).toISOString()
+      localStorage.setItem(LAST_VISIT_KEY, since)
+      const rows = Array.from({ length: 8 }, (_, index) => email(`u${index}`, {
+        subject: `未读 ${index}`,
+        // The first two arrived after the last visit.
+        receivedAt: new Date(Date.now() - (index < 2 ? 10 : 120) * 60_000 - index * 1000).toISOString(),
+      }))
+      const { client, onOpenEmail } = setup({ unread: rows, props: { folders: [inbox(6)] } })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      expect(client.listEmails).toHaveBeenCalledWith(expect.objectContaining({ folderRole: 'inbox', archive: 'exclude', unread: true, limit: 6, text: null, groupSenders: false }))
+      const list = within(section).getByRole('list')
+      expect(within(list).getAllByRole('listitem')).toHaveLength(6)
+      expect(within(list).getAllByText('新')).toHaveLength(2)
+      expect(within(within(list).getAllByRole('listitem')[2]).queryByText('新')).not.toBeInTheDocument()
+      // Six unread: nothing more to see.
+      expect(within(section).queryByRole('button', { name: /查看全部/ })).not.toBeInTheDocument()
+      await userEvent.click(within(section).getByRole('button', { name: /未读 1/ }))
+      expect(onOpenEmail).toHaveBeenCalledWith(rows[1])
+    })
+
+    it('links to every unread message above six', async () => {
+      const { onOpenUnread } = setup({ unread: Array.from({ length: 6 }, (_, index) => email(`u${index}`)), props: { folders: [inbox(23)] } })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      await userEvent.click(within(section).getByRole('button', { name: '查看全部 23 封未读' }))
+      expect(onOpenUnread).toHaveBeenCalled()
+    })
   })
 
-  it('opens the unread and starred views', async () => {
-    const { onSelectMailbox } = setup({
-      overview: { ...empty, starredUnread: 2 },
-      props: { folders: [{ id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox', selectable: true, countsKnown: true, unreadCount: 7, totalCount: 9, archivedCount: 0, archivedUnreadCount: 0 }] },
+  describe('recent activity', () => {
+    it('charts fourteen days with today emphasized and labeled for assistive technology', async () => {
+      const activity = activityOf()
+      setup({ overview: { ...empty, activity } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      const chart = within(section).getByRole('group', { name: '近 14 天每天收到的邮件' })
+      const columns = within(chart).getAllByRole('img')
+      expect(columns).toHaveLength(14)
+      const today = columns[13]
+      expect(today).toHaveAttribute('data-today')
+      expect(today.querySelector('[data-slot="activity-bar"]')).toHaveClass('bg-primary')
+      expect(columns[0].querySelector('[data-slot="activity-bar"]')).not.toHaveClass('bg-primary')
+      // A day without mail is a 2px stub at the baseline.
+      expect(columns[0].querySelector<HTMLElement>('[data-slot="activity-bar"]')!.style.height).toBe('2px')
+      const date = new Date(activity.days[13].start)
+      const expected = `${new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(date)} ${new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(date)} · 5 封`
+      expect(today).toHaveAccessibleName(expected)
+      expect(within(section).getByText('14 天前')).toBeInTheDocument()
+      expect(within(section).getByText('今天')).toBeInTheDocument()
     })
-    const section = await screen.findByRole('region', { name: '未读与星标' })
-    await userEvent.click(within(section).getByRole('button', { name: '收件箱未读 7' }))
-    expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'unified', role: 'inbox' })
-    await userEvent.click(within(section).getByRole('button', { name: '星标未读 2' }))
-    expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'starred' })
+
+    it('shows a day in a tooltip on keyboard focus and moves with the arrow keys', async () => {
+      setup({ overview: { ...empty, activity: activityOf() } })
+      const chart = await screen.findByRole('group', { name: '近 14 天每天收到的邮件' })
+      const columns = within(chart).getAllByRole('img')
+      // One tab stop for the chart, on today.
+      expect(columns.filter((column) => column.tabIndex === 0)).toEqual([columns[13]])
+      for (let i = 0; i < 20 && document.activeElement !== columns[13]; i++) await userEvent.tab()
+      expect(columns[13]).toHaveFocus()
+      const name = columns[13].getAttribute('aria-label')!
+      expect(await screen.findByText(name, { selector: '[data-slot="tooltip-content"]' })).toBeInTheDocument()
+      await userEvent.keyboard('{ArrowLeft}')
+      expect(columns[12]).toHaveFocus()
+      await userEvent.keyboard('{Home}')
+      expect(columns[0]).toHaveFocus()
+    })
+
+    it('compares the weeks: more, about the same, and only the count while the earlier week is incomplete', async () => {
+      setup({ overview: { ...empty, activity: activityOf() } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      expect(within(section).getByText('近 7 天收到 40 封，比前 7 天多 12 封')).toBeInTheDocument()
+      expect(within(section).getByText('发出 10 封，和前 7 天差不多')).toBeInTheDocument()
+    })
+
+    it('states only the counts when the earlier week is not fully cached', async () => {
+      setup({ overview: { ...empty, activity: activityOf({ previousWeekComplete: false }) } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      expect(within(section).getByText('近 7 天收到 40 封')).toBeInTheDocument()
+      expect(within(section).getByText('发出 10 封')).toBeInTheDocument()
+    })
+
+    it('leaves out the sent line when nothing was sent in either week', async () => {
+      setup({ overview: { ...empty, activity: activityOf({ sentLastWeek: 0, sentPreviousWeek: 0, topContacts: [] }) } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      expect(within(section).queryByText(/^发出/)).not.toBeInTheDocument()
+      expect(within(section).queryByText('往来最多：')).not.toBeInTheDocument()
+    })
+
+    it('is absent when the two weeks hold no mail at all', async () => {
+      const quiet = activityOf({ sentLastWeek: 0, sentPreviousWeek: 0, receivedLastWeek: 0, receivedPreviousWeek: 0, topContacts: [], today: { received: 0, unread: 0 } })
+      setup({ overview: { ...empty, activity: { ...quiet, days: quiet.days.map((day) => ({ ...day, received: 0 })) } } })
+      await loaded()
+      expect(screen.queryByRole('region', { name: '近况' })).not.toBeInTheDocument()
+    })
+
+    it('opens a frequent contact in the contact view', async () => {
+      const activity = activityOf()
+      const { onOpenContact } = setup({ overview: { ...empty, activity } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      expect(within(section).getByText('往来最多：')).toBeInTheDocument()
+      await userEvent.click(within(section).getByRole('button', { name: /赵六/ }))
+      expect(onOpenContact).toHaveBeenCalledWith(activity.topContacts[0])
+      // Without a name, the address.
+      await userEvent.click(within(section).getByRole('button', { name: /qian@example\.com/ }))
+      expect(onOpenContact).toHaveBeenLastCalledWith(activity.topContacts[1])
+    })
+
+    it.each([
+      [{ received: 18, unread: 2 }, '今天收到 18 封，还剩 2 封未读'],
+      [{ received: 18, unread: 0 }, '今天收到 18 封，都已读过'],
+      [{ received: 0, unread: 0 }, '今天还没有收到邮件'],
+    ])('describes today: %o', async (today, line) => {
+      setup({ overview: { ...empty, activity: activityOf({ today }) } })
+      const section = await screen.findByRole('region', { name: '近况' })
+      expect(within(section).getByText(line)).toBeInTheDocument()
+    })
+  })
+
+  describe('sync line', () => {
+    const footer = () => document.querySelector('[data-slot="now-sync"]')
+
+    it('gives the oldest last sync with a check mark when every mailbox is synced', async () => {
+      const other = exampleAccount({ id: 'other' })
+      setup({
+        accounts: [account, other],
+        props: { syncStates: { ...synced(), other: exampleSyncState({ accountId: 'other', lastSyncedAt: new Date(Date.now() - 30_000).toISOString() }) } },
+      })
+      await loaded()
+      expect(footer()).toHaveTextContent('所有邮箱已同步 · 2分钟前')
+      expect(footer()!.querySelector('[data-slot="now-sync-icon"]')).toHaveAttribute('aria-hidden', 'true')
+    })
+
+    it('says syncing, without an icon, while a round runs', async () => {
+      setup({ props: { syncStates: synced({ phase: 'syncing' }) } })
+      await loaded()
+      expect(footer()).toHaveTextContent('正在同步…')
+      expect(footer()!.querySelector('svg')).toBeNull()
+    })
+
+    it('reports a sync problem, without an icon', async () => {
+      setup({ props: { syncStates: synced({ failure: { code: 'network', message: '', detail: null, willRetry: true } }) } })
+      await loaded()
+      expect(footer()).toHaveTextContent('部分邮箱同步异常')
+      expect(footer()!.querySelector('svg')).toBeNull()
+    })
+
+    it('is absent before the accounts report their state', async () => {
+      setup()
+      await loaded()
+      expect(footer()).toBeNull()
+    })
   })
 
   it('copies a recognized code through the shared flow and opens its message from the sender', async () => {
@@ -193,7 +400,7 @@ describe('Now page', () => {
     client.getVerificationCode.mockImplementation((emailId) => emailId === 'c1'
       ? new Promise((resolve) => { finish = resolve })
       : Promise.resolve({ emailId, ...pending(emailId === 'c2' ? 'unavailable' : 'unchecked') }))
-    await screen.findByRole('region', { name: '未读与星标' })
+    await screen.findByRole('region', { name: '收件箱' })
     await waitFor(() => expect(finish).toBeDefined())
     // Still being checked, unreadable, or not checked without the body: nothing to copy, so nothing shown.
     expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
@@ -209,7 +416,7 @@ describe('Now page', () => {
     setup({
       overview: { ...empty, starredUnread: 1, verificationCodes: [overviewCode('c1', '111111', { receivedAt: new Date(Date.now() - 16 * 60_000).toISOString() })] },
     })
-    await screen.findByRole('region', { name: '未读与星标' })
+    await screen.findByRole('region', { name: '收件箱' })
     expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
   })
 
@@ -224,31 +431,56 @@ describe('Now page', () => {
     expect(onOpenEmail).toHaveBeenCalledWith(unnamed)
   })
 
+  it('refreshes relative times once a minute', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      setup({ unread: [email('m1', { subject: '季度报告', receivedAt: new Date(Date.now() - 2 * 60_000).toISOString() })], props: { folders: [inbox(1)] } })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      const row = within(section).getByRole('button', { name: /季度报告/ })
+      expect(row).toHaveTextContent('2分钟前')
+      await act(async () => { vi.advanceTimersByTime(60_000) })
+      expect(row).toHaveTextContent('3分钟前')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('plays the entrance on the first visit of the day only', async () => {
-    setup({ overview: { ...empty, starredUnread: 2 } })
+    setup({ overview: { ...empty, starredUnread: 2, activity: activityOf() } })
     await loaded()
     expect(screen.getByRole('heading', { level: 1 }).parentElement).toHaveClass('animate-in')
     expect(localStorage.getItem(ENTRANCE_KEY)).toBe(localDay(new Date()))
+    // The bars grow from the baseline, a little after one another.
+    const bars = document.querySelectorAll<HTMLElement>('[data-slot="activity-bar"]')
+    expect(bars[0]).toHaveClass('animate-now-bar-grow')
+    expect(bars[13].style.animationDelay).toBe('260ms')
   })
 
   it('renders at once on a later visit the same day', async () => {
     localStorage.setItem(ENTRANCE_KEY, localDay(new Date()))
-    setup({ overview: { ...empty, starredUnread: 2 } })
+    setup({ overview: { ...empty, starredUnread: 2, activity: activityOf() } })
     await loaded()
     expect(screen.getByRole('heading', { level: 1 }).parentElement).not.toHaveClass('animate-in')
+    expect(document.querySelector('[data-slot="activity-bar"]')).not.toHaveClass('animate-now-bar-grow')
   })
 
-  it('skips the rise, stagger and count-up with reduced motion', async () => {
+  it('skips the rise, stagger, count-up and growing bars with reduced motion', async () => {
     vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
       matches: query.includes('reduce'), media: query, onchange: null,
       addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     }))
     const raf = vi.spyOn(window, 'requestAnimationFrame')
-    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [] } } })
-    const section = await screen.findByRole('region', { name: '自上次查看后的新邮件' })
+    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [] }, activity: activityOf() } })
+    const section = await screen.findByRole('region', { name: '收件箱' })
     expect(section).not.toHaveClass('animate-in')
     expect(screen.getByRole('heading', { level: 1 }).parentElement).not.toHaveClass('animate-in')
-    expect(within(section).getByText('12')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: '新邮件 12' })).toHaveTextContent('12')
+    expect(document.querySelector('[data-slot="activity-bar"]')).not.toHaveClass('animate-now-bar-grow')
     expect(raf).not.toHaveBeenCalled()
   })
 })
+
+/** A controller that never recognizes anything, for tests that do not use codes. */
+function stubVerification(): NowPageProps['verification'] {
+  return { status: () => undefined, busy: () => false, copied: () => false, copy: vi.fn(), requestVisible: () => undefined }
+}

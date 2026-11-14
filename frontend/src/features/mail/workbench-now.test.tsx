@@ -71,17 +71,40 @@ describe('Now page in the workbench', () => {
     expect(nav().getByRole('button', { name: '此刻' })).not.toHaveAttribute('data-active')
   })
 
-  it('opens a new message in the unified inbox and records the visit on leaving', async () => {
+  it('opens an unread message in the unified inbox and records the visit on leaving', async () => {
     const since = new Date(2000, 0, 1).toISOString()
     localStorage.setItem(LAST_VISIT_KEY, since)
     render(withTitleBar(<Workbench client={await startOnNow()} />))
-    const section = await screen.findByRole('region', { name: '自上次查看后的新邮件' })
-    const row = within(section).getAllByRole('button')[0]
+    const section = await screen.findByRole('region', { name: '收件箱' })
+    const row = within(within(section).getByRole('list')).getAllByRole('button')[0]
     const subject = row.querySelector('span.truncate.text-muted-foreground')!.textContent!
+    // Everything arrived after a visit this long ago.
+    expect(within(row).getByText('新')).toBeInTheDocument()
     await userEvent.click(row)
     expect(await screen.findByRole('heading', { level: 2, name: subject })).toBeInTheDocument()
     expect(nav().getAllByRole('button', { name: /^收件箱/ })[0]).toHaveAttribute('data-active')
     expect(Date.parse(localStorage.getItem(LAST_VISIT_KEY)!)).toBeGreaterThan(Date.parse(since))
+  })
+
+  it('opens the unified inbox with the Unread filter from the unread count', async () => {
+    render(withTitleBar(<Workbench client={await startOnNow()} />))
+    const section = await screen.findByRole('region', { name: '收件箱' })
+    await userEvent.click(within(section).getByRole('button', { name: /^未读 \d+$/ }))
+    expect(await screen.findByRole('list', { name: '邮件列表' })).toBeInTheDocument()
+    expect(nav().getAllByRole('button', { name: /^收件箱/ })[0]).toHaveAttribute('data-active')
+    expect(screen.getByRole('tab', { name: '未读' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('opens a frequent contact in the contact view, across accounts', async () => {
+    render(withTitleBar(<Workbench client={await startOnNow()} />))
+    const section = await screen.findByRole('region', { name: '近况' })
+    const label = within(section).getByText('往来最多：')
+    const person = within(label.parentElement!).getAllByRole('button')[0]
+    const name = person.querySelector('span.truncate')!.textContent!
+    await userEvent.click(person)
+    expect(await screen.findByRole('heading', { level: 1, name })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回全部收件箱' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '全部' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('copies a code through the shared verification-code flow, as the list does', async () => {

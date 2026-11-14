@@ -104,11 +104,9 @@
   "outboxFailed_other": "{{count}} 封邮件发送失败",
   "outboxUnknown_other": "{{count}} 封邮件需要确认是否已发出",
   "drafts_other": "{{count}} 份草稿未完成",
-  "newMail": "自上次查看后的新邮件",
-  "newMailTotal_other": "{{count}} 封新邮件",
-  "accountCount_other": "{{account}}：{{count}} 封",
-  "unreadStarred": "未读与星标",
-  "inboxUnread": "收件箱未读",
+  "inbox": "收件箱",
+  "statNew": "新邮件",
+  "statUnread": "未读",
   "starredUnread": "星标未读",
   "codes": "验证码",
   "codeLabel": "验证码 {{code}}",
@@ -116,5 +114,31 @@
   "attachments": "最近的附件",
   "attachment": "附件",
   "moreFiles_other": "等 {{count}} 个文件",
-  "justNow": "刚刚"
+  "justNow": "刚刚",
+  "newTag": "新",
+  "viewAllUnread_other": "查看全部 {{count}} 封未读",
+  "recent": "近况",
+  "chartLabel": "近 14 天每天收到的邮件",
+  "chartDay_other": "{{date}} {{weekday}} · {{count}} 封",
+  "chartStart": "14 天前",
+  "chartToday": "今天",
+  "receivedWeek": {
+    "only_other": "近 7 天收到 {{count}} 封",
+    "same_other": "近 7 天收到 {{count}} 封，和前 7 天差不多",
+    "more_other": "近 7 天收到 {{count}} 封，比前 7 天多 {{diff}} 封",
+    "fewer_other": "近 7 天收到 {{count}} 封，比前 7 天少 {{diff}} 封"
+  },
+  "sentWeek": {
+    "only_other": "发出 {{count}} 封",
+    "same_other": "发出 {{count}} 封，和前 7 天差不多",
+    "more_other": "发出 {{count}} 封，比前 7 天多 {{diff}} 封",
+    "fewer_other": "发出 {{count}} 封，比前 7 天少 {{diff}} 封"
+  },
+  "topContacts": "往来最多：",
+  "todayNone": "今天还没有收到邮件",
+  "todayUnread_other": "今天收到 {{count}} 封，还剩 {{unread}} 封未读",
+  "todayAllRead_other": "今天收到 {{count}} 封，都已读过",
+  "syncedAt": "所有邮箱已同步 · {{time}}",
+  "syncing": "正在同步…",
+  "syncIssue": "部分邮箱同步异常"
 }

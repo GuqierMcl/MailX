@@ -29,7 +29,7 @@ export const mailKeys = {
   conversation: (anchorId: string) => [...mailKeys.conversations(), anchorId] as const,
   /** The Now page's summary; refetched with the folder tree after a sync round or a state change. */
   overviews: () => [...mailKeys.all, 'overview'] as const,
-  overview: (since: string | null) => [...mailKeys.overviews(), since] as const,
+  overview: (since: string | null, dayStarts: string[] = []) => [...mailKeys.overviews(), since, dayStarts] as const,
 }
 
 /** App preferences; sync rounds never touch them. */
