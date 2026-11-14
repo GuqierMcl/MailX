@@ -11,6 +11,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-14
+
 ### 🚀 Feature
 
 - Copy recognized verification codes from the message list, reading pane or Windows/macOS notifications; an optional setting under Enhancements moves the email to Trash after a successful copy, with undo, and defaults to off. / 可从邮件列表、阅读区或 Windows/macOS 通知复制识别到的验证码；“增强”新增默认关闭的选项，可在复制成功后将邮件移到已删除并提供撤销。 ([#133](https://github.com/GuqierMcl/MailX/pull/133))
@@ -34,6 +36,11 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。 ([#125](https://github.com/GuqierMcl/MailX/pull/125))
 - In the desktop app, an account dragged in Email accounts stays under the pointer instead of jumping to the window's top-left corner. / 在桌面应用的邮箱账号中拖动账号时，账号会跟随指针，不再跳到窗口左上角。 ([#130](https://github.com/GuqierMcl/MailX/pull/130))
 
+### 🔄 Changed
+
+- MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+
 ## [0.2.1] - 2026-11-12
 
 ### 🚀 Feature
@@ -48,8 +55,6 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🔄 Changed
 
 - The local database upgrades to v29 to keep saved translations; older versions cannot open the upgraded database. / 本地数据库升级到 v29 以保存译文，旧版本无法打开升级后的数据库。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
-- MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
-- The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 
 ## [0.2.0] - 2026-11-12
 
@@ -192,7 +197,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/GuqierMcl/MailX/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/GuqierMcl/MailX/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...v0.1.2
