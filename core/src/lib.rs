@@ -47,7 +47,8 @@ pub use app::{
     OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult, OverviewCode, ProtocolVerification,
     RecentAttachment, RemoteImageStatus, SaveAiConnection, SavedAiConnection,
     TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
-    TranslationStatus, TranslationTest, VerifyAccountConnection, VerifyDraftConnection,
+    TranslationStatus, TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome,
+    VerificationCodeState, VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -65,10 +66,11 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
-    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, MailboxLabel, McpSettings,
-    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
-    ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, StartupView,
-    ThemeMode, TranslationProviderId, TranslationSettings, mail_body_css,
+    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
+    McpSettings, NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy,
+    SecuritySettings, ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot,
+    SettingsStore, StartupView, ThemeMode, TranslationProviderId, TranslationSettings,
+    mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

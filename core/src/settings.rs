@@ -735,6 +735,15 @@ pub struct GeneralSettings {
     pub startup_view: StartupView,
 }
 
+/// Optional mail-workflow enhancements, independent of notification delivery.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MailSettings {
+    /// After a dedicated verification-code copy succeeds, move that email to
+    /// the account's Trash. Never authorizes a permanent deletion.
+    pub trash_verification_mail_after_copy: bool,
+}
+
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<String, D::Error> {
@@ -770,6 +779,8 @@ pub struct SettingsPatch {
     #[ts(optional)]
     pub general: Option<GeneralSettings>,
     #[ts(optional)]
+    pub mail: Option<MailSettings>,
+    #[ts(optional)]
     pub appearance: Option<AppearanceSettings>,
     #[ts(optional)]
     pub security: Option<SecuritySettings>,
@@ -787,6 +798,7 @@ pub struct SettingsPatch {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub general: GeneralSettings,
+    pub mail: MailSettings,
     pub appearance: AppearanceSettings,
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
@@ -874,6 +886,7 @@ impl AppSettings {
         };
         Ok(Self {
             general: self.general,
+            mail: self.mail,
             security: self.security,
             layout,
             notifications,
@@ -910,6 +923,7 @@ impl AppSettings {
             },
         };
         Self {
+            mail: self.mail,
             general: if valid_language(&self.general.language) {
                 self.general
             } else {
@@ -1145,6 +1159,7 @@ impl SettingsStore {
             general: patch
                 .general
                 .unwrap_or_else(|| state.settings.general.clone()),
+            mail: patch.mail.unwrap_or_else(|| state.settings.mail.clone()),
             appearance: patch
                 .appearance
                 .unwrap_or_else(|| state.settings.appearance.clone()),
@@ -1276,6 +1291,18 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
         .get_mut("settings")
         .and_then(serde_json::Value::as_object_mut)
     {
+        if let Some(mail) = settings.get_mut("mail") {
+            if let Some(mail) = mail.as_object_mut() {
+                if mail
+                    .get("trashVerificationMailAfterCopy")
+                    .is_some_and(|value| !value.is_boolean())
+                {
+                    mail.remove("trashVerificationMailAfterCopy");
+                }
+            } else {
+                settings.remove("mail");
+            }
+        }
         if let Some(translation) = settings.get_mut("translation") {
             if translation.is_object() {
                 repair_translation(translation);

@@ -57,7 +57,16 @@ describe('settings dialog', () => {
   it('shows a visible title and keeps navigation on narrow windows', () => {
     const { dialog } = renderDialog()
     expect(within(dialog).getByRole('heading', { name: '设置' })).toBeVisible()
-    for (const name of ['外观', '发信', '联系人', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+    for (const name of ['外观', '发信', '联系人', '增强', '安全性', '关于']) expect(within(dialog).getByRole('button', { name })).toBeInTheDocument()
+  })
+
+  it('places verification-code cleanup on the mail enhancements page in the mail group', async () => {
+    const { dialog } = renderDialog(testClient(), { section: 'general' })
+    expect(within(dialog).queryByRole('switch', { name: '复制验证码后移到已删除' })).not.toBeInTheDocument()
+    const mailGroup = within(dialog).getByTestId('settings-nav-group-mail')
+    await userEvent.click(within(mailGroup).getByRole('button', { name: '增强' }))
+    expect(within(dialog).getByRole('heading', { name: '增强' })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('switch', { name: '复制验证码后移到已删除' })).not.toBeChecked()
   })
 
   it('has a 发信 section with the default sender account and the undo window', async () => {
@@ -168,7 +177,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

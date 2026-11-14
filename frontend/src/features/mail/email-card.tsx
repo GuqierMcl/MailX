@@ -6,11 +6,13 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Archive02Icon, ArchiveRestoreIcon, ArrowRight01Icon, Attachment01Icon, Delete02Icon, StarIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 import type { Account, EmailSummary, MailboxLabel, PreviewLines, SnippetSegment } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { displayName, formatListTime, recipientsLabel } from './format'
 import { LocalOnlyMarker } from './local-only-marker'
 import { SenderAvatar } from './sender-avatar'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { readyVerificationCode, type ReadyVerificationCode, type VerificationCodes } from './use-verification-codes'
 
 const PREVIEW_CLAMP: Record<Exclude<PreviewLines, 'none'>, string> = {
   one: 'line-clamp-1',
@@ -46,6 +48,7 @@ type EmailCardProps = {
   onDelete?: (email: EmailSummary) => void
   onRemoveLocal?: (email: EmailSummary) => void
   canArchive?: (email: EmailSummary) => boolean
+  verification?: VerificationCodes
   /** The list is picking messages: rows toggle instead of opening, and quick actions step aside. */
   selectionMode?: boolean
   /** Whether this row is among the picked ones (selection mode only). */
@@ -59,7 +62,7 @@ type EmailCardProps = {
 export type RowClick = { toggle: boolean; range: boolean }
 
 /** A message row with its state slot and quick actions kept outside the main link. */
-export function EmailCard({ email, sentView, account, selected: opened, previewLines, mailboxLabel = 'name', index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
+export function EmailCard({ email, sentView, account, selected: opened, previewLines, mailboxLabel = 'name', index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, verification, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
   useTranslation()
   // In a sent view the row is about who the mail went to. The avatar follows
   // the same person, so it never shows the account owner on every row.
@@ -73,10 +76,14 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
   const canChangeArchive = !selectionMode && !group && Boolean(onArchive && !email.localOnly && canArchive?.(email))
   const canDelete = !selectionMode && !group && Boolean(onDelete) && !email.localOnly
   const canRemoveLocal = !selectionMode && !group && Boolean(onRemoveLocal) && email.localOnly
-  const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal
+  const proposedCode = !selectionMode && !group && !email.localOnly ? readyVerificationCode(verification?.status(email.id)) : null
+  const hasActions = canChangeFlags || canChangeArchive || canDelete || canRemoveLocal || Boolean(proposedCode)
   const [actionsMounted, setActionsMounted] = useState(false)
   const [actionsVisible, setActionsVisible] = useState(false)
   const [actionsArmed, setActionsArmed] = useState(false)
+  // A result arriving under the pointer must not replace a button the user was
+  // about to press. Adopt a new code only when a new toolbar session opens.
+  const [actionCode, setActionCode] = useState<ReadyVerificationCode | null>(null)
   const wantsActionsVisible = useRef(false)
   const pointerDown = useRef(false)
   const keyboardFocus = useRef(false)
@@ -93,6 +100,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
     clearHideTimer()
     if (actionsMounted) setActionsVisible(true)
     else {
+      setActionCode(proposedCode)
       setActionsVisible(false)
       setActionsMounted(true)
     }
@@ -330,9 +338,21 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
               actionVisibility,
             )}
           >
-            {canChangeFlags && starButton}
-            {canChangeFlags && readButton}
-            {canChangeArchive && archiveButton}
+            {actionCode && verification && !selectionMode && !group && !email.localOnly ? (
+              <Button data-row-action variant="ghost" size="sm"
+                className="h-6 min-h-[24px] px-1.5 text-xs"
+                aria-label={t('mail:verificationCopy')}
+                disabled={verification.busy(email.id)}
+                onClick={() => void verification.copy(email.id, actionCode.recognitionId)}>
+                {verification.busy(email.id) ? t('mail:verificationCopying')
+                  : verification.copied(email.id, actionCode.recognitionId) ? t('mail:verificationCopiedShort')
+                    : t('mail:verificationCopy')}
+              </Button>
+            ) : <>
+              {canChangeFlags && starButton}
+              {canChangeFlags && readButton}
+              {canChangeArchive && archiveButton}
+            </>}
             {canDelete && (
               <IconButton
                 data-row-action

@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn candidate_subject_filter_is_broad_but_does_not_admit_replies_or_unrelated_mail() {
+    for subject in [
+        "Your verification code",
+        "Sign in to Example",
+        "Verify your email",
+        "登录通知",
+        "驗證電郵",
+    ] {
+        assert!(is_candidate_subject(subject), "{subject}");
+    }
+    for subject in [
+        "Re: Your verification code",
+        "Fwd: Sign in",
+        "Invoice 123456",
+        "A verifier's report",
+        "",
+        "otpidentifier",
+    ] {
+        assert!(!is_candidate_subject(subject), "{subject}");
+    }
+    assert!(!is_candidate_subject(&"OTP".repeat(MAX_SUBJECT_BYTES)));
+}
+
 fn found(subject: &str, body: &str, expected: &str) {
     let result = detect(subject, body).unwrap();
     let Detection::Found { candidate } = result else {

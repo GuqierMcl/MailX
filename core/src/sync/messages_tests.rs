@@ -386,7 +386,7 @@ async fn only_unread_recent_inbox_mail_that_arrived_after_the_first_round_is_new
 }
 
 #[tokio::test]
-async fn many_arrivals_are_one_event_with_the_newest_few_described() {
+async fn many_arrivals_are_one_event_with_every_candidate_newest_first() {
     let fixture = fixture();
     let now = chrono::Utc::now();
     let mut first = commands(21, &[2]);
@@ -416,7 +416,7 @@ async fn many_arrivals_are_one_event_with_the_newest_few_described() {
         .iter()
         .map(|m| m.subject.as_str())
         .collect();
-    assert_eq!(subjects, ["M7", "M6", "M5"]);
+    assert_eq!(subjects, ["M7", "M6", "M5", "M4", "M3"]);
 }
 
 #[tokio::test]

@@ -22,6 +22,7 @@ import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import type { ListSelection } from './use-list-selection'
 import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
+import type { VerificationCodes, VerificationTarget } from './use-verification-codes'
 
 export type ListFilter = 'all' | 'unread'
 
@@ -74,6 +75,7 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   mailboxLabel?: MailboxLabel
   /** Asks for the previews of the listed rows; the complete wanted set every time. */
   onRequestPreviews?: (emailIds: string[]) => void
+  verification?: VerificationCodes
   /** Changes a message read or starred flag from the row action rail. */
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   /** Archives or restores a message when the current row can be changed locally. */
@@ -187,7 +189,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -260,6 +262,7 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
       selection={selection}
+      verification={verification}
       viewingContact={contact?.address ?? null} onViewContact={onViewContact} onAggregate={onAggregate} isAggregated={isAggregated}
       initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset} reveal={reveal}
     />
@@ -292,6 +295,7 @@ type VirtualRowsProps = {
   previewLines: PreviewLines
   mailboxLabel?: MailboxLabel
   onRequestPreviews?: (emailIds: string[]) => void
+  verification?: VerificationCodes
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   onArchive?: (email: EmailSummary, archive: boolean) => void
   onDelete?: (email: EmailSummary) => void
@@ -315,7 +319,7 @@ type VirtualRowsProps = {
   reveal?: RevealRequest | null
 } & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // One right-click menu serves the whole list. The snapshot outlives the open
@@ -411,6 +415,17 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   const rendered = virtualItems.map((item) => emails[item.index])
   usePreviewRequests(onRequestPreviews, rendered, previewLines)
   useGaveUpVersion()
+  // Unlike mounted overscan/pinned rows, only the actual viewport requests new
+  // code recognition. A sender group is never treated as its representative mail.
+  const codeTargetsKey = JSON.stringify(stale || selection?.active ? [] : virtualItems
+    .filter((item) => item.index >= (virtualizer.range?.startIndex ?? 0) && item.index <= (virtualizer.range?.endIndex ?? -1))
+    .map((item) => emails[item.index])
+    .filter((email) => !email.senderGroup && !email.localOnly)
+    .map((email) => ({ emailId: email.id, bodyState: email.bodyState })))
+  const codeTargets = useMemo(() => JSON.parse(codeTargetsKey) as VerificationTarget[], [codeTargetsKey])
+  const requestCodes = verification?.requestVisible
+  useEffect(() => { requestCodes?.(codeTargets) }, [requestCodes, codeTargets])
+  useEffect(() => () => { requestCodes?.([]) }, [requestCodes])
 
   // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
   // with only that row. Inside, a click toggles and Shift picks the range.
@@ -495,6 +510,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
                 onDelete={onDelete}
                 onRemoveLocal={onRemoveLocal}
                 canArchive={canArchive}
+                verification={verification}
                 selectionMode={selection?.active ?? false}
                 picked={selection?.isSelected(email.id) ?? false}
                 menuOpen={email.id === menuOpenId}

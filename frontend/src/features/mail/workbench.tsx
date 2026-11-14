@@ -57,6 +57,7 @@ import { useMailShortcuts } from './use-mail-shortcuts'
 import { useDeleteEmail } from './use-delete-email'
 import { useContactAggregation } from './use-contact-aggregation'
 import { useMailStateChanges } from './use-mail-state-changes'
+import { useVerificationCodes } from './use-verification-codes'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
@@ -469,6 +470,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (email) removeLocalCopy(email)
   }, [removeLocalChoice, removeLocalCopy, setRemoveLocalChoice])
   const deleteEmail = useDeleteEmail(client, folders, letGo)
+  const verification = useVerificationCodes(client, opened && !readerCollapsed && !selecting && mailView ? body.email?.summary ?? null : null, sourceIdentity, letGo)
   const archiveEmail = useArchiveEmail(client, letGo)
   const hideOpened = useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
@@ -850,6 +852,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               className={cn('h-full min-h-0', slide && !reducedMotion && listSlideClass(slide))}
             >
             <EmailList
+              verification={verification}
               onRequestPreviews={requestPreviews}
               title={contactView ? contactView.name ?? contactView.address : baseTitle}
               accountName={accounts.find((account) => account.id === selectedAccountId)?.displayName}
@@ -928,6 +931,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               <SelectionSummary items={selection.items} accounts={displayAccounts} />
             ) : (
             <EmailView
+              verification={verification}
               hidden={readerCollapsed}
               key={`${opened?.id ?? ''}:${body.identity}`}
               client={client}

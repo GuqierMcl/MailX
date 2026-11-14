@@ -285,11 +285,11 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 偏好只需要数据目录，由宿主单独打开并复用 `SettingsStore`，不受 Ready 检查影响；核心启动失败时语言、外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。`settings_get` 和设置变更事件对本地可信 main 与合法 `composer-<uuid>` 窗口开放，`settings_update` 仍只允许 main；邮件正文 iframe 和其他窗口无权访问。
 
-`AppSettings` 另含 `translation`（见“邮件翻译”）。`AppSettings` 包含 `general`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回核心原始顺序的第一个账号，即创建时间与 id 顺序；显示排序不参与此选择）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.navCollapsed`（默认 false）记录侧栏是否收成图标栏，下次启动恢复；窄窗口自动收成图标栏不修改该值。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段；`LayoutSettingsPatch` 的每个字段均可选，核心在设置锁内逐字段与当前值合并，因此侧栏宽度、列表宽度与账号显示顺序在不同窗口先后保存也不会相互覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。宽度与折叠类布局变化由前端抖动写入（停止 500ms 后一次提交），账号顺序在放下时提交一次，核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览，其余取值始终按行数预留固定高度（每行 1rem），没有预览的邮件也留出同样的空白，使列表每行等高；旧文件缺少该项时取默认值），以及 `mailboxLabel`（`name` / `icon`，默认 `name`：跨账号视图里邮件行用账号名称还是头像上的小徽标标出所属邮箱；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新在核心锁内合并，`layout` 按提交的字段更新，其他设置节按提交的整节替换；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+`AppSettings` 另含 `translation`（见“邮件翻译”）。`AppSettings` 包含 `general`、`mail`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）与 `compose`。`mail.trashVerificationMailAfterCopy` 为布尔值，默认 false，旧文件缺少 `mail` 时补默认值；由“设置 → 邮件 → 增强”修改，开启后仅在专用验证码复制成功时安排可撤销的移到 Trash，不授权永久删除（见“验证码识别与复制”）。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回核心原始顺序的第一个账号，即创建时间与 id 顺序；显示排序不参与此选择）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.navCollapsed`（默认 false）记录侧栏是否收成图标栏，下次启动恢复；窄窗口自动收成图标栏不修改该值。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段；`LayoutSettingsPatch` 的每个字段均可选，核心在设置锁内逐字段与当前值合并，因此侧栏宽度、列表宽度与账号显示顺序在不同窗口先后保存也不会相互覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。宽度与折叠类布局变化由前端抖动写入（停止 500ms 后一次提交），账号顺序在放下时提交一次，核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览，其余取值始终按行数预留固定高度（每行 1rem），没有预览的邮件也留出同样的空白，使列表每行等高；旧文件缺少该项时取默认值），以及 `mailboxLabel`（`name` / `icon`，默认 `name`：跨账号视图里邮件行用账号名称还是头像上的小徽标标出所属邮箱；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新在核心锁内合并，`layout` 按提交的字段更新，其他设置节按提交的整节替换；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
 
 `layout.accountOrder` 是账号 id 的有序数组（默认 `[]`），仅控制本机界面的账号显示顺序，不改变核心账号查询顺序、草稿已有发件账号或默认发件规则。账号管理列表、邮件侧栏、命令面板、写信发件账号选择及相关设置列表共用该偏好；其他可信窗口通过现有设置事件读取最新顺序。显示时先按已记录且仍存在的 id 排列，再按原始顺序追加未记录账号；重复、未知或已删除的 id 不产生额外行。空数组及旧文件缺少该字段时沿用原始顺序。提交最多 256 个条目，每项去首尾空白并解析为 UUID，转为规范小写形式，保留首次出现的顺序去重，绝不按 id 排序；非法 UUID、字段类型错误或超限返回 `validation`，`field` 为 `layout.accountOrder`，不落盘。手工编辑文件中的非法列表加载时只将此字段清为 `[]`，保留其他合法设置。设置存储不访问账号数据库，保存时不检查账号是否存在。
 
-`general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的七个设置节（含 `translation`）均为可选，未提交的节保留；`layout` 使用 `LayoutSettingsPatch` 在核心锁内逐字段合并，其他提交的节仍整节替换，其局部修改由前端在发送前与最新已提交值合并。
+`general: { language }` 的 `language` 有效值为 `system | zh-CN | en`，通用设置页提供“跟随系统 / 简体中文 / English”。`SettingsPatch` 的各设置节（含 `mail` 与 `translation`）均为可选，未提交的节保留；`layout` 使用 `LayoutSettingsPatch` 在核心锁内逐字段合并，其他提交的节仍整节替换，其局部修改由前端在发送前与最新已提交值合并。
 
 `general.autoUpdate` 是默认 true 的布尔值，控制桌面自动下载及自动包的退出安装；启动和定时检查固定开启。旧文件缺少新字段且有合法 `general.autoCheckUpdates` 时迁移其布尔值，保留原 false；新字段优先，均缺少时为 true，保存只输出 `autoUpdate`。设置保存成功后宿主按 revision 应用策略：关闭时取消自动下载并解除自动包的退出安装，手动下载的同意不受影响；重新开启可恢复已暂停的自动下载。这是设置文件扩展，不涉及邮件数据库迁移。
 
@@ -707,7 +707,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### 新邮件通知
 
-**判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 只带最新的 3 封（发件人、主题、时间、邮件 id），其余只计数。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
+**判定在核心。** 头部同步每轮对每个文件夹记下此前见过的最大 UID；本轮新存入、UID 高于它的邮件才算“新到达”，再筛掉不在收件箱（`role = inbox`）、已读（例如已在手机上读过）、或收到时间早于 24 小时前（离线多日后补齐的）的邮件。以下情况一律不算新邮件：首次同步一个文件夹；UIDVALIDITY 变化导致整夹重建；补齐 30 天窗口内的旧邮件。首轮为空的收件箱完成之后，下一封到达的邮件可以通知。新邮件按“账号 × 同步轮次 × 文件夹”合并成一个 `NewMail { accountId, accountName, count, messages }`，`messages` 保留本轮全部到达邮件（发件人、主题、时间、邮件 id），供宿主从完整候选中识别验证码；普通摘要仍只列最新的 3 封发件人。已经入库的新邮件即使这一轮后面失败也会通知：游标已越过它们，以后不会再出现。
 
 **设置也在核心，所有宿主一致。** `notifications` 设置节：`enabled`（默认开）、`showPreview`（默认开）、`whenFocused`（默认关）、`sound`（`system | chime | ding | droplet | bubble | marimba | sparkle | knock | chord | none`，默认 `system`）、`mutedAccounts`（账号 id 列表）。核心的 `NewMail::for_delivery(&settings)` 统一套用前三项中与内容相关的规则：总开关关闭或账号被静音时什么都不发；关闭预览时把 `messages` 清空，发出的内容里就不含发件人和主题，任何宿主（包括以后的 webhook）都不会泄露。桌面以当前 `effectiveLocale` 调用 `NewMail::summary_localized(locale)` 生成标题和正文：一封时保留发件人与主题，多封时生成当前语言的账号摘要；空主题、计数和摘要模板来自共享资源。`summary()` 保留默认中文的兼容入口。`mutedAccounts` 保存时去空白、排序、去重，含空项或控制字符返回 `validation`（`field` 为 `notifications.mutedAccounts`）；手工编辑出的非法列表加载时整体清空。
 
@@ -719,7 +719,31 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 | `previewSound(sound)` | `notifications_preview_sound`，`{ sound }` | 播放 MailX 自带音效；`system` 与 `none` 不播放 |
 | `onNotificationOpen(listener)` | 事件 `mailx://notification-open` | 通知被点击 |
 
-**平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。
+**普通通知的平台差异（来自插件与系统实现，尚未在 Windows / Linux 实机确认）。** macOS：开发模式（`tauri dev`）下通知以“终端”的名义发出，真实效果以打包版本为准；每条可点击的通知占一个等待线程，直到它被点击、关闭或自动消失（横幅样式会自动消失；用户改成“提醒”样式时会一直等到被处理，数量受按账号合并限制）。Windows：只有通知还在屏幕上时点击才会回报，进入操作中心后点击只会唤起应用；开发构建不设 AppUserModelID。Linux：取决于通知服务器，部分服务器不支持声音提示或点击回报；自带音效走 ALSA。
+
+### 验证码识别与复制（主窗口）
+
+列表、阅读区和原生通知共用 `MailxCore` 的识别缓存与复制服务。UI 查询不套用通知的未读、INBOX 或短时间窗口规则；当前可见的已读、历史与归档邮件也可提供结果。未缓存正文只为疑似主题执行受限读取；已缓存正文可补充普通主题的识别。本机已发送副本和草稿不在此入口范围内。算法、1 MiB / 4 秒读取预算与缓存身份见[验证码识别](../architecture/verification-codes.md#7-共享识别状态与界面)。
+
+| MailxClient 方法 | Tauri 命令与参数 | 结果 |
+| --- | --- | --- |
+| `getVerificationCode(emailId, allowFetch)` | `emails_verification_code_status`，`{ emailId, allowFetch }` | `VerificationCodeStatus { emailId, state, code, recognitionId }` |
+| `copyVerificationCode(emailId, recognitionId)` | `emails_copy_verification_code`，`{ emailId, recognitionId }` | `VerificationCodeCopyOutcome { emailId, accountId, cleanup, deletion }` |
+| `undoVerificationCodeDelete(batchId)` | `emails_undo_verification_code_delete`，`{ batchId }` | `null`；在原有撤销期限内取消该次复制安排的清理 |
+| `onVerificationCodeCopied(listener)` | `mailx://verification-code-copied` | 通知入口复制完成的 `VerificationCodeCopyOutcome`，不含码值；UI 自己发起的复制使用响应，不重复推送 |
+| `onVerificationCodeChanged(listener)` | `mailx://verification-code-changed` | `{ emailIds }`；识别结果可用、通知清理或撤销后失效相应查询 |
+
+三个命令均通过主窗口权限与来源检查，不向 composer、邮件正文 iframe 或 MCP 开放。`state` 为 `unchecked | ready | notFound | ambiguous | unavailable`；只有 `ready` 携带码值和识别凭据。凭据绑定当前邮件身份及原始正文版本，失效后需重读状态；前端不提交码值、清理开关或永久删除确认。
+
+复制服务在核心服务锁内验证身份、调用宿主剪贴板回调，再根据实际写入时的 `mail.trashVerificationMailAfterCopy` 安排清理。返回成功只表示剪贴板写入成功，清理单独表达：`disabled` 为未开启，`queued` 携带 `EmailDeletion`，`unavailable` 为无 Trash 或已在 Trash，`failed` 为复制成功但清理未完成。复制失败不进入删除队列；删除排队始终拒绝永久删除。应用内 Toast 与原生通知撤销共用后端 5 秒期限，后台提示和失效行为见[复制后清理](../architecture/verification-codes.md#8-复制后移到已删除与撤销)。
+
+### 验证码通知（桌面）
+
+允许通知内容预览时，宿主对真正新到达、主题疑似验证码的近期未读收件箱邮件进行本地识别。`MailxCore::notification_verification_code(email_id)` 是可信宿主使用的内部应用服务，最多 4 秒、2 个并发、完整 MIME 1 MiB；按账号路由只读获取且不改正文缓存或已读状态。下载后核对当前来源、revision、UIDVALIDITY 与邮件可见性。通知专用方法不直接对前端暴露；主窗口使用上面的共享状态与复制命令，没有新增 MCP 工具。
+
+桌面每批最多探测 5 封、总等待上限 5 秒，识别成功后逐封通知并从普通摘要中移除，同批只响一次；失败、歧义、超限或超时沿用普通通知。Windows / macOS 提供显式复制按钮，Linux 只在通知文字中突出验证码。通知总开关、账号静音、前台通知与隐藏预览均适用；隐藏预览不抓取或显示验证码。
+
+原生复制参数为当前进程的短期 UUID，动作最多有效 5 分钟，成功后消费；该参数绑定共享识别凭据。`notification_code_is_current(account_id, email_id)` 与最新通知设置共同复核动作，已读邮件可以复制，已删除、过旧或来源失效的邮件不能复制；撤销设置和最终副作用由宿主共享修订号与互斥边界。复制不激活窗口，正文点击继续打开邮件；Windows 通过专用协议和单实例转发支持通知中心激活，旧 token 在冷启动时不恢复。平台实现、预算和实测缺口见[验证码识别](../architecture/verification-codes.md#6-桌面通知接入)。
 
 ### 发送结果通知（桌面）
 

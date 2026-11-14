@@ -21,7 +21,7 @@ use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::{AppError, ErrorCode};
-use crate::events::{CoreEvent, Events, NEW_MAIL_DETAILS, NewMail, NewMailMessage};
+use crate::events::{CoreEvent, Events, NewMail, NewMailMessage};
 use crate::imap::{self, ImapError, Session};
 use crate::net::NetError;
 
@@ -259,7 +259,7 @@ impl Shared {
     pub(super) async fn announce(
         self: &Arc<Self>,
         token: &WorkerToken,
-        mut arrivals: Vec<NewMailMessage>,
+        arrivals: Vec<NewMailMessage>,
     ) {
         if arrivals.is_empty() {
             return;
@@ -269,7 +269,6 @@ impl Shared {
             return;
         };
         let count = arrivals.len() as u32;
-        arrivals.truncate(NEW_MAIL_DETAILS);
         self.events.emit(&CoreEvent::NewMail(NewMail {
             account_id: token.account_id.clone(),
             account_name: account.display_name,
