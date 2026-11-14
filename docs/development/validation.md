@@ -1289,3 +1289,29 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 **浏览器预览（macOS / Edge，合成客户端）：** 通过 `?seed=showcase` 的固定合成验证码邮件检查卡片与阅读区，观察到模拟复制成功反馈；复制未写入真实系统剪贴板。已查看固定名称“复制验证码”及短成功态“已复制”；提示条标签与等宽码值共用行高、基线对齐并留 8px 间距。已观察清理开关的关闭默认值；“增强”新页面的位置与交互尚未包含在这次预览证据内。
 
 **未验证：** 真实邮件服务商的复制后 Trash 写回 / 撤销、通知复制后原生撤销、Windows / Linux 运行、Linux 剪贴板所有权、三平台通知中心 / 后台 / 锁屏 / 专注模式交互。此前维护者确认的 macOS 开发模式通知复制不覆盖本阶段新增清理流程。合成预览不替代原生宿主或真实服务商验证，识别覆盖率和误识别率仍未测量。
+
+<a id="release-0-3-0-validation"></a>
+
+## 46. MailX 0.3.0 发版验证（2026-11-15，本机为 Asia/Shanghai）
+
+[正式 Release](https://github.com/GuqierMcl/MailX/releases/tag/v0.3.0) 于 `2026-11-14T17:22:39Z` 发布并设为 Latest。标签指向 `c9af0fd9b207cd122551e8ca8e32d5ec799e537d`；版本 PR 为 [#136](https://github.com/GuqierMcl/MailX/pull/136)，发版 SDK 检查修复为 [#137](https://github.com/GuqierMcl/MailX/pull/137)。本版数据库升级到 v31，旧版不能打开升级后的数据目录，发布说明包含完整备份提示。
+
+**自动检查与构建：**
+
+- 本机 `bun run check`、Rust 格式 / Clippy / 工作区测试通过；前端为 113 个文件、1,397 项测试通过。版本脚本与产物脚本回归通过；SDK 检查修复后脚本测试共 66 项通过。
+- [最终提交在 main 的 CI](https://github.com/GuqierMcl/MailX/actions/runs/43616619882) 通过前端和三平台 Rust 检查。首次运行中，既有 `workbench-headers` 的“无关文件夹同步不改变搜索、分页与选中”用例超过 5 秒时限；该用例单独复测通过，失败项及汇总检查重跑后通过。
+- [主分支四平台试构建](https://github.com/GuqierMcl/MailX/actions/runs/43616625249) 和[最终标签构建](https://github.com/GuqierMcl/MailX/actions/runs/43618965050) 均通过。首次标签构建只在 Intel Mac SDK 检查处失败：Intel 的 macOS 10.13 部署目标使用 `LC_VERSION_MIN_MACOSX`，原检查只读取 `LC_BUILD_VERSION`；修复后兼容两种格式，仍拒绝未知或低于 26 的 SDK。生成的真实 Intel / arm64 样本及旧 SDK 安装包分别验证了接受和拒绝路径，样本未执行。
+
+**发布产物与更新分发：**
+
+- 下载并核对 16 个 Release 文件：macOS 两架构安装包 / 更新包及签名、Windows NSIS 与签名、Linux AppImage / deb / rpm 与各自签名，以及 `latest.json`、`SHA256SUMS.txt`。15 条 SHA-256 全部匹配。
+- 使用应用配置中的公钥和更新器采用的 Minisign 验证实现，验证六份包签名及签名内的 `version:0.3.0`；四平台清单的版本、下载地址和签名对应关系正确。
+- 发布后公开 `releases/latest/download/latest.json` 与已核验的本地清单一致；`darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 的公开下载入口均返回成功。操作系统代码签名仍未实现，与更新包签名是不同的能力。
+
+**安装包启动范围：**
+
+- [Linux AppImage 启动检查](https://github.com/GuqierMcl/MailX/actions/runs/43610356988) 使用无更新签名、应用运行时代码与最终发布相同的构建，正常与移除 AppIndicator 库后降级两种场景均通过：窗口可见、进程存活、空账号数据库初始化到 v31，181 个 ELF 的 glibc 需求不高于 2.35。最终提交额外修改的是 macOS SDK 检查、其回归测试、工作流和发版文档；已比对应用运行时代码一致。这不是对正式签名下载文件或真实 Linux 桌面会话的交互验证。
+- 对下载的 macOS arm64 正式包做静态版本和 SDK 检查，并在 macOS 27.0.1 上以临时空数据目录运行。版本为 0.3.0，主程序和 MCP bridge 的 SDK 均为 26.5；SQLite 为 v31、账号数为 0，`integrity_check=ok`。维护者确认启动界面正常。本次未读取或升级已有邮箱数据；仅邮件数据与凭据配置隔离，WebView 缓存和窗口状态仍按应用 identifier 管理。
+- macOS Intel 正式包也通过静态 SDK 检查，两个可执行文件均为 SDK 26.5；没有在 Intel Mac 上实际运行。
+
+**未覆盖：** Windows 或 Intel Mac 安装启动、真实服务商登录与收发、已有账号从 0.2.1 经应用内自动 / 手动更新后的数据保留、立即重启与退出安装、取消 / 断网恢复，以及本版新功能在所有平台的完整实机验收。更新清单与签名校验通过不等于这些路径已经验证；已在 Release 正文明确范围。
