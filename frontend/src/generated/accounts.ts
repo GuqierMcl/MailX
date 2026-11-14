@@ -336,7 +336,14 @@ export type MailOverviewQuery = {
  * for no new-mail section: `newMail` is then empty. The caller decides
  * what to send on first use (for example the start of today).
  */
-since: string | null, };
+since: string | null,
+/**
+ * RFC 3339; exactly fourteen strictly ascending instants, each the start
+ * of a local day, the last one the start of today and not in the future.
+ * Day `i` runs to the next start, the last day to now. Omitted or `null`
+ * asks for no activity section.
+ */
+dayStarts?: Array<string>, };
 
 export type AccountMailCount = { accountId: string, count: number, };
 
@@ -368,6 +375,78 @@ export type RecentAttachment = { email: EmailSummary,
  */
 fileNames: Array<string>, };
 
+export type DayActivity = {
+/**
+ * RFC 3339 UTC; the requested day start, normalized.
+ */
+start: string, received: number, };
+
+export type OverviewContact = {
+/**
+ * Lowercased.
+ */
+address: string,
+/**
+ * The most recent non-empty display name among the counted messages.
+ * Untrusted text.
+ */
+name: string | null, count: number, };
+
+export type TodayActivity = {
+/**
+ * Inbox mail received since the last day start, as the inbox lists it:
+ * locally archived mail is left out.
+ */
+received: number,
+/**
+ * How many of those are unread.
+ */
+unread: number, };
+
+export type OverviewActivity = {
+/**
+ * One entry per requested day start, oldest first: inbox mail received
+ * that day, locally archived mail included. Junk, Trash and Sent never
+ * count. The last day ends at `generatedAt`.
+ */
+days: Array<DayActivity>,
+/**
+ * Sum of the last seven days.
+ */
+receivedLastWeek: number,
+/**
+ * Sum of the seven days before them.
+ */
+receivedPreviousWeek: number,
+/**
+ * Messages of the unified Sent view (sent-role folders and local Sent
+ * copies, a copy matched to its server copy counted once) in the last
+ * seven days.
+ */
+sentLastWeek: number,
+/**
+ * The same for the seven days before them.
+ */
+sentPreviousWeek: number,
+/**
+ * Whether the local cache can be trusted to hold both weeks, so the
+ * week-over-week comparison means something. True only when every
+ * account has an inbox and every current inbox and sent-role folder
+ * generation has finished a sync round, is not capped by the per-round
+ * limit, and started its sync window at least one UTC day before the
+ * first day start (the margin covers servers that read the window's
+ * date in their own time zone).
+ */
+previousWeekComplete: boolean,
+/**
+ * At most three addresses with the most messages in the last seven days:
+ * inbox mail received from them (archived included) plus Sent view
+ * messages addressed to them. Only addresses the Sent view holds at least
+ * one message to qualify, and the accounts' own addresses never do.
+ * Most messages first, then the most recent.
+ */
+topContacts: Array<OverviewContact>, today: TodayActivity, };
+
 export type MailOverview = { newMail: NewMailOverview,
 /**
  * Starred unread messages, in the Starred view's scope.
@@ -382,8 +461,13 @@ verificationCodes: Array<OverviewCode>,
  */
 recentAttachments: Array<RecentAttachment>,
 /**
+ * Received, sent and contact statistics of the last two weeks; present
+ * only when the query sent `dayStarts`.
+ */
+activity?: OverviewActivity,
+/**
  * RFC 3339; the core's clock when the overview was computed. The code
- * and attachment windows end here.
+ * and attachment windows end here, and so does the last activity day.
  */
 generatedAt: string, };
 

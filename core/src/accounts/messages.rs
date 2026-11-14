@@ -3,7 +3,9 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{AccountService, validate_email_id, validate_uuid};
-pub(crate) use crate::storage::messages::{CodeSource, FolderSyncCursor, NewMailRows, SyncTarget};
+pub(crate) use crate::storage::messages::{
+    CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient, SyncTarget,
+};
 use crate::{
     AppError,
     mail::{
@@ -119,6 +121,64 @@ impl AccountService {
         limit: u32,
     ) -> Result<Vec<(EmailSummary, Vec<String>)>, AppError> {
         self.storage.overview_attachments(after, limit)
+    }
+
+    /// Inbox mail received per range `[bounds[i], bounds[i + 1])`, archived
+    /// mail included.
+    pub(crate) fn overview_received(&self, bounds: &[String]) -> Result<Vec<u32>, AppError> {
+        self.storage.overview_received(bounds)
+    }
+
+    pub(crate) fn overview_inbox_unread(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<(u32, u32), AppError> {
+        self.storage.overview_inbox_unread(from, to)
+    }
+
+    pub(crate) fn overview_sent(&self, from: &str, to: &str) -> Result<u32, AppError> {
+        self.storage.overview_sent(from, to)
+    }
+
+    pub(crate) fn overview_history_complete(
+        &self,
+        window_start_by: &str,
+    ) -> Result<bool, AppError> {
+        self.storage.overview_history_complete(window_start_by)
+    }
+
+    pub(crate) fn overview_senders(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<SenderCount>, AppError> {
+        self.storage.overview_senders(from, to)
+    }
+
+    pub(crate) fn overview_sender_name(
+        &self,
+        address: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<(String, String)>, AppError> {
+        self.storage.overview_sender_name(address, from, to)
+    }
+
+    pub(crate) fn overview_sent_recipients(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<SentRecipient>, AppError> {
+        self.storage.overview_sent_recipients(from, to)
+    }
+
+    pub(crate) fn overview_sent_to(&self, candidates: &[String]) -> Result<Vec<String>, AppError> {
+        self.storage.overview_sent_to(candidates)
+    }
+
+    pub(crate) fn overview_own_addresses(&self) -> Result<Vec<String>, AppError> {
+        self.storage.overview_own_addresses()
     }
 
     /// The first [`MAX_SELECTION`] messages `list_emails` would show for the

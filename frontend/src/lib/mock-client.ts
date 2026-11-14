@@ -25,6 +25,7 @@ import type {
   FolderRole,
   MailAddress,
   MailStateChanged,
+  OverviewActivity,
   RouteConfig,
   TranslationProviderId,
   TranslationStatus,
@@ -652,6 +653,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       // archived; starred unread outside junk and trash.
       const now = Date.now()
       const role = (email: EmailDetail) => folders.find((folder) => folder.id === email.summary.folderId)?.role
+      const ownAddresses = () => new Set([...accounts.map((account) => account.emailAddress), ...Object.values(dataset.me).map((me) => me.address)]
+        .map((address) => address.toLowerCase()))
       const newestFirst = (a: EmailDetail, b: EmailDetail) => b.summary.receivedAt.localeCompare(a.summary.receivedAt) || b.summary.id.localeCompare(a.summary.id)
       const inbox = emails.filter((email) => role(email) === 'inbox' && !email.summary.archived).sort(newestFirst)
       const since = query.since == null ? null : Date.parse(query.since)
@@ -681,6 +684,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           // Names are known once the body is cached, as in the core.
           fileNames: email.summary.bodyState === 'ready' ? email.attachments.filter((part) => !part.isInline).map((part) => part.filename ?? '').filter(Boolean) : [],
         })),
+        ...(query.dayStarts == null ? {} : {
+          activity: mockActivity(emails, role, ownAddresses(), query.dayStarts, now),
+        }),
         generatedAt: new Date(now).toISOString(),
       })
     },
@@ -1658,7 +1664,43 @@ const DEFAULT_SEEDS: Seed[] = [
     verificationCode: '482913',
     hoursAgo: 0.1,
   },
+  // Older mail over the last two weeks, so the Now page has a believable
+  // activity chart and a few people you write to.
+  ...olderSeeds(),
 ]
+
+/** Received and sent mail spread over the last two weeks, all read. */
+function olderSeeds(): Seed[] {
+  const chen = { name: '陈晓', address: 'chen.xiao@example.com' }
+  const wang = { name: '王芳', address: 'wang.fang@example.com' }
+  const github = { name: 'GitHub', address: 'notifications@github.example' }
+  const mom = { name: '妈妈', address: 'mom@example.net' }
+  const received = (account: string, from: MailAddress, subject: string, hoursAgo: number): Seed =>
+    ({ account, from, subject, text: `${subject}。`, hoursAgo, read: true })
+  const sent = (account: string, to: MailAddress, subject: string, hoursAgo: number): Seed =>
+    ({ account, role: 'sent', from: account === WORK ? ME_WORK : ME_HOME, to: [to], subject, text: `${subject}。`, hoursAgo, read: true })
+  return [
+    received(WORK, chen, '同步模块排期调整', 40),
+    sent(WORK, chen, '回复：同步模块排期调整', 44),
+    received(WORK, chen, '本周站会纪要', 98),
+    received(WORK, chen, '上线检查清单', 150),
+    sent(WORK, chen, '回复：上线检查清单', 152),
+    received(WORK, chen, '第二季度复盘材料', 230),
+    sent(WORK, wang, '十月报销单据', 70),
+    received(WORK, wang, '回复：十月报销单据', 72),
+    received(WORK, wang, '财务系统切换说明', 190),
+    sent(WORK, wang, '回复：财务系统切换说明', 260),
+    received(WORK, github, '[MailX] Issue #12: IDLE reconnect', 20),
+    received(WORK, github, '[MailX] Release v0.2.0', 64),
+    received(WORK, github, '[MailX] Pull request #9 merged', 120),
+    received(WORK, github, '[MailX] Issue #7 closed', 175),
+    received(WORK, github, '[MailX] Workflow run failed', 210),
+    received(WORK, github, '[MailX] Discussion #3', 300),
+    received(PERSONAL, mom, '天冷了多穿点', 110),
+    sent(PERSONAL, mom, '回复：天冷了多穿点', 112),
+    received(PERSONAL, mom, '国庆的照片', 280),
+  ]
+}
 
 type MockDataset = {
   accounts: Account[]
@@ -1740,6 +1782,72 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       })),
     }
   })
+}
+
+/**
+ * The overview's activity section with the core's rules (app/overview/activity.rs):
+ * inbox mail per local day (archived included), the Sent view per week (the
+ * mock keeps one row per sent message, so nothing needs merging), today's
+ * inbox as listed, and the three addresses you corresponded with most that
+ * you have written to at least once, never your own.
+ */
+function mockActivity(
+  emails: EmailDetail[],
+  role: (email: EmailDetail) => FolderRole | null | undefined,
+  own: Set<string>,
+  dayStarts: string[],
+  now: number,
+): OverviewActivity {
+  const invalid = () => new MailxClientError({ code: 'validation', field: 'dayStarts', message: '配置参数无效。' })
+  const starts = dayStarts.map((start) => Date.parse(start))
+  if (starts.length !== 14 || starts.some(Number.isNaN)) throw invalid()
+  if (starts.some((start, index) => index > 0 && start <= starts[index - 1]) || starts[13] > now) throw invalid()
+  const time = (email: EmailDetail) => Date.parse(email.summary.receivedAt)
+  // Half-open ranges; the last one ends at `now` inclusive, as in the core.
+  const end = now + 1
+  const between = (email: EmailDetail, from: number, to: number) => time(email) >= from && time(email) < to
+  const inbox = emails.filter((email) => role(email) === 'inbox')
+  const sent = emails.filter((email) => role(email) === 'sent')
+  const bounds = [...starts, end]
+  const received = starts.map((_, index) => inbox.filter((email) => between(email, bounds[index], bounds[index + 1])).length)
+  const sum = (counts: number[]) => counts.reduce((total, count) => total + count, 0)
+  const recipients = (email: EmailDetail) => [...new Set([...email.to, ...email.cc].map((row) => row.address.toLowerCase()))]
+  const writtenTo = new Set(sent.flatMap(recipients))
+  type Tally = { count: number, last: number, name: { at: number, value: string } | null }
+  const tally = new Map<string, Tally>()
+  const mention = (address: string, at: number, name: string | null | undefined) => {
+    const row = tally.get(address) ?? { count: 0, last: 0, name: null }
+    row.count += 1
+    row.last = Math.max(row.last, at)
+    const value = name?.trim()
+    if (value && (!row.name || row.name.at < at)) row.name = { at, value }
+    tally.set(address, row)
+  }
+  for (const email of inbox.filter((row) => between(row, starts[7], end))) {
+    mention(email.summary.from.address.toLowerCase(), time(email), email.summary.from.name)
+  }
+  for (const email of sent.filter((row) => between(row, starts[7], end))) {
+    for (const address of recipients(email)) {
+      mention(address, time(email), [...email.to, ...email.cc].find((row) => row.address.toLowerCase() === address && row.name)?.name)
+    }
+  }
+  const topContacts = [...tally]
+    .filter(([address]) => writtenTo.has(address) && !own.has(address))
+    .sort(([a, x], [b, y]) => y.count - x.count || y.last - x.last || a.localeCompare(b))
+    .slice(0, 3)
+    .map(([address, row]) => ({ address, name: row.name?.value ?? null, count: row.count }))
+  const today = inbox.filter((email) => !email.summary.archived && between(email, starts[13], end))
+  return {
+    days: starts.map((start, index) => ({ start: new Date(start).toISOString(), received: received[index] })),
+    receivedLastWeek: sum(received.slice(7)),
+    receivedPreviousWeek: sum(received.slice(0, 7)),
+    sentLastWeek: sent.filter((email) => between(email, starts[7], end)).length,
+    sentPreviousWeek: sent.filter((email) => between(email, starts[0], starts[7])).length,
+    // The mock holds every message it will ever show.
+    previousWeekComplete: true,
+    topContacts,
+    today: { received: today.length, unread: today.filter((email) => !email.summary.isRead).length },
+  }
 }
 
 /** Browser preview only (`?seed=outbox`): one rich draft plus sends that end failed, unknown and retrying. */

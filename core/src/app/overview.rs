@@ -10,6 +10,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub use self::activity::{DayActivity, OverviewActivity, OverviewContact, TodayActivity};
 use super::MailxCore;
 use crate::{
     AppError,
@@ -40,6 +41,13 @@ pub struct MailOverviewQuery {
     /// for no new-mail section: `newMail` is then empty. The caller decides
     /// what to send on first use (for example the start of today).
     pub since: Option<String>,
+    /// RFC 3339; exactly fourteen strictly ascending instants, each the start
+    /// of a local day, the last one the start of today and not in the future.
+    /// Day `i` runs to the next start, the last day to now. Omitted or `null`
+    /// asks for no activity section.
+    #[serde(default)]
+    #[ts(optional)]
+    pub day_starts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -52,8 +60,13 @@ pub struct MailOverview {
     pub verification_codes: Vec<OverviewCode>,
     /// Newest first, at most five inbox messages from the last seven days.
     pub recent_attachments: Vec<RecentAttachment>,
+    /// Received, sent and contact statistics of the last two weeks; present
+    /// only when the query sent `dayStarts`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub activity: Option<OverviewActivity>,
     /// RFC 3339; the core's clock when the overview was computed. The code
-    /// and attachment windows end here.
+    /// and attachment windows end here, and so does the last activity day.
     pub generated_at: String,
 }
 
@@ -116,27 +129,43 @@ impl MailxCore {
     /// The Now page's local statistics. Read-only, bounded and cheap enough
     /// to run after every sync event; the time windows use the core's clock.
     pub fn mail_overview(&self, query: &MailOverviewQuery) -> Result<MailOverview, AppError> {
-        let since = validate(query)?;
-        overview_at(&*self.accounts()?, since.as_deref(), Utc::now())
+        let now = Utc::now();
+        let (since, day_starts) = validate(query, now)?;
+        overview_at(
+            &*self.accounts()?,
+            since.as_deref(),
+            day_starts.as_deref(),
+            now,
+        )
     }
 }
 
-fn validate(query: &MailOverviewQuery) -> Result<Option<String>, AppError> {
-    query
+/// The normalized `since` and day starts.
+type Validated = (Option<String>, Option<Vec<String>>);
+
+fn validate(query: &MailOverviewQuery, now: DateTime<Utc>) -> Result<Validated, AppError> {
+    let since = query
         .since
         .as_deref()
         .map(|since| normalized_time(since, "since"))
-        .transpose()
+        .transpose()?;
+    let day_starts = query
+        .day_starts
+        .as_deref()
+        .map(|starts| activity::validate_day_starts(starts, now))
+        .transpose()?;
+    Ok((since, day_starts))
 }
 
 fn timestamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-/// The overview as of `now`; `since` is already normalized.
+/// The overview as of `now`; `since` and `day_starts` are already validated.
 pub(crate) fn overview_at(
     service: &AccountService,
     since: Option<&str>,
+    day_starts: Option<&[String]>,
     now: DateTime<Utc>,
 ) -> Result<MailOverview, AppError> {
     let new_mail = match since {
@@ -193,9 +222,13 @@ pub(crate) fn overview_at(
         starred_unread: service.overview_starred_unread()?,
         verification_codes,
         recent_attachments,
+        activity: day_starts
+            .map(|starts| activity::activity_at(service, starts, now))
+            .transpose()?,
         generated_at: timestamp(now),
     })
 }
 
+mod activity;
 #[cfg(test)]
 mod tests;

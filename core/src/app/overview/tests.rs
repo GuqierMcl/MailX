@@ -215,7 +215,7 @@ impl Fixture {
 
     fn overview(&self, since_minutes_ago: Option<i64>) -> MailOverview {
         let since = since_minutes_ago.map(|minutes| at(self.now, minutes));
-        overview_at(&self.service, since.as_deref(), self.now).unwrap()
+        overview_at(&self.service, since.as_deref(), None, self.now).unwrap()
     }
 }
 
@@ -477,16 +477,25 @@ fn query_rejects_unknown_fields_and_invalid_since() {
         serde_json::from_value::<MailOverviewQuery>(json!({})).unwrap(),
         MailOverviewQuery::default()
     );
-    let error = validate(&MailOverviewQuery {
-        since: Some("yesterday".into()),
-    })
+    let error = validate(
+        &MailOverviewQuery {
+            since: Some("yesterday".into()),
+            ..Default::default()
+        },
+        Utc::now(),
+    )
     .unwrap_err();
     assert_eq!(error, AppError::validation("since"));
     assert_eq!(
-        validate(&MailOverviewQuery {
-            since: Some("2026-11-14T08:00:00+08:00".into()),
-        })
+        validate(
+            &MailOverviewQuery {
+                since: Some("2026-11-14T08:00:00+08:00".into()),
+                ..Default::default()
+            },
+            Utc::now(),
+        )
         .unwrap()
+        .0
         .as_deref(),
         Some("2026-11-14T00:00:00.000Z")
     );
@@ -495,4 +504,496 @@ fn query_rejects_unknown_fields_and_invalid_since() {
     assert_eq!(empty.generated_at, "2026-11-14T12:00:00.000Z");
     assert_eq!(empty.starred_unread, 0);
     assert!(empty.verification_codes.is_empty() && empty.recent_attachments.is_empty());
+    assert_eq!(empty.activity, None);
+}
+
+/// A message for the activity tests, at an exact time.
+struct At {
+    time: DateTime<Utc>,
+    from: (&'static str, Option<&'static str>),
+    to: &'static [(&'static str, Option<&'static str>)],
+    cc: &'static [&'static str],
+    read: bool,
+    message_id: Option<&'static str>,
+}
+
+fn at_time(time: DateTime<Utc>) -> At {
+    At {
+        time,
+        from: ("sender@example.test", Some("Sender")),
+        to: &[],
+        cc: &[],
+        read: false,
+        message_id: None,
+    }
+}
+
+fn stamp(time: DateTime<Utc>) -> String {
+    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Local midnights in UTC+8: day 13 starts at 2026-11-13T16:00Z, four hours
+/// before the fixture's `now`.
+fn day(index: i64) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-10-31T16:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
+        + Duration::days(index)
+}
+
+fn day_starts() -> Vec<String> {
+    (0..14).map(|index| stamp(day(index))).collect()
+}
+
+impl Fixture {
+    /// Stores messages after the folder's existing uids; returns their ids.
+    fn put_at(&mut self, account: usize, folder: &'static str, mails: &[At]) -> Vec<String> {
+        let target = self.targets[&(account, folder)].clone();
+        let first: u32 = self
+            .db
+            .query_row(
+                "SELECT COALESCE(MAX(uid), 0) + 1 FROM messages WHERE folder_id = ?1",
+                [&target.folder_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let address = |(address, name): &(&str, Option<&str>)| crate::mail::MailAddress {
+            name: name.map(Into::into),
+            address: (*address).into(),
+        };
+        let records: Vec<MessageRecord> = mails
+            .iter()
+            .enumerate()
+            .map(|(index, mail)| {
+                let uid = first + index as u32;
+                MessageRecord {
+                    uid,
+                    message_id_header: Some(mail.message_id.map_or_else(
+                        || format!("{account}-{folder}-{uid}@example.test"),
+                        Into::into,
+                    )),
+                    original_message_id: None,
+                    sent_identity_policy: crate::providers::for_imap_host("").policy_key(),
+                    in_reply_to: None,
+                    references_header: None,
+                    subject: "Activity".into(),
+                    from_name: mail.from.1.map(Into::into),
+                    from_address: mail.from.0.into(),
+                    to_addresses: mail.to.iter().map(address).collect(),
+                    cc_addresses: mail.cc.iter().map(|cc| address(&(*cc, None))).collect(),
+                    reply_to_addresses: vec![],
+                    received_at: stamp(mail.time),
+                    sent_at: None,
+                    size: Some(400),
+                    is_read: mail.read,
+                    is_flagged: false,
+                    flags: vec![],
+                    has_attachment: false,
+                }
+            })
+            .collect();
+        let highest = first + records.len() as u32;
+        self.service
+            .store_message_batch(&target, &records, highest)
+            .unwrap()
+            .unwrap();
+        records
+            .iter()
+            .map(|record| {
+                self.db
+                    .query_row(
+                        "SELECT id FROM messages WHERE folder_id = ?1 AND uid = ?2",
+                        params![target.folder_id, record.uid],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    /// An accepted send of `account` waiting in the Sent view as a local copy
+    /// until a server copy with `message_id` arrives.
+    fn local_copy(&self, account: usize, time: DateTime<Utc>, message_id: &str, to: &[&str]) {
+        let envelope = json!({
+            "from": self.accounts[account].email_address,
+            "recipients": to,
+        });
+        self.db
+            .execute(
+                "INSERT INTO outbox(id, account_id, client_mutation_id, queue_canonical, message_id,
+                 snapshot_hash, snapshot_size, envelope, subject, recipients_preview, recipient_count,
+                 state, accepted_at, not_before, first_queued_at, created_at, updated_at, preview,
+                 attachment_count)
+                 VALUES (?1, ?2, ?3, '{}', ?4, ?5, 10, ?6, 'Sent copy', ?7, ?8, 'accepted',
+                         ?9, ?9, ?9, ?9, ?9, 'body', 0)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    self.accounts[account].id,
+                    Uuid::new_v4().to_string(),
+                    format!("<{message_id}>"),
+                    "b".repeat(64),
+                    envelope.to_string(),
+                    serde_json::to_string(to).unwrap(),
+                    to.len() as i64,
+                    stamp(time),
+                ],
+            )
+            .unwrap();
+    }
+
+    /// Marks every inbox and Sent generation as fully synced.
+    fn finish_all(&mut self) {
+        for ((_, name), target) in self.targets.clone() {
+            if matches!(name, "INBOX" | "Sent") {
+                self.service
+                    .finish_backfill(&target, false)
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+    }
+
+    fn activity(&self) -> OverviewActivity {
+        overview_at(&self.service, None, Some(&day_starts()), self.now)
+            .unwrap()
+            .activity
+            .unwrap()
+    }
+}
+
+#[test]
+fn activity_counts_inbox_mail_per_local_day() {
+    let mut f = setup();
+    let ms = Duration::milliseconds(1);
+    let ids = f.put_at(
+        0,
+        "INBOX",
+        &[
+            // Before the first day: not counted.
+            at_time(day(0) - ms),
+            // Exactly at a day start: that day.
+            at_time(day(0)),
+            at_time(day(7) - ms),
+            at_time(day(7)),
+            at_time(day(13)),
+            // Read today.
+            At {
+                read: true,
+                ..at_time(day(13) + Duration::hours(1))
+            },
+            // Exactly now: today.
+            at_time(f.now),
+            // Archived today: a day count, not today's inbox.
+            at_time(day(13) + Duration::hours(2)),
+            // Archived earlier: still received that day.
+            at_time(day(3)),
+            // In the future: not received yet.
+            at_time(f.now + ms),
+        ],
+    );
+    f.service
+        .archive_messages(&[ids[7].clone(), ids[8].clone()])
+        .unwrap();
+    f.put_at(1, "INBOX", &[at_time(day(13) + Duration::minutes(5))]);
+    for folder in ["Junk", "Trash", "Sent"] {
+        f.put_at(1, folder, &[at_time(day(13)), at_time(day(10))]);
+    }
+
+    let activity = f.activity();
+    let days: Vec<u32> = activity.days.iter().map(|d| d.received).collect();
+    assert_eq!(days, [1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 5]);
+    assert_eq!(activity.days[13].start, "2026-11-13T16:00:00.000Z");
+    assert_eq!(activity.received_previous_week, 3);
+    assert_eq!(activity.received_last_week, 6);
+    // Today: four unarchived inbox messages, one of them read.
+    assert_eq!(
+        activity.today,
+        TodayActivity {
+            received: 4,
+            unread: 3
+        }
+    );
+    // The sent messages above count only as sent.
+    assert_eq!(
+        (activity.sent_last_week, activity.sent_previous_week),
+        (2, 0)
+    );
+}
+
+#[test]
+fn sent_counts_follow_the_sent_view_and_count_matched_copies_once() {
+    let mut f = setup();
+    // Waiting for its server copy: counted as the local copy.
+    f.local_copy(0, day(12), "pending@example.test", &["a@example.test"]);
+    // Matched once its server copy is stored: counted as the server copy.
+    f.local_copy(0, day(11), "matched@example.test", &["b@example.test"]);
+    // Before the two weeks.
+    f.local_copy(
+        1,
+        day(0) - Duration::hours(1),
+        "old@example.test",
+        &["c@example.test"],
+    );
+    f.put_at(
+        0,
+        "Sent",
+        &[
+            At {
+                message_id: Some("matched@example.test"),
+                ..at_time(day(11) + Duration::minutes(1))
+            },
+            at_time(day(2)),
+            at_time(day(6) + Duration::hours(23)),
+        ],
+    );
+    let matched: Option<String> =
+        f.db.query_row(
+            "SELECT server_copy_message_id FROM outbox WHERE message_id = '<matched@example.test>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(matched.is_some());
+    f.put_at(1, "Sent", &[at_time(day(13))]);
+    // An inbox message from the same Message-ID is not a sent message.
+    f.put_at(
+        0,
+        "INBOX",
+        &[At {
+            message_id: Some("matched@example.test"),
+            ..at_time(day(11))
+        }],
+    );
+
+    let activity = f.activity();
+    assert_eq!(activity.sent_last_week, 3);
+    assert_eq!(activity.sent_previous_week, 2);
+}
+
+#[test]
+fn previous_week_is_complete_only_when_every_folder_is_synced_far_enough() {
+    let mut f = setup();
+    // Never finished a round.
+    assert!(!f.activity().previous_week_complete);
+    f.finish_all();
+    assert!(f.activity().previous_week_complete);
+
+    // A capped inbox.
+    let inbox = f.targets[&(1, "INBOX")].clone();
+    f.service.finish_backfill(&inbox, true).unwrap().unwrap();
+    assert!(!f.activity().previous_week_complete);
+    f.service.finish_backfill(&inbox, false).unwrap().unwrap();
+    // A capped Junk folder does not matter.
+    let junk = f.targets[&(1, "Junk")].clone();
+    f.service.finish_backfill(&junk, true).unwrap().unwrap();
+    assert!(f.activity().previous_week_complete);
+
+    // A sync window starting too late: the first day starts 2026-10-31T16:00Z,
+    // so the window must start by 2026-10-30.
+    let sent = f.targets[&(0, "Sent")].folder_id.clone();
+    let window = |date: &str| {
+        f.db.execute(
+            "UPDATE folder_sync_cursors SET window_start = ?2 WHERE folder_id = ?1",
+            params![sent, date],
+        )
+        .unwrap();
+    };
+    window("2026-10-31");
+    assert!(!f.activity().previous_week_complete);
+    window("2026-10-30");
+    assert!(f.activity().previous_week_complete);
+
+    // A Sent folder that never synced (no generation at all).
+    f.db.execute(
+        "DELETE FROM folder_sync_cursors WHERE folder_id = ?1",
+        [&sent],
+    )
+    .unwrap();
+    assert!(!f.activity().previous_week_complete);
+}
+
+#[test]
+fn top_contacts_are_people_you_write_to() {
+    let mut f = setup();
+    let last = |hours: i64| day(7) + Duration::hours(hours);
+    f.put_at(
+        0,
+        "INBOX",
+        &[
+            // Alice: three received, one archived, mixed case.
+            At {
+                from: ("Alice@Example.test", Some("Alice")),
+                ..at_time(last(1))
+            },
+            At {
+                from: ("alice@example.test", Some("Alice Liu")),
+                ..at_time(last(30))
+            },
+            At {
+                from: ("ALICE@example.test", None),
+                ..at_time(last(40))
+            },
+            // Before the last seven days: not counted.
+            At {
+                from: ("alice@example.test", Some("Old Alice")),
+                ..at_time(day(6))
+            },
+            // A newsletter you never wrote to.
+            At {
+                from: ("news@example.test", Some("News")),
+                ..at_time(last(2))
+            },
+            At {
+                from: ("news@example.test", Some("News")),
+                ..at_time(last(3))
+            },
+            At {
+                from: ("news@example.test", Some("News")),
+                ..at_time(last(4))
+            },
+            At {
+                from: ("news@example.test", Some("News")),
+                ..at_time(last(5))
+            },
+            // Your other account.
+            At {
+                from: ("home@example.test", Some("Me")),
+                ..at_time(last(6))
+            },
+            At {
+                from: ("home@example.test", Some("Me")),
+                ..at_time(last(7))
+            },
+            // Carol: written to only long ago, so she qualifies.
+            At {
+                from: ("carol@example.test", Some("Carol")),
+                ..at_time(last(8))
+            },
+            // Dave: one received, newer than Carol's.
+            At {
+                from: ("dave@example.test", Some("Dave")),
+                ..at_time(last(9))
+            },
+        ],
+    );
+    let archived = f.put_at(
+        0,
+        "INBOX",
+        &[At {
+            from: ("alice@example.test", Some("Alice")),
+            ..at_time(last(45))
+        }],
+    );
+    f.service.archive_messages(&archived).unwrap();
+    f.put_at(
+        0,
+        "Sent",
+        &[
+            // To Alice (named) and Bob, Cc Alice again: Alice counts once.
+            At {
+                from: ("work@example.test", None),
+                to: &[
+                    ("alice@example.test", Some("A. Liu")),
+                    ("bob@example.test", None),
+                ],
+                cc: &["ALICE@example.test", "home@example.test"],
+                ..at_time(last(20))
+            },
+            // Carol, two weeks ago.
+            At {
+                from: ("work@example.test", None),
+                to: &[("carol@example.test", None)],
+                ..at_time(day(1))
+            },
+            // Dave, long ago.
+            At {
+                from: ("work@example.test", None),
+                to: &[("dave@example.test", None)],
+                ..at_time(day(0) - Duration::days(10))
+            },
+        ],
+    );
+    // Bob twice more from a local copy (Bcc included in the envelope).
+    f.local_copy(1, last(50), "bob-1@example.test", &["Bob@example.test"]);
+    f.local_copy(1, last(51), "bob-2@example.test", &["bob@example.test"]);
+
+    let contacts = f.activity().top_contacts;
+    assert_eq!(
+        contacts,
+        [
+            // 4 received (one archived) + 1 sent; the newest name is from
+            // the archived message, newer than the sent one.
+            OverviewContact {
+                address: "alice@example.test".into(),
+                name: Some("Alice".into()),
+                count: 5
+            },
+            // 3 sent, no name known.
+            OverviewContact {
+                address: "bob@example.test".into(),
+                name: None,
+                count: 3
+            },
+            // Dave and Carol both have 1: Dave's message is newer.
+            OverviewContact {
+                address: "dave@example.test".into(),
+                name: Some("Dave".into()),
+                count: 1
+            },
+        ]
+    );
+}
+
+#[test]
+fn day_starts_are_validated() {
+    let now = DateTime::parse_from_rfc3339("2026-11-14T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let check = |starts: Vec<String>| {
+        validate(
+            &MailOverviewQuery {
+                since: None,
+                day_starts: Some(starts),
+            },
+            now,
+        )
+    };
+    let error = Err(AppError::validation("dayStarts"));
+    let valid = day_starts();
+    assert_eq!(check(valid.clone()).unwrap().1, Some(valid.clone()));
+    // Any offset is accepted and normalized.
+    let mut offset = valid.clone();
+    offset[13] = "2026-11-14T00:00:00+08:00".into();
+    assert_eq!(check(offset).unwrap().1, Some(valid.clone()));
+    // Count.
+    assert_eq!(check(valid[1..].to_vec()), error);
+    let mut more = valid.clone();
+    more.push(stamp(now));
+    assert_eq!(check(more), error);
+    assert_eq!(check(vec![]), error);
+    // Order: equal or descending starts.
+    let mut equal = valid.clone();
+    equal[5] = equal[4].clone();
+    assert_eq!(check(equal), error);
+    let mut reversed = valid.clone();
+    reversed.reverse();
+    assert_eq!(check(reversed), error);
+    // Invalid.
+    let mut invalid = valid.clone();
+    invalid[3] = "yesterday".into();
+    assert_eq!(check(invalid), error);
+    // The last start may be now but not later.
+    let mut current = valid.clone();
+    current[13] = stamp(now);
+    assert!(check(current).is_ok());
+    let mut future = valid;
+    future[13] = stamp(now + Duration::milliseconds(1));
+    assert_eq!(check(future), error);
+    // Omitted: no activity, and the field is optional on the wire.
+    assert_eq!(
+        serde_json::from_value::<MailOverviewQuery>(json!({"since": null}))
+            .unwrap()
+            .day_starts,
+        None
+    );
 }
