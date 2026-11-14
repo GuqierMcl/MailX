@@ -204,14 +204,7 @@ jobs:
         run: |
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
           test -n "$app"
-          for bin in "$app"/Contents/MacOS/*; do
-            sdk=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "sdk" { print $2; exit }')
-            echo "$bin: SDK ${sdk:-unknown}"
-            if ! [ "${sdk%%.*}" -ge 26 ] 2>/dev/null; then
-              echo "::error::$bin was built with macOS SDK ${sdk:-unknown}; SDK 26 or later is required."
-              exit 1
-            fi
-          done
+          bash scripts/check-macos-sdk.sh "$app"
       - name: Collect and rename installers
         shell: bash
         run: |
