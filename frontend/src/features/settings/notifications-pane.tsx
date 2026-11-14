@@ -67,7 +67,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
         <Switch id="notifications.enabled" checked={notifications.enabled}
           onCheckedChange={(enabled) => update.mutate({ enabled })} />
       </SettingsRow>
-      <SettingsRow label={t('settings:showPreview')} htmlFor="notifications.showPreview">
+      <SettingsRow label={t('settings:showPreview')} description={t('settings:notificationPreviewHint')} htmlFor="notifications.showPreview">
         <Switch id="notifications.showPreview" checked={notifications.showPreview} disabled={off}
           onCheckedChange={(showPreview) => update.mutate({ showPreview })} />
       </SettingsRow>

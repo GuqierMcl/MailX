@@ -110,6 +110,45 @@ const SUFFIXES: &[&str] = &[
     "to verify your account",
 ];
 
+/// Cheap admission filter for notification-only body reads. It intentionally
+/// accepts common login/verification subjects without claiming a code exists.
+/// Reply/forward subjects and oversized text never start background fetching.
+pub fn is_candidate_subject(subject: &str) -> bool {
+    if subject.len() > MAX_SUBJECT_BYTES || reply_subject(subject) {
+        return false;
+    }
+    let lower = normalize(subject).to_ascii_lowercase();
+    keyword_in(&lower).is_some()
+        || [
+            "sign in",
+            "sign-in",
+            "log in",
+            "login",
+            "verify",
+            "verification",
+            "authentication",
+        ]
+        .iter()
+        .any(|term| {
+            lower
+                .match_indices(term)
+                .any(|(start, _)| keyword_boundary(&lower, start, term))
+        })
+        || [
+            "验证",
+            "驗證",
+            "校验",
+            "校驗",
+            "登录",
+            "登入",
+            "登錄",
+            "动态密码",
+            "動態密碼",
+        ]
+        .iter()
+        .any(|term| lower.contains(term))
+}
+
 /// Recognize a unique 4–8 character ASCII digit or mixed letter/digit code in
 /// decoded subject and plain body text. Case and leading zeroes are preserved.
 /// Explicit nearby verification language is required. Conflicting candidates

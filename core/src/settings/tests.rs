@@ -4,6 +4,7 @@ use tempfile::TempDir;
 fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
         general: GeneralSettings::default(),
+        mail: MailSettings::default(),
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
@@ -374,6 +375,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
                 "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true },
+                "mail": { "trashVerificationMailAfterCopy": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -1262,6 +1264,82 @@ fn single_key_shortcuts_default_on_recover_and_persist_off() {
         assert!(!restored.settings.general.single_key_shortcuts);
         assert_eq!(restored.settings.general.language, "en");
         assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+    }
+}
+
+#[test]
+fn verification_mail_cleanup_defaults_off_repairs_invalid_values_and_persists() {
+    assert!(!MailSettings::default().trash_verification_mail_after_copy);
+    for value in [
+        None,
+        Some(serde_json::json!({})),
+        Some(serde_json::json!({"trashVerificationMailAfterCopy": "yes"})),
+        Some(serde_json::json!({"trashVerificationMailAfterCopy": null})),
+        Some(serde_json::Value::Null),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let mut settings =
+            serde_json::json!({"general":{"language":"en"},"appearance":{"theme":"dark"}});
+        if let Some(value) = value {
+            settings["mail"] = value;
+        }
+        fs::write(
+            directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":settings}).to_string(),
+        )
+        .unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert!(!snapshot.settings.mail.trash_verification_mail_after_copy);
+        assert!(!snapshot.recovered);
+        let mut mail = snapshot.settings.mail;
+        mail.trash_verification_mail_after_copy = true;
+        store
+            .patch(SettingsPatch {
+                mail: Some(mail),
+                ..Default::default()
+            })
+            .unwrap();
+        let reopened = SettingsStore::open(directory.path()).unwrap();
+        let restored = reopened.get().unwrap();
+        assert!(restored.settings.mail.trash_verification_mail_after_copy);
+        assert_eq!(restored.settings.general.language, "en");
+        assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+        let mut mail = restored.settings.mail;
+        mail.trash_verification_mail_after_copy = false;
+        reopened
+            .patch(SettingsPatch {
+                mail: Some(mail),
+                ..Default::default()
+            })
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+        assert_eq!(
+            saved["settings"]["mail"]["trashVerificationMailAfterCopy"],
+            false
+        );
+        assert!(
+            saved["settings"]["general"]
+                .get("trashVerificationMailAfterCopy")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn malformed_verification_cleanup_ipc_is_rejected() {
+    for value in [
+        serde_json::json!("yes"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        assert!(
+            serde_json::from_value::<SettingsPatch>(serde_json::json!({
+                "mail": {"trashVerificationMailAfterCopy": value}
+            }))
+            .is_err()
+        );
     }
 }
 

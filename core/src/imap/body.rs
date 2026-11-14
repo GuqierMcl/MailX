@@ -74,14 +74,28 @@ impl Session {
     /// when this collector takes over. Consuming the session ensures that an
     /// interrupted or rejected body transfer can never contaminate later work.
     pub(crate) async fn fetch_message(
+        self,
+        uid: u32,
+        size: Option<u64>,
+    ) -> Result<Option<Vec<u8>>, ImapError> {
+        self.fetch_message_limited(uid, size, MAX_MESSAGE_BYTES)
+            .await
+    }
+
+    /// The notification path supplies a smaller payload cap. The cap is
+    /// enforced against untrusted literal declarations before allocation,
+    /// independently of the server's stored RFC822.SIZE hint.
+    pub(crate) async fn fetch_message_limited(
         mut self,
         uid: u32,
         size: Option<u64>,
+        payload_limit: usize,
     ) -> Result<Option<Vec<u8>>, ImapError> {
         if uid == 0 {
             return Err(protocol());
         }
-        if size.is_some_and(|value| value > MAX_MESSAGE_BYTES as u64) {
+        let payload_limit = payload_limit.min(MAX_MESSAGE_BYTES);
+        if payload_limit == 0 || size.is_some_and(|value| value > payload_limit as u64) {
             return Err(ImapError::TooLarge);
         }
         let guard = self.body_guard.clone().ok_or_else(protocol)?;
@@ -91,7 +105,15 @@ impl Session {
         let tag = "MAILXBODY";
         let result = timeout(
             body_timeout(size),
-            fetch(self.inner.get_mut(), tag, uid, Limits::default()),
+            fetch(
+                self.inner.get_mut(),
+                tag,
+                uid,
+                Limits {
+                    payload: payload_limit,
+                    ..Limits::default()
+                },
+            ),
         )
         .await
         .map_err(|_| ImapError::Timeout)?;

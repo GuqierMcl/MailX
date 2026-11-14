@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useState } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { AiMagicIcon, ComputerIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
   Sidebar,
@@ -25,11 +25,12 @@ import { NotificationsPane } from './notifications-pane'
 import { ComposePane } from './compose-pane'
 import { ContactsPane } from './contacts-pane'
 import { GeneralPane } from './general-pane'
+import { MailEnhancementsPane } from './mail-enhancements-pane'
 import { McpPane } from './mcp-pane'
 import { AboutPane } from './about-pane'
 import { ShortcutsPane } from './shortcuts-pane'
 
-export type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'mailEnhancements' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -63,6 +64,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       items: [
         { id: 'compose', name: t('settings:compose'), icon: PencilEdit02Icon },
         { id: 'contacts', name: t('settings:contacts'), icon: UserMultiple02Icon },
+        { id: 'mailEnhancements', name: t('settings:mailEnhancements'), icon: InboxIcon },
         { id: 'security', name: t('settings:security'), icon: Shield01Icon },
         { id: 'translation', name: t('settings:translation'), icon: LanguagesIcon },
       ],
@@ -119,6 +121,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
               {section === 'contacts' && <ContactsPane client={client} />}
+              {section === 'mailEnhancements' && <MailEnhancementsPane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
               {section === 'translation' && <TranslationPane client={client} onNavigate={setSection} />}
               {section === 'ai' && <AiPane client={client} />}

@@ -1270,6 +1270,7 @@ pub(crate) async fn settings_update(
 }
 
 pub(crate) fn emit_settings_changed(app: &tauri::AppHandle, snapshot: &SettingsSnapshot) {
+    crate::notifications::settings_changed(app, snapshot);
     let change = mailx_core::SettingsChanged {
         revision: snapshot.revision,
     };

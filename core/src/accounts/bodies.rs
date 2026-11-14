@@ -20,8 +20,21 @@ impl AccountService {
         self.storage.body_identity_current(identity)
     }
 
+    pub(crate) fn notification_header(
+        &self,
+        id: &str,
+    ) -> Result<Option<(String, String, bool)>, AppError> {
+        validate_email_id(id)?;
+        self.storage.notification_header(id)
+    }
+
     pub(crate) fn preview_targets(&self, ids: &[String]) -> Result<Vec<BodyIdentity>, AppError> {
         self.storage.preview_targets(ids)
+    }
+
+    pub(crate) fn verification_code_header(&self, id: &str) -> Result<Option<String>, AppError> {
+        validate_email_id(id)?;
+        self.storage.verification_code_header(id)
     }
 
     pub(crate) fn preview_commit(

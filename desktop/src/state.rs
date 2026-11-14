@@ -223,8 +223,12 @@ impl DesktopState {
         mailx_core::NotificationSettings,
         mailx_core::SupportedLocale,
     )> {
-        let snapshot = self.settings_store().ok()?.get().ok()?;
+        let snapshot = self.notification_snapshot()?;
         Some((snapshot.settings.notifications, snapshot.effective_locale))
+    }
+
+    pub(crate) fn notification_snapshot(&self) -> Option<mailx_core::SettingsSnapshot> {
+        self.settings_store().ok()?.get().ok()
     }
 
     /// The AI provider service, created on first use.

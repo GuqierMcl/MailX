@@ -294,5 +294,15 @@
   "shortcutStar": "加星标或取消星标",
   "shortcutRead": "标为已读或未读",
   "shortcutSelectAll": "全选（选择邮件时）",
-  "shortcutCompose": "写邮件"
+  "shortcutCompose": "写邮件",
+  "verificationCodeBar": "验证码",
+  "verificationCodeLabel": "验证码",
+  "verificationCopy": "复制验证码",
+  "verificationCopiedShort": "已复制",
+  "verificationCopying": "正在复制…",
+  "verificationCopied": "验证码已复制",
+  "verificationCopyFailed": "无法复制验证码",
+  "verificationCopiedAndTrashed": "验证码已复制，邮件已移到已删除",
+  "verificationCopiedKept": "验证码已复制，邮件无法移到已删除，已保留",
+  "verificationCleanupFailed": "验证码已复制，但未能将邮件移到已删除"
 }

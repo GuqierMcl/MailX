@@ -29,6 +29,8 @@ import type {
   RemoteImageStatus,
   FlagWriteBack,
   EmailDeletion,
+  VerificationCodeStatus,
+  VerificationCodeCopyOutcome,
   MessagesDeleted,
   MailStateChanged,
   ArchiveOutcome,
@@ -162,6 +164,13 @@ export interface MailxClient {
   deleteEmails(emailIds: string[], confirmedPermanent: boolean, partial?: boolean): Promise<EmailDeletion>
   /** Takes a deletion back before it reaches the server; `alreadyDeleting` after. */
   undoDelete(batchId: string): Promise<void>
+  /** Shared local recognition; only explicit bounded candidate reads may fetch. */
+  getVerificationCode(emailId: string, allowFetch: boolean): Promise<VerificationCodeStatus>
+  copyVerificationCode(emailId: string, recognitionId: string): Promise<VerificationCodeCopyOutcome>
+  undoVerificationCodeDelete(batchId: string): Promise<void>
+  /** Copies performed from system notifications, without exposing code values. */
+  onVerificationCodeCopied(listener: (outcome: VerificationCodeCopyOutcome) => void): () => void
+  onVerificationCodeChanged(listener: (change: { emailIds: string[] }) => void): () => void
   /**
    * Archives inbox emails on this device only (the server is not touched);
    * the whole batch is refused unless every id is a visible inbox email.
@@ -500,6 +509,11 @@ export function createDesktopClient(): MailxClient {
     },
     deleteEmails: (emailIds, confirmedPermanent, partial = false) => call<EmailDeletion>('emails_delete', { emailIds, confirmedPermanent, partial }),
     undoDelete: (batchId) => call<void>('emails_undo_delete', { batchId }),
+    getVerificationCode: (emailId, allowFetch) => call<VerificationCodeStatus>('emails_verification_code_status', { emailId, allowFetch }),
+    copyVerificationCode: (emailId, recognitionId) => call<VerificationCodeCopyOutcome>('emails_copy_verification_code', { emailId, recognitionId }),
+    undoVerificationCodeDelete: (batchId) => call<void>('emails_undo_verification_code_delete', { batchId }),
+    onVerificationCodeCopied: (listener) => subscribe<VerificationCodeCopyOutcome>('mailx://verification-code-copied', listener),
+    onVerificationCodeChanged: (listener) => subscribe<{ emailIds: string[] }>('mailx://verification-code-changed', listener),
     archiveEmails: (emailIds, partial = false) => call<ArchiveOutcome>('emails_archive', { emailIds, partial }),
     unarchiveEmails: (emailIds, partial = false) => call<ArchiveOutcome>('emails_unarchive', { emailIds, partial }),
     setFlags: (emailIds, flag, wanted) => call<FlagBatchOutcome>('emails_set_flags', { emailIds, flag, wanted }),

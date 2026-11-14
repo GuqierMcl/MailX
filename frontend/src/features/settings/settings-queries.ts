@@ -56,6 +56,7 @@ export const DEFAULT_TRANSLATION: TranslationSettings = {
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
+export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false }, false)
 export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */
