@@ -19,7 +19,7 @@
 | [远程图片调研与优化](remote-image-loading.md) | Implemented：外部项目证据、图片兼容、代理信任策略；真实代理矩阵待补 |
 | [工具层与调用入口](agent-tools.md) | 共享工具、授权和结果整形；本地 MCP 已接入，内置 Agent 与远程 MCP 待接入 |
 | [AI 交互界面](ai-chat-ui.md) | Proposed：自建的 AI 共用构件、各入口形态、动效时长与缓动、流式与长对话的性能要求 |
-| [内置 AI 工具权限](ai-permissions.md) | Proposed：内置 AI 的动作分级、core 强制的逐次确认与确认凭据、范围与限额；修订内置 Agent 发信无需确认的旧约定 |
+| [内置 AI 工具权限](ai-permissions.md) | Proposed：内置 AI 与 MCP 能力对齐；读取与整理直接执行、整理可撤销，发信默认每次确认，需要确认时由 core 暂停运行等待主窗口回应 |
 | [整理邮件工具](mail-organize-tools.md) | MCP 标记、归档、同步刷新与打开草稿，查询增强、事件和精确撤销 |
 | [发送与附件工具](mail-send-tools.md) | MCP 直接发信、发送结果与取消、草稿附件增删 |
 | [桌面与 Web](desktop-web.md) | 两种宿主、前端数据流、进程生命周期和部署 |

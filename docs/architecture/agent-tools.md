@@ -121,7 +121,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 内置 Agent 的工具结果会进入模型请求，因此每次工具调用都按 [AI Runtime](../ai-runtime/README.md) 的披露规则计入范围；MCP 侧的风险提示在授权界面说明。
 
-内置 Agent 的写操作另有按动作的“直接执行 / 询问 / 不提供”策略与 core 强制的确认凭据，发信每次确认，规划见[内置 AI 工具权限](ai-permissions.md)（Proposed，未实现）。
+内置 Agent 与 MCP 使用相同的工具；写操作按类别“直接执行 / 询问”，需要询问时由 core 内的循环暂停等待主窗口回应，发信默认每次确认，规划见[内置 AI 工具权限](ai-permissions.md)（Proposed，未实现），实现选型见 [ADR 0005](../adr/0005-builtin-agent-loop.md)。
 
 ## 6. 结果与错误
 
