@@ -1,6 +1,6 @@
 # AI Runtime
 
-状态：**Proposed** · 2026-11-15 修订。服务商与模型配置、非流式 `complete` 调用和以模型为来源的翻译已有实现；流式客户端、`core/src/assistant/` 中的运行管理与智能体循环（含同意、上限、取消、「此刻」概述缓存）和 `assistant` 设置已在 core 实现；暂停等待确认、撤销整理所需的数据与桌面 IPC（主窗口命令与事件，见[应用服务 API](../contracts/app-api.md#ai-助手主窗口)）已实现，仅有自动测试；界面尚未实现。实现选型见 [ADR 0005](../adr/0005-builtin-agent-loop.md)，权限见[内置 AI 工具权限](../architecture/ai-permissions.md)，界面见 [AI 交互界面](../architecture/ai-chat-ui.md)。
+状态：**Proposed** · 2026-11-15 修订。服务商与模型配置、非流式 `complete` 调用和以模型为来源的翻译已有实现；流式客户端、`core/src/assistant/` 中的运行管理与智能体循环（含同意、上限、取消、「此刻」概述缓存）和 `assistant` 设置已在 core 实现；暂停等待确认、撤销整理所需的数据与桌面 IPC（主窗口命令与事件，见[应用服务 API](../contracts/app-api.md#ai-助手主窗口)）已实现，仅有自动测试；界面已有“设置 → 集成 → AI → 助手”与「此刻」AI 概述句（自动测试与浏览器预览，未在桌面实机或真实服务商上验证），对话界面尚未实现。实现选型见 [ADR 0005](../adr/0005-builtin-agent-loop.md)，权限见[内置 AI 工具权限](../architecture/ai-permissions.md)，界面见 [AI 交互界面](../architecture/ai-chat-ui.md)。
 
 ## 1. 定位
 
@@ -88,6 +88,8 @@ awaitingConsent → running ⇄ awaitingConfirmation
 | AI 可以做什么 | 整理邮件、AI 自己的草稿：直接执行（默认）/ 每次询问；发信：每次确认（默认）/ 直接发送 |
 | 自定义指令 | 一段文字，附加到系统提示，例如称呼、语气、签名习惯 |
 | 保存对话记录 | 第二期；开关与“清除全部” |
+
+“AI 可以做什么”与“自定义指令”只影响对话，在对话界面上线前设置页不显示这几行（`AssistantGroup` 的 `chat` 开关）；它们已保存在设置中，默认值即上表所列。
 
 ## 8. 上限与预算（初始值，实测后调整）
 

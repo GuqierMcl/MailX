@@ -107,10 +107,20 @@ pub(crate) async fn assistant_grant_consent(
     Ok(respond(
         async {
             args?;
-            state.assistant(&app)?.grant_consent().await
+            let consent = state.assistant(&app)?.grant_consent().await?;
+            settings_changed(&app, &state);
+            Ok(consent)
         }
         .await,
     ))
+}
+
+/// Consent lives in the settings file: tell every window, like a settings
+/// update does, so their settings caches see the new revision.
+fn settings_changed(app: &tauri::AppHandle, state: &DesktopState) {
+    if let Some(snapshot) = state.notification_snapshot() {
+        crate::commands::emit_settings_changed(app, &snapshot);
+    }
 }
 
 /// Works without a ready core: settings do not need one, and without a core
@@ -127,7 +137,7 @@ pub(crate) async fn assistant_revoke_consent(
     Ok(respond(
         async {
             args?;
-            match state.assistant(&app) {
+            let result = match state.assistant(&app) {
                 Ok(assistant) => assistant.revoke_consent(),
                 Err(error) if error.code == ErrorCode::CoreNotReady => {
                     state
@@ -140,7 +150,11 @@ pub(crate) async fn assistant_revoke_consent(
                         .await
                 }
                 Err(error) => Err::<(), AppError>(error),
+            };
+            if result.is_ok() {
+                settings_changed(&app, &state);
             }
+            result
         }
         .await,
     ))

@@ -94,7 +94,7 @@
 - [ ] 补齐目标平台安装包中的 MCP sidecar 路径、AppImage 复制、客户端兼容以及中断 / 恢复验证；不能用 core 或 IPC 自动测试替代。
 - [ ] 持续扩展注入样本、跨账号访问、失败流与进程中断的验证证据。
 - [x] 内置 AI 的服务商与模型配置：多连接、OpenAI / Anthropic 兼容接口（Ollama 经其 OpenAI 兼容接口作为内置预设）、models.dev 目录、模型列表与测试调用、默认模型和专用代理；仅有自动测试，尚无功能使用模型。见[设计](../architecture/ai-providers.md)。
-- [ ] 内置 AI 运行时（[设计](../ai-runtime/README.md)，自建见 [ADR 0005](../adr/0005-builtin-agent-loop.md)）：OpenAI 兼容与 Anthropic 的流式输出与工具调用、内存中的运行管理、智能体循环、内容发送同意、暂停等待确认、助手设置；第一个使用方为「此刻」的 AI 概述句。
+- [x] 内置 AI 运行时（[设计](../ai-runtime/README.md)，自建见 [ADR 0005](../adr/0005-builtin-agent-loop.md)）：OpenAI 兼容与 Anthropic 的流式输出与工具调用、内存中的运行管理、智能体循环、内容发送同意、暂停等待确认、助手设置；第一个使用方为「此刻」的 AI 概述句。已实现：core 与桌面宿主、设置页“助手”一组与「此刻」AI 概述句；仅自动测试与浏览器预览，未用真实服务商与桌面实机验证。
 - [ ] 内置 AI 对话：「此刻」对话框，与 MCP 相同的工具，整理直接执行可撤销、发信默认每次确认（[权限](../architecture/ai-permissions.md)），界面见 [AI 交互界面](../architecture/ai-chat-ui.md)。
 - [ ] 内置 AI 的阅读区与写信窗口：总结、待办建议、改写与起草回复；对话记录的保存与清除。
 

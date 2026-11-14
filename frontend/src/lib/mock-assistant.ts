@@ -23,6 +23,8 @@ export type MockAssistantDeps = {
   /** A draft addressed to someone new, as the assistant would have written it. */
   draftToSend: () => Promise<{ draft: Draft; accountName: string; accountAddress: string }>
   send: (draft: Draft) => Promise<OutboxItem>
+  /** The connection the assistant would use now, as the core's `assistant_binding`; `null` without a model. */
+  binding?: () => AiConsent | null
 }
 
 type Run = { snap: RunSnapshot; waiting: ((approved: boolean) => void) | null }
@@ -50,6 +52,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     switch (kind.type) {
       case 'state':
         snap.state = kind.state
+        if (over(kind.state)) snap.completedAt = new Date().toISOString()
         if (kind.state !== 'awaitingConfirmation') snap.pending = null
         break
       case 'text': snap.text += kind.delta; break
@@ -140,7 +143,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
   function create(kind: RunSnapshot['kind'], state: RunSnapshot['state'], conversationId: string | null): Run {
     const run: Run = {
       waiting: null,
-      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], error: null, finishedReason: null, seq: 0, conversationId, pending: null },
+      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], error: null, finishedReason: null, completedAt: null, seq: 0, conversationId, pending: null },
     }
     runs.set(run.snap.runId, run)
     emit(run, { type: 'state', state })
@@ -164,7 +167,9 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       if (kind.type === 'chat' && (!kind.message.trim() || kind.message.length > 20_000)) throw failure('validation', 'message')
       const tag = kind.type
       const conversationId = kind.type === 'chat' ? kind.conversationId ?? crypto.randomUUID() : null
-      if (!consent) return structuredClone(create(tag, 'awaitingConsent', conversationId).snap)
+      // Like the core: the consent must name the connection in use now; switching connections asks again.
+      const binding = deps.binding?.() ?? MOCK_CONSENT
+      if (!consent || consent.connectionId !== binding.connectionId || consent.baseUrl !== binding.baseUrl) return structuredClone(create(tag, 'awaitingConsent', conversationId).snap)
       const run = create(tag, 'running', conversationId)
       const body = kind.type === 'chat' ? chat(run, kind.message.trim()) : nowSummary(run)
       void body.catch(() => { emit(run, { type: 'failed', code: 'internal' }); emit(run, { type: 'state', state: 'failed' }) })
@@ -184,7 +189,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       emit(run, { type: 'state', state: 'running' })
       answer(approved)
     },
-    async grantConsent() { consent = MOCK_CONSENT; return structuredClone(consent) },
+    async grantConsent() { consent = deps.binding?.() ?? MOCK_CONSENT; return structuredClone(consent) },
     async revokeConsent() {
       consent = null
       for (const run of runs.values()) {

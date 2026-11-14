@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppSettings, LayoutSettings, SettingsPatch, TranslationSettings } from '@/generated/accounts'
+import type { AppSettings, AssistantSettings, LayoutSettings, SettingsPatch, TranslationSettings } from '@/generated/accounts'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { DEFAULT_APPEARANCE, applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
@@ -56,6 +56,11 @@ export const DEFAULT_TRANSLATION: TranslationSettings = {
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
+export const DEFAULT_ASSISTANT: AssistantSettings = {
+  enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '',
+}
+/** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
+export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)
 export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false }, false)
 export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' }, false)
 

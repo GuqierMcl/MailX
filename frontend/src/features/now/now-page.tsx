@@ -26,6 +26,8 @@ import { NowAmbient } from './now-ambient'
 import { relativeTime } from './relative-time'
 import { compareWeeks, dayStarts, syncSummary } from './activity'
 import { ActivityChart } from './activity-chart'
+import { SummaryLine } from './summary-line'
+import { useNowSummary } from './use-now-summary'
 
 /** Rows of unread inbox mail the page lists; more are a link away. */
 export const UNREAD_ROWS = 6
@@ -97,6 +99,8 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   if (!shown && !overview.isPending && !unreadList.isPending) setShown(true)
 
   const data = overview.data
+  // The AI sentence starts once the overview is in, for the same period the page shows.
+  const summary = useNowSummary({ client, ready: data !== undefined, since, dayStarts: starts })
   const fresh = useFreshCodes(data?.verificationCodes ?? [])
   useCodeTargets(verification, fresh)
   // Only codes the shared recognizer has confirmed, so every one shown can be copied.
@@ -162,7 +166,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               <header {...motionProps(animate, 0, 'px-3')}>
                 <p className="text-sm text-muted-foreground">{date}</p>
                 <h1 className="mt-1 text-3xl font-semibold tracking-tight text-balance">{greeting}</h1>
-                <p className="mt-2 min-h-6 text-base text-muted-foreground">{data ? summaryLine(now, context) : null}</p>
+                <SummaryLine client={client} preset={data ? summaryLine(now, context) : null} summary={summary} />
                 {nothingPending && context.kind !== 'clear' && <p className="mt-1 text-base text-muted-foreground">{t('now:allClear')}</p>}
               </header>
 

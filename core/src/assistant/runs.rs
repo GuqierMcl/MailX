@@ -19,6 +19,11 @@ use crate::{
     events::{CoreEvent, Events},
 };
 
+/// The current time as RFC 3339 UTC with milliseconds.
+pub(crate) fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 /// Runs that may be active at once.
 pub(crate) const MAX_ACTIVE_RUNS: usize = 2;
 /// Finished runs stay readable this long ...
@@ -91,6 +96,7 @@ impl Runs {
                     entry.waiting = None;
                 }
                 if state.finished() {
+                    snapshot.completed_at = Some(now_rfc3339());
                     entry.finished_at = Some(Instant::now());
                 }
             }
@@ -166,6 +172,7 @@ impl Runs {
                 tools: Vec::new(),
                 error: None,
                 finished_reason: None,
+                completed_at: None,
                 seq: 0,
                 conversation_id,
                 pending: None,
@@ -186,7 +193,12 @@ impl Runs {
     }
 
     /// A run that is already complete: nothing runs, nothing is emitted.
-    pub(crate) fn create_completed(&self, kind: RunKindTag, text: String) -> RunSnapshot {
+    pub(crate) fn create_completed(
+        &self,
+        kind: RunKindTag,
+        text: String,
+        completed_at: String,
+    ) -> RunSnapshot {
         let mut table = self.lock();
         Self::sweep_at(&mut table, Instant::now());
         let run_id = Uuid::new_v4().to_string();
@@ -199,6 +211,7 @@ impl Runs {
             tools: Vec::new(),
             error: None,
             finished_reason: Some(FinishedReason::Stop),
+            completed_at: Some(completed_at),
             seq: 0,
             conversation_id: None,
             pending: None,

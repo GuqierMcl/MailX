@@ -718,7 +718,7 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
     }
     let cut = turn.reason == Some(FinishReason::Length);
     if !cut {
-        inner.summaries.put(key, answer);
+        inner.summaries.put(key, answer, super::runs::now_rfc3339());
     }
     Outcome::Finished(if cut {
         FinishedReason::Length

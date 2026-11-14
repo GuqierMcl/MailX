@@ -176,6 +176,10 @@ pub struct RunSnapshot {
     pub tools: Vec<ToolActivity>,
     pub error: Option<ErrorCode>,
     pub finished_reason: Option<FinishedReason>,
+    /// When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC
+    /// with milliseconds; `None` while it is going. A Now summary answered
+    /// from the cache carries the time its text was first generated.
+    pub completed_at: Option<String>,
     /// The `seq` of the last event this snapshot includes; later events
     /// continue from it.
     #[ts(type = "number")]

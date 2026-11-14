@@ -151,7 +151,9 @@ fn key(input: &str, model: &str, locale: SupportedLocale) -> String {
 /// Answers by (input, model, prompt version, locale), in memory.
 #[derive(Default)]
 pub(crate) struct SummaryCache {
-    entries: Mutex<HashMap<String, (Instant, String)>>,
+    /// Value: when it was stored, the text, and the generation time shown to
+    /// the user (RFC 3339 UTC).
+    entries: Mutex<HashMap<String, (Instant, String, String)>>,
 }
 
 impl SummaryCache {
@@ -159,27 +161,30 @@ impl SummaryCache {
         key(input, model, locale)
     }
 
-    pub(crate) fn get(&self, key: &str) -> Option<String> {
+    /// The cached text and the time it was generated.
+    pub(crate) fn get(&self, key: &str) -> Option<(String, String)> {
         self.get_at(key, Instant::now())
     }
 
-    fn get_at(&self, key: &str, now: Instant) -> Option<String> {
+    fn get_at(&self, key: &str, now: Instant) -> Option<(String, String)> {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        entries.retain(|_, (at, _)| now.saturating_duration_since(*at) < CACHE_FOR);
-        entries.get(key).map(|(_, text)| text.clone())
+        entries.retain(|_, (at, _, _)| now.saturating_duration_since(*at) < CACHE_FOR);
+        entries
+            .get(key)
+            .map(|(_, text, generated)| (text.clone(), generated.clone()))
     }
 
-    pub(crate) fn put(&self, key: String, text: String) {
+    pub(crate) fn put(&self, key: String, text: String, generated_at: String) {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         if entries.len() >= CACHE_ENTRIES
             && let Some(oldest) = entries
                 .iter()
-                .min_by_key(|(_, (at, _))| *at)
+                .min_by_key(|(_, (at, _, _))| *at)
                 .map(|(key, _)| key.clone())
         {
             entries.remove(&oldest);
         }
-        entries.insert(key, (Instant::now(), text));
+        entries.insert(key, (Instant::now(), text, generated_at));
     }
 
     #[cfg(test)]
@@ -210,11 +215,15 @@ mod tests {
     #[test]
     fn cache_expires_and_stays_small() {
         let cache = SummaryCache::default();
-        cache.put("k".into(), "text".into());
-        assert_eq!(cache.get("k").as_deref(), Some("text"));
+        cache.put("k".into(), "text".into(), "2026-01-02T03:04:05.678Z".into());
+        // The original generation time comes back, not the time of the lookup.
+        assert_eq!(
+            cache.get("k"),
+            Some(("text".to_owned(), "2026-01-02T03:04:05.678Z".to_owned()))
+        );
         assert!(cache.expired_for_test("k"));
         for i in 0..40 {
-            cache.put(format!("k{i}"), "x".into());
+            cache.put(format!("k{i}"), "x".into(), "t".into());
         }
         assert!(cache.entries.lock().unwrap().len() <= CACHE_ENTRIES);
     }

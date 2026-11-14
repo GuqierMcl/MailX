@@ -113,8 +113,17 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   let mcpStatus: McpStatus = { state: 'off' }
   const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
+  const consentChanged = () => {
+    settings = { ...settings, revision: settings.revision + 1 }
+    window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
+  }
   const assistant = createMockAssistant({
     stepMs: options.assistantStepMs ?? 40,
+    binding() {
+      const model = settings.settings.assistant.model ?? aiDefault
+      const connection = model && aiConnections.find((item) => item.id === model.connectionId)
+      return connection ? { connectionId: connection.id, baseUrl: connection.baseUrl } : null
+    },
     locale: () => settings.effectiveLocale,
     overview() {
       const inbox = emails.filter((email) => folders.find((folder) => folder.id === email.summary.folderId)?.role === 'inbox' && !email.summary.archived)
@@ -1142,8 +1151,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     assistantCancel: (runId) => assistant.cancel(runId),
     assistantSnapshot: (runId) => assistant.snapshot(runId),
     assistantRespond: (runId, requestId, approved) => assistant.respond(runId, requestId, approved),
-    assistantGrantConsent: () => assistant.grantConsent(),
-    assistantRevokeConsent: () => assistant.revokeConsent(),
+    // Like the core, a consent change is a settings change: a new revision and the usual event.
+    assistantGrantConsent: async () => { const consent = await assistant.grantConsent(); consentChanged(); return consent },
+    assistantRevokeConsent: async () => { await assistant.revokeConsent(); consentChanged() },
     onAssistantEvent: (listener) => assistant.onEvent(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),

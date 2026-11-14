@@ -19,6 +19,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { aiKeys } from '@/lib/query-client'
 import { AiProviderIcon } from './ai-provider-icon'
 import { AiProviderDialog } from './ai-provider-dialog'
+import { AssistantGroup } from './assistant-group'
 import { useAiCatalog, useAiState, useModelGroups } from './ai-queries'
 import { ModelList } from './ai-model-picker'
 import { ProxyPasswordFields, ProxyRows } from './proxy-rows'
@@ -30,7 +31,8 @@ const hostOf = (baseUrl: string) => {
   try { return new URL(baseUrl).host } catch { return baseUrl }
 }
 
-export function AiPane({ client }: { client: MailxClient }) {
+/** `assistantChat` shows the assistant settings only the chat uses; off until the chat ships. */
+export function AiPane({ client, assistantChat = false }: { client: MailxClient; assistantChat?: boolean }) {
   useTranslation()
   const queryClient = useQueryClient()
   const state = useAiState(client)
@@ -82,6 +84,7 @@ export function AiPane({ client }: { client: MailxClient }) {
     <SettingsGroup title={t('settings:aiDefaultModel')}>
       <DefaultModelRow client={client} ai={ai} onPick={(model) => attempt(client.aiSetDefaultModel(model))} />
     </SettingsGroup>
+    <AssistantGroup client={client} ai={ai} chat={assistantChat} />
     <SettingsDisclosure title={t('settings:aiAdvanced')}
       summary={ai.route.kind === 'proxy' ? t('settings:translationAdvancedProxy', { host: ai.route.host, port: ai.route.port }) : t('settings:translationNetworkDirect')}>
       <ProxyRows idPrefix="ai" route={ai.route} networkDescription={t('settings:aiNetworkDescription')}

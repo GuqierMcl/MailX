@@ -735,6 +735,7 @@ type RunSnapshot = {
   seq: number;                      // 快照包含的最后一个事件序号
   conversationId: string | null;    // 对话才有
   pending: PendingConfirmation | null; // 仅在 awaitingConfirmation 时非空
+  completedAt: string | null;       // 结束（completed / failed / canceled）的时间，RFC 3339 UTC；缓存的「此刻」概述为原始生成时间
 };
 type ToolActivity = { callId: string; name: string; status: "running" | "done" | "failed" | "denied"; summary: ToolActivitySummary };
 type ToolActivitySummary =

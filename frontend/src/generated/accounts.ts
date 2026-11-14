@@ -1237,6 +1237,12 @@ export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
  */
 text: string, tools: Array<ToolActivity>, error: ErrorCode | null, finishedReason: FinishedReason | null,
 /**
+ * When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC
+ * with milliseconds; `None` while it is going. A Now summary answered
+ * from the cache carries the time its text was first generated.
+ */
+completedAt: string | null,
+/**
  * The `seq` of the last event this snapshot includes; later events
  * continue from it.
  */

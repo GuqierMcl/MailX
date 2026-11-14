@@ -131,7 +131,7 @@ Finished translations are kept on this computer so reopening a message does not 
 
 ## AI
 
-Settings → Integrations → AI connects MailX to AI model providers. Translation can use a model (choose "AI model" under Translation); nothing else in MailX does yet, and nothing you read or write is sent to a model unless you choose that.
+Settings → Integrations → AI connects MailX to AI model providers. Translation can use a model (choose "AI model" under Translation), and the assistant can write the summary line on the Now page. Nothing you read or write is sent to a model unless you agree to it.
 
 ### Add a provider
 
@@ -148,6 +148,12 @@ Under "Default model", choose one of the models of a provider you added. "Test" 
 ### Use a proxy for AI
 
 AI connects directly by default. Under "Advanced" you can set a proxy (SOCKS5 or HTTP, with an optional username and password) used only for AI; then choose per provider whether it goes through it. The proxy you set on a mail account is not used. If the proxy fails, the request fails and never connects directly.
+
+### Assistant
+
+Under "Assistant" in the same page you can turn the assistant on or off, pick the model it uses (it follows the default model unless you choose another), and choose which mailboxes it may read.
+
+With a model set up, the Now page offers "Summarize with AI" next to its summary line. The first time, MailX asks whether the subjects, senders and text of your mail may be sent to that provider; attachments and images are not sent. After you agree, the line is written by the model, marked with a small sparkle, and you can hover it to see when it was written or write it again. If anything goes wrong, the usual line stays. To take back your agreement, choose "Revoke" under "Sending mail content"; switching to a provider at another address asks again.
 
 ## Composing and sending
 

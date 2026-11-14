@@ -225,8 +225,10 @@ impl Assistant {
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
         let input = summary::build_input(&overview, &ready.settings.excluded_accounts, has_since);
         let key = SummaryCache::key(&input, &ready.target.model_id, ready.locale);
-        if let Some(text) = inner.summaries.get(&key) {
-            return Ok(inner.runs.create_completed(RunKindTag::NowSummary, text));
+        if let Some((text, completed_at)) = inner.summaries.get(&key) {
+            return Ok(inner
+                .runs
+                .create_completed(RunKindTag::NowSummary, text, completed_at));
         }
         let run_id = inner
             .runs

@@ -7,11 +7,12 @@ import composer from '../../../locales/zh-CN/composer.json'
 import errors from '../../../locales/zh-CN/errors.json'
 import updater from '../../../locales/zh-CN/updater.json'
 import now from '../../../locales/zh-CN/now.json'
+import ai from '../../../locales/zh-CN/ai.json'
 
 declare module 'i18next' {
   interface CustomTypeOptions {
     defaultNS: 'common'
     returnNull: false
-    resources: { common: typeof common; settings: typeof settings; accounts: typeof accounts; mail: typeof mail; composer: typeof composer; errors: typeof errors; updater: typeof updater; now: typeof now }
+    resources: { common: typeof common; settings: typeof settings; accounts: typeof accounts; mail: typeof mail; composer: typeof composer; errors: typeof errors; updater: typeof updater; now: typeof now; ai: typeof ai }
   }
 }

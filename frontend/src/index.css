@@ -55,6 +55,20 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* AI identity (ai-chat-ui.md 4.6): cyan-blue, blue-violet, magenta. Not tied to the accent colour.
+     Light is calmer so it does not go grey on white; dark can be brighter. Decoration and icons only, never text. */
+  --ai-1: oklch(0.7 0.13 215);
+  --ai-2: oklch(0.6 0.19 275);
+  --ai-3: oklch(0.64 0.2 340);
+  --ai-gradient: linear-gradient(90deg, var(--ai-1), var(--ai-2), var(--ai-3));
+  /* The thin working line: transparent at both ends so it glides in and out of nothing. */
+  --ai-flow: linear-gradient(90deg, transparent, var(--ai-1), var(--ai-2), var(--ai-3), transparent);
+  /* Shared motion steps (ai-chat-ui.md 6.1). */
+  --motion-fast: 150ms;
+  --motion-medium: 200ms;
+  --motion-view: 280ms;
+  --motion-glow-out: 300ms;
+  --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
 }
 
 body { margin: 0; min-width: 320px; }
@@ -150,6 +164,9 @@ html[data-translucent].dark .app-canvas {
   --mail-selection: color-mix(in oklab, var(--mail-selection-accent) 22%, var(--background));
   --mail-selection-muted-foreground: oklch(0.708 0 0);
   --mail-pick: color-mix(in oklab, var(--mail-selection-accent) 10%, var(--background));
+  --ai-1: oklch(0.8 0.13 210);
+  --ai-2: oklch(0.7 0.18 275);
+  --ai-3: oklch(0.74 0.2 340);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -277,3 +294,12 @@ html[data-translucent].dark .app-canvas {
   @keyframes now-bar-grow {
     from {
       transform: scaleY(0);}}}
+
+/* The AI working line: a short bright segment glides across a faint track. Only transform moves. */
+@theme {
+  --animate-ai-flow: ai-flow 1.6s var(--ease-out-soft) infinite;
+  @keyframes ai-flow {
+    from {
+      transform: translateX(-100%);}
+    to {
+      transform: translateX(250%);}}}

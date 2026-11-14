@@ -1732,6 +1732,11 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
     let snapshot = fx.finished(&started.run_id).await;
     assert_eq!(snapshot.state, RunState::Completed);
     assert!(snapshot.tools.is_empty());
+    let generated = snapshot.completed_at.clone().expect("completed_at is set");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&generated).is_ok() && generated.ends_with('Z'),
+        "{generated}"
+    );
 
     let request = fx.request(0);
     assert!(request.get("tools").is_none(), "no tools: {request}");
@@ -1756,6 +1761,18 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
     assert_eq!(again.text, "You have mail.");
     assert_eq!(again.seq, 0);
     assert_eq!(fx.requests(), 1, "no second model call");
+    // The cached answer shows when it was generated, not when it was fetched.
+    let cached_at = again.completed_at.clone().expect("cached completed_at");
+    assert!(cached_at.as_str() >= generated.as_str());
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&cached_at)
+            .unwrap()
+            .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&generated).unwrap())
+            < chrono::Duration::seconds(5)
+    );
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let later = fx.assistant.start(summary_request()).await.unwrap();
+    assert_eq!(later.completed_at, again.completed_at);
     assert_eq!(
         fx.assistant.snapshot(&again.run_id).unwrap().text,
         "You have mail."
@@ -1801,6 +1818,10 @@ async fn a_failed_summary_is_not_cached() {
     let started = fx.assistant.start(summary_request()).await.unwrap();
     let snapshot = fx.finished(&started.run_id).await;
     assert_eq!(snapshot.error, Some(ErrorCode::AiUnavailable));
+    assert!(
+        snapshot.completed_at.is_some(),
+        "failed runs are stamped too"
+    );
     fx.model(vec![say("Now it works.")]);
     let again = fx.assistant.start(summary_request()).await.unwrap();
     assert_eq!(again.state, RunState::Running);
