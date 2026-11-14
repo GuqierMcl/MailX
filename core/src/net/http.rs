@@ -6,8 +6,11 @@
 
 use std::time::Duration;
 
+use tokio::time::Instant;
+
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
 use hyper::{
     HeaderMap, Method, Request,
     header::{self, HeaderName, HeaderValue},
@@ -77,14 +80,22 @@ pub(crate) async fn send(request: HttpRequest<'_>) -> Result<HttpReply, HttpErro
         .map_err(|_| HttpError::Timeout)?
 }
 
-async fn send_inner(request: HttpRequest<'_>) -> Result<HttpReply, HttpError> {
+/// What `open` hands back: a sender with its connection task guard.
+struct Opened {
+    sender: hyper::client::conn::http1::SendRequest<Full<Bytes>>,
+    connection: Connection,
+    request: Request<Full<Bytes>>,
+}
+
+/// Connects over the route (a failed proxy is an error, never a direct
+/// connection), upgrades to TLS for `https`, and builds the request.
+async fn open(request: HttpRequest<'_>, accept: &'static str) -> Result<Opened, HttpError> {
     let HttpRequest {
         method,
         url,
         route,
         headers,
         body,
-        max_response_bytes,
         ..
     } = request;
     let tls = match url.scheme() {
@@ -110,26 +121,25 @@ async fn send_inner(request: HttpRequest<'_>) -> Result<HttpReply, HttpError> {
         target.push_str(query);
     }
 
-    // A failed proxy is an error here, never a direct connection.
     let mut stream = super::connect(route, &host, port)
         .await
         .map_err(net_error)?;
     if tls {
         stream = super::upgrade_tls(stream, &host).await.map_err(net_error)?;
     }
-    let (mut sender, connection) = hyper::client::conn::http1::Builder::new()
+    let (sender, connection) = hyper::client::conn::http1::Builder::new()
         .max_buf_size(64 * 1024)
         .handshake(TokioIo::new(stream))
         .await
         .map_err(|_| HttpError::Network)?;
-    let _connection = Connection(tokio::spawn(async move {
+    let connection = Connection(tokio::spawn(async move {
         let _ = connection.await;
     }));
     let mut builder = Request::builder()
         .method(method)
         .uri(target)
         .header(header::HOST, authority)
-        .header(header::ACCEPT, "application/json")
+        .header(header::ACCEPT, accept)
         .header(header::ACCEPT_ENCODING, "identity")
         .header(header::USER_AGENT, "MailX");
     if body.is_some() {
@@ -141,6 +151,20 @@ async fn send_inner(request: HttpRequest<'_>) -> Result<HttpReply, HttpError> {
     for (name, value) in headers {
         request.headers_mut().insert(name, value);
     }
+    Ok(Opened {
+        sender,
+        connection,
+        request,
+    })
+}
+
+async fn send_inner(request: HttpRequest<'_>) -> Result<HttpReply, HttpError> {
+    let max_response_bytes = request.max_response_bytes;
+    let Opened {
+        mut sender,
+        connection: _connection,
+        request,
+    } = open(request, "application/json").await?;
     let response = sender
         .send_request(request)
         .await
@@ -162,5 +186,93 @@ async fn send_inner(request: HttpRequest<'_>) -> Result<HttpReply, HttpError> {
         status,
         headers,
         body: bytes,
+    })
+}
+
+/// Bounds for one streamed answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StreamLimits {
+    /// Connecting, TLS and the response headers.
+    pub first_byte: Duration,
+    /// The longest gap between two body chunks.
+    pub idle: Duration,
+    /// The whole answer, from the start of the request.
+    pub total: Duration,
+    /// The body's size across all chunks.
+    pub max_bytes: usize,
+}
+
+/// A response whose body is read chunk by chunk. The connection task lives
+/// as long as this value; dropping it (mid-stream or not) aborts the task and
+/// closes the socket, which is how a stream is cancelled.
+pub(crate) struct StreamingReply {
+    pub status: u16,
+    body: Incoming,
+    limits: StreamLimits,
+    deadline: Instant,
+    received: usize,
+    _connection: Connection,
+}
+
+impl StreamingReply {
+    /// The next piece of body, `None` at the end. Waits at most the idle
+    /// limit, and never past the total limit (`Timeout`); a body beyond
+    /// `max_bytes` is `TooLarge`.
+    pub(crate) async fn next_chunk(&mut self) -> Result<Option<Bytes>, HttpError> {
+        let wait_until = self.deadline.min(Instant::now() + self.limits.idle);
+        loop {
+            let frame = tokio::time::timeout_at(wait_until, self.body.frame())
+                .await
+                .map_err(|_| HttpError::Timeout)?;
+            let Some(frame) = frame else {
+                return Ok(None);
+            };
+            let frame = frame.map_err(|_| HttpError::Network)?;
+            // Trailers carry nothing we use.
+            if let Ok(data) = frame.into_data() {
+                if data.is_empty() {
+                    continue;
+                }
+                self.received += data.len();
+                if self.received > self.limits.max_bytes {
+                    return Err(HttpError::TooLarge);
+                }
+                return Ok(Some(data));
+            }
+        }
+    }
+}
+
+/// Like [`send`], but the body is delivered as it arrives (`Accept:
+/// text/event-stream`). `request.timeout` and `request.max_response_bytes` are
+/// not used: `limits` bounds the answer. The body of a non-2xx answer is not
+/// read; the caller only needs the status.
+pub(crate) async fn send_streaming(
+    request: HttpRequest<'_>,
+    limits: StreamLimits,
+) -> Result<StreamingReply, HttpError> {
+    let started = Instant::now();
+    let first_byte = limits.first_byte.min(limits.total);
+    let (response, connection) = tokio::time::timeout(first_byte, async {
+        let Opened {
+            mut sender,
+            connection,
+            request,
+        } = open(request, "text/event-stream").await?;
+        let response = sender
+            .send_request(request)
+            .await
+            .map_err(|_| HttpError::Network)?;
+        Ok::<_, HttpError>((response, connection))
+    })
+    .await
+    .map_err(|_| HttpError::Timeout)??;
+    Ok(StreamingReply {
+        status: response.status().as_u16(),
+        body: response.into_body(),
+        limits,
+        deadline: started + limits.total,
+        received: 0,
+        _connection: connection,
     })
 }

@@ -294,5 +294,8 @@ pub(crate) async fn test(endpoint: &Endpoint<'_>, model: &str) -> Result<u32, Er
     Ok(u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX))
 }
 
+/// Streaming chat with tool calls.
+pub(crate) mod stream;
+
 #[cfg(test)]
 pub(crate) mod tests;

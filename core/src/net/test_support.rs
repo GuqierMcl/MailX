@@ -2,7 +2,11 @@
 //! forward to a local upstream, and a throwaway TLS identity. Everything
 //! listens on 127.0.0.1; nothing here talks to a real server.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -206,6 +210,39 @@ impl MockHttp {
     }
 }
 
+/// Reads one request (head and `Content-Length` body) from `stream`.
+async fn read_request(stream: &mut BufReader<TcpStream>) -> Recorded {
+    let mut line = String::new();
+    stream.read_line(&mut line).await.unwrap();
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or_default().to_owned();
+    let target = parts.next().unwrap_or_default().to_owned();
+    let mut headers = Vec::new();
+    loop {
+        line.clear();
+        stream.read_line(&mut line).await.unwrap();
+        if line == "\r\n" || line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.trim_end().split_once(':') {
+            headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
+        }
+    }
+    let length = headers
+        .iter()
+        .find(|(name, _)| name == "content-length")
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).await.unwrap();
+    Recorded {
+        method,
+        target,
+        headers,
+        body,
+    }
+}
+
 pub(crate) async fn mock_http(
     responder: impl Fn(&Recorded) -> MockReply + Send + Sync + 'static,
 ) -> MockHttp {
@@ -222,35 +259,7 @@ pub(crate) async fn mock_http(
             let (record, responder) = (record.clone(), responder.clone());
             tokio::spawn(async move {
                 let mut stream = BufReader::new(stream);
-                let mut line = String::new();
-                stream.read_line(&mut line).await.unwrap();
-                let mut parts = line.split_whitespace();
-                let method = parts.next().unwrap_or_default().to_owned();
-                let target = parts.next().unwrap_or_default().to_owned();
-                let mut headers = Vec::new();
-                loop {
-                    line.clear();
-                    stream.read_line(&mut line).await.unwrap();
-                    if line == "\r\n" || line.is_empty() {
-                        break;
-                    }
-                    if let Some((name, value)) = line.trim_end().split_once(':') {
-                        headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
-                    }
-                }
-                let length = headers
-                    .iter()
-                    .find(|(name, _)| name == "content-length")
-                    .and_then(|(_, value)| value.parse::<usize>().ok())
-                    .unwrap_or(0);
-                let mut body = vec![0u8; length];
-                stream.read_exact(&mut body).await.unwrap();
-                let request = Recorded {
-                    method,
-                    target,
-                    headers,
-                    body,
-                };
+                let request = read_request(&mut stream).await;
                 let reply = responder(&request);
                 record.lock().unwrap().push(request);
                 let mut head = format!(
@@ -270,4 +279,114 @@ pub(crate) async fn mock_http(
         }
     });
     MockHttp { port, requests }
+}
+
+/// A chunked answer: each chunk is written after its delay.
+pub(crate) struct StreamReply {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub chunks: Vec<(Duration, Vec<u8>)>,
+    /// Keep the connection open after the last chunk (no terminating chunk).
+    pub hold_open: bool,
+}
+
+impl StreamReply {
+    pub(crate) fn sse(chunks: Vec<(Duration, Vec<u8>)>) -> Self {
+        Self {
+            status: 200,
+            headers: vec![("Content-Type".into(), "text/event-stream".into())],
+            chunks,
+            hold_open: false,
+        }
+    }
+
+    /// Chunks with no delay in between.
+    pub(crate) fn sse_chunks(chunks: impl IntoIterator<Item = Vec<u8>>) -> Self {
+        Self::sse(chunks.into_iter().map(|c| (Duration::ZERO, c)).collect())
+    }
+
+    pub(crate) fn hold_open(mut self) -> Self {
+        self.hold_open = true;
+        self
+    }
+
+    pub(crate) fn status(mut self, status: u16) -> Self {
+        self.status = status;
+        self
+    }
+}
+
+/// A server that answers each request with a chunked body and notes when the
+/// client closes the connection.
+pub(crate) struct MockStream {
+    pub http: MockHttp,
+    /// Set once the client side of a connection was seen closing.
+    pub closed: Arc<AtomicBool>,
+}
+
+pub(crate) async fn mock_stream(
+    responder: impl Fn(&Recorded) -> StreamReply + Send + Sync + 'static,
+) -> MockStream {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicBool::new(false));
+    let responder = Arc::new(responder);
+    let (record, flag) = (requests.clone(), closed.clone());
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let (record, flag, responder) = (record.clone(), flag.clone(), responder.clone());
+            tokio::spawn(async move {
+                let mut stream = BufReader::new(stream);
+                let request = read_request(&mut stream).await;
+                let reply = responder(&request);
+                record.lock().unwrap().push(request);
+                let (mut read, mut write) = stream.into_inner().into_split();
+                let mut head = format!(
+                    "HTTP/1.1 {} X\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
+                    reply.status
+                );
+                for (name, value) in &reply.headers {
+                    head.push_str(&format!("{name}: {value}\r\n"));
+                }
+                head.push_str("\r\n");
+                let writer = async {
+                    if write.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for (delay, bytes) in &reply.chunks {
+                        tokio::time::sleep(*delay).await;
+                        let mut frame = format!("{:x}\r\n", bytes.len()).into_bytes();
+                        frame.extend_from_slice(bytes);
+                        frame.extend_from_slice(b"\r\n");
+                        if write.write_all(&frame).await.is_err() || write.flush().await.is_err() {
+                            return;
+                        }
+                    }
+                    if reply.hold_open {
+                        std::future::pending::<()>().await;
+                    }
+                    let _ = write.write_all(b"0\r\n\r\n").await;
+                    let _ = write.shutdown().await;
+                };
+                // The client sends nothing after its request, so a read that
+                // ends means it closed the connection.
+                let watcher = async {
+                    let mut buffer = [0u8; 64];
+                    while matches!(read.read(&mut buffer).await, Ok(n) if n > 0) {}
+                };
+                tokio::select! {
+                    () = writer => {}
+                    () = watcher => flag.store(true, Ordering::SeqCst),
+                }
+            });
+        }
+    });
+    MockStream {
+        http: MockHttp { port, requests },
+        closed,
+    }
 }
