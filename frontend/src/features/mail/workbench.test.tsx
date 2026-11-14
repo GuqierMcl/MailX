@@ -58,8 +58,9 @@ describe('workbench', () => {
     expect(within(list).getAllByText('个人邮箱').length).toBeGreaterThan(0)
     expect(within(list).queryByText('lin.wei@example.com')).not.toBeInTheDocument()
 
-    await userEvent.click(rows[0])
-    expect(rows[0]).toHaveAttribute('aria-current', 'true')
+    const roadmap = rows.find((row) => within(row).queryByText('第三季度产品路线图评审'))!
+    await userEvent.click(roadmap)
+    expect(roadmap).toHaveAttribute('aria-current', 'true')
     expect(await screen.findByRole('heading', { level: 2, name: '第三季度产品路线图评审' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '附件' })).toHaveTextContent('Q3 路线图草稿.pdf')
   })

@@ -330,6 +330,63 @@ indexedBodies: number, syncedAfter: string | null, syncedBefore: string | null, 
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 
+export type MailOverviewQuery = {
+/**
+ * RFC 3339; the last time the user looked at the Now page. `None` asks
+ * for no new-mail section: `newMail` is then empty. The caller decides
+ * what to send on first use (for example the start of today).
+ */
+since: string | null, };
+
+export type AccountMailCount = { accountId: string, count: number, };
+
+export type NewMailOverview = { total: number,
+/**
+ * Only accounts with new mail, ordered by account id.
+ */
+accounts: Array<AccountMailCount>,
+/**
+ * The newest five, newest first.
+ */
+latest: Array<EmailSummary>, };
+
+export type OverviewCode = { emailId: string, accountId: string, folderId: string, from: MailAddress, code: string,
+/**
+ * RFC 3339.
+ */
+receivedAt: string,
+/**
+ * The stored body state, so hosts can key the shared verification-code
+ * status (which reads the full body) to the same message version.
+ */
+bodyState: BodyState, };
+
+export type RecentAttachment = { email: EmailSummary,
+/**
+ * Names of the non-inline attachments, known once the body has been
+ * downloaded; empty before that. Untrusted text from the sender.
+ */
+fileNames: Array<string>, };
+
+export type MailOverview = { newMail: NewMailOverview,
+/**
+ * Starred unread messages, in the Starred view's scope.
+ */
+starredUnread: number,
+/**
+ * Newest first, at most three, from the last fifteen minutes.
+ */
+verificationCodes: Array<OverviewCode>,
+/**
+ * Newest first, at most five inbox messages from the last seven days.
+ */
+recentAttachments: Array<RecentAttachment>,
+/**
+ * RFC 3339; the core's clock when the overview was computed. The code
+ * and attachment windows end here.
+ */
+generatedAt: string, };
+
 export type ConversationPage = { messages: Array<EmailSummary>,
 /**
  * True when local headers might be incomplete (some older messages may be missing).
@@ -499,6 +556,8 @@ export type SupportedLocale = "zh-CN" | "en";
 
 export type CloseBehavior = "ask" | "background" | "quit";
 
+export type StartupView = "inbox" | "now";
+
 export type GeneralSettings = { language: LanguagePreference,
 /**
  * Download new versions automatically and install on a normal application
@@ -523,7 +582,12 @@ silentStart: boolean,
  * Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
  * Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
  */
-singleKeyShortcuts: boolean, };
+singleKeyShortcuts: boolean,
+/**
+ * The view shown when the main window starts: the unified inbox or the
+ * Now page (now-page.md section 2).
+ */
+startupView: StartupView, };
 
 export type MailSettings = {
 /**

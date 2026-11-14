@@ -80,7 +80,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     ? [[emails[index].summary.id, seed.verificationCode] as const] : []))
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -646,6 +646,43 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const key = senderAddress(address, 'address')
       if (!aggregated) contactRules.delete(key)
       else if (!contactRules.has(key)) contactRules.set(key, new Date().toISOString())
+    },
+    async getMailOverview(query) {
+      // Same scope rules as the core (app/overview.rs): inbox mail that is not
+      // archived; starred unread outside junk and trash.
+      const now = Date.now()
+      const role = (email: EmailDetail) => folders.find((folder) => folder.id === email.summary.folderId)?.role
+      const newestFirst = (a: EmailDetail, b: EmailDetail) => b.summary.receivedAt.localeCompare(a.summary.receivedAt) || b.summary.id.localeCompare(a.summary.id)
+      const inbox = emails.filter((email) => role(email) === 'inbox' && !email.summary.archived).sort(newestFirst)
+      const since = query.since == null ? null : Date.parse(query.since)
+      if (since != null && Number.isNaN(since)) throw new MailxClientError({ code: 'validation', field: 'since', message: '配置参数无效。' })
+      const fresh = since == null ? [] : inbox.filter((email) => Date.parse(email.summary.receivedAt) > since)
+      const perAccount = new Map<string, number>()
+      for (const email of fresh) perAccount.set(email.summary.accountId, (perAccount.get(email.summary.accountId) ?? 0) + 1)
+      const within = (email: EmailDetail, ms: number) => Date.parse(email.summary.receivedAt) >= now - ms
+      // A stand-in for the core's detector: only the mock's own wording.
+      const code = (email: EmailDetail) => {
+        const text = email.summary.bodyState === 'ready' ? email.body?.text ?? '' : email.summary.preview
+        return /(?:验证码|verification code)\D{0,6}(\d{4,8})/i.exec(`${email.summary.subject}\n${text}`)?.[1] ?? null
+      }
+      return structuredClone({
+        newMail: {
+          total: fresh.length,
+          accounts: [...perAccount].sort(([a], [b]) => a.localeCompare(b)).map(([accountId, count]) => ({ accountId, count })),
+          latest: fresh.slice(0, 5).map((email) => email.summary),
+        },
+        starredUnread: emails.filter((email) => email.summary.isStarred && !email.summary.isRead && role(email) !== 'junk' && role(email) !== 'trash').length,
+        verificationCodes: inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => {
+          const found = code(email)
+          return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState }] : []
+        }).slice(0, 3),
+        recentAttachments: inbox.filter((email) => email.summary.hasAttachment && within(email, 7 * 86_400_000)).slice(0, 5).map((email) => ({
+          email: email.summary,
+          // Names are known once the body is cached, as in the core.
+          fileNames: email.summary.bodyState === 'ready' ? email.attachments.filter((part) => !part.isInline).map((part) => part.filename ?? '').filter(Boolean) : [],
+        })),
+        generatedAt: new Date(now).toISOString(),
+      })
     },
     async getEmail(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
@@ -1604,6 +1641,22 @@ const DEFAULT_SEEDS: Seed[] = [
     text: '麻烦你先占房，我下午把名单发给你。',
     hoursAgo: 1,
     read: true,
+  },
+  {
+    account: PERSONAL,
+    from: { name: '东方航空', address: 'service@airline.example' },
+    subject: '您的电子登机牌',
+    text: '林伟先生，您好：\n\n您预订的航班电子登机牌见附件，请在登机前准备好身份证件。',
+    hoursAgo: 5,
+    attachments: [['电子登机牌.pdf', 'application/pdf', 96_000]],
+  },
+  {
+    account: PERSONAL,
+    from: { name: '云存储', address: 'no-reply@cloud.example' },
+    subject: '登录验证码',
+    text: '你的验证码是 482913，10 分钟内有效。如果不是你本人操作，请忽略这封邮件。',
+    verificationCode: '482913',
+    hoursAgo: 0.1,
   },
 ]
 

@@ -4,7 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import type { CloseBehavior, LanguagePreference } from '@/generated/accounts'
+import type { CloseBehavior, LanguagePreference, StartupView } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { errorText } from '@/i18n/errors'
 import { useLifecycle } from '@/features/lifecycle/lifecycle-context'
@@ -20,6 +20,7 @@ export function GeneralPane({ client }: { client: MailxClient }) {
   const [quitError, setQuitError] = useState<unknown>(null)
   const [quitPending, setQuitPending] = useState(false)
   const items = { system: t('system'), 'zh-CN': '简体中文', en: 'English' }
+  const startupItems: Record<StartupView, string> = { inbox: t('startupInbox'), now: t('startupNow') }
   const snapshot = lifecycle?.snapshot
   const closeItems: Record<CloseBehavior, string> = {
     ask: t('ask'),
@@ -44,6 +45,14 @@ export function GeneralPane({ client }: { client: MailxClient }) {
           onValueChange={(language: LanguagePreference | null) => { if (language) update.mutate({ language }) }}>
           <SelectTrigger id="general.language" className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>{Object.entries(items).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+        </Select>
+      </SettingsRow>
+      <SettingsRow label={t('startupView')} description={t('startupViewHint')} htmlFor="general.startupView">
+        <Select value={settings.data?.settings.general.startupView ?? 'inbox'} items={startupItems}
+          disabled={!settings.data || update.isPending}
+          onValueChange={(startupView: StartupView | null) => { if (startupView) update.mutate({ startupView }) }}>
+          <SelectTrigger id="general.startupView" className="w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>{Object.entries(startupItems).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsRow>
     </SettingsGroup>

@@ -31,6 +31,11 @@ describe('mail rail', () => {
     expect(rail.getByRole('button', { name: /^写邮件/ })).toBeInTheDocument()
     for (const name of ['星标', '已发送', '更多', '账号', '设置']) expect(rail.getByRole('button', { name })).toBeInTheDocument()
     expect(rail.queryByText('邮箱')).not.toBeInTheDocument()
+    // 此刻 sits between compose and the inbox, with no number.
+    const names = rail.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? '')
+    expect(names.indexOf('此刻')).toBe(names.findIndex((name) => name.startsWith('写邮件')) + 1)
+    await userEvent.click(rail.getByRole('button', { name: '此刻' }))
+    expect(rail.getByRole('button', { name: '此刻' })).toHaveAttribute('aria-current', 'page')
 
     await userEvent.click(rail.getByRole('button', { name: '星标' }))
     expect(await screen.findByRole('heading', { name: '星标' })).toBeInTheDocument()

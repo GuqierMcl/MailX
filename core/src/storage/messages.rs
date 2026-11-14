@@ -16,7 +16,10 @@ use crate::{
     sync::headers::MessageRecord,
 };
 
+mod overview;
 mod sent_copies;
+
+pub(crate) use overview::{CodeSource, NewMailRows};
 
 /// Identity captured before network I/O; every write checks it again in its transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -884,6 +887,17 @@ fn collapse_copies(
         .collect()
 }
 
+/// The stored `messages.body_state` value.
+fn body_state(value: &str) -> rusqlite::Result<BodyState> {
+    match value {
+        "missing" => Ok(BodyState::Missing),
+        "fetching" => Ok(BodyState::Fetching),
+        "ready" => Ok(BodyState::Ready),
+        "failed" => Ok(BodyState::Failed),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+
 fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
     Ok(EmailSummary {
         id: row.get(0)?,
@@ -900,13 +914,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<EmailSummary> {
         is_starred: row.get(8)?,
         has_attachment: row.get(9)?,
         preview: row.get(10)?,
-        body_state: match row.get::<_, String>(11)?.as_str() {
-            "missing" => BodyState::Missing,
-            "fetching" => BodyState::Fetching,
-            "ready" => BodyState::Ready,
-            "failed" => BodyState::Failed,
-            _ => return Err(rusqlite::Error::InvalidQuery),
-        },
+        body_state: body_state(&row.get::<_, String>(11)?)?,
         pending_changes: row.get(12)?,
         preview_state: match row.get::<_, String>(13)?.as_str() {
             "missing" => PreviewState::Missing,

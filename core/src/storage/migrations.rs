@@ -201,6 +201,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_translations"],
         sql: include_str!("migrations/0029_message_translations.sql"),
     },
+    Migration {
+        version: 30,
+        description: "starred unread index for the Now page overview",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0030_starred_unread_index.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -605,7 +611,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 29);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 30);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -654,6 +660,21 @@ mod tests {
         let index: i64 = db
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_by_sender'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn starred_unread_index_is_added_to_an_existing_database() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(29)).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let index: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_starred_unread'",
                 [],
                 |row| row.get(0),
             )

@@ -3,12 +3,12 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{AccountService, validate_email_id, validate_uuid};
-pub(crate) use crate::storage::messages::{FolderSyncCursor, SyncTarget};
+pub(crate) use crate::storage::messages::{CodeSource, FolderSyncCursor, NewMailRows, SyncTarget};
 use crate::{
     AppError,
     mail::{
-        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, MAX_KEEP_IDS,
-        MAX_SELECTION,
+        ConversationPage, EmailDetail, EmailListQuery, EmailPage, EmailSelection, EmailSummary,
+        MAX_KEEP_IDS, MAX_SELECTION,
     },
     storage::messages::{PageCursor, ValidatedEmailQuery},
     sync::headers::MessageRecord,
@@ -87,6 +87,38 @@ impl AccountService {
 
     pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
         self.storage.list_emails(&validate_query(query)?)
+    }
+
+    /// Inbox mail received after `since` (RFC 3339, already normalized):
+    /// per-account counts and the newest `latest` messages.
+    pub(crate) fn overview_new_mail(
+        &self,
+        since: &str,
+        latest: u32,
+    ) -> Result<NewMailRows, AppError> {
+        self.storage.overview_new_mail(since, latest)
+    }
+
+    pub(crate) fn overview_starred_unread(&self) -> Result<u32, AppError> {
+        self.storage.overview_starred_unread()
+    }
+
+    pub(crate) fn overview_code_sources(
+        &self,
+        after: &str,
+        limit: u32,
+        max_text_bytes: usize,
+    ) -> Result<Vec<CodeSource>, AppError> {
+        self.storage
+            .overview_code_sources(after, limit, max_text_bytes)
+    }
+
+    pub(crate) fn overview_attachments(
+        &self,
+        after: &str,
+        limit: u32,
+    ) -> Result<Vec<(EmailSummary, Vec<String>)>, AppError> {
+        self.storage.overview_attachments(after, limit)
     }
 
     /// The first [`MAX_SELECTION`] messages `list_emails` would show for the
@@ -234,7 +266,7 @@ impl AccountService {
     }
 }
 
-fn normalized_time(value: &str, field: &str) -> Result<String, AppError> {
+pub(crate) fn normalized_time(value: &str, field: &str) -> Result<String, AppError> {
     let time = DateTime::parse_from_rfc3339(value)
         .map_err(|_| AppError::validation(field))?
         .with_timezone(&Utc);

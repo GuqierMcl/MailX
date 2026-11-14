@@ -32,7 +32,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
@@ -118,6 +118,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     aiProviderIcon: vi.fn<MailxClient['aiProviderIcon']>().mockResolvedValue(null),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
+    getMailOverview: vi.fn<MailxClient['getMailOverview']>().mockResolvedValue({ newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date(0).toISOString() }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
     getConversation: vi.fn<MailxClient['getConversation']>().mockRejectedValue(new Error('not found')),
     fetchBody: vi.fn<MailxClient['fetchBody']>().mockRejectedValue(new Error('unavailable')),
