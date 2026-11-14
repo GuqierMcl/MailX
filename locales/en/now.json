@@ -121,7 +121,6 @@
   "codes": "Verification codes",
   "codeLabel": "Code {{code}}",
   "copyCode": "Copy code {{code}}",
-  "codeNotReady": "Code {{code}} can't be copied yet",
   "attachments": "Recent attachments",
   "attachment": "Attachment",
   "moreFiles_one": "+{{count}} more file",

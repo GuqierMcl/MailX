@@ -113,7 +113,6 @@
   "codes": "验证码",
   "codeLabel": "验证码 {{code}}",
   "copyCode": "复制验证码 {{code}}",
-  "codeNotReady": "验证码 {{code}} 暂时无法复制",
   "attachments": "最近的附件",
   "attachment": "附件",
   "moreFiles_other": "等 {{count}} 个文件",

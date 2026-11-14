@@ -17,7 +17,7 @@ import { signInNeeded } from '@/features/accounts/sign-in-state'
 import { SenderAvatar } from '@/features/mail/sender-avatar'
 import { displayName } from '@/features/mail/format'
 import type { Mailbox } from '@/features/mail/mailbox'
-import { readyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
+import { readyVerificationCode, type ReadyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, lineContext, lineKey, type LineContext, type NowKey } from './greeting'
 import { useDayClock, useFirstVisitToday, useLastVisit } from './visit'
 import { entrance, useCountUp } from './motion'
@@ -66,10 +66,10 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const data = overview.data
   const fresh = useFreshCodes(data?.verificationCodes ?? [])
   useCodeTargets(verification, fresh)
-  // The shared recognizer reads the full message; where it finds no single code, the entry goes.
-  const codes = fresh.filter((code) => {
-    const state = verification.status(code.emailId)?.state
-    return state !== 'notFound' && state !== 'ambiguous'
+  // Only codes the shared recognizer has confirmed, so every one shown can be copied.
+  const codes = fresh.flatMap((code) => {
+    const ready = readyVerificationCode(verification.status(code.emailId))
+    return ready ? [{ ...code, ready }] : []
   })
 
   // Needs attention: accounts that stopped, sends that failed or may not have gone, drafts.
@@ -231,18 +231,16 @@ function useCodeTargets(verification: VerificationCodes, codes: OverviewCode[]) 
 }
 
 /**
- * One code. Copying goes through the shared flow (clipboard written by the
- * host, optional move to Trash, shared notices) once the recognizer agrees;
- * until then the overview's code shows and the button waits.
+ * One code the shared recognizer confirmed. Copying goes through the shared
+ * flow: the host writes the clipboard, the move-to-Trash setting applies and
+ * the notices match the list and reader.
  */
-function CodeRow({ code, language, verification, onOpenEmail }: { code: OverviewCode; language: string; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
-  const ready = readyVerificationCode(verification.status(code.emailId))
-  const shown = ready?.code ?? code.code
+function CodeRow({ code, language, verification, onOpenEmail }: { code: OverviewCode & { ready: ReadyVerificationCode }; language: string; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
+  const { ready } = code
+  const shown = ready.code
   const busy = verification.busy(code.emailId)
-  const copied = ready ? verification.copied(code.emailId, ready.recognitionId) : false
-  // Not ready covers a check still running and a message the recognizer cannot read.
-  const label = !ready ? t('now:codeNotReady', { code: shown })
-    : busy ? t('mail:verificationCopying') : copied ? t('mail:verificationCopiedShort') : t('now:copyCode', { code: shown })
+  const copied = verification.copied(code.emailId, ready.recognitionId)
+  const label = busy ? t('mail:verificationCopying') : copied ? t('mail:verificationCopiedShort') : t('now:copyCode', { code: shown })
   return (
     <li className="flex items-center gap-3 rounded-lg px-3 py-2">
       <p className="font-mono text-2xl font-semibold tracking-[0.18em] tabular-nums">
@@ -262,8 +260,8 @@ function CodeRow({ code, language, verification, onOpenEmail }: { code: Overview
       <IconButton
         label={label}
         size="icon-sm"
-        disabled={!ready || busy}
-        onClick={ready ? () => void verification.copy(code.emailId, ready.recognitionId) : undefined}
+        disabled={busy}
+        onClick={() => void verification.copy(code.emailId, ready.recognitionId)}
       >
         <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} />
       </IconButton>

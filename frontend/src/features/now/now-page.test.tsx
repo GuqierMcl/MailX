@@ -185,22 +185,23 @@ describe('Now page', () => {
     expect(within(section).getByText('验证码 333333')).toBeInTheDocument()
   })
 
-  it('shows a code still being checked or unreadable with copying turned off', async () => {
+  it('shows a code only once it can be copied', async () => {
     let finish!: (status: VerificationCodeStatus) => void
     const { client } = setup({
-      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913'), overviewCode('c2', '555123')] },
-      statuses: { c2: pending('unavailable') },
+      overview: { ...empty, starredUnread: 1, verificationCodes: [overviewCode('c1', '482913'), overviewCode('c2', '555123'), overviewCode('c3', '777888')] },
     })
     client.getVerificationCode.mockImplementation((emailId) => emailId === 'c1'
       ? new Promise((resolve) => { finish = resolve })
-      : Promise.resolve({ emailId, ...pending('unavailable') }))
-    const section = await screen.findByRole('region', { name: '验证码' })
-    expect(within(section).getByText('验证码 482913')).toBeInTheDocument()
-    expect(within(section).getByRole('button', { name: '验证码 482913 暂时无法复制' })).toBeDisabled()
-    expect(await within(section).findByRole('button', { name: '验证码 555123 暂时无法复制' })).toBeDisabled()
+      : Promise.resolve({ emailId, ...pending(emailId === 'c2' ? 'unavailable' : 'unchecked') }))
+    await screen.findByRole('region', { name: '未读与星标' })
     await waitFor(() => expect(finish).toBeDefined())
+    // Still being checked, unreadable, or not checked without the body: nothing to copy, so nothing shown.
+    expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
     await act(async () => finish({ emailId: 'c1', ...ready('482913') }))
-    expect(await within(section).findByRole('button', { name: '复制验证码 482913' })).toBeEnabled()
+    const section = await screen.findByRole('region', { name: '验证码' })
+    expect(within(section).getByRole('button', { name: '复制验证码 482913' })).toBeEnabled()
+    expect(within(section).queryByText('验证码 555123')).not.toBeInTheDocument()
+    expect(within(section).queryByText('验证码 777888')).not.toBeInTheDocument()
     expect(client.copyVerificationCode).not.toHaveBeenCalled()
   })
 
