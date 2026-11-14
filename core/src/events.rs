@@ -44,6 +44,10 @@ pub enum CoreEvent {
     /// An account's local sent copies changed (a copy was removed from this
     /// device); lists showing its Sent folder refetch.
     SentCopies(SentCopiesChanged),
+    /// Progress of a built-in assistant run: state changes, streamed text and
+    /// tool activity. `seq` increases per run; a missed event is recovered
+    /// from `Assistant::snapshot`.
+    Assistant(crate::assistant::AssistantEvent),
 }
 
 /// Origin is selected by the trusted caller, never from mail content.

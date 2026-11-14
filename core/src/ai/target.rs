@@ -14,6 +14,8 @@ pub struct AiModelTarget {
     pub(crate) model_id: String,
     /// The model's output limit in tokens, when the catalog knows it.
     pub(crate) output_length: Option<u32>,
+    /// The model's context window in tokens, when the catalog knows it.
+    pub(crate) context_length: Option<u32>,
     /// Empty for a connection without a key (local servers).
     pub(crate) key: SecretValue,
     pub(crate) route: NetRoute,
@@ -31,6 +33,11 @@ impl fmt::Debug for AiModelTarget {
 }
 
 impl AiModelTarget {
+    pub(crate) fn with_context_length(mut self, context_length: Option<u32>) -> Self {
+        self.context_length = context_length;
+        self
+    }
+
     pub(crate) fn new(
         binding: AiConsent,
         protocol: AiProtocol,
@@ -44,6 +51,7 @@ impl AiModelTarget {
             protocol,
             model_id,
             output_length,
+            context_length: None,
             key: SecretValue::new(key),
             route,
         }

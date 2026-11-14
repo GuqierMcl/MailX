@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "translationNotConfigured" | "translationConsentRequired" | "translationKeyRejected" | "translationQuotaExceeded" | "translationRateLimited" | "translationNetwork" | "translationProxy" | "translationTimeout" | "translationUnavailable" | "translationInvalidResponse" | "translationLanguageUnsupported" | "translationTooLarge" | "translationCancelled" | "aiNotConfigured" | "aiKeyRejected" | "aiQuotaExceeded" | "aiModelNotFound" | "aiRateLimited" | "aiRequestRejected" | "aiUnavailable" | "aiNetwork" | "aiProxy" | "aiTimeout" | "aiInvalidResponse" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "translationNotConfigured" | "translationConsentRequired" | "translationKeyRejected" | "translationQuotaExceeded" | "translationRateLimited" | "translationNetwork" | "translationProxy" | "translationTimeout" | "translationUnavailable" | "translationInvalidResponse" | "translationLanguageUnsupported" | "translationTooLarge" | "translationCancelled" | "aiNotConfigured" | "aiKeyRejected" | "aiQuotaExceeded" | "aiModelNotFound" | "aiRateLimited" | "aiRequestRejected" | "aiUnavailable" | "aiNetwork" | "aiProxy" | "aiTimeout" | "aiInvalidResponse" | "assistantDisabled" | "assistantBusy" | "assistantContextFull" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -682,9 +682,9 @@ export type MailSettings = {
  */
 trashVerificationMailAfterCopy: boolean, };
 
-export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, };
 
-export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -1140,3 +1140,76 @@ export type AiProviderIcon = { mimeType: "image/svg+xml",
  * Base64 of the SVG text.
  */
 data: string, };
+
+export type AssistantMode = "direct" | "ask";
+
+export type AssistantSendMode = "confirm" | "direct";
+
+export type AssistantSettings = {
+/**
+ * Off: no run starts, whatever asks for it.
+ */
+enabled: boolean,
+/**
+ * `None` follows `ai.defaultModel`.
+ */
+model: AiModelRef | null,
+/**
+ * The connection and base URL the user agreed to send mail content to.
+ */
+consented: AiConsent | null,
+/**
+ * Account ids the assistant cannot see.
+ */
+excludedAccounts: Array<string>,
+/**
+ * Flags, archive and refresh.
+ */
+organize: AssistantMode,
+/**
+ * Changes to drafts the assistant created itself.
+ */
+aiDrafts: AssistantMode, send: AssistantSendMode,
+/**
+ * Appended to the system prompt, at most 2000 characters.
+ */
+instructions: string, };
+
+export type StartRun = { kind: RunKind, };
+
+export type RunKind = { "type": "nowSummary", since: string | null, dayStarts?: Array<string>, } | { "type": "chat", conversationId?: string, message: string, };
+
+export type RunKindTag = "nowSummary" | "chat";
+
+export type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
+
+export type FinishedReason = "stop" | "limit" | "length";
+
+export type ToolStatus = "running" | "done" | "failed" | "denied";
+
+export type ToolActivitySummary = { "type": "pending" } | { "type": "found", count: number, } | { "type": "read", emailIds: Array<string>, } | { "type": "changed", count: number, emailIds: Array<string>, } | { "type": "draft", draftId: string, subject: string, } | { "type": "outbox", outboxId: string, } | { "type": "done" } | { "type": "denied" } | { "type": "error", code: string, };
+
+export type ToolActivity = { callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, };
+
+export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
+/**
+ * Everything the model has written so far.
+ */
+text: string, tools: Array<ToolActivity>, error: ErrorCode | null, finishedReason: FinishedReason | null,
+/**
+ * The `seq` of the last event this snapshot includes; later events
+ * continue from it.
+ */
+seq: number,
+/**
+ * Set for chats.
+ */
+conversationId: string | null, };
+
+export type AssistantEvent = { runId: string,
+/**
+ * Increases by one per event of a run, starting at 1.
+ */
+seq: number, kind: AssistantEventKind, };
+
+export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };

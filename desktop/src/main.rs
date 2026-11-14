@@ -201,6 +201,9 @@ fn main() {
                             notification_accounts.clone(),
                         );
                     }
+                    // No assistant is constructed in the desktop host yet;
+                    // forwarding to the window comes with its IPC.
+                    mailx_core::CoreEvent::Assistant(_) => {}
                 });
             let state = state::DesktopState::new(data_dir, secrets, events);
             app.manage(state.clone());

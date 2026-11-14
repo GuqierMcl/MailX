@@ -11,6 +11,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
         translation: TranslationSettings::default(),
+        assistant: AssistantSettings::default(),
         ai: AiSettings::default(),
         appearance: AppearanceSettings {
             accent_color: accent_color.into(),
@@ -397,6 +398,16 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                 },
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0 },
                 "mcp": { "enabled": false },
+                "assistant": {
+                    "enabled": true,
+                    "model": null,
+                    "consented": null,
+                    "excludedAccounts": [],
+                    "organize": "direct",
+                    "aiDrafts": "direct",
+                    "send": "confirm",
+                    "instructions": ""
+                },
                 "translation": {
                     "provider": "microsoftFree",
                     "microsoftRegion": "",

@@ -656,6 +656,73 @@ impl AiService {
         ))
     }
 
+    // ---------------------------------------------------------- assistant
+
+    /// The model the assistant uses: its own model, else the default model,
+    /// with the connection. A model whose connection is gone counts as unset.
+    fn assistant_choice<'a>(
+        ai: &'a AiSettings,
+        own: Option<&'a AiModelRef>,
+    ) -> Option<(&'a AiModelRef, &'a AiConnection)> {
+        [own, ai.default_model.as_ref()]
+            .into_iter()
+            .flatten()
+            .find_map(|model| {
+                ai.connections
+                    .iter()
+                    .find(|c| c.id == model.connection_id)
+                    .map(|connection| (model, connection))
+            })
+    }
+
+    /// Which connection the assistant would use, from the settings alone: no
+    /// key is read and nothing goes out. `None` when no model is usable.
+    pub async fn assistant_binding(self: &Arc<Self>) -> Result<Option<AiConsent>, AppError> {
+        self.blocking(|this| {
+            let ai = this.ai_settings()?;
+            let own = this.settings.get()?.settings.assistant.model;
+            Ok(
+                Self::assistant_choice(&ai, own.as_ref()).map(|(_, connection)| AiConsent {
+                    connection_id: connection.id.clone(),
+                    base_url: connection.base_url.clone(),
+                }),
+            )
+        })
+        .await
+    }
+
+    /// Everything an assistant call needs. `AiNotConfigured` when no model is
+    /// usable.
+    pub async fn assistant_target(self: &Arc<Self>) -> Result<AiModelTarget, AppError> {
+        let (connection, model, key, ai_route) = self
+            .blocking(|this| {
+                let ai = this.ai_settings()?;
+                let own = this.settings.get()?.settings.assistant.model;
+                let (model, connection) =
+                    Self::assistant_choice(&ai, own.as_ref()).ok_or_else(not_configured)?;
+                let key = this
+                    .secrets
+                    .get(&key_secret(&connection.id))?
+                    .map(|key| key.expose_secret().to_owned())
+                    .unwrap_or_default();
+                Ok((connection.clone(), model.clone(), key, ai.route.clone()))
+            })
+            .await?;
+        let route = self.route(&ai_route, connection.use_proxy).await?;
+        Ok(AiModelTarget::new(
+            AiConsent {
+                connection_id: connection.id,
+                base_url: connection.base_url,
+            },
+            connection.protocol,
+            model.model_id,
+            model.output_length,
+            key,
+            route,
+        )
+        .with_context_length(model.context_length))
+    }
+
     // ------------------------------------------------------------ catalog
 
     fn catalog_view(

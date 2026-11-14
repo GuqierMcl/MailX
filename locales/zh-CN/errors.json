@@ -71,5 +71,8 @@
   "aiNetwork": "连不上服务商",
   "aiProxy": "无法通过代理连接",
   "aiTimeout": "服务商响应超时",
-  "aiInvalidResponse": "服务商返回的内容无法使用"
+  "aiInvalidResponse": "服务商返回的内容无法使用",
+  "assistantDisabled": "助手已关闭",
+  "assistantBusy": "助手正忙",
+  "assistantContextFull": "对话太长了"
 }

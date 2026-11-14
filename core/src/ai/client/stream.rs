@@ -9,9 +9,6 @@
 //! some servers simply close the connection after the last chunk, and the
 //! caller already has everything the model said.
 
-// No caller until the agent loop lands.
-#![allow(dead_code)]
-
 mod anthropic;
 mod openai;
 mod sse;
