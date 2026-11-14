@@ -3,17 +3,19 @@
 //! `docs/ai-runtime/README.md` section 8. Provider text, prompts and mail
 //! content are never logged and never leave in events: events carry model
 //! output, structured tool summaries and fixed error codes only.
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use serde_json::Value;
 
 use super::{
-    Gate, Inner, Ready,
+    Gate, Inner, Ready, confirm,
     conversations::ActiveConversation,
     policy::{self, Decision, DraftSource},
     prompt,
     summary::MAX_OUTPUT_TOKENS,
-    types::{FinishedReason, ToolActivitySummary, ToolStatus},
+    types::{
+        ConfirmationRequest, FinishedReason, FlagRestore, ToolActivitySummary, ToolStatus, ToolUndo,
+    },
 };
 use crate::{
     ErrorCode,
@@ -24,7 +26,7 @@ use crate::{
             ToolCallRequest, ToolDefinition, stream_chat,
         },
     },
-    tools::{Audience, Principal, RequestContext, Tools},
+    tools::{Audience, Principal, RequestContext, ToolError, Tools, TrustedOutput},
 };
 
 /// Model requests for one user message.
@@ -199,6 +201,8 @@ async fn chat_loop(
         )
         .unwrap_or_default(),
     );
+    // What this run has shown the model, and what the user turned down.
+    let mut memory = Memory::default();
     for turn_number in 1..=MAX_TURNS {
         // Settings are read again every turn: a switched-off assistant, a
         // revoked consent or another model applies at once.
@@ -251,7 +255,7 @@ async fn chat_loop(
                     ToolStatus::Running,
                     ToolActivitySummary::Pending,
                 );
-                run_tool(inner, run_id, call).await
+                run_call(inner, run_id, call, &mut memory).await
             };
             inner
                 .runs
@@ -270,11 +274,23 @@ async fn chat_loop(
 
 // -------------------------------------------------------------------- tools
 
+/// What one run remembers across its tool calls.
+#[derive(Default)]
+struct Memory {
+    /// Lowercased addresses on the mail the model read or searched.
+    seen: HashSet<String>,
+    /// Calls (tool and arguments) the user turned down. The same call is not
+    /// asked again in this run, which ends with the next user message.
+    declined: HashSet<String>,
+}
+
 struct Executed {
     status: ToolStatus,
     summary: ToolActivitySummary,
     content: String,
     is_error: bool,
+    /// Addresses found in a read or search result.
+    addresses: Vec<String>,
 }
 
 impl Executed {
@@ -286,33 +302,93 @@ impl Executed {
             },
             content: format!("Error {code}: {message}"),
             is_error: true,
+            addresses: Vec::new(),
         }
     }
 
-    /// The user's settings ask first and nobody can answer yet, so this is a
-    /// refusal the model is told about.
-    fn denied() -> Self {
+    /// Not run, and the model is told why.
+    fn denied(reason: &str) -> Self {
         Self {
             status: ToolStatus::Denied,
             summary: ToolActivitySummary::Denied,
-            content: "The user declined this action. It was not run. Do not try again unless \
-                      the user asks you to."
-                .to_owned(),
+            content: format!(
+                "{reason} It was not run. Do not try again unless the user asks you to."
+            ),
             is_error: true,
+            addresses: Vec::new(),
         }
     }
+
+    fn declined() -> Self {
+        Self::denied("The user declined this action.")
+    }
+}
+
+/// Where a call stands before it can run.
+enum Step {
+    Done(Executed),
+    /// The settings ask the user first; this is what to show them.
+    Ask(Box<ConfirmationRequest>),
+}
+
+/// How long a confirmation waits for the user before it counts as declined.
+pub(crate) const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// One tool call: runs it, or pauses the run until the user answers.
+async fn run_call(
+    inner: &Arc<Inner>,
+    run_id: &str,
+    call: &ToolCallRequest,
+    memory: &mut Memory,
+) -> Executed {
+    let key = format!("{}\u{0}{}", call.name, call.arguments);
+    if memory.declined.contains(&key) {
+        return Executed::denied("The user already declined this exact action in this run.");
+    }
+    let executed = match run_tool(inner, run_id, call, false, &memory.seen).await {
+        Step::Done(done) => done,
+        Step::Ask(request) => {
+            let Some((request_id, answer)) = inner.runs.ask(run_id, &call.id, *request) else {
+                return Executed::failed("canceled", "The run was stopped.");
+            };
+            match tokio::time::timeout(inner.confirmation_timeout(), answer).await {
+                Ok(Ok(true)) => match run_tool(inner, run_id, call, true, &memory.seen).await {
+                    Step::Done(done) => done,
+                    Step::Ask(_) => Executed::declined(),
+                },
+                Ok(_) => {
+                    memory.declined.insert(key);
+                    Executed::declined()
+                }
+                Err(_) => {
+                    inner.runs.expire(run_id, &request_id);
+                    memory.declined.insert(key);
+                    Executed::denied("The user did not answer in time.")
+                }
+            }
+        }
+    };
+    memory.seen.extend(executed.addresses.iter().cloned());
+    executed
 }
 
 /// Tool code is synchronous and blocks on storage, so it runs on a blocking
 /// thread. Dropping this future (a cancel) abandons the wait; a call already
 /// running finishes and its result is dropped.
-async fn run_tool(inner: &Arc<Inner>, run_id: &str, call: &ToolCallRequest) -> Executed {
+async fn run_tool(
+    inner: &Arc<Inner>,
+    run_id: &str,
+    call: &ToolCallRequest,
+    approved: bool,
+    seen: &HashSet<String>,
+) -> Step {
     let inner = inner.clone();
     let run_id = run_id.to_owned();
     let call = call.clone();
-    tokio::task::spawn_blocking(move || execute(&inner, &run_id, &call))
+    let seen = seen.clone();
+    tokio::task::spawn_blocking(move || execute(&inner, &run_id, &call, approved, &seen))
         .await
-        .unwrap_or_else(|_| Executed::failed("internal", "An internal error occurred."))
+        .unwrap_or_else(|_| Step::Done(Executed::failed("internal", "An internal error occurred.")))
 }
 
 fn draft_source(inner: &Inner, arguments: &Value, grant: &crate::tools::Grant) -> DraftSource {
@@ -330,13 +406,34 @@ fn draft_source(inner: &Inner, arguments: &Value, grant: &crate::tools::Grant) -
     }
 }
 
-fn execute(inner: &Inner, run_id: &str, call: &ToolCallRequest) -> Executed {
+fn code_text(code: impl serde::Serialize) -> String {
+    serde_json::to_value(code)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "internal".into())
+}
+
+/// With `approved` the user has agreed to exactly this call, so the policy is
+/// not consulted again; the settings switch and the grant still are.
+fn execute(
+    inner: &Inner,
+    run_id: &str,
+    call: &ToolCallRequest,
+    approved: bool,
+    seen: &HashSet<String>,
+) -> Step {
     let Ok(snapshot) = inner.settings.get() else {
-        return Executed::failed("unavailable", "Settings could not be read.");
+        return Step::Done(Executed::failed(
+            "unavailable",
+            "Settings could not be read.",
+        ));
     };
     let settings = snapshot.settings.assistant;
     if !settings.enabled {
-        return Executed::failed("notPermitted", "The assistant is turned off.");
+        return Step::Done(Executed::failed(
+            "notPermitted",
+            "The assistant is turned off.",
+        ));
     }
     // The ids only matter when some account is left out.
     let ids: Vec<String> = if settings.excluded_accounts.is_empty() {
@@ -344,18 +441,42 @@ fn execute(inner: &Inner, run_id: &str, call: &ToolCallRequest) -> Executed {
     } else {
         match inner.core.account_identities() {
             Ok(identities) => identities.into_iter().map(|a| a.id).collect(),
-            Err(_) => return Executed::failed("unavailable", "MailX is temporarily unavailable."),
+            Err(_) => {
+                return Step::Done(Executed::failed(
+                    "unavailable",
+                    "MailX is temporarily unavailable.",
+                ));
+            }
         }
     };
     let grant = policy::grant(&settings, &ids);
-    let source = if policy::needs_draft(&call.name) {
-        draft_source(inner, &call.arguments, &grant)
-    } else {
-        DraftSource::Missing
-    };
-    if policy::classify(&call.name, &settings, source) == Decision::Ask {
-        // The confirmation flow does not exist yet: asking means declined.
-        return Executed::denied();
+    if !approved {
+        if !policy::is_known(&call.name) {
+            // Nothing meaningful to show the user; never run.
+            return Step::Done(Executed::declined());
+        }
+        let source = if policy::needs_draft(&call.name) {
+            draft_source(inner, &call.arguments, &grant)
+        } else {
+            DraftSource::Missing
+        };
+        if policy::classify(&call.name, &settings, source) == Decision::Ask {
+            return match confirm::build(&inner.core, &grant, &call.name, &call.arguments, seen) {
+                Ok(request) => Step::Ask(Box::new(request)),
+                // The record is missing or out of scope: the tool would only
+                // report that, so the model hears it without a question.
+                Err(error) if matches!(error.code, ErrorCode::NotFound | ErrorCode::Validation) => {
+                    Step::Done(Executed::failed(
+                        &code_text(error.code),
+                        "The record was not found.",
+                    ))
+                }
+                Err(_) => Step::Done(Executed::failed(
+                    "unavailable",
+                    "MailX is temporarily unavailable.",
+                )),
+            };
+        }
     }
     let context = RequestContext::new(
         Principal::BuiltinAgent {
@@ -364,28 +485,47 @@ fn execute(inner: &Inner, run_id: &str, call: &ToolCallRequest) -> Executed {
         grant,
         call.id.chars().take(64).collect::<String>(),
     );
-    match inner
+    let (result, trusted) = inner
         .tools
-        .call(&context, &call.name, call.arguments.clone())
-    {
+        .call_traced(&context, &call.name, call.arguments.clone());
+    Step::Done(match result {
         Ok(output) => {
             let text = serde_json::to_string(&output).unwrap_or_default();
             let text: String = text.chars().take(MAX_RESULT_CHARS).collect();
+            let mut addresses = Vec::new();
+            if matches!(call.name.as_str(), "read_email" | "search_emails") {
+                collect_addresses(&output, &mut addresses);
+            }
             Executed {
                 status: ToolStatus::Done,
-                summary: summarize(&call.name, &call.arguments, &output),
+                summary: summarize(&call.name, &call.arguments, &output, &trusted),
                 content: prompt::wrap_result(&call.name, &text),
                 is_error: false,
+                addresses,
             }
         }
-        Err(error) => {
-            let code = serde_json::to_value(error.code)
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_owned))
-                .unwrap_or_else(|| "internal".into());
+        Err(ToolError { code, message, .. }) => {
             // Both are fixed strings of the tool layer, never mail or server text.
-            Executed::failed(&code, &error.message)
+            Executed::failed(&code_text(code), &message)
         }
+    })
+}
+
+/// Every `address` string in a tool result, lowercased.
+fn collect_addresses(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                match inner {
+                    Value::String(address) if key == "address" => {
+                        out.push(address.trim().to_lowercase());
+                    }
+                    _ => collect_addresses(inner, out),
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_addresses(item, out)),
+        _ => {}
     }
 }
 
@@ -419,9 +559,44 @@ fn text(output: &Value, field: &str, max: usize) -> String {
         .collect()
 }
 
+/// The flags to put back: for every message whose requested field was changed
+/// (`queued` or `localOnly`), the value it had before the call.
+fn flag_restore(input: &Value, output: &Value, trusted: &TrustedOutput) -> Vec<FlagRestore> {
+    let changed = |result: &Value, field: &str| {
+        input.get(field).is_some_and(|wanted| !wanted.is_null())
+            && result
+                .get(field)
+                .and_then(|r| r.get("status"))
+                .and_then(Value::as_str)
+                .is_some_and(|s| s == "queued" || s == "localOnly")
+    };
+    output
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|result| {
+            let id = result.get("emailId").and_then(Value::as_str)?;
+            let before = trusted.previous_flags.iter().find(|f| f.email_id == id)?;
+            let restore = FlagRestore {
+                email_id: id.chars().take(64).collect(),
+                is_read: changed(result, "isRead").then_some(before.is_read),
+                is_starred: changed(result, "isStarred").then_some(before.is_starred),
+            };
+            (restore.is_read.is_some() || restore.is_starred.is_some()).then_some(restore)
+        })
+        .take(MAX_SUMMARY_ITEMS)
+        .collect()
+}
+
 /// A short structured account of a finished call, from the tool's input and
 /// output. Never raw output.
-fn summarize(name: &str, input: &Value, output: &Value) -> ToolActivitySummary {
+fn summarize(
+    name: &str,
+    input: &Value,
+    output: &Value,
+    trusted: &TrustedOutput,
+) -> ToolActivitySummary {
     match name {
         "search_emails" => ToolActivitySummary::Found {
             count: count(output.get("emails")),
@@ -467,9 +642,11 @@ fn summarize(name: &str, input: &Value, output: &Value) -> ToolActivitySummary {
                         .collect()
                 })
                 .unwrap_or_default();
+            let restore = flag_restore(input, output, trusted);
             ToolActivitySummary::Changed {
                 count: u32::try_from(changed.len()).unwrap_or(u32::MAX),
                 email_ids: changed,
+                undo: (!restore.is_empty()).then_some(ToolUndo::Flags { restore }),
             }
         }
         "archive_emails" | "unarchive_emails" => ToolActivitySummary::Changed {
@@ -478,6 +655,10 @@ fn summarize(name: &str, input: &Value, output: &Value) -> ToolActivitySummary {
                 .and_then(Value::as_u64)
                 .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX)),
             email_ids: strings(input.get("emailIds")),
+            undo: trusted
+                .archive_undo_token
+                .clone()
+                .map(|token| ToolUndo::Archive { token }),
         },
         "create_draft" | "create_reply_draft" => ToolActivitySummary::Draft {
             draft_id: text(output, "draftId", 64),
@@ -549,6 +730,7 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::PreviousFlags;
     use serde_json::json;
 
     #[test]
@@ -564,40 +746,66 @@ mod tests {
             "search_emails",
             &json!({}),
             &json!({"emails": [{"id": "a"}, {"id": "b"}]}),
+            &TrustedOutput::default(),
         );
         assert_eq!(found, ToolActivitySummary::Found { count: 2 });
         let changed = summarize(
             "archive_emails",
             &json!({"emailIds": ["a", "b"]}),
             &json!({"processedCount": 2, "changedCount": 1}),
+            &TrustedOutput::default(),
         );
         assert_eq!(
             changed,
             ToolActivitySummary::Changed {
                 count: 1,
-                email_ids: vec!["a".into(), "b".into()]
+                email_ids: vec!["a".into(), "b".into()],
+                undo: None,
             }
         );
         let flags = summarize(
             "set_email_flags",
-            &json!({}),
+            &json!({"emailIds": ["a", "b", "c"], "isRead": true, "isStarred": true}),
             &json!({"results": [
                 {"emailId": "a", "isRead": {"status": "queued"}},
                 {"emailId": "b", "isRead": {"status": "unchanged"}},
                 {"emailId": "c", "isStarred": {"status": "failed", "errorCode": "notFound"}},
             ]}),
+            &TrustedOutput {
+                archive_undo_token: None,
+                previous_flags: vec![
+                    PreviousFlags {
+                        email_id: "a".into(),
+                        is_read: false,
+                        is_starred: true,
+                    },
+                    PreviousFlags {
+                        email_id: "b".into(),
+                        is_read: true,
+                        is_starred: false,
+                    },
+                ],
+            },
         );
         assert_eq!(
             flags,
             ToolActivitySummary::Changed {
                 count: 1,
-                email_ids: vec!["a".into()]
+                email_ids: vec!["a".into()],
+                undo: Some(ToolUndo::Flags {
+                    restore: vec![FlagRestore {
+                        email_id: "a".into(),
+                        is_read: Some(false),
+                        is_starred: None,
+                    }]
+                }),
             }
         );
         let draft = summarize(
             "create_draft",
             &json!({}),
             &json!({"draftId": "d1", "subject": "Hi", "accountId": "x"}),
+            &TrustedOutput::default(),
         );
         assert_eq!(
             draft,
@@ -607,7 +815,12 @@ mod tests {
             }
         );
         assert_eq!(
-            summarize("refresh_sync", &json!({}), &json!({"accepted": true})),
+            summarize(
+                "refresh_sync",
+                &json!({}),
+                &json!({"accepted": true}),
+                &TrustedOutput::default()
+            ),
             ToolActivitySummary::Done
         );
     }

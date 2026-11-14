@@ -1187,7 +1187,47 @@ export type FinishedReason = "stop" | "limit" | "length";
 
 export type ToolStatus = "running" | "done" | "failed" | "denied";
 
-export type ToolActivitySummary = { "type": "pending" } | { "type": "found", count: number, } | { "type": "read", emailIds: Array<string>, } | { "type": "changed", count: number, emailIds: Array<string>, } | { "type": "draft", draftId: string, subject: string, } | { "type": "outbox", outboxId: string, } | { "type": "done" } | { "type": "denied" } | { "type": "error", code: string, };
+export type ToolUndo = { "type": "archive", token: string, } | { "type": "flags", restore: Array<FlagRestore>, };
+
+export type FlagRestore = { emailId: string, isRead: boolean | null, isStarred: boolean | null, };
+
+export type ConfirmAction = "send" | "cancelSend" | "organize" | "aiDraft" | "userDraft";
+
+export type ConfirmWarning = "newRecipient" | "notInConversation" | "hasAttachments";
+
+export type ConfirmAttachment = { fileName: string, size: number, };
+
+export type OrganizeChange = { "type": "archive" } | { "type": "unarchive" } | { "type": "flags", isRead: boolean | null, isStarred: boolean | null, } | { "type": "refresh" };
+
+export type ConfirmDraftChange = { "type": "create" } | { "type": "update", fields: Array<string>, } | { "type": "delete" } | { "type": "attachmentAdded", fileName: string, } | { "type": "attachmentRemoved", fileName: string, };
+
+export type ConfirmationDetails = { "type": "send", accountName: string, accountAddress: string, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string,
+/**
+ * The first characters of the plain-text body.
+ */
+bodyPreview: string, attachments: Array<ConfirmAttachment>, warnings: Array<ConfirmWarning>, } | { "type": "outbox", retry: boolean, senderAddress: string, subject: string,
+/**
+ * The first few recipients; `recipientCount` counts all.
+ */
+recipients: Array<string>, recipientCount: number, } | { "type": "organize", change: OrganizeChange,
+/**
+ * Emails the call targets that exist and are in scope.
+ */
+count: number,
+/**
+ * Subjects of up to five of them.
+ */
+subjects: Array<string>, } | { "type": "draft", subject: string, origin: DraftOrigin, change: ConfirmDraftChange, };
+
+export type ConfirmationRequest = { action: ConfirmAction,
+/**
+ * The tool id, e.g. `send_email`.
+ */
+tool: string, details: ConfirmationDetails, };
+
+export type PendingConfirmation = { requestId: string, callId: string, request: ConfirmationRequest, };
+
+export type ToolActivitySummary = { "type": "pending" } | { "type": "found", count: number, } | { "type": "read", emailIds: Array<string>, } | { "type": "changed", count: number, emailIds: Array<string>, undo: ToolUndo | null, } | { "type": "draft", draftId: string, subject: string, } | { "type": "outbox", outboxId: string, } | { "type": "done" } | { "type": "denied" } | { "type": "error", code: string, };
 
 export type ToolActivity = { callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, };
 
@@ -1204,7 +1244,12 @@ seq: number,
 /**
  * Set for chats.
  */
-conversationId: string | null, };
+conversationId: string | null,
+/**
+ * The question the run waits on; set exactly while `state` is
+ * `awaitingConfirmation`.
+ */
+pending: PendingConfirmation | null, };
 
 export type AssistantEvent = { runId: string,
 /**
@@ -1212,4 +1257,4 @@ export type AssistantEvent = { runId: string,
  */
 seq: number, kind: AssistantEventKind, };
 
-export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };
+export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "confirm", requestId: string, callId: string, request: ConfirmationRequest, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };

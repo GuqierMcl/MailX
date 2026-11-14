@@ -174,6 +174,12 @@ const MAIN_ONLY: &[&str] = &[
     "ai_list_models",
     "ai_test",
     "ai_provider_icon",
+    "assistant_start",
+    "assistant_cancel",
+    "assistant_snapshot",
+    "assistant_respond",
+    "assistant_grant_consent",
+    "assistant_revoke_consent",
     "settings_update",
     "autostart_get",
     "autostart_set",
@@ -442,6 +448,27 @@ mod tests {
     }
 
     #[test]
+    fn assistant_commands_are_for_the_main_window_alone() {
+        let app = url("tauri://localhost");
+        let composer = composer_label(&id());
+        for command in [
+            "assistant_start",
+            "assistant_cancel",
+            "assistant_snapshot",
+            "assistant_respond",
+            "assistant_grant_consent",
+            "assistant_revoke_consent",
+        ] {
+            assert_eq!(check("main", &app, command, None), Ok(WindowKind::Main));
+            // A composer window (or a mail body frame) cannot answer a
+            // confirmation or grant consent.
+            assert!(check(&composer, &app, command, None).is_err(), "{command}");
+            assert!(check("mail-body", &app, command, None).is_err());
+            assert!(check("main", &url("https://example.com"), command, None).is_err());
+        }
+    }
+
+    #[test]
     fn the_whitelist_table() {
         let composer = WindowKind::Composer(id());
         let main = WindowKind::Main;
@@ -516,6 +543,12 @@ mod tests {
             ("ai_list_models", true, false),
             ("ai_test", true, false),
             ("ai_provider_icon", true, false),
+            ("assistant_start", true, false),
+            ("assistant_cancel", true, false),
+            ("assistant_snapshot", true, false),
+            ("assistant_respond", true, false),
+            ("assistant_grant_consent", true, false),
+            ("assistant_revoke_consent", true, false),
             ("emails_set_flag", true, false),
             ("emails_delete", true, false),
             ("emails_verification_code_status", true, false),

@@ -7,12 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::task::AbortHandle;
+use tokio::{sync::oneshot, task::AbortHandle};
 use uuid::Uuid;
 
 use super::types::{
-    AssistantEvent, AssistantEventKind, FinishedReason, RunKindTag, RunSnapshot, RunState,
-    ToolActivity, ToolActivitySummary, ToolStatus,
+    AssistantEvent, AssistantEventKind, ConfirmationRequest, FinishedReason, PendingConfirmation,
+    RunKindTag, RunSnapshot, RunState, ToolActivity, ToolActivitySummary, ToolStatus,
 };
 use crate::{
     AppError, ErrorCode,
@@ -26,8 +26,15 @@ pub(crate) const KEEP_FINISHED_FOR: Duration = Duration::from_secs(10 * 60);
 /// ... and no more than this many of them.
 pub(crate) const KEEP_FINISHED_RUNS: usize = 20;
 
+/// The loop's end of a confirmation: `true` approves.
+struct Waiting {
+    request_id: String,
+    answer: oneshot::Sender<bool>,
+}
+
 struct Entry {
     snapshot: RunSnapshot,
+    waiting: Option<Waiting>,
     abort: Option<AbortHandle>,
     finished_at: Option<Instant>,
     created: u64,
@@ -79,6 +86,10 @@ impl Runs {
         match &kind {
             AssistantEventKind::State { state } => {
                 snapshot.state = *state;
+                if *state != RunState::AwaitingConfirmation {
+                    snapshot.pending = None;
+                    entry.waiting = None;
+                }
                 if state.finished() {
                     entry.finished_at = Some(Instant::now());
                 }
@@ -100,6 +111,17 @@ impl Runs {
                     Some(existing) => *existing = activity,
                     None => snapshot.tools.push(activity),
                 }
+            }
+            AssistantEventKind::Confirm {
+                request_id,
+                call_id,
+                request,
+            } => {
+                snapshot.pending = Some(PendingConfirmation {
+                    request_id: request_id.clone(),
+                    call_id: call_id.clone(),
+                    request: request.clone(),
+                });
             }
             AssistantEventKind::Finished { reason } => snapshot.finished_reason = Some(*reason),
             AssistantEventKind::Failed { code } => snapshot.error = Some(*code),
@@ -146,7 +168,9 @@ impl Runs {
                 finished_reason: None,
                 seq: 0,
                 conversation_id,
+                pending: None,
             },
+            waiting: None,
             abort: None,
             finished_at: None,
             created,
@@ -177,12 +201,14 @@ impl Runs {
             finished_reason: Some(FinishedReason::Stop),
             seq: 0,
             conversation_id: None,
+            pending: None,
         };
         let created = table.counter;
         table.runs.insert(
             run_id,
             Entry {
                 snapshot: snapshot.clone(),
+                waiting: None,
                 abort: None,
                 finished_at: Some(Instant::now()),
                 created,
@@ -257,6 +283,103 @@ impl Runs {
                 run_id,
                 AssistantEventKind::State {
                     state: RunState::Failed,
+                },
+            );
+        }
+    }
+
+    /// Pauses the run on a question for the user: the state becomes
+    /// `awaitingConfirmation` and the request goes out as an event. Returns
+    /// the request id and the channel the answer arrives on, or `None` when
+    /// the run is already over.
+    pub(crate) fn ask(
+        &self,
+        run_id: &str,
+        call_id: &str,
+        request: ConfirmationRequest,
+    ) -> Option<(String, oneshot::Receiver<bool>)> {
+        let mut table = self.lock();
+        let request_id = Uuid::new_v4().to_string();
+        if !self.apply(
+            &mut table,
+            run_id,
+            AssistantEventKind::State {
+                state: RunState::AwaitingConfirmation,
+            },
+        ) {
+            return None;
+        }
+        let (answer, receiver) = oneshot::channel();
+        // `apply` found the run above and keeps the lock until here.
+        table.runs.get_mut(run_id)?.waiting = Some(Waiting {
+            request_id: request_id.clone(),
+            answer,
+        });
+        self.apply(
+            &mut table,
+            run_id,
+            AssistantEventKind::Confirm {
+                request_id: request_id.clone(),
+                call_id: call_id.to_owned(),
+                request,
+            },
+        );
+        Some((request_id, receiver))
+    }
+
+    /// Delivers the user's answer to the run's pending question and sets it
+    /// running again. `NotFound` for an unknown run; `Conflict` when the run
+    /// is not waiting, waits on another request, or the question has already
+    /// been answered or has expired.
+    pub(crate) fn respond(
+        &self,
+        run_id: &str,
+        request_id: &str,
+        approved: bool,
+    ) -> Result<(), AppError> {
+        let mut table = self.lock();
+        let entry = table
+            .runs
+            .get_mut(run_id)
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        if entry.snapshot.state != RunState::AwaitingConfirmation
+            || entry
+                .waiting
+                .as_ref()
+                .is_none_or(|waiting| waiting.request_id != request_id)
+        {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
+        let waiting = entry.waiting.take().expect("checked above");
+        // The loop stopped listening (it timed out a moment ago).
+        if waiting.answer.send(approved).is_err() {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
+        self.apply(
+            &mut table,
+            run_id,
+            AssistantEventKind::State {
+                state: RunState::Running,
+            },
+        );
+        Ok(())
+    }
+
+    /// The question went unanswered: drops it and sets the run running again.
+    pub(crate) fn expire(&self, run_id: &str, request_id: &str) {
+        let mut table = self.lock();
+        let waiting = table.runs.get(run_id).is_some_and(|entry| {
+            entry
+                .waiting
+                .as_ref()
+                .is_some_and(|waiting| waiting.request_id == request_id)
+        });
+        if waiting {
+            self.apply(
+                &mut table,
+                run_id,
+                AssistantEventKind::State {
+                    state: RunState::Running,
                 },
             );
         }

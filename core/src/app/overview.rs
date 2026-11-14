@@ -126,6 +126,18 @@ pub struct RecentAttachment {
 }
 
 impl MailxCore {
+    /// Which of `addresses` the account has any cached mail from or to
+    /// (sender, To, Cc, or a local Sent copy's recipients, Bcc included).
+    /// Case-insensitive; the answer is lowercased.
+    pub(crate) fn known_correspondents(
+        &self,
+        account_id: &str,
+        addresses: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        let lowered: Vec<String> = addresses.iter().map(|a| a.to_lowercase()).collect();
+        self.accounts()?.known_correspondents(account_id, &lowered)
+    }
+
     /// The Now page's local statistics. Read-only, bounded and cheap enough
     /// to run after every sync event; the time windows use the core's clock.
     pub fn mail_overview(&self, query: &MailOverviewQuery) -> Result<MailOverview, AppError> {

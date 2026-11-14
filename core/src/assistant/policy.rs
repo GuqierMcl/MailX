@@ -34,8 +34,7 @@ impl DraftSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Decision {
     Run,
-    /// The user must agree first. Until the confirmation flow exists, the
-    /// loop treats this as declined.
+    /// The user must agree first: the run pauses on a confirmation.
     Ask,
 }
 
@@ -68,6 +67,20 @@ const SEND_TOOLS: &[&str] = &["send_email", "cancel_outbox"];
 /// draft up before deciding.
 pub(crate) fn needs_draft(tool: &str) -> bool {
     DRAFT_CHANGE_TOOLS.contains(&tool)
+}
+
+/// Whether the tool is in a category above. An unknown tool is never run and
+/// never asked about: there is nothing meaningful to show.
+pub(crate) fn is_known(tool: &str) -> bool {
+    [
+        READ_TOOLS,
+        ORGANIZE_TOOLS,
+        NEW_DRAFT_TOOLS,
+        DRAFT_CHANGE_TOOLS,
+        SEND_TOOLS,
+    ]
+    .iter()
+    .any(|list| list.contains(&tool))
 }
 
 fn mode(mode: AssistantMode) -> Decision {

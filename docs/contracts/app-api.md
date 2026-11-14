@@ -388,7 +388,7 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 
 列表预览：`emails_request_previews` 的参数是列表当前需要预览的**完整**邮件 id 集合，新请求取代每个账号尚未开始的旧请求（已在进行的批次会完成），所以滚动时前端只需发最新可见行。已是 ready / failed、已不可见或已过期的 id 被忽略；账号被停用、缺凭证等不可用时不抓取。结果以 `mailx://email-previews` 推送给 main，`previewState` 为 ready（带 `preview`）、failed（`preview` 为空）或 missing（`preview` 为空）：missing 项表示“这一次尝试没有得到预览，之后可以再次请求”，由网络、认证、代理、超时或服务器错误（当前批次与该账号被放弃的剩余队列）、UIDVALIDITY 变化、服务器未返回对应 UID 触发，不写库，行保持 missing；仅因被新请求取代而丢弃的 id 不推送任何事件。前端应据此停止显示“加载中”，并自行限制对同一 id 的重试频率。事件只是提示，列表重新读取得到同样的数据。命令不返回错误详情，且不占用正文下载通道。
 
-核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有六种（`Outbox`、`DraftChanged` 见上文发件箱）：
+核心不再按事件种类各开一个回调，而是只有一个出口：宿主在 `MailxCore::open` 时传入一个 `EventSink`（实现 `emit(&CoreEvent)`；普通闭包即可），由宿主决定每种事件送到哪里。`CoreEvent` 现有七种（`Outbox`、`DraftChanged` 见上文发件箱，`Assistant` 见“AI 助手”）：
 
 | 事件 | 含义 | 桌面宿主的去向 |
 | --- | --- | --- |
@@ -398,6 +398,7 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 | `Previews(EmailPreviews)` | 一批列表预览抓取完成 | `mailx://email-previews`，仅 main 窗口 |
 | `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
 | `DraftChanged(DraftChanged)` | 草稿创建 / 保存 / 删除，或被队列锁定 / 释放 | `mailx://drafts` |
+| `Assistant(AssistantEvent)` | 助手运行的状态、文字、工具活动与确认请求 | `mailx://assistant`，仅 main 窗口 |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 
@@ -702,6 +703,102 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 - 密钥必须是可打印 ASCII，最长 4096 字节，可以为空（本机 Ollama、LM Studio 不需要）；接口地址只接受带主机的 `http` / `https`，不带账号、查询参数或片段；名称 1–64 字符。校验失败返回 `validation`，错误中不含密钥原值。密钥存入 `SecretStore` 的 `mailx/ai/<connectionId>/api-key`，代理密码为 `mailx/ai/proxy-password`。
 - 图标 `data` 只能作为 CSS 遮罩使用，不能插入为标记。
 - 服务商返回的原文不传给界面，只返回固定错误码：`aiNotConfigured`（连接不存在）、`aiKeyRejected`（401 / 403）、`aiQuotaExceeded`（402）、`aiModelNotFound`（测试调用 404）、`aiRateLimited`（429）、`aiRequestRejected`（其他 3xx / 4xx，含不跟随的重定向）、`aiUnavailable`（5xx）、`aiNetwork`、`aiProxy`（代理失败，不回退直连）、`aiTimeout`、`aiInvalidResponse`。
+
+### AI 助手（主窗口）
+
+设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面尚未接入，目前只有 `MailxClient` 方法（含浏览器预览用的模拟实现）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `assistantStart(request)` | `assistant_start`，`{ request: StartRun }` | `RunSnapshot`（启动那一刻的快照） |
+| `assistantCancel(runId)` | `assistant_cancel`，`{ runId }` | 空；已结束的运行保持原样 |
+| `assistantSnapshot(runId)` | `assistant_snapshot`，`{ runId }` | `RunSnapshot`；结束后保留十分钟（最多 20 个），之后 `notFound` |
+| `assistantRespond(runId, requestId, approved)` | `assistant_respond`，`{ runId, requestId, approved }` | 空 |
+| `assistantGrantConsent()` | `assistant_grant_consent`，`{}` | `AiConsent`（当前助手模型所属的连接 id 与规范化地址） |
+| `assistantRevokeConsent()` | `assistant_revoke_consent`，`{}` | 空；同时取消所有进行中的运行；核心未就绪时也能执行 |
+| `onAssistantEvent(listener)` | 事件 `mailx://assistant` | `AssistantEvent`，只发给主窗口 |
+
+撤销整理没有专门命令，界面直接用已有的 `emails_undo_archive` 与 `emails_set_flags`，见下文“撤销整理”。
+
+```ts
+type StartRun = { kind: RunKind };
+type RunKind =
+  | { type: "nowSummary"; since: string | null; dayStarts?: string[] }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容
+  | { type: "chat"; conversationId?: string; message: string };         // 不带 conversationId 即新对话；message 1–20000 字符
+type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
+type RunSnapshot = {
+  runId: string; kind: "nowSummary" | "chat"; state: RunState;
+  text: string;                     // 模型到目前为止写的全部文字
+  tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
+  error: ErrorCode | null;          // failed 时的固定错误码
+  finishedReason: "stop" | "limit" | "length" | null;
+  seq: number;                      // 快照包含的最后一个事件序号
+  conversationId: string | null;    // 对话才有
+  pending: PendingConfirmation | null; // 仅在 awaitingConfirmation 时非空
+};
+type ToolActivity = { callId: string; name: string; status: "running" | "done" | "failed" | "denied"; summary: ToolActivitySummary };
+type ToolActivitySummary =
+  | { type: "pending" } | { type: "found"; count: number } | { type: "read"; emailIds: string[] }
+  | { type: "changed"; count: number; emailIds: string[]; undo: ToolUndo | null }
+  | { type: "draft"; draftId: string; subject: string } | { type: "outbox"; outboxId: string }
+  | { type: "done" } | { type: "denied" } | { type: "error"; code: string };
+type AssistantEvent = { runId: string; seq: number; kind: AssistantEventKind };  // seq 每个运行从 1 起逐个加一
+type AssistantEventKind =
+  | { type: "state"; state: RunState }
+  | { type: "text"; delta: string }
+  | { type: "tool"; callId: string; name: string; status: ToolStatus; summary: ToolActivitySummary }
+  | { type: "confirm"; requestId: string; callId: string; request: ConfirmationRequest }
+  | { type: "finished"; reason: "stop" | "limit" | "length" }
+  | { type: "failed"; code: ErrorCode };
+```
+
+**运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件。
+
+**事件与快照。** 事件按 `seq` 顺序到达；前端可以随时用 `assistantSnapshot` 重新取得状态（包括待确认的请求），再接收 `seq` 更大的事件，忽略小于等于快照 `seq` 的。事件只含模型输出的文字、结构化的工具摘要和固定错误码；提示词、邮件正文与服务商原文不会出现。
+
+**确认。** 工具的处理方式取自助手设置（见 [ai-permissions](../architecture/ai-permissions.md#2-操作类别)）。需要询问时运行进入 `awaitingConfirmation`，依次发出 `state` 事件与 `confirm` 事件，`RunSnapshot.pending` 同时有值；循环此时不执行该调用，也不再请求模型。一次只有一个待确认请求；同一轮里的多个工具调用按顺序处理，各自暂停。
+
+```ts
+type PendingConfirmation = { requestId: string; callId: string; request: ConfirmationRequest };
+type ConfirmationRequest = { action: ConfirmAction; tool: string; details: ConfirmationDetails };
+type ConfirmAction = "send" | "cancelSend" | "organize" | "aiDraft" | "userDraft";
+type ConfirmationDetails =
+  | { type: "send"; accountName: string; accountAddress: string; to: MailAddress[]; cc: MailAddress[]; bcc: MailAddress[];
+      subject: string; bodyPreview: string;            // 纯文本正文的前 300 个字符
+      attachments: { fileName: string; size: number }[]; // 不含内嵌图片
+      warnings: ("newRecipient" | "notInConversation" | "hasAttachments")[] }
+  | { type: "outbox"; retry: boolean; senderAddress: string; subject: string; recipients: string[]; recipientCount: number } // 重试排队的发送，或取消排队
+  | { type: "organize"; change: OrganizeChange; count: number; subjects: string[] }  // count 为目标中存在且在范围内的邮件数，subjects 最多 5 个
+  | { type: "draft"; subject: string; origin: "user" | "mcp" | "ai"; change: ConfirmDraftChange };
+type OrganizeChange = { type: "archive" } | { type: "unarchive" } | { type: "flags"; isRead: boolean | null; isStarred: boolean | null } | { type: "refresh" };
+type ConfirmDraftChange = { type: "create" } | { type: "update"; fields: string[] } | { type: "delete" }
+  | { type: "attachmentAdded"; fileName: string } | { type: "attachmentRemoved"; fileName: string };
+```
+
+- 请求由核心根据**当前数据**生成（草稿、发件箱项、邮件的现状），不使用模型对自己操作的描述；模型参数只决定查哪条记录。新建草稿时没有记录可查，`create_draft` 显示模型给出的主题，`create_reply_draft` 显示被回复邮件的主题。目标记录不存在或不在可用账号内时不弹确认，模型直接得到 `notFound` 类错误结果。
+- 发信的 `warnings`：`newRecipient`——某个收件人（含抄送、密送）在该账号的本地缓存里从未出现在任何邮件的发件人、收件人、抄送，或本机已发送副本的收件人中；`notInConversation`——某个收件人不在本次运行中已读取或搜索到的邮件地址里；`hasAttachments`——有非内嵌附件。
+- `assistantRespond` 只对该运行当前的 `requestId` 有效，且只能答一次。`approved: true` 时核心按**原参数**执行该调用（设置开关与账号范围会重新检查；草稿在这期间被改过时，工具自己返回 `conflict`，发信不会发出）；`false` 时模型收到“用户拒绝”的结果，该调用的活动状态为 `denied`。
+- 10 分钟没有回应按拒绝处理（活动 `denied`，模型被告知用户没有及时回应）。取消运行或撤销同意时，等待中的请求随运行结束，运行为 `canceled`。
+- 同一次运行（即同一条用户消息）里，被拒绝（含超时）的同一工具与同一参数不再弹出确认：模型直接得到“已拒绝”的结果。用户发出新消息后重新询问。
+- 不认识的工具名从不执行也不询问，按 `denied` 处理。
+- 错误：`notFound`（运行不存在）；`conflict`（运行不在等待、请求 id 不是当前待确认的那个、已被回应、已超时或已取消）。
+
+**撤销整理。** 整理类工具直接执行成功后，`tool` 事件（与快照）里的 `ToolActivitySummary.changed.undo` 带有撤销所需的数据，只经由这条通向主窗口的事件到达界面，不进入模型看到的任何文字：
+
+```ts
+type ToolUndo =
+  | { type: "archive"; token: string }                  // 归档与取消归档：一次性令牌，交给 emails_undo_archive
+  | { type: "flags"; restore: FlagRestore[] };          // 标记已读 / 星标：调用前的值
+type FlagRestore = { emailId: string; isRead: boolean | null; isStarred: boolean | null }; // 只含这次调用真正改动的字段
+```
+
+- 归档令牌就是核心整理服务发出的 `undoToken`，沿用其规则：10 分钟有效，对同一批邮件做过后续操作即失效，用过即作废；界面调用 `emails_undo_archive`，过期返回 `notFound` 时撤销按钮消失。
+- 标记按 `restore` 分组：把 `isRead` 相同的邮件合成一次 `emails_set_flags(ids, "read", value)`，星标同理；这是写回原值，不检查之间是否有别的修改。
+- 因此没有 `assistant_undo` 命令：核心不保存撤销数据，不增加状态，撤销与用户自己的整理共用同一条路径与事件。助手自己的整理同样会发出 `MailStateChanged`（`source: "ai"`，含 `undoToken`），列表据此刷新；工具事件里的 `undo` 只是把令牌与这次对话里的那一行对上。
+
+**同意规则。** 同意绑定“连接 id 与规范化的服务地址”（`AiConsent`，与翻译共用类型）：换连接或改地址需要重新同意，换模型、换密钥不需要。`assistantGrantConsent` 记录当前助手模型（`assistant.model`，缺省跟随 `ai.defaultModel`）所属连接，没有可用模型时返回 `aiNotConfigured`。同意只能由这两个命令设置与撤销；设置读取里 `assistant.consented` 可见，但写入会被忽略。
+
+**错误码。** `assistantStart` 的失败：`assistantDisabled`（助手在设置里关闭）、`aiNotConfigured`（没有可用的模型或连接）、`assistantBusy`（已有 2 个进行中的运行，或该对话已有运行）、`notFound`（`conversationId` 不存在）、`validation`（`message` 为空或过长，`since` / `dayStarts` 无效）、`coreNotReady`。运行失败时快照的 `error` 为固定码：上述 `assistantDisabled`、`aiNotConfigured`，以及 `assistantContextFull`（对话接近模型上下文的八成，请新开对话）、`aiKeyRejected`、`aiQuotaExceeded`、`aiModelNotFound`、`aiRateLimited`、`aiRequestRejected`、`aiUnavailable`、`aiNetwork`、`aiProxy`（代理失败不回退直连）、`aiTimeout`、`aiInvalidResponse`、`internal`；含义同上文 AI 服务商一节，服务商原文不外传。工具失败不使运行失败：它是对应活动的 `failed` 状态与 `error` 摘要（`code` 为工具层固定码），同时作为错误结果交给模型。
 
 ### 全局提示（Toast）
 

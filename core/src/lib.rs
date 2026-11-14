@@ -53,8 +53,10 @@ pub use app::{
     VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use assistant::{
-    Assistant, AssistantEvent, AssistantEventKind, FinishedReason, RunKind, RunKindTag,
-    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus,
+    Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
+    ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
+    FlagRestore, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState,
+    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

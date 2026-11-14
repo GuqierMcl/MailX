@@ -2,6 +2,10 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
   AiCatalog,
+  AiConsent,
+  AssistantEvent,
+  RunSnapshot,
+  StartRun,
   AiModel,
   AiModelRef,
   AiProviderIcon,
@@ -358,6 +362,29 @@ export interface MailxClient {
   onComposerCloseRequested(listener: (request: { generation: number }) => void): () => void
   onAppCloseCancelled(listener: (request: { generation: number }) => void): () => void
 
+  // --- Built-in assistant (docs/contracts/app-api.md, "AI 助手（主窗口）"). Main window only.
+  /**
+   * Starts a run (a Now summary or one chat message). Without the user's consent the snapshot is
+   * `awaitingConsent` and has already ended: call `assistantGrantConsent`, then start again.
+   * Everything after the first snapshot arrives through `onAssistantEvent`.
+   */
+  assistantStart(request: StartRun): Promise<RunSnapshot>
+  /** Stops a run; it ends `canceled`. A finished run is left as it is. */
+  assistantCancel(runId: string): Promise<void>
+  /** The run as it is now, including its pending confirmation; `notFound` ten minutes after it ended. */
+  assistantSnapshot(runId: string): Promise<RunSnapshot>
+  /**
+   * Answers the confirmation the run waits on. `conflict` when that request is no longer pending
+   * (answered, timed out, canceled, or another request). The request id comes from the `confirm` event.
+   */
+  assistantRespond(runId: string, requestId: string, approved: boolean): Promise<void>
+  /** Records the consent to send mail content to the connection the assistant would use now. The only way to set it. */
+  assistantGrantConsent(): Promise<AiConsent>
+  /** Takes the consent back and stops every run that is going. */
+  assistantRevokeConsent(): Promise<void>
+  /** Run events in `seq` order: state, text, tool activity, confirmation requests, the end. */
+  onAssistantEvent(listener: (event: AssistantEvent) => void): () => void
+
   // --- Updates (docs/architecture/updater.md). Main window only.
   /** The current update state, including whether this edition can install one. */
   getUpdateState(): Promise<UpdateSnapshot>
@@ -399,6 +426,7 @@ export const HOST_EVENTS = {
   settingsChanged: 'mailx://settings-changed',
   updater: 'mailx://updater-state',
   mcp: 'mailx://mcp-status-changed',
+  assistant: 'mailx://assistant',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -689,6 +717,13 @@ export function createDesktopClient(): MailxClient {
     restartToUpdate: () => call<UpdateSnapshot>('updater_restart'),
     openExternalLink: (url) => call<void>('updater_open_link', { url }),
     onUpdateState: (listener) => subscribe<UpdateSnapshot>(HOST_EVENTS.updater, listener),
+    assistantStart: (request) => call<RunSnapshot>('assistant_start', { request }),
+    assistantCancel: (runId) => call<void>('assistant_cancel', { runId }),
+    assistantSnapshot: (runId) => call<RunSnapshot>('assistant_snapshot', { runId }),
+    assistantRespond: (runId, requestId, approved) => call<void>('assistant_respond', { runId, requestId, approved }),
+    assistantGrantConsent: () => call<AiConsent>('assistant_grant_consent'),
+    assistantRevokeConsent: () => call<void>('assistant_revoke_consent'),
+    onAssistantEvent: (listener) => subscribe<AssistantEvent>(HOST_EVENTS.assistant, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
     getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),

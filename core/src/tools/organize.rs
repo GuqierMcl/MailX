@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::context::{Action, Audience, Principal};
 use super::error::{ToolError, ToolErrorCode};
 use super::spec::{Annotations, AudiencePolicy, ToolCall, ToolSpec, Tools};
+use super::trusted::PreviousFlags;
 use crate::{FlagChange, MailChangeSource};
 
 pub const MAX_ORGANIZE_BATCH: usize = 50;
@@ -188,6 +189,11 @@ fn set_email_flags(
             .and_then(|mail| {
                 call.require_account(&mail.summary.account_id)?;
                 call.note_resource(&mail.summary.account_id);
+                call.keep_previous_flags(PreviousFlags {
+                    email_id: id.clone(),
+                    is_read: mail.summary.is_read,
+                    is_starred: mail.summary.is_starred,
+                });
                 Ok(())
             });
         match checked {
@@ -247,6 +253,7 @@ fn change_archive(
     let outcome = call
         .core
         .change_email_archive(&input.email_ids, archive, source(call))?;
+    call.keep_archive_undo(outcome.undo_token.clone());
     Ok(ArchiveEmailsOutput {
         processed_count: outcome.processed_count,
         changed_count: outcome.changed_count,

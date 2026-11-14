@@ -578,32 +578,134 @@ async fn a_tool_call_runs_against_the_core_and_its_result_goes_back_wrapped() {
     assert!(seqs.windows(2).all(|pair| pair[1] == pair[0] + 1));
 }
 
+// ------------------------------------------------------------ confirmation
+
+/// Waits until the run asks something.
+async fn pending(assistant: &Assistant, run_id: &str) -> PendingConfirmation {
+    for _ in 0..400 {
+        let snapshot = assistant.snapshot(run_id).unwrap();
+        if let Some(pending) = snapshot.pending {
+            assert_eq!(snapshot.state, RunState::AwaitingConfirmation);
+            return pending;
+        }
+        assert!(!snapshot.state.finished(), "ended without asking");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the run never asked");
+}
+
+fn send_args(draft: &crate::Draft) -> Value {
+    json!({"action": "send", "draftId": draft.id, "expectedRevision": draft.revision,
+           "clientMutationId": uuid::Uuid::new_v4().to_string()})
+}
+
+fn outbox_count(fx: &Fx) -> usize {
+    fx.core.list_outbox(None, true).unwrap().len()
+}
+
+impl Fx {
+    fn subject(&self, index: usize) -> String {
+        self.core
+            .get_email(&self.emails[index])
+            .unwrap()
+            .summary
+            .subject
+    }
+
+    fn draft_to(&self, address: &str) -> crate::Draft {
+        self.core
+            .create_draft(
+                serde_json::from_value(json!({
+                    "accountId": self.account, "to": [{"address": address}],
+                    "cc": [], "bcc": [], "subject": "Plans", "bodyHtml": "<p>Hello there</p>",
+                    "clientMutationId": uuid::Uuid::new_v4().to_string()
+                }))
+                .unwrap(),
+                "",
+            )
+            .unwrap()
+    }
+}
+
 #[tokio::test]
-async fn organize_tools_run_when_direct_and_are_denied_when_asking() {
-    let args = |fx: &Fx| json!({"emailIds": [fx.emails[0]], "isRead": true});
-    // Direct (the default).
+async fn organize_in_ask_mode_pauses_and_approval_runs_the_original_call() {
     let fx = Fx::new().await;
-    assert!(!is_read(&fx, 0));
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    let args = json!({"emailIds": [fx.emails[0]], "isRead": true});
     fx.model(vec![
-        calls(&[("c1", "set_email_flags", args(&fx))]),
+        calls(&[("c1", "set_email_flags", args)]),
         say("Marked."),
     ]);
-    let snapshot = fx.chat_and_wait("mark it read").await;
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(asked.call_id, "c1");
+    assert_eq!(asked.request.action, ConfirmAction::Organize);
+    assert_eq!(asked.request.tool, "set_email_flags");
+    assert_eq!(
+        asked.request.details,
+        ConfirmationDetails::Organize {
+            change: OrganizeChange::Flags {
+                is_read: Some(true),
+                is_starred: None
+            },
+            count: 1,
+            subjects: vec![fx.subject(0)],
+        }
+    );
+    assert!(!is_read(&fx, 0), "nothing ran while the question is open");
+    assert_eq!(fx.requests(), 1, "the model is not asked again meanwhile");
+
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.pending, None);
     assert_eq!(snapshot.tools[0].status, ToolStatus::Done);
-    assert!(matches!(
-        snapshot.tools[0].summary,
-        ToolActivitySummary::Changed { count: 1, .. }
-    ));
     assert!(is_read(&fx, 0));
 
-    // Ask: not run, and the model is told.
+    // The events: running, the pause with its request, running again.
+    let events = fx.run_events(&started.run_id);
+    let states: Vec<RunState> = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            AssistantEventKind::State { state } => Some(state),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        states[..3],
+        [
+            RunState::Running,
+            RunState::AwaitingConfirmation,
+            RunState::Running
+        ]
+    );
+    assert!(events.iter().any(|e| matches!(
+        &e.kind,
+        AssistantEventKind::Confirm { request_id, call_id, .. }
+            if *request_id == asked.request_id && call_id == "c1"
+    )));
+}
+
+#[tokio::test]
+async fn denying_tells_the_model_and_changes_nothing() {
     let fx = Fx::new().await;
     fx.configure(|a| a.organize = AssistantMode::Ask);
     fx.model(vec![
-        calls(&[("c1", "set_email_flags", args(&fx))]),
+        calls(&[(
+            "c1",
+            "set_email_flags",
+            json!({"emailIds": [fx.emails[0]], "isRead": true}),
+        )]),
         say("I could not."),
     ]);
-    let snapshot = fx.chat_and_wait("mark it read").await;
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, false)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
     assert_eq!(snapshot.state, RunState::Completed);
     assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
     assert_eq!(snapshot.tools[0].summary, ToolActivitySummary::Denied);
@@ -614,39 +716,115 @@ async fn organize_tools_run_when_direct_and_are_denied_when_asking() {
 }
 
 #[tokio::test]
-async fn sending_is_denied_in_confirm_mode_and_queues_in_direct_mode() {
-    let outbox_events = |fx: &Fx| {
-        fx.events
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|e| matches!(e, CoreEvent::Outbox(_)))
-            .count()
-    };
-    let send = |draft: &crate::Draft| {
-        json!({"action": "send", "draftId": draft.id, "expectedRevision": draft.revision,
-               "clientMutationId": uuid::Uuid::new_v4().to_string()})
-    };
-
+async fn direct_organize_carries_undo_data_for_the_ui_and_never_for_the_model() {
     let fx = Fx::new().await;
-    let draft = fx.user_draft();
     fx.model(vec![
-        calls(&[("c1", "send_email", send(&draft))]),
-        say("Not sent."),
+        calls(&[
+            (
+                "f",
+                "set_email_flags",
+                json!({"emailIds": [fx.emails[0]], "isRead": true}),
+            ),
+            ("a", "archive_emails", json!({"emailIds": [fx.emails[1]]})),
+        ]),
+        say("Done."),
     ]);
-    let snapshot = fx.chat_and_wait("send my draft").await;
-    assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
-    assert_eq!(outbox_events(&fx), 0, "nothing was queued");
-    assert!(fx.core.list_outbox(None, true).unwrap().is_empty());
+    let snapshot = fx.chat_and_wait("tidy up").await;
+    let tool = |id: &str| snapshot.tools.iter().find(|t| t.call_id == id).unwrap();
+    let ToolActivitySummary::Changed {
+        undo: Some(ToolUndo::Flags { restore }),
+        ..
+    } = &tool("f").summary
+    else {
+        panic!("{:?}", tool("f"));
+    };
+    assert_eq!(
+        restore,
+        &vec![FlagRestore {
+            email_id: fx.emails[0].clone(),
+            is_read: Some(false),
+            is_starred: None,
+        }]
+    );
+    let ToolActivitySummary::Changed {
+        undo: Some(ToolUndo::Archive { token }),
+        ..
+    } = &tool("a").summary
+    else {
+        panic!("{:?}", tool("a"));
+    };
+    // The same token undoes the archive through the core.
+    fx.core.undo_archive(token).unwrap();
 
+    // Nothing the model can read mentions the token or the previous flags.
+    let second = fx.request(1).to_string();
+    assert!(!second.contains(token), "the token reached the model");
+    assert!(!second.contains("undoToken") && !second.contains("restore"));
+    for result in tool_messages(&fx.request(1)) {
+        assert!(!result.contains(token));
+    }
+}
+
+#[tokio::test]
+async fn sending_in_confirm_mode_pauses_and_approval_queues_the_mail() {
     let fx = Fx::new().await;
-    fx.configure(|a| a.send = AssistantSendMode::Direct);
-    let draft = fx.user_draft();
+    let draft = fx.draft_to("stranger@example.test");
+    fx.core
+        .add_attachment(
+            crate::AddAttachmentRequest {
+                draft_id: draft.id.clone(),
+                expected_revision: draft.revision,
+                file_name: "report.pdf".into(),
+            },
+            b"hello",
+        )
+        .unwrap();
+    let draft = fx.core.get_draft(&draft.id).unwrap();
     fx.model(vec![
-        calls(&[("c1", "send_email", send(&draft))]),
+        calls(&[("c1", "send_email", send_args(&draft))]),
         say("Queued."),
     ]);
-    let snapshot = fx.chat_and_wait("send my draft").await;
+    let started = fx.chat("send my draft").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(asked.request.action, ConfirmAction::Send);
+    assert_eq!(asked.request.tool, "send_email");
+    let identity = fx
+        .core
+        .account_identities()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.id == fx.account)
+        .unwrap();
+    assert_eq!(
+        asked.request.details,
+        ConfirmationDetails::Send {
+            account_name: identity.display_name,
+            account_address: identity.email_address,
+            to: vec![crate::MailAddress {
+                name: None,
+                address: "stranger@example.test".into()
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Plans".into(),
+            body_preview: "Hello there".into(),
+            attachments: vec![ConfirmAttachment {
+                file_name: "report.pdf".into(),
+                size: 5
+            }],
+            warnings: vec![
+                ConfirmWarning::NewRecipient,
+                ConfirmWarning::NotInConversation,
+                ConfirmWarning::HasAttachments
+            ],
+        }
+    );
+    assert_eq!(outbox_count(&fx), 0, "nothing queued while asking");
+
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
     assert_eq!(snapshot.tools[0].status, ToolStatus::Done);
     let ToolActivitySummary::Outbox { outbox_id } = &snapshot.tools[0].summary else {
         panic!("{:?}", snapshot.tools[0].summary);
@@ -656,66 +834,480 @@ async fn sending_is_denied_in_confirm_mode_and_queues_in_direct_mode() {
 }
 
 #[tokio::test]
-async fn the_assistants_own_drafts_follow_ai_drafts_and_the_users_are_always_asked() {
+async fn denying_a_send_queues_nothing_and_direct_mode_never_asks() {
     let fx = Fx::new().await;
+    let draft = fx.user_draft();
+    fx.model(vec![
+        calls(&[("c1", "send_email", send_args(&draft))]),
+        say("Not sent."),
+    ]);
+    let started = fx.chat("send my draft").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, false)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
+    assert_eq!(outbox_count(&fx), 0);
+    assert!(tool_messages(&fx.request(1))[0].contains("declined"));
+
+    let fx = Fx::new().await;
+    fx.configure(|a| a.send = AssistantSendMode::Direct);
+    let draft = fx.user_draft();
+    fx.model(vec![
+        calls(&[("c1", "send_email", send_args(&draft))]),
+        say("Queued."),
+    ]);
+    let snapshot = fx.chat_and_wait("send my draft").await;
+    assert_eq!(snapshot.tools[0].status, ToolStatus::Done);
+    assert!(
+        fx.run_events(&snapshot.run_id)
+            .iter()
+            .all(|e| !matches!(e.kind, AssistantEventKind::Confirm { .. }))
+    );
+    assert_eq!(outbox_count(&fx), 1);
+}
+
+#[tokio::test]
+async fn send_warnings_come_from_the_cache_and_from_what_this_run_read() {
+    let fx = Fx::new().await;
+    // The first message is from a known correspondent.
+    fx.db
+        .execute(
+            "UPDATE messages SET from_address = 'friend@example.test' WHERE id = ?1",
+            params![fx.emails[0]],
+        )
+        .unwrap();
+    let friend = fx.draft_to("Friend@Example.test");
+    // Read the friend's mail first in the same turn: known and in conversation.
+    fx.model(vec![
+        calls(&[
+            ("r", "read_email", json!({"emailId": fx.emails[0]})),
+            ("s", "send_email", send_args(&friend)),
+        ]),
+        say("Done."),
+    ]);
+    let started = fx.chat("answer my friend").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(asked.call_id, "s");
+    let ConfirmationDetails::Send { warnings, .. } = &asked.request.details else {
+        panic!("{:?}", asked.request);
+    };
+    assert_eq!(warnings, &Vec::<ConfirmWarning>::new());
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, false)
+        .unwrap();
+    fx.finished(&started.run_id).await;
+
+    // Known in the cache but not read in this run: only notInConversation.
+    let again = fx.draft_to("friend@example.test");
+    fx.model(vec![
+        calls(&[("s", "send_email", send_args(&again))]),
+        say("Done."),
+    ]);
+    let started = fx.chat("answer my friend").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    let ConfirmationDetails::Send { warnings, .. } = &asked.request.details else {
+        panic!("{:?}", asked.request);
+    };
+    assert_eq!(warnings, &vec![ConfirmWarning::NotInConversation]);
+    fx.assistant.cancel(&started.run_id).unwrap();
+}
+
+#[tokio::test]
+async fn the_request_shows_the_draft_as_it_is_not_as_the_model_describes_it() {
+    let fx = Fx::new().await;
+    let draft = fx.draft_to("someone@example.test");
+    let mut args = send_args(&draft);
+    // Model text that disagrees with the record is ignored.
+    args["subject"] = json!("Harmless");
+    fx.model(vec![calls(&[("c1", "send_email", args)]), say("x")]);
+    let started = fx.chat("send").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    // Extra fields make the tool reject the call, but the card comes first
+    // and shows the record; approving then fails closed.
+    let ConfirmationDetails::Send { subject, .. } = &asked.request.details else {
+        panic!("{:?}", asked.request);
+    };
+    assert_eq!(subject, "Plans");
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.tools[0].status, ToolStatus::Failed);
+    assert_eq!(outbox_count(&fx), 0);
+}
+
+#[tokio::test]
+async fn a_draft_changed_after_the_question_makes_the_approved_send_fail() {
+    let fx = Fx::new().await;
+    let draft = fx.draft_to("someone@example.test");
+    fx.model(vec![
+        calls(&[("c1", "send_email", send_args(&draft))]),
+        say("x"),
+    ]);
+    let started = fx.chat("send").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.core
+        .update_draft(crate::UpdateDraftRequest {
+            id: draft.id.clone(),
+            expected_revision: draft.revision,
+            account_id: None,
+            to: draft.to.clone(),
+            cc: vec![],
+            bcc: vec![],
+            subject: "Changed meanwhile".into(),
+            body_html: "<p>Other</p>".into(),
+        })
+        .unwrap();
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert!(matches!(
+        &snapshot.tools[0].summary,
+        ToolActivitySummary::Error { code } if code == "conflict"
+    ));
+    assert_eq!(outbox_count(&fx), 0);
+}
+
+#[tokio::test]
+async fn retry_and_cancel_of_queued_sends_summarise_the_queue_item() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.send = AssistantSendMode::Direct);
+    let draft = fx.draft_to("someone@example.test");
+    fx.model(vec![
+        calls(&[("s", "send_email", send_args(&draft))]),
+        say("Queued."),
+    ]);
+    let snapshot = fx.chat_and_wait("send").await;
+    let ToolActivitySummary::Outbox { outbox_id } = &snapshot.tools[0].summary else {
+        panic!();
+    };
+    let outbox_id = outbox_id.clone();
+    fx.configure(|a| a.send = AssistantSendMode::Confirm);
+
+    // Two calls in one turn: each pauses in order.
+    fx.model(vec![
+        calls(&[
+            (
+                "r",
+                "send_email",
+                json!({"action": "retry", "outboxId": outbox_id}),
+            ),
+            ("c", "cancel_outbox", json!({"outboxId": outbox_id})),
+        ]),
+        say("Done."),
+    ]);
+    let started = fx.chat("deal with the queue").await;
+    let first = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(first.call_id, "r");
+    assert_eq!(first.request.action, ConfirmAction::Send);
+    let expected = |retry| ConfirmationDetails::Outbox {
+        retry,
+        sender_address: fx.core.get_outbox(&outbox_id).unwrap().sender_email_address,
+        subject: "Plans".into(),
+        recipients: vec!["someone@example.test".into()],
+        recipient_count: 1,
+    };
+    assert_eq!(first.request.details, expected(true));
+    fx.assistant
+        .respond(&started.run_id, &first.request_id, false)
+        .unwrap();
+    let second = loop {
+        let next = pending(&fx.assistant, &started.run_id).await;
+        if next.request_id != first.request_id {
+            break next;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(second.call_id, "c");
+    assert_eq!(second.request.action, ConfirmAction::CancelSend);
+    assert_eq!(second.request.details, expected(false));
+    fx.assistant
+        .respond(&started.run_id, &second.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
+    assert_eq!(snapshot.tools[1].status, ToolStatus::Done);
+    assert_eq!(
+        fx.core.get_outbox(&outbox_id).unwrap().state,
+        crate::OutboxState::Canceled
+    );
+}
+
+#[tokio::test]
+async fn draft_tools_ask_by_whose_draft_it_is_and_describe_the_change() {
+    let fx = Fx::new().await;
+    let user = fx.user_draft();
     fx.model(vec![
         calls(&[(
-            "c1",
+            "u",
+            "update_draft",
+            json!({"draftId": user.id, "expectedRevision": user.revision,
+                   "subject": "New", "to": [{"address": "x@example.test"}]}),
+        )]),
+        say("Done."),
+    ]);
+    let started = fx.chat("edit my draft").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(asked.request.action, ConfirmAction::UserDraft);
+    assert_eq!(
+        asked.request.details,
+        ConfirmationDetails::Draft {
+            subject: "User draft".into(),
+            origin: crate::DraftOrigin::User,
+            change: ConfirmDraftChange::Update {
+                fields: vec!["to".into(), "subject".into()]
+            },
+        }
+    );
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    fx.finished(&started.run_id).await;
+    assert_eq!(fx.core.get_draft(&user.id).unwrap().subject, "New");
+
+    // Delete and attachment changes on a draft the assistant made, with
+    // aiDrafts set to ask.
+    fx.configure(|a| a.ai_drafts = AssistantMode::Ask);
+    fx.model(vec![
+        calls(&[(
+            "n",
             "create_draft",
             json!({"accountId": fx.account, "to": [{"address": "a@example.test"}],
                    "subject": "From AI", "bodyHtml": "<p>x</p>"}),
         )]),
         say("Drafted."),
     ]);
-    let snapshot = fx.chat_and_wait("draft something").await;
-    let ToolActivitySummary::Draft { draft_id, subject } = &snapshot.tools[0].summary else {
+    let started = fx.chat("draft something").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(asked.request.action, ConfirmAction::AiDraft);
+    assert_eq!(
+        asked.request.details,
+        ConfirmationDetails::Draft {
+            subject: "From AI".into(),
+            origin: crate::DraftOrigin::Ai,
+            change: ConfirmDraftChange::Create,
+        }
+    );
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    let ToolActivitySummary::Draft { draft_id, .. } = &snapshot.tools[0].summary else {
         panic!("{:?}", snapshot.tools[0]);
     };
-    assert_eq!(subject, "From AI");
-    let ai_draft = fx.core.get_draft(draft_id).unwrap();
-    assert_eq!(ai_draft.origin, crate::DraftOrigin::Ai);
-    let user_draft = fx.user_draft();
-
-    let update = |draft: &crate::Draft| json!({"draftId": draft.id, "expectedRevision": draft.revision, "subject": "Changed"});
-    // Everything direct: still only the assistant's own draft changes.
-    fx.configure(|a| {
-        a.organize = AssistantMode::Direct;
-        a.ai_drafts = AssistantMode::Direct;
-        a.send = AssistantSendMode::Direct;
-    });
+    let ai = fx.core.get_draft(draft_id).unwrap();
     fx.model(vec![
         calls(&[
-            ("u1", "update_draft", update(&ai_draft)),
-            ("u2", "update_draft", update(&user_draft)),
+            (
+                "a",
+                "add_draft_attachment",
+                json!({"draftId": ai.id, "expectedRevision": ai.revision,
+                       "filePath": "/tmp/some/notes.txt"}),
+            ),
+            (
+                "d",
+                "delete_draft",
+                json!({"draftId": ai.id, "expectedRevision": ai.revision}),
+            ),
         ]),
         say("Done."),
     ]);
-    let snapshot = fx.chat_and_wait("rename both").await;
-    let status = |id: &str| {
+    let started = fx.chat("clean up").await;
+    let first = pending(&fx.assistant, &started.run_id).await;
+    assert_eq!(first.request.action, ConfirmAction::AiDraft);
+    assert_eq!(
+        first.request.details,
+        ConfirmationDetails::Draft {
+            subject: "From AI".into(),
+            origin: crate::DraftOrigin::Ai,
+            change: ConfirmDraftChange::AttachmentAdded {
+                file_name: "notes.txt".into()
+            },
+        }
+    );
+    fx.assistant
+        .respond(&started.run_id, &first.request_id, false)
+        .unwrap();
+    let second = loop {
+        let next = pending(&fx.assistant, &started.run_id).await;
+        if next.request_id != first.request_id {
+            break next;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(
+        second.request.details,
+        ConfirmationDetails::Draft {
+            subject: "From AI".into(),
+            origin: crate::DraftOrigin::Ai,
+            change: ConfirmDraftChange::Delete,
+        }
+    );
+    fx.assistant.cancel(&started.run_id).unwrap();
+}
+
+#[tokio::test]
+async fn an_unanswered_question_times_out_as_declined() {
+    let fx = Fx::new().await;
+    fx.assistant
+        .set_confirmation_timeout(Duration::from_millis(150));
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    fx.model(vec![
+        calls(&[(
+            "c1",
+            "set_email_flags",
+            json!({"emailIds": [fx.emails[0]], "isRead": true}),
+        )]),
+        say("Not done."),
+    ]);
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
+    assert!(!is_read(&fx, 0));
+    assert!(tool_messages(&fx.request(1))[0].contains("did not answer"));
+    // A late answer finds nothing to answer.
+    let late = fx
+        .assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap_err();
+    assert_eq!(late.code, ErrorCode::Conflict);
+    assert!(!is_read(&fx, 0));
+}
+
+#[tokio::test]
+async fn canceling_while_waiting_ends_the_run_canceled() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    fx.model(vec![
+        calls(&[(
+            "c1",
+            "set_email_flags",
+            json!({"emailIds": [fx.emails[0]], "isRead": true}),
+        )]),
+        say("x"),
+    ]);
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant.cancel(&started.run_id).unwrap();
+    let snapshot = fx.assistant.snapshot(&started.run_id).unwrap();
+    assert_eq!(snapshot.state, RunState::Canceled);
+    assert_eq!(snapshot.pending, None);
+    assert_eq!(
+        fx.assistant
+            .respond(&started.run_id, &asked.request_id, true)
+            .unwrap_err()
+            .code,
+        ErrorCode::Conflict
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!is_read(&fx, 0));
+    assert_eq!(fx.requests(), 1);
+    // The conversation is free again.
+    fx.model(vec![say("back")]);
+    let id = snapshot.conversation_id.unwrap();
+    let next = fx
+        .assistant
+        .start(chat_request(Some(&id), "go on"))
+        .await
+        .unwrap();
+    assert_eq!(fx.finished(&next.run_id).await.text, "back");
+}
+
+#[tokio::test]
+async fn only_the_pending_request_of_that_run_can_be_answered_once() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    fx.model(vec![
+        calls(&[(
+            "c1",
+            "set_email_flags",
+            json!({"emailIds": [fx.emails[0]], "isRead": true}),
+        )]),
+        say("ok"),
+    ]);
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    let code = |result: Result<(), AppError>| result.unwrap_err().code;
+    assert_eq!(
+        code(fx.assistant.respond(&started.run_id, "nope", true)),
+        ErrorCode::Conflict
+    );
+    assert_eq!(
+        code(fx.assistant.respond("no-such-run", &asked.request_id, true)),
+        ErrorCode::NotFound
+    );
+    // Another run cannot answer this run's question.
+    let other = fx.chat("hello").await;
+    assert_eq!(
+        code(fx.assistant.respond(&other.run_id, &asked.request_id, true)),
+        ErrorCode::Conflict
+    );
+    assert!(!is_read(&fx, 0), "wrong answers changed nothing");
+    assert_eq!(
+        fx.assistant.snapshot(&started.run_id).unwrap().state,
+        RunState::AwaitingConfirmation
+    );
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    assert_eq!(
+        code(
+            fx.assistant
+                .respond(&started.run_id, &asked.request_id, true)
+        ),
+        ErrorCode::Conflict,
+        "once"
+    );
+    fx.finished(&started.run_id).await;
+    assert!(is_read(&fx, 0));
+    assert_eq!(
+        code(
+            fx.assistant
+                .respond(&started.run_id, &asked.request_id, true)
+        ),
+        ErrorCode::Conflict,
+        "after the run"
+    );
+}
+
+#[tokio::test]
+async fn the_same_call_is_not_asked_again_after_a_denial_in_that_run() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    let args = json!({"emailIds": [fx.emails[0]], "isRead": true});
+    fx.model(vec![
+        calls(&[("c1", "set_email_flags", args.clone())]),
+        calls(&[("c2", "set_email_flags", args)]),
+        say("Fine, I stop."),
+    ]);
+    let started = fx.chat("mark it read").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, false)
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(fx.requests(), 3);
+    let confirms = fx
+        .run_events(&started.run_id)
+        .iter()
+        .filter(|e| matches!(e.kind, AssistantEventKind::Confirm { .. }))
+        .count();
+    assert_eq!(confirms, 1, "asked once");
+    assert!(
         snapshot
             .tools
             .iter()
-            .find(|t| t.call_id == id)
-            .unwrap()
-            .status
-    };
-    assert_eq!(status("u1"), ToolStatus::Done);
-    assert_eq!(status("u2"), ToolStatus::Denied);
-    assert_eq!(fx.core.get_draft(&ai_draft.id).unwrap().subject, "Changed");
-    assert_eq!(
-        fx.core.get_draft(&user_draft.id).unwrap().subject,
-        "User draft"
+            .all(|t| t.status == ToolStatus::Denied)
     );
-
-    // aiDrafts = ask: the assistant's own draft is asked about too.
-    fx.configure(|a| a.ai_drafts = AssistantMode::Ask);
-    let current = fx.core.get_draft(&ai_draft.id).unwrap();
-    fx.model(vec![
-        calls(&[("u3", "update_draft", update(&current))]),
-        say("Done."),
-    ]);
-    let snapshot = fx.chat_and_wait("rename again").await;
-    assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
+    let results = tool_messages(&fx.request(2));
+    assert!(results[1].contains("already declined"), "{results:?}");
+    assert!(!is_read(&fx, 0));
 }
 
 #[tokio::test]
@@ -780,7 +1372,7 @@ async fn tool_errors_reach_the_model_as_error_results_with_the_stable_code() {
     let a = &snapshot.tools[0];
     assert_eq!(a.status, ToolStatus::Failed);
     assert!(matches!(&a.summary, ToolActivitySummary::Error { code } if code == "notFound"));
-    // An unknown tool is never run: the policy asks, and asking is declined.
+    // An unknown tool is never run and never asked about.
     assert_eq!(snapshot.tools[1].status, ToolStatus::Denied);
 }
 

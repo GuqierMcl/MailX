@@ -16,6 +16,7 @@
 //! with no extra bookkeeping, and the loop re-checks before every model
 //! request, so a revocation also stops runs that are already going.
 mod agent;
+mod confirm;
 mod conversations;
 mod policy;
 mod prompt;
@@ -25,7 +26,13 @@ mod summary;
 mod tests;
 mod types;
 
-use std::sync::Arc;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 use crate::{
     AppError, ErrorCode, MailOverviewQuery, MailxCore, SupportedLocale,
@@ -39,8 +46,10 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, FinishedReason, MAX_MESSAGE_CHARS, RunKind, RunKindTag,
-    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus,
+    AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
+    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason, FlagRestore,
+    MAX_MESSAGE_CHARS, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot,
+    RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -57,6 +66,7 @@ pub(crate) struct Inner {
     runs: Runs,
     conversations: Arc<Conversations>,
     summaries: SummaryCache,
+    confirmation_timeout_ms: AtomicU64,
 }
 
 /// What a run needs, resolved from the settings at one moment.
@@ -72,6 +82,10 @@ pub(crate) enum Gate {
 }
 
 impl Inner {
+    pub(crate) fn confirmation_timeout(&self) -> Duration {
+        Duration::from_millis(self.confirmation_timeout_ms.load(Ordering::Relaxed))
+    }
+
     /// Checks the switch, finds the model and compares the consent. Reads only
     /// settings until the consent matches.
     pub(crate) async fn gate(&self) -> Result<Gate, AppError> {
@@ -116,6 +130,9 @@ impl Assistant {
                 runs: Runs::new(events),
                 conversations: Arc::new(Conversations::default()),
                 summaries: SummaryCache::default(),
+                confirmation_timeout_ms: AtomicU64::new(
+                    u64::try_from(agent::CONFIRMATION_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
+                ),
             }),
         }
     }
@@ -219,6 +236,17 @@ impl Assistant {
         inner.runs.snapshot(&run_id)
     }
 
+    /// Answers the confirmation a run is waiting on: `approved` runs the
+    /// tool call with its original arguments, otherwise the model is told the
+    /// user declined. Only the run's current request can be answered, once.
+    ///
+    /// Errors: `NotFound` (unknown run), `Conflict` (the run is not waiting,
+    /// waits on a different request, or the request was already answered,
+    /// canceled or timed out).
+    pub fn respond(&self, run_id: &str, request_id: &str, approved: bool) -> Result<(), AppError> {
+        self.inner.runs.respond(run_id, request_id, approved)
+    }
+
     /// Stops a run: its connection closes and it ends `canceled`. A run that
     /// already ended is left as it is. `NotFound` for an unknown id.
     pub fn cancel(&self, run_id: &str) -> Result<(), AppError> {
@@ -251,6 +279,15 @@ impl Assistant {
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))??;
         Ok(binding)
+    }
+
+    /// Shortens the confirmation timeout for a test.
+    #[cfg(test)]
+    pub(crate) fn set_confirmation_timeout(&self, timeout: Duration) {
+        self.inner.confirmation_timeout_ms.store(
+            u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
     }
 
     /// Takes the consent back and stops every run that is going.

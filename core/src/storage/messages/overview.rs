@@ -374,6 +374,39 @@ impl Storage {
         Ok(rows)
     }
 
+    /// Which of `candidates` (lowercased) appear on any message of the
+    /// account in the local cache: as sender, as To / Cc recipient, or as an
+    /// SMTP recipient (Bcc included) of a local Sent copy. Used to tell a
+    /// first-time recipient from a known correspondent.
+    pub(crate) fn known_correspondents(
+        &self,
+        account_id: &str,
+        candidates: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        let mut by_sender = self.db.prepare_cached(&format!(
+            "SELECT 1 {VISIBLE_MESSAGES} AND m.account_id = ?1 AND lower(m.from_address) = ?2 LIMIT 1"
+        ))?;
+        let mut by_recipient = self.db.prepare_cached(&format!(
+            "SELECT 1 {VISIBLE_MESSAGES} AND m.account_id = ?1 AND (
+                 EXISTS (SELECT 1 FROM json_each(m.to_addresses) j
+                         WHERE lower(json_extract(j.value, '$.address')) = ?2)
+              OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) j
+                         WHERE lower(json_extract(j.value, '$.address')) = ?2)) LIMIT 1"
+        ))?;
+        let mut by_copy = self.db.prepare_cached(&format!(
+            "SELECT 1 {LOCAL_COPIES} AND o.account_id = ?1 AND EXISTS (
+                 SELECT 1 FROM json_each(o.envelope, '$.recipients') j WHERE lower(j.value) = ?2) LIMIT 1"
+        ))?;
+        let mut known = Vec::new();
+        for address in candidates {
+            let args = params![account_id, address];
+            if by_sender.exists(args)? || by_recipient.exists(args)? || by_copy.exists(args)? {
+                known.push(address.clone());
+            }
+        }
+        Ok(known)
+    }
+
     /// Every account's own address, lowercased.
     pub(crate) fn overview_own_addresses(&self) -> Result<Vec<String>, AppError> {
         let mut statement = self

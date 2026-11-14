@@ -183,6 +183,13 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     }),
     getMcpClientConfig: vi.fn<MailxClient['getMcpClientConfig']>().mockResolvedValue({ command: '/opt/MailX/mailx-mcp', args: ['--discovery', '/data/mcp-discovery.json'], display: { command: '/opt/MailX/mailx-mcp', discovery: '~/data/mcp-discovery.json' } }),
     onMcpStatus: vi.fn<MailxClient['onMcpStatus']>().mockReturnValue(() => undefined),
+    assistantStart: vi.fn<MailxClient['assistantStart']>(),
+    assistantCancel: vi.fn<MailxClient['assistantCancel']>().mockResolvedValue(undefined),
+    assistantSnapshot: vi.fn<MailxClient['assistantSnapshot']>(),
+    assistantRespond: vi.fn<MailxClient['assistantRespond']>().mockResolvedValue(undefined),
+    assistantGrantConsent: vi.fn<MailxClient['assistantGrantConsent']>().mockResolvedValue({ connectionId: '00000000-0000-4000-8000-0000000000a1', baseUrl: 'https://api.example.test/v1' }),
+    assistantRevokeConsent: vi.fn<MailxClient['assistantRevokeConsent']>().mockResolvedValue(undefined),
+    onAssistantEvent: vi.fn<MailxClient['onAssistantEvent']>().mockReturnValue(() => undefined),
     onUpdateState: vi.fn<MailxClient['onUpdateState']>().mockReturnValue(() => undefined),
   }
 }

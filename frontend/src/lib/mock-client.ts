@@ -32,6 +32,7 @@ import type {
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
+import { createMockAssistant } from '@/lib/mock-assistant'
 import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
@@ -70,6 +71,8 @@ export type MockClientOptions = {
   resolveDraft?: (id: string) => Draft | null
   /** Browser preview only: `showcase` loads the fictitious screenshot dataset. */
   seed?: string | null
+  /** Delay between the assistant's streamed events. Default 40 ms. */
+  assistantStepMs?: number
 }
 
 export function createMockClient(options: MockClientOptions = {}): MailxClient {
@@ -110,6 +113,28 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   let mcpStatus: McpStatus = { state: 'off' }
   const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
+  const assistant = createMockAssistant({
+    stepMs: options.assistantStepMs ?? 40,
+    locale: () => settings.effectiveLocale,
+    overview() {
+      const inbox = emails.filter((email) => folders.find((folder) => folder.id === email.summary.folderId)?.role === 'inbox' && !email.summary.archived)
+      return { unread: inbox.filter((email) => !email.summary.isRead).length, starred: inbox.filter((email) => email.summary.isStarred).length }
+    },
+    firstUnread() {
+      const email = emails.find((row) => !row.summary.isRead && !row.summary.archived && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox')
+      return email ? { id: email.summary.id } : null
+    },
+    archive: async (emailIds) => (await client.archiveEmails(emailIds)).undoToken,
+    async draftToSend() {
+      const draft = await client.createDraft({
+        accountId: null, to: [{ name: 'Alex Chen', address: 'alex@example.test' }], cc: [], bcc: [],
+        subject: 'Meeting notes', bodyHtml: '<p>Here are the notes from today.</p>', clientMutationId: crypto.randomUUID(),
+      })
+      const account = accounts.find((row) => row.id === draft.accountId) ?? accounts[0]
+      return { draft, accountName: account.displayName, accountAddress: account.emailAddress }
+    },
+    send: (draft) => client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() }),
+  })
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
   const removalListeners = new Set<(removal: AccountRemoval) => void>()
@@ -421,7 +446,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     return { inScope, items, individual: matched.filter((email) => !isGrouped(email)) }
   }
 
-  return {
+  const client: MailxClient = {
     available: true,
     getStartupStatus: async () => ({ state: 'ready', revision: 1 }),
     retryStartup: async () => ({ state: 'ready', revision: 1 }),
@@ -1113,6 +1138,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     openExternalLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
     // The browser preview has no host: the switch only changes an in-memory status.
+    assistantStart: (request) => assistant.start(request),
+    assistantCancel: (runId) => assistant.cancel(runId),
+    assistantSnapshot: (runId) => assistant.snapshot(runId),
+    assistantRespond: (runId, requestId, approved) => assistant.respond(runId, requestId, approved),
+    assistantGrantConsent: () => assistant.grantConsent(),
+    assistantRevokeConsent: () => assistant.revokeConsent(),
+    onAssistantEvent: (listener) => assistant.onEvent(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),
     setAutostart: async () => { throw new MailxClientError({ code: 'hostUnavailable', message: '', field: null }) },
@@ -1123,7 +1155,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }),
     onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
-    getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
+    // The consent is the assistant's own (granted by `assistantGrantConsent`), never part of a settings write.
+    getSettings: async () => { readStoredSettings(); return structuredClone({ ...settings, settings: { ...settings.settings, assistant: { ...settings.settings.assistant, consented: assistant.consent() } } }) },
     async onSettingsChanged(listener) {
       const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })
       const storage = (event: StorageEvent) => {
@@ -1164,14 +1197,16 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       settings = { revision: settings.revision + 1,
         effectiveLocale: general.language === 'system' ? systemLocale() : general.language,
         settings: { ...settings.settings, ...next, layout, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
+      settings.settings.assistant = { ...settings.settings.assistant, consented: null }
       try { localStorage.setItem('mailx.mock.settings', JSON.stringify(settings)) } catch { /* Optional preview cache. */ }
       window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
-      return structuredClone(settings)
+      return structuredClone({ ...settings, settings: { ...settings.settings, assistant: { ...settings.settings.assistant, consented: assistant.consent() } } })
       }
       // Browser tabs share a preview store, just as WebViews share the host store.
       return navigator.locks ? navigator.locks.request('mailx.mock.settings', save) : save()
     },
   }
+  return client
 }
 
 /** Preview-only release notes, shaped like a real `latest.json` section. */

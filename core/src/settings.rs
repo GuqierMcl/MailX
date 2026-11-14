@@ -1190,9 +1190,15 @@ impl SettingsStore {
             translation: patch
                 .translation
                 .unwrap_or_else(|| state.settings.translation.clone()),
-            assistant: patch
-                .assistant
-                .unwrap_or_else(|| state.settings.assistant.clone()),
+            assistant: match patch.assistant {
+                // The consent is granted and revoked only by the assistant's
+                // own commands; whatever a patch carries for it is ignored.
+                Some(assistant) => AssistantSettings {
+                    consented: state.settings.assistant.consented.clone(),
+                    ..assistant
+                },
+                None => state.settings.assistant.clone(),
+            },
             ai: state.settings.ai.clone(),
         }
         .normalized()?;
@@ -1291,13 +1297,18 @@ impl SettingsStore {
         Ok(result)
     }
 
-    /// Replaces all settings except `mcp` and `ai`. The file is written atomically
+    /// Replaces all settings except `mcp`, `ai` and the assistant's consent.
+    /// The file is written atomically
     /// before the in-memory copy changes, so a failed write leaves both untouched.
     pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
         let settings = AppSettings {
             mcp: state.settings.mcp,
             ai: state.settings.ai.clone(),
+            assistant: AssistantSettings {
+                consented: state.settings.assistant.consented.clone(),
+                ..settings.assistant.clone()
+            },
             ..settings
         }
         .normalized()?;

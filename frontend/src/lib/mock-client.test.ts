@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { emailQuery } from '@/features/mail/format'
 import { createMockClient } from './mock-client'
-import type { ConnectionInput } from '@/generated/accounts'
+import type { AssistantEvent, ConnectionInput } from '@/generated/accounts'
 
 describe('mock account display preferences', () => {
   beforeEach(() => localStorage.clear())
@@ -709,5 +709,110 @@ describe('mock mail overview', () => {
     expect(contacts).not.toContain('notifications@github.example')
     await expect(client.getMailOverview({ since: null, dayStarts: dayStarts.slice(1) })).rejects.toMatchObject({ failure: { code: 'validation', field: 'dayStarts' } })
     await expect(client.getMailOverview({ since: null, dayStarts: [...dayStarts].reverse() })).rejects.toMatchObject({ failure: { code: 'validation', field: 'dayStarts' } })
+  })
+})
+
+describe('mock assistant', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => localStorage.clear())
+
+  const mock = () => createMockClient({ assistantStepMs: 1 })
+  const record = (client: ReturnType<typeof createMockClient>) => {
+    const events: AssistantEvent[] = []
+    client.onAssistantEvent((event) => events.push(event))
+    return events
+  }
+  const finished = (client: ReturnType<typeof createMockClient>, runId: string) =>
+    vi.waitFor(async () => {
+      const snapshot = await client.assistantSnapshot(runId)
+      expect(['completed', 'failed', 'canceled']).toContain(snapshot.state)
+      return snapshot
+    })
+  const asking = (client: ReturnType<typeof createMockClient>, runId: string) =>
+    vi.waitFor(async () => {
+      const snapshot = await client.assistantSnapshot(runId)
+      expect(snapshot.pending).not.toBeNull()
+      return snapshot
+    })
+  const chat = (message: string) => ({ kind: { type: 'chat' as const, message } })
+  const now = { kind: { type: 'nowSummary' as const, since: null } }
+
+  it('needs the consent first, and the settings cannot grant it', async () => {
+    const client = mock()
+    const events = record(client)
+    const waiting = await client.assistantStart(now)
+    expect(waiting.state).toBe('awaitingConsent')
+    expect(events.map((event) => event.kind)).toEqual([{ type: 'state', state: 'awaitingConsent' }])
+
+    const patch = await client.updateSettings({ assistant: { ...(await client.getSettings()).settings.assistant, consented: { connectionId: 'x', baseUrl: 'https://evil.example' } } })
+    expect(patch.settings.assistant.consented).toBeNull()
+    const consent = await client.assistantGrantConsent()
+    expect((await client.getSettings()).settings.assistant.consented).toEqual(consent)
+    expect((await client.updateSettings({ assistant: { ...patch.settings.assistant, consented: null } })).settings.assistant.consented).toEqual(consent)
+    await client.assistantRevokeConsent()
+    expect((await client.getSettings()).settings.assistant.consented).toBeNull()
+  })
+
+  it('streams the Now summary in a few ordered text events', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const events = record(client)
+    const started = await client.assistantStart(now)
+    expect(started.state).toBe('running')
+    const done = await finished(client, started.runId)
+    expect(done.state).toBe('completed')
+    const deltas = events.flatMap((event) => event.kind.type === 'text' ? [event.kind.delta] : [])
+    expect(deltas.length).toBeGreaterThan(2)
+    expect(deltas.join('')).toBe(done.text)
+    expect(done.text).toMatch(/\d/)
+    expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1))
+    expect(done.seq).toBe(events.length)
+  })
+
+  it('archives on request with a running then done tool activity that carries the undo token', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const events = record(client)
+    const started = await client.assistantStart(chat('please archive the newest one'))
+    const done = await finished(client, started.runId)
+    const statuses = events.flatMap((event) => event.kind.type === 'tool' ? [event.kind.status] : [])
+    expect(statuses).toEqual(['running', 'done'])
+    const summary = done.tools[0].summary
+    expect(summary).toMatchObject({ type: 'changed', count: 1, undo: { type: 'archive' } })
+    if (summary.type !== 'changed' || summary.undo?.type !== 'archive') throw new Error('no undo')
+    await client.undoArchive(summary.undo.token)
+  })
+
+  it('asks before sending and respects the answer, once, for that request only', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('send the notes'))
+    const asked = await asking(client, started.runId)
+    expect(asked.state).toBe('awaitingConfirmation')
+    expect(asked.pending?.request).toMatchObject({ action: 'send', tool: 'send_email', details: { type: 'send', subject: 'Meeting notes' } })
+    await expect(client.assistantRespond(started.runId, 'wrong', true)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+    await expect(client.assistantRespond('missing', asked.pending!.requestId, true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    await client.assistantRespond(started.runId, asked.pending!.requestId, true)
+    await expect(client.assistantRespond(started.runId, asked.pending!.requestId, true)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+    const done = await finished(client, started.runId)
+    expect(done.tools[0]).toMatchObject({ status: 'done', summary: { type: 'outbox' } })
+    expect(await client.listOutbox()).toHaveLength(1)
+
+    const denied = await client.assistantStart(chat('send it again'))
+    const second = await asking(client, denied.runId)
+    await client.assistantRespond(denied.runId, second.pending!.requestId, false)
+    expect((await finished(client, denied.runId)).tools[0].status).toBe('denied')
+    expect(await client.listOutbox()).toHaveLength(1)
+  })
+
+  it('cancels a run that waits and rejects an empty message', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('send the notes'))
+    const asked = await asking(client, started.runId)
+    await client.assistantCancel(started.runId)
+    expect(await client.assistantSnapshot(started.runId)).toMatchObject({ state: 'canceled', pending: null })
+    await expect(client.assistantRespond(started.runId, asked.pending!.requestId, true)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+    await expect(client.assistantStart(chat('   '))).rejects.toMatchObject({ failure: { code: 'validation', field: 'message' } })
   })
 })

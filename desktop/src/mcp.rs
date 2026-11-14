@@ -47,6 +47,39 @@ pub(crate) fn status_after_start(result: &Result<(), McpFailureCode>) -> Option<
         .map(|code| McpStatus::Failed { code: *code })
 }
 
+/// The tool registry both local MCP and the built-in assistant use: the same
+/// default account, UI language, undo-send window, open-draft check and
+/// audit. The MCP server adds its UI openers on top.
+pub(crate) fn shared_tools(
+    app: &tauri::AppHandle,
+    state: &DesktopState,
+    core: mailx_core::MailxCore,
+) -> mailx_core::tools::Tools {
+    let default_state = state.clone();
+    mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
+        .with_undo_send_seconds({
+            let send_state = state.clone();
+            move || send_state.undo_send_seconds().map_err(Into::into)
+        })
+        .with_locale({
+            let locale_state = state.clone();
+            // The same locale the UI's reply command uses.
+            move || {
+                locale_state
+                    .notification_settings()
+                    .map(|(_, locale)| locale)
+                    .unwrap_or_else(crate::locale::system_locale)
+            }
+        })
+        .with_draft_open_check({
+            let handle = app.clone();
+            move |draft_id| {
+                crate::window_access::draft_open_in(handle.webview_windows().into_keys(), draft_id)
+            }
+        })
+        .with_audit(Arc::new(StderrAudit))
+}
+
 #[derive(Default)]
 struct Slot {
     handle: Option<McpHandle>,
@@ -111,81 +144,55 @@ impl McpManager {
                 let (Some(core), Ok(data_dir)) = (core, state.data_dir()) else {
                     return;
                 };
-                let default_state = state.clone();
-                let tools =
-                    mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
-                        .with_undo_send_seconds({
-                            let send_state = state.clone();
-                            move || send_state.undo_send_seconds().map_err(Into::into)
-                        })
-                        .with_locale({
-                            let locale_state = state.clone();
-                            // The same locale the UI's reply command uses.
-                            move || {
-                                locale_state
-                                    .notification_settings()
-                                    .map(|(_, locale)| locale)
-                                    .unwrap_or_else(crate::locale::system_locale)
-                            }
-                        })
-                        .with_draft_open_check({
-                            let handle = app.clone();
-                            move |draft_id| {
-                                crate::window_access::draft_open_in(
-                                    handle.webview_windows().into_keys(),
-                                    draft_id,
-                                )
-                            }
-                        })
-                        .with_ui_opener({
-                            let handle = app.clone();
-                            move |account_id, email_id| {
-                                let opened =
-                                    crate::notifications::open_email(&handle, account_id, email_id);
-                                if opened {
-                                    Ok(())
-                                } else {
-                                    Err(mailx_core::tools::ToolError::new(
-                                        mailx_core::tools::ToolErrorCode::Unavailable,
-                                    ))
-                                }
-                            }
-                        })
-                        .with_draft_opener({
-                            let handle = app.clone();
-                            let draft_state = state.clone();
-                            move |account_id, draft_id| {
-                                let handle = handle.clone();
-                                let draft_state = draft_state.clone();
-                                let account_id = account_id.to_owned();
-                                let draft_id = draft_id.to_owned();
-                                // Tools execute on spawn_blocking. Build the
-                                // window on the async runtime, as composer_open
-                                // does, to avoid Windows synchronous IPC hangs.
-                                tauri::async_runtime::block_on(tauri::async_runtime::spawn(
-                                    async move {
-                                        crate::compose::open_agent_draft(
-                                            &handle,
-                                            &draft_state,
-                                            account_id,
-                                            draft_id,
-                                        )
-                                        .await
-                                    },
+                let tools = shared_tools(app, &state, core)
+                    .with_ui_opener({
+                        let handle = app.clone();
+                        move |account_id, email_id| {
+                            let opened =
+                                crate::notifications::open_email(&handle, account_id, email_id);
+                            if opened {
+                                Ok(())
+                            } else {
+                                Err(mailx_core::tools::ToolError::new(
+                                    mailx_core::tools::ToolErrorCode::Unavailable,
                                 ))
-                                .map_err(|_| {
-                                    mailx_core::tools::ToolError::new(
-                                        mailx_core::tools::ToolErrorCode::Unavailable,
-                                    )
-                                })?
-                                .map_err(|_| {
-                                    mailx_core::tools::ToolError::new(
-                                        mailx_core::tools::ToolErrorCode::Unavailable,
-                                    )
-                                })
                             }
-                        })
-                        .with_audit(Arc::new(StderrAudit));
+                        }
+                    })
+                    .with_draft_opener({
+                        let handle = app.clone();
+                        let draft_state = state.clone();
+                        move |account_id, draft_id| {
+                            let handle = handle.clone();
+                            let draft_state = draft_state.clone();
+                            let account_id = account_id.to_owned();
+                            let draft_id = draft_id.to_owned();
+                            // Tools execute on spawn_blocking. Build the
+                            // window on the async runtime, as composer_open
+                            // does, to avoid Windows synchronous IPC hangs.
+                            tauri::async_runtime::block_on(tauri::async_runtime::spawn(
+                                async move {
+                                    crate::compose::open_agent_draft(
+                                        &handle,
+                                        &draft_state,
+                                        account_id,
+                                        draft_id,
+                                    )
+                                    .await
+                                },
+                            ))
+                            .map_err(|_| {
+                                mailx_core::tools::ToolError::new(
+                                    mailx_core::tools::ToolErrorCode::Unavailable,
+                                )
+                            })?
+                            .map_err(|_| {
+                                mailx_core::tools::ToolError::new(
+                                    mailx_core::tools::ToolErrorCode::Unavailable,
+                                )
+                            })
+                        }
+                    });
                 let config = McpConfig {
                     data_dir,
                     tools: Arc::new(tools),

@@ -50,10 +50,6 @@ fn patch_persists_and_reloads_without_touching_other_sections() {
         a.send = AssistantSendMode::Direct;
         a.excluded_accounts = vec![ID_A.to_uppercase(), ID_B.into(), ID_A.into()];
         a.instructions = "  Call me Sam.  ".into();
-        a.consented = Some(AiConsent {
-            connection_id: ID_A.into(),
-            base_url: "https://api.example.test/v1/".into(),
-        });
     });
     let snapshot = store
         .patch(SettingsPatch {
@@ -65,10 +61,6 @@ fn patch_persists_and_reloads_without_touching_other_sections() {
     assert!(!saved.enabled);
     assert_eq!(saved.excluded_accounts, vec![ID_A, ID_B]);
     assert_eq!(saved.instructions, "Call me Sam.");
-    assert_eq!(
-        saved.consented.unwrap().base_url,
-        "https://api.example.test/v1"
-    );
     assert_eq!(snapshot.settings.general, GeneralSettings::default());
     let text = fs::read_to_string(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
     assert!(text.contains("\"aiDrafts\": \"ask\"") && text.contains("\"send\": \"direct\""));
@@ -78,6 +70,69 @@ fn patch_persists_and_reloads_without_touching_other_sections() {
         .unwrap();
     assert_eq!(reloaded.settings.assistant.organize, AssistantMode::Ask);
     assert_eq!(reloaded.settings.assistant.excluded_accounts.len(), 2);
+}
+
+fn consent(base_url: &str) -> AiConsent {
+    AiConsent {
+        connection_id: ID_A.into(),
+        base_url: base_url.into(),
+    }
+}
+
+#[test]
+fn a_patch_or_update_cannot_set_or_clear_the_consent() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    // Not even an invalid value is looked at.
+    let forged = store
+        .patch(SettingsPatch {
+            assistant: Some(assistant(|a| {
+                a.send = AssistantSendMode::Direct;
+                a.consented = Some(consent("https://evil.example.test/v1"));
+            })),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(forged.settings.assistant.send, AssistantSendMode::Direct);
+    assert_eq!(forged.settings.assistant.consented, None);
+    let mut all = forged.settings.clone();
+    all.assistant.consented = Some(consent("https://evil.example.test/v1"));
+    assert_eq!(
+        store.update(all).unwrap().settings.assistant.consented,
+        None
+    );
+
+    // The assistant's own path sets it; patches then keep it, even when they
+    // carry none or another.
+    store
+        .update_assistant(|a| {
+            a.consented = Some(consent("https://api.example.test/v1/"));
+            Ok(())
+        })
+        .unwrap();
+    for sent in [None, Some(consent("https://other.example.test"))] {
+        let after = store
+            .patch(SettingsPatch {
+                assistant: Some(assistant(|a| a.consented = sent)),
+                ..SettingsPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            after.settings.assistant.consented,
+            Some(consent("https://api.example.test/v1")),
+        );
+    }
+    let mut all = store.get().unwrap().settings;
+    all.assistant.consented = None;
+    assert!(
+        store
+            .update(all)
+            .unwrap()
+            .settings
+            .assistant
+            .consented
+            .is_some()
+    );
 }
 
 #[test]
@@ -107,13 +162,6 @@ fn invalid_input_is_rejected_with_its_field() {
         a.excluded_accounts = (0..65).map(|_| Uuid::new_v4().to_string()).collect()
     }));
     assert_eq!(many.field.as_deref(), Some("assistant.excludedAccounts"));
-    let bad_consent = rejected(Box::new(|a| {
-        a.consented = Some(AiConsent {
-            connection_id: "nope".into(),
-            base_url: "https://x.test".into(),
-        })
-    }));
-    assert_eq!(bad_consent.field.as_deref(), Some("assistant.consented"));
     assert_eq!(
         store.get().unwrap().settings.assistant,
         AssistantSettings::default()

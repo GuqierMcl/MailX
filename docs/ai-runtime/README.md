@@ -1,6 +1,6 @@
 # AI Runtime
 
-状态：**Proposed** · 2026-11-15 修订。服务商与模型配置、非流式 `complete` 调用和以模型为来源的翻译已有实现；流式客户端、`core/src/assistant/` 中的运行管理与智能体循环（含同意、上限、取消、「此刻」概述缓存）和 `assistant` 设置已在 core 实现；需要确认的调用目前一律按“用户拒绝”处理，确认流程、桌面 IPC 与界面尚未实现。实现选型见 [ADR 0005](../adr/0005-builtin-agent-loop.md)，权限见[内置 AI 工具权限](../architecture/ai-permissions.md)，界面见 [AI 交互界面](../architecture/ai-chat-ui.md)。
+状态：**Proposed** · 2026-11-15 修订。服务商与模型配置、非流式 `complete` 调用和以模型为来源的翻译已有实现；流式客户端、`core/src/assistant/` 中的运行管理与智能体循环（含同意、上限、取消、「此刻」概述缓存）和 `assistant` 设置已在 core 实现；暂停等待确认、撤销整理所需的数据与桌面 IPC（主窗口命令与事件，见[应用服务 API](../contracts/app-api.md#ai-助手主窗口)）已实现，仅有自动测试；界面尚未实现。实现选型见 [ADR 0005](../adr/0005-builtin-agent-loop.md)，权限见[内置 AI 工具权限](../architecture/ai-permissions.md)，界面见 [AI 交互界面](../architecture/ai-chat-ui.md)。
 
 ## 1. 定位
 
