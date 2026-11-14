@@ -207,6 +207,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["messages"],
         sql: include_str!("migrations/0030_starred_unread_index.sql"),
     },
+    Migration {
+        version: 31,
+        description: "folder sync cursor history completion",
+        required_tables: &["folder_sync_cursors"],
+        sql: include_str!("migrations/0031_cursor_history_complete.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -611,7 +617,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 30);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 31);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -680,6 +686,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn history_complete_migration_backfills_finished_uncapped_cursors() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(30)).unwrap();
+        db.execute(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id,
+             created_at, updated_at) VALUES ('a', 1, 'Keep', 'local@example.test', 'source', 't', 't')",
+            [],
+        )
+        .unwrap();
+        let cases = [
+            ("done", 1, 0, 1),
+            ("capped", 1, 1, 0),
+            ("running", 0, 0, 0),
+            ("running-capped", 0, 1, 0),
+        ];
+        for (id, done, capped, _) in cases {
+            db.execute(
+                "INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role,
+                 selectable, attributes, unread_count, total_count, synced_at)
+                 VALUES (?1, 'a', 'source', ?1, ?1, 'other', 1, '[]', 0, 0, 't')",
+                [id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO folder_sync_cursors(folder_id, uid_validity, window_start,
+                 window_capped, backfill_done, highest_uid, updated_at)
+                 VALUES (?1, 1, '2026-01-01', ?2, ?3, 5, 't')",
+                rusqlite::params![id, capped, done],
+            )
+            .unwrap();
+        }
+        apply(&mut db, MIGRATIONS).unwrap();
+        for (id, _, _, expected) in cases {
+            let complete: i64 = db
+                .query_row(
+                    "SELECT history_complete FROM folder_sync_cursors WHERE folder_id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(complete, expected, "{id}");
+        }
+        assert!(
+            db.execute(
+                "UPDATE folder_sync_cursors SET history_complete = 2 WHERE folder_id = 'done'",
+                [],
+            )
+            .is_err()
+        );
     }
 
     #[test]

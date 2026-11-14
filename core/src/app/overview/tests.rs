@@ -778,11 +778,47 @@ fn previous_week_is_complete_only_when_every_folder_is_synced_far_enough() {
     f.finish_all();
     assert!(f.activity().previous_week_complete);
 
-    // A capped inbox.
+    // The next round in progress keeps the history complete.
     let inbox = f.targets[&(1, "INBOX")].clone();
+    f.service.begin_backfill(&inbox, false).unwrap().unwrap();
+    assert!(f.activity().previous_week_complete);
+    f.service.finish_backfill(&inbox, false).unwrap().unwrap();
+    assert!(f.activity().previous_week_complete);
+
+    // A capped round, whether just begun or finished, clears it until an
+    // uncapped round finishes again.
+    f.service.begin_backfill(&inbox, true).unwrap().unwrap();
+    assert!(!f.activity().previous_week_complete);
+    f.service.begin_backfill(&inbox, false).unwrap().unwrap();
+    assert!(!f.activity().previous_week_complete);
+    f.service.finish_backfill(&inbox, false).unwrap().unwrap();
+    assert!(f.activity().previous_week_complete);
     f.service.finish_backfill(&inbox, true).unwrap().unwrap();
     assert!(!f.activity().previous_week_complete);
     f.service.finish_backfill(&inbox, false).unwrap().unwrap();
+    assert!(f.activity().previous_week_complete);
+
+    // A new generation is incomplete until its first round finishes, even
+    // while that round runs.
+    let regenerated = SyncTarget {
+        uid_validity: 11,
+        ..inbox.clone()
+    };
+    f.service
+        .ensure_generation(&regenerated, "2026-01-01")
+        .unwrap()
+        .unwrap();
+    assert!(!f.activity().previous_week_complete);
+    f.service
+        .begin_backfill(&regenerated, false)
+        .unwrap()
+        .unwrap();
+    assert!(!f.activity().previous_week_complete);
+    f.service
+        .finish_backfill(&regenerated, false)
+        .unwrap()
+        .unwrap();
+    assert!(f.activity().previous_week_complete);
     // A capped Junk folder does not matter.
     let junk = f.targets[&(1, "Junk")].clone();
     f.service.finish_backfill(&junk, true).unwrap().unwrap();

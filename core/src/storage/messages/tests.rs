@@ -1514,6 +1514,12 @@ fn writes_report_only_real_changes() {
     assert_eq!(f.service.finish_backfill(&target, false).unwrap(), Some(1));
     assert_eq!(f.service.finish_backfill(&target, false).unwrap(), Some(0));
     assert_eq!(f.service.begin_backfill(&target, false).unwrap(), Some(1));
+    // History completion is not counted on its own: it only moves with the
+    // two coverage flags.
+    assert_eq!(f.service.begin_backfill(&target, true).unwrap(), Some(1));
+    assert_eq!(f.service.begin_backfill(&target, true).unwrap(), Some(0));
+    assert_eq!(f.service.finish_backfill(&target, false).unwrap(), Some(1));
+    assert_eq!(f.service.begin_backfill(&target, false).unwrap(), Some(1));
 
     let created = f
         .service

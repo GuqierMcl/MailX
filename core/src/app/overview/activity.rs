@@ -39,8 +39,9 @@ pub struct OverviewActivity {
     /// Whether the local cache can be trusted to hold both weeks, so the
     /// week-over-week comparison means something. True only when every
     /// account has an inbox and every current inbox and sent-role folder
-    /// generation has finished a sync round, is not capped by the per-round
-    /// limit, and started its sync window at least one UTC day before the
+    /// generation has finished at least one sync round not capped by the
+    /// per-round limit (a later round in progress keeps it), is not capped
+    /// now, and started its sync window at least one UTC day before the
     /// first day start (the margin covers servers that read the window's
     /// date in their own time zone).
     pub previous_week_complete: bool,

@@ -192,10 +192,11 @@ impl Storage {
         super::search_index::remove_folder(&tx, &target.folder_id)?;
         tx.execute("UPDATE messages SET remote_state = 'stale', updated_at = ?1 WHERE folder_id = ?2 AND remote_state = 'present'", params![timestamp, target.folder_id])?;
         tx.execute(
-            "INSERT INTO folder_sync_cursors (folder_id, uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at)
-             VALUES (?1, ?2, ?3, 0, 0, 0, ?4)
+            "INSERT INTO folder_sync_cursors (folder_id, uid_validity, window_start, window_capped, backfill_done, history_complete, highest_uid, updated_at)
+             VALUES (?1, ?2, ?3, 0, 0, 0, 0, ?4)
              ON CONFLICT (folder_id) DO UPDATE SET uid_validity = excluded.uid_validity,
-             window_start = excluded.window_start, window_capped = 0, backfill_done = 0, highest_uid = 0, updated_at = excluded.updated_at",
+             window_start = excluded.window_start, window_capped = 0, backfill_done = 0, history_complete = 0,
+             highest_uid = 0, updated_at = excluded.updated_at",
             params![target.folder_id, target.uid_validity, window_start, timestamp],
         )?;
         let cursor = read_cursor(&tx, &target.folder_id)?.map(|cursor| FolderSyncCursor {
@@ -377,6 +378,18 @@ impl Storage {
         }
         // Coverage depends on these two flags, so only a real transition counts.
         let changed = tx.execute("UPDATE folder_sync_cursors SET backfill_done = ?1, window_capped = ?2, updated_at = ?3 WHERE folder_id = ?4 AND (backfill_done <> ?1 OR window_capped <> ?2)", params![done, capped, now(), target.folder_id])?;
+        // The generation's history stays complete while later rounds run:
+        // only finishing an uncapped round sets it and only a capped round
+        // clears it. Not counted above: it only flips together with one of
+        // the two flags (complete implies uncapped, and is set as a round
+        // that began with backfill_done = 0 finishes), so the round reports
+        // the change already.
+        if capped || done {
+            tx.execute(
+                "UPDATE folder_sync_cursors SET history_complete = ?1 WHERE folder_id = ?2 AND history_complete <> ?1",
+                params![!capped, target.folder_id],
+            )?;
+        }
         tx.commit()?;
         Ok(Some(changed))
     }

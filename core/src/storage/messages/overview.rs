@@ -242,8 +242,10 @@ impl Storage {
     /// `window_start_by` on. True when every account has a current inbox and
     /// every selectable inbox and sent-role folder of the current mailbox
     /// sources has a generation that started its window on or before
-    /// `window_start_by` (`YYYY-MM-DD`), finished a sync round and is not
-    /// capped: the facts the list's `Coverage.headersComplete` relies on.
+    /// `window_start_by` (`YYYY-MM-DD`), has finished at least one uncapped
+    /// sync round and is not capped. Unlike the list's
+    /// `Coverage.headersComplete`, a round in progress does not clear it, so
+    /// the answer holds steady while folders sync.
     pub(crate) fn overview_history_complete(
         &self,
         window_start_by: &str,
@@ -260,7 +262,7 @@ impl Storage {
                  JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
                  LEFT JOIN folder_sync_cursors c ON c.folder_id = f.id
                  WHERE f.selectable = 1 AND f.role IN ('inbox', 'sent')
-                   AND (c.folder_id IS NULL OR c.backfill_done = 0 OR c.window_capped = 1
+                   AND (c.folder_id IS NULL OR c.history_complete = 0 OR c.window_capped = 1
                         OR c.window_start > ?1))",
             [window_start_by],
             |row| row.get(0),
