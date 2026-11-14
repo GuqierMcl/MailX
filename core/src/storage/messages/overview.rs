@@ -7,10 +7,10 @@
 //! list does; junk and trash are other folder roles and never match.
 use rusqlite::params;
 
-use super::{SUMMARY_COLUMNS, VISIBLE_MESSAGES, archived_sql, summary};
+use super::{SUMMARY_COLUMNS, VISIBLE_MESSAGES, archived_sql, body_state, summary};
 use crate::{
     AppError,
-    mail::{EmailSummary, MailAddress},
+    mail::{BodyState, EmailSummary, MailAddress},
     storage::Storage,
 };
 
@@ -32,6 +32,7 @@ pub(crate) struct CodeSource {
     pub from: MailAddress,
     pub subject: String,
     pub received_at: String,
+    pub body_state: BodyState,
     /// The cached plain-text body when the body is downloaded, otherwise the
     /// stored preview. `None` when the cached body is larger than the
     /// detector accepts, so the message is skipped rather than truncated.
@@ -90,7 +91,7 @@ impl Storage {
         let max_text_bytes = i64::try_from(max_text_bytes).unwrap_or(i64::MAX);
         let mut statement = self.db.prepare(&format!(
             "SELECT m.id, m.account_id, m.folder_id, m.subject, m.from_name, m.from_address,
-                    m.received_at, m.body_state = 'ready', m.preview,
+                    m.received_at, m.body_state, m.preview,
                     (SELECT length(CAST(b.plain_text AS BLOB)) FROM message_bodies b
                       WHERE b.message_id = m.id),
                     (SELECT b.plain_text FROM message_bodies b
@@ -100,7 +101,8 @@ impl Storage {
         ))?;
         let rows = statement
             .query_map(params![after, limit, max_text_bytes], |row| {
-                let ready: bool = row.get(7)?;
+                let body_state = body_state(&row.get::<_, String>(7)?)?;
+                let ready = body_state == BodyState::Ready;
                 let preview: String = row.get(8)?;
                 let body_size: Option<i64> = row.get(9)?;
                 let body: Option<String> = row.get(10)?;
@@ -120,6 +122,7 @@ impl Storage {
                         address: row.get(5)?,
                     },
                     received_at: row.get(6)?,
+                    body_state,
                     text,
                 })
             })?

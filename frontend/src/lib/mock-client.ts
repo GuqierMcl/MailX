@@ -674,7 +674,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         starredUnread: emails.filter((email) => email.summary.isStarred && !email.summary.isRead && role(email) !== 'junk' && role(email) !== 'trash').length,
         verificationCodes: inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => {
           const found = code(email)
-          return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt }] : []
+          return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState }] : []
         }).slice(0, 3),
         recentAttachments: inbox.filter((email) => email.summary.hasAttachment && within(email, 7 * 86_400_000)).slice(0, 5).map((email) => ({
           email: email.summary,
@@ -1655,6 +1655,7 @@ const DEFAULT_SEEDS: Seed[] = [
     from: { name: '云存储', address: 'no-reply@cloud.example' },
     subject: '登录验证码',
     text: '你的验证码是 482913，10 分钟内有效。如果不是你本人操作，请忽略这封邮件。',
+    verificationCode: '482913',
     hoursAgo: 0.1,
   },
 ]

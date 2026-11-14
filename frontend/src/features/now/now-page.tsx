@@ -1,12 +1,11 @@
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useId, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, type ReactNode } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { Alert02Icon, Attachment01Icon, Copy01Icon, File01Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
+import { Alert02Icon, Attachment01Icon, Copy01Icon, File01Icon, MailUpload01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { useQuery } from '@tanstack/react-query'
-import type { Account, AccountSyncState, EmailSummary, Folder, OutboxItem } from '@/generated/accounts'
+import type { Account, AccountSyncState, EmailSummary, Folder, OutboxItem, OverviewCode } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
-import { toast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
@@ -18,6 +17,7 @@ import { signInNeeded } from '@/features/accounts/sign-in-state'
 import { SenderAvatar } from '@/features/mail/sender-avatar'
 import { displayName } from '@/features/mail/format'
 import type { Mailbox } from '@/features/mail/mailbox'
+import { readyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, lineContext, lineKey, type LineContext, type NowKey } from './greeting'
 import { useDayClock, useFirstVisitToday, useLastVisit } from './visit'
 import { entrance, useCountUp } from './motion'
@@ -38,6 +38,8 @@ export type NowPageProps = {
   onOpenAccount: (accountId: string) => void
   /** Shows the message in the reader, in the view it belongs to. */
   onOpenEmail: (email: { id: string; accountId: string }) => void
+  /** The workbench's shared verification-code controller: recognition and copying behave as in the list and reader. */
+  verification: VerificationCodes
 }
 
 type AttentionItem = { id: string; icon: IconSvgElement; label: string; tone?: 'alert'; onClick: () => void; avatar?: Account }
@@ -47,7 +49,7 @@ type AttentionItem = { id: string; icon: IconSvgElement; label: string; tone?: '
  * all computed on this device. It fills the island; the content sits in one
  * centered column that scrolls on its own. Sections appear only with content.
  */
-export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenAccount, onOpenEmail }: NowPageProps) {
+export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenAccount, onOpenEmail, verification }: NowPageProps) {
   const { i18n } = useTranslation()
   const language = i18n.language
   const now = useDayClock()
@@ -62,7 +64,13 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     queryFn: () => client.getMailOverview({ since }),
   })
   const data = overview.data
-  const codes = useFreshCodes(data?.verificationCodes ?? [])
+  const fresh = useFreshCodes(data?.verificationCodes ?? [])
+  useCodeTargets(verification, fresh)
+  // The shared recognizer reads the full message; where it finds no single code, the entry goes.
+  const codes = fresh.filter((code) => {
+    const state = verification.status(code.emailId)?.state
+    return state !== 'notFound' && state !== 'ambiguous'
+  })
 
   // Needs attention: accounts that stopped, sends that failed or may not have gone, drafts.
   const attention: AttentionItem[] = accounts.flatMap((account): AttentionItem[] => {
@@ -180,25 +188,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
             <Section title={t('now:codes')} animate={animate} index={next()}>
               <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
                 {codes.map((code) => (
-                  <li key={code.emailId} className="flex items-center gap-3 rounded-lg px-3 py-2">
-                    <p className="font-mono text-2xl font-semibold tracking-[0.18em] tabular-nums">
-                      <span className="sr-only">{t('now:codeLabel', { code: code.code })}</span>
-                      <span aria-hidden>{code.code}</span>
-                    </p>
-                    <div className="min-w-0 flex-1 text-sm">
-                      <button
-                        type="button"
-                        className="max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => onOpenEmail({ id: code.emailId, accountId: code.accountId })}
-                      >
-                        {displayName(code.from)}
-                      </button>
-                      <p className="text-xs text-muted-foreground">{relativeTime(code.receivedAt, language)}</p>
-                    </div>
-                    <IconButton label={t('now:copyCode', { code: code.code })} size="icon-sm" onClick={() => void copyCode(code.code)}>
-                      <HugeiconsIcon icon={Copy01Icon} />
-                    </IconButton>
-                  </li>
+                  <CodeRow key={code.emailId} code={code} language={language} verification={verification} onOpenEmail={onOpenEmail} />
                 ))}
               </ul>
             </Section>
@@ -228,6 +218,56 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
         </div>
       </div>
     </div>
+  )
+}
+
+/** Asks the shared controller to recognize the shown codes; nothing while the page is gone. */
+function useCodeTargets(verification: VerificationCodes, codes: OverviewCode[]) {
+  const key = JSON.stringify(codes.map((code): VerificationTarget => ({ emailId: code.emailId, bodyState: code.bodyState })))
+  const targets = useMemo(() => JSON.parse(key) as VerificationTarget[], [key])
+  const request = verification.requestVisible
+  useEffect(() => { request(targets) }, [request, targets])
+  useEffect(() => () => { request([]) }, [request])
+}
+
+/**
+ * One code. Copying goes through the shared flow (clipboard written by the
+ * host, optional move to Trash, shared notices) once the recognizer agrees;
+ * until then the overview's code shows and the button waits.
+ */
+function CodeRow({ code, language, verification, onOpenEmail }: { code: OverviewCode; language: string; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
+  const ready = readyVerificationCode(verification.status(code.emailId))
+  const shown = ready?.code ?? code.code
+  const busy = verification.busy(code.emailId)
+  const copied = ready ? verification.copied(code.emailId, ready.recognitionId) : false
+  // Not ready covers a check still running and a message the recognizer cannot read.
+  const label = !ready ? t('now:codeNotReady', { code: shown })
+    : busy ? t('mail:verificationCopying') : copied ? t('mail:verificationCopiedShort') : t('now:copyCode', { code: shown })
+  return (
+    <li className="flex items-center gap-3 rounded-lg px-3 py-2">
+      <p className="font-mono text-2xl font-semibold tracking-[0.18em] tabular-nums">
+        <span className="sr-only">{t('now:codeLabel', { code: shown })}</span>
+        <span aria-hidden>{shown}</span>
+      </p>
+      <div className="min-w-0 flex-1 text-sm">
+        <button
+          type="button"
+          className="max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onOpenEmail({ id: code.emailId, accountId: code.accountId })}
+        >
+          {displayName(code.from)}
+        </button>
+        <p className="text-xs text-muted-foreground">{relativeTime(code.receivedAt, language)}</p>
+      </div>
+      <IconButton
+        label={label}
+        size="icon-sm"
+        disabled={!ready || busy}
+        onClick={ready ? () => void verification.copy(code.emailId, ready.recognitionId) : undefined}
+      >
+        <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} />
+      </IconButton>
+    </li>
   )
 }
 
@@ -296,14 +336,5 @@ function summaryLine(now: Date, context: LineContext) {
     case 'holiday': return t(key, { holiday: t(`now:holidays.${context.holiday}`) })
     case 'solarTerm': return t(key, { term: t(`now:solarTerms.${context.term}`) })
     default: return t(key)
-  }
-}
-
-async function copyCode(code: string) {
-  try {
-    await navigator.clipboard.writeText(code)
-    toast.success(t('now:codeCopied'))
-  } catch {
-    toast.error(t('now:copyFailed'))
   }
 }

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
 import type { MailxClient } from '@/lib/mailx-client'
 import { withTitleBar } from '@/test/title-bar'
+import { Toaster } from '@/components/ui/toast'
 import { LAST_VISIT_KEY } from '@/features/now/visit'
 import { Workbench } from './workbench'
 
@@ -81,5 +82,19 @@ describe('Now page in the workbench', () => {
     expect(await screen.findByRole('heading', { level: 2, name: subject })).toBeInTheDocument()
     expect(nav().getAllByRole('button', { name: /^收件箱/ })[0]).toHaveAttribute('data-active')
     expect(Date.parse(localStorage.getItem(LAST_VISIT_KEY)!)).toBeGreaterThan(Date.parse(since))
+  })
+
+  it('copies a code through the shared verification-code flow, as the list does', async () => {
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const base = await startOnNow()
+    const client: MailxClient = { ...base, getVerificationCode: vi.fn(base.getVerificationCode), copyVerificationCode: vi.fn(base.copyVerificationCode) }
+    render(<>{withTitleBar(<Workbench client={client} />)}<Toaster /></>)
+    const section = await screen.findByRole('region', { name: '验证码' })
+    await userEvent.click(await within(section).findByRole('button', { name: '复制验证码 482913' }))
+    expect(client.getVerificationCode).toHaveBeenCalledWith(expect.any(String), true)
+    expect(client.copyVerificationCode).toHaveBeenCalledWith(expect.any(String), expect.stringMatching(/^mock-code:/))
+    expect(await screen.findByText('验证码已复制')).toBeInTheDocument()
+    expect(writeText).not.toHaveBeenCalled()
   })
 })

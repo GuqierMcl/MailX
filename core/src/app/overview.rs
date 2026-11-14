@@ -15,7 +15,7 @@ use crate::{
     AppError,
     accounts::{AccountService, messages::normalized_time},
     mail::{
-        EmailSummary, MailAddress,
+        BodyState, EmailSummary, MailAddress,
         verification_code::{self, Detection},
     },
 };
@@ -86,6 +86,9 @@ pub struct OverviewCode {
     pub code: String,
     /// RFC 3339.
     pub received_at: String,
+    /// The stored body state, so hosts can key the shared verification-code
+    /// status (which reads the full body) to the same message version.
+    pub body_state: BodyState,
 }
 
 impl fmt::Debug for OverviewCode {
@@ -95,6 +98,7 @@ impl fmt::Debug for OverviewCode {
             .field("account_id", &self.account_id)
             .field("code", &"[redacted]")
             .field("received_at", &self.received_at)
+            .field("body_state", &self.body_state)
             .finish_non_exhaustive()
     }
 }
@@ -171,6 +175,7 @@ pub(crate) fn overview_at(
                     from: source.from,
                     code: candidate.code,
                     received_at: source.received_at,
+                    body_state: source.body_state,
                 }),
                 _ => None,
             }

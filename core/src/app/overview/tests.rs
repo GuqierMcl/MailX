@@ -372,6 +372,8 @@ fn verification_codes_come_from_previews_and_cached_bodies_only() {
     assert_eq!(codes[0].folder_id, f.targets[&(0, "INBOX")].folder_id);
     assert_eq!(codes[0].from.address, "sender@example.test");
     assert_eq!(codes[0].received_at, at(f.now, 1));
+    assert_eq!(codes[0].body_state, BodyState::Ready);
+    assert_eq!(codes[1].body_state, BodyState::Missing);
     assert!(!format!("{:?}", codes[0]).contains("482913"));
 }
 

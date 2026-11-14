@@ -354,7 +354,12 @@ export type OverviewCode = { emailId: string, accountId: string, folderId: strin
 /**
  * RFC 3339.
  */
-receivedAt: string, };
+receivedAt: string,
+/**
+ * The stored body state, so hosts can key the shared verification-code
+ * status (which reads the full body) to the same message version.
+ */
+bodyState: BodyState, };
 
 export type RecentAttachment = { email: EmailSummary,
 /**

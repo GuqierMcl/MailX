@@ -818,6 +818,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             onSelectMailbox={selectMailbox}
             onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
             onOpenEmail={openFromNow}
+            verification={verification}
           />
         ) : !layoutReady ? (
           // The saved list width is only read when the group mounts, so it waits for the settings.

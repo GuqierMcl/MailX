@@ -40,7 +40,7 @@ describe('last visit', () => {
 
 describe('verification code expiry', () => {
   const code = (id: string, receivedAt: Date): OverviewCode => ({
-    emailId: id, accountId: 'a', folderId: 'f', from: { name: null, address: 'x@example.com' }, code: '123456', receivedAt: receivedAt.toISOString(),
+    emailId: id, accountId: 'a', folderId: 'f', from: { name: null, address: 'x@example.com' }, code: '123456', receivedAt: receivedAt.toISOString(), bodyState: 'missing',
   })
 
   it('drops each code fifteen minutes after it arrived, without polling', () => {

@@ -1,10 +1,13 @@
-import { render, screen, waitFor, within } from '@/test/render'
+import { useCallback, useState } from 'react'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EmailSummary, MailOverview, OutboxItem } from '@/generated/accounts'
+import type { Account, EmailSummary, MailOverview, OutboxItem, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
 import { exampleAccount, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import type { MailxClient } from '@/lib/mailx-client'
+import { useVerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
 import { NowPage, type NowPageProps } from './now-page'
@@ -23,18 +26,47 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
 
 const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 
-function setup({ overview = empty, accounts = [account], props = {} }: { overview?: MailOverview; accounts?: Account[]; props?: Partial<NowPageProps> } = {}) {
+function overviewCode(emailId: string, code: string, overrides: Partial<OverviewCode> = {}): OverviewCode {
+  return {
+    emailId, accountId: account.id, folderId: 'inbox', from: { name: '银行', address: 'bank@example.com' }, code,
+    receivedAt: new Date(Date.now() - 60_000).toISOString(), bodyState: 'ready', ...overrides,
+  }
+}
+
+type Handlers = Pick<NowPageProps, 'onSelectMailbox' | 'onOpenAccount' | 'onOpenEmail'>
+type HarnessProps = { client: MailxClient; accounts: Account[]; handlers: Handlers; props: Partial<NowPageProps>; requested: (targets: VerificationTarget[]) => void }
+
+/** The workbench's shared controller, kept mounted while the page can be closed. */
+function Harness({ client, accounts, handlers, props, requested }: HarnessProps) {
+  const controller = useVerificationCodes(client, null, 'test', vi.fn())
+  const forward = controller.requestVisible
+  const requestVisible = useCallback((targets: VerificationTarget[]) => { requested(targets); forward(targets) }, [forward, requested])
+  const [open, setOpen] = useState(true)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(false)}>close now page</button>
+      {open && <NowPage client={client} accounts={accounts} folders={[]} syncStates={{}} draftCount={0} outbox={[]} verification={{ ...controller, requestVisible }} {...handlers} {...props} />}
+    </>
+  )
+}
+
+function setup({ overview = empty, accounts = [account], props = {}, statuses = {} }: { overview?: MailOverview; accounts?: Account[]; props?: Partial<NowPageProps>; statuses?: Record<string, Omit<VerificationCodeStatus, 'emailId'>> } = {}) {
   const client = testClient(accounts)
   client.getMailOverview.mockResolvedValue(overview)
+  client.getVerificationCode.mockImplementation(async (emailId) => ({ emailId, ...(statuses[emailId] ?? { state: 'notFound', code: null, recognitionId: null }) }))
   const handlers = { onSelectMailbox: vi.fn(), onOpenAccount: vi.fn(), onOpenEmail: vi.fn() }
+  const requested = vi.fn<(targets: VerificationTarget[]) => void>()
   render(
     <TooltipProvider>
-      <NowPage client={client} accounts={accounts} folders={[]} syncStates={{}} draftCount={0} outbox={[]} {...handlers} {...props} />
+      <Harness client={client} accounts={accounts} handlers={handlers} props={props} requested={requested} />
       <Toaster />
     </TooltipProvider>,
   )
-  return { client, ...handlers }
+  return { client, requested, ...handlers }
 }
+
+const ready = (code: string, recognitionId = `r-${code}`) => ({ state: 'ready' as const, code, recognitionId })
+const pending = (state: 'unchecked' | 'unavailable' = 'unchecked') => ({ state, code: null, recognitionId: null })
 
 /** Waits for the overview: the summary line appears with it. */
 const loaded = async () => {
@@ -110,24 +142,71 @@ describe('Now page', () => {
     expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'starred' })
   })
 
-  it('copies a verification code and opens its message from the sender', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined)
+  it('copies a recognized code through the shared flow and opens its message from the sender', async () => {
+    const writeText = vi.fn()
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-    const { onOpenEmail } = setup({
-      overview: { ...empty, verificationCodes: [{ emailId: 'c1', accountId: account.id, folderId: 'inbox', from: { name: '银行', address: 'bank@example.com' }, code: '482913', receivedAt: new Date(Date.now() - 60_000).toISOString() }] },
+    const { client, onOpenEmail } = setup({
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913')] },
+      // The shared recognizer's code wins over the overview's.
+      statuses: { c1: ready('482914', 'rec-1') },
     })
     const section = await screen.findByRole('region', { name: '验证码' })
-    expect(within(section).getByText('验证码 482913')).toBeInTheDocument()
-    await userEvent.click(within(section).getByRole('button', { name: '复制验证码 482913' }))
-    expect(writeText).toHaveBeenCalledWith('482913')
-    expect(await screen.findByText('已复制验证码')).toBeInTheDocument()
+    expect(await within(section).findByText('验证码 482914')).toBeInTheDocument()
+    await userEvent.click(within(section).getByRole('button', { name: '复制验证码 482914' }))
+    expect(client.copyVerificationCode).toHaveBeenCalledWith('c1', 'rec-1')
+    expect(await screen.findByText('验证码已复制')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: '已复制' })).toBeInTheDocument()
+    expect(writeText).not.toHaveBeenCalled()
     await userEvent.click(within(section).getByRole('button', { name: '银行' }))
     expect(onOpenEmail).toHaveBeenCalledWith({ id: 'c1', accountId: account.id })
   })
 
+  it('asks the shared recognizer for the shown codes and lets go when the page closes', async () => {
+    const { client, requested } = setup({
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913'), overviewCode('c2', '7391', { bodyState: 'missing' })] },
+      statuses: { c1: ready('482913'), c2: ready('7391') },
+    })
+    await screen.findByRole('region', { name: '验证码' })
+    await waitFor(() => expect(requested).toHaveBeenLastCalledWith([{ emailId: 'c1', bodyState: 'ready' }, { emailId: 'c2', bodyState: 'missing' }]))
+    // The page asks like a visible list row, so a missing body may be fetched.
+    await waitFor(() => expect(client.getVerificationCode).toHaveBeenCalledWith('c2', true))
+    await userEvent.click(screen.getByRole('button', { name: 'close now page' }))
+    expect(requested).toHaveBeenLastCalledWith([])
+  })
+
+  it('hides codes the shared recognizer does not confirm', async () => {
+    setup({
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '111111'), overviewCode('c2', '222222'), overviewCode('c3', '333333')] },
+      statuses: { c1: { state: 'notFound', code: null, recognitionId: null }, c2: { state: 'ambiguous', code: null, recognitionId: null }, c3: ready('333333') },
+    })
+    const section = await screen.findByRole('region', { name: '验证码' })
+    await waitFor(() => expect(within(section).queryByText('验证码 111111')).not.toBeInTheDocument())
+    await waitFor(() => expect(within(section).queryByText('验证码 222222')).not.toBeInTheDocument())
+    expect(within(section).getByText('验证码 333333')).toBeInTheDocument()
+  })
+
+  it('shows a code still being checked or unreadable with copying turned off', async () => {
+    let finish!: (status: VerificationCodeStatus) => void
+    const { client } = setup({
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913'), overviewCode('c2', '555123')] },
+      statuses: { c2: pending('unavailable') },
+    })
+    client.getVerificationCode.mockImplementation((emailId) => emailId === 'c1'
+      ? new Promise((resolve) => { finish = resolve })
+      : Promise.resolve({ emailId, ...pending('unavailable') }))
+    const section = await screen.findByRole('region', { name: '验证码' })
+    expect(within(section).getByText('验证码 482913')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: '验证码 482913 暂时无法复制' })).toBeDisabled()
+    expect(await within(section).findByRole('button', { name: '验证码 555123 暂时无法复制' })).toBeDisabled()
+    await waitFor(() => expect(finish).toBeDefined())
+    await act(async () => finish({ emailId: 'c1', ...ready('482913') }))
+    expect(await within(section).findByRole('button', { name: '复制验证码 482913' })).toBeEnabled()
+    expect(client.copyVerificationCode).not.toHaveBeenCalled()
+  })
+
   it('hides a code that is already older than fifteen minutes', async () => {
     setup({
-      overview: { ...empty, starredUnread: 1, verificationCodes: [{ emailId: 'c1', accountId: account.id, folderId: 'inbox', from: { name: null, address: 'bank@example.com' }, code: '111111', receivedAt: new Date(Date.now() - 16 * 60_000).toISOString() }] },
+      overview: { ...empty, starredUnread: 1, verificationCodes: [overviewCode('c1', '111111', { receivedAt: new Date(Date.now() - 16 * 60_000).toISOString() })] },
     })
     await screen.findByRole('region', { name: '未读与星标' })
     expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
