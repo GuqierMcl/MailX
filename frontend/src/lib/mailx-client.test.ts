@@ -294,3 +294,30 @@ describe('unsaved connection verification boundary', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 })
+
+describe('desktop assistant commands', () => {
+  it('sends only the named arguments and unwraps the results', async () => {
+    const consent = { connectionId: 'c', baseUrl: 'https://api.example.test/v1' }
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: consent, requestId: 'request' })
+    const client = createDesktopClient()
+    await client.assistantStart({ kind: { type: 'chat', message: 'hi' } })
+    await client.assistantCancel('run-1')
+    await client.assistantSnapshot('run-1')
+    await client.assistantRespond('run-1', 'req-1', true)
+    await expect(client.assistantGrantConsent()).resolves.toEqual(consent)
+    await client.assistantRevokeConsent()
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['assistant_start', { request: { kind: { type: 'chat', message: 'hi' } } }],
+      ['assistant_cancel', { runId: 'run-1' }],
+      ['assistant_snapshot', { runId: 'run-1' }],
+      ['assistant_respond', { runId: 'run-1', requestId: 'req-1', approved: true }],
+      ['assistant_grant_consent', undefined],
+      ['assistant_revoke_consent', undefined],
+    ])
+  })
+
+  it('maps a refused answer to its stable code', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: false, error: { code: 'conflict', message: 'x', field: null }, requestId: 'request' })
+    await expect(createDesktopClient().assistantRespond('run', 'old', false)).rejects.toMatchObject({ failure: { code: 'conflict' } })
+  })
+})

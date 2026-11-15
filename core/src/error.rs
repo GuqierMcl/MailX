@@ -88,6 +88,12 @@ pub enum ErrorCode {
     AiTimeout,
     /// The answer cannot be read, or is over the size cap.
     AiInvalidResponse,
+    /// The assistant is turned off in the settings.
+    AssistantDisabled,
+    /// Two assistant runs are already going, or the conversation is busy.
+    AssistantBusy,
+    /// The conversation is too long for the model; start a new one.
+    AssistantContextFull,
     StorageUnavailable,
     StorageIncompatible,
     AlreadyOpen,
@@ -171,6 +177,9 @@ impl AppError {
             ErrorCode::AiProxy => "无法通过你设置的代理连接服务商，请检查代理设置。",
             ErrorCode::AiTimeout => "服务商响应太慢，请稍后重试。",
             ErrorCode::AiInvalidResponse => "服务商返回的内容无法使用，请检查接口地址和协议。",
+            ErrorCode::AssistantDisabled => "助手已关闭，可以在设置里重新打开。",
+            ErrorCode::AssistantBusy => "助手正忙，请等当前任务结束后再试。",
+            ErrorCode::AssistantContextFull => "这段对话太长了，请新开一个对话。",
             ErrorCode::StorageUnavailable => "无法读写本地数据，请检查可用空间与访问权限。",
             ErrorCode::StorageIncompatible => "数据库版本或迁移校验不兼容，原有数据已保留。",
             ErrorCode::AlreadyOpen => "此数据目录已由另一个 MailX 实例打开。",

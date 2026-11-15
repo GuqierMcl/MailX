@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod assistant;
 mod attachment_save;
 mod autostart;
 mod body_protocol;
@@ -201,6 +202,15 @@ fn main() {
                             notification_accounts.clone(),
                         );
                     }
+                    // Run state, text, tools and confirmation requests; the
+                    // main window is the only one that can answer them.
+                    mailx_core::CoreEvent::Assistant(event) => {
+                        let _ = handle.emit_to(
+                            EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                            assistant::EVENT,
+                            event,
+                        );
+                    }
                 });
             let state = state::DesktopState::new(data_dir, secrets, events);
             app.manage(state.clone());
@@ -315,6 +325,12 @@ fn main() {
             commands::ai_list_models,
             commands::ai_test,
             commands::ai_provider_icon,
+            assistant::assistant_start,
+            assistant::assistant_cancel,
+            assistant::assistant_snapshot,
+            assistant::assistant_respond,
+            assistant::assistant_grant_consent,
+            assistant::assistant_revoke_consent,
             commands::settings_get,
             commands::settings_update,
             commands::notifications_test,

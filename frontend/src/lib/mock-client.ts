@@ -32,6 +32,7 @@ import type {
 } from '@/generated/accounts'
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
+import { createMockAssistant } from '@/lib/mock-assistant'
 import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
@@ -70,6 +71,8 @@ export type MockClientOptions = {
   resolveDraft?: (id: string) => Draft | null
   /** Browser preview only: `showcase` loads the fictitious screenshot dataset. */
   seed?: string | null
+  /** Delay between the assistant's streamed events. Default 40 ms. */
+  assistantStepMs?: number
 }
 
 export function createMockClient(options: MockClientOptions = {}): MailxClient {
@@ -82,7 +85,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '' }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -110,6 +113,37 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   let mcpStatus: McpStatus = { state: 'off' }
   const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
+  const consentChanged = () => {
+    settings = { ...settings, revision: settings.revision + 1 }
+    window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
+  }
+  const assistant = createMockAssistant({
+    stepMs: options.assistantStepMs ?? 40,
+    binding() {
+      const model = settings.settings.assistant.model ?? aiDefault
+      const connection = model && aiConnections.find((item) => item.id === model.connectionId)
+      return connection ? { connectionId: connection.id, baseUrl: connection.baseUrl } : null
+    },
+    locale: () => settings.effectiveLocale,
+    overview() {
+      const inbox = emails.filter((email) => folders.find((folder) => folder.id === email.summary.folderId)?.role === 'inbox' && !email.summary.archived)
+      return { unread: inbox.filter((email) => !email.summary.isRead).length, starred: inbox.filter((email) => email.summary.isStarred).length }
+    },
+    firstUnread() {
+      const email = emails.find((row) => !row.summary.isRead && !row.summary.archived && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox')
+      return email ? { id: email.summary.id } : null
+    },
+    archive: async (emailIds) => (await client.archiveEmails(emailIds)).undoToken,
+    async draftToSend() {
+      const draft = await client.createDraft({
+        accountId: null, to: [{ name: 'Alex Chen', address: 'alex@example.test' }], cc: [], bcc: [],
+        subject: 'Meeting notes', bodyHtml: '<p>Here are the notes from today.</p>', clientMutationId: crypto.randomUUID(),
+      })
+      const account = accounts.find((row) => row.id === draft.accountId) ?? accounts[0]
+      return { draft, accountName: account.displayName, accountAddress: account.emailAddress }
+    },
+    send: (draft) => client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() }),
+  })
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
   const removalListeners = new Set<(removal: AccountRemoval) => void>()
@@ -421,7 +455,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     return { inScope, items, individual: matched.filter((email) => !isGrouped(email)) }
   }
 
-  return {
+  const client: MailxClient = {
     available: true,
     getStartupStatus: async () => ({ state: 'ready', revision: 1 }),
     retryStartup: async () => ({ state: 'ready', revision: 1 }),
@@ -669,6 +703,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         const text = email.summary.bodyState === 'ready' ? email.body?.text ?? '' : email.summary.preview
         return /(?:验证码|verification code)\D{0,6}(\d{4,8})/i.exec(`${email.summary.subject}\n${text}`)?.[1] ?? null
       }
+      // Subjects the core's `is_candidate_subject` would admit (the mock's own wording).
+      const candidateSubject = (subject: string) => /验证码|verification|sign[ -]?in|log ?in|登录|verify/i.test(subject) && !/^(re|fwd?|回复|转发)[:：]/i.test(subject)
+      const shown = inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => code(email) ? [email] : []).slice(0, 3)
       return structuredClone({
         newMail: {
           total: fresh.length,
@@ -680,6 +717,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const found = code(email)
           return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState }] : []
         }).slice(0, 3),
+        codeCandidates: inbox
+          .filter((email) => within(email, 15 * 60_000) && !shown.includes(email) && candidateSubject(email.summary.subject))
+          .slice(0, 5)
+          .map((email) => ({ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState })),
         recentAttachments: inbox.filter((email) => email.summary.hasAttachment && within(email, 7 * 86_400_000)).slice(0, 5).map((email) => ({
           email: email.summary,
           // Names are known once the body is cached, as in the core.
@@ -1113,6 +1154,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     openExternalLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
     // The browser preview has no host: the switch only changes an in-memory status.
+    assistantStart: (request) => assistant.start(request),
+    assistantCancel: (runId) => assistant.cancel(runId),
+    assistantSnapshot: (runId) => assistant.snapshot(runId),
+    assistantRespond: (runId, requestId, approved) => assistant.respond(runId, requestId, approved),
+    // Like the core, a consent change is a settings change: a new revision and the usual event.
+    assistantGrantConsent: async () => { const consent = await assistant.grantConsent(); consentChanged(); return consent },
+    assistantRevokeConsent: async () => { await assistant.revokeConsent(); consentChanged() },
+    onAssistantEvent: (listener) => assistant.onEvent(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),
     setAutostart: async () => { throw new MailxClientError({ code: 'hostUnavailable', message: '', field: null }) },
@@ -1123,7 +1172,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }),
     onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
-    getSettings: async () => { readStoredSettings(); return structuredClone(settings) },
+    // The consent is the assistant's own (granted by `assistantGrantConsent`), never part of a settings write.
+    getSettings: async () => { readStoredSettings(); return structuredClone({ ...settings, settings: { ...settings.settings, assistant: { ...settings.settings.assistant, consented: assistant.consent() } } }) },
     async onSettingsChanged(listener) {
       const own = (event: Event) => listener({ revision: (event as CustomEvent<number>).detail })
       const storage = (event: StorageEvent) => {
@@ -1164,14 +1214,16 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       settings = { revision: settings.revision + 1,
         effectiveLocale: general.language === 'system' ? systemLocale() : general.language,
         settings: { ...settings.settings, ...next, layout, appearance: { ...appearance, interfaceFont, mailFont } }, stored: true, recovered: false }
+      settings.settings.assistant = { ...settings.settings.assistant, consented: null }
       try { localStorage.setItem('mailx.mock.settings', JSON.stringify(settings)) } catch { /* Optional preview cache. */ }
       window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
-      return structuredClone(settings)
+      return structuredClone({ ...settings, settings: { ...settings.settings, assistant: { ...settings.settings.assistant, consented: assistant.consent() } } })
       }
       // Browser tabs share a preview store, just as WebViews share the host store.
       return navigator.locks ? navigator.locks.request('mailx.mock.settings', save) : save()
     },
   }
+  return client
 }
 
 /** Preview-only release notes, shaped like a real `latest.json` section. */
@@ -1458,6 +1510,8 @@ export type Seed = {
   translatedSubject?: string
   /** A known synthetic recognition result for browser UI previews. */
   verificationCode?: string
+  /** Header only, like mail that just arrived: no preview and no body until something fetches it. */
+  unfetched?: boolean
 }
 
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }
@@ -1665,6 +1719,16 @@ const DEFAULT_SEEDS: Seed[] = [
     verificationCode: '482913',
     hoursAgo: 0.1,
   },
+  // Just arrived: no preview and no body yet, so the Now page only learns of its code from the recognizer.
+  {
+    account: WORK,
+    from: { name: '开发者平台', address: 'security@devplatform.example' },
+    subject: '你的登录验证码',
+    text: '你的登录验证码是 706152，5 分钟内有效。',
+    verificationCode: '706152',
+    unfetched: true,
+    hoursAgo: 0.2,
+  },
   // Older mail over the last two weeks, so the Now page has a believable
   // activity chart and a few people you write to.
   ...olderSeeds(),
@@ -1755,14 +1819,14 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       to: { addresses: recipients.slice(0, 3), total: recipients.length },
       localOnly: seed.localOnly ?? false,
       archived: false,
-      preview: lazy ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
+      preview: lazy || seed.unfetched ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
       receivedAt: new Date(BASE_TIME - seed.hoursAgo * 3_600_000).toISOString(),
       isRead: seed.read ?? false,
       isStarred: seed.starred ?? false,
       hasAttachment: (seed.attachments?.length ?? 0) > 0,
       // Lazy rows look like synced headers: no body or preview yet.
-      bodyState: lazy ? 'missing' : 'ready',
-      previewState: lazy ? 'missing' : 'ready',
+      bodyState: lazy || seed.unfetched ? 'missing' : 'ready',
+      previewState: lazy || seed.unfetched ? 'missing' : 'ready',
       pendingChanges: false,
       matchSnippet: null,
       senderGroup: null,

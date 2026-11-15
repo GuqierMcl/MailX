@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- The assistant can write the Now page's summary line with your AI model, after you agree once to send mail content to that provider; Settings → Integrations → AI has a new Assistant group to turn it off, pick its model and choose which mailboxes it may read. / 助手可以用你的 AI 模型为“此刻”页面写概述句（首次需同意向该服务商发送邮件内容）；“设置 → 集成 → AI”新增“助手”一组，可关闭助手、选择模型和可读取的邮箱。 ([#138](https://github.com/GuqierMcl/MailX/pull/138))
+
 ### ✨ Optimization
 
 - Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))

@@ -10,6 +10,7 @@
 pub mod accounts;
 pub mod ai;
 mod app;
+pub mod assistant;
 pub mod auth;
 pub mod drafts;
 pub mod error;
@@ -39,7 +40,7 @@ pub use app::{
     AccountConnectionVerification, AccountMailCount, Activity, AiConnectionState, AiService,
     AiState, ArchiveOutcome, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind,
     BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks,
-    CancelConnectionVerification, CancelDraftVerification, ConfirmOAuthMailbox,
+    CancelConnectionVerification, CancelDraftVerification, CodeCandidate, ConfirmOAuthMailbox,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
     CreateOAuthAccount, DayActivity, DraftBodyBinding, DraftConnectionVerification,
     EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,
@@ -50,6 +51,12 @@ pub use app::{
     TranslationInfo, TranslationKeyState, TranslationProxyPasswordState, TranslationStatus,
     TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
     VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
+};
+pub use assistant::{
+    Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
+    ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
+    FlagRestore, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState,
+    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -66,12 +73,12 @@ pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
-    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
-    McpSettings, NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy,
-    SecuritySettings, ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot,
-    SettingsStore, StartupView, ThemeMode, TranslationProviderId, TranslationSettings,
-    mail_body_css,
+    AiConsent, AppSettings, AppearanceSettings, AssistantMode, AssistantSendMode,
+    AssistantSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings, LayoutSettings,
+    LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel, McpSettings, NotificationSettings,
+    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, ServiceRoute,
+    SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, ThemeMode,
+    TranslationProviderId, TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

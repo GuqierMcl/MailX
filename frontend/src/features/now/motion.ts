@@ -31,11 +31,24 @@ export function useCountUp(value: number, enabled: boolean): number {
 }
 
 /**
- * Entrance of one block: fade in with a 4px rise, 200ms, decelerating, each
- * block 40ms after the one before. Only opacity and transform move.
+ * How the page comes in: `first` is the day's first visit (a fuller entrance with counting numbers),
+ * `return` every other visit (a lighter one), `none` for reduced motion.
  */
-export function entrance(animate: boolean, index: number): { className?: string; style?: CSSProperties } {
-  if (!animate) return {}
+export type EntranceMode = 'first' | 'return' | 'none'
+
+const RETURN_STAGGER_MS = 25
+
+export function entranceMode(firstToday: boolean, reducedMotion: boolean): EntranceMode {
+  return reducedMotion ? 'none' : firstToday ? 'first' : 'return'
+}
+
+/**
+ * Entrance of one block. First visit: fade in with a 4px rise, 200ms, 40ms after the block before.
+ * Return visit: a 2px rise, 150ms, 25ms apart. Both decelerate; only opacity and transform move.
+ */
+export function entrance(mode: EntranceMode, index: number): { className?: string; style?: CSSProperties } {
+  if (mode === 'none') return {}
+  if (mode === 'return') return { className: 'animate-now-rise', style: { animationDelay: `${index * RETURN_STAGGER_MS}ms` } }
   return {
     className: cn('animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]'),
     style: { animationDelay: `${index * STAGGER_MS}ms` },

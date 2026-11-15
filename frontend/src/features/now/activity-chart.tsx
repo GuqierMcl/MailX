@@ -3,12 +3,14 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import type { DayActivity } from '@/generated/accounts'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import type { EntranceMode } from './motion'
 
 /** Plot height in px (`h-14`); a day with mail is at least as tall as its rounded top. */
 const HEIGHT = 56
 const MIN_BAR = 4
 const STUB = 2
 const STAGGER_MS = 20
+const RETURN_STAGGER_MS = 8
 
 /** "11月3日 周一 · 12 封": the tooltip and the column's accessible name. */
 function dayLabel(day: DayActivity, language: string): string {
@@ -26,7 +28,7 @@ function dayLabel(day: DayActivity, language: string): string {
  * a hit target the full height and width of its slot; one tab stop for the
  * chart, arrow keys move between days, and hover or focus shows the value.
  */
-export function ActivityChart({ days, language, animate }: { days: DayActivity[]; language: string; animate: boolean }) {
+export function ActivityChart({ days, language, mode }: { days: DayActivity[]; language: string; mode: EntranceMode }) {
   const max = Math.max(1, ...days.map((day) => day.received))
   const [active, setActive] = useState(days.length - 1)
   const columns = useRef<(HTMLDivElement | null)[]>([])
@@ -70,9 +72,10 @@ export function ActivityChart({ days, language, animate }: { days: DayActivity[]
                     'block w-full origin-bottom',
                     day.received > 0 && 'rounded-t-[4px]',
                     today ? 'bg-primary' : 'bg-muted-foreground/30 group-hover:bg-muted-foreground/45',
-                    animate && 'animate-now-bar-grow',
+                    mode === 'first' && 'animate-now-bar-grow',
+                    mode === 'return' && 'animate-now-bar-grow-quick',
                   )}
-                  style={{ height, animationDelay: animate ? `${index * STAGGER_MS}ms` : undefined }}
+                  style={{ height, animationDelay: mode === 'none' ? undefined : `${index * (mode === 'first' ? STAGGER_MS : RETURN_STAGGER_MS)}ms` }}
                 />
               </TooltipTrigger>
               <TooltipContent>{label}</TooltipContent>

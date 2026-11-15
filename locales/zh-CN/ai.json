@@ -1,0 +1,8 @@
+{
+  "generated": "由 AI 生成",
+  "generatedAt": "由 AI 生成 · 生成于 {{time}}",
+  "cancel": "取消",
+  "consentTitle": "把邮件内容发送给{{service}}？",
+  "consentBody": "助手会读取邮件的主题、发件人和正文文字，并发送给这个服务。附件内容和图片不会发送。",
+  "consentConfirm": "同意"
+}

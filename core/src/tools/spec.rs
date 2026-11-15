@@ -12,6 +12,7 @@ use serde_json::Value;
 use super::audit::{NoAudit, ToolAudit, ToolCallRecord};
 use super::context::{Action, Audience, RequestContext};
 use super::error::{ToolError, ToolErrorCode};
+use super::trusted::{PreviousFlags, TrustedOutput};
 use crate::MailxCore;
 
 /// Per-audience limits. Kept as separate values per audience so one
@@ -223,6 +224,7 @@ pub struct ToolCall<'a> {
     ui_opener: &'a UiOpener,
     draft_opener: &'a UiOpener,
     resources: RefCell<Vec<String>>,
+    trusted: RefCell<TrustedOutput>,
 }
 
 impl ToolCall<'_> {
@@ -254,6 +256,17 @@ impl ToolCall<'_> {
 
     pub fn open_draft_in_app(&self, account_id: &str, draft_id: &str) -> Result<(), ToolError> {
         (self.draft_opener)(account_id, draft_id)
+    }
+
+    /// Keeps the archive undo token for the host UI. It never enters the
+    /// tool's output.
+    pub(super) fn keep_archive_undo(&self, token: Option<String>) {
+        self.trusted.borrow_mut().archive_undo_token = token;
+    }
+
+    /// Keeps a message's flags from before the call, for the host UI's undo.
+    pub(super) fn keep_previous_flags(&self, flags: PreviousFlags) {
+        self.trusted.borrow_mut().previous_flags.push(flags);
     }
 
     /// Records an account or email id for the call log.
@@ -427,7 +440,18 @@ impl Tools {
         tool_id: &str,
         input: Value,
     ) -> Result<Value, ToolError> {
-        let (result, resources) = self.dispatch(ctx, tool_id, input);
+        self.call_traced(ctx, tool_id, input).0
+    }
+
+    /// Like [`Tools::call`], also returning what only the trusted host UI may
+    /// see (undo data). The model must never be shown it.
+    pub fn call_traced(
+        &self,
+        ctx: &RequestContext,
+        tool_id: &str,
+        input: Value,
+    ) -> (Result<Value, ToolError>, TrustedOutput) {
+        let (result, resources, trusted) = self.dispatch(ctx, tool_id, input);
         self.audit.record(&ToolCallRecord {
             request_id: ctx.request_id.clone(),
             principal_kind: ctx.principal.kind(),
@@ -442,7 +466,7 @@ impl Tools {
             resource_ids: resources,
             error: result.as_ref().err().map(|e| e.code),
         });
-        result
+        (result, trusted)
     }
 
     fn dispatch(
@@ -450,7 +474,7 @@ impl Tools {
         ctx: &RequestContext,
         tool_id: &str,
         input: Value,
-    ) -> (Result<Value, ToolError>, Vec<String>) {
+    ) -> (Result<Value, ToolError>, Vec<String>, TrustedOutput) {
         let audience = ctx.principal.audience();
         let Some((entry, policy)) = self
             .entries
@@ -458,7 +482,11 @@ impl Tools {
             .find(|e| e.spec.id == tool_id)
             .and_then(|e| e.spec.policy_for(audience).map(|p| (e, p)))
         else {
-            return (Err(ToolError::new(ToolErrorCode::UnknownTool)), Vec::new());
+            return (
+                Err(ToolError::new(ToolErrorCode::UnknownTool)),
+                Vec::new(),
+                TrustedOutput::default(),
+            );
         };
         if !entry
             .spec
@@ -466,7 +494,11 @@ impl Tools {
             .iter()
             .all(|a| ctx.grant.allows(*a))
         {
-            return (Err(ToolError::new(ToolErrorCode::NotPermitted)), Vec::new());
+            return (
+                Err(ToolError::new(ToolErrorCode::NotPermitted)),
+                Vec::new(),
+                TrustedOutput::default(),
+            );
         }
         // Hosts may send null for a tool without arguments.
         let input = if input.is_null() {
@@ -485,9 +517,14 @@ impl Tools {
             ui_opener: &*self.ui_opener,
             draft_opener: &*self.draft_opener,
             resources: RefCell::new(Vec::new()),
+            trusted: RefCell::default(),
         };
         let result = (entry.run)(&call, input);
-        (result, call.resources.into_inner())
+        (
+            result,
+            call.resources.into_inner(),
+            call.trusted.into_inner(),
+        )
     }
 }
 

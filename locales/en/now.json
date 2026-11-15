@@ -159,5 +159,8 @@
   "todayAllRead_other": "{{count}} messages today, all read",
   "syncedAt": "All mailboxes synced · {{time}}",
   "syncing": "Syncing…",
-  "syncIssue": "Some mailboxes have sync problems"
+  "syncIssue": "Some mailboxes have sync problems",
+  "aiSummarize": "Summarize with AI",
+  "aiRefresh": "Regenerate",
+  "aiSummaryLabel": "AI summary"
 }

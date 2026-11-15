@@ -71,5 +71,8 @@
   "aiNetwork": "Can't reach the provider",
   "aiProxy": "Can't connect through the proxy",
   "aiTimeout": "The provider took too long",
-  "aiInvalidResponse": "Unexpected answer from the provider"
+  "aiInvalidResponse": "Unexpected answer from the provider",
+  "assistantDisabled": "The assistant is turned off",
+  "assistantBusy": "The assistant is busy",
+  "assistantContextFull": "This conversation is too long"
 }

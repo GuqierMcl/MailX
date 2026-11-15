@@ -18,6 +18,7 @@ mod sending;
 mod spec;
 #[cfg(test)]
 mod tests;
+mod trusted;
 mod ui;
 
 pub use accounts::{AccountInfo, ListAccountsInput, ListAccountsOutput, SyncStatus};
@@ -44,4 +45,5 @@ pub use sending::{
     SendEmailInput,
 };
 pub use spec::{Annotations, AudiencePolicy, ToolCall, ToolDescriptor, ToolSpec, Tools};
+pub use trusted::{PreviousFlags, TrustedOutput};
 pub use ui::{ShowEmailInput, ShowEmailOutput};

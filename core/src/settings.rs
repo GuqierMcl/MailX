@@ -18,6 +18,10 @@ use std::sync::Mutex;
 use ts_rs::TS;
 use uuid::Uuid;
 
+mod assistant;
+use assistant::repair_assistant;
+pub use assistant::{AssistantMode, AssistantSendMode, AssistantSettings, MAX_INSTRUCTIONS_CHARS};
+
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 const BACKUP_FILE_NAME: &str = "settings.json.bak";
 const CURRENT_VERSION: u32 = 1;
@@ -793,6 +797,8 @@ pub struct SettingsPatch {
     pub compose: Option<ComposeSettings>,
     #[ts(optional)]
     pub translation: Option<TranslationSettings>,
+    #[ts(optional)]
+    pub assistant: Option<AssistantSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -807,6 +813,7 @@ pub struct AppSettings {
     pub compose: ComposeSettings,
     pub mcp: McpSettings,
     pub translation: TranslationSettings,
+    pub assistant: AssistantSettings,
     /// Only the AI commands change it; `SettingsPatch` has no such field. The
     /// interface reads it through `ai_state`, so it is not part of the
     /// generated settings type.
@@ -894,6 +901,7 @@ impl AppSettings {
             compose,
             mcp: self.mcp,
             translation: self.translation.normalized()?,
+            assistant: self.assistant.normalized()?,
             ai: self.ai.normalized()?,
             appearance: AppearanceSettings {
                 accent_color: normalize_accent_color(&appearance.accent_color)
@@ -938,6 +946,7 @@ impl AppSettings {
             compose,
             mcp: self.mcp,
             translation: self.translation.sanitized(),
+            assistant: self.assistant.sanitized(),
             ai: self.ai.sanitized(),
             layout: LayoutSettings {
                 nav_width: self.layout.nav_width.clamp(NAV_WIDTH_MIN, NAV_WIDTH_MAX),
@@ -1181,6 +1190,15 @@ impl SettingsStore {
             translation: patch
                 .translation
                 .unwrap_or_else(|| state.settings.translation.clone()),
+            assistant: match patch.assistant {
+                // The consent is granted and revoked only by the assistant's
+                // own commands; whatever a patch carries for it is ignored.
+                Some(assistant) => AssistantSettings {
+                    consented: state.settings.assistant.consented.clone(),
+                    ..assistant
+                },
+                None => state.settings.assistant.clone(),
+            },
             ai: state.settings.ai.clone(),
         }
         .normalized()?;
@@ -1254,13 +1272,43 @@ impl SettingsStore {
         Ok(result)
     }
 
-    /// Replaces all settings except `mcp` and `ai`. The file is written atomically
+    /// Changes only the `assistant` section under the store lock; used by the
+    /// assistant service to record or revoke consent without replacing a
+    /// section captured earlier by another settings edit.
+    pub fn update_assistant<R>(
+        &self,
+        change: impl FnOnce(&mut AssistantSettings) -> Result<R, AppError>,
+    ) -> Result<R, AppError> {
+        let mut state = self.state.lock().map_err(|_| storage_error())?;
+        let mut assistant = state.settings.assistant.clone();
+        let result = change(&mut assistant)?;
+        let settings = AppSettings {
+            assistant,
+            ..state.settings.clone()
+        }
+        .normalized()?;
+        write_file(&self.directory, &settings)?;
+        *state = State {
+            revision: state.revision.saturating_add(1),
+            settings,
+            stored: true,
+            recovered: false,
+        };
+        Ok(result)
+    }
+
+    /// Replaces all settings except `mcp`, `ai` and the assistant's consent.
+    /// The file is written atomically
     /// before the in-memory copy changes, so a failed write leaves both untouched.
     pub fn update(&self, settings: AppSettings) -> Result<SettingsSnapshot, AppError> {
         let mut state = self.state.lock().map_err(|_| storage_error())?;
         let settings = AppSettings {
             mcp: state.settings.mcp,
             ai: state.settings.ai.clone(),
+            assistant: AssistantSettings {
+                consented: state.settings.assistant.consented.clone(),
+                ..settings.assistant.clone()
+            },
             ..settings
         }
         .normalized()?;
@@ -1309,6 +1357,13 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 repair_translation(translation);
             } else {
                 settings.remove("translation");
+            }
+        }
+        if let Some(assistant) = settings.get_mut("assistant") {
+            if assistant.is_object() {
+                repair_assistant(assistant);
+            } else {
+                settings.remove("assistant");
             }
         }
         if let Some(ai) = settings.get_mut("ai") {

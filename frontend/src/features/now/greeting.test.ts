@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daySegment, lineContext, lineKey, localDay, nextBoundary } from './greeting'
+import { SEGMENT_ICONS, daySegment, lineContext, lineKey, localDay, nextBoundary, type DaySegment } from './greeting'
 
 const at = (hour: number, minute = 0) => new Date(2026, 10, 12, hour, minute)
 const quiet = { attention: false, newMail: 0, unread: 0 }
@@ -48,5 +48,14 @@ describe('summary line', () => {
 
   it('writes the local date', () => {
     expect(localDay(new Date(2026, 0, 5, 23, 30))).toBe('2026-01-05')
+  })
+})
+
+describe('segment icons', () => {
+  it('has a distinct icon for every part of the day', () => {
+    const segments = Object.keys(SEGMENT_ICONS) as DaySegment[]
+    expect(segments).toHaveLength(6)
+    expect(new Set(segments.map((segment) => SEGMENT_ICONS[segment])).size).toBe(6)
+    for (const hour of [5, 8, 11, 13, 17, 21]) expect(segments).toContain(daySegment(new Date(2026, 0, 5, hour)))
   })
 })

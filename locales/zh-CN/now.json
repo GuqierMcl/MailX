@@ -140,5 +140,8 @@
   "todayAllRead_other": "今天收到 {{count}} 封，都已读过",
   "syncedAt": "所有邮箱已同步 · {{time}}",
   "syncing": "正在同步…",
-  "syncIssue": "部分邮箱同步异常"
+  "syncIssue": "部分邮箱同步异常",
+  "aiSummarize": "用 AI 总结",
+  "aiRefresh": "重新生成",
+  "aiSummaryLabel": "AI 概述"
 }

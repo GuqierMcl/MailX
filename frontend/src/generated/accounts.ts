@@ -1,6 +1,6 @@
 // Generated from Rust by `cargo run -p mailx-core --example export_types`. Do not edit.
 
-export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "translationNotConfigured" | "translationConsentRequired" | "translationKeyRejected" | "translationQuotaExceeded" | "translationRateLimited" | "translationNetwork" | "translationProxy" | "translationTimeout" | "translationUnavailable" | "translationInvalidResponse" | "translationLanguageUnsupported" | "translationTooLarge" | "translationCancelled" | "aiNotConfigured" | "aiKeyRejected" | "aiQuotaExceeded" | "aiModelNotFound" | "aiRateLimited" | "aiRequestRejected" | "aiUnavailable" | "aiNetwork" | "aiProxy" | "aiTimeout" | "aiInvalidResponse" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
+export type ErrorCode = "validation" | "notFound" | "conflict" | "idempotencyConflict" | "draftLocked" | "forbidden" | "alreadySending" | "confirmationRequired" | "alreadyDeleting" | "bodyNotCached" | "attachmentTooLarge" | "tooManyAttachments" | "unsupportedImage" | "unsupported" | "oauthNetwork" | "oauthProxy" | "oauthTls" | "oauthRateLimited" | "oauthServerUnavailable" | "oauthTimeout" | "oauthAuthorizationDenied" | "oauthSessionExpired" | "oauthInvalidResponse" | "oauthReauthorizationRequired" | "oauthMailboxRefused" | "oauthUsePersonalEntry" | "oauthUseOrganizationEntry" | "translationNotConfigured" | "translationConsentRequired" | "translationKeyRejected" | "translationQuotaExceeded" | "translationRateLimited" | "translationNetwork" | "translationProxy" | "translationTimeout" | "translationUnavailable" | "translationInvalidResponse" | "translationLanguageUnsupported" | "translationTooLarge" | "translationCancelled" | "aiNotConfigured" | "aiKeyRejected" | "aiQuotaExceeded" | "aiModelNotFound" | "aiRateLimited" | "aiRequestRejected" | "aiUnavailable" | "aiNetwork" | "aiProxy" | "aiTimeout" | "aiInvalidResponse" | "assistantDisabled" | "assistantBusy" | "assistantContextFull" | "storageUnavailable" | "storageIncompatible" | "alreadyOpen" | "secretStoreLocked" | "secretStoreUnavailable" | "secretMissing" | "coreNotReady" | "internal";
 
 export type AppError = { code: ErrorCode, message: string, field: string | null, };
 
@@ -357,6 +357,16 @@ accounts: Array<AccountMailCount>,
  */
 latest: Array<EmailSummary>, };
 
+export type CodeCandidate = { emailId: string, accountId: string, folderId: string, from: MailAddress,
+/**
+ * RFC 3339.
+ */
+receivedAt: string,
+/**
+ * The stored body state, as in [`OverviewCode`].
+ */
+bodyState: BodyState, };
+
 export type OverviewCode = { emailId: string, accountId: string, folderId: string, from: MailAddress, code: string,
 /**
  * RFC 3339.
@@ -457,6 +467,14 @@ starredUnread: number,
  * Newest first, at most three, from the last fifteen minutes.
  */
 verificationCodes: Array<OverviewCode>,
+/**
+ * Inbox messages from the same fifteen minutes whose subject looks like
+ * a verification mail but that have no code here yet (no preview, no
+ * downloaded body, or none found). Newest first, at most five. Hosts
+ * hand them to the shared verification-code recognizer, which may
+ * download the body; one counts as a code only once it answers.
+ */
+codeCandidates: Array<CodeCandidate>,
 /**
  * Newest first, at most five inbox messages from the last seven days.
  */
@@ -682,9 +700,9 @@ export type MailSettings = {
  */
 trashVerificationMailAfterCopy: boolean, };
 
-export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, };
 
-export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -1140,3 +1158,132 @@ export type AiProviderIcon = { mimeType: "image/svg+xml",
  * Base64 of the SVG text.
  */
 data: string, };
+
+export type AssistantMode = "direct" | "ask";
+
+export type AssistantSendMode = "confirm" | "direct";
+
+export type AssistantSettings = {
+/**
+ * Off: no run starts, whatever asks for it.
+ */
+enabled: boolean,
+/**
+ * `None` follows `ai.defaultModel`.
+ */
+model: AiModelRef | null,
+/**
+ * The connection and base URL the user agreed to send mail content to.
+ */
+consented: AiConsent | null,
+/**
+ * Account ids the assistant cannot see.
+ */
+excludedAccounts: Array<string>,
+/**
+ * Flags, archive and refresh.
+ */
+organize: AssistantMode,
+/**
+ * Changes to drafts the assistant created itself.
+ */
+aiDrafts: AssistantMode, send: AssistantSendMode,
+/**
+ * Appended to the system prompt, at most 2000 characters.
+ */
+instructions: string, };
+
+export type StartRun = { kind: RunKind, };
+
+export type RunKind = { "type": "nowSummary", since: string | null, dayStarts?: Array<string>,
+/**
+ * Skip the cached answer and ask the model again (the refresh
+ * button); the new answer replaces the cached one.
+ */
+fresh: boolean, } | { "type": "chat", conversationId?: string, message: string, };
+
+export type RunKindTag = "nowSummary" | "chat";
+
+export type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
+
+export type FinishedReason = "stop" | "limit" | "length";
+
+export type ToolStatus = "running" | "done" | "failed" | "denied";
+
+export type ToolUndo = { "type": "archive", token: string, } | { "type": "flags", restore: Array<FlagRestore>, };
+
+export type FlagRestore = { emailId: string, isRead: boolean | null, isStarred: boolean | null, };
+
+export type ConfirmAction = "send" | "cancelSend" | "organize" | "aiDraft" | "userDraft";
+
+export type ConfirmWarning = "newRecipient" | "notInConversation" | "hasAttachments";
+
+export type ConfirmAttachment = { fileName: string, size: number, };
+
+export type OrganizeChange = { "type": "archive" } | { "type": "unarchive" } | { "type": "flags", isRead: boolean | null, isStarred: boolean | null, } | { "type": "refresh" };
+
+export type ConfirmDraftChange = { "type": "create" } | { "type": "update", fields: Array<string>, } | { "type": "delete" } | { "type": "attachmentAdded", fileName: string, } | { "type": "attachmentRemoved", fileName: string, };
+
+export type ConfirmationDetails = { "type": "send", accountName: string, accountAddress: string, to: Array<MailAddress>, cc: Array<MailAddress>, bcc: Array<MailAddress>, subject: string,
+/**
+ * The first characters of the plain-text body.
+ */
+bodyPreview: string, attachments: Array<ConfirmAttachment>, warnings: Array<ConfirmWarning>, } | { "type": "outbox", retry: boolean, senderAddress: string, subject: string,
+/**
+ * The first few recipients; `recipientCount` counts all.
+ */
+recipients: Array<string>, recipientCount: number, } | { "type": "organize", change: OrganizeChange,
+/**
+ * Emails the call targets that exist and are in scope.
+ */
+count: number,
+/**
+ * Subjects of up to five of them.
+ */
+subjects: Array<string>, } | { "type": "draft", subject: string, origin: DraftOrigin, change: ConfirmDraftChange, };
+
+export type ConfirmationRequest = { action: ConfirmAction,
+/**
+ * The tool id, e.g. `send_email`.
+ */
+tool: string, details: ConfirmationDetails, };
+
+export type PendingConfirmation = { requestId: string, callId: string, request: ConfirmationRequest, };
+
+export type ToolActivitySummary = { "type": "pending" } | { "type": "found", count: number, } | { "type": "read", emailIds: Array<string>, } | { "type": "changed", count: number, emailIds: Array<string>, undo: ToolUndo | null, } | { "type": "draft", draftId: string, subject: string, } | { "type": "outbox", outboxId: string, } | { "type": "done" } | { "type": "denied" } | { "type": "error", code: string, };
+
+export type ToolActivity = { callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, };
+
+export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
+/**
+ * Everything the model has written so far.
+ */
+text: string, tools: Array<ToolActivity>, error: ErrorCode | null, finishedReason: FinishedReason | null,
+/**
+ * When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC
+ * with milliseconds; `None` while it is going. A Now summary answered
+ * from the cache carries the time its text was first generated.
+ */
+completedAt: string | null,
+/**
+ * The `seq` of the last event this snapshot includes; later events
+ * continue from it.
+ */
+seq: number,
+/**
+ * Set for chats.
+ */
+conversationId: string | null,
+/**
+ * The question the run waits on; set exactly while `state` is
+ * `awaitingConfirmation`.
+ */
+pending: PendingConfirmation | null, };
+
+export type AssistantEvent = { runId: string,
+/**
+ * Increases by one per event of a run, starting at 1.
+ */
+seq: number, kind: AssistantEventKind, };
+
+export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "confirm", requestId: string, callId: string, request: ConfirmationRequest, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };

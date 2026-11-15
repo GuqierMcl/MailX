@@ -8,7 +8,7 @@ use std::{
 
 pub(crate) use mailx_core::StartupStatus;
 use mailx_core::{
-    Activity, AiService, AppError, ErrorCode, Events, MailxCore, SettingsStore,
+    Activity, AiService, AppError, Assistant, ErrorCode, Events, MailxCore, SettingsStore,
     secrets::SecretStore,
 };
 
@@ -24,6 +24,8 @@ struct Inner {
     /// AI provider settings need only the settings, secrets and data
     /// directory, so they work even when the mail store could not open.
     ai: Mutex<Option<Arc<AiService>>>,
+    /// The built-in assistant, created on first use once the core is ready.
+    assistant: Mutex<Option<Assistant>>,
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
     /// Called each time the core becomes ready (also after a retry).
@@ -49,6 +51,7 @@ impl DesktopState {
             activity: Mutex::new(Activity::default()),
             settings: Mutex::new(None),
             ai: Mutex::new(None),
+            assistant: Mutex::new(None),
             // The setup hook immediately schedules this first attempt. Keep
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
@@ -246,6 +249,31 @@ impl DesktopState {
         let service = Arc::new(AiService::new(store, self.0.secrets.clone(), directory));
         *slot = Some(service.clone());
         Ok(service)
+    }
+
+    /// The built-in assistant, created on first use. Its tools are the ones
+    /// local MCP uses (same default account, language, undo-send window and
+    /// open-draft check) without the UI openers. `CoreNotReady` until the core
+    /// is open; nothing is cached before that.
+    pub(crate) fn assistant(&self, app: &tauri::AppHandle) -> Result<Assistant, AppError> {
+        let core = self.core()?;
+        let mut slot = self
+            .0
+            .assistant
+            .lock()
+            .map_err(|_| AppError::new(ErrorCode::Internal))?;
+        if let Some(assistant) = slot.as_ref() {
+            return Ok(assistant.clone());
+        }
+        let assistant = Assistant::new(
+            core.clone(),
+            self.ai()?,
+            self.settings_store()?,
+            crate::mcp::shared_tools(app, self, core),
+            self.0.events.clone(),
+        );
+        *slot = Some(assistant.clone());
+        Ok(assistant)
     }
 
     fn settings_store(&self) -> Result<Arc<SettingsStore>, AppError> {

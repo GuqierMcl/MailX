@@ -67,7 +67,7 @@ pub use organize::{
     ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
 };
 pub use overview::{
-    AccountMailCount, DayActivity, MailOverview, MailOverviewQuery, NewMailOverview,
+    AccountMailCount, CodeCandidate, DayActivity, MailOverview, MailOverviewQuery, NewMailOverview,
     OverviewActivity, OverviewCode, OverviewContact, RecentAttachment, TodayActivity,
 };
 pub use translation::{

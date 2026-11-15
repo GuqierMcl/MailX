@@ -177,6 +177,14 @@ impl AccountService {
         self.storage.overview_sent_to(candidates)
     }
 
+    pub(crate) fn known_correspondents(
+        &self,
+        account_id: &str,
+        candidates: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        self.storage.known_correspondents(account_id, candidates)
+    }
+
     pub(crate) fn overview_own_addresses(&self) -> Result<Vec<String>, AppError> {
         self.storage.overview_own_addresses()
     }
