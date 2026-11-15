@@ -673,6 +673,10 @@ describe('mock mail overview', () => {
     expect(overview.newMail.accounts.reduce((sum, row) => sum + row.count, 0)).toBe(overview.newMail.total)
     expect(overview.newMail.latest.length).toBeLessThanOrEqual(5)
     expect(overview.verificationCodes.map((row) => row.code)).toEqual(['482913'])
+    // A fresh code mail with no preview or body is only a candidate, and the recognizer finds its code.
+    expect(overview.codeCandidates).toHaveLength(1)
+    expect(overview.codeCandidates[0]).toMatchObject({ bodyState: 'missing' })
+    expect(await client.getVerificationCode(overview.codeCandidates[0].emailId, true)).toMatchObject({ state: 'ready', code: '706152' })
     expect(overview.recentAttachments.length).toBe(2)
     expect(overview.recentAttachments.some((row) => row.fileNames.length === 0)).toBe(true)
     expect((await client.getMailOverview({ since: null })).newMail).toEqual({ total: 0, accounts: [], latest: [] })
@@ -735,7 +739,7 @@ describe('mock assistant', () => {
       return snapshot
     })
   const chat = (message: string) => ({ kind: { type: 'chat' as const, message } })
-  const now = { kind: { type: 'nowSummary' as const, since: null } }
+  const now = { kind: { type: 'nowSummary' as const, since: null, fresh: false } }
 
   it('needs the consent first, and the settings cannot grant it', async () => {
     const client = mock()

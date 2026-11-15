@@ -2,13 +2,13 @@ import { useCallback, useState } from 'react'
 import { act, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Account, AccountSyncState, EmailPage, EmailSummary, Folder, MailOverview, OutboxItem, OverviewActivity, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
+import type { Account, AccountSyncState, CodeCandidate, EmailPage, EmailSummary, Folder, MailOverview, OutboxItem, OverviewActivity, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
 import { exampleAccount, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Toaster } from '@/components/ui/toast'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { MailxClient } from '@/lib/mailx-client'
 import { useVerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
-import { localDay } from './greeting'
+import { daySegment, localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
@@ -43,7 +43,7 @@ function activityOf(overrides: Partial<OverviewActivity> = {}): OverviewActivity
   }
 }
 
-const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date().toISOString() }
+const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 
 function overviewCode(emailId: string, code: string, overrides: Partial<OverviewCode> = {}): OverviewCode {
   return {
@@ -412,6 +412,52 @@ describe('Now page', () => {
     expect(client.copyVerificationCode).not.toHaveBeenCalled()
   })
 
+  describe('code candidates', () => {
+    const candidate = (emailId: string, overrides: Partial<CodeCandidate> = {}): CodeCandidate => ({
+      emailId, accountId: account.id, folderId: 'inbox', from: { name: '云服务', address: 'login@cloud.example' },
+      receivedAt: new Date(Date.now() - 30_000).toISOString(), bodyState: 'missing', ...overrides,
+    })
+
+    it('shows a mail with no preview once the shared recognizer answers ready, and asks it to fetch', async () => {
+      const { client, requested } = setup({
+        overview: { ...empty, starredUnread: 1, codeCandidates: [candidate('n1')] },
+        statuses: { n1: ready('706152', 'rec-n1') },
+      })
+      const section = await screen.findByRole('region', { name: '验证码' })
+      expect(await within(section).findByText('验证码 706152')).toBeInTheDocument()
+      expect(within(section).getByRole('button', { name: '云服务' })).toBeInTheDocument()
+      expect(requested).toHaveBeenCalledWith([{ emailId: 'n1', bodyState: 'missing' }])
+      expect(client.getVerificationCode).toHaveBeenCalledWith('n1', true)
+    })
+
+    it('shows nothing for a candidate the recognizer does not confirm', async () => {
+      const { client } = setup({
+        overview: { ...empty, starredUnread: 1, codeCandidates: [candidate('n1'), candidate('n2'), candidate('n3')] },
+        statuses: { n1: pending('unchecked'), n2: { state: 'notFound', code: null, recognitionId: null }, n3: { state: 'ambiguous', code: null, recognitionId: null } },
+      })
+      await screen.findByRole('region', { name: '收件箱' })
+      await waitFor(() => expect(client.getVerificationCode).toHaveBeenCalledTimes(3))
+      await act(async () => { await Promise.resolve() })
+      expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
+    })
+
+    it('lists codes and candidates together, newest first, and drops a candidate after fifteen minutes', async () => {
+      setup({
+        overview: {
+          ...empty,
+          verificationCodes: [overviewCode('c1', '482913', { receivedAt: new Date(Date.now() - 5 * 60_000).toISOString() })],
+          codeCandidates: [candidate('n1', { receivedAt: new Date(Date.now() - 60_000).toISOString() }), candidate('n2', { receivedAt: new Date(Date.now() - 16 * 60_000).toISOString() })],
+        },
+        statuses: { c1: ready('482913'), n1: ready('706152'), n2: ready('999999') },
+      })
+      const section = await screen.findByRole('region', { name: '验证码' })
+      await within(section).findByText('验证码 706152')
+      const codes = within(section).getAllByText(/^验证码 \d+$/).map((node) => node.textContent)
+      expect(codes).toEqual(['验证码 706152', '验证码 482913'])
+      expect(within(section).queryByText('验证码 999999')).not.toBeInTheDocument()
+    })
+  })
+
   it('hides a code that is already older than fifteen minutes', async () => {
     setup({
       overview: { ...empty, starredUnread: 1, verificationCodes: [overviewCode('c1', '111111', { receivedAt: new Date(Date.now() - 16 * 60_000).toISOString() })] },
@@ -456,12 +502,54 @@ describe('Now page', () => {
     expect(bars[13].style.animationDelay).toBe('260ms')
   })
 
-  it('renders at once on a later visit the same day', async () => {
+  it('plays a lighter entrance on a later visit the same day: a short rise, no count-up, quick bars', async () => {
     localStorage.setItem(ENTRANCE_KEY, localDay(new Date()))
-    setup({ overview: { ...empty, starredUnread: 2, activity: activityOf() } })
+    const raf = vi.spyOn(window, 'requestAnimationFrame')
+    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [] }, starredUnread: 2, activity: activityOf() } })
+    const section = await screen.findByRole('region', { name: '收件箱' })
+    const header = screen.getByRole('heading', { level: 1 }).parentElement!
+    expect(header).toHaveClass('animate-now-rise')
+    expect(header).not.toHaveClass('animate-in')
+    expect(section).toHaveClass('animate-now-rise')
+    expect(section.style.animationDelay).toBe('25ms')
+    // Numbers show at once.
+    expect(within(section).getByRole('button', { name: '新邮件 12' })).toHaveTextContent('12')
+    const bars = document.querySelectorAll<HTMLElement>('[data-slot="activity-bar"]')
+    expect(bars[0]).toHaveClass('animate-now-bar-grow-quick')
+    expect(bars[0]).not.toHaveClass('animate-now-bar-grow')
+    expect(bars[13].style.animationDelay).toBe('104ms')
+    expect(raf).not.toHaveBeenCalled()
+  })
+
+  it('shows an icon for the part of the day before the greeting, hidden from screen readers', async () => {
+    setup()
     await loaded()
-    expect(screen.getByRole('heading', { level: 1 }).parentElement).not.toHaveClass('animate-in')
-    expect(document.querySelector('[data-slot="activity-bar"]')).not.toHaveClass('animate-now-bar-grow')
+    const heading = screen.getByRole('heading', { level: 1 })
+    const icon = heading.querySelector('[data-slot="now-greeting-icon"]')!
+    expect(icon).toHaveAttribute('aria-hidden', 'true')
+    expect(icon).toHaveAttribute('data-segment', daySegment(new Date()))
+    // Only the current icon is opaque; the others wait at zero for a cross-fade.
+    expect(icon.querySelectorAll('svg.opacity-100')).toHaveLength(1)
+    expect(icon.querySelectorAll('svg.opacity-0')).toHaveLength(5)
+    expect(icon).toHaveClass('animate-now-icon-in')
+    // Not part of the accessible name: the greeting text already says it.
+    expect(heading).toHaveAccessibleName(/^[^\s]/)
+  })
+
+  it('cross-fades the icon when the part of the day changes while the page is open', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 18, 10, 59, 30))
+      setup()
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      const icon = () => document.querySelector('[data-slot="now-greeting-icon"]')
+      expect(icon()).toHaveAttribute('data-segment', 'morning')
+      await act(async () => { await vi.advanceTimersByTimeAsync(31_000) })
+      expect(icon()).toHaveAttribute('data-segment', 'noon')
+      expect(icon()!.querySelectorAll('svg.opacity-100')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('skips the rise, stagger, count-up and growing bars with reduced motion', async () => {
@@ -476,6 +564,10 @@ describe('Now page', () => {
     expect(screen.getByRole('heading', { level: 1 }).parentElement).not.toHaveClass('animate-in')
     expect(within(section).getByRole('button', { name: '新邮件 12' })).toHaveTextContent('12')
     expect(document.querySelector('[data-slot="activity-bar"]')).not.toHaveClass('animate-now-bar-grow')
+    expect(document.querySelector('[data-slot="activity-bar"]')).not.toHaveClass('animate-now-bar-grow-quick')
+    expect(document.querySelector('.animate-now-rise')).not.toBeInTheDocument()
+    // The icon is simply there.
+    expect(document.querySelector('[data-slot="now-greeting-icon"]')).not.toHaveClass('animate-now-icon-in')
     expect(raf).not.toHaveBeenCalled()
   })
 })

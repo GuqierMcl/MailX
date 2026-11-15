@@ -703,6 +703,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         const text = email.summary.bodyState === 'ready' ? email.body?.text ?? '' : email.summary.preview
         return /(?:验证码|verification code)\D{0,6}(\d{4,8})/i.exec(`${email.summary.subject}\n${text}`)?.[1] ?? null
       }
+      // Subjects the core's `is_candidate_subject` would admit (the mock's own wording).
+      const candidateSubject = (subject: string) => /验证码|verification|sign[ -]?in|log ?in|登录|verify/i.test(subject) && !/^(re|fwd?|回复|转发)[:：]/i.test(subject)
+      const shown = inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => code(email) ? [email] : []).slice(0, 3)
       return structuredClone({
         newMail: {
           total: fresh.length,
@@ -714,6 +717,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const found = code(email)
           return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState }] : []
         }).slice(0, 3),
+        codeCandidates: inbox
+          .filter((email) => within(email, 15 * 60_000) && !shown.includes(email) && candidateSubject(email.summary.subject))
+          .slice(0, 5)
+          .map((email) => ({ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState })),
         recentAttachments: inbox.filter((email) => email.summary.hasAttachment && within(email, 7 * 86_400_000)).slice(0, 5).map((email) => ({
           email: email.summary,
           // Names are known once the body is cached, as in the core.
@@ -1503,6 +1510,8 @@ export type Seed = {
   translatedSubject?: string
   /** A known synthetic recognition result for browser UI previews. */
   verificationCode?: string
+  /** Header only, like mail that just arrived: no preview and no body until something fetches it. */
+  unfetched?: boolean
 }
 
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }
@@ -1710,6 +1719,16 @@ const DEFAULT_SEEDS: Seed[] = [
     verificationCode: '482913',
     hoursAgo: 0.1,
   },
+  // Just arrived: no preview and no body yet, so the Now page only learns of its code from the recognizer.
+  {
+    account: WORK,
+    from: { name: '开发者平台', address: 'security@devplatform.example' },
+    subject: '你的登录验证码',
+    text: '你的登录验证码是 706152，5 分钟内有效。',
+    verificationCode: '706152',
+    unfetched: true,
+    hoursAgo: 0.2,
+  },
   // Older mail over the last two weeks, so the Now page has a believable
   // activity chart and a few people you write to.
   ...olderSeeds(),
@@ -1800,14 +1819,14 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       to: { addresses: recipients.slice(0, 3), total: recipients.length },
       localOnly: seed.localOnly ?? false,
       archived: false,
-      preview: lazy ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
+      preview: lazy || seed.unfetched ? '' : seed.text.replace(/\s+/g, ' ').slice(0, 120),
       receivedAt: new Date(BASE_TIME - seed.hoursAgo * 3_600_000).toISOString(),
       isRead: seed.read ?? false,
       isStarred: seed.starred ?? false,
       hasAttachment: (seed.attachments?.length ?? 0) > 0,
       // Lazy rows look like synced headers: no body or preview yet.
-      bodyState: lazy ? 'missing' : 'ready',
-      previewState: lazy ? 'missing' : 'ready',
+      bodyState: lazy || seed.unfetched ? 'missing' : 'ready',
+      previewState: lazy || seed.unfetched ? 'missing' : 'ready',
       pendingChanges: false,
       matchSnippet: null,
       senderGroup: null,

@@ -1,4 +1,6 @@
 import type { ParseKeys } from 'i18next'
+import type { IconSvgElement } from '@hugeicons/react'
+import { MoonStarIcon, Sun01Icon, Sun03Icon, SunCloud01Icon, SunriseIcon, SunsetIcon } from '@hugeicons/core-free-icons'
 import { holidayOn, solarTermOn, type Holiday, type SolarTerm } from './calendar'
 
 /** A message key of the `now` namespace. */
@@ -11,6 +13,19 @@ export type DaySegment = 'earlyMorning' | 'morning' | 'noon' | 'afternoon' | 'ev
 const SEGMENT_STARTS: [number, DaySegment][] = [
   [5, 'earlyMorning'], [8, 'morning'], [11, 'noon'], [13, 'afternoon'], [17, 'evening'], [21, 'night'],
 ]
+
+/**
+ * The icon before the greeting for each part of the day (not the sidebar's fixed `SunriseIcon`, and
+ * not `Sun03Icon`, which the title bar's theme button uses). Its colour is `--now-icon-<segment>` in index.css.
+ */
+export const SEGMENT_ICONS: Record<DaySegment, IconSvgElement> = {
+  earlyMorning: SunriseIcon,
+  morning: Sun03Icon,
+  noon: Sun01Icon,
+  afternoon: SunCloud01Icon,
+  evening: SunsetIcon,
+  night: MoonStarIcon,
+}
 
 export function daySegment(date: Date): DaySegment {
   const hour = date.getHours()

@@ -357,6 +357,16 @@ accounts: Array<AccountMailCount>,
  */
 latest: Array<EmailSummary>, };
 
+export type CodeCandidate = { emailId: string, accountId: string, folderId: string, from: MailAddress,
+/**
+ * RFC 3339.
+ */
+receivedAt: string,
+/**
+ * The stored body state, as in [`OverviewCode`].
+ */
+bodyState: BodyState, };
+
 export type OverviewCode = { emailId: string, accountId: string, folderId: string, from: MailAddress, code: string,
 /**
  * RFC 3339.
@@ -457,6 +467,14 @@ starredUnread: number,
  * Newest first, at most three, from the last fifteen minutes.
  */
 verificationCodes: Array<OverviewCode>,
+/**
+ * Inbox messages from the same fifteen minutes whose subject looks like
+ * a verification mail but that have no code here yet (no preview, no
+ * downloaded body, or none found). Newest first, at most five. Hosts
+ * hand them to the shared verification-code recognizer, which may
+ * download the body; one counts as a code only once it answers.
+ */
+codeCandidates: Array<CodeCandidate>,
 /**
  * Newest first, at most five inbox messages from the last seven days.
  */
@@ -1177,7 +1195,12 @@ instructions: string, };
 
 export type StartRun = { kind: RunKind, };
 
-export type RunKind = { "type": "nowSummary", since: string | null, dayStarts?: Array<string>, } | { "type": "chat", conversationId?: string, message: string, };
+export type RunKind = { "type": "nowSummary", since: string | null, dayStarts?: Array<string>,
+/**
+ * Skip the cached answer and ask the model again (the refresh
+ * button); the new answer replaces the cached one.
+ */
+fresh: boolean, } | { "type": "chat", conversationId?: string, message: string, };
 
 export type RunKindTag = "nowSummary" | "chat";
 

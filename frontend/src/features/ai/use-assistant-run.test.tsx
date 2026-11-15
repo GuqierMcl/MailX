@@ -5,7 +5,7 @@ import type { AssistantEvent, AssistantEventKind, RunKind, RunSnapshot } from '@
 import { MailxClientError } from '@/lib/mailx-client'
 import { useAssistantRun } from './use-assistant-run'
 
-const KIND: RunKind = { type: 'nowSummary', since: null }
+const KIND: RunKind = { type: 'nowSummary', since: null, fresh: false }
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
   runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,

@@ -27,6 +27,8 @@ pub const OVERVIEW_LATEST: u32 = 5;
 pub const OVERVIEW_CODE_MINUTES: i64 = 15;
 /// Most verification codes listed.
 pub const OVERVIEW_CODES: usize = 3;
+/// Most verification-code candidates listed.
+pub const OVERVIEW_CODE_CANDIDATES: usize = 5;
 /// Most recent messages a code is searched in; bounds the detector work.
 const CODE_CANDIDATES: u32 = 50;
 /// How far back attachments are listed.
@@ -58,6 +60,12 @@ pub struct MailOverview {
     pub starred_unread: u32,
     /// Newest first, at most three, from the last fifteen minutes.
     pub verification_codes: Vec<OverviewCode>,
+    /// Inbox messages from the same fifteen minutes whose subject looks like
+    /// a verification mail but that have no code here yet (no preview, no
+    /// downloaded body, or none found). Newest first, at most five. Hosts
+    /// hand them to the shared verification-code recognizer, which may
+    /// download the body; one counts as a code only once it answers.
+    pub code_candidates: Vec<CodeCandidate>,
     /// Newest first, at most five inbox messages from the last seven days.
     pub recent_attachments: Vec<RecentAttachment>,
     /// Received, sent and contact statistics of the last two weeks; present
@@ -101,6 +109,21 @@ pub struct OverviewCode {
     pub received_at: String,
     /// The stored body state, so hosts can key the shared verification-code
     /// status (which reads the full body) to the same message version.
+    pub body_state: BodyState,
+}
+
+/// A recent inbox message that may carry a verification code. The subject is
+/// left out: hosts need only the identity, the sender and the body state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeCandidate {
+    pub email_id: String,
+    pub account_id: String,
+    pub folder_id: String,
+    pub from: MailAddress,
+    /// RFC 3339.
+    pub received_at: String,
+    /// The stored body state, as in [`OverviewCode`].
     pub body_state: BodyState,
 }
 
@@ -197,32 +220,50 @@ pub(crate) fn overview_at(
         }
     };
     let code_since = timestamp(now - Duration::minutes(OVERVIEW_CODE_MINUTES));
-    let verification_codes = service
-        .overview_code_sources(
-            &code_since,
-            CODE_CANDIDATES,
-            verification_code::MAX_TEXT_BYTES,
-        )?
-        .into_iter()
-        .filter_map(|source| {
-            // Oversized bodies, ambiguous and missing codes and detector
-            // errors are all skipped without a trace.
-            let text = source.text?;
-            match verification_code::detect(&source.subject, &text) {
-                Ok(Detection::Found { candidate }) => Some(OverviewCode {
+    let sources = service.overview_code_sources(
+        &code_since,
+        CODE_CANDIDATES,
+        verification_code::MAX_TEXT_BYTES,
+    )?;
+    let mut verification_codes = Vec::new();
+    let mut code_candidates = Vec::new();
+    for source in sources {
+        // Oversized bodies, ambiguous and missing codes and detector errors
+        // are all skipped without a trace.
+        let found = source.text.as_deref().and_then(|text| {
+            match verification_code::detect(&source.subject, text) {
+                Ok(Detection::Found { candidate }) => Some(candidate.code),
+                _ => None,
+            }
+        });
+        match found {
+            Some(code) if verification_codes.len() < OVERVIEW_CODES => {
+                verification_codes.push(OverviewCode {
                     email_id: source.email_id,
                     account_id: source.account_id,
                     folder_id: source.folder_id,
                     from: source.from,
-                    code: candidate.code,
+                    code,
                     received_at: source.received_at,
                     body_state: source.body_state,
-                }),
-                _ => None,
+                });
             }
-        })
-        .take(OVERVIEW_CODES)
-        .collect();
+            Some(_) => {}
+            None if code_candidates.len() < OVERVIEW_CODE_CANDIDATES
+                && verification_code::is_candidate_subject(&source.subject) =>
+            {
+                code_candidates.push(CodeCandidate {
+                    email_id: source.email_id,
+                    account_id: source.account_id,
+                    folder_id: source.folder_id,
+                    from: source.from,
+                    received_at: source.received_at,
+                    body_state: source.body_state,
+                });
+            }
+            None => {}
+        }
+    }
     let attachment_since = timestamp(now - Duration::days(OVERVIEW_ATTACHMENT_DAYS));
     let recent_attachments = service
         .overview_attachments(&attachment_since, OVERVIEW_ATTACHMENTS)?
@@ -233,6 +274,7 @@ pub(crate) fn overview_at(
         new_mail,
         starred_unread: service.overview_starred_unread()?,
         verification_codes,
+        code_candidates,
         recent_attachments,
         activity: day_starts
             .map(|starts| activity::activity_at(service, starts, now))

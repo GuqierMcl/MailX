@@ -409,6 +409,61 @@ fn verification_codes_skip_oversized_bodies_and_stop_at_three() {
 }
 
 #[test]
+fn code_candidates_are_recent_verification_subjects_without_a_code_yet() {
+    let mut f = setup();
+    let ids = f.put(
+        0,
+        "INBOX",
+        &[
+            // Has a code from its preview: a code, not a candidate.
+            mail("Your verification code", 1),
+            // Nothing stored yet: a candidate.
+            mail("Your verification code", 2),
+            // Not a verification subject.
+            mail("Weekly newsletter", 3),
+            mail("Sign in to Example", 4),
+            // Outside the window.
+            mail("Your verification code", 16),
+            // Archived.
+            mail("Your verification code", 5),
+            // A reply is never a candidate.
+            mail("Re: Your verification code", 6),
+        ],
+    );
+    f.set_preview(&ids[0], "Your verification code is 482913.");
+    f.service.archive_messages(&[ids[5].clone()]).unwrap();
+    f.put(0, "Junk", &[mail("Your verification code", 1)]);
+    let home = f.put(1, "INBOX", &[mail("Verify your email", 1)]);
+
+    let overview = f.overview(None);
+    assert_eq!(overview.verification_codes.len(), 1);
+    let found: Vec<&str> = overview
+        .code_candidates
+        .iter()
+        .map(|c| c.email_id.as_str())
+        .collect();
+    // Newest first, across accounts.
+    assert_eq!(found, [home[0].as_str(), ids[1].as_str(), ids[3].as_str()]);
+    let first = &overview.code_candidates[0];
+    assert_eq!(first.account_id, f.accounts[1].id);
+    assert_eq!(first.folder_id, f.targets[&(1, "INBOX")].folder_id);
+    assert_eq!(first.from.address, "sender@example.test");
+    assert_eq!(first.received_at, at(f.now, 1));
+    assert_eq!(first.body_state, BodyState::Missing);
+}
+
+#[test]
+fn code_candidates_stop_at_five() {
+    let mut f = setup();
+    let mails: Vec<Mail> = (1..=8).map(|n| mail("Your verification code", n)).collect();
+    f.put(0, "INBOX", &mails);
+    assert_eq!(
+        f.overview(None).code_candidates.len(),
+        OVERVIEW_CODE_CANDIDATES
+    );
+}
+
+#[test]
 fn recent_attachments_list_known_names_newest_first() {
     let mut f = setup();
     let with = |subject, minutes_ago| Mail {

@@ -31,6 +31,10 @@ pub enum RunKind {
         #[serde(default)]
         #[ts(optional)]
         day_starts: Option<Vec<String>>,
+        /// Skip the cached answer and ask the model again (the refresh
+        /// button); the new answer replaces the cached one.
+        #[serde(default)]
+        fresh: bool,
     },
     /// One user message in a conversation; `conversationId` `None` opens a
     /// new conversation.

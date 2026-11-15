@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { Alert02Icon, Attachment01Icon, CheckmarkCircle02Icon, Copy01Icon, File01Icon, MailUpload01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import type { Account, AccountSyncState, EmailSummary, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
+import type { Account, AccountSyncState, CodeCandidate, EmailSummary, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -20,8 +20,9 @@ import type { Mailbox } from '@/features/mail/mailbox'
 import { readyVerificationCode, type ReadyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, lineContext, lineKey, type LineContext, type NowKey } from './greeting'
 import { useDayClock, useFirstVisitToday, useLastVisit, useMinuteClock } from './visit'
-import { entrance, useCountUp } from './motion'
+import { entrance, entranceMode, useCountUp, type EntranceMode } from './motion'
 import { useFreshCodes } from './use-fresh-codes'
+import { GreetingIcon } from './greeting-icon'
 import { NowAmbient } from './now-ambient'
 import { relativeTime } from './relative-time'
 import { compareWeeks, dayStarts, syncSummary } from './activity'
@@ -72,8 +73,8 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const since = useLastVisit()
   const firstToday = useFirstVisitToday()
   const reducedMotion = usePrefersReducedMotion()
-  // Only the day's first visit plays the entrance; reduced motion never does.
-  const animate = firstToday && !reducedMotion
+  // The day's first visit plays the full entrance, later ones a lighter one; reduced motion neither.
+  const mode = entranceMode(firstToday, reducedMotion)
   const settings = useSettings(client)
   // Recomputed when the day clock passes midnight; the key changes with it.
   const starts = dayStarts(now)
@@ -101,13 +102,15 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const data = overview.data
   // The AI sentence starts once the overview is in, for the same period the page shows.
   const summary = useNowSummary({ client, ready: data !== undefined, since, dayStarts: starts })
-  const fresh = useFreshCodes(data?.verificationCodes ?? [])
-  useCodeTargets(verification, fresh)
-  // Only codes the shared recognizer has confirmed, so every one shown can be copied.
-  const codes = fresh.flatMap((code) => {
+  const freshCodes = useFreshCodes(data?.verificationCodes ?? [])
+  const freshCandidates = useFreshCodes(data?.codeCandidates ?? [])
+  useCodeTargets(verification, [...freshCodes, ...freshCandidates])
+  // Only codes the shared recognizer has confirmed, so every one shown can be copied. A candidate
+  // (a likely verification mail the overview found no code in yet) counts once the recognizer says so.
+  const codes = [...freshCodes, ...freshCandidates].flatMap((code): ShownCode[] => {
     const ready = readyVerificationCode(verification.status(code.emailId))
-    return ready ? [{ ...code, ready }] : []
-  })
+    return ready ? [{ emailId: code.emailId, accountId: code.accountId, from: code.from, receivedAt: code.receivedAt, ready }] : []
+  }).sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt)).slice(0, OVERVIEW_CODES)
 
   // Needs attention: accounts that stopped, sends that failed or may not have gone, drafts.
   const attention: AttentionItem[] = accounts.flatMap((account): AttentionItem[] => {
@@ -163,15 +166,15 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
           <div aria-hidden className="min-h-10 flex-[2] sm:min-h-14" />
           {shown && (
             <div data-slot="now-content" className="mx-auto flex w-full max-w-190 shrink-0 flex-col gap-9">
-              <header {...motionProps(animate, 0, 'px-3')}>
+              <header {...motionProps(mode, 0, 'px-3')}>
                 <p className="text-sm text-muted-foreground">{date}</p>
-                <h1 className="mt-1 text-3xl font-semibold tracking-tight text-balance">{greeting}</h1>
-                <SummaryLine client={client} preset={data ? summaryLine(now, context) : null} summary={summary} />
+                <h1 className="mt-1 text-3xl font-semibold tracking-tight text-balance"><GreetingIcon segment={segment} mode={mode} />{greeting}</h1>
+                <SummaryLine client={client} preset={data ? summaryLine(now, context) : null} summary={summary} mode={mode} />
                 {nothingPending && context.kind !== 'clear' && <p className="mt-1 text-base text-muted-foreground">{t('now:allClear')}</p>}
               </header>
 
               {attention.length > 0 && (
-                <Section title={t('now:attention')} animate={animate} index={next()}>
+                <Section title={t('now:attention')} mode={mode} index={next()}>
                   <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
                     {attention.map((item) => (
                       <li key={item.id}>
@@ -189,7 +192,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               )}
 
               {codes.length > 0 && (
-                <Section title={t('now:codes')} animate={animate} index={next()}>
+                <Section title={t('now:codes')} mode={mode} index={next()}>
                   <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
                     {codes.map((code) => (
                       <CodeRow key={code.emailId} code={code} language={language} now={minute} verification={verification} onOpenEmail={onOpenEmail} />
@@ -199,11 +202,11 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               )}
 
               {showInbox && (
-                <Section title={t('now:inbox')} animate={animate} index={next()}>
+                <Section title={t('now:inbox')} mode={mode} index={next()}>
                   <div className="flex flex-wrap gap-2">
-                    {newMail > 0 && <StatButton value={newMail} label={t('now:statNew')} animate={animate} onClick={() => onSelectMailbox({ kind: 'unified', role: 'inbox' })} />}
-                    <StatButton value={unread} label={t('now:statUnread')} animate={animate} onClick={onOpenUnread} />
-                    {starredUnread > 0 && <StatButton value={starredUnread} label={t('now:starredUnread')} animate={animate} onClick={() => onSelectMailbox({ kind: 'starred' })} />}
+                    {newMail > 0 && <StatButton value={newMail} label={t('now:statNew')} mode={mode} onClick={() => onSelectMailbox({ kind: 'unified', role: 'inbox' })} />}
+                    <StatButton value={unread} label={t('now:statUnread')} mode={mode} onClick={onOpenUnread} />
+                    {starredUnread > 0 && <StatButton value={starredUnread} label={t('now:starredUnread')} mode={mode} onClick={() => onSelectMailbox({ kind: 'starred' })} />}
                   </div>
                   {unreadRows.length > 0 && (
                     <ul className="flex flex-col">
@@ -223,13 +226,13 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               )}
 
               {showActivity && (
-                <Section title={t('now:recent')} animate={animate} index={next()}>
-                  <Activity activity={activity} language={language} animate={animate} contactAccountId={accounts[0]?.id ?? ''} onOpenContact={onOpenContact} />
+                <Section title={t('now:recent')} mode={mode} index={next()}>
+                  <Activity activity={activity} language={language} mode={mode} contactAccountId={accounts[0]?.id ?? ''} onOpenContact={onOpenContact} />
                 </Section>
               )}
 
               {attachments.length > 0 && (
-                <Section title={t('now:attachments')} animate={animate} index={next()}>
+                <Section title={t('now:attachments')} mode={mode} index={next()}>
                   <ul className="flex flex-col">
                     {attachments.map(({ email, fileNames }) => (
                       <li key={email.id}>
@@ -251,7 +254,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               )}
 
               {sync && (
-                <p data-slot="now-sync" {...motionProps(animate, next(), 'flex items-center gap-1.5 px-3 text-xs text-muted-foreground')}>
+                <p data-slot="now-sync" {...motionProps(mode, next(), 'flex items-center gap-1.5 px-3 text-xs text-muted-foreground')}>
                   {sync.kind === 'synced' ? (
                     <>
                       {t('now:syncedAt', { time: relativeTime(sync.at, language, minute) })}
@@ -293,10 +296,10 @@ function useInboxRefresh(folders: Folder[], syncStates: Record<string, AccountSy
 }
 
 /** The last two weeks: the daily chart, then a few plain sentences. */
-function Activity({ activity, language, animate, contactAccountId, onOpenContact }: {
+function Activity({ activity, language, mode, contactAccountId, onOpenContact }: {
   activity: OverviewActivity
   language: string
-  animate: boolean
+  mode: EntranceMode
   /** Any account; avatars are looked up by address. */
   contactAccountId: string
   onOpenContact: NowPageProps['onOpenContact']
@@ -308,7 +311,7 @@ function Activity({ activity, language, animate, contactAccountId, onOpenContact
   const { today } = activity
   return (
     <div className="flex flex-col gap-4 px-3">
-      <ActivityChart days={activity.days} language={language} animate={animate} />
+      <ActivityChart days={activity.days} language={language} mode={mode} />
       <div data-slot="now-activity-lines" className="flex flex-col gap-1.5 text-sm text-muted-foreground">
         <p>{t(`now:receivedWeek.${received.kind}`, { count: activity.receivedLastWeek, diff: 'diff' in received ? received.diff : 0 })}</p>
         {showSent && <p>{t(`now:sentWeek.${sent.kind}`, { count: activity.sentLastWeek, diff: 'diff' in sent ? sent.diff : 0 })}</p>}
@@ -338,8 +341,14 @@ function Activity({ activity, language, animate, contactAccountId, onOpenContact
   )
 }
 
-/** Asks the shared controller to recognize the shown codes; nothing while the page is gone. */
-function useCodeTargets(verification: VerificationCodes, codes: OverviewCode[]) {
+/** Most codes listed, as the overview caps its own list. */
+const OVERVIEW_CODES = 3
+
+/** A code the shared recognizer confirmed, whether the overview found it or only suspected it. */
+type ShownCode = Pick<OverviewCode, 'emailId' | 'accountId' | 'from' | 'receivedAt'> & { ready: ReadyVerificationCode }
+
+/** Asks the shared controller to recognize the codes and candidates; nothing while the page is gone. */
+function useCodeTargets(verification: VerificationCodes, codes: (OverviewCode | CodeCandidate)[]) {
   const key = JSON.stringify(codes.map((code): VerificationTarget => ({ emailId: code.emailId, bodyState: code.bodyState })))
   const targets = useMemo(() => JSON.parse(key) as VerificationTarget[], [key])
   const request = verification.requestVisible
@@ -352,7 +361,7 @@ function useCodeTargets(verification: VerificationCodes, codes: OverviewCode[]) 
  * flow: the host writes the clipboard, the move-to-Trash setting applies and
  * the notices match the list and reader.
  */
-function CodeRow({ code, language, now, verification, onOpenEmail }: { code: OverviewCode & { ready: ReadyVerificationCode }; language: string; now: number; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
+function CodeRow({ code, language, now, verification, onOpenEmail }: { code: ShownCode; language: string; now: number; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
   const { ready } = code
   const shown = ready.code
   const busy = verification.busy(code.emailId)
@@ -389,15 +398,15 @@ function CodeRow({ code, language, now, verification, onOpenEmail }: { code: Ove
 const rowClass = 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring'
 const linkClass = 'rounded-md px-3 py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
 
-function motionProps(animate: boolean, index: number, className?: string) {
-  const motion = entrance(animate, index)
+function motionProps(mode: EntranceMode, index: number, className?: string) {
+  const motion = entrance(mode, index)
   return { className: cn(className, motion.className), style: motion.style }
 }
 
-function Section({ title, animate, index, children }: { title: string; animate: boolean; index: number; children: ReactNode }) {
+function Section({ title, mode, index, children }: { title: string; mode: EntranceMode; index: number; children: ReactNode }) {
   const id = useId()
   return (
-    <section aria-labelledby={id} {...motionProps(animate, index, 'flex flex-col gap-2')}>
+    <section aria-labelledby={id} {...motionProps(mode, index, 'flex flex-col gap-2')}>
       <h2 id={id} className="px-3 text-xs font-medium text-muted-foreground">{title}</h2>
       {children}
     </section>
@@ -405,8 +414,8 @@ function Section({ title, animate, index, children }: { title: string; animate: 
 }
 
 /** A small count that leads somewhere; screen readers get the label and the number once. */
-function StatButton({ value, label, animate, onClick }: { value: number; label: string; animate: boolean; onClick: () => void }) {
-  const shown = useCountUp(value, animate)
+function StatButton({ value, label, mode, onClick }: { value: number; label: string; mode: EntranceMode; onClick: () => void }) {
+  const shown = useCountUp(value, mode === 'first')
   return (
     <button
       type="button"

@@ -118,7 +118,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     aiProviderIcon: vi.fn<MailxClient['aiProviderIcon']>().mockResolvedValue(null),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
     listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
-    getMailOverview: vi.fn<MailxClient['getMailOverview']>().mockResolvedValue({ newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date(0).toISOString() }),
+    getMailOverview: vi.fn<MailxClient['getMailOverview']>().mockResolvedValue({ newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date(0).toISOString() }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
     getConversation: vi.fn<MailxClient['getConversation']>().mockRejectedValue(new Error('not found')),
     fetchBody: vi.fn<MailxClient['fetchBody']>().mockRejectedValue(new Error('unavailable')),

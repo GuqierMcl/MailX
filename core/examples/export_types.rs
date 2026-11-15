@@ -78,6 +78,7 @@ fn main() {
         MailOverviewQuery,
         AccountMailCount,
         NewMailOverview,
+        CodeCandidate,
         OverviewCode,
         RecentAttachment,
         DayActivity,

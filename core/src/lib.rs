@@ -40,7 +40,7 @@ pub use app::{
     AccountConnectionVerification, AccountMailCount, Activity, AiConnectionState, AiService,
     AiState, ArchiveOutcome, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind,
     BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks,
-    CancelConnectionVerification, CancelDraftVerification, ConfirmOAuthMailbox,
+    CancelConnectionVerification, CancelDraftVerification, CodeCandidate, ConfirmOAuthMailbox,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
     CreateOAuthAccount, DayActivity, DraftBodyBinding, DraftConnectionVerification,
     EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,

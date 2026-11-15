@@ -338,6 +338,17 @@ fn summary_request() -> StartRun {
         kind: RunKind::NowSummary {
             since: Some("2000-01-01T00:00:00.000Z".into()),
             day_starts: None,
+            fresh: false,
+        },
+    }
+}
+
+fn fresh_summary_request() -> StartRun {
+    StartRun {
+        kind: RunKind::NowSummary {
+            since: Some("2000-01-01T00:00:00.000Z".into()),
+            day_starts: None,
+            fresh: true,
         },
     }
 }
@@ -1791,6 +1802,28 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
 }
 
 #[tokio::test]
+async fn a_fresh_now_summary_skips_the_cache_and_replaces_it() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("First."), say("Second.")]);
+    let first = fx.assistant.start(summary_request()).await.unwrap();
+    assert_eq!(fx.finished(&first.run_id).await.text, "First.");
+    // The same facts: a normal start is answered from the cache.
+    let cached = fx.assistant.start(summary_request()).await.unwrap();
+    assert_eq!(cached.text, "First.");
+    assert_eq!(fx.requests(), 1);
+    // A fresh start calls the model again.
+    let fresh = fx.assistant.start(fresh_summary_request()).await.unwrap();
+    assert_eq!(fresh.state, RunState::Running);
+    assert_eq!(fx.finished(&fresh.run_id).await.text, "Second.");
+    assert_eq!(fx.requests(), 2);
+    // The new answer replaced the old one in the cache.
+    let after = fx.assistant.start(summary_request()).await.unwrap();
+    assert_eq!(after.state, RunState::Completed);
+    assert_eq!(after.text, "Second.");
+    assert_eq!(fx.requests(), 2);
+}
+
+#[tokio::test]
 async fn a_now_summary_leaves_out_what_an_excluded_account_would_reveal() {
     let fx = Fx::new().await;
     fx.configure(|a| a.excluded_accounts = vec![fx.account.clone()]);
@@ -1837,6 +1870,7 @@ async fn a_summary_with_a_bad_query_is_a_validation_error() {
             kind: RunKind::NowSummary {
                 since: Some("yesterday".into()),
                 day_starts: None,
+                fresh: false,
             },
         })
         .await

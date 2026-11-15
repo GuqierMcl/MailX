@@ -69,6 +69,14 @@
   --motion-view: 280ms;
   --motion-glow-out: 300ms;
   --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decel: cubic-bezier(0.16, 1, 0.3, 1);
+  /* The Now page's time-of-day icon before the greeting (now-page.md 4.1): low saturation, at least 3:1 on the island. */
+  --now-icon-early-morning: oklch(0.64 0.12 45);
+  --now-icon-morning: oklch(0.65 0.12 72);
+  --now-icon-noon: oklch(0.66 0.12 90);
+  --now-icon-afternoon: oklch(0.64 0.12 62);
+  --now-icon-evening: oklch(0.62 0.12 20);
+  --now-icon-night: oklch(0.55 0.1 275);
 }
 
 body { margin: 0; min-width: 320px; }
@@ -167,6 +175,12 @@ html[data-translucent].dark .app-canvas {
   --ai-1: oklch(0.8 0.13 210);
   --ai-2: oklch(0.7 0.18 275);
   --ai-3: oklch(0.74 0.2 340);
+  --now-icon-early-morning: oklch(0.78 0.1 50);
+  --now-icon-morning: oklch(0.8 0.1 80);
+  --now-icon-noon: oklch(0.85 0.11 95);
+  --now-icon-afternoon: oklch(0.8 0.1 70);
+  --now-icon-evening: oklch(0.78 0.1 25);
+  --now-icon-night: oklch(0.78 0.09 275);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -294,6 +308,37 @@ html[data-translucent].dark .app-canvas {
   @keyframes now-bar-grow {
     from {
       transform: scaleY(0);}}}
+
+/* A returning visit to the Now page: lighter than the first one (a 2px rise, 150ms) and the chart grows faster. */
+@theme {
+  --animate-now-rise: now-rise var(--motion-fast) var(--ease-decel) both;
+  @keyframes now-rise {
+    from {
+      opacity: 0;
+      transform: translateY(2px);}}
+  --animate-now-bar-grow-quick: now-bar-grow 250ms var(--ease-decel) both;
+  /* The time-of-day icon turns in slightly as it fades in. */
+  --animate-now-icon-in: now-icon-in 320ms var(--ease-decel) both;
+  @keyframes now-icon-in {
+    from {
+      opacity: 0;
+      transform: rotate(-12deg);}}
+  /* One sweep of the AI gradient over a finished sentence; only the background moves. */
+  --animate-ai-sheen: ai-sheen 800ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  @keyframes ai-sheen {
+    from {
+      background-position: 100% 0;}
+    to {
+      background-position: 0 0;}}
+  /* An AI sentence replaced by a new one: the old fades out over the new one fading in. */
+  --animate-now-text-in: now-text-in var(--motion-medium) var(--ease-out-soft) both;
+  @keyframes now-text-in {
+    from {
+      opacity: 0;}}
+  --animate-now-text-out: now-text-out var(--motion-medium) var(--ease-out-soft) both;
+  @keyframes now-text-out {
+    to {
+      opacity: 0;}}}
 
 /* The AI working line: a short bright segment glides across a faint track. Only transform moves. */
 @theme {

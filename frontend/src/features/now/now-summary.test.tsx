@@ -10,7 +10,7 @@ import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
 
 const account = exampleAccount({ displayName: '工作邮箱', senderName: '林夕' })
-const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], recentAttachments: [], generatedAt: new Date().toISOString() }
+const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 const noMail: EmailPage = { items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
 const CONNECTION = { id: 'c1', providerId: 'openai', name: 'OpenAI', protocol: 'openaiCompatible' as const, baseUrl: 'https://api.openai.com/v1', useProxy: false, hasKey: true }
 const ready: AiState = {
@@ -91,7 +91,7 @@ describe('Now page: AI summary line', () => {
     await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    expect(client.assistantStart).toHaveBeenCalledWith({ kind: { type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()) } })
+    expect(client.assistantStart).toHaveBeenCalledWith({ kind: { type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()), fresh: false } })
     // The overview came first.
     expect(client.getMailOverview.mock.invocationCallOrder[0]).toBeLessThan(client.assistantStart.mock.invocationCallOrder[0])
   })
@@ -141,16 +141,71 @@ describe('Now page: AI summary line', () => {
     expect(client.assistantStart).toHaveBeenCalledTimes(1)
   })
 
-  it('refreshes with a new run from the button next to the finished sentence', async () => {
+  it('refreshes with a fresh run, keeping the old sentence until the new one is done', async () => {
     const { client, emit } = setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 }), snapshot({ runId: 'r2' })] })
     await settled()
-    await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    const button = await screen.findByRole('button', { name: '重新生成' })
+    // Always there, quiet, with no hover needed.
+    expect(button.className).toMatch(/text-muted-foreground\/60/)
+    expect(button.className).not.toMatch(/opacity-0/)
+    await userEvent.click(button)
     await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
-    // Back to the preset while the new run works.
-    await waitFor(() => expect(aiLayer()).toHaveAttribute('data-shown', 'false'))
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ type: 'nowSummary', fresh: true }) })
+    // The old sentence stays, with the working line under it, and the button waits.
     await waitFor(() => expect(workingLine()).toBeInTheDocument())
-    await emit(event(2, { type: 'text', delta: '换了一句。' }, 'r2'), event(3, { type: 'state', state: 'completed' }, 'r2'))
+    expect(aiLayer()).toHaveAttribute('data-shown', 'true')
+    expect(sentence(SENTENCE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新生成' })).toBeDisabled()
+    expect(document.querySelector('[class*="animate-spin"]')).toBeInTheDocument()
+    // Streaming text does not replace it yet.
+    await emit(event(2, { type: 'text', delta: '换了' }, 'r2'))
+    expect(sentence(SENTENCE)).toBeInTheDocument()
+    expect(within(aiLayer() as HTMLElement).queryByText('换了')).not.toBeInTheDocument()
+    await emit(event(3, { type: 'text', delta: '一句。' }, 'r2'), event(4, { type: 'state', state: 'completed' }, 'r2'))
     expect(sentence('换了一句。')).toBeInTheDocument()
+    expect(within(aiLayer() as HTMLElement).queryByText(SENTENCE)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: '重新生成' })).toBeEnabled())
+    expect(document.querySelector('[class*="animate-spin"]')).not.toBeInTheDocument()
+  })
+
+  it('keeps the old sentence when a refresh fails', async () => {
+    const { emit } = setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 }), snapshot({ runId: 'r2' })] })
+    await settled()
+    await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    await waitFor(() => expect(workingLine()).toBeInTheDocument())
+    await emit(event(2, { type: 'text', delta: '半句' }, 'r2'), event(3, { type: 'failed', code: 'aiTimeout' }, 'r2'), event(4, { type: 'state', state: 'failed' }, 'r2'))
+    await waitFor(() => expect(workingLine()).not.toBeInTheDocument())
+    expect(aiLayer()).toHaveAttribute('data-shown', 'true')
+    expect(sentence(SENTENCE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新生成' })).toBeEnabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('plays one sheen over a finished sentence shown on entry, not over one that streamed in', async () => {
+    setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 })] })
+    await settled()
+    await waitFor(() => expect(document.querySelector('[data-slot="now-summary-sheen"]')).toBeInTheDocument())
+    expect(document.querySelector('[data-slot="now-summary-sheen"]')).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('has no sheen after streaming, or with reduced motion', async () => {
+    const streamed = setup()
+    await settled()
+    await waitFor(() => expect(workingLine()).toBeInTheDocument())
+    await streamed.emit(event(2, { type: 'text', delta: SENTENCE }), event(3, { type: 'state', state: 'completed' }))
+    expect(sentence(SENTENCE)).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="now-summary-sheen"]')).not.toBeInTheDocument()
+  })
+
+  it('has no sheen with reduced motion', async () => {
+    const restore = reduceMotion(true)
+    try {
+      setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 })] })
+      await settled()
+      await waitFor(() => expect(aiLayer()).toHaveAttribute('data-shown', 'true'))
+      expect(document.querySelector('[data-slot="now-summary-sheen"]')).not.toBeInTheDocument()
+      expect(document.querySelector('.animate-now-rise')).not.toBeInTheDocument()
+    } finally { restore() }
   })
 
   describe('without consent', () => {

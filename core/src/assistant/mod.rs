@@ -144,7 +144,8 @@ impl Assistant {
     /// runs are active, or the conversation already has one), `NotFound` (an
     /// unknown conversation) and `Validation` (the request itself). A missing
     /// consent is not an error: the snapshot is `awaitingConsent`. A Now
-    /// summary found in the cache is returned as `completed` at once.
+    /// summary found in the cache is returned as `completed` at once, unless
+    /// the request is `fresh`.
     pub async fn start(&self, request: StartRun) -> Result<RunSnapshot, AppError> {
         let inner = &self.inner;
         let message = match &request.kind {
@@ -177,9 +178,11 @@ impl Assistant {
             }
         };
         match request.kind {
-            RunKind::NowSummary { since, day_starts } => {
-                self.start_summary(*ready, since, day_starts).await
-            }
+            RunKind::NowSummary {
+                since,
+                day_starts,
+                fresh,
+            } => self.start_summary(*ready, since, day_starts, fresh).await,
             RunKind::Chat {
                 conversation_id, ..
             } => {
@@ -215,6 +218,7 @@ impl Assistant {
         ready: Ready,
         since: Option<String>,
         day_starts: Option<Vec<String>>,
+        fresh: bool,
     ) -> Result<RunSnapshot, AppError> {
         let inner = &self.inner;
         let has_since = since.is_some();
@@ -225,7 +229,8 @@ impl Assistant {
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
         let input = summary::build_input(&overview, &ready.settings.excluded_accounts, has_since);
         let key = SummaryCache::key(&input, &ready.target.model_id, ready.locale);
-        if let Some((text, completed_at)) = inner.summaries.get(&key) {
+        // A refresh asks the model again; its answer replaces the cached one.
+        if !fresh && let Some((text, completed_at)) = inner.summaries.get(&key) {
             return Ok(inner
                 .runs
                 .create_completed(RunKindTag::NowSummary, text, completed_at));
