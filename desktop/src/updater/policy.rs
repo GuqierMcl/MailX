@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
-const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5);
+const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// The release manifest is a few kilobytes: a slow answer means a broken
 /// network, not a slow link.
 pub(crate) const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -370,9 +370,9 @@ mod tests {
     }
 
     #[test]
-    fn the_scheduler_waits_thirty_seconds_then_six_hours() {
-        assert_eq!(next_wait(true), Duration::from_secs(30));
-        assert_eq!(next_wait(false), Duration::from_secs(6 * 3600));
+    fn the_scheduler_waits_five_seconds_then_one_hour() {
+        assert_eq!(next_wait(true), Duration::from_secs(5));
+        assert_eq!(next_wait(false), Duration::from_secs(3600));
     }
 
     #[test]
