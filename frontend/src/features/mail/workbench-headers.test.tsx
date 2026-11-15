@@ -348,7 +348,8 @@ describe('synced inbox headers', () => {
     expect(rows()).toHaveLength(103)
     expect(rows()[102]).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('邮件')
-  })
+    // Two of the waits above allow 3 s each on a slow runner; the whole test needs more than the 5 s default.
+  }, 15_000)
 
   it('shows committed folder results before the account finishes and refreshes all loaded pages', async () => {
     let items = Array.from({ length: 103 }, (_, index) => email(String(index)))
