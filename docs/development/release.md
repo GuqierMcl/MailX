@@ -79,7 +79,7 @@
 8. **验证草稿**：在仓库 `Releases` 页找到带 `Draft` 标记的条目，下载各平台安装包，走安装、登录、同步、阅读、发信与本次变更的冒烟；核对文件名中的版本号、`SHA256SUMS.txt`、更新包 / 签名和 `latest.json`。未验证的平台或场景须在发布说明中明确；检查范围见上面的发布前检查。
 9. **（可选）修改说明**：草稿的 `Edit`（铅笔）页可改正文，但只改 GitHub 上那份，不会回写 `CHANGELOG.md`。有价值的改动请同步进日志；想让正文重新生成，见第 7 节。
 10. **发布**：草稿的 `Edit` 页底部点 **Publish release**（命令行：`gh release edit vX.Y.Z --draft=false`）。**发布前决定要不要勾 Pre-release**：不勾就是推送给所有用户，见第 4 节。工作流不会替你勾。
-11. **观察更新**：已装带更新器版本的用户在启动约 30 秒后和每 6 小时检查。当前默认开启自动更新，发现版本后先后台下载，完成才提醒重启；关闭自动更新的用户只收到版本提示。用旧版分别验证自动与手动下载、说明与进度、立即重启、正常退出安装和数据保留，记录对应客户端版本与平台。
+11. **观察更新**：已装带更新器版本的用户在启动约 5 秒后检查，之后每 1 小时检查，间隔从上次自动检查完成后计算。当前默认开启自动更新，发现版本后先后台下载，完成才提醒重启；关闭自动更新的用户只收到版本提示。用旧版分别验证自动与手动下载、说明与进度、立即重启、正常退出安装和数据保留，记录对应客户端版本与平台。
 
 发版后**不需要**再把版本改成下一个开发版本；`main` 保持在最近发布的版本号，下次发版再改。
 
@@ -97,7 +97,7 @@ Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEM
 
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
 - **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先，且该提交在 `main` 上的 `CI result` 必须已经通过（发版 PR 只跑轻量检查，全量检查以合并后的这次为准）。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
-- **build**：macOS arm64（`macos-26`）、macOS x64（`macos-26-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。macOS 包必须用 SDK 26 或更新版本构建：macOS 26 起，用旧 SDK 构建的应用会进入兼容模式，红绿灯的大小和位置与标题栏布局不符。构建后会用 `otool` 检查 `.app` 内每个可执行文件的 SDK 版本，低于 26 就失败；本地开发构建使用本机的 Xcode 或命令行工具，版本可能与 CI 不同。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
+- **build**：macOS arm64（`macos-26`）、macOS x64（`macos-26-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。macOS 包必须用 SDK 26 或更新版本构建：macOS 26 起，用旧 SDK 构建的应用会进入兼容模式，红绿灯的大小和位置与标题栏布局不符。构建后由 `scripts/check-macos-sdk.sh` 用 `otool` 检查 `.app` 内每个可执行文件的 SDK 版本，同时识别 Intel 低部署目标使用的 `LC_VERSION_MIN_MACOSX` 与较新目标的 `LC_BUILD_VERSION`；未知或低于 26 均失败；本地开发构建使用本机的 Xcode 或命令行工具，版本可能与 CI 不同。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
 - **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
 改动工作流或 runner 标签（如 `macos-26-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。

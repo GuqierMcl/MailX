@@ -37,6 +37,23 @@ async fn complete_message_is_binary_safe_and_uses_peek() {
 }
 
 #[tokio::test]
+async fn notification_payload_limit_rejects_declaration_even_when_standard_body_limit_allows_it() {
+    let limit = crate::mail::verification_code::MAX_EML_BYTES;
+    let reply = format!("* 7 FETCH (UID 42 BODY[] {{{}}}\r\n", limit + 1);
+    assert!(matches!(
+        scripted_fetch(
+            reply.into_bytes(),
+            Limits {
+                payload: limit,
+                ..Limits::default()
+            }
+        )
+        .await,
+        Err(ImapError::TooLarge)
+    ));
+}
+
+#[tokio::test]
 async fn body_before_uid_is_supported_and_zero_length_is_not_missing() {
     let fetched = scripted_fetch(
         b"* 7 FETCH (BODY[] {0}\r\n UID 42)\r\nB1 OK\r\n".to_vec(),

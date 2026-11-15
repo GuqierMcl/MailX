@@ -64,6 +64,17 @@ pub enum PreviewLines {
     Three,
 }
 
+/// How a message row names the mailbox it belongs to in views spanning accounts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxLabel {
+    /// The account's display name after the sender.
+    #[default]
+    Name,
+    /// A small account badge on the sender avatar.
+    Icon,
+}
+
 /// How message bodies follow the app's color mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +100,7 @@ pub struct AppearanceSettings {
     pub mail_theme: MailTheme,
     pub font_size: FontSize,
     pub preview_lines: PreviewLines,
+    pub mailbox_label: MailboxLabel,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -687,6 +699,15 @@ pub enum CloseBehavior {
     Quit,
 }
 
+/// The view the main window opens with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum StartupView {
+    Inbox,
+    #[default]
+    Now,
+}
+
 /// Language preference is validated on input; a string lets field validation
 /// report `general.language` rather than a generic deserialization error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -706,6 +727,22 @@ pub struct GeneralSettings {
     /// Hide the main window only on a registered desktop login launch. The
     /// desktop host still requires an available Dock/tray recovery entry.
     pub silent_start: bool,
+    /// Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
+    /// Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
+    pub single_key_shortcuts: bool,
+    /// The view shown when the main window starts: the Now page (the default,
+    /// also for files written before the setting existed) or the unified inbox
+    /// (now-page.md section 2).
+    pub startup_view: StartupView,
+}
+
+/// Optional mail-workflow enhancements, independent of notification delivery.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MailSettings {
+    /// After a dedicated verification-code copy succeeds, move that email to
+    /// the account's Trash. Never authorizes a permanent deletion.
+    pub trash_verification_mail_after_copy: bool,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -725,6 +762,8 @@ impl Default for GeneralSettings {
             close_behavior: CloseBehavior::Ask,
             show_menu_bar_icon: true,
             silent_start: false,
+            single_key_shortcuts: true,
+            startup_view: StartupView::Now,
         }
     }
 }
@@ -740,6 +779,8 @@ fn valid_language(value: &str) -> bool {
 pub struct SettingsPatch {
     #[ts(optional)]
     pub general: Option<GeneralSettings>,
+    #[ts(optional)]
+    pub mail: Option<MailSettings>,
     #[ts(optional)]
     pub appearance: Option<AppearanceSettings>,
     #[ts(optional)]
@@ -758,6 +799,7 @@ pub struct SettingsPatch {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub general: GeneralSettings,
+    pub mail: MailSettings,
     pub appearance: AppearanceSettings,
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
@@ -845,6 +887,7 @@ impl AppSettings {
         };
         Ok(Self {
             general: self.general,
+            mail: self.mail,
             security: self.security,
             layout,
             notifications,
@@ -881,6 +924,7 @@ impl AppSettings {
             },
         };
         Self {
+            mail: self.mail,
             general: if valid_language(&self.general.language) {
                 self.general
             } else {
@@ -1116,6 +1160,7 @@ impl SettingsStore {
             general: patch
                 .general
                 .unwrap_or_else(|| state.settings.general.clone()),
+            mail: patch.mail.unwrap_or_else(|| state.settings.mail.clone()),
             appearance: patch
                 .appearance
                 .unwrap_or_else(|| state.settings.appearance.clone()),
@@ -1247,6 +1292,18 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
         .get_mut("settings")
         .and_then(serde_json::Value::as_object_mut)
     {
+        if let Some(mail) = settings.get_mut("mail") {
+            if let Some(mail) = mail.as_object_mut() {
+                if mail
+                    .get("trashVerificationMailAfterCopy")
+                    .is_some_and(|value| !value.is_boolean())
+                {
+                    mail.remove("trashVerificationMailAfterCopy");
+                }
+            } else {
+                settings.remove("mail");
+            }
+        }
         if let Some(translation) = settings.get_mut("translation") {
             if translation.is_object() {
                 repair_translation(translation);
@@ -1288,7 +1345,12 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                     {
                         general.insert("autoUpdate".into(), value);
                     }
-                    for key in ["autoUpdate", "showMenuBarIcon", "silentStart"] {
+                    for key in [
+                        "autoUpdate",
+                        "showMenuBarIcon",
+                        "silentStart",
+                        "singleKeyShortcuts",
+                    ] {
                         if general.get(key).is_some_and(|value| !value.is_boolean()) {
                             general.remove(key);
                         }
@@ -1297,6 +1359,11 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                         serde_json::from_value::<CloseBehavior>(value.clone()).is_err()
                     }) {
                         general.remove("closeBehavior");
+                    }
+                    if general.get("startupView").is_some_and(|value| {
+                        serde_json::from_value::<StartupView>(value.clone()).is_err()
+                    }) {
+                        general.remove("startupView");
                     }
                 }
             }

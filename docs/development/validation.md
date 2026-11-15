@@ -1232,11 +1232,68 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - Windows、Linux 没有手测；经代理的真实路径、系统凭据库中密钥的读写没有单独验证。
 - 没有用真实密钥测过 `aiKeyRejected` 等错误码在真实服务上的对应关系。
 
-自动测试通过不代表上述项目已验收。<a id="exchange-ews-validation"></a>
+自动测试通过不代表上述项目已验收。
 
-## 43. Exchange 邮箱探测与 EWS + NTLMv2 传输层（2026-11-12）
+<a id="verification-code-validation"></a>
 
-### 43.1 被探测的服务器
+## 43. 验证码识别第一阶段（2026-11-13，仅本地合成样本）
+
+实现与边界见[验证码识别](../architecture/verification-codes.md)。环境为 macOS，使用仓库固定的 Rust 工具链；本阶段没有调用真实邮箱、模型或通知服务。
+
+- `cargo test -p mailx-core --locked` 通过，既有显式忽略项保持忽略。审查补充边界修正后，重新运行 `cargo test -p mailx-core --lib mail::verification_code --locked`（7 项表驱动测试）与 `cargo test -p mailx-core --test verification_code_mime --locked`（11 项）均通过。
+- `cargo clippy -p mailx-core --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`bun run version:check` 与 `git diff --check` 通过。
+- 规则样本覆盖中英文、前导零、混合码大小写、主题 / 正文冲突、重复码、同一关键词的多个候选、引用旧码、普通订单 / 金额 / 电话 / URL、超长或分组数字、不可见字符 / ASCII 控制字符片段、输入和候选数量上限，以及长 token 的扫描行为。Debug 不显示码值，显式探测 JSON 包含码值。
+- MIME 样本覆盖编码主题、Base64、quoted-printable 与字符集解码、HTML 实体和行内文本、纯文本 alternative 优先与空白回退、附件 / 嵌套邮件排除、引用与明显隐藏内容排除、过滤后数字不拼接、无效 MIME 与超限输入拒绝。
+- 执行 `bun run otp:probe --eml tests/fixtures/verification-code/sample.eml`，得到 `found` / `482913`，引用中的旧码未进入候选。另对主题 / stdin 路径模拟了唯一候选、多个候选、普通邮件与 Unicode 片段，分别得到预期状态；无效 MIME、超限 stdin、互斥参数与不存在文件均失败并返回固定错误，不带原文或文件路径。
+
+**未验证：** 脱敏真实模板的识别覆盖率和误识别率；任意 CSS 隐藏与未覆盖的引用格式；Windows / Linux 本地运行。本阶段尚未接入同步获取、系统通知或剪贴板，不能由这些测试推定通知展示、通知中心点击或后台复制已经可用。
+
+
+<a id="verification-code-notification-validation"></a>
+
+## 44. 验证码通知（2026-11-13，自动验证与有限 macOS 开发模式反馈）
+
+实现与边界见[验证码识别](../architecture/verification-codes.md#6-桌面通知接入)。以下自动验证环境为 macOS，使用合成邮件、本机模拟 IMAP 和临时数据目录；自动测试没有访问真实邮箱、写入真实剪贴板或发送原生测试通知。维护者的手测反馈另列。
+
+**自动覆盖：**
+
+- core 应用服务：近期未读 INBOX 与候选主题过滤、缓存读取不触网、不改变已读和正文缓存、有界 `BODY.PEEK[]`、UIDVALIDITY 不匹配、连接版本变化后的迟到结果拒绝、取消关闭网络 future、独立并发闸门与请求超时。底层 IMAP 接收测试验证 1 MiB literal 限额在读取 / 分配前生效。
+- 新邮件事件保留全部候选，并验证顺序和首次同步 / 重建排除；普通摘要仍只描述前 3 封发件人，隐藏预览仍清空详情。
+- 桌面通知规划：第 4 封以后也能成为独立验证码通知、普通摘要剔除验证码邮件、同批只响一次、当前语言、识别失败回退、隐藏预览 / 静音 / 前台规则。动作表测试覆盖随机 token、容量、过期、消费、设置撤销与旧设置查询不能恢复已撤销内容。
+- macOS 适配器单元测试区分复制与正文打开，忽略普通通知和关闭事件。
+- Windows 适配器含协议 / UUID 参数验证、命令路径引用、XML 转义及原生过期时间测试。已在 macOS 上通过 Windows GNU 目标的隔离类型检查与 Clippy（真实 WinRT / winreg 绑定、最小 Tauri 表面替身）；这不是 Windows 运行或完整安装包编译证据。
+- 前端通知设置测试验证预览开关的新名称和既有保存行为；中英文资源、TypeScript 检查与前端 lint/build 已通过。生成 DTO 仅同步 `NewMail.messages` 的语义说明。
+
+**本机执行结果：** 22 项桌面通知专项测试、7 项通知设置测试通过；工作区 Clippy、格式、资源、版本检查和前端类型 / lint / build 通过。`cargo test --workspace --locked --quiet` 全部通过，既有显式忽略项保持忽略。
+
+**维护者反馈（2026-11-13）：** 在 macOS 使用 `bun run desktop:dev:isolated` 测试验证码通知，报告按钮复制成功。通知正文中的码没有局部加粗或颜色高亮，符合当前原生正文样式；这不是开发模式额外关闭高亮。报告未记录 macOS 版本、邮箱服务商、是否从通知中心点击、窗口是否隐藏，不能推定安装包、后台复制或其余平台已通过。
+
+**仍需实测：** Windows 安装包中横幅与通知中心的复制 / 正文打开、按用户协议注册及路径含空格和升级后的分发、关闭窗口驻留后台时不抢焦点、冷启动旧 token 不复制；macOS 安装包的按钮位置、通知中心留存和后台复制；Linux 通知文字和声音；三平台专注模式、系统隐藏预览、锁屏呈现及剪贴板不可用。尚未用脱敏真实服务商模板测量识别覆盖率与误识别率。
+
+
+<a id="verification-code-workbench-validation"></a>
+
+## 45. 验证码工作台与复制后清理（2026-11-14，自动测试与浏览器合成预览）
+
+范围见[共享识别状态](../architecture/verification-codes.md#7-共享识别状态与界面)和[复制后清理](../architecture/verification-codes.md#8-复制后移到已删除与撤销)。识别结果由通知、列表和阅读区共享；清理开关在“邮件 → 增强”，默认关闭。
+
+**已有回归覆盖：**
+
+- core 共享服务：已读 / 历史 / 归档邮件可查询，通知仍使用自身的新到达时效；内存结果复用、同封并发读取去重、慢网络不阻塞已有结果、正文哈希或账号身份变化使凭据失效；剪贴板回调失败不安排删除，无 Trash 或已在 Trash 只复制，清理失败保留复制成功结果，已隐藏邮件不重复排队。服务锁等待期间改变清理偏好时，在实际复制处读取当前偏好。
+- 桌面宿主：主窗口 status/copy/undo 命令权限，输入不能携带码值、清理开关或永久删除授权；共享剪贴板入口、通知 token 与识别凭据绑定、撤销通知失败后的取消清理，以及取消失败时保持真实清理状态并提示。Windows 协议 / macOS 原生回调区分 Copy、Open 和 Undo；Windows 撤销通知使用剩余期限及独立通知组。
+- 前端：实际可见行请求及并发限制、离开视口的排队请求取消、列表复制不打开 / 标已读、聚合 / 多选 / 本机副本排除、悬停期间固定按钮目标、卡片固定“复制验证码”名称、阅读区提示条与当前邮件绑定、复制后清理和撤销、复制与清理的部分失败反馈、通知结果的查询失效。
+- 设置：默认关闭、旧文件缺少节时补默认值、非法值处理、保存失败与重开持久化；页面属于“邮件”分组的“增强”，独立于通知开关。
+
+**可重复的自动检查：** `cargo test --workspace --locked --quiet`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`bun run types:check`、`bun run frontend:test`、`bun run typecheck`、`bun run lint`、`bun run i18n:check`、`bun run build`、`git diff --check`。本机工作区 Rust 测试与 Clippy 已通过；设置迁入独立 `mail` 节后，再次通过工作区 Clippy、66 项设置测试及桌面测试。最终界面调整后的前端全量测试为 107 个文件、1,298 项通过；页面最终命名为“增强”并整合主分支后，6 个相关文件的 93 项回归再次通过。类型、lint、资源、构建、版本、生成 DTO 与 diff 检查均通过。CI 与原生实机证据另行记录，不由本机测试推定跨平台交互已通过。
+
+**浏览器预览（macOS / Edge，合成客户端）：** 通过 `?seed=showcase` 的固定合成验证码邮件检查卡片与阅读区，观察到模拟复制成功反馈；复制未写入真实系统剪贴板。已查看固定名称“复制验证码”及短成功态“已复制”；提示条标签与等宽码值共用行高、基线对齐并留 8px 间距。已观察清理开关的关闭默认值；“增强”新页面的位置与交互尚未包含在这次预览证据内。
+
+**未验证：** 真实邮件服务商的复制后 Trash 写回 / 撤销、通知复制后原生撤销、Windows / Linux 运行、Linux 剪贴板所有权、三平台通知中心 / 后台 / 锁屏 / 专注模式交互。此前维护者确认的 macOS 开发模式通知复制不覆盖本阶段新增清理流程。合成预览不替代原生宿主或真实服务商验证，识别覆盖率和误识别率仍未测量。
+
+<a id="exchange-ews-validation"></a>
+## 44. Exchange 邮箱探测与 EWS + NTLMv2 传输层（2026-11-12）
+
+### 44.1 被探测的服务器
 
 对一个本地部署的 Exchange 邮箱做了被动能力探测，没有尝试任何认证。目的：判断该类账号在 MailX 里该走哪条路。**真实标识不入仓库**：下文主机名、IP、证书主体与账号均为示意占位（统一用 `example.com` / `mail.example.com` 等），真实组织名、人名、公网 IP、企业 CA 名与网关厂商名都不出现。
 
@@ -1257,7 +1314,7 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 
 结论：这台服务器上**收信可以走 IMAP，发信走不通**，而同类桌面客户端之所以能用，是因为它选了“Exchange 类型 + 使用 HTTP 连接 + NTLM”，即 EWS over 443，绕开了 IMAP/SMTP。EWS 的 `WWW-Authenticate` 只给 `Negotiate` 与 `NTLM`（只有 Autodiscover 给 `Basic realm="mail.example.com"`），所以基本认证不是选项。
 
-### 43.2 已实现
+### 44.2 已实现
 
 `core/src/ews/`（尚未接入账号模型，模块内 `allow(dead_code)`）：
 
@@ -1267,12 +1324,12 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - `soap.rs`：信封与服务端版本头、`FindFolder` 请求、按本地名匹配的有界扫描（前缀无关、支持自闭合元素、拒绝 `<!DOCTYPE>`/`<!ENTITY>`）、`ResponseClass="Error"` 映射为服务端错误（不回传其文本）。
 - `mod.rs`：`Endpoint`（默认 `/EWS/Exchange.asmx`:443）、`EwsClient::connect`（走账号路由 + TLS + NTLM）、`folders()`。
 
-### 43.3 执行的检查
+### 44.3 执行的检查
 
 - `cargo test -p mailx-core --lib`：1026 项通过（新增 42 项 EWS 测试），1 项忽略（真机）。覆盖：三条哈希的 RFC 向量、NTLMv2 向量、`Type 2` 越界与降级拒绝、`Type 3` 字段布局、**一条 TCP 连接上完成的四次请求**（假服务器只 accept 一次，客户端若重连即失败）、错误密码 → `Rejected`、无 NTLM → `NoNtlm`、多挑战合并头解析、SOAP 的 DTD/前缀/自闭合/错误类。
 - `cargo clippy -p mailx-core --all-targets -- -D warnings`、`cargo fmt --all` 通过。
 
-### 43.4 未验证
+### 44.4 未验证
 
 - **真实账号的 EWS 登录**：需要该邮箱的密码。入口已备好，用环境变量传入，不落库、不打印：
   `MAILX_EWS_HOST` / `MAILX_EWS_USER` / `MAILX_EWS_PASSWORD` 后运行 `cargo test -p mailx-core --lib a_real_exchange -- --ignored --nocapture`。
@@ -1318,3 +1375,4 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 ### 42.4 注意事项：Tauri v2 自定义命令的三处 ACL 同步
 
 Tauri v2 的自定义命令除了 `desktop/src/window_access.rs` 的来源白名单，还必须同时出现在 `desktop/build.rs` 的 `AppManifest::commands` 清单与 `desktop/capabilities/main.json` 的 permissions 里（权限 toml 由 tauri-build 自动生成、已被 gitignore）。漏掉后两者时前端 invoke 报 "Command … not allowed by ACL"。本次 `accounts_discover_mail_settings` 漏了后两处，表现为探测永远显示「无法连接服务器以探测设置」。新增桌面命令务必三处同步。
+

@@ -389,6 +389,148 @@ indexedBodies: number, syncedAfter: string | null, syncedBefore: string | null, 
 
 export type EmailPage = { items: Array<EmailSummary>, nextCursor: string | null, coverage: Coverage, };
 
+export type MailOverviewQuery = {
+/**
+ * RFC 3339; the last time the user looked at the Now page. `None` asks
+ * for no new-mail section: `newMail` is then empty. The caller decides
+ * what to send on first use (for example the start of today).
+ */
+since: string | null,
+/**
+ * RFC 3339; exactly fourteen strictly ascending instants, each the start
+ * of a local day, the last one the start of today and not in the future.
+ * Day `i` runs to the next start, the last day to now. Omitted or `null`
+ * asks for no activity section.
+ */
+dayStarts?: Array<string>, };
+
+export type AccountMailCount = { accountId: string, count: number, };
+
+export type NewMailOverview = { total: number,
+/**
+ * Only accounts with new mail, ordered by account id.
+ */
+accounts: Array<AccountMailCount>,
+/**
+ * The newest five, newest first.
+ */
+latest: Array<EmailSummary>, };
+
+export type OverviewCode = { emailId: string, accountId: string, folderId: string, from: MailAddress, code: string,
+/**
+ * RFC 3339.
+ */
+receivedAt: string,
+/**
+ * The stored body state, so hosts can key the shared verification-code
+ * status (which reads the full body) to the same message version.
+ */
+bodyState: BodyState, };
+
+export type RecentAttachment = { email: EmailSummary,
+/**
+ * Names of the non-inline attachments, known once the body has been
+ * downloaded; empty before that. Untrusted text from the sender.
+ */
+fileNames: Array<string>, };
+
+export type DayActivity = {
+/**
+ * RFC 3339 UTC; the requested day start, normalized.
+ */
+start: string, received: number, };
+
+export type OverviewContact = {
+/**
+ * Lowercased.
+ */
+address: string,
+/**
+ * The most recent non-empty display name among the counted messages.
+ * Untrusted text.
+ */
+name: string | null, count: number, };
+
+export type TodayActivity = {
+/**
+ * Inbox mail received since the last day start, as the inbox lists it:
+ * locally archived mail is left out.
+ */
+received: number,
+/**
+ * How many of those are unread.
+ */
+unread: number, };
+
+export type OverviewActivity = {
+/**
+ * One entry per requested day start, oldest first: inbox mail received
+ * that day, locally archived mail included. Junk, Trash and Sent never
+ * count. The last day ends at `generatedAt`.
+ */
+days: Array<DayActivity>,
+/**
+ * Sum of the last seven days.
+ */
+receivedLastWeek: number,
+/**
+ * Sum of the seven days before them.
+ */
+receivedPreviousWeek: number,
+/**
+ * Messages of the unified Sent view (sent-role folders and local Sent
+ * copies, a copy matched to its server copy counted once) in the last
+ * seven days.
+ */
+sentLastWeek: number,
+/**
+ * The same for the seven days before them.
+ */
+sentPreviousWeek: number,
+/**
+ * Whether the local cache can be trusted to hold both weeks, so the
+ * week-over-week comparison means something. True only when every
+ * account has an inbox and every current inbox and sent-role folder
+ * generation has finished at least one sync round not capped by the
+ * per-round limit (a later round in progress keeps it), is not capped
+ * now, and started its sync window at least one UTC day before the
+ * first day start (the margin covers servers that read the window's
+ * date in their own time zone).
+ */
+previousWeekComplete: boolean,
+/**
+ * At most three addresses with the most messages in the last seven days:
+ * inbox mail received from them (archived included) plus Sent view
+ * messages addressed to them. Only addresses the Sent view holds at least
+ * one message to qualify, and the accounts' own addresses never do.
+ * Most messages first, then the most recent.
+ */
+topContacts: Array<OverviewContact>, today: TodayActivity, };
+
+export type MailOverview = { newMail: NewMailOverview,
+/**
+ * Starred unread messages, in the Starred view's scope.
+ */
+starredUnread: number,
+/**
+ * Newest first, at most three, from the last fifteen minutes.
+ */
+verificationCodes: Array<OverviewCode>,
+/**
+ * Newest first, at most five inbox messages from the last seven days.
+ */
+recentAttachments: Array<RecentAttachment>,
+/**
+ * Received, sent and contact statistics of the last two weeks; present
+ * only when the query sent `dayStarts`.
+ */
+activity?: OverviewActivity,
+/**
+ * RFC 3339; the core's clock when the overview was computed. The code
+ * and attachment windows end here, and so does the last activity day.
+ */
+generatedAt: string, };
+
 export type ConversationPage = { messages: Array<EmailSummary>,
 /**
  * True when local headers might be incomplete (some older messages may be missing).
@@ -408,6 +550,14 @@ export type EmailDetail = { summary: EmailSummary, to: Array<MailAddress>, cc: A
  * `None` until `summary.body_state` is `ready`.
  */
 body: EmailBody | null, bodyFailure: BodyFailureCode | null, attachments: Array<AttachmentSummary>, };
+
+export type VerificationCodeState = "unchecked" | "ready" | "notFound" | "ambiguous" | "unavailable";
+
+export type VerificationCodeStatus = { emailId: string, state: VerificationCodeState, code: string | null, recognitionId: string | null, };
+
+export type VerificationCodeCleanup = "disabled" | "queued" | "unavailable" | "failed";
+
+export type VerificationCodeCopyOutcome = { emailId: string, accountId: string, cleanup: VerificationCodeCleanup, deletion: EmailDeletion | null, };
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 
@@ -463,7 +613,7 @@ interfaceFont: string,
 /**
  * `""` or comma-separated font families for message bodies, tried in order.
  */
-mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, };
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, mailboxLabel: MailboxLabel, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
@@ -508,6 +658,8 @@ export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, l
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 
+export type MailboxLabel = "name" | "icon";
+
 export type NotificationSound = "system" | "chime" | "ding" | "droplet" | "bubble" | "marimba" | "sparkle" | "knock" | "chord" | "none";
 
 export type NotificationSettings = { enabled: boolean,
@@ -548,6 +700,8 @@ export type SupportedLocale = "zh-CN" | "en";
 
 export type CloseBehavior = "ask" | "background" | "quit";
 
+export type StartupView = "inbox" | "now";
+
 export type GeneralSettings = { language: LanguagePreference,
 /**
  * Download new versions automatically and install on a normal application
@@ -567,11 +721,29 @@ showMenuBarIcon: boolean,
  * Hide the main window only on a registered desktop login launch. The
  * desktop host still requires an available Dock/tray recovery entry.
  */
-silentStart: boolean, };
+silentStart: boolean,
+/**
+ * Single-key mail shortcuts in the main window (`j`, `e`, `s`, ...).
+ * Modifier shortcuts such as Cmd/Ctrl+N stay on regardless.
+ */
+singleKeyShortcuts: boolean,
+/**
+ * The view shown when the main window starts: the Now page (the default,
+ * also for files written before the setting existed) or the unified inbox
+ * (now-page.md section 2).
+ */
+startupView: StartupView, };
 
-export type AppSettings = { general: GeneralSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+export type MailSettings = {
+/**
+ * After a dedicated verification-code copy succeeds, move that email to
+ * the account's Trash. Never authorizes a permanent deletion.
+ */
+trashVerificationMailAfterCopy: boolean, };
 
-export type SettingsPatch = { general?: GeneralSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, };
+
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
@@ -664,7 +836,8 @@ export type NewMail = { accountId: string, accountName: string,
  */
 count: number,
 /**
- * The newest few, newest first. Empty when previews are turned off.
+ * All arrivals in this sync round, newest first, so a host can identify
+ * verification mail before grouping. Empty when previews are turned off.
  */
 messages: Array<NewMailMessage>, };
 

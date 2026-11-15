@@ -1,6 +1,6 @@
 {
   "name": "mailx",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "MailX workspace entrypoint",
   "license": "Apache-2.0",
@@ -32,6 +32,7 @@
     "release:assets": "bun scripts/release-assets.mjs",
     "types:generate": "bun scripts/generate-types.mjs",
     "types:check": "bun scripts/generate-types.mjs --check",
+    "otp:probe": "cargo run -p mailx-core --locked --example verification_code_probe --",
     "i18n:check": "bun scripts/check-i18n.mjs",
     "icons:generate": "bun scripts/generate-icons.mjs",
     "icons:check": "bun scripts/generate-icons.mjs --check",

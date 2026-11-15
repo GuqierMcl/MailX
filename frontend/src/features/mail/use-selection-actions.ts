@@ -64,3 +64,25 @@ export function useSelectionActions({ client, selection, listQuery, folders, arc
     onDelete: () => run((settle) => deleteMany(selection.items, settle), leaveDone),
   }
 }
+
+/**
+ * What the selection header (and its keyboard shortcuts) can do right now with
+ * the picked messages. Mixed selections go the way that changes something: any
+ * unread → mark read. With nothing picked the flags rest on "mark as read" and
+ * "add star".
+ */
+export function selectionAvailability(selection: Pick<ListSelection, 'items' | 'count'>, actions: Pick<SelectionActions, 'busy' | 'canArchiveItem'>) {
+  const { items, count } = selection
+  const none = count === 0 || actions.busy
+  const changeable = items.filter((item) => !item.localOnly)
+  const archivable = items.filter(actions.canArchiveItem).length
+  return {
+    none,
+    changeable: changeable.length,
+    anyUnread: changeable.length === 0 || changeable.some((item) => !item.isRead),
+    anyUnstarred: changeable.length === 0 || changeable.some((item) => !item.isStarred),
+    archivable,
+    archiveBlocked: count > 0 && archivable === 0,
+    deletable: changeable.length,
+  }
+}

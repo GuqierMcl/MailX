@@ -6,7 +6,7 @@ import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowLeft01Icon, InboxIcon, Search01Icon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary, PreviewLines } from '@/generated/accounts'
+import type { Account, EmailSummary, MailboxLabel, PreviewLines } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,6 +22,7 @@ import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import type { ListSelection } from './use-list-selection'
 import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
+import type { VerificationCodes, VerificationTarget } from './use-verification-codes'
 
 export type ListFilter = 'all' | 'unread'
 
@@ -42,6 +43,8 @@ export type ContactHeading = {
 
 type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'> & {
   title: string
+  /** The account owning this folder or local archive, shown beside the title. */
+  accountName?: string
   /** Set in the contact view: back button and the contact's name replace the plain title. */
   contact?: ContactHeading
   /** Where the list starts scrolling, in px; used to come back to a remembered position. */
@@ -69,8 +72,10 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   selectedId: string | null
   /** Lines of body preview per row, from the appearance settings. */
   previewLines: PreviewLines
+  mailboxLabel?: MailboxLabel
   /** Asks for the previews of the listed rows; the complete wanted set every time. */
   onRequestPreviews?: (emailIds: string[]) => void
+  verification?: VerificationCodes
   /** Changes a message read or starred flag from the row action rail. */
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   /** Archives or restores a message when the current row can be changed locally. */
@@ -90,11 +95,16 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   selection?: ListSelection
   /** What the selection header does with the picked messages. */
   selectionActions?: SelectionActions
+  /** Scrolls this row into view; a new object each time it is asked (keyboard moves). */
+  reveal?: RevealRequest | null
 }
+
+/** A request to bring a row into view; `seq` repeats a request for the same row. */
+export type RevealRequest = { id: string; seq: number }
 
 export function EmailList(props: EmailListProps) {
   useTranslation()
-  const { title, contact, filter, onFilterChange, selection, selectionActions } = props
+  const { title, accountName, contact, filter, onFilterChange, selection, selectionActions } = props
   const selecting = Boolean(selection?.active && selectionActions)
   useSelectionKeys(selecting ? selection : undefined, selectionActions)
   return (
@@ -111,7 +121,12 @@ export function EmailList(props: EmailListProps) {
           </>
         ) : (
           <>
-            {contact ? <ContactTitle contact={contact} /> : <h1 className="truncate text-base font-semibold">{title}</h1>}
+            {contact ? <ContactTitle contact={contact} /> : (
+              <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                <h1 className="truncate text-base font-semibold">{title}</h1>
+                {accountName && <span className="max-w-1/2 truncate text-xs font-normal text-muted-foreground">{accountName}</span>}
+              </div>
+            )}
             {selection && selectionActions && (
               <Button variant="ghost" size="sm" className="ml-auto" onClick={selection.enter}>{t('mail:select')}</Button>
             )}
@@ -174,7 +189,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -242,13 +257,14 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
   }
   return (
     <VirtualRows
-      sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} onRequestPreviews={onRequestPreviews}
+      sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} mailboxLabel={mailboxLabel} onRequestPreviews={onRequestPreviews}
       onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive} onRespond={onRespond}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
       selection={selection}
+      verification={verification}
       viewingContact={contact?.address ?? null} onViewContact={onViewContact} onAggregate={onAggregate} isAggregated={isAggregated}
-      initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset}
+      initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset} reveal={reveal}
     />
   )
 }
@@ -277,7 +293,9 @@ type VirtualRowsProps = {
   stale: boolean
   selectedId: string | null
   previewLines: PreviewLines
+  mailboxLabel?: MailboxLabel
   onRequestPreviews?: (emailIds: string[]) => void
+  verification?: VerificationCodes
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   onArchive?: (email: EmailSummary, archive: boolean) => void
   onDelete?: (email: EmailSummary) => void
@@ -298,9 +316,10 @@ type VirtualRowsProps = {
   viewingContact: string | null
   initialScrollTop?: number
   onScrollOffset?: (offset: number) => void
+  reveal?: RevealRequest | null
 } & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, onRequestPreviews, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // One right-click menu serves the whole list. The snapshot outlives the open
@@ -345,6 +364,18 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
     initialOffset: initialScrollTop,
   })
 
+  // A keyboard move brings its row into view, scrolling only as far as needed.
+  // Only a new request scrolls; the list refreshing under it does not.
+  const latestEmails = useRef(emails)
+  useEffect(() => {
+    latestEmails.current = emails
+  })
+  useEffect(() => {
+    if (!reveal) return
+    const index = latestEmails.current.findIndex((email) => email.id === reveal.id)
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' })
+  }, [reveal, virtualizer])
+
   // Report the scroll offset so the caller can come back to it later.
   useEffect(() => {
     const viewport = viewportRef.current
@@ -384,6 +415,17 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   const rendered = virtualItems.map((item) => emails[item.index])
   usePreviewRequests(onRequestPreviews, rendered, previewLines)
   useGaveUpVersion()
+  // Unlike mounted overscan/pinned rows, only the actual viewport requests new
+  // code recognition. A sender group is never treated as its representative mail.
+  const codeTargetsKey = JSON.stringify(stale || selection?.active ? [] : virtualItems
+    .filter((item) => item.index >= (virtualizer.range?.startIndex ?? 0) && item.index <= (virtualizer.range?.endIndex ?? -1))
+    .map((item) => emails[item.index])
+    .filter((email) => !email.senderGroup && !email.localOnly)
+    .map((email) => ({ emailId: email.id, bodyState: email.bodyState })))
+  const codeTargets = useMemo(() => JSON.parse(codeTargetsKey) as VerificationTarget[], [codeTargetsKey])
+  const requestCodes = verification?.requestVisible
+  useEffect(() => { requestCodes?.(codeTargets) }, [requestCodes, codeTargets])
+  useEffect(() => () => { requestCodes?.([]) }, [requestCodes])
 
   // Outside selection mode a plain click opens; Cmd/Ctrl or Shift starts picking
   // with only that row. Inside, a click toggles and Shift picks the range.
@@ -462,11 +504,13 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
                 account={accounts?.find((account) => account.id === email.accountId) ?? null}
                 selected={!email.senderGroup && email.id === selectedId}
                 previewLines={previewLines}
+                mailboxLabel={mailboxLabel}
                 onFlag={onFlag}
                 onArchive={onArchive}
                 onDelete={onDelete}
                 onRemoveLocal={onRemoveLocal}
                 canArchive={canArchive}
+                verification={verification}
                 selectionMode={selection?.active ?? false}
                 picked={selection?.isSelected(email.id) ?? false}
                 menuOpen={email.id === menuOpenId}

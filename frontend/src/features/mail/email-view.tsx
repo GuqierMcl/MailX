@@ -43,6 +43,8 @@ import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
 import { TranslationBar } from './translation/translation-bar'
 import { TranslationToolbarGroup } from './translation/translation-toolbar'
 import type { EmailTranslation } from './translation/use-email-translation'
+import { VerificationCodeBar } from './verification-code-bar'
+import type { VerificationCodes } from './use-verification-codes'
 
 export function RemoveLocalCopyDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
   return (
@@ -86,11 +88,12 @@ type EmailViewProps = {
   onArchive?: (email: EmailSummary, archive: boolean) => void
   /** Translation of the open message, shared with the command palette; absent where nothing can be translated. */
   translation?: EmailTranslation
+  verification?: VerificationCodes
   /** Wraps the reader's content (everything under the toolbar), e.g. with the rest of a conversation. */
   frame?: (content: ReactNode) => ReactNode
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -113,7 +116,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
       </EmptyHeader>
     </Empty>
   ) : email ? (
-    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} />
+    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} verification={verification} />
   ) : (
     <Empty>
       <EmptyHeader>
@@ -213,7 +216,7 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation'> & { email: EmailDetail }
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation' | 'verification'> & { email: EmailDetail }
 
 function EmailContent({ email, ...props }: ContentProps) {
   useTranslation()
@@ -240,7 +243,8 @@ function EmailContent({ email, ...props }: ContentProps) {
           </div>
         </header>
       </ScrollArea>
-        <div className="flex min-h-0 flex-1 flex-col p-4 text-sm">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 text-sm">
+          <VerificationCodeBar emailId={summary.id} verification={summary.localOnly ? undefined : props.verification} />
           <Body email={email} {...props} />
         </div>
         {attachments.length > 0 && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}

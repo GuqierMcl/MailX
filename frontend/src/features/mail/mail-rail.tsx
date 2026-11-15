@@ -14,6 +14,7 @@ import {
   Settings01Icon,
   SpamIcon,
   StarIcon,
+  SunriseIcon,
 } from '@hugeicons/core-free-icons'
 import type { FolderRole } from '@/generated/accounts'
 import {
@@ -120,6 +121,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
     <div data-slot="mail-rail" className="flex h-full min-h-0 flex-col items-center gap-1 py-2">
       <RailItem icon={PencilEdit02Icon} label={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })} onClick={onCompose} />
       <div className="mt-3 flex flex-col items-center gap-1">
+        <RailItem icon={SunriseIcon} label={t('mail:nowView')} active={mailbox.kind === 'now'} onClick={choose({ kind: 'now' })} />
         <RailItem
           icon={InboxIcon} label={t('mail:inbox')} name={withUnread(t('mail:inbox'), unifiedUnread)}
           active={isUnified('inbox')} onClick={choose({ kind: 'unified', role: 'inbox' })}
@@ -175,7 +177,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
                     />
                   )}
                 >
-                  <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className={cn('size-6 text-[11px]', active && 'ring-2 ring-primary ring-offset-1 ring-offset-sidebar')} />
+                  <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-6 text-[11px]" />
                   {(failure || unread > 0) && <RailDot alert={failure} />}
                 </TooltipTrigger>
                 <TooltipContent side="right">{name}</TooltipContent>

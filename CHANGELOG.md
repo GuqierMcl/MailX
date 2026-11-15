@@ -11,7 +11,15 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))
+
+## [0.3.0] - 2026-11-14
+
 ### 🚀 Feature
+
+- Copy recognized verification codes from the message list, reading pane or Windows/macOS notifications; an optional setting under Enhancements moves the email to Trash after a successful copy, with undo, and defaults to off. / 可从邮件列表、阅读区或 Windows/macOS 通知复制识别到的验证码；“增强”新增默认关闭的选项，可在复制成功后将邮件移到已删除并提供撤销。 ([#133](https://github.com/GuqierMcl/MailX/pull/133))
 
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
@@ -23,10 +31,24 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### ✨ Optimization
 
 - The getting-started guides and the architecture, contract and validation documents now describe discovery and the EWS coverage limits in both languages. / 使用入门、架构、契约与验证文档已用中英文同步说明自动探测与 EWS 的覆盖边界。
+- Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
+- Keyboard shortcuts for mail: J/K to move between messages, E to archive, # to delete, S to star, U for read or unread, R/A/F to reply, reply all or forward, / to search and ? to list them all; single-key shortcuts can be turned off in Settings → Keyboard shortcuts. / 邮件键盘快捷键：J/K 切换邮件，E 归档，# 删除，S 加星标，U 标为已读或未读，R/A/F 回复、全部回复或转发，/ 搜索，? 查看全部；可在“设置 → 快捷键”中关闭单键快捷键。 ([#131](https://github.com/GuqierMcl/MailX/pull/131))
+- Now, a new page below Compose, greets you and sums up what needs attention, recent verification codes, your inbox with its newest unread messages, activity over the last two weeks and the people you write with most, recent attachments and sync status, all worked out on this computer; MailX now opens on it, and Settings → General can switch back to the inbox. / 新增“此刻”页面（位于“写邮件”下方），向你问好并汇总需要处理的事、最近的验证码、收件箱与最新未读邮件、近两周的收发近况与往来最多的人、最近的附件和同步状态，均在本机计算；MailX 打开时默认显示该页面，可在“设置 → 通用”中改回收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- When viewing one account's folder or local archive, its name appears in muted text beside the message list heading. / 查看某个账号的文件夹或本机归档时，邮件列表标题旁会以弱化小字显示邮箱名称。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
+- In the collapsed sidebar, the current account is highlighted only by its button background, with the avatar's selection ring removed. / 折叠侧栏中，当前邮箱仅以按钮背景高亮，移除头像选中圆环。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
+- The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
+- New appearance setting to show a message's mailbox as a name or a small icon on the sender's avatar. / 新增外观设置：可把邮件所属邮箱显示为名称，或显示为发件人头像上的小图标。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
+- The account page is tidier: a header with the address and sync status, actions in a fixed bar at the bottom, connection details folded away, shorter check results, and a marker in the account list on the account that has a problem. / 账号页更简洁：顶部显示地址和同步状态，操作固定在底部，连接详情默认折叠，验证结果更简短，账号列表会标出有问题的账号。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
 
 ### 🩹 Fixed
 
 - On macOS 26 and later, the window's close, minimize and zoom buttons now use the current system style and sit in the right place. / 在 macOS 26 及更新版本上，窗口的关闭、最小化和缩放按钮改用当前系统样式，并回到正确位置。 ([#125](https://github.com/GuqierMcl/MailX/pull/125))
+- In the desktop app, an account dragged in Email accounts stays under the pointer instead of jumping to the window's top-left corner. / 在桌面应用的邮箱账号中拖动账号时，账号会跟随指针，不再跳到窗口左上角。 ([#130](https://github.com/GuqierMcl/MailX/pull/130))
+
+### 🔄 Changed
+
+- MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 
 ### 🔄 Changed
 
@@ -188,7 +210,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/GuqierMcl/MailX/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/GuqierMcl/MailX/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/GuqierMcl/MailX/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/GuqierMcl/MailX/compare/v0.1.1...v0.1.2

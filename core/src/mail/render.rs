@@ -14,6 +14,7 @@ mod images;
 mod plain;
 mod quotes;
 
+pub(crate) use html::plain_text as html_plain_text;
 pub(crate) use html::sanitize as sanitize_document;
 pub use quotes::fold_quotes;
 
@@ -240,7 +241,7 @@ pub fn attachment_contents(raw: &[u8]) -> Result<Vec<DecodedAttachment>, RenderE
         .collect())
 }
 
-fn parse(raw: &[u8]) -> Result<Message<'_>, RenderError> {
+pub(crate) fn parse(raw: &[u8]) -> Result<Message<'_>, RenderError> {
     if raw.len() > MAX_MESSAGE_BYTES {
         return Err(RenderError::TooLarge);
     }

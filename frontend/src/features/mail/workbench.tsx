@@ -16,7 +16,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { clientFailureCode, type MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
-import { EmailList, type ListFilter } from './email-list'
+import { EmailList, type ListFilter, type RevealRequest } from './email-list'
 import { escapeBelongsToSomethingElse } from './use-close-on-escape'
 import { CommandPalette } from './command-palette'
 import { MailSearch } from './mail-search'
@@ -49,23 +49,30 @@ import { loadMailTree } from './mail-tree'
 import { DeleteForGoodDialog } from './delete-for-good-dialog'
 import { canArchive, useArchiveEmail, useArchiveEmails } from './use-archive-email'
 import { useListSelection } from './use-list-selection'
-import { useSelectionActions } from './use-selection-actions'
+import { selectionAvailability, useSelectionActions } from './use-selection-actions'
 import { SelectionSummary } from './selection-summary'
+import { ShortcutHelpDialog } from './shortcut-help'
+import type { SingleKeyShortcutId } from './shortcuts'
+import { useMailShortcuts } from './use-mail-shortcuts'
 import { useDeleteEmail } from './use-delete-email'
 import { useContactAggregation } from './use-contact-aggregation'
 import { useMailStateChanges } from './use-mail-state-changes'
+import { useVerificationCodes } from './use-verification-codes'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
 import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
 import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
+import { NowPage } from '@/features/now/now-page'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
 const PAGE_SIZE = 100
 /** The core's limit on kept ids (`MAX_KEEP_IDS`); the oldest drop out first. */
 const MAX_KEPT = 500
+/** Where the window starts unless the settings say the Now page; see `startupApplied`. */
+const INITIAL_MAILBOX: Mailbox = { kind: 'unified', role: 'inbox' }
 const NO_IDS: string[] = []
 /** Mail in these folders never shows up under a contact. */
 const CONTACT_EXCLUDED_ROLES: FolderRole[] = ['junk', 'trash']
@@ -94,7 +101,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   const saveLayout = useDebouncedLayoutSave(client)
   const [accountsTarget, setAccountsTarget] = useState<AccountsTarget | null>(null)
   const [addingAccount, setAddingAccount] = useState(false)
-  const [mailbox, setMailbox] = useState<Mailbox>({ kind: 'unified', role: 'inbox' })
+  const [mailbox, setMailbox] = useState<Mailbox>(INITIAL_MAILBOX)
   const [filter, setFilter] = useState<ListFilter>('all')
   // Messages opened in one Unread view; see `keptIds` below.
   const [kept, setKept] = useState<{ view: string; ids: string[] }>({ view: '', ids: NO_IDS })
@@ -138,21 +145,31 @@ export function Workbench({ client }: { client: MailxClient }) {
     },
   })
   const settingsQuery = useSettings(client)
+  // The startup view applies once, when the settings first arrive, and never over a
+  // view the user already picked (any pick is a new object) or a message already opened.
+  const [startupApplied, setStartupApplied] = useState(false)
+  if (!startupApplied && settingsQuery.data) {
+    setStartupApplied(true)
+    if (settingsQuery.data.settings.general.startupView === 'now' && mailbox === INITIAL_MAILBOX && !openedState) setMailbox({ kind: 'now' })
+  }
   const senderAvatars = settingsQuery.data?.settings.security.senderAvatars ?? false
   const navWidth = settingsQuery.data?.settings.layout.navWidth ?? NAV_DEFAULT
   const navCollapsed = settingsQuery.data?.settings.layout.navCollapsed ?? false
   const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
+  const mailboxLabel = settingsQuery.data?.settings.appearance.mailboxLabel ?? 'name'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
   const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
   const readerCollapsed = readerChoice ?? savedCollapsed
   const setReaderCollapsed = setReaderChoice // stable, so effects may use it
+  // The Now page replaces the panels; coming back mounts them anew, and they follow the state again.
+  const nowPage = mailbox.kind === 'now'
   useLayoutEffect(() => {
     const reader = readerPanel.current
-    if (!layoutReady || !reader) return
+    if (!layoutReady || !reader || nowPage) return
     if (readerCollapsed && !reader.isCollapsed()) reader.collapse()
     else if (!readerCollapsed && reader.isCollapsed()) reader.expand()
-  }, [layoutReady, readerCollapsed, readerPanel])
+  }, [layoutReady, readerCollapsed, readerPanel, nowPage])
   // Each change is handed over as it happens; the debounce keeps only the last. Comparing
   // with the saved value here would let an earlier queued value win after a quick toggle back.
   useEffect(() => {
@@ -200,10 +217,11 @@ export function Workbench({ client }: { client: MailxClient }) {
   const treeReloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scheduleTreeReload = useCallback(() => {
     clearTimeout(treeReloadTimer.current)
-    treeReloadTimer.current = setTimeout(
-      () => void queryClient.invalidateQueries({ queryKey: mailKeys.tree() }),
-      TREE_RELOAD_DELAY_MS,
-    )
+    treeReloadTimer.current = setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
+      // The Now page's counts change with the same rounds.
+      void queryClient.invalidateQueries({ queryKey: mailKeys.overviews() })
+    }, TREE_RELOAD_DELAY_MS)
   }, [queryClient])
   useEffect(() => () => clearTimeout(treeReloadTimer.current), [])
 
@@ -418,10 +436,22 @@ export function Workbench({ client }: { client: MailxClient }) {
   const latestTree = useRef({ accounts, folders })
   useEffect(() => { latestTree.current = { accounts, folders } }, [accounts, folders])
   const [removeError, setRemoveError] = useState<string | null>(null)
+  // A message that left the view lets go of the reader. When a keyboard shortcut
+  // archived or deleted the opened message, its neighbour in the list opens instead.
+  const advanceAfter = useRef<{ id: string; next: EmailSummary | null } | null>(null)
+  const openedRef = useRef(openedState)
+  useEffect(() => { openedRef.current = openedState }, [openedState])
+  const openRef = useRef<(email: EmailSummary) => void>(() => undefined)
+  const letGo = useCallback((email: { id: string }) => {
+    const follow = advanceAfter.current?.id === email.id ? advanceAfter.current : null
+    if (follow) advanceAfter.current = null
+    if (follow?.next && openedRef.current?.id === email.id) openRef.current(follow.next)
+    else setOpened((current) => current?.id === email.id ? null : current)
+  }, [])
   const removeLocalCopy = useCallback((email: { id: string }) => {
     setRemoveError(null)
     client.removeLocalCopy(email.id).then(() => {
-      setOpened((current) => current?.id === email.id ? null : current)
+      letGo(email)
       void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     }).catch((error: unknown) => {
       const message = errorText(error)
@@ -431,7 +461,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         toast.error(t('mail:removeLocalCopyFailed'), { description: message })
       }
     })
-  }, [client, openedState, queryClient, readerCollapsed])
+  }, [client, letGo, openedState, queryClient, readerCollapsed])
   const [removeLocalChoice, setRemoveLocalChoice] = useState<EmailSummary | null>(null)
   const requestRemoveLocal = useCallback((email: EmailSummary) => setRemoveLocalChoice(email), [setRemoveLocalChoice])
   const confirmRemoveLocal = useCallback(() => {
@@ -439,12 +469,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     setRemoveLocalChoice(null)
     if (email) removeLocalCopy(email)
   }, [removeLocalChoice, removeLocalCopy, setRemoveLocalChoice])
-  const deleteEmail = useDeleteEmail(client, folders, useCallback((email: { id: string }) => {
-    setOpened((current) => current?.id === email.id ? null : current)
-  }, []))
-  const archiveEmail = useArchiveEmail(client, useCallback((email: { id: string }) => {
-    setOpened((current) => current?.id === email.id ? null : current)
-  }, []))
+  const deleteEmail = useDeleteEmail(client, folders, letGo)
+  const verification = useVerificationCodes(client, opened && !readerCollapsed && !selecting && mailView ? body.email?.summary ?? null : null, sourceIdentity, letGo)
+  const archiveEmail = useArchiveEmail(client, letGo)
   const hideOpened = useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
   }, [])
@@ -543,6 +570,125 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
 
+  // A listed message opened in the Unread view stays in it once read; see `keptIds`.
+  const keepListed = (id: string) => {
+    if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
+    setKept((current) => {
+      const ids = current.view === viewKey ? current.ids : NO_IDS
+      return ids.includes(id) ? current : { view: viewKey, ids: [...ids, id].slice(-MAX_KEPT) }
+    })
+  }
+  // Every way of opening a message (list click, search result, notification) shows the reader.
+  const openEmail = (email: { id: string; accountId: string }) => {
+    keepListed(email.id)
+    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
+    setAnchorId(email.id)
+    setReaderCollapsed(false)
+    // Opening a message (from search or the palette) ends picking, so the reader can show it.
+    exitSelection()
+  }
+  useEffect(() => { openRef.current = openEmail })
+  // A message on the Now page opens in the unified inbox, where it lives.
+  const openFromNow = (email: { id: string; accountId: string }) => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    openEmail(email)
+  }
+  // The Now page's unread links: the unified inbox, Unread filter on, no search left over.
+  const openUnreadFromNow = () => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    setSearch('')
+    setFilter('unread')
+  }
+  // A person on the Now page: all of their mail across accounts, from the unified inbox.
+  const openContactFromNow = (person: { address: string; name: string | null }) => {
+    showMailbox({ kind: 'unified', role: 'inbox' })
+    setSearch('')
+    setFilter('all')
+    savedScroll.current = 0
+    setContact({ address: person.address.trim(), name: person.name?.trim() || null, accountId: null })
+  }
+
+  // Single-key shortcuts (see `shortcuts.ts`). Browsing moves the opened message
+  // like a click on the next or previous row; group rows are not messages and are
+  // skipped. Acting needs the opened message on screen, with the reader toolbar's rules.
+  const singleKeys = settingsQuery.data?.settings.general.singleKeyShortcuts ?? true
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [reveal, setReveal] = useState<RevealRequest | null>(null)
+  const runShortcut = (id: SingleKeyShortcutId): boolean => {
+    if (id === 'help') {
+      setHelpOpen(true)
+      return true
+    }
+    if (id === 'search') {
+      setPaletteOpen(true)
+      return true
+    }
+    if (!mailView) return false
+    if (selecting) {
+      // Picking: the flags, archive and delete go to the picked messages, as in the header.
+      const state = selectionAvailability(selection, selectionActions)
+      if (state.none) return false
+      if (id === 'archive' && !state.archiveBlocked) selectionActions.onArchive()
+      else if (id === 'delete' && state.deletable > 0) selectionActions.onDelete()
+      else if (id === 'star' && state.changeable > 0) selectionActions.onFlag('starred', state.anyUnstarred)
+      else if (id === 'read' && state.changeable > 0) selectionActions.onFlag('read', state.anyUnread)
+      else return false
+      return true
+    }
+    const rows = emails.filter((email) => !email.senderGroup)
+    const own = opened ? rows.findIndex((email) => email.id === opened.id) : -1
+    // A message expanded inside a thread may not be listed; its thread's row is.
+    const at = own >= 0 ? own : opened && anchorId ? rows.findIndex((email) => email.id === anchorId) : -1
+    const go = (email: EmailSummary | undefined) => {
+      if (!email) return false
+      openEmail(email)
+      setReveal((previous) => ({ id: email.id, seq: (previous?.seq ?? 0) + 1 }))
+      return true
+    }
+    if (id === 'next') {
+      if (at >= 0 && at === rows.length - 1) loadMore()
+      return go(at < 0 ? rows[0] : rows[at + 1])
+    }
+    if (id === 'previous') return go(at < 0 ? rows[0] : rows[at - 1])
+    if (id === 'open') {
+      if (!opened) return go(rows[0])
+      if (!readerCollapsed) return false
+      setReaderCollapsed(false)
+      return true
+    }
+    const summary = opened && !readerCollapsed && body.email?.summary.id === opened.id ? body.email.summary : null
+    if (!summary) return false
+    // After archive or delete, the next row opens (the previous one at the end of the list).
+    const advance = () => {
+      advanceAfter.current = { id: summary.id, next: own >= 0 ? rows[own + 1] ?? rows[own - 1] ?? null : null }
+    }
+    switch (id) {
+      case 'archive':
+        if (!canArchive(summary, folders)) return false
+        advance()
+        void archiveEmail(summary, !summary.archived)
+        return true
+      case 'delete':
+        advance()
+        if (summary.localOnly) requestRemoveLocal(summary)
+        else deleteEmail.request(summary)
+        return true
+      case 'star':
+      case 'read': {
+        if (summary.localOnly) return false
+        const flag = id === 'star' ? 'starred' : 'read'
+        void setFlag(summary, flag, !(flag === 'starred' ? summary.isStarred : summary.isRead))
+        return true
+      }
+      case 'reply':
+      case 'replyAll':
+      case 'forward':
+        void compose.respond(summary.id, id)
+        return true
+    }
+  }
+  useMailShortcuts(singleKeys, runShortcut)
+
   const refreshAccounts = () => void queryClient.invalidateQueries({ queryKey: mailKeys.all })
   const dialog = (
     <>
@@ -595,23 +741,6 @@ export function Workbench({ client }: { client: MailxClient }) {
   const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
   const selectedOutbox = outbox.data?.find((item) => item.id === outboxChoice) ?? null
 
-  // A listed message opened in the Unread view stays in it once read; see `keptIds`.
-  const keepListed = (id: string) => {
-    if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
-    setKept((current) => {
-      const ids = current.view === viewKey ? current.ids : NO_IDS
-      return ids.includes(id) ? current : { view: viewKey, ids: [...ids, id].slice(-MAX_KEPT) }
-    })
-  }
-  // Every way of opening a message (list click, search result, notification) shows the reader.
-  const openEmail = (email: { id: string; accountId: string }) => {
-    keepListed(email.id)
-    setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
-    setAnchorId(email.id)
-    setReaderCollapsed(false)
-    // Opening a message (from search or the palette) ends picking, so the reader can show it.
-    exitSelection()
-  }
   // Expanding a message inside the thread opens it like any other (read mark, toolbar,
   // body) but keeps the anchor, so the same conversation stays on screen.
   const expandInThread = (email: EmailSummary) => {
@@ -692,8 +821,25 @@ export function Workbench({ client }: { client: MailxClient }) {
           onOpenSettings={setSettings}
           translation={mailView && !selecting && !readerCollapsed && translation.available ? translation : null}
         />
-        {/* The saved list width is only read when the group mounts, so it waits for the settings. */}
-        {!layoutReady ? <div className="min-h-0 flex-1 bg-muted/40" /> : (
+        {activeMailbox.kind === 'now' ? (
+          <NowPage
+            client={client}
+            accounts={displayAccounts}
+            folders={folders}
+            syncStates={currentSyncStates}
+            draftCount={draftCount}
+            outbox={outbox.data ?? []}
+            onSelectMailbox={selectMailbox}
+            onOpenUnread={openUnreadFromNow}
+            onOpenContact={openContactFromNow}
+            onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
+            onOpenEmail={openFromNow}
+            verification={verification}
+          />
+        ) : !layoutReady ? (
+          // The saved list width is only read when the group mounts, so it waits for the settings.
+          <div className="min-h-0 flex-1 bg-muted/40" />
+        ) : (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0" onLayoutChanged={saveListWidth}>
           <ResizablePanel panelRef={listPanel} defaultSize={listWidth} minSize={LIST_MIN} className="bg-muted/40">
             {activeMailbox.kind === 'drafts' ? (
@@ -723,8 +869,10 @@ export function Workbench({ client }: { client: MailxClient }) {
               className={cn('h-full min-h-0', slide && !reducedMotion && listSlideClass(slide))}
             >
             <EmailList
+              verification={verification}
               onRequestPreviews={requestPreviews}
               title={contactView ? contactView.name ?? contactView.address : baseTitle}
+              accountName={accounts.find((account) => account.id === selectedAccountId)?.displayName}
               contact={contactView ? { name: contactView.name, address: contactView.address, backTitle: baseTitle, onBack: leaveContact } : undefined}
               initialScrollTop={contactView ? undefined : restoreScroll}
               onScrollOffset={contactView ? undefined : trackScroll}
@@ -747,6 +895,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               indexedBodies={pages?.at(-1)?.coverage.indexedBodies ?? 0}
               selectedId={highlighted}
               previewLines={previewLines}
+              mailboxLabel={mailboxLabel}
               onFilterChange={setFilter}
               onSelect={openEmail}
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
@@ -758,6 +907,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onLoadMore={loadMore}
               selection={selection}
               selectionActions={selectionActions}
+              reveal={reveal}
             />
             </div>
             )}
@@ -798,6 +948,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               <SelectionSummary items={selection.items} accounts={displayAccounts} />
             ) : (
             <EmailView
+              verification={verification}
               hidden={readerCollapsed}
               key={`${opened?.id ?? ''}:${body.identity}`}
               client={client}
@@ -831,11 +982,20 @@ export function Workbench({ client }: { client: MailxClient }) {
           </ResizablePanel>
         </ResizablePanelGroup>
         )}
-        {accounts.length > 0 && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
+        {/* The Now page has no reader to fold. */}
+        {accounts.length > 0 && !nowPage && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}
       <TranslationConsentDialog translation={translation} />
+      <ShortcutHelpDialog
+        open={helpOpen}
+        onOpenChange={setHelpOpen}
+        onOpenSettings={() => {
+          setHelpOpen(false)
+          setSettings({ section: 'shortcuts' })
+        }}
+      />
       <DeleteForGoodDialog {...deleteEmail.confirmation} />
       <RemoveLocalCopyDialog
         open={removeLocalChoice !== null}

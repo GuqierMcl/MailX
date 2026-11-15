@@ -8,13 +8,14 @@ import { Radio } from '@base-ui/react/radio'
 import { RadioGroup } from '@base-ui/react/radio-group'
 import { cn } from 'cn'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { CustomColorSwatch } from '@/components/custom-color-swatch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
@@ -33,6 +34,7 @@ const FONT_PREVIEW = '敏捷的棕色狐狸跳过了懒狗 · The quick brown fo
 export function AppearancePane({ client }: { client: MailxClient }) {
   useTranslation()
   const PREVIEW_LINE_LABELS: Record<PreviewLines, string> = { none: t('settings:previewNone'), one: t('settings:previewOne'), two: t('settings:previewTwo'), three: t('settings:previewThree') }
+  const MAILBOX_LABELS: Record<MailboxLabel, string> = { name: t('settings:mailboxLabelName'), icon: t('settings:mailboxLabelIcon') }
   const FONT_SIZE_LABELS: Record<FontSize, string> = { small: t('settings:fontSmall'), default: t('settings:fontDefault'), large: t('settings:fontLarge') }
   const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: t('settings:mailThemeFollow'), light: t('settings:mailThemeLight') }
   const settings = useSettings(client)
@@ -131,6 +133,15 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
+        <SettingsRow label={t('settings:mailboxLabel')} htmlFor="appearance.mailboxLabel">
+          <Select value={appearance.mailboxLabel} items={MAILBOX_LABELS}
+            onValueChange={(mailboxLabel: MailboxLabel | null) => { if (mailboxLabel) change({ mailboxLabel }) }}>
+            <SelectTrigger id="appearance.mailboxLabel" className="w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(MAILBOX_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
       </SettingsGroup>
     </SettingsPage>
   )
@@ -190,15 +201,7 @@ function AccentChoice({ value: saved, onChange }: { value: string; onChange: (ac
         })}
       </RadioGroup>
       <span className="h-5 w-px bg-border" aria-hidden />
-      {/* The native picker sits invisibly over the swatch so the OS color panel opens on click. */}
-      <label title={t('settings:customColor')} data-checked={custom || undefined}
-        className={cn(swatch, 'cursor-pointer has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
-          !custom && 'bg-[conic-gradient(#ef4444,#eab308,#22c55e,#06b6d4,#3b82f6,#a855f7,#ef4444)]')}
-        style={custom ? { backgroundColor: value } : undefined}>
-        <input type="color" aria-label={t('settings:customAccent')} className="absolute inset-0 size-full cursor-pointer opacity-0"
-          value={custom ? value : '#2563eb'} onChange={(event) => setPicking(event.target.value.toLowerCase())} />
-        {custom && <span className="pointer-events-none">{tick}</span>}
-      </label>
+      <CustomColorSwatch value={value} checked={custom} label={t('settings:customAccent')} className={swatch} onChange={setPicking} />
     </div>
   )
 }

@@ -21,6 +21,7 @@ import {
   SidebarLeftIcon,
   SpamIcon,
   StarIcon,
+  SunriseIcon,
   UserAdd01Icon,
 } from '@hugeicons/core-free-icons'
 import { useQuery } from '@tanstack/react-query'
@@ -127,6 +128,7 @@ function PaletteBody({
     (accountPosition.get(left.accountId) ?? accounts.length) - (accountPosition.get(right.accountId) ?? accounts.length))
   // The same views, in the same order, as the top of the sidebar.
   const views: [string, string, Entry['icon'], Mailbox][] = [
+    ['now', t('mail:nowView'), SunriseIcon, { kind: 'now' }],
     ['inbox', t('mail:allInboxes'), InboxIcon, { kind: 'unified', role: 'inbox' }],
     ['starred', t('mail:starredView'), StarIcon, { kind: 'starred' }],
     ['drafts', t('mail:drafts'), File01Icon, { kind: 'drafts' }],

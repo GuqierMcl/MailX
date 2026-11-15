@@ -2,9 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Allow only the local main window to manage accounts, read cached mail, read and save app settings, manage drafts and the send queue, open composer windows, control its own title bar, and drive the app updater.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "allow-accounts-cancel-draft-verification",
     "allow-accounts-cancel-verification",
@@ -119,6 +117,10 @@
     "allow-window-perform",
     "allow-window-set-theme",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "allow-emails-overview",
+    "allow-emails-verification-code-status",
+    "allow-emails-copy-verification-code",
+    "allow-emails-undo-verification-code-delete"
   ]
 }

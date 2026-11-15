@@ -49,12 +49,14 @@ mod draft_bodies;
 mod flags;
 mod oauth;
 mod organize;
+mod overview;
 mod translation;
 pub use oauth::{
     BeginOAuthAccount, BeginOAuthReauthorization, ConfirmOAuthMailbox, CreateOAuthAccount,
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
 };
 mod verification;
+mod verification_codes;
 pub use crate::sync::cadence::Activity;
 pub use ai::{AiConnectionState, AiService, AiState, SaveAiConnection, SavedAiConnection};
 pub use attachments::{AttachmentFile, AttachmentInfo};
@@ -69,6 +71,10 @@ pub use flags::{FlagChange, MessageFlag};
 pub use organize::{
     ArchiveOutcome, EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome,
 };
+pub use overview::{
+    AccountMailCount, DayActivity, MailOverview, MailOverviewQuery, NewMailOverview,
+    OverviewActivity, OverviewCode, OverviewContact, RecentAttachment, TodayActivity,
+};
 pub use translation::{
     TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
     TranslationStatus, TranslationTest,
@@ -78,6 +84,10 @@ pub use verification::{
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
     DraftConnectionVerification, ProtocolVerification, VerifyAccountConnection,
     VerifyDraftConnection,
+};
+pub use verification_codes::{
+    VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
+    VerificationCodeStatus,
 };
 
 /// How long after an accepted send the account's sync is woken once to pick
@@ -108,6 +118,7 @@ pub struct MailxCore {
     archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
     oauth_sessions: Arc<crate::accounts::oauth_sessions::SessionCoordinator>,
     translation: Arc<translation::Translations>,
+    notification_codes: Arc<verification_codes::NotificationCodes>,
 }
 
 /// Shared by every clone of a `MailxCore`. When the last clone goes, it stops
@@ -254,6 +265,7 @@ impl MailxCore {
             archive_undo: Arc::default(),
             oauth_sessions: Arc::default(),
             translation,
+            notification_codes: Arc::default(),
         })
     }
 
@@ -323,6 +335,7 @@ impl MailxCore {
             // cleanup failure as though the account were still present.
             self.bodies.retire(&removed.account_id);
             self.previews.retire(&removed.account_id);
+            self.notification_codes.retire(&removed.account_id);
             removed
         };
         self.sync.retire(&removed.account_id);

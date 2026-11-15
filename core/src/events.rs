@@ -16,7 +16,7 @@ use crate::send::types::{DraftChanged, OutboxChanged};
 use crate::settings::NotificationSettings;
 use crate::sync::manager::{AccountSyncState, FlagWriteBack, MessagesDeleted};
 
-/// Messages described one by one; the rest of a batch is only counted.
+/// Maximum message details used in the ordinary notification summary.
 pub const NEW_MAIL_DETAILS: usize = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -127,7 +127,8 @@ pub struct NewMail {
     /// Every new message, including those not described below.
     #[ts(type = "number")]
     pub count: u32,
-    /// The newest few, newest first. Empty when previews are turned off.
+    /// All arrivals in this sync round, newest first, so a host can identify
+    /// verification mail before grouping. Empty when previews are turned off.
     pub messages: Vec<NewMailMessage>,
 }
 
@@ -192,7 +193,7 @@ impl NewMail {
             [] => (self.account_name.clone(), locale.new_mail(self.count)),
             messages => {
                 let mut senders: Vec<&str> = Vec::new();
-                for message in messages {
+                for message in messages.iter().take(NEW_MAIL_DETAILS) {
                     let sender = message
                         .from
                         .name
@@ -222,6 +223,31 @@ impl NewMail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_arrivals_are_available_but_summary_remains_bounded() {
+        let messages = (0..6)
+            .map(|i| {
+                message(
+                    &i.to_string(),
+                    Some(&format!("Sender{i}")),
+                    "sender@example.test",
+                    "Subject",
+                )
+            })
+            .collect();
+        let mail = mail(6, messages);
+        assert_eq!(
+            mail.for_delivery(&NotificationSettings::default())
+                .unwrap()
+                .messages
+                .len(),
+            6
+        );
+        let (_, body) = mail.summary();
+        assert!(body.contains("Sender0") && body.contains("Sender2"));
+        assert!(!body.contains("Sender3"));
+    }
 
     fn message(id: &str, name: Option<&str>, address: &str, subject: &str) -> NewMailMessage {
         NewMailMessage {

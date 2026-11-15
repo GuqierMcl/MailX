@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/icon-button'
 import { t } from '@/i18n'
 import type { ListSelection } from './use-list-selection'
+import { selectionAvailability } from './use-selection-actions'
 
 /** What the selection header can do with the picked messages; see `useSelectionActions`. */
 export type SelectionActions = {
@@ -29,18 +30,10 @@ export type SelectionActions = {
  */
 export function SelectionHeader({ selection, actions }: { selection: ListSelection; actions: SelectionActions }) {
   useTranslation()
-  const { items, count } = selection
-  const none = count === 0 || actions.busy
-  const changeable = items.filter((item) => !item.localOnly)
-  // Mixed selections go the way that changes something: any unread → mark read.
-  // With nothing picked the buttons rest on "mark as read" and "add star".
-  const anyUnread = changeable.length === 0 || changeable.some((item) => !item.isRead)
-  const anyUnstarred = changeable.length === 0 || changeable.some((item) => !item.isStarred)
-  const archivable = items.filter(actions.canArchiveItem).length
-  const deletable = changeable.length
+  const { count } = selection
+  const { none, changeable, anyUnread, anyUnstarred, archiveBlocked, deletable } = selectionAvailability(selection, actions)
   const archiving = actions.archiveMode === 'archive'
   const archiveLabel = archiving ? t('mail:archive') : t('mail:unarchive')
-  const archiveBlocked = count > 0 && archivable === 0
   return (
     <div role="toolbar" aria-label={t('mail:selectionActions')} className="flex min-w-0 flex-1 items-center gap-1">
       <Button variant="ghost" size="sm" className="-ml-2 shrink-0" disabled={actions.busy} onClick={selection.allSelected ? selection.deselectAll : actions.onSelectAll}>
@@ -52,14 +45,14 @@ export function SelectionHeader({ selection, actions }: { selection: ListSelecti
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <IconButton
           label={anyUnread ? t('mail:markRead') : t('mail:markUnread')}
-          disabled={none || changeable.length === 0}
+          disabled={none || changeable === 0}
           onClick={() => actions.onFlag('read', anyUnread)}
         >
           <HugeiconsIcon icon={anyUnread ? MailOpen01Icon : Mail01Icon} />
         </IconButton>
         <IconButton
           label={anyUnstarred ? t('mail:star') : t('mail:unstar')}
-          disabled={none || changeable.length === 0}
+          disabled={none || changeable === 0}
           onClick={() => actions.onFlag('starred', anyUnstarred)}
         >
           <HugeiconsIcon icon={anyUnstarred ? StarIcon : StarOffIcon} />

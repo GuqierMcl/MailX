@@ -4,6 +4,7 @@ use tempfile::TempDir;
 fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
     AppSettings {
         general: GeneralSettings::default(),
+        mail: MailSettings::default(),
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
@@ -324,6 +325,43 @@ fn hand_edited_files_keep_valid_fields_and_reset_invalid_strings() {
     assert_eq!(appearance.font_size, FontSize::Default);
     // Settings saved before the option existed get the one-line default.
     assert_eq!(appearance.preview_lines, PreviewLines::One);
+    assert_eq!(appearance.mailbox_label, MailboxLabel::Name);
+}
+
+#[test]
+fn mailbox_label_persists_and_a_document_without_it_loads_as_name() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    store
+        .patch(SettingsPatch {
+            appearance: Some(AppearanceSettings {
+                mailbox_label: MailboxLabel::Icon,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    let text = file_text(&directory, SETTINGS_FILE_NAME);
+    assert!(text.contains("\"mailboxLabel\": \"icon\""));
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(
+        restored.settings.appearance.mailbox_label,
+        MailboxLabel::Icon
+    );
+
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{ "appearance": { "theme": "dark" } }"#,
+    )
+    .unwrap();
+    let legacy = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(legacy.settings.appearance.mailbox_label, MailboxLabel::Name);
 }
 
 #[test]
@@ -336,7 +374,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
         serde_json::json!({
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
-                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false },
+                "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true, "startupView": "now" },
+                "mail": { "trashVerificationMailAfterCopy": false },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -344,7 +383,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailFont": "",
                     "mailTheme": "follow",
                     "fontSize": "default",
-                    "previewLines": "one"
+                    "previewLines": "one",
+                    "mailboxLabel": "name"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
                 "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },
@@ -1133,6 +1173,8 @@ fn saved_background_preferences_recover_independently() {
                 close_behavior,
                 show_menu_bar_icon,
                 silent_start: false,
+                single_key_shortcuts: true,
+                startup_view: StartupView::Now,
             },
             "{general}"
         );
@@ -1146,6 +1188,8 @@ fn saved_background_preferences_recover_independently() {
             close_behavior: CloseBehavior::Quit,
             show_menu_bar_icon: true,
             silent_start: true,
+            single_key_shortcuts: true,
+            startup_view: StartupView::Now,
         },
         ..Default::default()
     }
@@ -1155,6 +1199,7 @@ fn saved_background_preferences_recover_independently() {
     assert_eq!(settings.general.close_behavior, CloseBehavior::Quit);
     assert!(settings.general.show_menu_bar_icon);
     assert!(settings.general.silent_start);
+    assert_eq!(settings.general.startup_view, StartupView::Now);
 }
 
 #[test]
@@ -1184,6 +1229,180 @@ fn silent_login_preference_defaults_recovers_and_persists_without_changing_other
             .unwrap();
         assert!(restored.settings.general.silent_start);
         assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+    }
+}
+
+#[test]
+fn single_key_shortcuts_default_on_recover_and_persist_off() {
+    for value in [
+        serde_json::json!({"language": "en", "showMenuBarIcon": false}),
+        serde_json::json!({"language": "en", "singleKeyShortcuts": "no"}),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":{"general":value,"appearance":{"theme":"dark"}}}).to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert!(snapshot.settings.general.single_key_shortcuts, "{value}");
+        assert_eq!(snapshot.settings.general.language, "en");
+        assert!(!snapshot.recovered);
+        let mut general = snapshot.settings.general;
+        general.single_key_shortcuts = false;
+        store
+            .patch(SettingsPatch {
+                general: Some(general),
+                ..Default::default()
+            })
+            .unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+        assert_eq!(
+            persisted["settings"]["general"]["singleKeyShortcuts"],
+            false
+        );
+        let restored = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!restored.settings.general.single_key_shortcuts);
+        assert_eq!(restored.settings.general.language, "en");
+        assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+    }
+}
+
+#[test]
+fn startup_view_defaults_to_now_recovers_and_persists() {
+    for (value, expected) in [
+        // Files written before the setting existed open on the Now page.
+        (
+            serde_json::json!({"language": "en", "showMenuBarIcon": false}),
+            StartupView::Now,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": "home"}),
+            StartupView::Now,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": 1}),
+            StartupView::Now,
+        ),
+        (
+            serde_json::json!({"language": "en", "startupView": "inbox"}),
+            StartupView::Inbox,
+        ),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":{"general":value,"appearance":{"theme":"dark"}}}).to_string()).unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert_eq!(snapshot.settings.general.startup_view, expected, "{value}");
+        assert_eq!(snapshot.settings.general.language, "en");
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+    }
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let snapshot = store.get().unwrap();
+    assert_eq!(snapshot.settings.general.startup_view, StartupView::Now);
+    let mut general = snapshot.settings.general;
+    general.startup_view = StartupView::Inbox;
+    store
+        .patch(SettingsPatch {
+            general: Some(general),
+            ..Default::default()
+        })
+        .unwrap();
+    let persisted: serde_json::Value =
+        serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+    assert_eq!(persisted["settings"]["general"]["startupView"], "inbox");
+    let restored = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(restored.settings.general.startup_view, StartupView::Inbox);
+    // Client input with an unknown value is rejected, not silently changed.
+    assert!(
+        serde_json::from_value::<SettingsPatch>(
+            serde_json::json!({"general": {"startupView": "home"}})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn verification_mail_cleanup_defaults_off_repairs_invalid_values_and_persists() {
+    assert!(!MailSettings::default().trash_verification_mail_after_copy);
+    for value in [
+        None,
+        Some(serde_json::json!({})),
+        Some(serde_json::json!({"trashVerificationMailAfterCopy": "yes"})),
+        Some(serde_json::json!({"trashVerificationMailAfterCopy": null})),
+        Some(serde_json::Value::Null),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let mut settings =
+            serde_json::json!({"general":{"language":"en"},"appearance":{"theme":"dark"}});
+        if let Some(value) = value {
+            settings["mail"] = value;
+        }
+        fs::write(
+            directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version":1,"settings":settings}).to_string(),
+        )
+        .unwrap();
+        let store = SettingsStore::open(directory.path()).unwrap();
+        let snapshot = store.get().unwrap();
+        assert!(!snapshot.settings.mail.trash_verification_mail_after_copy);
+        assert!(!snapshot.recovered);
+        let mut mail = snapshot.settings.mail;
+        mail.trash_verification_mail_after_copy = true;
+        store
+            .patch(SettingsPatch {
+                mail: Some(mail),
+                ..Default::default()
+            })
+            .unwrap();
+        let reopened = SettingsStore::open(directory.path()).unwrap();
+        let restored = reopened.get().unwrap();
+        assert!(restored.settings.mail.trash_verification_mail_after_copy);
+        assert_eq!(restored.settings.general.language, "en");
+        assert_eq!(restored.settings.appearance.theme, ThemeMode::Dark);
+        let mut mail = restored.settings.mail;
+        mail.trash_verification_mail_after_copy = false;
+        reopened
+            .patch(SettingsPatch {
+                mail: Some(mail),
+                ..Default::default()
+            })
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+        assert_eq!(
+            saved["settings"]["mail"]["trashVerificationMailAfterCopy"],
+            false
+        );
+        assert!(
+            saved["settings"]["general"]
+                .get("trashVerificationMailAfterCopy")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn malformed_verification_cleanup_ipc_is_rejected() {
+    for value in [
+        serde_json::json!("yes"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        assert!(
+            serde_json::from_value::<SettingsPatch>(serde_json::json!({
+                "mail": {"trashVerificationMailAfterCopy": value}
+            }))
+            .is_err()
+        );
     }
 }
 

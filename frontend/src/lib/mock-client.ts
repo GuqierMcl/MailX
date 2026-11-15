@@ -25,6 +25,7 @@ import type {
   FolderRole,
   MailAddress,
   MailStateChanged,
+  OverviewActivity,
   RouteConfig,
   TranslationProviderId,
   TranslationStatus,
@@ -75,9 +76,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const dataset = options.seed === 'showcase' ? showcaseDataset() : DEFAULT_DATASET
   const accounts = dataset.accounts.map((account) => structuredClone(account))
   const emails = buildEmails(dataset)
+  // Explicit screenshot fixtures only: the production recognizer lives in Rust.
+  const verificationCodes = new Map(dataset.seeds.flatMap((seed, index) => seed.verificationCode
+    ? [[emails[index].summary.id, seed.verificationCode] as const] : []))
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -87,7 +92,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
-        settings = { ...value, settings: { ...value.settings, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }
@@ -113,6 +118,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const clone = <T,>(value: T) => structuredClone(value)
   const MOCK_DELETE_UNDO_MS = 5000
   const pendingDeletions = new Map<string, { timer: ReturnType<typeof setTimeout>; emails: typeof emails }>()
+  const verificationDeletions = new Set<string>()
   const archiveReceipts = new Map<string, { emailIds: string[]; before: boolean; expires: number }>()
   const mailStateListeners = new Set<(change: MailStateChanged) => void>()
 
@@ -646,6 +652,48 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!aggregated) contactRules.delete(key)
       else if (!contactRules.has(key)) contactRules.set(key, new Date().toISOString())
     },
+    async getMailOverview(query) {
+      // Same scope rules as the core (app/overview.rs): inbox mail that is not
+      // archived; starred unread outside junk and trash.
+      const now = Date.now()
+      const role = (email: EmailDetail) => folders.find((folder) => folder.id === email.summary.folderId)?.role
+      const ownAddresses = () => new Set([...accounts.map((account) => account.emailAddress), ...Object.values(dataset.me).map((me) => me.address)]
+        .map((address) => address.toLowerCase()))
+      const newestFirst = (a: EmailDetail, b: EmailDetail) => b.summary.receivedAt.localeCompare(a.summary.receivedAt) || b.summary.id.localeCompare(a.summary.id)
+      const inbox = emails.filter((email) => role(email) === 'inbox' && !email.summary.archived).sort(newestFirst)
+      const since = query.since == null ? null : Date.parse(query.since)
+      if (since != null && Number.isNaN(since)) throw new MailxClientError({ code: 'validation', field: 'since', message: '配置参数无效。' })
+      const fresh = since == null ? [] : inbox.filter((email) => Date.parse(email.summary.receivedAt) > since)
+      const perAccount = new Map<string, number>()
+      for (const email of fresh) perAccount.set(email.summary.accountId, (perAccount.get(email.summary.accountId) ?? 0) + 1)
+      const within = (email: EmailDetail, ms: number) => Date.parse(email.summary.receivedAt) >= now - ms
+      // A stand-in for the core's detector: only the mock's own wording.
+      const code = (email: EmailDetail) => {
+        const text = email.summary.bodyState === 'ready' ? email.body?.text ?? '' : email.summary.preview
+        return /(?:验证码|verification code)\D{0,6}(\d{4,8})/i.exec(`${email.summary.subject}\n${text}`)?.[1] ?? null
+      }
+      return structuredClone({
+        newMail: {
+          total: fresh.length,
+          accounts: [...perAccount].sort(([a], [b]) => a.localeCompare(b)).map(([accountId, count]) => ({ accountId, count })),
+          latest: fresh.slice(0, 5).map((email) => email.summary),
+        },
+        starredUnread: emails.filter((email) => email.summary.isStarred && !email.summary.isRead && role(email) !== 'junk' && role(email) !== 'trash').length,
+        verificationCodes: inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => {
+          const found = code(email)
+          return found ? [{ emailId: email.summary.id, accountId: email.summary.accountId, folderId: email.summary.folderId, from: email.summary.from, code: found, receivedAt: email.summary.receivedAt, bodyState: email.summary.bodyState }] : []
+        }).slice(0, 3),
+        recentAttachments: inbox.filter((email) => email.summary.hasAttachment && within(email, 7 * 86_400_000)).slice(0, 5).map((email) => ({
+          email: email.summary,
+          // Names are known once the body is cached, as in the core.
+          fileNames: email.summary.bodyState === 'ready' ? email.attachments.filter((part) => !part.isInline).map((part) => part.filename ?? '').filter(Boolean) : [],
+        })),
+        ...(query.dayStarts == null ? {} : {
+          activity: mockActivity(emails, role, ownAddresses(), query.dayStarts, now),
+        }),
+        generatedAt: new Date(now).toISOString(),
+      })
+    },
     async getEmail(emailId) {
       const email = emails.find((row) => row.summary.id === emailId)
       if (!email) throw notFound()
@@ -724,6 +772,44 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       pendingDeletions.set(batchId, { timer, emails: plans.map((plan) => plan.email) })
       return { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent, skippedIds }
     },
+    async getVerificationCode(emailId) {
+      if (!emails.some((email) => email.summary.id === emailId)) throw notFound()
+      const code = verificationCodes.get(emailId)
+      return code ? { emailId, state: 'ready', code, recognitionId: `mock-code:${emailId}` }
+        : { emailId, state: 'notFound', code: null, recognitionId: null }
+    },
+    async copyVerificationCode(emailId, recognitionId) {
+      const email = emails.find((row) => row.summary.id === emailId)
+      if (!email || !verificationCodes.has(emailId) || recognitionId !== `mock-code:${emailId}`) throw notFound()
+      // Browser demonstration only: this acknowledges the synthetic copy without
+      // reading or writing the visitor's real clipboard.
+      const base = { emailId, accountId: email.summary.accountId }
+      if (!settings.settings.mail.trashVerificationMailAfterCopy) return { ...base, cleanup: 'disabled', deletion: null }
+      const source = folders.find((folder) => folder.id === email.summary.folderId)
+      const trash = source?.role === 'trash' ? undefined : folders.find((folder) => folder.accountId === email.summary.accountId && folder.role === 'trash' && folder.selectable)
+      if (!trash) return { ...base, cleanup: 'unavailable', deletion: null }
+      emails.splice(emails.indexOf(email), 1)
+      const batchId = crypto.randomUUID()
+      verificationDeletions.add(batchId)
+      const timer = setTimeout(() => {
+        pendingDeletions.delete(batchId)
+        verificationDeletions.delete(batchId)
+        email.summary.folderId = trash.id
+        emails.push(email)
+      }, MOCK_DELETE_UNDO_MS)
+      pendingDeletions.set(batchId, { timer, emails: [email] })
+      return { ...base, cleanup: 'queued', deletion: { batchId, undoUntil: new Date(Date.now() + MOCK_DELETE_UNDO_MS).toISOString(), permanent: false, skippedIds: [] } }
+    },
+    async undoVerificationCodeDelete(batchId) {
+      const pending = verificationDeletions.has(batchId) ? pendingDeletions.get(batchId) : undefined
+      if (!pending) throw notFound()
+      clearTimeout(pending.timer)
+      pendingDeletions.delete(batchId)
+      verificationDeletions.delete(batchId)
+      emails.push(...pending.emails)
+    },
+    onVerificationCodeCopied: () => () => undefined,
+    onVerificationCodeChanged: () => () => undefined,
     async undoDelete(batchId) {
       const pending = pendingDeletions.get(batchId)
       if (!pending) throw notFound()
@@ -1049,7 +1135,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const next = JSON.parse(event.newValue) as typeof settings
           if (typeof next.revision === 'number' && next.revision > settings.revision &&
               (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
-            settings = next
+            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true } } }
             listener({ revision: settings.revision })
           }
         } catch { /* Ignore an invalid preview cache. */ }
@@ -1377,6 +1463,8 @@ export type Seed = {
   html?: boolean
   /** What the subject reads once translated; defaults to a bracketed copy. */
   translatedSubject?: string
+  /** A known synthetic recognition result for browser UI previews. */
+  verificationCode?: string
 }
 
 const ME_WORK = { name: '林伟', address: 'lin.wei@example.com' }
@@ -1568,7 +1656,59 @@ const DEFAULT_SEEDS: Seed[] = [
     hoursAgo: 1,
     read: true,
   },
+  {
+    account: PERSONAL,
+    from: { name: '东方航空', address: 'service@airline.example' },
+    subject: '您的电子登机牌',
+    text: '林伟先生，您好：\n\n您预订的航班电子登机牌见附件，请在登机前准备好身份证件。',
+    hoursAgo: 5,
+    attachments: [['电子登机牌.pdf', 'application/pdf', 96_000]],
+  },
+  {
+    account: PERSONAL,
+    from: { name: '云存储', address: 'no-reply@cloud.example' },
+    subject: '登录验证码',
+    text: '你的验证码是 482913，10 分钟内有效。如果不是你本人操作，请忽略这封邮件。',
+    verificationCode: '482913',
+    hoursAgo: 0.1,
+  },
+  // Older mail over the last two weeks, so the Now page has a believable
+  // activity chart and a few people you write to.
+  ...olderSeeds(),
 ]
+
+/** Received and sent mail spread over the last two weeks, all read. */
+function olderSeeds(): Seed[] {
+  const chen = { name: '陈晓', address: 'chen.xiao@example.com' }
+  const wang = { name: '王芳', address: 'wang.fang@example.com' }
+  const github = { name: 'GitHub', address: 'notifications@github.example' }
+  const mom = { name: '妈妈', address: 'mom@example.net' }
+  const received = (account: string, from: MailAddress, subject: string, hoursAgo: number): Seed =>
+    ({ account, from, subject, text: `${subject}。`, hoursAgo, read: true })
+  const sent = (account: string, to: MailAddress, subject: string, hoursAgo: number): Seed =>
+    ({ account, role: 'sent', from: account === WORK ? ME_WORK : ME_HOME, to: [to], subject, text: `${subject}。`, hoursAgo, read: true })
+  return [
+    received(WORK, chen, '同步模块排期调整', 40),
+    sent(WORK, chen, '回复：同步模块排期调整', 44),
+    received(WORK, chen, '本周站会纪要', 98),
+    received(WORK, chen, '上线检查清单', 150),
+    sent(WORK, chen, '回复：上线检查清单', 152),
+    received(WORK, chen, '第二季度复盘材料', 230),
+    sent(WORK, wang, '十月报销单据', 70),
+    received(WORK, wang, '回复：十月报销单据', 72),
+    received(WORK, wang, '财务系统切换说明', 190),
+    sent(WORK, wang, '回复：财务系统切换说明', 260),
+    received(WORK, github, '[MailX] Issue #12: IDLE reconnect', 20),
+    received(WORK, github, '[MailX] Release v0.2.0', 64),
+    received(WORK, github, '[MailX] Pull request #9 merged', 120),
+    received(WORK, github, '[MailX] Issue #7 closed', 175),
+    received(WORK, github, '[MailX] Workflow run failed', 210),
+    received(WORK, github, '[MailX] Discussion #3', 300),
+    received(PERSONAL, mom, '天冷了多穿点', 110),
+    sent(PERSONAL, mom, '回复：天冷了多穿点', 112),
+    received(PERSONAL, mom, '国庆的照片', 280),
+  ]
+}
 
 type MockDataset = {
   accounts: Account[]
@@ -1650,6 +1790,72 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       })),
     }
   })
+}
+
+/**
+ * The overview's activity section with the core's rules (app/overview/activity.rs):
+ * inbox mail per local day (archived included), the Sent view per week (the
+ * mock keeps one row per sent message, so nothing needs merging), today's
+ * inbox as listed, and the three addresses you corresponded with most that
+ * you have written to at least once, never your own.
+ */
+function mockActivity(
+  emails: EmailDetail[],
+  role: (email: EmailDetail) => FolderRole | null | undefined,
+  own: Set<string>,
+  dayStarts: string[],
+  now: number,
+): OverviewActivity {
+  const invalid = () => new MailxClientError({ code: 'validation', field: 'dayStarts', message: '配置参数无效。' })
+  const starts = dayStarts.map((start) => Date.parse(start))
+  if (starts.length !== 14 || starts.some(Number.isNaN)) throw invalid()
+  if (starts.some((start, index) => index > 0 && start <= starts[index - 1]) || starts[13] > now) throw invalid()
+  const time = (email: EmailDetail) => Date.parse(email.summary.receivedAt)
+  // Half-open ranges; the last one ends at `now` inclusive, as in the core.
+  const end = now + 1
+  const between = (email: EmailDetail, from: number, to: number) => time(email) >= from && time(email) < to
+  const inbox = emails.filter((email) => role(email) === 'inbox')
+  const sent = emails.filter((email) => role(email) === 'sent')
+  const bounds = [...starts, end]
+  const received = starts.map((_, index) => inbox.filter((email) => between(email, bounds[index], bounds[index + 1])).length)
+  const sum = (counts: number[]) => counts.reduce((total, count) => total + count, 0)
+  const recipients = (email: EmailDetail) => [...new Set([...email.to, ...email.cc].map((row) => row.address.toLowerCase()))]
+  const writtenTo = new Set(sent.flatMap(recipients))
+  type Tally = { count: number, last: number, name: { at: number, value: string } | null }
+  const tally = new Map<string, Tally>()
+  const mention = (address: string, at: number, name: string | null | undefined) => {
+    const row = tally.get(address) ?? { count: 0, last: 0, name: null }
+    row.count += 1
+    row.last = Math.max(row.last, at)
+    const value = name?.trim()
+    if (value && (!row.name || row.name.at < at)) row.name = { at, value }
+    tally.set(address, row)
+  }
+  for (const email of inbox.filter((row) => between(row, starts[7], end))) {
+    mention(email.summary.from.address.toLowerCase(), time(email), email.summary.from.name)
+  }
+  for (const email of sent.filter((row) => between(row, starts[7], end))) {
+    for (const address of recipients(email)) {
+      mention(address, time(email), [...email.to, ...email.cc].find((row) => row.address.toLowerCase() === address && row.name)?.name)
+    }
+  }
+  const topContacts = [...tally]
+    .filter(([address]) => writtenTo.has(address) && !own.has(address))
+    .sort(([a, x], [b, y]) => y.count - x.count || y.last - x.last || a.localeCompare(b))
+    .slice(0, 3)
+    .map(([address, row]) => ({ address, name: row.name?.value ?? null, count: row.count }))
+  const today = inbox.filter((email) => !email.summary.archived && between(email, starts[13], end))
+  return {
+    days: starts.map((start, index) => ({ start: new Date(start).toISOString(), received: received[index] })),
+    receivedLastWeek: sum(received.slice(7)),
+    receivedPreviousWeek: sum(received.slice(0, 7)),
+    sentLastWeek: sent.filter((email) => between(email, starts[7], end)).length,
+    sentPreviousWeek: sent.filter((email) => between(email, starts[0], starts[7])).length,
+    // The mock holds every message it will ever show.
+    previousWeekComplete: true,
+    topContacts,
+    today: { received: today.length, unread: today.filter((email) => !email.summary.isRead).length },
+  }
 }
 
 /** Browser preview only (`?seed=outbox`): one rich draft plus sends that end failed, unknown and retrying. */

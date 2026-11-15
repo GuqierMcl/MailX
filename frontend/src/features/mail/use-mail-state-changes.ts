@@ -14,6 +14,7 @@ export function useMailStateChanges(client: MailxClient) {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     void queryClient.invalidateQueries({ queryKey: mailKeys.tree() })
     void queryClient.invalidateQueries({ queryKey: mailKeys.conversations() })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.overviews() })
     // A shared Message-ID can affect more rows than fit in the event's ID
     // sample; always refresh cached details as well as lists and counts.
     void queryClient.invalidateQueries({

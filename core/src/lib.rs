@@ -38,19 +38,22 @@ pub use ai::{
     AiProtocol, AiProviderIcon, AiSettings, AiTestResult,
 };
 pub use app::{
-    AccountConnectionVerification, Activity, AiConnectionState, AiService, AiState,
-    ArchiveOutcome, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind,
+    AccountConnectionVerification, AccountMailCount, Activity, AiConnectionState, AiService,
+    AiState, ArchiveOutcome, AttachmentFile, AttachmentInfo, AvatarImage, AvatarKind,
     BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks,
     CancelConnectionVerification, CancelDraftVerification, ConfirmOAuthMailbox,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
-    CreateOAuthAccount, DiscoverMailSettingsRequest, DiscoveredEwsEndpoint,
-    DiscoveredMailEndpoint, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
-    FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,
-    MailSettingsDiscovery, MailSettingsDiscoveryStatus, MailxCore, MessageFlag,
+    CreateOAuthAccount, DayActivity, DiscoveredEwsEndpoint, DiscoveredMailEndpoint,
+    DiscoverMailSettingsRequest, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
+    FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailOverview,
+    MailOverviewQuery, MailSettingsDiscovery, MailSettingsDiscoveryStatus, MailxCore, MessageFlag,
+    NewMailOverview,
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
-    ProtocolVerification, RemoteImageStatus, SaveAiConnection, SavedAiConnection,
-    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
-    TranslationStatus, TranslationTest, VerifyAccountConnection, VerifyDraftConnection,
+    OverviewActivity, OverviewCode, OverviewContact, ProtocolVerification, RecentAttachment,
+    RemoteImageStatus, SaveAiConnection, SavedAiConnection, TodayActivity, TranslationCacheStats,
+    TranslationInfo, TranslationKeyState, TranslationProxyPasswordState, TranslationStatus,
+    TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
+    VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
@@ -68,10 +71,11 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AiConsent, AppSettings, AppearanceSettings, CloseBehavior, ComposeSettings, FontSize,
-    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailTheme, McpSettings,
-    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
-    ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, ThemeMode,
-    TranslationProviderId, TranslationSettings, mail_body_css,
+    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
+    McpSettings, NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy,
+    SecuritySettings, ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot,
+    SettingsStore, StartupView, ThemeMode, TranslationProviderId, TranslationSettings,
+    mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

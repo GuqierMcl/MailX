@@ -12,7 +12,7 @@ import { withTitleBar } from '@/test/title-bar'
 import { Workbench } from './workbench'
 import { expandAccount } from '@/test/sidebar'
 
-const DEFAULT_SETTINGS = { appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' as const }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
+const DEFAULT_SETTINGS = { mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' as const }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
 const account = exampleAccount()
 const inbox: Folder = {
   id: 'inbox', accountId: account.id, parentId: null, name: 'INBOX', role: 'inbox',
@@ -702,7 +702,7 @@ describe('the folded reader survives a restart', () => {
   const toggle = () => screen.getByRole('button', { name: /^(收起|展开)邮件内容$/ })
   const savedLayout = (client: ReturnType<typeof setup>['client'], readerCollapsed: boolean) =>
     client.getSettings.mockResolvedValue({
-      settings: { ...DEFAULT_SETTINGS, general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false }, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, effectiveLocale: 'zh-CN', revision: 0, stored: true, recovered: false,
+      settings: { ...DEFAULT_SETTINGS, general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, layout: { ...DEFAULT_LAYOUT, readerCollapsed } }, effectiveLocale: 'zh-CN', revision: 0, stored: true, recovered: false,
     })
 
   it('starts folded when it was left folded, and shown by default', async () => {

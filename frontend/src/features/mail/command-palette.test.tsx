@@ -67,11 +67,19 @@ describe('command palette', () => {
   it('offers the same views as the top of the sidebar, before the folders', async () => {
     const { palette } = await openPalette()
     const jumps = within(palette).getAllByRole('option').map((option) => option.textContent ?? '')
-    const views = ['全部收件箱', '星标', '草稿', '全部已发送', '全部已归档', '全部垃圾邮件', '全部已删除']
+    const views = ['此刻', '全部收件箱', '星标', '草稿', '全部已发送', '全部已归档', '全部垃圾邮件', '全部已删除']
     expect(jumps.filter((label) => views.includes(label))).toEqual(views)
     expect(jumps.indexOf('全部已删除')).toBeLessThan(jumps.findIndex((label) => label.includes(' · ')))
     // A server archive folder keeps its own name, apart from the local archive.
     expect(jumps).toContain('工作邮箱 · 归档')
+  })
+
+  it('jumps to the Now page', async () => {
+    const { input } = await openPalette()
+    await userEvent.type(input, '此刻')
+    await userEvent.click(await screen.findByRole('option', { name: '此刻' }))
+    await waitFor(() => expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument())
+    expect(within(screen.getByRole('navigation', { name: '邮箱导航' })).getByRole('button', { name: '此刻' })).toHaveAttribute('data-active')
   })
 
   it('jumps to starred mail across accounts', async () => {
