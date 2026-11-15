@@ -137,6 +137,9 @@ impl Storage {
             "mail_connections",
             "network_routes",
             "auth_profiles",
+            "exchange_endpoints",
+            "ews_items",
+            "ews_folder_state",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [id])?;
         }

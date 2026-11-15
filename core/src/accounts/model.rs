@@ -19,6 +19,26 @@ impl TrustEndpoint {
             username: connection.username.clone(),
         }
     }
+
+    /// An EWS endpoint is a single HTTPS origin. The credential is trusted
+    /// against exactly the origin the user confirmed, never a derived host.
+    pub fn ews(config: &EwsConnectionConfig) -> Self {
+        let parsed = url::Url::parse(&config.url).ok();
+        Self {
+            protocol: "ews".into(),
+            host: parsed
+                .as_ref()
+                .and_then(|url| url.host_str())
+                .unwrap_or_default()
+                .to_owned(),
+            port: parsed
+                .as_ref()
+                .and_then(|url| url.port_or_known_default())
+                .unwrap_or(443),
+            tls: Some(TlsMode::Implicit),
+            username: config.username.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

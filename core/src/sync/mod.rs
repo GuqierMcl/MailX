@@ -2,6 +2,7 @@
 
 pub(crate) mod bodies;
 pub(crate) mod cadence;
+pub(crate) mod ews;
 pub(crate) mod folders;
 pub(crate) mod headers;
 pub(crate) mod idle;

@@ -63,6 +63,7 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
               <ConnectionForm
                 key={version}
                 account={account}
+                discoveryClient={client}
                 onOpenHelp={() => client.openProviderHelp(account.providerId ?? '')}
                 intro={{
                   title: t('accounts:reconnectAfterSave'),

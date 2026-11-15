@@ -17,6 +17,7 @@ mod contacts;
 pub(crate) mod conversations;
 pub(crate) mod deletions;
 pub(crate) mod drafts;
+pub(crate) mod ews;
 mod flag_changes;
 mod folders;
 pub(crate) mod image_cache;
@@ -177,6 +178,26 @@ impl Storage {
                 imap: find(&imap_id, "imap", &imap)?,
                 smtp: find(&smtp_id, "smtp", &smtp)?,
             });
+        let ews = self
+            .db
+            .query_row(
+                "SELECT url,auth,username,cert_principal_name FROM exchange_endpoints WHERE account_id=?1",
+                [id],
+                |r| {
+                    let auth: String = r.get(1)?;
+                    Ok(EwsConnectionConfig {
+                        url: r.get(0)?,
+                        auth: if auth == "basic" {
+                            EwsAuth::Basic
+                        } else {
+                            EwsAuth::Ntlm
+                        },
+                        username: r.get(2)?,
+                        cert_principal_name: r.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
         let (route_revision, route, proxy_secret) = self.load_route(id)?;
         let mut snapshot = Snapshot {
             account: Account {
@@ -193,6 +214,7 @@ impl Storage {
                 updated_at: basic.6,
                 imap,
                 smtp,
+                ews,
                 authentication,
                 default_route_revision: if matches!(route, RouteConfig::Inherit) {
                     Some(1)
@@ -363,6 +385,22 @@ impl Storage {
             ("smtp", &account.smtp, &account.authentication.smtp().id),
         ] {
             tx.execute("INSERT INTO mail_connections(account_id,protocol,host,port,tls,username,auth_profile_id) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![account.id,protocol,config.host,config.port,enum_name(&config.tls)?,config.username,auth_id])?;
+        }
+        tx.execute(
+            "DELETE FROM exchange_endpoints WHERE account_id=?1",
+            [&account.id],
+        )?;
+        if let Some(ews) = &account.ews {
+            tx.execute(
+                "INSERT INTO exchange_endpoints(account_id,url,auth,username,cert_principal_name) VALUES (?1,?2,?3,?4,?5)",
+                params![
+                    account.id,
+                    ews.url,
+                    match ews.auth { EwsAuth::Ntlm => "ntlm", EwsAuth::Basic => "basic" },
+                    ews.username,
+                    ews.cert_principal_name
+                ],
+            )?;
         }
         tx.execute(
             "DELETE FROM network_routes WHERE account_id=?1",

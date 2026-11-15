@@ -1,6 +1,6 @@
 # 架构文档
 
-状态：**桌面邮件与本地 MCP 已有实现 / 内置 AI 与服务器宿主为 Planned** · 账号、同步与 IDLE、隔离阅读、本地全文搜索、整理邮件、富文本发信、附件与内嵌图片、邮件翻译、应用内更新及中英文界面已有实现。各功能的真实服务商与平台证据见[验证记录](../development/validation.md)；这些方案可由后续设计修订或替换。
+状态：**桌面邮件与本地 MCP 已有实现 / 内置 AI 与服务器宿主为 Planned** · 账号、同步与 IDLE、隔离阅读、本地全文搜索、整理邮件、富文本发信、附件与内嵌图片、邮件翻译、应用内更新及中英文界面已有实现；通用入口的邮箱设置自动探测与自建 Exchange 经 EWS over HTTPS + NTLM 的收发闭环已有实现，覆盖仍有边界（增量同步、EPA、真机验证等仍为后续方向）。各功能的真实服务商与平台证据见[验证记录](../development/validation.md)；这些方案可由后续设计修订或替换。
 
 | 文档 | 主要问题 |
 | --- | --- |
@@ -11,6 +11,9 @@
 | [桌面生命周期](desktop-lifecycle.md) | 关窗、后台与托盘、安全退出、登录自动启动与静默启动 |
 | [数据库迁移与启动](database-migrations.md) | Implemented：版本化迁移、v1 兼容和业务启动准入 |
 | [同步与发信](mail-sync.md) | 账号生命周期、增量同步、断网恢复与防重复发送 |
+| [邮箱服务商兼容层](provider-compatibility.md) | 主干接口与服务商模块边界、服务商识别、已发送副本身份与对账；自动探测不改变已保存账号的兼容策略 |
+| [Exchange 自动发现与邮箱设置探测](exchange-autodiscovery.md) | 添加账号前的一次性只读发现：Autodiscover POX、匿名 EWS 回退、状态词表与路由约束 |
+| [EWS 邮件后端](ews-backend.md) | 已实现：EWS over HTTPS + NTLMv2 的 FindItem / GetItem / UpdateItem / DeleteItem / CreateItem 收发闭环与独立轮询；增量同步、EPA 等仍为后续方向 |
 | [验证码识别](verification-codes.md) | core 本地规则识别、歧义结果、MIME 预算、开发探测与原生通知复制；平台交互待验 |
 | [邮箱服务商兼容层](provider-compatibility.md) | 主干接口与服务商模块边界、服务商识别、已发送副本身份与对账 |
 | [写信与发送](sending.md) | 富文本草稿、写信窗口、附件与内嵌图片、SMTP 队列与已发送副本 |

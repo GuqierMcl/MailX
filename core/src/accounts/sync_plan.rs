@@ -5,11 +5,13 @@
 use super::model::TrustEndpoint;
 use super::types::{CredentialTrust, RouteConfig};
 use super::{AccountService, validate_uuid};
+use crate::auth::credential::ProtocolCredential;
 use crate::error::{AppError, ErrorCode};
+use crate::ews::Endpoint;
 use crate::imap::ImapLogin;
 use crate::mail::Folder;
 use crate::net::{NetRoute, ProxyRoute};
-use crate::secrets::SecretStoreError;
+use crate::secrets::{SecretStoreError, SecretValue};
 use crate::smtp::{SmtpLogin, SmtpPlan};
 use crate::storage::proxy_endpoint;
 use crate::sync::folders::FolderRecord;
@@ -24,6 +26,18 @@ pub(crate) struct SyncPlan {
 pub(crate) struct SyncIdentity {
     pub mailbox_source_id: String,
     pub revision: u32,
+    /// EWS accounts run their own polling worker instead of IMAP/IDLE.
+    pub is_ews: bool,
+}
+
+/// Everything an EWS round needs: one HTTPS endpoint, one password, one route.
+#[derive(Debug)]
+pub(crate) struct EwsPlan {
+    pub mailbox_source_id: String,
+    pub endpoint: Endpoint,
+    pub user: String,
+    pub password: SecretValue,
+    pub route: NetRoute,
 }
 
 #[derive(Debug)]
@@ -56,7 +70,51 @@ impl AccountService {
         Ok(SyncIdentity {
             mailbox_source_id: account.mailbox_source_id,
             revision: account.revision,
+            is_ews: account.ews.is_some(),
         })
+    }
+
+    /// Resolves an EWS plan, or `None` for an ordinary IMAP/SMTP account. The
+    /// password is only released for the exact HTTPS endpoint the user saved:
+    /// a changed URL cannot silently send credentials to another host.
+    pub(crate) fn ews_plan(&self, account_id: &str) -> Result<Option<EwsPlan>, PlanError> {
+        let snapshot = self.storage.load(account_id)?;
+        let account = &snapshot.account;
+        let Some(ews) = &account.ews else {
+            return Ok(None);
+        };
+        let endpoint = TrustEndpoint::ews(ews);
+        let profile = snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.id == account.authentication.imap().id)
+            .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+        if profile.trust(&endpoint) != CredentialTrust::Trusted {
+            return Err(PlanError::CredentialUntrusted);
+        }
+        let ProtocolCredential::Password(password) = self.protocol_credential(profile, account)?
+        else {
+            return Err(PlanError::CredentialMissing);
+        };
+        let url = url::Url::parse(&ews.url)
+            .map_err(|_| PlanError::Account(AppError::new(ErrorCode::StorageIncompatible)))?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| PlanError::Account(AppError::new(ErrorCode::StorageIncompatible)))?
+            .to_owned();
+        let mut route = self.image_route(account_id)?;
+        route.image_proxy_dns = false;
+        Ok(Some(EwsPlan {
+            mailbox_source_id: account.mailbox_source_id.clone(),
+            endpoint: Endpoint {
+                host,
+                port: url.port_or_known_default().unwrap_or(443),
+                path: url.path().to_owned(),
+            },
+            user: ews.username.clone(),
+            password,
+            route,
+        }))
     }
 
     /// Resolves credentials for an IMAP sync. A credential is only used for the

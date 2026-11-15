@@ -148,6 +148,8 @@ pub struct MessagesDeleted {
 pub(super) struct WorkerToken {
     pub(super) account_id: String,
     pub(super) source: String,
+    /// EWS accounts use the polling round without IMAP sessions or IDLE.
+    pub(super) is_ews: bool,
     revision: u32,
     generation: u32,
 }
@@ -291,7 +293,12 @@ impl Shared {
         });
     }
 
-    fn reconcile_targets(&self, token: &WorkerToken, targets: &[(String, String)], listed: bool) {
+    pub(super) fn reconcile_targets(
+        &self,
+        token: &WorkerToken,
+        targets: &[(String, String)],
+        listed: bool,
+    ) {
         self.update(token, |state| {
             let mut old: HashMap<_, _> = state
                 .folders
@@ -635,6 +642,7 @@ impl SyncManager {
         let Ok(account) = service.sync_identity(account_id) else {
             return;
         };
+        let is_ews = account.is_ews;
         let token = {
             let Ok(mut states) = self.shared.states.lock() else {
                 return;
@@ -659,6 +667,7 @@ impl SyncManager {
             WorkerToken {
                 account_id: account_id.to_owned(),
                 source: account.mailbox_source_id,
+                is_ews,
                 revision: account.revision,
                 generation,
             }
@@ -685,8 +694,12 @@ impl SyncManager {
             )),
         );
         drop(workers);
-        self.start_writer(account_id, writer_token);
-        self.start_watcher(account_id, watcher_token, watcher_wake, health);
+        // EWS has no IDLE and no IMAP flag writer; its round handles both.
+        // Leaving the watcher unspawned also keeps the cadence on plain polling.
+        if !is_ews {
+            self.start_writer(account_id, writer_token);
+            self.start_watcher(account_id, watcher_token, watcher_wake, health);
+        }
     }
 
     /// Starts the IDLE watcher next to the sync worker, on the same lifecycle:
@@ -823,7 +836,7 @@ impl Drop for SyncManager {
     }
 }
 
-enum Outcome {
+pub(super) enum Outcome {
     Synced,
     /// All folders attempted; failures remain visible until the next round.
     Partial(SyncFailure),
@@ -1070,6 +1083,9 @@ async fn sync_once(
     memory: &mut messages::FolderMemory,
 ) -> Outcome {
     let id = token.account_id.clone();
+    if token.is_ews {
+        return super::ews::sync_once(shared, token).await;
+    }
     let plan = match with_store(shared, token, move |service| Ok(service.sync_plan(&id))).await {
         Ok(Ok(plan)) => plan,
         Ok(Err(PlanError::Account(error))) if error.code == ErrorCode::NotFound => {
@@ -1273,7 +1289,7 @@ where
     failed.map_or(Outcome::Synced, Outcome::Partial)
 }
 
-fn from_sync_error(error: SyncError) -> Outcome {
+pub(super) fn from_sync_error(error: SyncError) -> Outcome {
     match error {
         SyncError::Imap(error) => classify(error),
         SyncError::Storage(error) if error.code == ErrorCode::NotFound => Outcome::Gone,
@@ -1321,7 +1337,11 @@ fn classify(error: ImapError) -> Outcome {
     }
 }
 
-fn failure(code: SyncFailureCode, detail: Option<String>, will_retry: bool) -> SyncFailure {
+pub(super) fn failure(
+    code: SyncFailureCode,
+    detail: Option<String>,
+    will_retry: bool,
+) -> SyncFailure {
     let message = match code {
         SyncFailureCode::Authentication => "服务器拒绝了登录，请检查用户名和密码或授权码。",
         SyncFailureCode::SignInRequired => "邮箱登录已过期，请在账号设置中重新登录。",
@@ -1441,6 +1461,7 @@ mod tests {
         let old = WorkerToken {
             account_id: account.id.clone(),
             source: account.mailbox_source_id.clone(),
+            is_ews: false,
             revision: account.revision,
             generation: state.generation,
         };
@@ -1554,6 +1575,7 @@ mod tests {
         let token = WorkerToken {
             account_id: account.id.clone(),
             source: account.mailbox_source_id.clone(),
+            is_ews: false,
             revision: account.revision,
             generation: state.generation,
         };

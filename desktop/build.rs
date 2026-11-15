@@ -28,6 +28,7 @@ fn main() {
             "accounts_cancel_verification",
             "accounts_verify_draft_connection",
             "accounts_cancel_draft_verification",
+            "accounts_discover_mail_settings",
             "accounts_open_provider_help",
             "folders_list",
             "emails_list",

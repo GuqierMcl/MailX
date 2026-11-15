@@ -2,7 +2,11 @@ import { errorText, type ErrorContext } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Account, AuthenticationMode, ConnectionInput, DraftConnectionVerification, TlsMode } from '@/generated/accounts'
+import type {
+  Account, AuthenticationMode, ConnectionInput, DiscoveredMailEndpoint, DiscoverMailSettingsRequest,
+  DraftConnectionVerification, EwsConnectionConfig, MailSettingsDiscovery, MailSettingsDiscoveryStatus,
+  RouteInput, TlsMode,
+} from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,10 +15,11 @@ import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
 import { providerCredentialText, providerEmailRequired, providerOf, type MailProvider } from './providers'
-import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
+import { changeDraft, clearSecrets, draftToConnection, draftToRoute, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 import { ConnectionVerificationReport } from './connection-verification'
 
 type FormProps = {
@@ -24,6 +29,8 @@ type FormProps = {
   onOpenHelp?(): Promise<void>
   /** Adds optional testing of the unsaved connection in the add-account wizard. */
   verificationClient?: MailxClient
+  /** Read-only server lookup used by the manual IMAP/SMTP path, before asking for servers. */
+  discoveryClient?: MailxClient
   /** Invalidates reports when the containing wizard closes or asks to leave. */
   verificationResetKey?: string
   /** Where to resume, e.g. coming back to this step of the add-account wizard. */
@@ -48,6 +55,12 @@ type FormProps = {
   unavailable?: boolean
   /** Adds a back button beside submit, e.g. in a wizard. */
   onBack?(): void
+  /**
+   * Generic accounts open on a sign-in card: the address and a password, then
+   * either "sign in" (detect, verify with the recommended protocol, submit) or
+   * "manual setup" (the full form below, prefilled by the same lookup).
+   */
+  signInFirst?: boolean
 }
 
 type InputFieldProps = {
@@ -67,6 +80,127 @@ type LoginTestState = (
   | { kind: 'idle' | 'checking' | 'cancelled' }
   | { kind: 'ready'; report: DraftConnectionVerification }
 ) & { scopeKey: string }
+
+/** What the sign-in card is doing right now. */
+type SignInState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'report'; report: DraftConnectionVerification }
+  | { kind: 'failed' }
+
+type DiscoveryState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'found'; source: string | null }
+  | { kind: 'ews'; source: string | null }
+  | { kind: 'needsCredentials' }
+  | { kind: 'failed'; status: MailSettingsDiscoveryStatus }
+  | { kind: 'manual' }
+
+/** Editing any of these changes which server is looked up, so a result is stale. */
+const DISCOVERY_INPUT_KEYS: (keyof AccountDraft)[] = [
+  'emailAddress', 'routeKind', 'proxyKind', 'proxyHost', 'proxyPort', 'proxyAuth', 'proxyUsername', 'imageProxyDns',
+]
+
+/** One plain sentence for every status a lookup can report. */
+const DISCOVERY_STATUS_KEYS = {
+  found: 'accounts:autodiscoverStatusFound',
+  needsCredentials: 'accounts:autodiscoverStatusNeedsCredentials',
+  rejected: 'accounts:autodiscoverStatusRejected',
+  notFound: 'accounts:autodiscoverStatusNotFound',
+  network: 'accounts:autodiscoverStatusNetwork',
+  proxy: 'accounts:autodiscoverStatusProxy',
+  tls: 'accounts:autodiscoverStatusTls',
+  timeout: 'accounts:autodiscoverStatusTimeout',
+  unsupported: 'accounts:autodiscoverStatusUnsupported',
+} as const satisfies Record<MailSettingsDiscoveryStatus, string>
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/
+const DISCOVERY_DELAY_MS = 300
+
+function endpointDraft(endpoint: DiscoveredMailEndpoint): ConnectionDraft {
+  // A null username keeps the form's default (the mailbox address).
+  return { host: endpoint.host, port: String(endpoint.port), tls: endpoint.tls, username: endpoint.username ?? '' }
+}
+
+/** EWS accounts still keep IMAP/SMTP placeholder rows; take their host from the URL. */
+function ewsHost(url: string, emailAddress: string): string {
+  const fallback = emailAddress.split('@')[1] ?? 'localhost'
+  try {
+    return new URL(url).hostname || fallback
+  } catch {
+    return fallback
+  }
+}
+
+function DiscoveryPanel({ state, source, emailEntered, saving, onRetry }: {
+  state: DiscoveryState
+  source: string | null
+  emailEntered: boolean
+  saving: boolean
+  onRetry(): void
+}) {
+  useTranslation()
+  const checking = state.kind === 'checking'
+  let title = t('accounts:autodiscoverPrompt')
+  let detail: string | null = null
+  if (checking) title = t('accounts:autodiscoverChecking')
+  else if (state.kind === 'found') title = t('accounts:autodiscoverFound')
+  else if (state.kind === 'manual') title = t('accounts:autodiscoverManual')
+  else if (state.kind === 'needsCredentials') {
+    title = t(DISCOVERY_STATUS_KEYS.needsCredentials)
+    detail = t('accounts:autodiscoverNeedsCredentialsHint')
+  } else if (state.kind === 'failed') {
+    title = t(DISCOVERY_STATUS_KEYS[state.status])
+    detail = t('accounts:autodiscoverFailedHint')
+  }
+  return (
+    <SettingsGroup title={t('accounts:autodiscoverTitle')}>
+      <Alert role="status">
+        <AlertTitle>{title}</AlertTitle>
+        {detail && <AlertDescription>{detail}</AlertDescription>}
+      </Alert>
+      {source && <FieldDescription>{t('accounts:autodiscoverSource', { source })}</FieldDescription>}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={saving || checking || !emailEntered} onClick={onRetry}>
+          {t(state.kind === 'needsCredentials' ? 'accounts:autodiscoverRetryWithPassword' : 'accounts:autodiscoverRetry')}
+        </Button>
+      </div>
+    </SettingsGroup>
+  )
+}
+
+function EwsFields({ ews, source, saving, onManual, onChange }: {
+  ews: EwsConnectionConfig
+  source: string | null
+  saving: boolean
+  onManual(): void
+  onChange(value: EwsConnectionConfig): void
+}) {
+  useTranslation()
+  return (
+    <SettingsGroup title={t('accounts:ewsSettingsTitle')} description={t('accounts:ewsDescription')}>
+      {source && <FieldDescription>{t('accounts:autodiscoverSource', { source })}</FieldDescription>}
+      <TextField id="ews.url" label={t('accounts:ewsUrlLabel')} value={ews.url} placeholder="https://mail.example.com/EWS/Exchange.asmx"
+        description={t('accounts:ewsUrlHint')} onChange={(url) => onChange({ ...ews, url: url.trim() })} />
+      <TextField id="ews.username" label={t('accounts:ewsUsernameLabel')} value={ews.username} placeholder="DOMAIN\\user"
+        description={t('accounts:ewsUsernameHint')} onChange={(username) => onChange({ ...ews, username })} />
+      <Field>
+        <FieldLabel htmlFor="ews.auth">{t('accounts:ewsAuthLabel')}</FieldLabel>
+        <Select value={ews.auth} onValueChange={(auth) => { if (auth) onChange({ ...ews, auth }) }}
+          items={{ ntlm: 'NTLM', basic: 'Basic' }}>
+          <SelectTrigger id="ews.auth" className="w-full" aria-label={t('accounts:ewsAuthLabel')}><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="ntlm">NTLM</SelectItem><SelectItem value="basic">Basic</SelectItem></SelectContent>
+        </Select>
+        <FieldDescription>{t('accounts:ewsAuthHint')}</FieldDescription>
+      </Field>
+      <TextField id="ews.certPrincipalName" label={t('accounts:ewsCertPrincipalLabel')} value={ews.certPrincipalName ?? ''}
+        placeholder="msstd:mail.example.com" description={t('accounts:ewsCertPrincipalHint')}
+        onChange={(certPrincipalName) => onChange({ ...ews, certPrincipalName: certPrincipalName.trim() || null })} />
+      <Button variant="outline" className="w-fit" disabled={saving} onClick={onManual}>{t('accounts:ewsSwitchToManual')}</Button>
+    </SettingsGroup>
+  )
+}
 
 export function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
   const invalid = error?.field === id
@@ -217,7 +351,8 @@ export function RouteFields({ draft, change, error, oldProxyAuth }: {
  */
 export function ConnectionForm({
   account, provider: selectedProvider, onOpenHelp, initialDraft: resume, initialError = null, intro, submitLabel, submittingLabel,
-  onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack, verificationClient, verificationResetKey = '',
+  onSubmit, onBusyChange, onDirtyChange, onReload, unavailable, onBack, verificationClient, discoveryClient, verificationResetKey = '',
+  signInFirst = false,
 }: FormProps) {
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
@@ -238,6 +373,41 @@ export function ConnectionForm({
     testPending.current?.abort()
     testPending.current = null
   }, [verificationResetKey])
+  const discoveryEnabled = !setup && !!discoveryClient
+  const autoDiscover = discoveryEnabled && !account
+  const [discovery, setDiscovery] = useState<DiscoveryState>({ kind: 'idle' })
+  // The sign-in card only exists for a brand-new generic account: an edit form
+  // never re-detects on its own and a preset provider already knows its servers.
+  const [phase, setPhase] = useState<'signin' | 'form'>(signInFirst && !account && !resume ? 'signin' : 'form')
+  const [signInState, setSignInState] = useState<SignInState>({ kind: 'idle' })
+  const signingIn = useRef(false)
+  const discoverySeq = useRef(0)
+  const mounted = useRef(true)
+  const draftRef = useRef(draft)
+  const discoverRef = useRef<() => Promise<void>>(async () => undefined)
+  const discoveryKey = JSON.stringify([
+    draft.emailAddress.trim(), draft.routeKind, draft.proxyKind, draft.proxyHost,
+    draft.proxyPort, draft.proxyAuth, draft.proxyUsername, draft.imageProxyDns,
+  ])
+  // A lookup has no abort signal: a sequence number and a mounted flag keep a
+  // late answer from overwriting newer input or an unmounted form.
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      discoverySeq.current += 1
+    }
+  }, [])
+  // Keep the latest draft and lookup reachable from the debounced timer.
+  useEffect(() => {
+    draftRef.current = draft
+    discoverRef.current = discover
+  })
+  useEffect(() => {
+    if (!autoDiscover || !EMAIL_PATTERN.test(draftRef.current.emailAddress.trim())) return
+    const timer = setTimeout(() => { void discoverRef.current() }, DISCOVERY_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [discoveryKey, autoDiscover])
   const password = account?.authentication.kind === 'password' ? account.authentication : null
   const oauth = account?.authentication.kind === 'oauth2'
   const sameMode = password?.mode === draft.mode
@@ -254,7 +424,15 @@ export function ConnectionForm({
 
   function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
     resetTest()
-    setDraft((current) => changeDraft(current, key, value))
+    const resetsDiscovery = discoveryEnabled && DISCOVERY_INPUT_KEYS.includes(key)
+    if (resetsDiscovery) {
+      discoverySeq.current += 1
+      setDiscovery({ kind: 'idle' })
+    }
+    setDraft((current) => {
+      const changed = changeDraft(current, key, value)
+      return resetsDiscovery ? { ...changed, ews: null } : changed
+    })
     onDirtyChange(true)
     setError(null)
   }
@@ -276,6 +454,214 @@ export function ConnectionForm({
     const field = failure.field
     if (field && !['emailAddress', 'sharedPassword', 'imapPassword', 'smtpPassword'].includes(field)) setAdvanced(true)
     if (field) requestAnimationFrame(() => document.getElementById(field)?.focus())
+  }
+
+  function currentDiscoveryPassword(): string | null {
+    const current = draftRef.current
+    const secret = current.mode === 'shared' ? current.sharedPassword : current.imapPassword
+    return secret.replace && secret.value ? secret.value : null
+  }
+
+  /**
+   * Pure: the draft and lookup state a discovery answer produces. Returning
+   * the next draft (instead of only scheduling it) lets the sign-in path read
+   * what it just applied without waiting for React to commit.
+   */
+  function appliedDiscovery(value: AccountDraft, result: MailSettingsDiscovery, hadPassword: boolean, emailAddress: string): { draft: AccountDraft; discovery: DiscoveryState } {
+    const ews = result.ews
+    if (result.status === 'found' && ews) {
+      const login = ews.username ?? emailAddress
+      const placeholder: ConnectionDraft = { host: ewsHost(ews.url, emailAddress), port: '443', tls: 'implicit', username: login }
+      return {
+        draft: {
+          ...value,
+          ews: { url: ews.url, auth: ews.auth, username: login, certPrincipalName: ews.certPrincipalName },
+          imap: { ...placeholder }, smtp: { ...placeholder },
+        },
+        discovery: { kind: 'ews', source: result.source },
+      }
+    }
+    if (result.status === 'found' && (result.imap || result.smtp)) {
+      return {
+        draft: {
+          ...value, ews: null,
+          imap: result.imap ? endpointDraft(result.imap) : value.imap,
+          smtp: result.smtp ? endpointDraft(result.smtp) : value.smtp,
+        },
+        discovery: { kind: 'found', source: result.source },
+      }
+    }
+    if (result.status === 'needsCredentials' && !hadPassword) {
+      return { draft: { ...value, ews: null }, discovery: { kind: 'needsCredentials' } }
+    }
+    return { draft: { ...value, ews: null }, discovery: { kind: 'failed', status: result.status } }
+  }
+
+  async function discover() {
+    if (!discoveryClient || !discoveryEnabled) return
+    const current = draftRef.current
+    const emailAddress = current.emailAddress.trim()
+    if (!EMAIL_PATTERN.test(emailAddress)) return
+    let route: RouteInput
+    try {
+      route = draftToRoute(current)
+    } catch {
+      // A half-entered proxy must not block the lookup; the form validates it on save.
+      route = { kind: current.routeKind === 'inherit' ? 'inherit' : 'direct' }
+    }
+    const password = currentDiscoveryPassword()
+    const request: DiscoverMailSettingsRequest = { emailAddress, password, route }
+    const seq = ++discoverySeq.current
+    setDiscovery({ kind: 'checking' })
+    try {
+      const result = await discoveryClient.discoverMailSettings(request)
+      if (!mounted.current || seq !== discoverySeq.current) return
+      const applied = appliedDiscovery(draftRef.current, result, password !== null, emailAddress)
+      setDraft(applied.draft)
+      setDiscovery(applied.discovery)
+    } catch (cause) {
+      if (!mounted.current || seq !== discoverySeq.current) return
+      setDraft((value) => ({ ...value, ews: null }))
+      setDiscovery({ kind: 'failed', status: 'network' })
+      // A swallowed IPC or host failure would masquerade as a network problem;
+      // surface whatever the host actually reported.
+      showFailure(clientFailure(cause))
+    }
+  }
+
+  function switchToManual() {
+    discoverySeq.current += 1
+    setDraft((value) => ({ ...value, ews: null }))
+    setDiscovery({ kind: 'manual' })
+  }
+
+  /** Manual setup: the full form opens and its own lookup prefills it. */
+  function enterManual() {
+    if (signingIn.current) return
+    setPhase('form')
+  }
+
+  /**
+   * "Next" on the sign-in card: look the address up, apply the recommended
+   * protocol (an Exchange endpoint when the server offers one, IMAP/SMTP
+   * otherwise), verify the credentials against it, and submit on success. A
+   * failed sign-in falls through to the manual form, prefilled with whatever
+   * the lookup did find. Nothing is saved until the caller's `onSubmit` runs.
+   */
+  async function signIn() {
+    if (!verificationClient || !discoveryClient || signingIn.current || pending.current) return
+    setError(null)
+    const current = draftRef.current
+    const emailAddress = current.emailAddress.trim()
+    if (!EMAIL_PATTERN.test(emailAddress)) {
+      showFailure({ code: 'validation', field: 'emailAddress', message: '' })
+      return
+    }
+    const password = currentDiscoveryPassword()
+    if (!password) {
+      showFailure({ code: 'validation', field: 'sharedPassword', message: '' })
+      return
+    }
+    let route: RouteInput
+    try {
+      route = draftToRoute(current)
+    } catch {
+      // A half-entered proxy is validated on save; the lookup needs a route now.
+      route = { kind: current.routeKind === 'inherit' ? 'inherit' : 'direct' }
+    }
+    signingIn.current = true
+    setSignInState({ kind: 'checking' })
+    onBusyChange(true)
+    try {
+      const result = await discoveryClient.discoverMailSettings({ emailAddress, password, route })
+      if (!mounted.current) return
+      const applied = appliedDiscovery(current, result, true, emailAddress)
+      setDraft(applied.draft)
+      setDiscovery(applied.discovery)
+      if (result.status !== 'found' || (!result.ews && !result.imap && !result.smtp)) {
+        // Nothing usable: the manual form explains what the lookup reported.
+        setSignInState({ kind: 'failed' })
+        setPhase('form')
+        return
+      }
+      let connection: ConnectionInput
+      try {
+        connection = draftToConnection(applied.draft, account, provider)
+      } catch (cause) {
+        setSignInState({ kind: 'failed' })
+        showFailure(clientFailure(cause))
+        return
+      }
+      const report = await verificationClient.verifyDraftConnection(connection)
+      if (!mounted.current) return
+      setSignInState({ kind: 'report', report })
+      if (report.imap.status !== 'verified' || report.smtp.status !== 'verified') {
+        // Sign-in failed: hand the prefilled form over for manual correction.
+        setLoginTest({ kind: 'ready', report, scopeKey: verificationResetKey })
+        setPhase('form')
+        return
+      }
+      pending.current = true
+      setSaving(true)
+      // Secrets exist only in this in-flight submission after it begins.
+      setDraft(clearSecrets)
+      try {
+        await onSubmit(connection, applied.draft)
+        onDirtyChange(false)
+      } catch (cause) {
+        showFailure(clientFailure(cause))
+      } finally {
+        pending.current = false
+        setSaving(false)
+      }
+    } catch (cause) {
+      if (!mounted.current) return
+      setSignInState({ kind: 'failed' })
+      showFailure(clientFailure(cause))
+    } finally {
+      signingIn.current = false
+      if (mounted.current) onBusyChange(false)
+    }
+  }
+
+  /** Manual Exchange details; the placeholder rows track the URL's host. */
+  function changeEws(value: EwsConnectionConfig) {
+    resetTest()
+    setDraft((current) => {
+      const host = ewsHost(value.url, current.emailAddress)
+      return { ...current, ews: value, imap: { ...current.imap, host }, smtp: { ...current.smtp, host } }
+    })
+    onDirtyChange(true)
+    setError(null)
+  }
+
+  /** Switching the receive protocol by hand, as an alternative to a lookup. */
+  function switchProtocol(protocol: 'exchange' | 'imapSmtp') {
+    resetTest()
+    if (protocol === 'imapSmtp') {
+      setDraft((current) => ({ ...current, ews: null }))
+      setDiscovery({ kind: 'manual' })
+      onDirtyChange(true)
+      setError(null)
+      return
+    }
+    setDraft((current) => {
+      if (current.ews) return current
+      const domain = current.emailAddress.trim().split('@')[1] ?? ''
+      const host = domain ? `mail.${domain}` : ''
+      const url = host ? `https://${host}/EWS/Exchange.asmx` : ''
+      const login = current.emailAddress.trim()
+      const placeholder: ConnectionDraft = { host, port: '443', tls: 'implicit', username: login }
+      return {
+        ...current,
+        mode: 'shared',
+        ews: { url, auth: 'ntlm', username: login, certPrincipalName: null },
+        imap: { ...placeholder }, smtp: { ...placeholder },
+      }
+    })
+    setDiscovery({ kind: 'manual' })
+    onDirtyChange(true)
+    setError(null)
   }
 
   async function testLogin() {
@@ -354,8 +740,58 @@ export function ConnectionForm({
                     <PasswordField id="smtpPassword" label={credentialText.outgoing} value={draft.smtpPassword} onChange={(value) => change('smtpPassword', value)} canKeep={sameMode && !!password?.smtp.passwordConfigured} error={error} placeholder={credentialText.placeholder} />
                   </>}</>)
   const routeFields = <RouteFields draft={draft} change={change} error={error} oldProxyAuth={oldProxyAuth} />
+  const ewsMode = draft.ews !== null
+  // Before an address is entered, the manual step shows no server fields at all.
+  const discoveryIdle = discoveryEnabled && !account && discovery.kind === 'idle' && draft.emailAddress.trim() === ''
+  const showServerFields = !ewsMode && !discoveryIdle
+  const discoverySource = discovery.kind === 'found' || discovery.kind === 'ews' ? discovery.source : null
 
   if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>{t('accounts:signedInThroughBrowser')}</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
+
+  // The sign-in card: address and password first. "Next" signs in with the
+  // recommended protocol; "manual setup" opens the fully manual form.
+  if (phase === 'signin') {
+    const busy = signInState.kind === 'checking'
+    return (
+      <SettingsPage footer={<>
+        <FieldDescription>{busy ? t('accounts:signInBusy') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
+        <div className="flex shrink-0 gap-2">
+          {onBack && <Button variant="outline" onClick={() => { resetTest(); onBack() }} disabled={busy}>{t('accounts:back')}</Button>}
+          <Button variant="outline" disabled={busy} onClick={enterManual}>{t('accounts:manualSetupAction')}</Button>
+          <Button onClick={() => { void signIn() }} disabled={busy || unavailable || !verificationClient?.available}>{busy ? submittingLabel : submitLabel}</Button>
+        </div>
+      </>}>
+        <Alert role="status">
+          <AlertTitle>{t('accounts:signInHeading')}</AlertTitle>
+          <AlertDescription>{t('accounts:signInHint')}</AlertDescription>
+        </Alert>
+        {error && (
+          <Alert variant="destructive">
+            <AlertTitle>{t('accounts:notSaved')}</AlertTitle>
+            <AlertDescription>{errorText(error, errorContext)}</AlertDescription>
+          </Alert>
+        )}
+        <FieldSet disabled={busy} aria-label={t('accounts:emailAccountSettings')} aria-busy={busy} className="gap-6">
+          <SettingsGroup title={t('accounts:emailAddress')} description={t('accounts:signInEmailHint')}>
+            <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@example.com" inputMode="email" error={error} errorContext={errorContext} />
+          </SettingsGroup>
+          <SettingsGroup title={credentialText.shared}>
+            <PasswordField id="sharedPassword" label={credentialText.shared} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={false} error={error} placeholder={credentialText.placeholder} />
+            <FieldDescription>{t('accounts:signInProtocolHint')}</FieldDescription>
+          </SettingsGroup>
+          <details className="text-sm">
+            <summary className="cursor-pointer rounded-md py-2 font-medium focus-visible:outline-2 focus-visible:outline-ring">{t('accounts:advancedSettings')}</summary>
+            <div className="flex flex-col gap-6 pt-4">{routeFields}</div>
+          </details>
+        </FieldSet>
+        <div role="status" aria-live="polite" className="text-sm">
+          {signInState.kind === 'checking' && <p className="text-muted-foreground">{t('accounts:signInBusy')}</p>}
+          {signInState.kind === 'report' && verificationClient && <ConnectionVerificationReport report={signInState.report} client={verificationClient} providerId={provider.id} isEws={ewsMode} />}
+          {signInState.kind === 'failed' && <p className="text-muted-foreground">{t('accounts:signInFailedHint')}</p>}
+        </div>
+      </SettingsPage>
+    )
+  }
 
   return (
     <SettingsPage footer={<>
@@ -404,9 +840,42 @@ export function ConnectionForm({
             </details>
           ) : (
             <>
-              {serverFields}
+              <SettingsGroup title={t('accounts:serverSettingsTitle')} description={t('accounts:serverSettingsHint')}>
+                <Tabs value={ewsMode ? 'exchange' : 'imap'} onValueChange={(value) => {
+                  if (value === 'exchange' && !ewsMode) switchProtocol('exchange')
+                  else if (value === 'imap' && ewsMode) switchProtocol('imapSmtp')
+                }}>
+                  <TabsList aria-label={t('accounts:serverSettingsTitle')}>
+                    <TabsTrigger value="pop3" disabled>{t('accounts:protocolPop3')}</TabsTrigger>
+                    <TabsTrigger value="imap">{t('accounts:serverTabImap')}</TabsTrigger>
+                    <TabsTrigger value="exchange">{t('accounts:serverTabExchange')}</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="pop3" className="text-sm">
+                    <Alert role="status">
+                      <AlertTitle>{t('accounts:pop3UnsupportedTitle')}</AlertTitle>
+                      <AlertDescription>{t('accounts:pop3UnsupportedHint')}</AlertDescription>
+                    </Alert>
+                  </TabsContent>
+                  <TabsContent value="imap" className="text-sm">
+                    {/* base-ui keeps inactive panels mounted. Guard by the
+                        active mode so the discovery source and the server
+                        fields are not duplicated in the DOM (and so hidden
+                        inputs never share an id with the visible tab). */}
+                    {!ewsMode && discoveryEnabled && (
+                      <DiscoveryPanel state={discovery} source={discoverySource} emailEntered={draft.emailAddress.trim() !== ''}
+                        saving={saving} onRetry={() => { void discover() }} />
+                    )}
+                    {!ewsMode && showServerFields && serverFields}
+                  </TabsContent>
+                  <TabsContent value="exchange" className="text-sm">
+                    {ewsMode && draft.ews && (
+                      <EwsFields ews={draft.ews} source={discoverySource} saving={saving} onManual={switchToManual} onChange={changeEws} />
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </SettingsGroup>
               <SettingsGroup title={t('accounts:authentication')} description={t('accounts:authenticationDescription')}>
-                {modeFields}
+                {!ewsMode && modeFields}
                 {passwordFields}
               </SettingsGroup>
               {routeFields}
@@ -426,7 +895,7 @@ export function ConnectionForm({
           </div>
           <div role="status" aria-live="polite" className="text-sm">
             {currentTest.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
-            {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} />}
+            {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} isEws={ewsMode} />}
           </div>
         </SettingsGroup>}
     </SettingsPage>

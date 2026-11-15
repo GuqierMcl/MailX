@@ -1,9 +1,10 @@
 use mailx_core::{
     Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
     CancelConnectionVerification, CancelDraftVerification, ConversationPage, CreateAccountRequest,
-    DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage, ErrorCode, Folder,
-    MailOverview, MailOverviewQuery, RemoveAccountRequest, SettingsPatch, SettingsSnapshot,
-    UpdateConnectionRequest, UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
+    DiscoverMailSettingsRequest, DraftConnectionVerification, EmailDetail, EmailListQuery,
+    EmailPage, ErrorCode, Folder, MailOverview, MailOverviewQuery, MailSettingsDiscovery,
+    RemoveAccountRequest, SettingsPatch, SettingsSnapshot, UpdateConnectionRequest,
+    UpdateProfileRequest, VerifyAccountConnection, VerifyDraftConnection,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow, ipc::InvokeBody};
@@ -421,6 +422,25 @@ pub(crate) async fn accounts_cancel_draft_verification(
     Ok(respond(args.and_then(|args| {
         state.core()?.cancel_draft_verification(args.request)
     })))
+}
+
+/// Read-only lookup of mail servers for an address that has not been saved.
+/// The form decides what to fill in; no account or trust decision is written.
+#[tauri::command]
+pub(crate) async fn accounts_discover_mail_settings(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<MailSettingsDiscovery>, ()> {
+    let args = authorize(&window, "accounts_discover_mail_settings")
+        .and_then(|_| parse::<WriteArgs<DiscoverMailSettingsRequest>>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => match state.core() {
+            Ok(core) => core.discover_mail_settings(args.request).await,
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }))
 }
 
 #[derive(Deserialize)]

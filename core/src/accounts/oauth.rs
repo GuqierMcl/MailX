@@ -325,6 +325,7 @@ impl AccountService {
                     provider_id: account.provider_id,
                     imap: account.imap,
                     smtp: account.smtp,
+                    ews: account.ews.clone(),
                     authentication: AuthenticationInput::OAuth2 {
                         configuration: auth.configuration,
                     },
@@ -500,6 +501,7 @@ impl AccountService {
             mailbox_source_id: new_id(),
             imap: connection.imap,
             smtp: connection.smtp,
+            ews: None,
             authentication: AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
                 mode: AuthenticationMode::Shared,
                 imap: auth.summary(&auth.trusted_endpoints[0]),
@@ -567,6 +569,7 @@ pub(crate) fn create_request(
             provider_id: Some(registration.id.clone()),
             imap,
             smtp,
+            ews: None,
             authentication: AuthenticationInput::OAuth2 {
                 configuration: OAuth2Configuration {
                     provider_id: registration.id.clone(),

@@ -238,6 +238,7 @@ describe('unsaved connection verification boundary', () => {
     authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-authorization-code' } },
     route: { kind: 'custom', proxyKind: 'socks5', host: 'proxy.example.com', port: 1080, dns: 'proxy', imageProxyDns: false, confirmImageProxyDns: false,
       authentication: { username: 'proxy-user', password: { action: 'replace', value: 'synthetic-proxy-secret' } } },
+    ews: null,
   }
   const protocols = {
     imap: { status: 'verified', stage: 'complete', code: null },

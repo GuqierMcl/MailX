@@ -156,6 +156,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `createAccount(request)` | `accounts_create`，`{ request: { requestId, config } }` | `AccountService::create` | `Account` |
 | `updateConnection(request)` | `accounts_update_connection`，`{ request: { accountId, expectedRevision, connection } }` | `AccountService::update_connection` | `Account` |
 | `updateProfile(request)` | `accounts_update_profile`，`{ request: { accountId, profile } }` | `AccountService::update_profile` | `Account` |
+| `discoverMailSettings(request)` | `accounts_discover_mail_settings`，`{ request: { emailAddress, password: string \| null, route } }` | 只读发现（`core/src/discovery/`），不创建账号 | `MailSettingsDiscovery` |
 
 账号分两部分，各自一个修改请求，生命周期不同：
 
@@ -168,9 +169,31 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `Account` 返回账号与来源 ID、连接配置的 `revision`、名称、`color`、`senderName` 与 `useProviderIcon`、非敏感配置、凭证是否已配置及信任状态、路由及版本、UTC 时间。已有数据库账号升级后、旧账号快照或 journal 缺少 `useProviderIcon` 时，默认值均为 `true`。没有密码或秘密引用；`connectionStatus` 当前只能是 `unverified`。主机变化不会隐式扩大旧凭证的信任，也不会执行自动连接测试。
 
+连接与账号契约新增可空 `ews`：`ConnectionInput` / `AccountConfigInput` / `Account` 均带 `ews: EwsConnectionConfig | null`，结构为 `{ url: string(https), auth: "ntlm" | "basic", username: string, certPrincipalName: string | null }`。`null` 表示沿用 IMAP / SMTP 连接，旧客户端与旧账号不受影响。EWS 账号仍保留 `imap` / `smtp` 两行作为存储与发件箱兼容占位，收发与发信实际走 EWS（见[EWS 邮件后端](../architecture/ews-backend.md)）；密码只用 `shared` 模式，不新增认证类型。保存时把 EWS 端点加入凭证信任范围，端点身份含 `https` + 主机 + 端口 + 路径 + 登录用户名 + 认证方式，**URL 或登录名变更即不再信任**，需重新输入密码确认。EWS 账号可使用「添加前测试登录」（语义见下文）。
+
 命令仅授权本地可信 main 窗口，并由宿主再次检查来源 URL。原始 IPC 负载在受控边界反序列化，畸形参数只返回固定脱敏错误，不透传可能包含输入值的解析异常。客户端不能自报管理员或指定秘密引用；认证配置之间的账号归属由后端生成关系并由数据库复合外键约束。不存在读取秘密、任意 SQL、客户端指定数据库目录或通用主机文件访问接口。原骨架的 `core_info` 已移除。
 
 创建使用 UUID `requestId` 去重：账号尚处初始 revision 且配置及秘密一致才返回原账号；重复键对应不同内容或已被编辑的账号时返回 `idempotencyConflict`。修改连接必须匹配 `expectedRevision`，不匹配返回 `conflict`；前端重新加载供用户处理，不静默覆盖。修改资料只校验账号存在，`expectedRevision` 不参与。
+
+### 添加账号前的邮箱设置自动探测
+
+`discoverMailSettings` / `accounts_discover_mail_settings` 仅可信 main 窗口且核心 Ready 时可调用，不向写信窗口、邮件正文或 MCP 开放。输入 `{ request: { emailAddress, password: string | null, route: RouteInput } }`，返回 `MailSettingsDiscovery`：
+
+```ts
+type MailSettingsDiscovery = {
+  status: 'found' | 'needsCredentials' | 'rejected' | 'notFound'
+    | 'network' | 'proxy' | 'tls' | 'timeout' | 'unsupported';
+  imap: /* 探测到的 IMAP 设置或空 */;
+  smtp: /* 探测到的 SMTP 设置或空 */;
+  ews:  /* 探测到的 EWS 端点或空 */;
+  source: /* 结果来源 */;
+};
+```
+
+- 命令**只读**：不创建账号、不写凭证、不改动已保存连接，也不启动同步或发信。重复以相同输入调用得到一致结论，不产生副作用；不使用 `requestId` 去重，也不参与 `expectedRevision` 乐观锁。
+- `status` 为固定词表，不含服务端原文；`needsCredentials` 表示需要密码才能继续，`rejected` 为被拒绝，`notFound` 为无可用结果，`network` / `proxy` / `tls` / `timeout` / `unsupported` 分别对应网络、代理、TLS、超时与不可用。`source` 标识结果来自 Autodiscover 还是匿名 EWS 回退探测。
+- `route` 遵循 `RouteInput` 既有约束，探测与后续账号连接使用同一套路由；自定义代理失败返回 `proxy`，**不回退直连**。`password` 为可空字符串，`null` 表示不带凭据的匿名 / 无密码探测；密码只在本次请求中使用，不入库、不写入 SecretStore。
+- 探测只向邮箱域名派生的主机发请求、HTTPS-only、最多 2 跳 redirect、20 秒总预算；`imap` / `smtp` / `ews` 为探测到的设置或空，结果只用于填充添加账号表单或选择通道。编辑已保存账号不调用本命令。协议与安全边界见[Exchange 自动发现与邮箱设置探测](../architecture/exchange-autodiscovery.md)。
 
 ### OAuth 专用宿主命令
 
@@ -812,7 +835,7 @@ type DraftConnectionVerification = {
 
 两个命令仅可信 main 窗口且核心 Ready 时开放；写信窗口及正文不能调用。`verificationId` 是 adapter 为每次尝试生成的 UUID，返回 ID 不匹配按固定通信错误处理。输入使用创建时的字段规范化与校验，只支持本次提供的密码类秘密，shared、separate 和代理凭证均必须使用 `replace`；`keep` 返回固定字段错误，OAuth 仍不支持。
 
-后端纯内存准备 IMAP / SMTP 登录计划，不获取 AccountService 锁、不读写数据库、不访问 SecretStore、不创建临时账号或后台同步。两协议按当前输入的独立端点/登录名/凭证及同一所选路由执行，TLS 校验和代理失败不回退直连的规则不变。`inherit` 沿用当前应用默认直连；图片代理 DNS 许可不用于邮件登录。
+后端纯内存准备 IMAP / SMTP 登录计划，不获取 AccountService 锁、不读写数据库、不访问 SecretStore、不创建临时账号或后台同步。两协议按当前输入的独立端点/登录名/凭证及同一所选路由执行，TLS 校验和代理失败不回退直连的规则不变。`inherit` 沿用当前应用默认直连；图片代理 DNS 许可不用于邮件登录。带 `ews` 的连接走 EWS 语义：执行一次 EWS NTLM 握手加 `FindFolder`（不读取任何邮件数据），**同一结果同时填入 `imap` 与 `smtp` 两个协议槽**；401 / 凭据错误归 `authentication`，TLS 归 `tls`，代理归 `proxy`，超时归 `timeout`，连接失败归 `network` 等，沿用既有 stage / code 词表；密码使用 `shared` 模式的收信密码。
 
 一次探测共享 45 秒总预算，涵盖参数准备、两协议网络探测及收尾；两协议并行并分别返回固定结果。复用上述 IMAP LOGIN/CAPABILITY/可选 ID/NOOP/退出和 SMTP EHLO/AUTH/QUIT，不获取目录、邮件或标记，不进入发件队列，不更新持久化连接状态。未保存尝试使用独立单一在途槽，不占用已有账号诊断；并发返回 `conflict`。取消支持先于注册到达，按尝试 ID 隔离，不能用旧取消影响新请求；超时、取消均关闭在途会话。响应只含固定阶段和原因，不回传凭据、端点或原始服务端文字。
 

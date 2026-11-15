@@ -11,6 +11,7 @@ function config(useProviderIcon = true): AccountConfigInput {
     smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit', username: 'synthetic@qq.com' },
     authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-secret' } },
     route: { kind: 'direct' },
+    ews: null,
   }
 }
 
@@ -33,7 +34,7 @@ describe('mock account provider icon preference', () => {
     const { emailAddress, providerId, imap, smtp, authentication, route } = config()
     const saved = await client.updateConnection({
       accountId: account.id, expectedRevision: account.revision,
-      connection: { emailAddress, providerId, imap, smtp: { ...smtp, port: 587, tls: 'startTls' }, authentication, route },
+      connection: { emailAddress, providerId, imap, smtp: { ...smtp, port: 587, tls: 'startTls' }, authentication, route, ews: null },
     })
     expect(saved.useProviderIcon).toBe(false)
     expect(saved.revision).toBe(account.revision + 1)

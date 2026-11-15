@@ -73,6 +73,7 @@ describe('mock unsaved connection verification', () => {
       smtp: { host: 'smtp.yeah.net', port: 465, tls: 'implicit', username: 'synthetic@yeah.net' },
       authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-authorization-code' } },
       route: { kind: 'direct' },
+      ews: null,
     }
   }
 

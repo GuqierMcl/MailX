@@ -61,37 +61,52 @@ export function ProtocolOutcome({ state, protocol }: { state: VerificationState;
   const result = report[protocol]
   return result.status === 'verified'
     ? <p className="text-xs text-muted-foreground">{t('accounts:verificationPassed')}</p>
-    : <p className="text-xs text-destructive">{failureText(result.code)}</p>
+    : <>
+      <p className="text-xs text-destructive">{failureText(result.code)}</p>
+      {result.detail && <p className="text-xs text-muted-foreground">{result.detail}</p>}
+    </>
 }
 
 /** Reviewed provider guidance for a rejected login or a provider refusal; nothing otherwise. */
-export function VerificationHelp({ report, client, providerId }: {
+export function VerificationHelp({ report, client, providerId, isEws = false }: {
   report: Pick<AccountConnectionVerification, 'imap' | 'smtp'> | null
   client: MailxClient
   providerId: string | null
+  /** EWS verifies over one HTTPS endpoint, so only the incoming slot carries a code. */
+  isEws?: boolean
 }) {
   if (!report) return null
-  const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
-  const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
+  const authenticationFailed = isEws
+    ? report.imap.code === 'authentication'
+    : report.imap.code === 'authentication' || report.smtp.code === 'authentication'
+  const policyFailed = isEws
+    ? report.imap.code === 'providerPolicy'
+    : report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
   if (!authenticationFailed && !policyFailed) return null
   return <ProviderAuthHelp client={client} providerId={providerId} reason={policyFailed ? 'providerPolicy' : 'authentication'} />
 }
 
 /** Saved and unsaved connections share the same protocol results and reviewed help. */
-export function ConnectionVerificationReport({ report, client, providerId }: {
+export function ConnectionVerificationReport({ report, client, providerId, isEws = false }: {
   report: Pick<AccountConnectionVerification, 'imap' | 'smtp'>
   client: MailxClient
   providerId: string | null
+  /** An Exchange (EWS) connection verifies over one HTTPS endpoint, so it shows a single row. */
+  isEws?: boolean
 }) {
   useTranslation()
-  const passed = report.imap.status === 'verified' && report.smtp.status === 'verified'
+  const passed = isEws
+    ? report.imap.status === 'verified'
+    : report.imap.status === 'verified' && report.smtp.status === 'verified'
   return <div className="flex w-full flex-col gap-3">
     {passed && <p className="text-xs text-muted-foreground">{t('accounts:verificationSucceeded')}</p>}
     <div className="flex flex-col gap-2">
-      {(['imap', 'smtp'] as const).map((protocol) => <ReportRow key={protocol} result={report[protocol]}
-        label={t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')} />)}
+      {isEws
+        ? <ReportRow label={t('accounts:verificationExchange')} result={report.imap} />
+        : (['imap', 'smtp'] as const).map((protocol) => <ReportRow key={protocol} result={report[protocol]}
+          label={t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')} />)}
     </div>
-    <VerificationHelp report={report} client={client} providerId={providerId} />
+    <VerificationHelp report={report} client={client} providerId={providerId} isEws={isEws} />
   </div>
 }
 
@@ -104,6 +119,7 @@ function ReportRow({ label, result }: { label: string; result: ProtocolResult })
         <span className={ok ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>{t(ok ? 'accounts:verificationPassed' : 'accounts:verificationNotPassed')}</span>
       </div>
       {!ok && <p className="text-xs text-destructive">{failureText(result.code)}</p>}
+      {result.detail && <p className="text-xs text-muted-foreground">{result.detail}</p>}
     </div>
   )
 }

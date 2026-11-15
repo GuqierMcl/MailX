@@ -14,6 +14,11 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### ✨ Optimization
 
 - Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))
+- Manual server settings for other mailboxes now use IMAP / SMTP and Exchange tabs, with a disabled POP3 placeholder. / 「其他邮箱」的手动服务器设置改为 IMAP/SMTP 与 Exchange 标签页，POP3 暂不支持并保持置灰。
+
+### 🩹 Fixed
+
+- Exchange (EWS) accounts now sign in and sync without server errors, and folders show their real hierarchy, unread counts and one entry per role instead of empty duplicates. / 修复 Exchange（EWS）账号登录与同步时的服务器错误，文件夹现在显示真实层级与未读数，并去掉空的同义重复文件夹。
 
 ## [0.3.0] - 2026-11-14
 
@@ -23,12 +28,17 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - AI settings: connect model providers (models.dev catalog, OpenAI-compatible and Anthropic-compatible APIs) and choose a default model. / AI 设置：连接模型服务商（models.dev 目录，兼容 OpenAI 与 Anthropic 接口）并选择默认模型。 ([#126](https://github.com/GuqierMcl/MailX/pull/126))
 - Translation can use an AI model from AI settings, with its own model choice. / 翻译可以使用 AI 设置里的模型，并可单独选择模型。 ([#127](https://github.com/GuqierMcl/MailX/pull/127))
-- Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
-- Keyboard shortcuts for mail: J/K to move between messages, E to archive, # to delete, S to star, U for read or unread, R/A/F to reply, reply all or forward, / to search and ? to list them all; single-key shortcuts can be turned off in Settings → Keyboard shortcuts. / 邮件键盘快捷键：J/K 切换邮件，E 归档，# 删除，S 加星标，U 标为已读或未读，R/A/F 回复、全部回复或转发，/ 搜索，? 查看全部；可在“设置 → 快捷键”中关闭单键快捷键。 ([#131](https://github.com/GuqierMcl/MailX/pull/131))
-- Now, a new page below Compose, greets you and sums up what needs attention, recent verification codes, your inbox with its newest unread messages, activity over the last two weeks and the people you write with most, recent attachments and sync status, all worked out on this computer; MailX now opens on it, and Settings → General can switch back to the inbox. / 新增“此刻”页面（位于“写邮件”下方），向你问好并汇总需要处理的事、最近的验证码、收件箱与最新未读邮件、近两周的收发近况与往来最多的人、最近的附件和同步状态，均在本机计算；MailX 打开时默认显示该页面，可在“设置 → 通用”中改回收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+- The generic IMAP / SMTP entry now runs a read-only discovery probe after you enter an address, filling in IMAP / SMTP settings or switching to an Exchange (EWS) channel; only a failed probe (a password being needed, a refusal, a network / TLS / timeout error, no result or an unsupported setup) asks you to enter the servers by hand, with Retry discovery and Enter manually. / 通用「IMAP/SMTP」入口现在输入邮箱地址后先做一次只读探测，自动填好 IMAP/SMTP 或切换到 Exchange(EWS) 通道；仅探测失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）时才提示手动填写服务器，并提供「重新探测」与「改为手动填写」。
+- The generic IMAP / SMTP entry now starts with just the email address, password and a collapsed network-routing section: Next probes the server and signs in with the recommended protocol — Exchange (HTTP/NTLM, EWS over HTTPS) when the server offers it, otherwise IMAP / SMTP — and only a sign-in that passes verification moves on to saving. Manual setup opens the full form, prefilled from a probe when an address is typed; a failed sign-in or an empty probe switches to the manual form keeping the prefilled values and the failure report. The manual form adds an account type choice — Exchange (HTTP/NTLM) with server URL, login name, authentication and certificate principal, IMAP / SMTP, or POP3 (not supported yet, greyed out) — and the Test sign-in button is now available for EWS accounts. / 通用「IMAP/SMTP」入口现在先只显示邮箱地址、密码与折叠的网络路由：「下一步」自动探测服务器并按推荐协议登录——服务器提供 Exchange（HTTP/NTLM，即 HTTPS 上的 EWS）时优先用 EWS，否则用 IMAP/SMTP——登录验证通过才进入保存；「手工设置」打开完整表单，已填邮箱地址时自动用探测结果预填（Exchange 端点或 IMAP/SMTP 主机/端口/加密）；登录失败或探测无结果时自动转为手工表单，保留已预填的值与失败报告。手工表单新增「账号类型」选择——Exchange（HTTP/NTLM，可编辑服务器 URL、登录名、认证方式与证书主体）、IMAP/SMTP、POP3（暂不支持，置灰并提示改用 IMAP/SMTP）——EWS 账号的「测试登录」按钮现已可用。
+- Draft sign-in verification covers EWS connections: one NTLM handshake plus a folder lookup fills both the incoming and outgoing slots with the same result without reading any mail, and credential, TLS, proxy, timeout and network failures keep the existing reason codes. / 草稿登录验证支持 EWS 连接：一次 NTLM 握手加文件夹查找即把同一结果同时填入收发两个协议槽位，不读取任何邮件数据；凭据、TLS、代理、超时与网络失败沿用既有阶段与原因码。
+- Self-hosted Exchange mailboxes that expose an EWS endpoint over HTTPS with NTLM can be added through discovery and receive and send mail over EWS, without IMAP IDLE or SMTP. / 暴露 HTTPS + NTLM 的 EWS 端点的企业自建 Exchange 邮箱现在可经自动探测添加，并通过 EWS 收发邮件，不依赖 IMAP IDLE 与 SMTP。
 
 ### ✨ Optimization
 
+- The getting-started guides and the architecture, contract and validation documents now describe discovery and the EWS coverage limits in both languages. / 使用入门、架构、契约与验证文档已用中英文同步说明自动探测与 EWS 的覆盖边界。
+- Accounts can use any identification color from the system color picker. / 账号标识颜色可以用系统取色器自定义。 ([#129](https://github.com/GuqierMcl/MailX/pull/129))
+- Keyboard shortcuts for mail: J/K to move between messages, E to archive, # to delete, S to star, U for read or unread, R/A/F to reply, reply all or forward, / to search and ? to list them all; single-key shortcuts can be turned off in Settings → Keyboard shortcuts. / 邮件键盘快捷键：J/K 切换邮件，E 归档，# 删除，S 加星标，U 标为已读或未读，R/A/F 回复、全部回复或转发，/ 搜索，? 查看全部；可在“设置 → 快捷键”中关闭单键快捷键。 ([#131](https://github.com/GuqierMcl/MailX/pull/131))
+- Now, a new page below Compose, greets you and sums up what needs attention, recent verification codes, your inbox with its newest unread messages, activity over the last two weeks and the people you write with most, recent attachments and sync status, all worked out on this computer; MailX now opens on it, and Settings → General can switch back to the inbox. / 新增“此刻”页面（位于“写邮件”下方），向你问好并汇总需要处理的事、最近的验证码、收件箱与最新未读邮件、近两周的收发近况与往来最多的人、最近的附件和同步状态，均在本机计算；MailX 打开时默认显示该页面，可在“设置 → 通用”中改回收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 - When viewing one account's folder or local archive, its name appears in muted text beside the message list heading. / 查看某个账号的文件夹或本机归档时，邮件列表标题旁会以弱化小字显示邮箱名称。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
 - In the collapsed sidebar, the current account is highlighted only by its button background, with the avatar's selection ring removed. / 折叠侧栏中，当前邮箱仅以按钮背景高亮，移除头像选中圆环。 ([#134](https://github.com/GuqierMcl/MailX/pull/134))
 - The message list is tidier: a narrow strip holds only the unread dot, and star, read, archive and delete now appear together in the upper right on hover, for every preview setting. / 邮件列表更紧凑：左侧窄条只放未读蓝点，星标、已读、归档和删除在悬停时统一出现在右上角，对所有预览设置都一样。 ([#128](https://github.com/GuqierMcl/MailX/pull/128))
@@ -44,6 +54,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 - The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
+
+### 🔄 Changed
+
+- Account inputs and summaries gain an optional `ews` connection, and the local database adds EWS endpoint, ItemId-to-local-uid mapping and folder-state tables; existing IMAP / SMTP accounts behave exactly as before. / 账号输入与摘要新增可空的 `ews` 连接，本地数据库加入 EWS 端点、ItemId 到本地 uid 的映射与文件夹状态表；已有 IMAP/SMTP 账号行为不变。
 
 ## [0.2.1] - 2026-11-12
 

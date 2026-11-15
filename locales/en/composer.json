@@ -208,7 +208,7 @@
     "network": "The network connection was interrupted",
     "protocol": "The sending server returned an unrecognized reply",
     "server": "The sending server rejected this message",
-    "tlsVerification": "The sending server’s certificate could not be verified",
+    "tlsVerification": "The sending server’s certificate could not be verified (an on-premises Exchange often uses a self-signed certificate on its mail port; re-run discovery in the account’s connection settings to use the Exchange channel)",
     "tlsUnavailable": "The sending server does not support an encrypted connection",
     "authUnavailable": "The sending server does not support a sign-in method available in MailX",
     "authRejected": "The sending server rejected sign-in. Check the password or app password.",

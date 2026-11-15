@@ -1,5 +1,5 @@
 import { t } from '@/i18n'
-import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, ProxyKind, RouteInput, SecretUpdate } from '@/generated/accounts'
+import type { Account, AuthenticationMode, ConnectionConfig, ConnectionInput, EwsConnectionConfig, ProxyKind, RouteInput, SecretUpdate } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { providerEmailRequired, type MailProvider } from './providers'
 
@@ -11,6 +11,7 @@ export type AccountDraft = {
   emailAddress: string
   imap: ConnectionDraft
   smtp: ConnectionDraft
+  ews: EwsConnectionConfig | null
   mode: AuthenticationMode
   sharedPassword: SecretDraft
   imapPassword: SecretDraft
@@ -34,6 +35,7 @@ export function initialDraft(account: Account | null, provider?: MailProvider): 
     emailAddress: account?.emailAddress ?? '',
     imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
     smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
+    ews: account?.ews ?? null,
     mode: password?.mode ?? 'shared',
     sharedPassword: secret(password?.imap.passwordConfigured),
     imapPassword: secret(password?.imap.passwordConfigured),
@@ -118,7 +120,7 @@ export function draftToConnection(draft: AccountDraft, account: Account | null, 
     ? { kind: 'password', mode: 'shared', password: secret(draft.sharedPassword, 'sharedPassword') }
     : { kind: 'password', mode: 'separate', imapPassword: secret(draft.imapPassword, 'imapPassword'), smtpPassword: secret(draft.smtpPassword, 'smtpPassword') }
   const route = draftToRoute(draft)
-  return { emailAddress, providerId: account ? account.providerId : provider?.id ?? null, imap, smtp, authentication, route }
+  return { emailAddress, providerId: account ? account.providerId : provider?.id ?? null, imap, smtp, authentication, route, ews: draft.ews }
 }
 
 /** The network route a draft describes. Sign-in has a route but no servers or address yet. */

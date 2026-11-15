@@ -1,6 +1,6 @@
 # 账号配置与凭证生命周期
 
-状态：**账号配置、协议连接与独立收发登录诊断已有实现 / 通用 OAuth 基础已有实现，生产服务商接入仍未开放**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在添加向导测试当前填写的 IMAP / SMTP 登录，也可在账号设置验证已保存配置版本的登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
+状态：**账号配置、协议连接、添加账号前的只读自动探测与 EWS 账号连接已有实现 / 通用 OAuth 基础已有实现，生产服务商接入仍未开放**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在添加向导测试当前填写的 IMAP / SMTP 登录，也可在账号设置验证已保存配置版本的登录；EWS 模式隐藏「测试登录」按钮。诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`core/src/discovery/`、`core/src/ews/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
 
 ## 1. 对象与身份
 
@@ -44,9 +44,26 @@ Gmail 入口以 `gmail` 保存服务商标识，新建时精确接受 `gmail.com
 
 添加向导的“测试登录”直接验证当前内存配置，不创建临时账号、不读取或写入 SecretStore、不写数据库、不启动同步。新配置的收发及代理秘密必须由本次输入提供（`replace`）；不允许 `keep` 借用已有账号的凭据。测试沿用创建配置的规范化与字段校验、所选路由与 TLS，点击测试仅表示用户授权向当前填写端点进行登录探测。结果不会变成持久化的信任或连接状态；测试可跳过，输入变化、离开连接步骤或关闭向导即取消并丢弃旧结果。
 
+### 添加账号前的自动探测与 EWS 账号连接
+
+服务商列表里的通用「IMAP/SMTP」入口（`GENERIC_PROVIDER`）不再是「一上来手填服务器」：输入邮箱地址后，前端调用只读命令 `accounts_discover_mail_settings`，由 `core/src/discovery/` 做一次性发现（Autodiscover POX、必要时对域名派生主机的匿名 EWS 回退探测，约束、状态词表与路由见[Exchange 自动发现与邮箱设置探测](exchange-autodiscovery.md)）。探测成功自动填好 IMAP / SMTP 设置，或切到 Exchange(EWS) 通道；探测失败（需要密码、被拒绝、网络 / TLS / 超时、无结果、不可用）才提示手动填写 IMAP 与 SMTP 信息，并提供「重新探测」与「改为手动填写」。该命令只读，不创建账号、不写凭证、不改动已保存连接；**编辑已保存账号不自动探测**，IMAP / SMTP 账号的行为零改动。
+
+账号契约相应扩展：`ConnectionInput` / `AccountConfigInput` / `Account` 新增可空 `ews: EwsConnectionConfig | null`：
+
+```ts
+type EwsConnectionConfig = {
+  url: string;                       // https
+  auth: 'ntlm' | 'basic';
+  username: string;                  // 如 DOMAIN\user
+  certPrincipalName: string | null;  // 如 msstd:mail.example.com
+};
+```
+
+EWS 账号仍保留 `imap` / `smtp` 两行作为存储与发件箱兼容占位，收发实际走 EWS（见 [EWS 邮件后端](ews-backend.md)）；密码只用 `shared` 模式，由既有 SecretStore 管理，不新增认证类型。保存时把 EWS 端点加入凭证信任范围：端点身份包含 `https` + 主机 + 端口 + 路径 + 登录用户名 + 认证方式，**URL 或登录名变更即不再信任**，需重新输入密码确认，规则与既有端点信任一致。EWS 模式不提供「测试登录」按钮（该按钮在 EWS 模式隐藏）。完整字段、只读语义与错误码见[应用 API](../contracts/app-api.md#3-当前账号操作)。
+
 ## 3. 端点信任与路由
 
-凭证信任绑定协议、规范化主机、端口、TLS 和登录用户名。首次输入或明确替换密码时，将当时的对应端点记录为受信范围。仅改端点并保留密码不会扩大信任：该连接返回 `needsConfirmation`。代理协议、端点或用户名变化同样不能自动继承原代理密码的信任。
+凭证信任绑定协议、规范化主机、端口、TLS 和登录用户名。首次输入或明确替换密码时，将当时的对应端点记录为受信范围。仅改端点并保留密码不会扩大信任：该连接返回 `needsConfirmation`。代理协议、端点或用户名变化同样不能自动继承原代理密码的信任。EWS 账号保存时同样把其 HTTPS 端点（含路径、登录用户名与认证方式）加入受信范围，URL 或登录名变化即失去信任，见上节。
 
 已有针对已保存账号的独立连接诊断，没有单独的“信任新端点”命令；诊断不能扩大凭证信任。用户可以重新输入密码以建立新配置的信任关系。`trusted` 仅表示凭证适用于所配置的接收方，不证明服务器可达、证书有效或密码正确。连接器在认证前检查信任并验证 TLS，不能将旧凭证直接发往新端点。
 

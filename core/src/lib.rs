@@ -11,9 +11,11 @@ pub mod accounts;
 pub mod ai;
 mod app;
 pub mod auth;
+mod discovery;
 pub mod drafts;
 pub mod error;
 pub mod events;
+mod ews;
 mod imap;
 pub mod localization;
 pub mod mail;
@@ -41,15 +43,16 @@ pub use app::{
     BeginOAuthAccount, BeginOAuthReauthorization, BodyBinding, BodyDocument, BodyLinks,
     CancelConnectionVerification, CancelDraftVerification, ConfirmOAuthMailbox,
     ConnectionVerificationCode, ConnectionVerificationStage, ConnectionVerificationStatus,
-    CreateOAuthAccount, DayActivity, DraftBodyBinding, DraftConnectionVerification,
-    EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,
-    MailOverview, MailOverviewQuery, MailxCore, MessageFlag, NewMailOverview,
-    OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
-    OverviewActivity, OverviewCode, OverviewContact, ProtocolVerification, RecentAttachment,
-    RemoteImageStatus, SaveAiConnection, SavedAiConnection, TodayActivity, TranslationCacheStats,
-    TranslationInfo, TranslationKeyState, TranslationProxyPasswordState, TranslationStatus,
-    TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
-    VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
+    CreateOAuthAccount, DayActivity, DiscoverMailSettingsRequest, DiscoveredEwsEndpoint,
+    DiscoveredMailEndpoint, DraftBodyBinding, DraftConnectionVerification, EmailFlagResult,
+    FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange, MailOverview,
+    MailOverviewQuery, MailSettingsDiscovery, MailSettingsDiscoveryStatus, MailxCore, MessageFlag,
+    NewMailOverview, OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest,
+    OAuthSignInResult, OverviewActivity, OverviewCode, OverviewContact, ProtocolVerification,
+    RecentAttachment, RemoteImageStatus, SaveAiConnection, SavedAiConnection, TodayActivity,
+    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
+    TranslationStatus, TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome,
+    VerificationCodeState, VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
