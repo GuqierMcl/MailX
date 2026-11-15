@@ -62,6 +62,8 @@ EWS 在本地部署 Exchange 2019 与 Exchange SE 仍在支持范围内；微软
 
 **当前实现与边界：** 已落地的操作为 `FindFolder`、每轮 `FindItem`（最多前 500 封，取头部与标记）、`GetItem(IncludeMimeContent=true)`（取完整 MIME 并预渲染缓存正文）、`UpdateItem`、`DeleteItem` 与 `CreateItem(SendAndSaveCopy)`。当前**没有** `SyncFolderItems` 增量同步，也没有服务器侧删除事件的增量同步：每轮以 `FindItem` 重新取范围内邮件，不维护 `SyncState` 游标；`MoveItem` / `GetAttachment` / `Subscribe` + `GetEvents` / `GetServerTimeZones` 仍为后续方向。表格描述的是完整目标映射，不代表每行都已接线。
 
+**文件夹列表的实际取值与容错：** `FindFolder` 按页取完并按 id 去重；`BaseShape=Default` 不返回 `ParentFolderId` / `FolderClass`，所以显式请求 `folder:ParentFolderId` / `folder:FolderClass` / `folder:UnreadCount`，并有 `AllProperties` 与纯 `Default` 形状两级降级。父链接全部缺失但存在子文件夹时，用 `Traversal="Shallow"` 逐个重建父引用（有次数上限，失败静默）。角色优先由一次 `GetFolder`（`IdOnly` + `DistinguishedFolderId`）取回的真实 FolderId 决定；该 best-effort 请求被拒绝或返回不全时回退到名称规则，不影响同一连接上的 `FindFolder`。顶层、无邮件、无子级且不被引用为父的空壳夹（空的服务器 Archive、Outbox 与 Outlook 保留系统夹）只从本地记录里排除，服务器上的文件夹和邮件不做任何改动；有邮件或有子文件夹的夹一律保留，隐藏的夹出现内容后会重新显示。
+
 请求边界（服务端不可信，必须自己设限）：
 
 - 单次 `FindItem` 返回条目有上限；`GetItem` 批量不超过 100 个 `ItemId`；超出时继续分页，不放大单次请求。
@@ -145,7 +147,7 @@ core/src/ews/
 
 ### 6.1 连接与端点
 
-账号契约以可空的 `EwsConnectionConfig`（`url` 为 HTTPS、`auth` 为 `ntlm` | `basic`、`username`、`certPrincipalName` 可空）表达 EWS 连接，不改写 `mail_connections` 的 `protocol` 检查（仍只接受 `imap` / `smtp`）。EWS 账号仍保留 `imap` / `smtp` 两行作为存储与发件箱兼容占位；这两行不用于发起 IMAP / SMTP 连接。EWS 端点另存于 `exchange_endpoints`，由迁移 `0030_exchange_ews.sql` 引入，见[数据库迁移](database-migrations.md)。
+账号契约以可空的 `EwsConnectionConfig`（`url` 为 HTTPS、`auth` 为 `ntlm` | `basic`、`username`、`certPrincipalName` 可空）表达 EWS 连接，不改写 `mail_connections` 的 `protocol` 检查（仍只接受 `imap` / `smtp`）。EWS 账号仍保留 `imap` / `smtp` 两行作为存储与发件箱兼容占位；这两行不用于发起 IMAP / SMTP 连接。EWS 端点另存于 `exchange_endpoints`，由迁移 `0032_exchange_ews.sql` 引入，见[数据库迁移](database-migrations.md)。
 
 ### 6.2 远端身份与本地映射
 
@@ -159,7 +161,7 @@ IMAP 的 `messages` 以 `(folder_id, uid_validity, uid)` 为身份；EWS 没有 
 
 ### 6.3 迁移规则
 
-- 只追加迁移，不改写历史 SQL；清单条目与 SQL 同时提交，编号按落地时的清单顺延。`0030_exchange_ews.sql` 一次引入上述三张表，属于 append-only 结构变更。
+- 只追加迁移，不改写历史 SQL；清单条目与 SQL 同时提交，编号按落地时的清单顺延。功能分支合并回主线时主线已占用 `0030` / `0031`，因此 EWS 迁移顺延为 `0032_exchange_ews.sql`，主线两条历史 SQL 字节不变；它一次引入上述三张表，属于 append-only 结构变更。
 - 迁移不联网、不读写 `SecretStore`；旧账号行为不变：没有 `ews` 连接的账号完全走原路径。
 - 账号删除时清理 `exchange_endpoints`、`ews_items`、`ews_folder_state` 三张表，随既有移除事务一并处理。
 - 测试必须使用隔离目录，禁止在真实数据目录上试迁移（一次被回退的实验迁移曾把正式库升到不存在的版本，导致应用拒绝启动）。
@@ -204,8 +206,8 @@ IMAP 的 `messages` 以 `(folder_id, uid_validity, uid)` 为身份；EWS 没有 
 | 已实现（传输与认证） | SOAP 信封、连接绑定的 HTTP/1.1、有界响应解析、自实现 MD4/MD5/HMAC-MD5 与 NTLMv2 Type1/2/3 |
 | 已实现（收信） | `FindFolder`、每轮 `FindItem`（前 500 封）、`GetItem(IncludeMimeContent)`、`UpdateItem`、`DeleteItem`、本地 MIME 解析与预渲染缓存正文、独立轮询 round、本地标记写回 |
 | 已实现（发信） | `CreateItem(SendAndSaveCopy)`，包装为 `Accepted` 复用 outbox 状态机、已发送副本对账与草稿清理 |
-| 已实现（账号与存储） | 添加账号自动探测、可空 `ews` 契约、`0029` 三张表与账号删除清理 |
-| 后续方向 | 真实 Exchange 服务器端到端收发与三平台打包验证；`SyncFolderItems` 增量与删除同步（当前每轮 `FindItem` 前 500 封）；EPA 通道绑定哈希；EWS 账号「测试登录」按钮；共享邮箱与世纪互联运营的 Microsoft 365；OAuth 用于 EWS；`MoveItem`、`GetAttachment`、流式订阅、HTTP 基本认证收发 |
+| 已实现（账号与存储） | 添加账号自动探测、可空 `ews` 契约、`0032` 三张表与账号删除清理 |
+| 后续方向 | 三平台打包与端到端自动化验证；`SyncFolderItems` 增量与删除同步（当前每轮 `FindItem` 前 500 封）；EPA 通道绑定哈希；共享邮箱与世纪互联运营的 Microsoft 365；OAuth 用于 EWS；`MoveItem`、`GetAttachment`、流式订阅、HTTP 基本认证收发 |
 
 原设计把 HTTP 基本认证排在 NTLM 之前，但被动探测的目标服务器在 EWS 上只提供 `Negotiate` 与 `NTLM`（只有 Autodiscover 给 `Basic`），先做 Basic 会得到一条走不通的路径，因此 NTLMv2 与 EWS 传输层一起落地。基本认证仍作为契约可选值保留，给只开了 Basic 的老部署作后续补充。
 
@@ -215,7 +217,7 @@ IMAP 的 `messages` 以 `(folder_id, uid_validity, uid)` 为身份；EWS 没有 
 
 自动测试覆盖的协议向量、SOAP 往返、NTLMv2 计算、迁移幂等与旧行兼容等证据集中记录在[验证记录](../development/validation.md)；本文不复制测试进度与结果，也不列出启动命令。
 
-**未做真机验证 / 待验证：** 真实 Exchange 服务器上的端到端收发闭环、三平台打包验证、Exchange 2013 / 2016 / 2019 的 EWS 行为差异、`X-AnchorMailbox` 在多 CAS 部署中的必要性、启用 EPA 的部署、通过企业代理访问 EWS 的稳定性、`SendAndSaveCopy` 后副本与本地快照的对账时机，以及 `SyncFolderItems` 增量与删除同步。上述项目不能写成已验证；记录中的主机名、证书主体与账号一律为占位，真实标识不入仓库。
+**未做真机验证 / 待验证：** 用户已在一台自建 Exchange 上确认登录、收发与文件夹层级可用（见[验证记录](../development/validation.md) §48），但自动测试不覆盖真实 NTLM/EPA 组合；仍待验证的是三平台打包与端到端自动化验证、Exchange 2013 / 2016 / 2019 的 EWS 行为差异、`X-AnchorMailbox` 在多 CAS 部署中的必要性、启用 EPA 的部署、通过企业代理访问 EWS 的稳定性、`SendAndSaveCopy` 后副本与本地快照的对账时机，以及 `SyncFolderItems` 增量与删除同步。上述项目不能写成已验证；记录中的主机名、证书主体与账号一律为占位，真实标识不入仓库。
 
 ## 12. 风险与回退
 

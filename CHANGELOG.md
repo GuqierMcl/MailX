@@ -14,6 +14,11 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### ✨ Optimization
 
 - Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))
+- Manual server settings for other mailboxes now use IMAP / SMTP and Exchange tabs, with a disabled POP3 placeholder. / 「其他邮箱」的手动服务器设置改为 IMAP/SMTP 与 Exchange 标签页，POP3 暂不支持并保持置灰。
+
+### 🩹 Fixed
+
+- Exchange (EWS) accounts now sign in and sync without server errors, and folders show their real hierarchy, unread counts and one entry per role instead of empty duplicates. / 修复 Exchange（EWS）账号登录与同步时的服务器错误，文件夹现在显示真实层级与未读数，并去掉空的同义重复文件夹。
 
 ## [0.3.0] - 2026-11-14
 
