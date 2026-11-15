@@ -211,7 +211,7 @@
   "verificationIncoming": "Incoming · IMAP",
   "verificationOutgoing": "Outgoing · SMTP",
   "verificationExchange": "Exchange (EWS)",
-  "verificationPassed": "Signed in",
+  "verificationPassed": "Passed",
   "verificationAuthUnavailable": "The server does not support the available authentication methods.",
   "verificationConfiguration": "Connection settings are unavailable. Edit the connection and try again.",
   "verificationSecretStore": "The system credential store is unavailable. Unlock it and try again.",
@@ -301,7 +301,7 @@
   "protocolImapSmtp": "IMAP/SMTP",
   "protocolPop3": "POP3",
   "protocolPop3Hint": "POP3 is not supported yet; IMAP reaches the same mailboxes on every provider that offers POP3.",
-  "connectionMethod": "Connection method",
+"connectionMethod": "Connection method",
   "methodImapSmtp": "IMAP/SMTP",
   "browserSignInMethod": "{{name}} · Browser sign-in",
   "connectionDetails": "Connection details",
@@ -315,5 +315,11 @@
   "syncRetryingShort": "Sync hit a problem and will retry",
   "lastSynced": "Last synced: {{time}}",
   "signedInAgain": "Signed in again",
-  "customColor": "Custom color"
+  "customColor": "Custom color",
+"serverSettingsTitle": "Server settings",
+  "serverSettingsHint": "Pick the receive protocol: Exchange sends and receives over HTTPS; IMAP works with SMTP. POP3 is not supported yet.",
+  "serverTabImap": "IMAP",
+  "serverTabExchange": "Exchange",
+  "pop3UnsupportedTitle": "POP3 is not supported yet",
+  "pop3UnsupportedHint": "MailX currently supports only IMAP/SMTP and Exchange. Providers that offer POP3 usually offer IMAP too; use the \"IMAP\" tab to configure sending and receiving."
 }

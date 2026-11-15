@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
 import { providerCredentialText, providerEmailRequired, providerOf, type MailProvider } from './providers'
@@ -839,22 +840,40 @@ export function ConnectionForm({
             </details>
           ) : (
             <>
-              <SettingsGroup title={t('accounts:protocolType')} description={t('accounts:protocolTypeHint')}>
-                <RadioGroup value={ewsMode ? 'exchange' : 'imapSmtp'} onValueChange={(value) => switchProtocol(value as 'exchange' | 'imapSmtp')} aria-label={t('accounts:protocolType')}>
-                  <Field orientation="horizontal"><RadioGroupItem id="protocol-exchange" value="exchange" /><FieldLabel htmlFor="protocol-exchange">{t('accounts:protocolExchange')}</FieldLabel></Field>
-                  <Field orientation="horizontal"><RadioGroupItem id="protocol-imapSmtp" value="imapSmtp" /><FieldLabel htmlFor="protocol-imapSmtp">{t('accounts:protocolImapSmtp')}</FieldLabel></Field>
-                  <Field orientation="horizontal"><RadioGroupItem id="protocol-pop3" value="pop3" disabled /><FieldLabel htmlFor="protocol-pop3" className="text-muted-foreground">{t('accounts:protocolPop3')}</FieldLabel></Field>
-                </RadioGroup>
-                <FieldDescription>{t('accounts:protocolPop3Hint')}</FieldDescription>
+              <SettingsGroup title={t('accounts:serverSettingsTitle')} description={t('accounts:serverSettingsHint')}>
+                <Tabs value={ewsMode ? 'exchange' : 'imap'} onValueChange={(value) => {
+                  if (value === 'exchange' && !ewsMode) switchProtocol('exchange')
+                  else if (value === 'imap' && ewsMode) switchProtocol('imapSmtp')
+                }}>
+                  <TabsList aria-label={t('accounts:serverSettingsTitle')}>
+                    <TabsTrigger value="pop3" disabled>{t('accounts:protocolPop3')}</TabsTrigger>
+                    <TabsTrigger value="imap">{t('accounts:serverTabImap')}</TabsTrigger>
+                    <TabsTrigger value="exchange">{t('accounts:serverTabExchange')}</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="pop3" className="text-sm">
+                    <Alert role="status">
+                      <AlertTitle>{t('accounts:pop3UnsupportedTitle')}</AlertTitle>
+                      <AlertDescription>{t('accounts:pop3UnsupportedHint')}</AlertDescription>
+                    </Alert>
+                  </TabsContent>
+                  <TabsContent value="imap" className="text-sm">
+                    {/* base-ui keeps inactive panels mounted. Guard by the
+                        active mode so the discovery source and the server
+                        fields are not duplicated in the DOM (and so hidden
+                        inputs never share an id with the visible tab). */}
+                    {!ewsMode && discoveryEnabled && (
+                      <DiscoveryPanel state={discovery} source={discoverySource} emailEntered={draft.emailAddress.trim() !== ''}
+                        saving={saving} onRetry={() => { void discover() }} />
+                    )}
+                    {!ewsMode && showServerFields && serverFields}
+                  </TabsContent>
+                  <TabsContent value="exchange" className="text-sm">
+                    {ewsMode && draft.ews && (
+                      <EwsFields ews={draft.ews} source={discoverySource} saving={saving} onManual={switchToManual} onChange={changeEws} />
+                    )}
+                  </TabsContent>
+                </Tabs>
               </SettingsGroup>
-              {discoveryEnabled && !ewsMode && (
-                <DiscoveryPanel state={discovery} source={discoverySource} emailEntered={draft.emailAddress.trim() !== ''}
-                  saving={saving} onRetry={() => { void discover() }} />
-              )}
-              {ewsMode && draft.ews && (
-                <EwsFields ews={draft.ews} source={discoverySource} saving={saving} onManual={switchToManual} onChange={changeEws} />
-              )}
-              {showServerFields && serverFields}
               <SettingsGroup title={t('accounts:authentication')} description={t('accounts:authenticationDescription')}>
                 {!ewsMode && modeFields}
                 {passwordFields}

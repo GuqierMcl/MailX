@@ -163,8 +163,8 @@ describe('accounts dialog', () => {
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('button', { name: '修改连接' }))
     const connection = await screen.findByRole('dialog', { name: '修改连接' })
-    // The protocol choice is now a radio beside the header's provider badge.
-    expect(await within(connection).findByRole('radio', { name: 'IMAP/SMTP' })).toBeInTheDocument()
+    // The protocol choice is a tab in the server settings group.
+    expect(await within(connection).findByRole('tab', { name: 'IMAP' })).toBeInTheDocument()
     fireEvent.change(await within(connection).findByLabelText('IMAP 主机'), { target: { value: 'imap.moved.example' } })
     await userEvent.click(within(connection).getByRole('button', { name: '保存并重新连接' }))
     await waitFor(() => expect(client.updateConnection).toHaveBeenCalledOnce())

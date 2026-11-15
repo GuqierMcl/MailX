@@ -233,7 +233,12 @@ export type ConnectionVerificationStage = "configuration" | "connection" | "tls"
 
 export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMissing" | "secretStore" | "network" | "proxy" | "tls" | "timeout" | "authentication" | "providerPolicy" | "authUnavailable" | "protocol" | "cancelled" | "unsupported" | "configuration";
 
-export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
+export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null,
+/**
+ * A free-text reason for a failure, when the structured `code` alone does
+ * not say enough. Empty for successes and for failures that need no detail.
+ */
+detail?: string, };
 
 export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, };
 

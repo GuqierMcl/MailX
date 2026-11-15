@@ -95,6 +95,11 @@ pub struct ProtocolVerification {
     pub status: ConnectionVerificationStatus,
     pub stage: ConnectionVerificationStage,
     pub code: Option<ConnectionVerificationCode>,
+    /// A free-text reason for a failure, when the structured `code` alone does
+    /// not say enough. Empty for successes and for failures that need no detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
 }
 
 impl ProtocolVerification {
@@ -103,6 +108,7 @@ impl ProtocolVerification {
             status: ConnectionVerificationStatus::Verified,
             stage: ConnectionVerificationStage::Complete,
             code: None,
+            detail: None,
         }
     }
     fn failed(stage: ConnectionVerificationStage, code: ConnectionVerificationCode) -> Self {
@@ -110,6 +116,7 @@ impl ProtocolVerification {
             status: ConnectionVerificationStatus::Failed,
             stage,
             code: Some(code),
+            detail: None,
         }
     }
 }
@@ -477,20 +484,68 @@ async fn verify_ews(route: &NetRoute, draft: &draft_connection::EwsDraft) -> Pro
 }
 
 fn ews_failure(error: EwsError) -> ProtocolVerification {
+    use crate::ews::soap::SoapError;
     use ConnectionVerificationCode as C;
     use ConnectionVerificationStage as S;
-    let (stage, code) = match error {
-        EwsError::Http(HttpError::Rejected) => (S::Authentication, C::Authentication),
-        EwsError::Http(HttpError::NoNtlm) => (S::Authentication, C::AuthUnavailable),
-        EwsError::Http(HttpError::Net(NetError::Proxy(_))) => (S::Connection, C::Proxy),
-        EwsError::Http(HttpError::Net(NetError::Tls(_))) => (S::Tls, C::Tls),
-        EwsError::Http(HttpError::Timeout) => (S::Connection, C::Timeout),
-        EwsError::Http(HttpError::Net(NetError::Timeout)) => (S::Connection, C::Timeout),
-        EwsError::Http(HttpError::Net(NetError::Connect(_))) => (S::Connection, C::Network),
-        EwsError::Http(HttpError::Transport) => (S::Connection, C::Network),
-        _ => (S::Mailbox, C::Protocol),
+    let (stage, code, detail) = match error {
+        EwsError::Http(HttpError::Rejected) => (
+            S::Authentication,
+            C::Authentication,
+            "服务器拒绝了 NTLM 登录：凭据，或登录名/域不正确。".into(),
+        ),
+        EwsError::Http(HttpError::NoNtlm) => (
+            S::Authentication,
+            C::AuthUnavailable,
+            "服务器未提供 NTLM 认证，可能只支持 Basic；当前客户端仅实现 NTLM。".into(),
+        ),
+        EwsError::Http(HttpError::Net(NetError::Proxy(_))) => {
+            (S::Connection, C::Proxy, String::new())
+        }
+        EwsError::Http(HttpError::Net(NetError::Tls(_))) => (
+            S::Tls,
+            C::Tls,
+            "TLS 证书验证失败；可能需要设置证书主体名（certPrincipalName）。".into(),
+        ),
+        EwsError::Http(HttpError::Timeout) | EwsError::Http(HttpError::Net(NetError::Timeout)) => {
+            (S::Connection, C::Timeout, String::new())
+        }
+        EwsError::Http(HttpError::Net(NetError::Connect(_))) => (
+            S::Connection,
+            C::Network,
+            "无法建立 TCP 连接（DNS 解析失败或连接被拒绝）。".into(),
+        ),
+        EwsError::Http(HttpError::Transport) => (
+            S::Connection,
+            C::Network,
+            "连接中断，或服务器返回了非 200/401 的响应。".into(),
+        ),
+        EwsError::Http(HttpError::UnexpectedStatus(_, detail)) => (
+            S::Connection,
+            C::Protocol,
+            format!("服务器返回了无法识别的响应：{detail}"),
+        ),
+        EwsError::Http(HttpError::Malformed) => {
+            (S::Mailbox, C::Protocol, "EWS 握手响应格式异常。".into())
+        }
+        EwsError::Http(HttpError::TooLarge) => {
+            (S::Mailbox, C::Protocol, "响应超过 32 MiB 上限。".into())
+        }
+        EwsError::Soap(SoapError::Malformed) => (
+            S::Mailbox,
+            C::Protocol,
+            "服务器未返回 SOAP（可能是 HTML 登录页或错误页，而非 XML）。".into(),
+        ),
+        EwsError::Soap(SoapError::Server) => (
+            S::Mailbox,
+            C::Protocol,
+            "EWS 返回了服务端错误（ResponseClass=Error）。".into(),
+        ),
     };
-    ProtocolVerification::failed(stage, code)
+    let mut verification = ProtocolVerification::failed(stage, code);
+    if !detail.is_empty() {
+        verification.detail = Some(detail);
+    }
+    verification
 }
 
 fn check_active(

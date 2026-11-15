@@ -211,7 +211,7 @@
   "verificationIncoming": "IMAP 收信",
   "verificationOutgoing": "SMTP 发信",
   "verificationExchange": "Exchange 收发",
-  "verificationPassed": "登录成功",
+  "verificationPassed": "已通过",
   "verificationAuthUnavailable": "服务器不支持当前认证方式。",
   "verificationConfiguration": "连接配置不可用，请修改连接后重试。",
   "verificationSecretStore": "系统凭据库暂不可用，请解锁后重试。",
@@ -301,7 +301,7 @@
   "protocolImapSmtp": "IMAP/SMTP",
   "protocolPop3": "POP3",
   "protocolPop3Hint": "POP3 暂不支持；提供 POP3 的服务商同样支持 IMAP，请改用 IMAP/SMTP。",
-  "connectionMethod": "连接方式",
+"connectionMethod": "连接方式",
   "methodImapSmtp": "IMAP/SMTP",
   "browserSignInMethod": "{{name}} · 浏览器登录",
   "connectionDetails": "连接详情",
@@ -315,5 +315,11 @@
   "syncRetryingShort": "同步遇到问题，会自动重试",
   "lastSynced": "最近同步：{{time}}",
   "signedInAgain": "已重新登录",
-  "customColor": "自定义颜色"
+  "customColor": "自定义颜色",
+"serverSettingsTitle": "服务器设置",
+  "serverSettingsHint": "选择接收协议：Exchange 通过 HTTPS 收发；IMAP 配合 SMTP 收发。POP3 暂未支持。",
+  "serverTabImap": "IMAP",
+  "serverTabExchange": "Exchange",
+  "pop3UnsupportedTitle": "POP3 暂未支持",
+  "pop3UnsupportedHint": "MailX 当前仅支持 IMAP/SMTP 与 Exchange。提供 POP3 的服务商通常同样支持 IMAP，请使用「IMAP」标签配置收发。"
 }

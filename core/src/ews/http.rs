@@ -26,17 +26,23 @@ pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// A SOAP response larger than this is refused instead of parsed
 /// (`docs/architecture/ews-backend.md` §3).
 pub(crate) const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
-/// What authentication asks for. Its content is irrelevant: any authenticated
-/// request proves the credentials, and an unauthenticated one only produces the
-/// `401` this client needs.
+/// What the two unauthenticated handshake requests carry. Their content is
+/// irrelevant to authentication (the server refuses them before parsing the
+/// body), but it must still be a well-formed EWS request: some Exchange / WAF
+/// setups inspect the body first. The `m:` / `t:` prefixes matter — `BaseShape`
+/// and `DistinguishedFolderId` belong to the *types* namespace, and putting
+/// them in the messages namespace is what makes Exchange answer with
+/// `ErrorInvalidOperation` ("ID 的格式不正确").
 const PROBE_BODY: &str = concat!(
     r#"<?xml version="1.0" encoding="utf-8"?>"#,
-    r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">"#,
-    r#"<soap:Header><t:RequestServerVersion xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" Version="Exchange2013"/></soap:Header>"#,
-    r#"<soap:Body><GetFolder xmlns="http://schemas.microsoft.com/exchange/services/2006/messages">"#,
-    r#"<FolderShape><BaseShape>IdOnly</BaseShape></FolderShape>"#,
-    r#"<FolderIds><DistinguishedFolderId Id="inbox"/></FolderIds>"#,
-    r#"</GetFolder></soap:Body></soap:Envelope>"#,
+    r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" "#,
+    r#"xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" "#,
+    r#"xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">"#,
+    r#"<soap:Header><t:RequestServerVersion Version="Exchange2013"/></soap:Header>"#,
+    r#"<soap:Body><m:GetFolder>"#,
+    r#"<m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape>"#,
+    r#"<m:FolderIds><t:DistinguishedFolderId Id="inbox"/></m:FolderIds>"#,
+    r#"</m:GetFolder></soap:Body></soap:Envelope>"#,
 );
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +59,10 @@ pub(crate) enum HttpError {
     TooLarge,
     /// The connection failed mid-request.
     Transport,
+    /// EWS answered a request with a status this client does not treat as a
+    /// success or a credential refusal, carrying a short response snippet so the
+    /// caller can tell a 502 from a redirect or an HTML login page.
+    UnexpectedStatus(u16, String),
 }
 
 /// An authenticated, connection-bound EWS endpoint.
@@ -142,15 +152,31 @@ impl EwsHttp {
             ntlm::client_challenge(),
             None,
         );
-        let response = self.send(Some(&type3)).await?;
+        // The `Type 3` message authenticates the connection, and the server then
+        // processes its body as a real EWS request. A malformed probe body (the
+        // discovery `GetFolder` uses an unprefixed `BaseShape`, so the wrong
+        // namespace) makes a *successful* login look like a 500 with an
+        // `ErrorInvalidOperation` fault. Send the same `FindFolder` the caller
+        // needs instead: on 200 we are authenticated and the caller's follow-up
+        // `FindFolder` is a harmless repeat; on a fault the diagnostic names the
+        // real operation rather than the handshake.
+        let body = super::soap::find_folders();
+        let response = self
+            .send_with(Some(&type3), Some("FindFolder"), body)
+            .await?;
         let status = response.status();
-        drain(response).await?;
         if status.is_success() {
+            // The server executed the FindFolder carried by Type 3 and answered
+            // with a real SOAP body. It must be drained before `hyper` will let
+            // us send the caller's next request on this single connection.
+            drain(response).await?;
             return Ok(());
         }
-        Err(match status {
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => HttpError::Rejected,
-            _ => HttpError::Transport,
+        let status_code = status.as_u16();
+        let snippet = diagnostic(response, "NTLM 认证后 FindFolder").await;
+        Err(match status_code {
+            401 | 403 => HttpError::Rejected,
+            _ => HttpError::UnexpectedStatus(status_code, snippet),
         })
     }
 
@@ -163,7 +189,9 @@ impl EwsHttp {
             return Err(HttpError::Rejected);
         }
         if !response.status().is_success() {
-            return Err(HttpError::Transport);
+            let status = response.status().as_u16();
+            let snippet = diagnostic(response, action).await;
+            return Err(HttpError::UnexpectedStatus(status, snippet));
         }
         read_body(response).await
     }
@@ -271,6 +299,43 @@ async fn read_body(response: Response<Incoming>) -> Result<String, HttpError> {
     String::from_utf8(collected.to_bytes().to_vec()).map_err(|_| HttpError::Malformed)
 }
 
+/// Builds a diagnostic string for an unexpected non-2xx / non-401 response: the
+/// HTTP status, the `Content-Type`, and a preview of the body. A SOAP fault or
+/// an HTML login / error page in the body tells far more than a bare status
+/// code. `label` names the request that produced the response (the NTLM
+/// handshake or the EWS operation) so a 500 can be placed precisely.
+async fn diagnostic(response: Response<Incoming>, label: &str) -> String {
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("(无 Content-Type)")
+        .to_owned();
+    // Read with a generous bound, then show only the first 1 KiB. Using the
+    // preview size as the `Limited` bound makes any larger body (a typical IIS
+    // HTML error page) surface as a read error instead of its contents.
+    let body = Limited::new(response.into_body(), 256 * 1024);
+    let preview = match timeout(REQUEST_TIMEOUT, body.collect()).await {
+        Ok(Ok(collected)) => {
+            let bytes = collected.to_bytes();
+            if bytes.is_empty() {
+                "(空响应体)".to_owned()
+            } else {
+                let end = bytes.len().min(1024);
+                let mut text = String::from_utf8_lossy(&bytes[..end]).to_string();
+                if bytes.len() > end {
+                    text.push_str("…(已截断)");
+                }
+                text
+            }
+        }
+        Ok(Err(_)) => "(响应体读取失败)".to_owned(),
+        Err(_) => "(响应体读取超时)".to_owned(),
+    };
+    format!("HTTP {status} · {content_type} · [{label}]：{preview}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,11 +436,29 @@ mod tests {
             head.to_ascii_lowercase().contains("authorization: ntlm "),
             "the third request carries Type 3"
         );
+        let soap = String::from_utf8_lossy(&body);
         assert!(
-            body.starts_with(b"<?xml"),
-            "the third request still carries a SOAP body"
+            soap.starts_with("<?xml") && soap.contains("<m:FindFolder"),
+            "Type 3 carries a real FindFolder request: {soap}"
         );
-        reply(&mut stream, "200 OK", "Content-Type: text/xml\r\n", "").await;
+        assert!(
+            soap.contains(r#"<t:DistinguishedFolderId Id="msgfolderroot"/>"#)
+                && soap.contains("<t:BaseShape>Default</t:BaseShape>"),
+            "the folder id and base shape use the types namespace: {soap}"
+        );
+        assert!(
+            !soap.contains("<BaseShape>"),
+            "the malformed, unprefixed BaseShape is gone: {soap}"
+        );
+        // A non-empty body: the client has to drain it before the fourth
+        // request can go out on this same connection.
+        reply(
+            &mut stream,
+            "200 OK",
+            "Content-Type: text/xml\r\n",
+            "<soap:Envelope><soap:Body/></soap:Envelope>",
+        )
+        .await;
 
         let (head, _) = read_request(&mut stream).await;
         // `hyper` writes header names in lower case.
@@ -463,6 +546,191 @@ mod tests {
         .err()
         .expect("authentication fails");
         assert_eq!(error, HttpError::Rejected);
+    }
+
+    /// Regression for a real Exchange 2019 deployment: NTLM succeeded, but the
+    /// server executed the malformed `GetFolder` probe carried by Type 3 and
+    /// answered 500 with a SOAP Fault. The diagnostic must surface that body
+    /// instead of a bare status code.
+    #[tokio::test]
+    async fn a_soap_fault_after_type3_is_reported_with_its_body() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let _ = read_request(&mut stream).await;
+            reply(
+                &mut stream,
+                "401 Unauthorized",
+                "WWW-Authenticate: NTLM\r\n",
+                "",
+            )
+            .await;
+            let _ = read_request(&mut stream).await;
+            let challenge = base64::engine::general_purpose::STANDARD.encode(type2());
+            reply(
+                &mut stream,
+                "401 Unauthorized",
+                &format!("WWW-Authenticate: NTLM {challenge}\r\n"),
+                "",
+            )
+            .await;
+            let (head, body) = read_request(&mut stream).await;
+            assert!(
+                head.to_ascii_lowercase().contains("authorization: ntlm "),
+                "Type 3 was sent"
+            );
+            let soap = String::from_utf8_lossy(&body);
+            assert!(
+                soap.contains("<m:FindFolder"),
+                "Type 3 no longer carries the malformed GetFolder probe: {soap}"
+            );
+            let fault = concat!(
+                r#"<?xml version="1.0" encoding="utf-8"?>"#,
+                r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">"#,
+                r#"<s:Body><s:Fault>"#,
+                r#"<faultcode>a:ErrorInvalidOperation</faultcode>"#,
+                r#"<faultstring>ID 的格式不正确。</faultstring>"#,
+                r#"</s:Fault></s:Body></s:Envelope>"#,
+            );
+            reply(
+                &mut stream,
+                "500 Internal Server Error",
+                "Content-Type: text/xml; charset=utf-8\r\n",
+                fault,
+            )
+            .await;
+        });
+
+        let stream = Box::new(TcpStream::connect(address).await.unwrap()) as BoxedStream;
+        let password = SecretValue::new("synthetic".to_owned());
+        let credentials = Credentials::parse("Domain\\User", &password);
+        let error = EwsHttp::with_stream(
+            stream,
+            "mail.example.com",
+            "/EWS/Exchange.asmx",
+            &credentials,
+        )
+        .await
+        .err()
+        .expect("a 500 is a failure");
+        let HttpError::UnexpectedStatus(status, detail) = error else {
+            panic!("expected UnexpectedStatus, got {error:?}");
+        };
+        assert_eq!(status, 500);
+        assert!(detail.contains("text/xml"), "{detail}");
+        assert!(detail.contains("ErrorInvalidOperation"), "{detail}");
+        assert!(detail.contains("FindFolder"), "{detail}");
+    }
+
+    /// The conservative `FindItem` retry must be possible on the *same*
+    /// connection: NTLM is connection-bound, and a 500 whose body was consumed
+    /// for diagnostics must not poison the hyper sender. This is the exact
+    /// shape of a real `ErrorInvalidRequest` from an unknown `FieldURI`.
+    #[tokio::test]
+    async fn a_rejected_find_item_can_be_retried_on_the_same_connection() {
+        use crate::ews::soap::{find_items, find_items_basic};
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let _ = read_request(&mut stream).await;
+            reply(
+                &mut stream,
+                "401 Unauthorized",
+                "WWW-Authenticate: NTLM\r\n",
+                "",
+            )
+            .await;
+            let _ = read_request(&mut stream).await;
+            let challenge = base64::engine::general_purpose::STANDARD.encode(type2());
+            reply(
+                &mut stream,
+                "401 Unauthorized",
+                &format!("WWW-Authenticate: NTLM {challenge}\r\n"),
+                "",
+            )
+            .await;
+            let _ = read_request(&mut stream).await;
+            reply(
+                &mut stream,
+                "200 OK",
+                "Content-Type: text/xml\r\n",
+                "<soap:Envelope><soap:Body/></soap:Envelope>",
+            )
+            .await;
+
+            // First FindItem: the full property set is refused at the schema
+            // level, so the answer is a top-level SOAP fault over HTTP 500.
+            let (_, full) = read_request(&mut stream).await;
+            let full = String::from_utf8_lossy(&full).to_string();
+            assert!(full.contains("<m:FindItem"), "a FindItem was posted");
+            assert!(full.contains(r#"FieldURI="item:Flag""#));
+            let fault = concat!(
+                r#"<?xml version="1.0" encoding="utf-8"?>"#,
+                r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">"#,
+                r#"<s:Body><s:Fault><faultcode>a:ErrorInvalidRequest</faultcode>"#,
+                r#"<faultstring>请求无效。</faultstring>"#,
+                r#"</s:Fault></s:Body></s:Envelope>"#,
+            );
+            reply(
+                &mut stream,
+                "500 Internal Server Error",
+                "Content-Type: text/xml; charset=utf-8\r\n",
+                fault,
+            )
+            .await;
+
+            // Retry: only the original-schema paths, on the same connection.
+            let (_, basic) = read_request(&mut stream).await;
+            let basic = String::from_utf8_lossy(&basic).to_string();
+            assert!(basic.contains("<m:FindItem"), "the retry is a FindItem");
+            assert!(basic.contains(r#"FieldURI="item:Subject""#));
+            for late in [
+                "item:Flag",
+                "item:InReplyTo",
+                "message:References",
+                "message:ReplyTo",
+            ] {
+                assert!(
+                    !basic.contains(&format!("FieldURI=\"{late}\"")),
+                    "the retry still asks for {late}"
+                );
+            }
+            reply(
+                &mut stream,
+                "200 OK",
+                "Content-Type: text/xml\r\n",
+                "<ok>retried</ok>",
+            )
+            .await;
+        });
+
+        let stream = Box::new(TcpStream::connect(address).await.unwrap()) as BoxedStream;
+        let password = SecretValue::new("synthetic".to_owned());
+        let credentials = Credentials::parse("Domain\\User", &password);
+        let mut http = EwsHttp::with_stream(
+            stream,
+            "mail.example.com",
+            "/EWS/Exchange.asmx",
+            &credentials,
+        )
+        .await
+        .expect("authentication succeeds");
+
+        let error = http
+            .post("FindItem", &find_items("inbox", 5))
+            .await
+            .expect_err("the full property set is refused");
+        assert!(matches!(error, HttpError::UnexpectedStatus(500, _)));
+
+        let body = http
+            .post("FindItem", &find_items_basic("inbox", 5))
+            .await
+            .expect("the retry succeeds on the same connection");
+        assert_eq!(body, "<ok>retried</ok>");
+        server.await.unwrap();
     }
 
     #[tokio::test]

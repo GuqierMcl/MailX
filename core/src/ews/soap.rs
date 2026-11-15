@@ -35,12 +35,31 @@ pub(crate) enum SoapError {
     Server,
 }
 
-/// One folder as `FindFolder` reports it.
+/// One folder as `FindFolder` reports it. A deep traversal returns a flat list,
+/// so the parent id and the folder class are what let the caller rebuild the
+/// tree and tell mail folders from calendars, contacts and search folders.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Folder {
     pub id: String,
+    pub parent_id: Option<String>,
     pub display_name: String,
     pub total_count: u32,
+    pub unread_count: u32,
+    /// `ChildFolderCount` is part of `BaseShape=Default`; it tells us whether a
+    /// shallow follow-up is worth issuing when a server omits parent ids.
+    pub child_folder_count: Option<u32>,
+    /// `IPF.Note` for mail folders; absent on servers that omit the property.
+    pub folder_class: Option<String>,
+    /// False for calendar / contacts / tasks / search folder elements.
+    pub mail_folder: bool,
+}
+
+/// One page of a `FindFolder` listing. `next_offset` is `None` once the server
+/// says the last item was included, or when paging cannot advance any further.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FoldersPage {
+    pub folders: Vec<Folder>,
+    pub next_offset: Option<usize>,
 }
 
 /// One message as FindItem reports it. Addresses are already decoded.
@@ -89,13 +108,122 @@ pub(crate) fn envelope(body: &str) -> String {
 }
 
 /// `FindFolder` rooted at the message-folder root, deep, one page of 256.
+/// This is also the body NTLM Type 3 carries, so it deliberately uses the bare
+/// `Default` shape: an extra `FieldURI` rejected during schema validation would
+/// turn a successful sign-in into an HTTP 500 (see `items()` for the same trap).
 pub(crate) fn find_folders() -> String {
-    envelope(concat!(
-        r#"<m:FindFolder Traversal="Deep">"#,
-        r#"<m:FolderShape><t:BaseShape>Default</t:BaseShape></m:FolderShape>"#,
-        r#"<m:IndexedPageFolderView MaxEntriesReturned="256" Offset="0" BasePoint="Beginning"/>"#,
-        r#"<m:ParentFolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderIds>"#,
-        r#"</m:FindFolder>"#,
+    find_folders_plain(0)
+}
+
+/// `BaseShape=Default` returns only `FolderId`, `DisplayName`, `UnreadCount`,
+/// `TotalCount` and `ChildFolderCount` for a folder. `ParentFolderId` and
+/// `FolderClass` are NOT in that set: they have to be asked for explicitly or
+/// the flat list of a deep traversal cannot be turned back into a tree.
+/// All three are members of `UnindexedFieldURIType` (MS-OXWSCDATA 2.2.5.26).
+const FOLDER_FIELDS: &[&str] = &[
+    "folder:ParentFolderId",
+    "folder:FolderClass",
+    "folder:UnreadCount",
+];
+
+const DEFAULT_SHAPE: &str = r#"<t:BaseShape>Default</t:BaseShape>"#;
+const ALL_SHAPE: &str = r#"<t:BaseShape>AllProperties</t:BaseShape>"#;
+const ROOT_FOLDER: &str = r#"<t:DistinguishedFolderId Id="msgfolderroot"/>"#;
+
+/// The `offset`-th page of the deep listing, explicitly asking for the parent
+/// id and the folder class. A strictly validating server that rejects the
+/// extra `FieldURI` paths falls back through [`find_folders_all`] and
+/// [`find_folders_plain`].
+pub(crate) fn find_folders_page(offset: usize) -> String {
+    let mut shape = String::from(DEFAULT_SHAPE);
+    shape.push_str("<t:AdditionalProperties>");
+    for field in FOLDER_FIELDS {
+        debug_assert!(
+            ALLOWED_FIELD_URIS.contains(field),
+            "{field} is not a valid EWS FieldURI"
+        );
+        shape.push_str(&format!(r#"<t:FieldURI FieldURI="{field}"/>"#));
+    }
+    shape.push_str("</t:AdditionalProperties>");
+    find_folders_with(offset, &shape, "Deep", ROOT_FOLDER)
+}
+
+/// The same page with every schema property. Used when a deployment rejects
+/// `AdditionalProperties` outright: `AllProperties` still carries the parent.
+pub(crate) fn find_folders_all(offset: usize) -> String {
+    find_folders_with(offset, ALL_SHAPE, "Deep", ROOT_FOLDER)
+}
+
+/// The same page with the bare `Default` shape, for servers that refuse any
+/// richer shape. The reader treats missing parent / class / unread as absent.
+pub(crate) fn find_folders_plain(offset: usize) -> String {
+    find_folders_with(offset, DEFAULT_SHAPE, "Deep", ROOT_FOLDER)
+}
+
+/// Direct children of one known folder. The caller already knows the parent,
+/// so this rebuilds the hierarchy without depending on `ParentFolderId` in the
+/// response at all.
+pub(crate) fn find_folder_children(parent_id: &str, offset: usize) -> String {
+    let parent = format!(r#"<t:FolderId Id="{}"/>"#, escape(parent_id));
+    find_folders_with(offset, DEFAULT_SHAPE, "Shallow", &parent)
+}
+
+/// One `GetFolder` for several distinguished folders. The response messages
+/// come back in request order, which is how the caller maps ids to roles.
+/// `IdOnly` keeps the answer small. A mailbox can contain empty folders whose
+/// names look exactly like the default ones after a locale switch; only this
+/// operation can say which folder really receives sent mail, drafts and so on.
+pub(crate) fn get_distinguished_folders(names: &[&str]) -> String {
+    let ids: String = names
+        .iter()
+        .map(|name| format!(r#"<t:DistinguishedFolderId Id="{}"/>"#, escape(name)))
+        .collect();
+    envelope(&format!(
+        concat!(
+            r#"<m:GetFolder>"#,
+            r#"<m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape>"#,
+            r#"<m:FolderIds>{ids}</m:FolderIds>"#,
+            r#"</m:GetFolder>"#,
+        ),
+        ids = ids,
+    ))
+}
+
+/// Folder ids from a `GetFolder` response, one slot per requested folder.
+/// A failed response message leaves its slot empty so the remaining ids stay
+/// aligned with the request. Anything unreadable yields an empty list; the
+/// caller treats that as "guess roles from names" rather than an error.
+pub(crate) fn parse_distinguished_folders(xml: &str) -> Vec<Option<String>> {
+    let Ok(xml) = checked(xml) else {
+        return Vec::new();
+    };
+    blocks(xml, "GetFolderResponseMessage")
+        .iter()
+        .map(|block| {
+            if attribute(block, "ResponseClass").is_some_and(|class| class != "Success") {
+                return None;
+            }
+            blocks(block, "FolderId")
+                .first()
+                .copied()
+                .and_then(|tag| attribute(tag, "Id"))
+        })
+        .collect()
+}
+
+fn find_folders_with(offset: usize, shape: &str, traversal: &str, parents: &str) -> String {
+    envelope(&format!(
+        concat!(
+            r#"<m:FindFolder Traversal="{traversal}">"#,
+            r#"<m:FolderShape>{shape}</m:FolderShape>"#,
+            r#"<m:IndexedPageFolderView MaxEntriesReturned="256" Offset="{offset}" BasePoint="Beginning"/>"#,
+            r#"<m:ParentFolderIds>{parents}</m:ParentFolderIds>"#,
+            r#"</m:FindFolder>"#,
+        ),
+        shape = shape,
+        traversal = traversal,
+        offset = offset,
+        parents = parents,
     ))
 }
 
@@ -121,6 +249,16 @@ fn checked(xml: &str) -> Result<&str, SoapError> {
 
 /// Reads the folder list out of a `FindFolder` response.
 pub(crate) fn parse_folders(xml: &str) -> Result<Vec<Folder>, SoapError> {
+    parse_folders_page(xml, 0).map(|page| page.folders)
+}
+
+/// Reads one page together with the paging cursor on `RootFolder`.
+///
+/// A deep traversal is a flat list: `ParentFolderId` and `FolderClass` are what
+/// the caller needs to rebuild the tree and skip non-mail folders. Elements are
+/// collected in document order, not grouped by their XML element name, so the
+/// local sidebar keeps the server's ordering.
+pub(crate) fn parse_folders_page(xml: &str, offset: usize) -> Result<FoldersPage, SoapError> {
     let xml = checked(xml)?;
     // A per-message failure is reported inside a 200, so the class decides.
     if let Some(message) = blocks(xml, "FindFolderResponseMessage").first()
@@ -131,62 +269,164 @@ pub(crate) fn parse_folders(xml: &str) -> Result<Vec<Folder>, SoapError> {
     let Some(root) = blocks(xml, "RootFolder").first().copied() else {
         return Err(SoapError::Malformed);
     };
-    let mut folders = Vec::new();
-    for name in [
-        "Folder",
-        "CalendarFolder",
-        "ContactsFolder",
-        "TasksFolder",
-        "SearchFolder",
-    ] {
+    // Exchange and its load balancers disagree on prefixes; local names only.
+    const KINDS: [(&str, bool); 5] = [
+        ("Folder", true),
+        ("CalendarFolder", false),
+        ("ContactsFolder", false),
+        ("TasksFolder", false),
+        ("SearchFolder", false),
+    ];
+    let base = root.as_ptr() as usize;
+    let mut found: Vec<(usize, &str, bool)> = Vec::new();
+    for (name, mail_folder) in KINDS {
         for block in blocks(root, name) {
-            let Some(id) = blocks(block, "FolderId").first().copied() else {
-                continue;
-            };
-            let Some(id) = attribute(id, "Id") else {
-                continue;
-            };
-            folders.push(Folder {
-                id,
-                display_name: text(block, "DisplayName").unwrap_or_default(),
-                total_count: text(block, "TotalCount")
-                    .and_then(|count| count.parse().ok())
-                    .unwrap_or(0),
-            });
+            found.push((block.as_ptr() as usize - base, block, mail_folder));
         }
     }
-    Ok(folders)
+    found.sort_by_key(|(position, _, _)| *position);
+    let mut folders = Vec::new();
+    for (_, block, mail_folder) in found {
+        let Some(id_tag) = blocks(block, "FolderId").first().copied() else {
+            continue;
+        };
+        let Some(id) = attribute(id_tag, "Id") else {
+            continue;
+        };
+        folders.push(Folder {
+            id,
+            parent_id: blocks(block, "ParentFolderId")
+                .first()
+                .copied()
+                .and_then(|tag| attribute(tag, "Id")),
+            display_name: text(block, "DisplayName").unwrap_or_default(),
+            total_count: text(block, "TotalCount")
+                .and_then(|count| count.trim().parse().ok())
+                .unwrap_or(0),
+            unread_count: text(block, "UnreadCount")
+                .and_then(|count| count.trim().parse().ok())
+                .unwrap_or(0),
+            child_folder_count: text(block, "ChildFolderCount")
+                .and_then(|count| count.trim().parse().ok()),
+            folder_class: text(block, "FolderClass").filter(|class| !class.is_empty()),
+            mail_folder,
+        });
+    }
+    // `IncludesLastItemInRange` is on RootFolder, not on each folder. Servers
+    // that omit it are treated as a single page, which is the old behaviour.
+    let last = attribute(root, "IncludesLastItemInRange")
+        .is_none_or(|value| !value.eq_ignore_ascii_case("false"));
+    let next_offset = if last {
+        None
+    } else {
+        let reported = attribute(root, "IndexedPagingOffset")
+            .and_then(|value| value.trim().parse::<usize>().ok());
+        let next = reported.unwrap_or_else(|| offset.saturating_add(folders.len()));
+        // A page that cannot advance would loop forever; an empty page ends it.
+        (next > offset && !folders.is_empty()).then_some(next)
+    };
+    Ok(FoldersPage {
+        folders,
+        next_offset,
+    })
 }
+
+/// Every `FieldURI` value MailX is allowed to emit must be a member of the EWS
+/// `UnindexedFieldURIType` enumeration. A value outside it is not a per-item
+/// error: Exchange fails while deserializing the request and answers with a
+/// top-level SOAP fault (`ErrorInvalidRequest`, "请求无效") over HTTP 500.
+/// `InReplyTo` belongs to `item:`, not `message:` — see the enumeration in
+/// MS-OXWSCDATA 2.2.5.26 / `UnindexedFieldURIType`.
+const ALLOWED_FIELD_URIS: &[&str] = &[
+    "item:Subject",
+    "message:From",
+    "message:ToRecipients",
+    "message:CcRecipients",
+    "message:ReplyTo",
+    "item:DateTimeSent",
+    "item:DateTimeReceived",
+    "message:IsRead",
+    "item:HasAttachments",
+    "item:Size",
+    "message:InternetMessageId",
+    "item:InReplyTo",
+    "message:References",
+    "item:Flag",
+    // FolderShape properties (FindFolder). These are legal members too; an
+    // unknown value would make Exchange reject the whole request with a 500.
+    "folder:ParentFolderId",
+    "folder:FolderClass",
+    "folder:UnreadCount",
+];
+
+/// Fields present since the original EWS schema. `item:Flag`, `item:InReplyTo`,
+/// `message:References` and `message:ReplyTo` arrived in Exchange 2010 SP2, so
+/// older or strictly validating servers can still reject the full set. A
+/// rejected `FindItem` retries with this conservative set instead of failing
+/// the whole account; the reader already defaults every missing field.
+const ITEM_FIELDS: &[&str] = &[
+    "item:Subject",
+    "message:From",
+    "message:ToRecipients",
+    "message:CcRecipients",
+    "message:ReplyTo",
+    "item:DateTimeSent",
+    "item:DateTimeReceived",
+    "message:IsRead",
+    "item:HasAttachments",
+    "item:Size",
+    "message:InternetMessageId",
+    "item:InReplyTo",
+    "message:References",
+    "item:Flag",
+];
+
+const BASIC_ITEM_FIELDS: &[&str] = &[
+    "item:Subject",
+    "message:From",
+    "message:ToRecipients",
+    "message:CcRecipients",
+    "item:DateTimeSent",
+    "item:DateTimeReceived",
+    "message:IsRead",
+    "item:HasAttachments",
+    "item:Size",
+    "message:InternetMessageId",
+];
 
 /// `FindItem` in one folder, shallow, one page of `max_entries` messages.
 pub(crate) fn find_items(folder_id: &str, max_entries: usize) -> String {
+    find_items_with(folder_id, max_entries, ITEM_FIELDS)
+}
+
+/// The same page using only universally supported property paths, for servers
+/// that reject one of the newer fields in [`ITEM_FIELDS`].
+pub(crate) fn find_items_basic(folder_id: &str, max_entries: usize) -> String {
+    find_items_with(folder_id, max_entries, BASIC_ITEM_FIELDS)
+}
+
+fn find_items_with(folder_id: &str, max_entries: usize, fields: &[&str]) -> String {
     let folder = escape(folder_id);
+    let mut properties = String::new();
+    for field in fields {
+        debug_assert!(
+            ALLOWED_FIELD_URIS.contains(field),
+            "{field} is not a valid EWS FieldURI"
+        );
+        properties.push_str(&format!(r#"<t:FieldURI FieldURI="{field}"/>"#));
+    }
     envelope(&format!(
         concat!(
             r#"<m:FindItem Traversal="Shallow">"#,
             r#"<m:ItemShape>"#,
             r#"<t:BaseShape>IdOnly</t:BaseShape>"#,
-            r#"<t:AdditionalProperties>"#,
-            r#"<t:FieldURI FieldURI="item:Subject"/>"#,
-            r#"<t:FieldURI FieldURI="message:From"/>"#,
-            r#"<t:FieldURI FieldURI="message:ToRecipients"/>"#,
-            r#"<t:FieldURI FieldURI="message:CcRecipients"/>"#,
-            r#"<t:FieldURI FieldURI="message:ReplyTo"/>"#,
-            r#"<t:FieldURI FieldURI="item:DateTimeSent"/>"#,
-            r#"<t:FieldURI FieldURI="item:DateTimeReceived"/>"#,
-            r#"<t:FieldURI FieldURI="message:IsRead"/>"#,
-            r#"<t:FieldURI FieldURI="item:HasAttachments"/>"#,
-            r#"<t:FieldURI FieldURI="item:Size"/>"#,
-            r#"<t:FieldURI FieldURI="message:InternetMessageId"/>"#,
-            r#"<t:FieldURI FieldURI="message:InReplyTo"/>"#,
-            r#"<t:FieldURI FieldURI="message:References"/>"#,
-            r#"<t:FieldURI FieldURI="item:Flag"/>"#,
-            r#"</t:AdditionalProperties>"#,
+            r#"<t:AdditionalProperties>{properties}</t:AdditionalProperties>"#,
             r#"</m:ItemShape>"#,
             r#"<m:IndexedPageItemView MaxEntriesReturned="{max_entries}" Offset="0" BasePoint="Beginning"/>"#,
             r#"<m:ParentFolderIds><t:FolderId Id="{folder}"/></m:ParentFolderIds>"#,
             r#"</m:FindItem>"#,
         ),
+        properties = properties,
         max_entries = max_entries,
         folder = folder,
     ))
@@ -634,6 +874,185 @@ mod tests {
     }
 
     #[test]
+    fn folder_pages_ask_for_the_parent_and_can_fall_back() {
+        // The Type 3 probe stays on the bare shape: a rejected extra property
+        // there would break sign-in before any retry could happen.
+        assert_eq!(find_folders(), find_folders_plain(0));
+        assert!(!find_folders().contains("FieldURI"));
+        let page = find_folders_page(256);
+        assert!(page.contains(r#"Offset="256" BasePoint="Beginning""#));
+        assert!(page.contains(r#"Traversal="Deep""#));
+        // `BaseShape=Default` does NOT include ParentFolderId / FolderClass.
+        // Without these the deep listing can never be rebuilt into a tree.
+        assert!(page.contains(r#"<t:FieldURI FieldURI="folder:ParentFolderId"/>"#));
+        assert!(page.contains(r#"<t:FieldURI FieldURI="folder:FolderClass"/>"#));
+        assert!(page.contains(r#"<t:FieldURI FieldURI="folder:UnreadCount"/>"#));
+        assert!(page.contains(r#"<t:BaseShape>Default</t:BaseShape>"#));
+        // The middle fallback needs no FieldURI at all to still get parents.
+        let all = find_folders_all(256);
+        assert!(all.contains(r#"<t:BaseShape>AllProperties</t:BaseShape>"#));
+        assert!(!all.contains("FieldURI"));
+        let plain = find_folders_plain(256);
+        assert!(plain.contains(r#"Offset="256""#));
+        assert!(!plain.contains("FieldURI"));
+        assert!(plain.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn shallow_children_requests_identify_their_parent() {
+        let request = find_folder_children("A&B", 0);
+        assert!(request.contains(r#"Traversal="Shallow""#));
+        assert!(request.contains(r#"<t:FolderId Id="A&amp;B"/>"#));
+        assert!(!request.contains("DistinguishedFolderId"));
+        // A bare Default shape: no shape rejection can break the repair path.
+        assert!(!request.contains("FieldURI"));
+    }
+
+    #[test]
+    fn distinguished_folder_request_asks_for_ids_in_a_stable_order() {
+        let request = get_distinguished_folders(&["inbox", "sentitems", "junkemail"]);
+        assert!(request.contains(r#"<t:BaseShape>IdOnly</t:BaseShape>"#));
+        assert!(request.contains(r#"<t:DistinguishedFolderId Id="inbox"/>"#));
+        assert!(request.contains(r#"<t:DistinguishedFolderId Id="sentitems"/>"#));
+        assert!(request.contains(r#"<t:DistinguishedFolderId Id="junkemail"/>"#));
+        assert!(
+            request.find(r#"Id="inbox""#).unwrap() < request.find(r#"Id="sentitems""#).unwrap()
+        );
+        assert!(request.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn a_failed_getfolder_message_keeps_its_slot_empty() {
+        let response = r#"<?xml version="1.0"?><s:Envelope><s:Body>
+          <m:GetFolderResponse>
+            <m:ResponseMessages>
+              <m:GetFolderResponseMessage ResponseClass="Success">
+                <m:Folders><t:Folder><t:FolderId Id="id-inbox" ChangeKey="ck"/></t:Folder></m:Folders>
+              </m:GetFolderResponseMessage>
+              <m:GetFolderResponseMessage ResponseClass="Error">
+                <m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>
+              </m:GetFolderResponseMessage>
+              <m:GetFolderResponseMessage ResponseClass="Success">
+                <m:Folders><t:Folder><t:FolderId Id="id-sent"/></t:Folder></m:Folders>
+              </m:GetFolderResponseMessage>
+            </m:ResponseMessages>
+          </m:GetFolderResponse>
+        </s:Body></s:Envelope>"#;
+        assert_eq!(
+            parse_distinguished_folders(response),
+            vec![
+                Some("id-inbox".to_owned()),
+                None,
+                Some("id-sent".to_owned())
+            ]
+        );
+        assert!(parse_distinguished_folders("<html/>").is_empty());
+    }
+
+    #[test]
+    fn every_folder_field_uri_is_a_legal_ews_member() {
+        for field in FOLDER_FIELDS {
+            assert!(
+                ALLOWED_FIELD_URIS.contains(field),
+                "{field} is not a legal UnindexedFieldURIType value"
+            );
+        }
+    }
+
+    const PAGED_RESPONSE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <m:FindFolderResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+        xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+      <m:ResponseMessages>
+        <m:FindFolderResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:RootFolder IndexedPagingOffset="256" TotalItemsInView="259" IncludesLastItemInRange="false">
+            <t:Folders>
+              <t:Folder>
+                <t:FolderId Id="root" ChangeKey="ck"/>
+                <t:ParentFolderId Id="msgroot" ChangeKey="ck"/>
+                <t:FolderClass>IPF.Note</t:FolderClass>
+                <t:DisplayName>收件箱</t:DisplayName>
+                <t:TotalCount>12</t:TotalCount>
+                <t:UnreadCount>3</t:UnreadCount>
+                <t:ChildFolderCount>2</t:ChildFolderCount>
+              </t:Folder>
+              <t:CalendarFolder>
+                <t:FolderId Id="cal"/>
+                <t:ParentFolderId Id="msgroot"/>
+                <t:FolderClass>IPF.Appointment</t:FolderClass>
+                <t:DisplayName>日历</t:DisplayName>
+              </t:CalendarFolder>
+              <t:Folder>
+                <t:FolderId Id="child"/>
+                <t:ParentFolderId Id="root"/>
+                <t:FolderClass>IPF.Note</t:FolderClass>
+                <t:DisplayName>项目</t:DisplayName>
+                <t:TotalCount>7</t:TotalCount>
+                <t:UnreadCount>0</t:UnreadCount>
+              </t:Folder>
+            </t:Folders>
+          </m:RootFolder>
+        </m:FindFolderResponseMessage>
+      </m:ResponseMessages>
+    </m:FindFolderResponse>
+  </s:Body>
+</s:Envelope>"#;
+
+    #[test]
+    fn a_deep_listing_keeps_parents_classes_counts_and_document_order() {
+        let page = parse_folders_page(PAGED_RESPONSE, 0).unwrap();
+        assert_eq!(page.next_offset, Some(256));
+        assert_eq!(page.folders.len(), 3);
+        // A CalendarFolder sits between two Folders: grouping by element name
+        // would have moved it to the end.
+        assert_eq!(page.folders[1].id, "cal");
+        let inbox = &page.folders[0];
+        assert_eq!(inbox.parent_id.as_deref(), Some("msgroot"));
+        assert_eq!(inbox.folder_class.as_deref(), Some("IPF.Note"));
+        assert_eq!(inbox.unread_count, 3);
+        assert_eq!(inbox.child_folder_count, Some(2));
+        assert_eq!(page.folders[2].child_folder_count, None);
+        assert!(inbox.mail_folder);
+        assert!(!page.folders[1].mail_folder);
+        assert_eq!(
+            page.folders[1].folder_class.as_deref(),
+            Some("IPF.Appointment")
+        );
+        assert_eq!(page.folders[2].parent_id.as_deref(), Some("root"));
+        assert_eq!(page.folders[2].unread_count, 0);
+    }
+
+    const EMPTY_PAGE: &str = concat!(
+        r#"<?xml version="1.0"?><s:Envelope><s:Body>"#,
+        r#"<m:FindFolderResponse><m:ResponseMessages>"#,
+        r#"<m:FindFolderResponseMessage ResponseClass="Success">"#,
+        r#"<m:ResponseCode>NoError</m:ResponseCode>"#,
+        r#"<m:RootFolder IndexedPagingOffset="256" IncludesLastItemInRange="false">"#,
+        r#"<t:Folders></t:Folders></m:RootFolder>"#,
+        r#"</m:FindFolderResponseMessage></m:ResponseMessages>"#,
+        r#"</m:FindFolderResponse></s:Body></s:Envelope>"#,
+    );
+
+    #[test]
+    fn paging_stops_on_the_last_page_or_when_it_cannot_advance() {
+        let last = PAGED_RESPONSE.replace(
+            r#"IncludesLastItemInRange="false""#,
+            r#"IncludesLastItemInRange="true""#,
+        );
+        assert_eq!(parse_folders_page(&last, 0).unwrap().next_offset, None);
+        // Without a server-supplied cursor, advance by the number of items read.
+        let no_cursor = PAGED_RESPONSE.replace(r#"IndexedPagingOffset="256" "#, "");
+        assert_eq!(
+            parse_folders_page(&no_cursor, 0).unwrap().next_offset,
+            Some(3)
+        );
+        // An empty page must end the loop even when the server offers a cursor.
+        assert_eq!(parse_folders_page(EMPTY_PAGE, 0).unwrap().next_offset, None);
+    }
+
+    #[test]
     fn markup_in_a_folder_name_cannot_break_the_reader() {
         let hostile = RESPONSE.replace("收件箱", "&lt;script&gt;alert(1)&lt;/script&gt;");
         let folders = parse_folders(&hostile).unwrap();
@@ -900,7 +1319,7 @@ mod tests {
             "item:HasAttachments",
             "item:Size",
             "message:InternetMessageId",
-            "message:InReplyTo",
+            "item:InReplyTo",
             "message:References",
             "item:Flag",
         ] {
@@ -909,9 +1328,55 @@ mod tests {
                 "missing {field}"
             );
         }
+        // `message:InReplyTo` is not a member of UnindexedFieldURIType: sending
+        // it makes Exchange fail XML deserialization with ErrorInvalidRequest
+        // (HTTP 500) instead of returning any items at all.
+        assert!(!request.contains("message:InReplyTo"));
         assert!(request.contains(r#"<t:BaseShape>IdOnly</t:BaseShape>"#));
         assert!(request.contains("RequestServerVersion Version=\"Exchange2013\""));
         assert!(request.ends_with("</soap:Envelope>"));
+    }
+
+    #[test]
+    fn every_emitted_field_uri_is_a_legal_ews_member() {
+        for field in ITEM_FIELDS.iter().chain(BASIC_ITEM_FIELDS) {
+            assert!(
+                ALLOWED_FIELD_URIS.contains(field),
+                "{field} is not a legal UnindexedFieldURIType value"
+            );
+        }
+        // The enumeration has no `message:InReplyTo`; `InReplyTo` is an item
+        // property (itemInReplyTo) even though it is an RFC 5322 header.
+        assert!(!ALLOWED_FIELD_URIS.contains(&"message:InReplyTo"));
+        for request in [
+            find_items("inbox", 5),
+            update_flags("id", None, Some(true), Some(true)),
+        ] {
+            assert!(!request.contains("message:InReplyTo"));
+        }
+    }
+
+    #[test]
+    fn the_basic_find_item_set_drops_only_the_late_properties() {
+        let full = find_items("inbox", 5);
+        let basic = find_items_basic("inbox", 5);
+        assert!(basic.contains(r#"<m:FindItem Traversal="Shallow">"#));
+        assert!(basic.contains(r#"MaxEntriesReturned="5""#));
+        assert!(basic.ends_with("</soap:Envelope>"));
+        assert!(basic.matches("<t:FieldURI ").count() == BASIC_ITEM_FIELDS.len());
+        assert!(full.matches("<t:FieldURI ").count() == ITEM_FIELDS.len());
+        for late in [
+            "message:ReplyTo",
+            "item:InReplyTo",
+            "message:References",
+            "item:Flag",
+        ] {
+            assert!(full.contains(&format!("FieldURI=\"{late}\"")));
+            assert!(!basic.contains(&format!("FieldURI=\"{late}\"")));
+        }
+        // Folder ids stay escaped in the reduced request too.
+        let escaped = find_items_basic("a&b\"c", 1);
+        assert!(escaped.contains("a&amp;b&quot;c"));
     }
 
     #[test]

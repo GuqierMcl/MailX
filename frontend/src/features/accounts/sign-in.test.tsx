@@ -97,7 +97,8 @@ describe('signing in before the manual server form', () => {
     // The failed sign-in hands the prefilled form over for manual correction.
     expect(await screen.findByLabelText('Exchange 服务器 URL')).toHaveValue(EWS_URL)
     expect(screen.getByRole('button', { name: '测试登录' })).toBeInTheDocument()
-    expect(screen.getByText('登录验证未通过')).toBeInTheDocument()
+    // The redesigned report shows a per-protocol verdict instead of a banner.
+    expect(screen.getByText('未通过')).toBeInTheDocument()
     expect(screen.getByText('邮箱服务器拒绝了账号登录，请检查密码或授权码。')).toBeInTheDocument()
     expect(screen.queryByText('登录验证通过，尚未测试实际投递。')).not.toBeInTheDocument()
     expect(onSubmit).not.toHaveBeenCalled()
@@ -167,12 +168,12 @@ describe('signing in before the manual server form', () => {
     renderSignInForm()
     await userEvent.click(screen.getByRole('button', { name: '手工设置' }))
     fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'alice@example.com' } })
-    await userEvent.click(screen.getByRole('radio', { name: 'Exchange（HTTP/NTLM）' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Exchange' }))
     expect(screen.getByLabelText('Exchange 服务器 URL')).toHaveValue(EWS_URL)
     expect(screen.getByLabelText('登录名')).toHaveValue('alice@example.com')
     expect(screen.getByRole('combobox', { name: '认证方式' })).toHaveTextContent('NTLM')
     expect(screen.queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('radio', { name: 'IMAP/SMTP' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'IMAP' }))
     expect(screen.queryByLabelText('Exchange 服务器 URL')).not.toBeInTheDocument()
     expect(screen.getByLabelText('IMAP 主机')).toBeInTheDocument()
     expect(screen.getByLabelText('SMTP 主机')).toBeInTheDocument()
@@ -181,14 +182,14 @@ describe('signing in before the manual server form', () => {
   it('offers POP3 only as a disabled choice', async () => {
     renderSignInForm()
     await userEvent.click(screen.getByRole('button', { name: '手工设置' }))
-    expect(screen.getByRole('radio', { name: 'POP3' })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('tab', { name: 'POP3' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('shows the login test while editing Exchange details', async () => {
     renderSignInForm()
     await userEvent.click(screen.getByRole('button', { name: '手工设置' }))
     fireEvent.change(screen.getByLabelText('邮箱地址'), { target: { value: 'alice@example.com' } })
-    await userEvent.click(screen.getByRole('radio', { name: 'Exchange（HTTP/NTLM）' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Exchange' }))
     expect(screen.getByRole('button', { name: '测试登录' })).toBeInTheDocument()
   })
 

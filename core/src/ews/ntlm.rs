@@ -15,9 +15,15 @@ const NEGOTIATE_MESSAGE: u32 = 1;
 const CHALLENGE_MESSAGE: u32 = 2;
 const AUTHENTICATE_MESSAGE: u32 = 3;
 
-/// `NEGOTIATE_UNICODE | OEM | REQUEST_TARGET | NTLM | ALWAYS_SIGN |
+/// `NEGOTIATE_UNICODE | OEM | REQUEST_TARGET | NTLM |
 /// EXTENDED_SESSIONSECURITY | TARGET_INFO | 128 | 56`.
-pub(crate) const NEGOTIATE_FLAGS: u32 = 0xa088_8207;
+///
+/// `NEGOTIATE_ALWAYS_SIGN` is deliberately absent: it forces the client to send
+/// a MIC in the `Type 3` message, which this client does not compute, and a
+/// server that enforces it answers the handshake with `500` instead of `401`.
+/// NTLM over HTTP does not sign per-message traffic, so declining the flag is
+/// the configuration every mainstream NTLM HTTP client uses.
+pub(crate) const NEGOTIATE_FLAGS: u32 = 0xa088_0207;
 
 const FLAG_UNICODE: u32 = 0x0000_0001;
 const FLAG_NTLM: u32 = 0x0000_0200;

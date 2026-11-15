@@ -29,7 +29,8 @@ const SPECIAL_USE: [(&str, FolderRole); 5] = [
 ];
 
 /// Common names for servers without SPECIAL-USE, compared case-insensitively.
-const WELL_KNOWN_NAMES: [(FolderRole, &[&str]); 5] = [
+/// Shared with the EWS path, which has neither delimiters nor SPECIAL-USE.
+pub(crate) const WELL_KNOWN_NAMES: [(FolderRole, &[&str]); 5] = [
     (
         FolderRole::Sent,
         &[
@@ -39,6 +40,7 @@ const WELL_KNOWN_NAMES: [(FolderRole, &[&str]); 5] = [
             "sent mail",
             "已发送",
             "已发送邮件",
+            "已发送项目",
             "已发邮件",
         ],
     ),
@@ -53,6 +55,7 @@ const WELL_KNOWN_NAMES: [(FolderRole, &[&str]); 5] = [
             "bin",
             "已删除",
             "已删除邮件",
+            "已删除项目",
             "废纸篓",
             "回收站",
         ],
@@ -65,13 +68,17 @@ const WELL_KNOWN_NAMES: [(FolderRole, &[&str]); 5] = [
             "junk e-mail",
             "junk email",
             "垃圾邮件",
+            "垃圾邮件箱",
             "垃圾箱",
         ],
     ),
-    (FolderRole::Archive, &["archive", "archives", "归档"]),
+    (
+        FolderRole::Archive,
+        &["archive", "archives", "归档", "存档", "封存"],
+    ),
 ];
 
-fn is_inbox(name: &str) -> bool {
+pub(crate) fn is_inbox(name: &str) -> bool {
     name.eq_ignore_ascii_case("INBOX")
 }
 

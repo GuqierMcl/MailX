@@ -95,7 +95,11 @@ export function ConnectionVerificationReport({ report, client, providerId, isEws
   isEws?: boolean
 }) {
   useTranslation()
+  const passed = isEws
+    ? report.imap.status === 'verified'
+    : report.imap.status === 'verified' && report.smtp.status === 'verified'
   return <div className="flex w-full flex-col gap-3">
+    {passed && <p className="text-xs text-muted-foreground">{t('accounts:verificationSucceeded')}</p>}
     <div className="flex flex-col gap-2">
       {isEws
         ? <ReportRow label={t('accounts:verificationExchange')} result={report.imap} />
