@@ -97,7 +97,13 @@ frontend/src/features/startup/
 
 `0029_message_translations.sql` 新建 `message_translations`，按（邮件、目标语言、是否含引用）保存译文：正文原始哈希、净化版本与分段版本、所用服务、源语言、译后主题、每段译文（JSON 数组）与是否部分翻译；邮件删除时级联删除。行只在这三项版本与当前邮件一致时被使用，因此正文或算法变化后无需清理任务即自然失效。译文属于邮件派生的敏感数据，设计见[邮件翻译](translation.md)。
 
-`0032_sender_name_index.sql` 为 `messages` 建立 `(from_address, from_name)` 覆盖索引，收件人补全据此读取去重后的发件地址与显示名，不扫描邮件行；不新增表，不改已有数据。
+`0030_starred_unread_index.sql` 为「此刻」概况的星标未读统计建立部分索引。
+
+`0031_cursor_history_complete.sql` 为 `folder_sync_cursors` 增加 `history_complete`，并按已完成且未被截断的游标回填。
+
+`0032_assistant_conversations.sql` 新建 `assistant_conversations`、`assistant_conversation_accounts` 与 `assistant_messages`，保存与内置助手的聊天记录（见[存储与搜索](storage-search.md#助手对话记录)）。账号 id 不做外键：移除账号的事务显式删除涉及它的对话。
+
+`0033_sender_name_index.sql` 为 `messages` 建立 `(from_address, from_name)` 覆盖索引，收件人补全据此读取去重后的发件地址与显示名，不扫描邮件行；不新增表，不改已有数据。
 
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 

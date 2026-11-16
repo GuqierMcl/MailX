@@ -783,6 +783,48 @@ describe('mock assistant', () => {
     expect((await client.getSettings()).settings.assistant.consented).toBeNull()
   })
 
+  it('keeps chats like the core: seeded past ones, newest first, saved at the end, deletable', async () => {
+    const client = mock()
+    const changes: string[] = []
+    client.onAssistantConversationsChanged((changed) => changes.push(changed.change))
+    const seeded = await client.assistantListConversations()
+    expect(seeded.items).toHaveLength(2)
+    expect(seeded.items[0].updatedAt >= seeded.items[1].updatedAt).toBe(true)
+    const past = await client.assistantGetConversation(seeded.items[0].id)
+    expect(past.turns.map((turn) => turn.role)).toEqual(['user', 'assistant'])
+    expect(JSON.stringify(past)).not.toContain('token')
+
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('look at my mail'))
+    await finished(client, started.runId)
+    await vi.waitFor(() => expect(changes).toContain('saved'))
+    const listed = await client.assistantListConversations({ limit: 1 })
+    expect(listed.items[0].id).toBe(started.conversationId)
+    expect(listed.items[0].title).toBe('look at my mail')
+    expect(listed.nextCursor).not.toBeNull()
+    const next = await client.assistantListConversations({ limit: 1, cursor: listed.nextCursor })
+    expect(next.items).toHaveLength(1)
+    const saved = await client.assistantGetConversation(started.conversationId!)
+    expect(saved.turns.map((turn) => turn.role)).toEqual(['user', 'assistant'])
+
+    await client.assistantDeleteConversation(started.conversationId!)
+    await expect(client.assistantGetConversation(started.conversationId!)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    await client.assistantClearConversations()
+    expect((await client.assistantListConversations()).items).toEqual([])
+    expect(changes.slice(-2)).toEqual(['deleted', 'cleared'])
+  })
+
+  it('does not save a chat while history is off', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    await client.updateSettings({ assistant: { ...(await client.getSettings()).settings.assistant, saveHistory: false } })
+    const before = (await client.assistantListConversations()).items.length
+    const started = await client.assistantStart(chat('private'))
+    await finished(client, started.runId)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await client.assistantListConversations()).items).toHaveLength(before)
+  })
+
   it('streams the Now summary in a few ordered text events', async () => {
     const client = mock()
     await client.assistantGrantConsent()
@@ -811,6 +853,29 @@ describe('mock assistant', () => {
     expect(summary).toMatchObject({ type: 'changed', count: 1, undo: { type: 'archive' } })
     if (summary.type !== 'changed' || summary.undo?.type !== 'archive') throw new Error('no undo')
     await client.undoArchive(summary.undo.token)
+  })
+
+  it('answers a plain question with a search step, a read step and markdown with a list and a link', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('what is new'))
+    const done = await finished(client, started.runId)
+    expect(done.tools.map((tool) => [tool.name, tool.status])).toEqual([['search_emails', 'done'], ['read_email', 'done']])
+    expect(done.tools[0].summary).toMatchObject({ type: 'found' })
+    expect(done.tools[1].summary).toMatchObject({ type: 'read' })
+    expect(done.text).toMatch(/\n- /)
+    expect(done.text).toContain('](https://example.com/help)')
+  })
+
+  it('writes a draft on request and reports it as a draft step', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('write me a draft'))
+    const done = await finished(client, started.runId)
+    expect(done.tools[0]).toMatchObject({ name: 'create_draft', status: 'done', summary: { type: 'draft' } })
+    const summary = done.tools[0].summary
+    if (summary.type !== 'draft') throw new Error('no draft')
+    expect((await client.getDraft(summary.draftId)).id).toBe(summary.draftId)
   })
 
   it('asks before sending and respects the answer, once, for that request only', async () => {

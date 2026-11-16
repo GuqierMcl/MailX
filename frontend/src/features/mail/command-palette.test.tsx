@@ -82,6 +82,22 @@ describe('command palette', () => {
     expect(within(screen.getByRole('navigation', { name: '邮箱导航' })).getByRole('button', { name: '此刻' })).toHaveAttribute('data-active')
   })
 
+  it('has no 问 AI command while the assistant is not usable', async () => {
+    const { palette } = await openPalette()
+    expect(within(palette).getByRole('option', { name: '打开设置' })).toBeInTheDocument()
+    expect(within(palette).queryByRole('option', { name: '问 AI' })).not.toBeInTheDocument()
+  })
+
+  it('offers 问 AI once a model is set, and it opens the Now page with the input focused', async () => {
+    const client = createMockClient()
+    const saved = await client.aiSaveConnection({ id: null, providerId: 'openai', name: 'OpenAI', protocol: 'openaiCompatible', baseUrl: 'https://api.openai.com/v1', useProxy: false, apiKey: 'sk-test', verify: false })
+    await client.aiSetDefaultModel({ connectionId: saved.connectionId, modelId: 'large-1', name: 'Large 1', contextLength: null, outputLength: null })
+    await openPalette(client)
+    await userEvent.click(await screen.findByRole('option', { name: '问 AI' }))
+    expect(await screen.findByRole('textbox', { name: '问问你的邮件' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '问问你的邮件' })).toHaveFocus())
+  })
+
   it('jumps to starred mail across accounts', async () => {
     const { input } = await openPalette()
     await userEvent.type(input, '星标')

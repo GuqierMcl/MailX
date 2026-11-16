@@ -215,9 +215,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 32,
+        description: "assistant chat conversations",
+        required_tables: &[
+            "assistant_conversations",
+            "assistant_conversation_accounts",
+            "assistant_messages",
+        ],
+        sql: include_str!("migrations/0032_assistant_conversations.sql"),
+    },
+    Migration {
+        version: 33,
         description: "sender address and name index for recipient suggestions",
         required_tables: &["messages"],
-        sql: include_str!("migrations/0032_sender_name_index.sql"),
+        sql: include_str!("migrations/0033_sender_name_index.sql"),
     },
 ];
 
@@ -623,7 +633,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 32);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 33);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -695,9 +705,75 @@ mod tests {
     }
 
     #[test]
+    fn assistant_conversations_migration_applies_fresh_and_upgrades_from_31() {
+        for upgraded in [false, true] {
+            let (_directory, mut db) = open_db();
+            db.pragma_update(None, "foreign_keys", true).unwrap();
+            if upgraded {
+                apply(&mut db, &manifest_up_to(31)).unwrap();
+                let exists: i64 = db
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master WHERE name = 'assistant_messages'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(exists, 0);
+            }
+            apply(&mut db, MIGRATIONS).unwrap();
+            db.execute(
+                "INSERT INTO assistant_conversations(id, title, created_at, updated_at, message_count)
+                 VALUES ('c', 'T', 't', 't', 1)",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                 VALUES ('c', 0, 'user', '{}', 't')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO assistant_conversation_accounts(conversation_id, account_id)
+                 VALUES ('c', 'a')",
+                [],
+            )
+            .unwrap();
+            assert!(
+                db.execute(
+                    "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                     VALUES ('c', 1, 'robot', '{}', 't')",
+                    [],
+                )
+                .is_err(),
+                "unknown roles are refused"
+            );
+            assert!(
+                db.execute(
+                    "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                     VALUES ('missing', 0, 'user', '{}', 't')",
+                    [],
+                )
+                .is_err(),
+                "a message needs its conversation"
+            );
+            db.execute("DELETE FROM assistant_conversations WHERE id = 'c'", [])
+                .unwrap();
+            for table in ["assistant_messages", "assistant_conversation_accounts"] {
+                let left: i64 = db
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                assert_eq!(left, 0, "{table} follows its conversation");
+            }
+        }
+    }
+
+    #[test]
     fn sender_name_index_is_added_to_an_existing_database() {
         let (_directory, mut db) = open_db();
-        apply(&mut db, &manifest_up_to(31)).unwrap();
+        apply(&mut db, &manifest_up_to(32)).unwrap();
         apply(&mut db, MIGRATIONS).unwrap();
         let index: i64 = db
             .query_row(

@@ -76,6 +76,7 @@ fn model_ref(connection_id: &str) -> AiModelRef {
         name: "M".into(),
         context_length: Some(1000),
         output_length: None,
+        tool_call: None,
     }
 }
 

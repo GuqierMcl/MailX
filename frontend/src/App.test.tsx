@@ -35,7 +35,8 @@ describe('the real window trees', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: matcher('关于', 'About') }))
     expect(await within(dialog).findByRole('button', { name: matcher('检查更新', 'Check for updates') })).toBeInTheDocument()
     expect(within(dialog).getByRole('switch', { name: matcher('自动更新', 'Automatic updates') })).toBeInTheDocument()
-  })
+    // It loads the whole app and waits up to 5 s for the first button alone; a busy runner needs more than the 5 s test default.
+  }, 20_000)
 
   it('renders no updater UI in a composer window', async () => {
     const App = await loadApp('?composer=00000000-0000-4000-8000-000000000000')

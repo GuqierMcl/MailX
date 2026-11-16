@@ -190,6 +190,7 @@
   "undoArchiveFailed": "无法撤销此次归档操作",
   "starredView": "星标",
   "nowView": "此刻",
+  "askAi": "问 AI",
   "more": "更多",
   "toggleAccounts": "{{action}}{{folder}}的各账号",
   "mailboxes": "邮箱",

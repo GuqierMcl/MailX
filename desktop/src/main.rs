@@ -211,6 +211,14 @@ fn main() {
                             event,
                         );
                     }
+                    // Saved conversations changed; the history list refetches.
+                    mailx_core::CoreEvent::AssistantConversationsChanged(changed) => {
+                        let _ = handle.emit_to(
+                            EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                            assistant::CONVERSATIONS_EVENT,
+                            changed,
+                        );
+                    }
                 });
             let state = state::DesktopState::new(data_dir, secrets, events);
             app.manage(state.clone());
@@ -332,6 +340,10 @@ fn main() {
             assistant::assistant_respond,
             assistant::assistant_grant_consent,
             assistant::assistant_revoke_consent,
+            assistant::assistant_list_conversations,
+            assistant::assistant_get_conversation,
+            assistant::assistant_delete_conversation,
+            assistant::assistant_clear_conversations,
             commands::settings_get,
             commands::settings_update,
             commands::notifications_test,

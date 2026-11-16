@@ -67,6 +67,8 @@
   --motion-fast: 150ms;
   --motion-medium: 200ms;
   --motion-view: 280ms;
+  --motion-swap-in: 250ms;
+  --motion-swap-out: 170ms;
   --motion-glow-out: 300ms;
   --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
   --ease-decel: cubic-bezier(0.16, 1, 0.3, 1);
@@ -348,3 +350,80 @@ html[data-translucent].dark .app-canvas {
       transform: translateX(-100%);}
     to {
       transform: translateX(250%);}}}
+
+/* The assistant chat (ai-chat-ui.md 4.3, 4.6, 6): a user message rises a little, the conversation view comes up from below. */
+@theme {
+  --animate-chat-rise: chat-rise var(--motion-medium) var(--ease-decel) both;
+  @keyframes chat-rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);}}
+  /* Overview and conversation trade places: only transform and opacity, on the live views (no snapshots, so text stays crisp).
+     In takes 250ms, out 170ms; the leaving view keeps its end state until the swap is over. */
+  --animate-view-in-up: view-in-up var(--motion-swap-in) var(--ease-decel) backwards;
+  @keyframes view-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);}}
+  --animate-view-in-down: view-in-down var(--motion-swap-in) var(--ease-decel) backwards;
+  @keyframes view-in-down {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);}}
+  --animate-view-out-up: view-out-up var(--motion-swap-out) var(--ease-out-soft) forwards;
+  @keyframes view-out-up {
+    to {
+      opacity: 0;
+      transform: translateY(-8px);}}
+  --animate-view-out-down: view-out-down var(--motion-swap-out) var(--ease-out-soft) forwards;
+  @keyframes view-out-down {
+    to {
+      opacity: 0;
+      transform: translateY(8px);}}
+  /* The input's rise when the assistant becomes usable: a short lift and fade. */
+  --animate-chat-input-in: chat-input-in var(--motion-view) var(--ease-decel) both;
+  @keyframes chat-input-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);}}}
+
+/* The input's gradient edge: a 1px ring cut out of a pre-drawn gradient. While working only the background drifts. */
+.ai-border {
+  padding: 1px;
+  background: linear-gradient(90deg, var(--ai-1), var(--ai-2), var(--ai-3), var(--ai-2), var(--ai-1));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);}
+.ai-border[data-flow="true"] {
+  animation: ai-border-drift 4s ease-in-out infinite alternate;}
+@keyframes ai-border-drift {
+  from {
+    background-position: 0 0;}
+  to {
+    background-position: 100% 0;}}
+/* The glow is a fixed blurred copy of the gradient; only its opacity changes. */
+.ai-glow {
+  background: var(--ai-gradient);
+  filter: blur(10px);}
+/* "Thinking": a slow band of the AI gradient across the words. Static under reduced motion. */
+.ai-shimmer {
+  background: linear-gradient(100deg, var(--muted-foreground) 35%, var(--ai-2) 50%, var(--muted-foreground) 65%);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: ai-shimmer 2.4s linear infinite;}
+@keyframes ai-shimmer {
+  from {
+    background-position: 100% 0;}
+  to {
+    background-position: -50% 0;}}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer {
+    animation: none;
+    background: var(--ai-gradient);
+    background-clip: text;
+    -webkit-background-clip: text;}
+  .ai-border[data-flow="true"] {
+    animation: none;}}

@@ -37,6 +37,44 @@ fn defaults_apply_to_old_files() {
     assert_eq!(defaults.send, AssistantSendMode::Confirm);
     assert_eq!(defaults.model, None);
     assert_eq!(defaults.consented, None);
+    assert!(defaults.save_history, "history is kept unless turned off");
+}
+
+#[test]
+fn save_history_can_be_turned_off_and_a_wrong_type_keeps_it_on() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    store
+        .patch(SettingsPatch {
+            assistant: Some(assistant(|a| a.save_history = false)),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    let text = fs::read_to_string(directory.path().join(SETTINGS_FILE_NAME)).unwrap();
+    assert!(text.contains("\"saveHistory\": false"));
+    assert!(
+        !SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .settings
+            .assistant
+            .save_history
+    );
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"assistant":{"saveHistory":"no"}}}"#,
+    )
+    .unwrap();
+    assert!(
+        SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap()
+            .settings
+            .assistant
+            .save_history
+    );
 }
 
 #[test]

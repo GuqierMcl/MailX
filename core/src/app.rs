@@ -274,7 +274,7 @@ impl MailxCore {
         self.accounts().unwrap().outbox_mime(id).unwrap()
     }
 
-    fn accounts(&self) -> Result<MutexGuard<'_, AccountService>, AppError> {
+    pub(crate) fn accounts(&self) -> Result<MutexGuard<'_, AccountService>, AppError> {
         self.service
             .lock()
             .map_err(|_| AppError::new(ErrorCode::Internal))
@@ -338,6 +338,14 @@ impl MailxCore {
         self.verification.invalidate(&removed.account_id);
         self.events
             .emit(&CoreEvent::AccountRemoved(removed.clone()));
+        // Saved assistant conversations that dealt with the account went with
+        // it (in the same transaction); history lists refetch.
+        self.events.emit(&CoreEvent::AssistantConversationsChanged(
+            crate::assistant::ConversationsChanged {
+                conversation_id: None,
+                change: crate::assistant::ConversationChange::Cleared,
+            },
+        ));
         for draft_id in &removed.draft_ids {
             self.events.emit(&CoreEvent::DraftChanged(DraftChanged {
                 draft_id: draft_id.clone(),

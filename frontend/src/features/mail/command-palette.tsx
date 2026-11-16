@@ -19,6 +19,7 @@ import {
   SentIcon,
   Settings01Icon,
   SidebarLeftIcon,
+  SparklesIcon,
   SpamIcon,
   StarIcon,
   SunriseIcon,
@@ -36,6 +37,7 @@ import {
 } from '@/components/ui/command'
 import { useShell } from '@/features/shell/shell-context'
 import { useSettings, useUpdateAppearance } from '@/features/settings/settings-queries'
+import { useAssistantUsable } from '@/features/ai/use-assistant-usable'
 import type { SettingsTarget } from '@/features/settings/settings-dialog'
 import type { EmailTranslation } from './translation/use-email-translation'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -71,6 +73,8 @@ export type CommandPaletteProps = {
   onAddAccount: () => void
   onOpenSettings: (target: SettingsTarget) => void
   onCompose: () => void
+  /** "问 AI": the caller opens the Now page and focuses its input. Offered only while the assistant is usable. */
+  onAskAi?: () => void
   /** Translation of the open message; null when no translatable message is on screen. */
   translation?: EmailTranslation | null
 }
@@ -93,13 +97,14 @@ export function CommandPalette(props: CommandPaletteProps) {
 
 function PaletteBody({
   client, onOpenChange, scope, search, scopeQuery, sourceIdentity, accounts, folders,
-  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose, translation,
+  onApplySearch, onOpenEmail, onSelectMailbox, onOpenAccounts, onAddAccount, onOpenSettings, onCompose, onAskAi, translation,
 }: CommandPaletteProps) {
   useTranslation()
   const [text, setText] = useState('')
   const [debounced, setDebounced] = useState('')
   const shell = useShell()
   const settings = useSettings(client)
+  const assistant = useAssistantUsable(client)
   const updateAppearance = useUpdateAppearance(client)
   const theme = settings.data?.settings.appearance.theme
   const appearance = settings.data?.settings.appearance
@@ -161,6 +166,7 @@ function PaletteBody({
         run: () => translation.configured ? translation.translate() : onOpenSettings({ section: 'translation' }),
       }]
   const commands: Entry[] = [
+    ...(assistant.usable && onAskAi ? [{ id: 'cmd:ask-ai', title: t('mail:askAi'), keywords: 'ai ask assistant chat 助手 问', icon: SparklesIcon, run: onAskAi }] : []),
     ...translationCommand,
     ...(accounts.length > 0 ? [{ id: 'cmd:compose', title: t('mail:compose'), keywords: 'compose new mail 新邮件 撰写 发信', icon: PencilEdit02Icon, run: onCompose }] : []),
     { id: 'cmd:settings', title: t('mail:openSettings'), keywords: 'settings 偏好', icon: Settings01Icon, run: () => onOpenSettings({ section: 'general' }) },

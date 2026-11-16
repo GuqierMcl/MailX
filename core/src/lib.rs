@@ -58,6 +58,10 @@ pub use assistant::{
     FlagRestore, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState,
     StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
+pub use assistant::{
+    ChatTurn, ChatTurnConfirmation, ChatTurnTool, ConfirmOutcome, ConversationChange,
+    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged, TurnState,
+};
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
     RemoveAttachmentRequest,

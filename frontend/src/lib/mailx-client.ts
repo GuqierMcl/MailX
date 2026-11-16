@@ -4,6 +4,9 @@ import type {
   AiCatalog,
   AiConsent,
   AssistantEvent,
+  ConversationDetail,
+  ConversationList,
+  ConversationsChanged,
   RunSnapshot,
   StartRun,
   AiModel,
@@ -392,6 +395,19 @@ export interface MailxClient {
   assistantRevokeConsent(): Promise<void>
   /** Run events in `seq` order: state, text, tool activity, confirmation requests, the end. */
   onAssistantEvent(listener: (event: AssistantEvent) => void): () => void
+  /**
+   * Saved chat conversations, newest first (kept on this device unless `assistant.saveHistory` is off).
+   * `limit` is 1 to 100 (default 50); `cursor` is the previous page's `nextCursor`.
+   */
+  assistantListConversations(page?: { limit?: number; cursor?: string | null }): Promise<ConversationList>
+  /** A saved conversation as turns that render like a live one; `notFound` when it is gone. */
+  assistantGetConversation(conversationId: string): Promise<ConversationDetail>
+  /** Deletes a conversation and stops the run that uses it, if any. `notFound` when it is gone. */
+  assistantDeleteConversation(conversationId: string): Promise<void>
+  /** Deletes every saved conversation and stops running chats. */
+  assistantClearConversations(): Promise<void>
+  /** Saved conversations changed (a turn was saved, one was deleted, an account's were removed): refetch the list. */
+  onAssistantConversationsChanged(listener: (changed: ConversationsChanged) => void): () => void
 
   // --- Updates (docs/architecture/updater.md). Main window only.
   /** The current update state, including whether this edition can install one. */
@@ -435,6 +451,7 @@ export const HOST_EVENTS = {
   updater: 'mailx://updater-state',
   mcp: 'mailx://mcp-status-changed',
   assistant: 'mailx://assistant',
+  assistantConversations: 'mailx://assistant-conversations',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -734,6 +751,11 @@ export function createDesktopClient(): MailxClient {
     assistantGrantConsent: () => call<AiConsent>('assistant_grant_consent'),
     assistantRevokeConsent: () => call<void>('assistant_revoke_consent'),
     onAssistantEvent: (listener) => subscribe<AssistantEvent>(HOST_EVENTS.assistant, listener),
+    assistantListConversations: (page) => call<ConversationList>('assistant_list_conversations', { limit: page?.limit, cursor: page?.cursor }),
+    assistantGetConversation: (conversationId) => call<ConversationDetail>('assistant_get_conversation', { conversationId }),
+    assistantDeleteConversation: (conversationId) => call<void>('assistant_delete_conversation', { conversationId }),
+    assistantClearConversations: () => call<void>('assistant_clear_conversations'),
+    onAssistantConversationsChanged: (listener) => subscribe<ConversationsChanged>(HOST_EVENTS.assistantConversations, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
     getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),

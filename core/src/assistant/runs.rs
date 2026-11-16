@@ -170,6 +170,7 @@ impl Runs {
                 state: RunState::Running,
                 text: String::new(),
                 tools: Vec::new(),
+                tools_available: kind == RunKindTag::Chat,
                 error: None,
                 finished_reason: None,
                 completed_at: None,
@@ -209,6 +210,7 @@ impl Runs {
             state: RunState::Completed,
             text,
             tools: Vec::new(),
+            tools_available: false,
             error: None,
             finished_reason: Some(FinishedReason::Stop),
             completed_at: Some(completed_at),
@@ -228,6 +230,13 @@ impl Runs {
             },
         );
         snapshot
+    }
+
+    /// Records that the run goes without tools.
+    pub(crate) fn set_no_tools(&self, run_id: &str) {
+        if let Some(entry) = self.lock().runs.get_mut(run_id) {
+            entry.snapshot.tools_available = false;
+        }
     }
 
     pub(crate) fn set_abort(&self, run_id: &str, handle: AbortHandle) {
@@ -430,11 +439,25 @@ impl Runs {
     }
 
     pub(crate) fn cancel_all(&self) {
+        self.cancel_where(|_| true);
+    }
+
+    /// Stops the active runs of one conversation.
+    pub(crate) fn cancel_conversation(&self, conversation_id: &str) {
+        self.cancel_where(|snapshot| snapshot.conversation_id.as_deref() == Some(conversation_id));
+    }
+
+    /// Stops every active chat run (Now summaries keep going).
+    pub(crate) fn cancel_chats(&self) {
+        self.cancel_where(|snapshot| snapshot.kind == RunKindTag::Chat);
+    }
+
+    fn cancel_where(&self, wanted: impl Fn(&RunSnapshot) -> bool) {
         let ids: Vec<String> = self
             .lock()
             .runs
             .iter()
-            .filter(|(_, entry)| entry.snapshot.state.active())
+            .filter(|(_, entry)| entry.snapshot.state.active() && wanted(&entry.snapshot))
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {

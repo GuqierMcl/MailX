@@ -199,6 +199,7 @@
   "undoArchiveFailed": "Couldn’t undo this archive operation",
   "starredView": "Starred",
   "nowView": "Now",
+  "askAi": "Ask AI",
   "more": "More",
   "toggleAccounts": "{{action}} {{folder}} by account",
   "mailboxes": "Mailboxes",

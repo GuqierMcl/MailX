@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { Alert02Icon, Attachment01Icon, CheckmarkCircle02Icon, Copy01Icon, File01Icon, MailUpload01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import type { Account, AccountSyncState, CodeCandidate, EmailSummary, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
+import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -25,9 +25,13 @@ import { useFreshCodes } from './use-fresh-codes'
 import { GreetingIcon } from './greeting-icon'
 import { NowAmbient } from './now-ambient'
 import { relativeTime } from './relative-time'
+import { MailRowCard, rowClass } from './mail-row-card'
 import { compareWeeks, dayStarts, syncSummary } from './activity'
 import { ActivityChart } from './activity-chart'
 import { SummaryLine } from './summary-line'
+import { useSharedAssistantChat } from '@/features/ai/assistant-chat-context'
+import { useAssistantUsable } from '@/features/ai/use-assistant-usable'
+import { NowChatShell } from './now-chat'
 import { useNowSummary } from './use-now-summary'
 
 /** Rows of unread inbox mail the page lists; more are a link away. */
@@ -53,6 +57,10 @@ export type NowPageProps = {
   onOpenAccount: (accountId: string) => void
   /** Shows the message in the reader, in the view it belongs to. */
   onOpenEmail: (email: { id: string; accountId: string }) => void
+  /** Opens a draft the assistant wrote, in the compose window. */
+  onOpenDraft?: (draftId: string) => void
+  /** Changes when something outside (the command palette) asks to start typing to the assistant. */
+  focusInputToken?: number
   /** The workbench's shared verification-code controller: recognition and copying behave as in the list and reader. */
   verification: VerificationCodes
 }
@@ -65,7 +73,7 @@ type AttentionItem = { id: string; icon: IconSvgElement; label: string; tone?: '
  * column, vertically centred while it is shorter than the island and
  * scrolling when taller. Sections appear only with content.
  */
-export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail, verification }: NowPageProps) {
+export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail, onOpenDraft, focusInputToken, verification }: NowPageProps) {
   const { i18n } = useTranslation()
   const language = i18n.language
   const now = useDayClock()
@@ -76,6 +84,10 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   // The day's first visit plays the full entrance, later ones a lighter one; reduced motion neither.
   const mode = entranceMode(firstToday, reducedMotion)
   const settings = useSettings(client)
+  // The conversation lives above this page (it survives leaving it); the input shows only while the assistant is usable.
+  const chat = useSharedAssistantChat()
+  const assistant = useAssistantUsable(client)
+  const chatOn = chat !== null && assistant.usable
   // Recomputed when the day clock passes midnight; the key changes with it.
   const starts = dayStarts(now)
   const overview = useQuery({
@@ -156,9 +168,25 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   let index = 1
   const next = () => index++
 
+  // The conversation view keeps this much of the overview: the greeting and, when known, the unread count.
+  const chatSummary = unread > 0 ? `${greeting} · ${t('ai:chat.summaryUnread', { count: unread })}` : greeting
+
   return (
     <div data-slot="now-page" className="relative min-h-0 flex-1 overflow-hidden bg-background">
       <NowAmbient segment={segment} />
+      <NowChatShell
+        client={client}
+        chat={chat}
+        usable={assistant.usable}
+        service={assistant.service}
+        summary={chatSummary}
+        onOpenEmail={onOpenEmail}
+        onOpenDraft={onOpenDraft ?? noop}
+        accounts={accounts}
+        folders={folders}
+        onSelectMailbox={onSelectMailbox}
+        focusToken={focusInputToken}
+      >
       <div className="relative h-full overflow-y-auto">
         {/* The column sits between two spacers that share the free height 2:3, so a
             short page rests a little above the middle and a long one scrolls. */}
@@ -212,7 +240,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
                     <ul className="flex flex-col">
                       {unreadRows.map((email) => (
                         <li key={email.id}>
-                          <MailRow email={email} language={language} now={minute} isNew={Date.parse(email.receivedAt) > sinceTime} onOpen={onOpenEmail} />
+                          <MailRowCard email={email} language={language} now={minute} isNew={Date.parse(email.receivedAt) > sinceTime} onOpen={onOpenEmail} />
                         </li>
                       ))}
                     </ul>
@@ -270,12 +298,16 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
               )}
             </div>
           )}
-          <div aria-hidden className="min-h-16 flex-[3]" />
+          {/* Room for the input when it is there, so the last block can scroll clear of it. */}
+          <div aria-hidden className={cn('flex-[3]', chatOn ? 'min-h-[calc(var(--chat-footer-h,0px)+2rem)]' : 'min-h-16')} />
         </div>
       </div>
+      </NowChatShell>
     </div>
   )
 }
+
+const noop = () => undefined
 
 /**
  * Refetches the unread list when a sync round changed an inbox: the workbench
@@ -395,7 +427,6 @@ function CodeRow({ code, language, now, verification, onOpenEmail }: { code: Sho
   )
 }
 
-const rowClass = 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring'
 const linkClass = 'rounded-md px-3 py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
 
 function motionProps(mode: EntranceMode, index: number, className?: string) {
@@ -425,22 +456,6 @@ function StatButton({ value, label, mode, onClick }: { value: number; label: str
     >
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold tabular-nums">{shown}</span>
-    </button>
-  )
-}
-
-function MailRow({ email, language, now, isNew, onOpen }: { email: EmailSummary; language: string; now: number; isNew: boolean; onOpen: (email: EmailSummary) => void }) {
-  const subject = email.subject || t('mail:noSubject')
-  return (
-    <button type="button" onClick={() => onOpen(email)} className={rowClass}>
-      <SenderAvatar sender={email.from} accountId={email.accountId} size="sm" />
-      {/* Side by side when there is room, stacked in a narrow window. */}
-      <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-        <span className="truncate font-medium sm:w-32 sm:shrink-0">{displayName(email.from)}</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">{subject}</span>
-      </span>
-      {isNew && <span data-slot="now-new-tag" className="shrink-0 rounded-sm bg-foreground/5 px-1.5 py-px text-[11px] text-muted-foreground">{t('now:newTag')}</span>}
-      <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(email.receivedAt, language, now)}</span>
     </button>
   )
 }

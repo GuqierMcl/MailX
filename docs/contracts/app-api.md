@@ -402,6 +402,7 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 | `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
 | `DraftChanged(DraftChanged)` | 草稿创建 / 保存 / 删除，或被队列锁定 / 释放 | `mailx://drafts` |
 | `Assistant(AssistantEvent)` | 助手运行的状态、文字、工具活动与确认请求 | `mailx://assistant`，仅 main 窗口 |
+| `AssistantConversationsChanged(ConversationsChanged)` | 已保存的助手对话有变化（保存了一轮、删除、清除、账号移除带走了一些） | `mailx://assistant-conversations`，仅 main 窗口 |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
 
@@ -707,7 +708,7 @@ type AiState = {
   route: ServiceRoute;              // AI 专用代理，类型与翻译路由相同
   proxyPasswordSet: boolean;
 };
-type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null };
+type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null; toolCall?: boolean | null };  // toolCall：模型是否支持工具调用，选择时取自目录；缺省或 null 为未知（按支持处理）
 type AiModel = { id: string; name: string; contextLength: number | null; outputLength: number | null; toolCall: boolean | null; source: "provider" | "catalog" };
 type AiCatalog = { providers: AiCatalogProvider[]; updatedAt: string | null; stale: boolean; refreshError: ErrorCode | null };
 type AiCatalogProvider = { id: string; name: string; protocol: AiProtocol; baseUrl: string; builtIn: boolean; local?: boolean };
@@ -721,7 +722,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### AI 助手（主窗口）
 
-设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面尚未接入，目前只有 `MailxClient` 方法（含浏览器预览用的模拟实现）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
+设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复；聊天记录（对话）按设置保存在本机，见下文“已保存的对话”。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令、保存对话记录）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -732,6 +733,11 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 | `assistantGrantConsent()` | `assistant_grant_consent`，`{}` | `AiConsent`（当前助手模型所属的连接 id 与规范化地址） |
 | `assistantRevokeConsent()` | `assistant_revoke_consent`，`{}` | 空；同时取消所有进行中的运行；核心未就绪时也能执行 |
 | `onAssistantEvent(listener)` | 事件 `mailx://assistant` | `AssistantEvent`，只发给主窗口 |
+| `assistantListConversations({ limit?, cursor? })` | `assistant_list_conversations`，`{ limit?, cursor? }` | `ConversationList`，最新在前；`limit` 1–100（默认 50）；`validation`（`limit`、`cursor`） |
+| `assistantGetConversation(conversationId)` | `assistant_get_conversation`，`{ conversationId }` | `ConversationDetail`；`notFound` |
+| `assistantDeleteConversation(conversationId)` | `assistant_delete_conversation`，`{ conversationId }` | 空；该对话有运行时先取消；`notFound` |
+| `assistantClearConversations()` | `assistant_clear_conversations`，`{}` | 空；删除全部已保存的对话并取消进行中的聊天运行 |
+| `onAssistantConversationsChanged(listener)` | 事件 `mailx://assistant-conversations` | `ConversationsChanged`，只发给主窗口 |
 
 撤销整理没有专门命令，界面直接用已有的 `emails_undo_archive` 与 `emails_set_flags`，见下文“撤销整理”。
 
@@ -745,6 +751,7 @@ type RunSnapshot = {
   runId: string; kind: "nowSummary" | "chat"; state: RunState;
   text: string;                     // 模型到目前为止写的全部文字
   tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
+  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述恒为 false
   error: ErrorCode | null;          // failed 时的固定错误码
   finishedReason: "stop" | "limit" | "length" | null;
   seq: number;                      // 快照包含的最后一个事件序号
@@ -769,6 +776,8 @@ type AssistantEventKind =
 ```
 
 **运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
+
+**无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 
 **事件与快照。** 事件按 `seq` 顺序到达；前端可以随时用 `assistantSnapshot` 重新取得状态（包括待确认的请求），再接收 `seq` 更大的事件，忽略小于等于快照 `seq` 的。事件只含模型输出的文字、结构化的工具摘要和固定错误码；提示词、邮件正文与服务商原文不会出现。
 
@@ -811,6 +820,32 @@ type FlagRestore = { emailId: string; isRead: boolean | null; isStarred: boolean
 - 归档令牌就是核心整理服务发出的 `undoToken`，沿用其规则：10 分钟有效，对同一批邮件做过后续操作即失效，用过即作废；界面调用 `emails_undo_archive`，过期返回 `notFound` 时撤销按钮消失。
 - 标记按 `restore` 分组：把 `isRead` 相同的邮件合成一次 `emails_set_flags(ids, "read", value)`，星标同理；这是写回原值，不检查之间是否有别的修改。
 - 因此没有 `assistant_undo` 命令：核心不保存撤销数据，不增加状态，撤销与用户自己的整理共用同一条路径与事件。助手自己的整理同样会发出 `MailStateChanged`（`source: "ai"`，含 `undoToken`），列表据此刷新；工具事件里的 `undo` 只是把令牌与这次对话里的那一行对上。
+
+**已保存的对话。** 设置 `assistant.saveHistory`（默认 `true`，旧文件按 `true` 读取）决定聊天是否保存在本机（迁移 `0032`，设计见 [AI Runtime](../ai-runtime/README.md#4-运行生命周期)）。关闭只停止保存新的轮次，已有记录保留，直到用户删除；关闭期间的对话之后也不补存。四个命令只开放给主窗口，参数拒绝未知字段。`StartRun` 的聊天带已保存对话的 `conversationId` 时继续它：不在内存里就从本机读入，历史原样发给模型；不存在（含涉及的账号已被移除）返回 `notFound`，已有约 400 条消息返回 `assistantContextFull`。
+
+```ts
+type ConversationList = { items: ConversationSummary[]; nextCursor: string | null };  // 不透明游标；最新在前，最多保留 100 个
+type ConversationSummary = { id: string; title: string; updatedAt: string; messageCount: number }; // title：第一条用户消息折成一行、最多 60 字符；messageCount：用户消息数
+type ConversationDetail = { id: string; title: string; createdAt: string; updatedAt: string; turns: ChatTurn[] };
+type ChatTurn =
+  | { role: "user"; text: string; at: string }
+  | { role: "assistant"; text: string;                 // 这条回复里模型写的全部文字（多步拼接，与实时的 RunSnapshot.text 相同）
+      tools: ChatTurnTool[];                           // 按调用顺序；摘要里的 changed.undo 恒为 null
+      confirmations: ChatTurnConfirmation[];           // 用户答过的确认，只有一行结果
+      state: "completed" | "failed" | "canceled";      // 应用在回复中途退出的，读回来是 canceled
+      finishedReason: FinishedReason | null;           // completed 时
+      error: ErrorCode | null;                         // failed 时
+      at: string };
+type ChatTurnTool = { callId: string; name: string; status: ToolStatus; summary: ToolActivitySummary; textOffset: number };
+type ChatTurnConfirmation = { callId: string; tool: string; action: ConfirmAction; outcome: "approved" | "denied" | "expired"; textOffset: number };
+type ConversationsChanged = { conversationId: string | null; change: "saved" | "deleted" | "cleared" };
+```
+
+- `textOffset` 是该调用开始时回复文字已有的长度，按 UTF-16 码元计（与 `String.length` 一致），界面据此把工具行和确认行放回与实时相同的位置；同一调用的确认与工具共用 `callId`，实时界面里带确认卡的工具不单独成行，读回来的做法相同。
+- 保存的内容见 AI Runtime 第 4 节：不含撤销数据与待确认的请求；撤销令牌与旧标志在重启后失效，读回来的整理活动没有撤销按钮。回复里的邮件与文件夹引用（`mailx://email/<id>`、`mailx://folder/<id>`）就在 `text` 里，邮件或文件夹之后被删除时界面按普通文字处理。
+- 保存发生在一轮完整的工具往返之后和回复结束时；运行报告 `completed` / `failed` / `canceled`（被取消的在保存完成后释放对话）之前，正常结束的回复已经写入，所以界面收到结束事件后立刻查询列表就能看到它。
+- `AssistantConversationsChanged` 是与 `AssistantEvent` 无关的核心事件，只表示“列表可能变了，请重新查询”：保存一轮（`saved`，带对话 id）、删除（`deleted`）、清除全部（`cleared`，`conversationId` 为 `null`）；移除账号后也发一条 `cleared`（涉及该账号的对话已在同一事务里删除）。事件可以丢，列表以查询为准。
+- 涉及的账号取自工具调用的参数与结果里的 `accountId` / `accountIds`；只列出账号不算。
 
 **同意规则。** 同意绑定“连接 id 与规范化的服务地址”（`AiConsent`，与翻译共用类型）：换连接或改地址需要重新同意，换模型、换密钥不需要。`assistantGrantConsent` 记录当前助手模型（`assistant.model`，缺省跟随 `ai.defaultModel`）所属连接，没有可用模型时返回 `aiNotConfigured`。同意只能由这两个命令设置与撤销；设置读取里 `assistant.consented` 可见，但写入会被忽略。
 
@@ -945,6 +980,8 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 该操作不联系服务商、不发送 IMAP 删除命令，也不撤回已提交邮件或撤销服务商授权码。终态和 `unknown` 发件记录随账号清除，确认文案必须始终说明邮件可能已经送达。有在途 SMTP 时拒绝移除，不强制中断后声称发送已撤销。
 
 提交后退休同步/写回、正文、空闲发信和诊断任务，撤销正文令牌、外链确认和远程图片权限。core 发 `AccountRemoved`，desktop 向可信 main/composer 窗口广播 `mailx://account-removed`，载荷为 `AccountRemoval`，随后发各实际删除草稿的 `mailx://drafts` Deleted 事件。前端 `onAccountRemoved` 清理查询与选择，写信窗口以 `draftIds` 判断自身是否应停止保存并直接关闭；不以打开窗口时的旧账号猜测。
+
+同一事务还会删除涉及该账号的已保存助手对话（见“AI 助手”一节的“已保存的对话”），核心随后再发一条 `AssistantConversationsChanged`（`cleared`）。
 
 `credentialsPending=true` 表示本机移除已提交，但部分 SecretStore 删除尚未完成；提示待清理并允许应用后续重试，不能作为账号删除失败重试创建。缓存文件、共享引用和恢复边界见[账号配置](../architecture/account-configuration.md#6-操作与后台任务契约)。
 

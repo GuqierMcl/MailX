@@ -32,6 +32,12 @@ export const mailKeys = {
   overview: (since: string | null, dayStarts: string[] = []) => [...mailKeys.overviews(), since, dayStarts] as const,
 }
 
+/** The assistant's saved conversations (the history panel); the core's `assistant-conversations` event refetches them. */
+export const assistantKeys = {
+  all: ['assistant'] as const,
+  conversations: () => [...assistantKeys.all, 'conversations'] as const,
+}
+
 /** App preferences; sync rounds never touch them. */
 export const settingsKeys = {
   all: ['settings'] as const,
