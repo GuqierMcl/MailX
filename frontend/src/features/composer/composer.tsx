@@ -574,7 +574,7 @@ const dragActivation = (event: PointerEvent) => event.pointerType === 'touch'
 /** The first two recipients by name, then how many there are in all. */
 function summaryRecipients(recipients: Recipient[]) {
   const names = recipients.slice(0, 2).map((item) => item.name || item.address).join(t('composer:header.separator'))
-  return recipients.length > 2 ? t('composer:header.more', { names, total: recipients.length, more: recipients.length - 2 }) : names
+  return recipients.length > 2 ? t('composer:header.more', { names, total: recipients.length }) : names
 }
 
 function headerSummary(accountName: string, recipients: Recipient[]) {

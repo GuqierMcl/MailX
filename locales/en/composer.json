@@ -63,7 +63,7 @@
   "header": {
     "expand": "Show sender and recipients: {{summary}}",
     "separator": ", ",
-    "more": "{{names}} and {{more}} more"
+    "more": "{{names}} and others ({{total}} people)"
   },
   "editor": {
     "loadFailed": "Unable to load editor",
