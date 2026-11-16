@@ -672,6 +672,39 @@ pub struct ComposeSettings {
     /// One of 0 (send at once), 5, 10, 20 or 30.
     #[ts(type = "number")]
     pub undo_send_seconds: u32,
+    /// Where new mail, replies and continued drafts open. Files written
+    /// before the setting existed open a composer window.
+    pub open_mode: ComposeOpenMode,
+}
+
+/// Where the composer opens (sending.md section 17.7).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ComposeOpenMode {
+    /// A composer window of its own.
+    #[default]
+    Window,
+    /// In the main window's reading pane.
+    Inline,
+    /// Any other stored or submitted value, kept only until validation:
+    /// client input with it is rejected as `compose.openMode` and a stored
+    /// file falls back to `Window`. Never written or exported.
+    #[doc(hidden)]
+    #[ts(skip)]
+    #[serde(skip_serializing)]
+    Invalid,
+}
+
+impl<'de> Deserialize<'de> for ComposeOpenMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Unknown values stay in the field-validation path, so IPC reports
+        // `compose.openMode` and a hand-edited file loses only this field.
+        Ok(match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(value) if value == "window" => Self::Window,
+            serde_json::Value::String(value) if value == "inline" => Self::Inline,
+            _ => Self::Invalid,
+        })
+    }
 }
 
 /// Local MCP access for other programs on this computer. Only the desktop
@@ -885,6 +918,9 @@ impl AppSettings {
         if !UNDO_SEND_SECONDS.contains(&self.compose.undo_send_seconds) {
             return Err(AppError::validation("compose.undoSendSeconds"));
         }
+        if self.compose.open_mode == ComposeOpenMode::Invalid {
+            return Err(AppError::validation("compose.openMode"));
+        }
         let compose = ComposeSettings {
             default_account_id: self
                 .compose
@@ -929,6 +965,10 @@ impl AppSettings {
                 self.compose.undo_send_seconds
             } else {
                 0
+            },
+            open_mode: match self.compose.open_mode {
+                ComposeOpenMode::Invalid => ComposeOpenMode::Window,
+                mode => mode,
             },
         };
         Self {

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu'
-import type { BaseUIEvent } from '@base-ui/react/types'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
+import { anchorContextMenuAt } from '@/lib/context-menu-anchor'
 import { cn } from '@/lib/utils'
 import { EmailCard, type RowClick } from './email-card'
 import { EmailContextMenuContent } from './email-context-menu'
@@ -23,6 +23,7 @@ import type { ListSelection } from './use-list-selection'
 import { useGaveUpVersion } from './preview-gave-up'
 import { usePreviewRequests } from './use-preview-requests'
 import type { VerificationCodes, VerificationTarget } from './use-verification-codes'
+import type { OpenIntent } from '@/features/outbox/use-compose'
 
 export type ListFilter = 'all' | 'unread'
 
@@ -87,7 +88,7 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   /** Whether local archive is available for this message's current folder. */
   canArchive?: (email: EmailSummary) => boolean
   /** Starts a reply, reply-all or forward from the right-click menu (opens the composer window). */
-  onRespond?: (email: EmailSummary, kind: RespondKind) => void
+  onRespond?: (email: EmailSummary, kind: RespondKind, intent?: OpenIntent) => void
   onFilterChange: (filter: ListFilter) => void
   onSelect: (email: EmailSummary) => void
   onLoadMore: () => void
@@ -301,7 +302,7 @@ type VirtualRowsProps = {
   onDelete?: (email: EmailSummary) => void
   onRemoveLocal?: (email: EmailSummary) => void
   canArchive?: (email: EmailSummary) => boolean
-  onRespond?: (email: EmailSummary, kind: RespondKind) => void
+  onRespond?: (email: EmailSummary, kind: RespondKind, intent?: OpenIntent) => void
   hasMore: boolean
   loadingMore: boolean
   refreshing: boolean
@@ -484,7 +485,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
               event.preventBaseUIHandler()
               return
             }
-            if (anchorAtRow(event, row)) return
+            if (anchorContextMenuAt(event, row)) return
             const active = document.activeElement
             menuReturnFocus.current = active instanceof HTMLElement && active !== document.body ? active : null
             setMenu({ email, open: false })
@@ -558,34 +559,4 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
       )}
     </ScrollArea>
   )
-}
-
-/** Menus re-sent at the row by `anchorAtRow`; they are never moved again. */
-const reanchored = new WeakSet<Event>()
-
-/**
- * Shift+F10 and the menu key send `contextmenu` with a point that may lie
- * outside the row, often (0, 0), and the menu opens at that point. Such an
- * event is replaced by one at the row: 16px in from its left edge, vertically
- * centred. A mouse right-click always lands inside the row and is left alone.
- * Returns true when the event was replaced.
- */
-function anchorAtRow(event: BaseUIEvent<ReactMouseEvent<HTMLElement>>, row: HTMLElement) {
-  if (reanchored.has(event.nativeEvent)) return false
-  const rect = row.getBoundingClientRect()
-  const { clientX: x, clientY: y } = event
-  if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return false
-  const replay = new MouseEvent('contextmenu', {
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    button: 2,
-    clientX: rect.left + 16,
-    clientY: rect.top + rect.height / 2,
-  })
-  reanchored.add(replay)
-  event.preventBaseUIHandler()
-  event.preventDefault()
-  event.target.dispatchEvent(replay)
-  return true
 }

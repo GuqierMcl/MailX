@@ -50,7 +50,7 @@ export const useUpdateAppearance = (client: MailxClient) => useSettingsSection(c
 export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(client, 'security', { remoteImages: 'ask', senderAvatars: false })
 export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
-export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
+export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' })
 export const DEFAULT_TRANSLATION: TranslationSettings = {
   provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,

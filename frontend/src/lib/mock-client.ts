@@ -18,6 +18,7 @@ import type {
   OutboxItem,
   OutboxState,
   ConversationPage,
+  ContactSuggestion,
   EmailDetail,
   EmailPreviews,
   EmailSummary,
@@ -85,7 +86,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '' }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '' }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -683,6 +684,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!aggregated) contactRules.delete(key)
       else if (!contactRules.has(key)) contactRules.set(key, new Date().toISOString())
     },
+    async suggestContacts(query, limit) {
+      const role = (email: EmailDetail) => folders.find((folder) => folder.id === email.summary.folderId)?.role
+      const own = new Set([...accounts.map((account) => account.emailAddress), ...Object.values(dataset.me).map((me) => me.address)]
+        .map((address) => address.toLowerCase()))
+      return mockContactSuggestions(emails, role, own, query, limit)
+    },
     async getMailOverview(query) {
       // Same scope rules as the core (app/overview.rs): inbox mail that is not
       // archived; starred unread outside junk and trash.
@@ -1137,6 +1144,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const draft = clone(requireDraft(draftId))
       options.onOpenComposer?.(draft, fresh)
     },
+    // The preview's composer tabs cannot be brought forward, so none counts as open.
+    async focusComposer() { return false },
     closeComposer: async () => undefined,
     cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),
@@ -1913,6 +1922,77 @@ function mockActivity(
     topContacts,
     today: { received: today.length, unread: today.filter((email) => !email.summary.isRead).length },
   }
+}
+
+const NO_REPLY = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster']
+const CJK = /[\u1100-\u11ff\u2e80-\u2fdf\u3040-\u30ff\u3130-\u318f\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/u
+
+/** The core's matching for `contacts_suggest` (accounts/contacts.rs); `wanted` is lowercased. */
+function contactMatches(wanted: string, address: string, name: string | null): boolean {
+  const domain = address.includes('@') ? address.slice(address.lastIndexOf('@') + 1) : null
+  if (address.startsWith(wanted) || domain?.startsWith(wanted)) return true
+  if (!name) return false
+  const lower = name.toLowerCase()
+  if (CJK.test(lower)) return lower.includes(wanted)
+  for (let at = lower.indexOf(wanted); at >= 0; at = lower.indexOf(wanted, at + 1)) {
+    if (at === 0 || /[\s._-]/u.test(lower[at - 1])) return true
+  }
+  return false
+}
+
+/**
+ * Recipient suggestions with the core's rules (sending.md 17.4): senders outside junk and
+ * trash plus recipients of sent mail, never your own or no-reply addresses; people you wrote
+ * to first, then sent × 3 + received, the newest exchange and the address.
+ */
+function mockContactSuggestions(
+  emails: EmailDetail[],
+  role: (email: EmailDetail) => FolderRole | null | undefined,
+  own: Set<string>,
+  query: string,
+  limit = 8,
+): ContactSuggestion[] {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new MailxClientError({ code: 'validation', field: 'limit', message: '配置参数无效。' })
+  const trimmed = query.trim()
+  if ([...trimmed].length > 320) throw new MailxClientError({ code: 'validation', field: 'query', message: '配置参数无效。' })
+  if (!trimmed) return []
+  const wanted = trimmed.toLowerCase()
+  type Person = { sent: number, received: number, last: string, name: { at: string, value: string } | null }
+  const people = new Map<string, Person>()
+  const mention = (rawAddress: string, at: string, name: string | null | undefined, sent: boolean) => {
+    const address = rawAddress.toLowerCase()
+    const local = address.includes('@') ? address.slice(0, address.lastIndexOf('@')) : address
+    if (!address || own.has(address) || NO_REPLY.some((pattern) => local.includes(pattern))) return
+    const row = people.get(address) ?? { sent: 0, received: 0, last: '', name: null }
+    if (sent) row.sent += 1
+    else row.received += 1
+    if (row.last < at) row.last = at
+    const value = name?.trim()
+    if (value && (!row.name || row.name.at < at)) row.name = { at, value }
+    people.set(address, row)
+  }
+  for (const email of emails) {
+    const folder = role(email)
+    if (folder === 'junk' || folder === 'trash') continue
+    const at = email.summary.receivedAt
+    if (folder === 'sent') {
+      const recipients = new Map<string, string | null>()
+      for (const row of [...email.to, ...email.cc]) {
+        const key = row.address.toLowerCase()
+        if (!recipients.get(key)) recipients.set(key, row.name ?? null)
+      }
+      for (const [address, name] of recipients) mention(address, at, name, true)
+    }
+    mention(email.summary.from.address, at, email.summary.from.name, false)
+  }
+  return [...people]
+    .filter(([address, row]) => contactMatches(wanted, address, row.name?.value ?? null))
+    .sort(([a, x], [b, y]) => Number(y.sent > 0) - Number(x.sent > 0)
+      || (y.sent * 3 + y.received) - (x.sent * 3 + x.received)
+      || y.last.localeCompare(x.last)
+      || (a < b ? -1 : a > b ? 1 : 0))
+    .slice(0, limit)
+    .map(([address, row]) => ({ name: row.name?.value ?? null, address }))
 }
 
 /** Browser preview only (`?seed=outbox`): one rich draft plus sends that end failed, unknown and retrying. */

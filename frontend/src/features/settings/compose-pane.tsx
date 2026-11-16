@@ -9,13 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/components/ui/spinner'
 import { loadMailTree } from '@/features/mail/mail-tree'
 import { sortAccountsForDisplay } from '@/features/accounts/account-order'
+import type { ComposeOpenMode } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateCompose } from './settings-queries'
-
-/** Choices the core accepts for `compose.undoSendSeconds`. */
-
 
 /** Empty value: no fixed account, so a new mail follows the mailbox being viewed. */
 const FOLLOW = '__follow__'
@@ -28,6 +26,10 @@ export function ComposePane({ client }: { client: MailxClient }) {
     '10': t('settings:undoTen'),
     '20': t('settings:undoTwenty'),
     '30': t('settings:undoThirty'),
+  }
+  const OPEN_MODES: Record<ComposeOpenMode, string> = {
+    window: t('settings:composeOpenWindow'),
+    inline: t('settings:composeOpenInline'),
   }
   const settings = useSettings(client)
   const update = useUpdateCompose(client)
@@ -54,6 +56,16 @@ export function ComposePane({ client }: { client: MailxClient }) {
           <SelectTrigger id="compose.defaultAccount" className="w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
             {Object.entries(accountItems).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </SettingsRow>
+      <SettingsRow label={t('settings:composeOpenMode')} htmlFor="compose.openMode"
+        description={t('settings:composeOpenModeDescription')}>
+        <Select value={compose.openMode} items={OPEN_MODES}
+          onValueChange={(value: string | null) => value && update.mutate({ openMode: value as ComposeOpenMode })}>
+          <SelectTrigger id="compose.openMode" className="w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {Object.entries(OPEN_MODES).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
           </SelectContent>
         </Select>
       </SettingsRow>

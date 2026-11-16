@@ -281,7 +281,7 @@ async fn legacy_plain_drafts_render_escaped_lines_and_removed_accounts_revoke_re
 }
 
 #[test]
-fn draft_body_prepare_is_main_only_and_never_grants_composer_image_access() {
+fn draft_body_prepare_is_main_only_and_image_preview_never_reaches_the_body_frame() {
     let draft_id = Uuid::new_v4();
     let app = Url::parse("tauri://localhost/index.html").unwrap();
     assert!(crate::window_access::check("main", &app, "drafts_prepare_body", None).is_ok());
@@ -294,10 +294,21 @@ fn draft_body_prepare_is_main_only_and_never_grants_composer_image_access() {
         )
         .is_err()
     );
+    // The main window's inline composer previews its pictures like a composer
+    // window does; the isolated body frame never can.
     assert!(
         crate::window_access::check(
             "main",
             &app,
+            "inline_image_preview",
+            Some(&draft_id.to_string())
+        )
+        .is_ok()
+    );
+    assert!(
+        crate::window_access::check(
+            "main",
+            &Url::parse("mailx-body://localhost").unwrap(),
             "inline_image_preview",
             Some(&draft_id.to_string())
         )

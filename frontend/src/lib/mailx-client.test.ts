@@ -144,6 +144,7 @@ describe('drafts and sending commands', () => {
     await client.retryOutboxNow('o')
     await client.resolveUnknown({ id: 'o', resolution: 'markSent', clientMutationId: 'c' })
     await client.openComposer('d')
+    await client.focusComposer('d')
     await client.closeComposer()
     const calls = vi.mocked(invoke).mock.calls
     expect(calls.map(([command, args]) => [command, args])).toEqual([
@@ -162,8 +163,16 @@ describe('drafts and sending commands', () => {
       ['outbox_retry_now', { id: 'o' }],
       ['outbox_resolve_unknown', { id: 'o', choice: 'markSent', clientMutationId: 'c' }],
       ['composer_open', { draftId: 'd' }],
+      ['composer_focus', { draftId: 'd' }],
       ['composer_close', { force: false, generation: null }],
     ])
+  })
+
+  it('reports whether a composer window had the draft', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(ok(true)).mockResolvedValueOnce(ok(false))
+    const client = createDesktopClient()
+    await expect(client.focusComposer('d')).resolves.toBe(true)
+    await expect(client.focusComposer('d')).resolves.toBe(false)
   })
 
   it('never lets the page pick the principal when queueing', async () => {

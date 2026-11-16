@@ -378,5 +378,10 @@
   "assistantSendDirectHint": "The AI can send mail without asking.",
   "assistantInstructions": "Custom instructions",
   "assistantInstructionsDescription": "How to address you, tone, signature habits. Added to every request.",
-  "assistantInstructionsCount": "{{length}} / {{max}}"
+  "assistantInstructionsCount": "{{length}} / {{max}}",
+  "composeOpenMode": "Open composer in",
+  "composeOpenModeDescription": "Where new mail, replies, forwards and continued drafts open. Shift-click to use the other place once.",
+  "composeOpenWindow": "New window",
+  "composeOpenInline": "Main window",
+  "quitInlineDraftFailed": "The message being written in the main window couldn't be saved."
 }

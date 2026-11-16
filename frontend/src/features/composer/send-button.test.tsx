@@ -1,7 +1,8 @@
 import { i18n } from '@/i18n'
+import { createRef } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONFIRM_GUARD_MS, CONFIRM_TIMEOUT_MS, SendButton } from './send-button'
+import { CONFIRM_GUARD_MS, CONFIRM_TIMEOUT_MS, SendButton, type SendButtonHandle } from './send-button'
 
 const matchMedia = window.matchMedia
 
@@ -133,5 +134,48 @@ describe('two-step send button', () => {
     const { button } = setup()
     expect(button.className).toMatch(/transition-\[width,background-color,color\]/)
     expect(button.className).toMatch(/duration-200/)
+  })
+
+  it('goes straight to the confirm stage from a host-run first press, keeping the guard and the timeout', async () => {
+    const control = createRef<SendButtonHandle>()
+    const alternative = vi.fn(async () => 9 as number | null)
+    const { button, press, onPrepare, onConfirm } = setup({ controlRef: control })
+    await act(async () => { control.current?.prepare(alternative) })
+    expect(alternative).toHaveBeenCalledTimes(1)
+    expect(onPrepare).not.toHaveBeenCalled()
+    expect(button).toHaveAttribute('data-stage', 'confirm')
+    expect(button).toHaveFocus()
+    await press()
+    expect(onConfirm).not.toHaveBeenCalled()
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS) })
+    expect(button).toHaveAttribute('data-stage', 'idle')
+
+    await act(async () => { control.current?.prepare(alternative) })
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_GUARD_MS + 1) })
+    await press()
+    expect(onConfirm).toHaveBeenCalledWith(9)
+  })
+
+  it('ignores a host-run first press unless it is at 发送, and stays put when that check refuses', async () => {
+    const control = createRef<SendButtonHandle>()
+    const { button, press, onConfirm } = setup({ controlRef: control })
+    await act(async () => { control.current?.prepare(async () => null) })
+    expect(button).toHaveAttribute('data-stage', 'idle')
+    await press()
+    const again = vi.fn(async () => 3 as number | null)
+    await act(async () => { control.current?.prepare(again) })
+    expect(again).not.toHaveBeenCalled()
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_GUARD_MS + 1) })
+    await press()
+    expect(onConfirm).toHaveBeenCalledWith(7)
+  })
+
+  it('withdraws a host-run confirmation on any edit', async () => {
+    const control = createRef<SendButtonHandle>()
+    const { button, rerender, onPrepare, onConfirm } = setup({ controlRef: control })
+    await act(async () => { control.current?.prepare(async () => 5) })
+    expect(button).toHaveAttribute('data-stage', 'confirm')
+    rerender(<SendButton subjectEmpty={false} resetToken="b" onPrepare={onPrepare} onConfirm={onConfirm} controlRef={control} />)
+    expect(button).toHaveAttribute('data-stage', 'idle')
   })
 })

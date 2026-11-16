@@ -2,15 +2,16 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Who is asking. The composer and authorized MCP/model tools may queue mail.
+/// Who is asking. The composer (a window or the main window's inline
+/// composer) and authorized MCP/model tools may queue mail.
 /// Only interactive UI callers may settle an `unknown` result. The trusted
 /// host decides the principal; request input cannot choose it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Caller {
     /// The user's own composer window.
     Composer,
-    /// The user's main window (outbox view); may settle `unknown` items but
-    /// not queue mail.
+    /// The user's main window: settles `unknown` items in the outbox view and
+    /// queues mail from its inline composer.
     MainWindow,
     /// An MCP client.
     Mcp,

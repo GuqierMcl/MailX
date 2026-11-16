@@ -45,6 +45,7 @@ import { TranslationToolbarGroup } from './translation/translation-toolbar'
 import type { EmailTranslation } from './translation/use-email-translation'
 import { VerificationCodeBar } from './verification-code-bar'
 import type { VerificationCodes } from './use-verification-codes'
+import { openIntent, type OpenIntent } from '@/features/outbox/use-compose'
 
 export function RemoveLocalCopyDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
   return (
@@ -79,7 +80,8 @@ type EmailViewProps = {
   /** The reader is folded away: keys must not close a message nobody can see. */
   hidden?: boolean
   /** Starts a reply, reply-all or forward of the open message (opens the composer window). */
-  onRespond: (kind: 'reply' | 'replyAll' | 'forward') => void
+  /** `intent` carries a Shift-click (open the other way this once). */
+  onRespond: (kind: 'reply' | 'replyAll' | 'forward', intent?: OpenIntent) => void
   /** Drops a local-only sent copy from this device after the user confirmed; the server is untouched. */
   onRemoveLocal?: (email: EmailSummary) => void
   /** Deletes a server email (to Trash, or for good after confirming), with undo. */
@@ -176,7 +178,7 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete,
       </div>
       <div className="flex items-center gap-1 not-first:ml-3">
         {RESPOND_ACTIONS.map(([kind, key, icon]) => (
-          <IconButton key={kind} label={t(key)} disabled={!summary} onClick={() => onRespond(kind)}>
+          <IconButton key={kind} label={t(key)} disabled={!summary} onClick={(event) => onRespond(kind, openIntent(event))}>
             <HugeiconsIcon icon={icon} />
           </IconButton>
         ))}

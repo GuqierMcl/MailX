@@ -396,7 +396,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "sound": "system",
                     "mutedAccounts": []
                 },
-                "compose": { "defaultAccountId": "", "undoSendSeconds": 0 },
+                "compose": { "defaultAccountId": "", "undoSendSeconds": 0, "openMode": "window" },
                 "mcp": { "enabled": false },
                 "assistant": {
                     "enabled": true,
@@ -886,7 +886,8 @@ fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
         ComposeSettings::default(),
         ComposeSettings {
             default_account_id: String::new(),
-            undo_send_seconds: 0
+            undo_send_seconds: 0,
+            open_mode: ComposeOpenMode::Window,
         }
     );
     fs::write(
@@ -903,6 +904,7 @@ fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
     let compose = ComposeSettings {
         default_account_id: "  account-1 ".into(),
         undo_send_seconds: 20,
+        open_mode: ComposeOpenMode::Inline,
     };
     let saved = store
         .patch(SettingsPatch {
@@ -912,6 +914,7 @@ fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
         .unwrap();
     assert_eq!(saved.settings.compose.default_account_id, "account-1");
     assert_eq!(saved.settings.compose.undo_send_seconds, 20);
+    assert_eq!(saved.settings.compose.open_mode, ComposeOpenMode::Inline);
     assert_eq!(saved.settings.appearance.theme, ThemeMode::Dark);
 
     store
@@ -926,6 +929,10 @@ fn compose_defaults_apply_to_old_files_and_patches_keep_other_sections() {
         .unwrap();
     assert_eq!(reloaded.settings.compose.undo_send_seconds, 20);
     assert_eq!(reloaded.settings.compose.default_account_id, "account-1");
+    assert_eq!(reloaded.settings.compose.open_mode, ComposeOpenMode::Inline);
+    let persisted: serde_json::Value =
+        serde_json::from_str(&file_text(&directory, SETTINGS_FILE_NAME)).unwrap();
+    assert_eq!(persisted["settings"]["compose"]["openMode"], "inline");
 }
 
 #[test]
@@ -961,6 +968,7 @@ fn invalid_compose_patches_are_rejected_and_change_nothing() {
             compose: Some(ComposeSettings {
                 default_account_id: "a\nb".into(),
                 undo_send_seconds: 5,
+                ..Default::default()
             }),
             ..Default::default()
         })
@@ -988,6 +996,69 @@ fn hand_edited_invalid_compose_values_fall_back_to_defaults() {
         .compose;
     assert_eq!(compose.undo_send_seconds, 0);
     assert_eq!(compose.default_account_id, "keep-me");
+}
+
+#[test]
+fn compose_open_mode_rejects_unknown_input_and_repairs_hand_edited_files() {
+    // Client input: only the two modes, reported as `compose.openMode`.
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    for value in [
+        serde_json::json!("tab"),
+        serde_json::json!("Window"),
+        serde_json::json!(""),
+        serde_json::json!(1),
+        serde_json::json!(null),
+    ] {
+        let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "compose": { "defaultAccountId": "", "undoSendSeconds": 0, "openMode": value }
+        }))
+        .unwrap();
+        let error = store.patch(patch).unwrap_err();
+        assert_eq!(error.code, ErrorCode::Validation, "{value}");
+        assert_eq!(error.field.as_deref(), Some("compose.openMode"), "{value}");
+    }
+    assert_eq!(
+        store.get().unwrap().settings.compose.open_mode,
+        ComposeOpenMode::Window
+    );
+    // A patch without the field means the default.
+    let patch: SettingsPatch = serde_json::from_value(serde_json::json!({
+        "compose": { "defaultAccountId": "", "undoSendSeconds": 0 }
+    }))
+    .unwrap();
+    assert_eq!(
+        store.patch(patch).unwrap().settings.compose.open_mode,
+        ComposeOpenMode::Window
+    );
+    // Stored files: unknown values fall back to a window, the rest is kept.
+    for (value, expected) in [
+        (serde_json::json!("inline"), ComposeOpenMode::Inline),
+        (serde_json::json!("window"), ComposeOpenMode::Window),
+        (serde_json::json!("sheet"), ComposeOpenMode::Window),
+        (serde_json::json!(7), ComposeOpenMode::Window),
+        (serde_json::json!({"x": 1}), ComposeOpenMode::Window),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(
+            directory.path().join(SETTINGS_FILE_NAME),
+            serde_json::json!({"version": 1, "settings": {
+                "compose": {"defaultAccountId": "keep-me", "undoSendSeconds": 10, "openMode": value},
+                "appearance": {"theme": "dark"}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert_eq!(snapshot.settings.compose.open_mode, expected, "{value}");
+        assert_eq!(snapshot.settings.compose.default_account_id, "keep-me");
+        assert_eq!(snapshot.settings.compose.undo_send_seconds, 10);
+        assert_eq!(snapshot.settings.appearance.theme, ThemeMode::Dark);
+        assert!(!snapshot.recovered);
+    }
 }
 
 #[test]

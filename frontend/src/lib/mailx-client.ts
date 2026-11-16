@@ -67,6 +67,7 @@ import type {
   EmailSelection,
   FlagBatchOutcome,
   ContactAggregation,
+  ContactSuggestion,
   MailOverview,
   MailOverviewQuery,
   TranslationCacheStats,
@@ -193,6 +194,11 @@ export interface MailxClient {
   listContactAggregations(): Promise<ContactAggregation[]>
   /** Starts or stops aggregating a sender address (case-insensitive, all accounts); idempotent. */
   setContactAggregation(address: string, aggregated: boolean): Promise<void>
+  /**
+   * Recipient suggestions for a composer address field, from mail already on this device:
+   * people you wrote to first. `limit` defaults to 8, at most 20; a blank query returns none.
+   */
+  suggestContacts(query: string, limit?: number): Promise<ContactSuggestion[]>
   /** Restores only an archive operation's changes; newer changes are never overwritten. */
   undoArchive(undoToken: string): Promise<void>
   /** Committed local flag/archive changes, including those made by agents. */
@@ -333,7 +339,7 @@ export interface MailxClient {
   attachmentPolicy(accountId: string): Promise<AttachmentPolicy>
   /** Composer window. Fires when files are dropped on it (the paths stay in the host). */
   onFilesDropped(listener: () => void): () => void
-  /** Composer window only, own draft only. Queues the draft; the undo window comes from settings. */
+  /** A composer window (own draft only) or the main window's inline composer. Queues the draft; the undo window comes from settings. */
   queueSend(request: QueueSendRequest): Promise<OutboxItem>
   listOutbox(options?: { accountId?: string | null; includeAll?: boolean }): Promise<OutboxItem[]>
   getOutbox(id: string): Promise<OutboxItem>
@@ -346,6 +352,8 @@ export interface MailxClient {
   resolveUnknown(request: ResolveUnknownRequest): Promise<OutboxItem>
   /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
   openComposer(draftId: string, fresh?: boolean): Promise<void>
+  /** Main window. Focuses the draft's composer window if one is open; false when none is (nothing is opened). */
+  focusComposer(draftId: string): Promise<boolean>
   /** Composer window. Closes its own window; flush the draft first. */
   closeComposer(force?: boolean, generation?: number): Promise<void>
   /** Cancels the matching close or app quit attempt without discarding edits. */
@@ -556,6 +564,7 @@ export function createDesktopClient(): MailxClient {
     selectEmails: (query) => call<EmailSelection>('emails_select', { query }),
     listContactAggregations: () => call<ContactAggregation[]>('contacts_list_aggregations', {}),
     setContactAggregation: (address, aggregated) => call<void>('contacts_set_aggregation', { address, aggregated }),
+    suggestContacts: (query, limit) => call<ContactSuggestion[]>('contacts_suggest', limit === undefined ? { query } : { query, limit }),
     undoArchive: (undoToken) => call<void>('emails_undo_archive', { undoToken }),
     onMailStateChanged: (listener) => subscribe<MailStateChanged>('mailx://mail-state-changed', listener),
     onDeletions(listener) {
@@ -702,6 +711,7 @@ export function createDesktopClient(): MailxClient {
     resolveUnknown: ({ id, resolution, clientMutationId }) =>
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
     openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
+    focusComposer: (draftId) => call<boolean>('composer_focus', { draftId }),
     closeComposer: (force = false, generation) => call<void>('composer_close', { force, generation: generation ?? null }),
     cancelComposerClose: (generation) => call<void>('composer_cancel_close', { generation }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),

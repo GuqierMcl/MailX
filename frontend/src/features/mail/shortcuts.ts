@@ -73,6 +73,12 @@ const TEXT_ENTRY = [
   '[role="textbox"]', '[role="combobox"]', '[role="searchbox"]', '[role="spinbutton"]',
 ].join(', ')
 
+/**
+ * A composer owns its keys even off a text field (a toolbar button, a recipient
+ * chip): the main window's inline composer must never archive or reply instead.
+ */
+const COMPOSER = '[data-slot="composer"], [data-slot="inline-composer"]'
+
 /** An open dialog, menu or popup owns the keyboard while it is up. */
 const OPEN_LAYER = '[role="dialog"][data-open], [role="alertdialog"][data-open], [role="dialog"][open], [role="menu"], [role="listbox"]'
 
@@ -85,13 +91,13 @@ const USES_ARROWS = '[role="tablist"], [role="radiogroup"], [role="slider"], [ro
 /**
  * Whether a single-key shortcut must leave this key press alone: already
  * handled, typing (including IME composition), a modifier other than Shift,
- * focus in a text field, or a dialog, menu or popup open.
+ * focus in a text field or a composer, or a dialog, menu or popup open.
  */
 export function singleKeyBlocked(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return true
   if (event.metaKey || event.ctrlKey || event.altKey) return true
   const target = event.target instanceof Element ? event.target : null
-  if (target && (target.closest(TEXT_ENTRY) || (target as HTMLElement).isContentEditable)) return true
+  if (target && (target.closest(TEXT_ENTRY) || target.closest(COMPOSER) || (target as HTMLElement).isContentEditable)) return true
   return Boolean(document.querySelector(OPEN_LAYER))
 }
 

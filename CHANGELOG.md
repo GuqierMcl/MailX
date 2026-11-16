@@ -15,8 +15,13 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - The assistant can write the Now page's summary line with your AI model, after you agree once to send mail content to that provider; Settings → Integrations → AI has a new Assistant group to turn it off, pick its model and choose which mailboxes it may read. / 助手可以用你的 AI 模型为“此刻”页面写概述句（首次需同意向该服务商发送邮件内容）；“设置 → 集成 → AI”新增“助手”一组，可关闭助手、选择模型和可读取的邮箱。 ([#138](https://github.com/GuqierMcl/MailX/pull/138))
 
+- Recipients are suggested from mail already on this computer as you type, and addresses can be dragged or moved between To, Cc and Bcc. / 输入收件人时根据本机已有邮件推荐联系人，地址可在收件人、抄送和密送之间拖动或移动。
+- Settings → Sending can open compose in the main window's reading pane instead of a new window; hold Shift when clicking to use the other one once. / “设置 → 发信”可让写信在主窗口阅读区中打开（默认仍为新窗口），点击时按住 Shift 可临时改用另一种方式。
+- Send reminds you once when the message mentions an attachment but none is added. / 正文提到附件却没有添加时，按发送会先提醒一次。
+
 ### ✨ Optimization
 
+- The compose header is clearer: the sending account shows its name first with the address in small text, the header folds into one line while you write, the quoted original in a reply folds away, and Cmd/Ctrl+Alt+C / B show Cc and Bcc. / 写信信头更清楚：发件账号以名称为主、地址为小字，写正文时信头收成一行，回复引用的原文默认折叠，Cmd/Ctrl+Alt+C / B 显示抄送和密送。
 - Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))
 
 ## [0.3.0] - 2026-11-14

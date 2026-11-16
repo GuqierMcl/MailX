@@ -81,6 +81,18 @@ describe('matchShortcut', () => {
     expect(press('e', {}, mount('<div contenteditable="false"><span>x</span></div>').querySelector('span')!)).toBe('archive')
   })
 
+  it('ignores keys anywhere inside a composer, including its buttons and the editor', () => {
+    const host = mount(`
+      <div data-slot="inline-composer"><section data-slot="composer">
+        <button id="attach">附件</button><span id="chip" tabindex="0">li@example.org</span>
+        <div class="ProseMirror" contenteditable="true"><p id="para">x</p></div>
+      </section></div>
+    `)
+    for (const element of host.querySelectorAll('#attach, #chip, #para')) {
+      for (const key of ['e', 'r', 'a', 'f', 'j', '#', '/', '?']) expect(press(key, {}, element)).toBeNull()
+    }
+  })
+
   it('ignores keys while a dialog, menu or popup is open', () => {
     for (const html of [
       '<div role="dialog" data-open></div>',
