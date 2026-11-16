@@ -13,7 +13,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- Add a separate self-hosted Exchange account with HTTPS/NTLMv2, server discovery and manual setup, sharing local mail, drafts and the reliable sending queue. / 新增独立的自建 Exchange 账号入口，支持 HTTPS/NTLMv2、服务器自动发现与手动配置，复用本地邮件、草稿和可靠发送队列。 ([#143](https://github.com/GuqierMcl/MailX/pull/143))
+- Add a separate self-hosted Exchange account with HTTPS/NTLMv2, server discovery and manual setup, sharing local mail, drafts and the reliable sending queue; thanks to @Arilt for the initial implementation and server compatibility feedback. / 新增独立的自建 Exchange 账号入口，支持 HTTPS/NTLMv2、服务器自动发现与手动配置，复用本地邮件、草稿和可靠发送队列；感谢 @Arilt 的初版实现与服务器兼容性反馈。 ([#143](https://github.com/GuqierMcl/MailX/pull/143), [#141](https://github.com/GuqierMcl/MailX/pull/141))
 
 - The assistant can write the Now page's summary line with your AI model, after you agree once to send mail content to that provider; Settings → Integrations → AI has a new Assistant group to turn it off, pick its model and choose which mailboxes it may read. / 助手可以用你的 AI 模型为“此刻”页面写概述句（首次需同意向该服务商发送邮件内容）；“设置 → 集成 → AI”新增“助手”一组，可关闭助手、选择模型和可读取的邮箱。 ([#138](https://github.com/GuqierMcl/MailX/pull/138))
 - Past chats with the assistant are saved on this computer and can be reopened, continued or deleted from the History button in the conversation; Settings → Integrations → AI → Assistant can turn saving off and clear them all. / 与助手的对话会保存在这台电脑上，可在对话页眉的“历史对话”中重新打开、继续或删除；“设置 → 集成 → AI → 助手”可关闭保存并清除全部对话。
