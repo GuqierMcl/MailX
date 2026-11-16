@@ -18,6 +18,7 @@ pub(crate) mod contacts;
 pub(crate) mod conversations;
 pub(crate) mod deletions;
 pub(crate) mod drafts;
+pub(crate) mod ews;
 mod flag_changes;
 mod folders;
 pub(crate) mod image_cache;
@@ -117,8 +118,8 @@ impl Storage {
     }
 
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
-        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon FROM accounts WHERE id=?1", [id], |r| {
-            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?))
+        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon,mail_backend FROM accounts WHERE id=?1", [id], |r| {
+            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?,r.get::<_, String>(10)?))
         }).optional()?.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
         let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json,oauth_binding_json FROM auth_profiles WHERE account_id=?1")?;
         let records = profile_statement
@@ -156,28 +157,61 @@ impl Storage {
                 auth,
             ))
         };
-        let (imap, imap_id) = connection("imap")?;
-        let (smtp, smtp_id) = connection("smtp")?;
-        let find = |profile_id: &str,
-                    protocol: &str,
-                    connection: &ConnectionConfig|
-         -> Result<AuthenticationSummary, AppError> {
-            Ok(profiles
+        let (mail_connection, authentication, imap_id, smtp_id) = if basic.10 == "ews" {
+            let (url, username, auth_id): (String, String, String) = self.db.query_row(
+                "SELECT url,username,auth_profile_id FROM ews_connections WHERE account_id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            let config = EwsConnectionConfig { url, username };
+            let profile = profiles
                 .iter()
-                .find(|p| p.id == profile_id)
-                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?
-                .summary(&TrustEndpoint::mail(protocol, connection)))
-        };
-        let authentication =
-            AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
-                mode: if imap_id == smtp_id {
-                    AuthenticationMode::Shared
-                } else {
-                    AuthenticationMode::Separate
-                },
-                imap: find(&imap_id, "imap", &imap)?,
-                smtp: find(&smtp_id, "smtp", &smtp)?,
+                .find(|p| p.id == auth_id && p.oauth.is_none())
+                .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+            let authentication = AccountAuthenticationSummary::EwsNtlm(EwsAuthenticationSummary {
+                credential: profile.summary(&TrustEndpoint::ews(&config)?),
             });
+            (
+                MailConnection::Ews {
+                    backend: EwsBackend::Ews,
+                    ews: config,
+                },
+                authentication,
+                auth_id.clone(),
+                auth_id,
+            )
+        } else if basic.10 == "imapSmtp" {
+            let (imap, imap_id) = connection("imap")?;
+            let (smtp, smtp_id) = connection("smtp")?;
+            let find = |profile_id: &str,
+                        protocol: &str,
+                        connection: &ConnectionConfig|
+             -> Result<AuthenticationSummary, AppError> {
+                Ok(profiles
+                    .iter()
+                    .find(|p| p.id == profile_id)
+                    .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?
+                    .summary(&TrustEndpoint::mail(protocol, connection)))
+            };
+            let authentication =
+                AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
+                    mode: if imap_id == smtp_id {
+                        AuthenticationMode::Shared
+                    } else {
+                        AuthenticationMode::Separate
+                    },
+                    imap: find(&imap_id, "imap", &imap)?,
+                    smtp: find(&smtp_id, "smtp", &smtp)?,
+                });
+            (
+                MailConnection::ImapSmtp { imap, smtp },
+                authentication,
+                imap_id,
+                smtp_id,
+            )
+        } else {
+            return Err(AppError::new(ErrorCode::StorageIncompatible));
+        };
         let (route_revision, route, proxy_secret) = self.load_route(id)?;
         let mut snapshot = Snapshot {
             account: Account {
@@ -192,8 +226,7 @@ impl Storage {
                 mailbox_source_id: basic.4,
                 created_at: basic.5,
                 updated_at: basic.6,
-                imap,
-                smtp,
+                connection: mail_connection,
                 authentication,
                 default_route_revision: if matches!(route, RouteConfig::Inherit) {
                     Some(1)
@@ -215,7 +248,7 @@ impl Storage {
                 .profile(&smtp_id)
                 .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
             snapshot.account.authentication =
-                crate::accounts::oauth::summary(binding, imap, smtp, &snapshot.account);
+                crate::accounts::oauth::summary(binding, imap, smtp, &snapshot.account)?;
         }
         Ok(snapshot)
     }
@@ -353,17 +386,39 @@ impl Storage {
             [&account.id],
         )?;
         tx.execute(
+            "DELETE FROM ews_connections WHERE account_id=?1",
+            [&account.id],
+        )?;
+        tx.execute(
+            "UPDATE accounts SET mail_backend=?2 WHERE id=?1",
+            params![
+                account.id,
+                if account.connection.is_ews() {
+                    "ews"
+                } else {
+                    "imapSmtp"
+                }
+            ],
+        )?;
+        tx.execute(
             "DELETE FROM auth_profiles WHERE account_id=?1",
             [&account.id],
         )?;
         for profile in &snapshot.profiles {
             tx.execute("INSERT INTO auth_profiles(id,account_id,kind,config_version,generation,secret_ref,trusted_endpoints_json,oauth_binding_json) VALUES (?1,?2,?6,1,?3,?4,?5,?7)",params![profile.id,account.id,profile.generation,profile.secret_ref,encode(&profile.trusted_endpoints)?,if profile.oauth.is_some() { "oauth2" } else { "password" },profile.oauth.as_ref().map(encode).transpose()?])?;
         }
-        for (protocol, config, auth_id) in [
-            ("imap", &account.imap, &account.authentication.imap().id),
-            ("smtp", &account.smtp, &account.authentication.smtp().id),
-        ] {
-            tx.execute("INSERT INTO mail_connections(account_id,protocol,host,port,tls,username,auth_profile_id) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![account.id,protocol,config.host,config.port,enum_name(&config.tls)?,config.username,auth_id])?;
+        match &account.connection {
+            MailConnection::ImapSmtp { imap, smtp } => {
+                for (protocol, config, auth_id) in [
+                    ("imap", imap, account.authentication.receive().id),
+                    ("smtp", smtp, account.authentication.submit().id),
+                ] {
+                    tx.execute("INSERT INTO mail_connections(account_id,protocol,host,port,tls,username,auth_profile_id) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![account.id,protocol,config.host,config.port,enum_name(&config.tls)?,config.username,auth_id])?;
+                }
+            }
+            MailConnection::Ews { ews, .. } => {
+                tx.execute("INSERT INTO ews_connections(account_id,url,username,auth_profile_id) VALUES (?1,?2,?3,?4)",params![account.id,ews.url,ews.username,account.authentication.receive().id])?;
+            }
         }
         tx.execute(
             "DELETE FROM network_routes WHERE account_id=?1",
@@ -423,6 +478,7 @@ pub(crate) fn proxy_endpoint(
         port,
         tls: None,
         username: username.into(),
+        path: None,
     }
 }
 fn enum_name(value: &impl serde::Serialize) -> Result<String, AppError> {

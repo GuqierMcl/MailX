@@ -1,5 +1,5 @@
 //! Shared, bounded verification-code reads and copy admission for trusted hosts.
-//! Recognition is local and cached only in memory. Disposable IMAP reads never
+//! Recognition is local and cached only in memory. Disposable protocol reads never
 //! alter body/read state, and dropping the caller cancels the network future.
 
 use std::{
@@ -213,6 +213,12 @@ impl NotificationCodes {
 enum Input {
     Cached(BlobStore, StoredBlob),
     Network(SyncPlan),
+    Ews(
+        Box<(
+            crate::accounts::sync_plan::EwsPlan,
+            crate::storage::ews::EwsItem,
+        )>,
+    ),
 }
 
 enum Prepared {
@@ -463,10 +469,16 @@ impl MailxCore {
                 {
                     return Ok(empty(VerificationCodeState::Unavailable));
                 }
-                let Ok(plan) = service.sync_plan(&identity.account_id) else {
-                    return Ok(empty(VerificationCodeState::Unavailable));
-                };
-                Input::Network(plan)
+                match service.ews_read_plan(&identity) {
+                    Ok(Some(plan)) => Input::Ews(Box::new(plan)),
+                    Ok(None) => {
+                        let Ok(plan) = service.sync_plan(&identity.account_id) else {
+                            return Ok(empty(VerificationCodeState::Unavailable));
+                        };
+                        Input::Network(plan)
+                    }
+                    Err(_) => return Ok(empty(VerificationCodeState::Unavailable)),
+                }
             };
             Ok::<_, AppError>(Prepared::Read(Box::new((identity, input))))
         })
@@ -485,6 +497,20 @@ impl MailxCore {
             }
             Input::Network(plan) => {
                 let Some(raw) = self.notification_raw(&identity, &plan).await else {
+                    return Ok(VerificationCodeStatus::empty(
+                        email_id,
+                        VerificationCodeState::Unavailable,
+                    ));
+                };
+                raw
+            }
+            Input::Ews(read) => {
+                let (plan, item) = *read;
+                let Some(raw) = crate::sync::ews::fetch_mime(&plan, &item, MAX_EML_BYTES)
+                    .await
+                    .ok()
+                    .flatten()
+                else {
                     return Ok(VerificationCodeStatus::empty(
                         email_id,
                         VerificationCodeState::Unavailable,

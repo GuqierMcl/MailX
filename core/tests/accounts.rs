@@ -12,6 +12,9 @@ use std::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
+#[path = "accounts/ews.rs"]
+mod ews;
+
 #[derive(Default)]
 struct MemorySecrets {
     state: Mutex<SecretState>,
@@ -133,11 +136,11 @@ fn persists_config_across_restart_without_disclosing_secrets() {
         AuthenticationMode::Shared
     );
     assert_eq!(
-        account.authentication.imap().id,
-        account.authentication.smtp().id
+        account.authentication.receive().id,
+        account.authentication.submit().id
     );
-    assert_eq!(account.imap.username, "alice-imap");
-    assert_eq!(account.smtp.username, "alice-smtp");
+    assert_eq!(account.connection.imap().unwrap().username, "alice-imap");
+    assert_eq!(account.connection.smtp().unwrap().username, "alice-smtp");
     assert_eq!(secrets.len(), 1);
     let output = serde_json::to_string(&account).unwrap();
     assert!(!output.contains("test-mail-secret"));
@@ -210,14 +213,14 @@ fn mail_usernames_default_independently_and_preserve_explicit_case() {
             .create(create_request(&Uuid::new_v4().to_string(), input))
             .unwrap();
         assert_eq!(account.email_address, "Alice@example.com");
-        assert_eq!(account.imap.username, expected_imap);
-        assert_eq!(account.smtp.username, expected_smtp);
+        assert_eq!(account.connection.imap().unwrap().username, expected_imap);
+        assert_eq!(account.connection.smtp().unwrap().username, expected_smtp);
         assert_eq!(
-            account.authentication.imap().trust,
+            account.authentication.receive().trust,
             CredentialTrust::Trusted
         );
         assert_eq!(
-            account.authentication.smtp().trust,
+            account.authentication.submit().trust,
             CredentialTrust::Trusted
         );
         assert_eq!(service.get(&account.id).unwrap(), account);
@@ -264,8 +267,8 @@ fn default_mail_usernames_keep_trust_until_the_effective_identity_changes() {
     // Saved usernames are concrete values, so changing only the display email
     // leaves both logins and their trust untouched.
     input["emailAddress"] = json!("other@example.com");
-    input["imap"]["username"] = json!(same.imap.username);
-    input["smtp"]["username"] = json!(same.smtp.username);
+    input["imap"]["username"] = json!(same.connection.imap().unwrap().username);
+    input["smtp"]["username"] = json!(same.connection.smtp().unwrap().username);
     let explicit = service
         .update_connection(update_request(&same, input.clone()))
         .unwrap();
@@ -277,15 +280,21 @@ fn default_mail_usernames_keep_trust_until_the_effective_identity_changes() {
     let changed = service
         .update_connection(update_request(&explicit, input.clone()))
         .unwrap();
-    assert_eq!(changed.imap.username, "other@example.com");
-    assert_eq!(changed.smtp.username, "other@example.com");
+    assert_eq!(
+        changed.connection.imap().unwrap().username,
+        "other@example.com"
+    );
+    assert_eq!(
+        changed.connection.smtp().unwrap().username,
+        "other@example.com"
+    );
     assert_ne!(changed.mailbox_source_id, original.mailbox_source_id);
     assert_eq!(
-        changed.authentication.imap().trust,
+        changed.authentication.receive().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_eq!(
-        changed.authentication.smtp().trust,
+        changed.authentication.submit().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_eq!(secrets.len(), 1);
@@ -296,11 +305,11 @@ fn default_mail_usernames_keep_trust_until_the_effective_identity_changes() {
         .unwrap();
     assert_eq!(confirmed.mailbox_source_id, changed.mailbox_source_id);
     assert_eq!(
-        confirmed.authentication.imap().trust,
+        confirmed.authentication.receive().trust,
         CredentialTrust::Trusted
     );
     assert_eq!(
-        confirmed.authentication.smtp().trust,
+        confirmed.authentication.submit().trust,
         CredentialTrust::Trusted
     );
 }
@@ -375,27 +384,30 @@ fn shared_and_separate_authentication_preserve_ownership_and_versions() {
         .update_connection(update_request(&original, separate.clone()))
         .unwrap();
     assert_ne!(
-        split.authentication.imap().id,
-        split.authentication.smtp().id
+        split.authentication.receive().id,
+        split.authentication.submit().id
     );
-    assert_eq!(split.authentication.imap().generation, 1);
-    assert_eq!(split.authentication.smtp().trust, CredentialTrust::Trusted);
+    assert_eq!(split.authentication.receive().generation, 1);
+    assert_eq!(
+        split.authentication.submit().trust,
+        CredentialTrust::Trusted
+    );
     assert_eq!(secrets.len(), 2);
     separate["authentication"]["smtpPassword"] =
         json!({"action":"replace","value":"new-smtp-password"});
     let rotated = service
         .update_connection(update_request(&split, separate))
         .unwrap();
-    assert_eq!(rotated.authentication.smtp().generation, 2);
-    assert_eq!(rotated.authentication.imap().generation, 1);
+    assert_eq!(rotated.authentication.submit().generation, 2);
+    assert_eq!(rotated.authentication.receive().generation, 1);
     assert_eq!(rotated.mailbox_source_id, original.mailbox_source_id);
     assert_eq!(secrets.len(), 2);
     let merged = service
         .update_connection(update_request(&rotated, keep_config()))
         .unwrap();
     assert_eq!(
-        merged.authentication.imap().id,
-        merged.authentication.smtp().id
+        merged.authentication.receive().id,
+        merged.authentication.submit().id
     );
     assert_eq!(secrets.len(), 1);
     assert_eq!(count(&db(directory.path()), "auth_profiles"), 1);
@@ -413,11 +425,11 @@ fn new_target_requires_credential_confirmation_and_new_mailbox_source() {
     assert_eq!(pending.id, original.id);
     assert_ne!(pending.mailbox_source_id, original.mailbox_source_id);
     assert_eq!(
-        pending.authentication.imap().trust,
+        pending.authentication.receive().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_eq!(
-        pending.authentication.smtp().trust,
+        pending.authentication.submit().trust,
         CredentialTrust::Trusted
     );
     moved["authentication"]["password"] =
@@ -426,7 +438,7 @@ fn new_target_requires_credential_confirmation_and_new_mailbox_source() {
         .update_connection(update_request(&pending, moved))
         .unwrap();
     assert_eq!(
-        confirmed.authentication.imap().trust,
+        confirmed.authentication.receive().trust,
         CredentialTrust::Trusted
     );
     assert_eq!(confirmed.mailbox_source_id, pending.mailbox_source_id);
@@ -450,7 +462,7 @@ fn tls_change_does_not_expand_trust_or_change_mailbox_identity() {
         .unwrap();
     assert_eq!(updated.mailbox_source_id, account.mailbox_source_id);
     assert_eq!(
-        updated.authentication.imap().trust,
+        updated.authentication.receive().trust,
         CredentialTrust::NeedsConfirmation
     );
 }
@@ -465,7 +477,7 @@ fn rejects_cross_account_links_and_unknown_wire_fields() {
         database
             .execute(
                 "UPDATE mail_connections SET auth_profile_id=?1 WHERE account_id=?2",
-                params![second.authentication.imap().id, first.id]
+                params![second.authentication.receive().id, first.id]
             )
             .is_err()
     );
@@ -474,7 +486,7 @@ fn rejects_cross_account_links_and_unknown_wire_fields() {
     malicious["authentication"]["secretRef"] = json!("arbitrary-private-reference");
     assert!(serde_json::from_value::<AccountConfigInput>(malicious).is_err());
     let mut malicious = config();
-    malicious["imap"]["authProfileId"] = json!(second.authentication.imap().id);
+    malicious["imap"]["authProfileId"] = json!(second.authentication.receive().id);
     assert!(serde_json::from_value::<AccountConfigInput>(malicious).is_err());
     let mut malicious = json!({"requestId":Uuid::new_v4().to_string(),"config":config()});
     malicious["principal"] = json!("admin");
@@ -819,7 +831,7 @@ fn missing_secret_is_not_reported_as_configured_or_treated_as_temporary_failure(
     let original = create(&mut service);
     secrets.state.lock().unwrap().entries.clear();
     let missing = service.get(&original.id).unwrap();
-    assert!(!missing.authentication.imap().credential_configured);
+    assert!(!missing.authentication.receive().credential_configured);
     assert_eq!(
         service
             .update_connection(update_request(&original, keep_config()))
@@ -908,16 +920,16 @@ fn same_process_split_recovery_preserves_pending_trust_and_rejects_old_revision(
     assert_eq!(recovered.revision, 2);
     assert_eq!(recovered.mailbox_source_id, original.mailbox_source_id);
     assert_eq!(
-        recovered.authentication.imap().trust,
+        recovered.authentication.receive().trust,
         CredentialTrust::Trusted
     );
     assert_eq!(
-        recovered.authentication.smtp().trust,
+        recovered.authentication.submit().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_ne!(
-        recovered.authentication.imap().id,
-        recovered.authentication.smtp().id
+        recovered.authentication.receive().id,
+        recovered.authentication.submit().id
     );
     assert_eq!(secrets.len(), 2);
     assert_eq!(count(&db(directory.path()), "credential_journal"), 0);
@@ -934,9 +946,12 @@ fn separate_merge_split_does_not_transfer_the_other_passwords_trust() {
     let merged = service
         .update_connection(update_request(&original, keep_config()))
         .unwrap();
-    assert_eq!(merged.authentication.imap().trust, CredentialTrust::Trusted);
     assert_eq!(
-        merged.authentication.smtp().trust,
+        merged.authentication.receive().trust,
+        CredentialTrust::Trusted
+    );
+    assert_eq!(
+        merged.authentication.submit().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_eq!(secrets.len(), 1);
@@ -945,9 +960,12 @@ fn separate_merge_split_does_not_transfer_the_other_passwords_trust() {
     let split = service
         .update_connection(update_request(&merged, split))
         .unwrap();
-    assert_eq!(split.authentication.imap().trust, CredentialTrust::Trusted);
     assert_eq!(
-        split.authentication.smtp().trust,
+        split.authentication.receive().trust,
+        CredentialTrust::Trusted
+    );
+    assert_eq!(
+        split.authentication.submit().trust,
         CredentialTrust::NeedsConfirmation
     );
     assert_eq!(secrets.len(), 2);

@@ -268,6 +268,10 @@ type DataStartedFuture = Pin<Box<dyn Future<Output = Result<(), ()>> + Send>>;
 pub(crate) struct DataStarted(Box<dyn FnOnce() -> DataStartedFuture + Send>);
 
 impl DataStarted {
+    pub(crate) async fn run(self) -> Result<(), ()> {
+        (self.0)().await
+    }
+
     pub(crate) fn new<F, Fut>(hook: F) -> Self
     where
         F: FnOnce() -> Fut + Send + 'static,

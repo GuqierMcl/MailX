@@ -36,6 +36,11 @@ scraper = { version = "0.27", default-features = false }
 serde.workspace = true
 serde_json = "1"
 sha2 = "0.10"
+# NTLMv2 (including MIC/CBT) is delegated to SSPI, without its network clients
+# or platform credential discovery. XML is namespace-aware and rejects DTDs.
+sspi = { version = "0.23.1", default-features = false }
+roxmltree = "0.21"
+x509-parser = { version = "0.18", default-features = false }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-socks = "0.5"

@@ -8,11 +8,10 @@ use super::{AccountService, new_id, validate_uuid};
 use crate::mail::render::{preview, render};
 use crate::{
     AppError, Draft, ErrorCode,
-    accounts::sync_plan::PlanError,
+    accounts::sync_plan::{PlanError, SubmitPlan},
     drafts::body::{outgoing_body, referenced_cids},
     send::types::*,
     smtp::{
-        SmtpPlan,
         attachment::{AttachmentData, InlineImageData},
         message::{BuiltMessage, OutgoingMessage, build, local_now, new_message_id},
     },
@@ -32,7 +31,7 @@ pub(crate) enum Next {
     /// An item moved to `sending`; attempt it with this plan.
     Job {
         job: Box<ClaimedJob>,
-        plan: Result<SmtpPlan, PlanError>,
+        plan: Box<Result<SubmitPlan, PlanError>>,
     },
 }
 
@@ -581,8 +580,11 @@ impl AccountService {
         let next = match claim {
             Claim::Wait(at) => Next::Wait(at),
             Claim::Job(job) => {
-                let plan = self.smtp_plan(account_id);
-                Next::Job { job, plan }
+                let plan = self.submit_plan(account_id);
+                Next::Job {
+                    job,
+                    plan: Box::new(plan),
+                }
             }
         };
         Ok(Step { changed, next })
@@ -917,7 +919,7 @@ mod tests {
         let (item, _) = service.queue_send(&request(&draft), 0, t0()).unwrap();
         assert!(is_job(&service.outbox_step(&account_id, t0()).unwrap()));
         let reply = ServerReplyInfo {
-            code: 250,
+            code: Some(250),
             text: "ok".into(),
         };
         let changed = service

@@ -30,4 +30,3 @@ export function toolLabel(tool: RunTool): string {
   const plain = (PLAIN.has(name) ? name : 'other') as PlainTool
   return t(tool.status === 'running' ? `ai:chat.tool.${plain}.running` : `ai:chat.tool.${plain}.done`)
 }
-

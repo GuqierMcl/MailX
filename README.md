@@ -34,17 +34,19 @@ English | [简体中文](README.zh-CN.md)
 
 ## Supported Mailboxes
 
-These providers have built-in presets. For most of them, pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you. Outlook and Microsoft 365 sign in through your browser instead.
+MailX includes dedicated setup entries for these services. For most of them, pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you. Outlook and Microsoft 365 sign in through your browser instead.
 
-| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud Mail" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365 / Exchange" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="32"> |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Gmail | iCloud Mail | Outlook | Microsoft 365 / Exchange | QQ Mail | 163 Mail | 126 Mail | Yeah Mail | 139 Mail |
+| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud Mail" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="32"> | <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Gmail | iCloud Mail | Outlook | Microsoft 365 | QQ Mail | 163 Mail | 126 Mail | Yeah Mail | 139 Mail | Exchange (self-hosted) |
 
 Gmail accepts `@gmail.com` and `@googlemail.com` addresses with a Google app password, which needs 2-Step Verification. See the [account setup guide](docs/guides/README.md#gmail) for how to create one and when it isn't available.
 
 iCloud Mail accepts `@icloud.com`, `@me.com` and `@mac.com` addresses with an Apple app-specific password. See the [account setup guide](docs/guides/README.md#icloud-mail) for the requirements and username settings.
 
-Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 / Exchange (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. A company-hosted Exchange server isn't covered by this entry; add it manually if it offers IMAP and SMTP. See the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for details.
+Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. For company-hosted servers, choose the separate Exchange (self-hosted) entry to discover an EWS endpoint or enter its HTTPS URL manually. See the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for details.
+
+Self-hosted Exchange uses EWS over HTTPS with NTLMv2, with automatic discovery and manual setup; it uses the same local inbox, drafts and outbox. Deployment and platform validation is tracked in the [validation record](docs/development/validation.md#exchange-ews-validation).
 
 Any other mailbox that offers IMAP and SMTP with password sign-in can be added by entering its servers manually. Browser sign-in for Gmail (without an app password) is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
 
@@ -67,7 +69,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 | Desktop app: composing and sending | ✅ Available |
 | Desktop app: showing sent copies in the Sent folder | ✅ Implemented |
 | Full-text search of local content | ✅ Implemented |
-| Browser sign-in: Outlook, Microsoft 365 / Exchange | ✅ Implemented |
+| Browser sign-in: Outlook, Microsoft 365 | ✅ Implemented |
 | Browser sign-in: Gmail | 🗓️ Planned |
 | Built-in AI assistant | 🗓️ Planned |
 | Message translation, with no setup or with a key of your own | ✅ Implemented (automated tests only) |

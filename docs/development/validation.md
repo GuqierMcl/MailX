@@ -1303,3 +1303,51 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 **手测：** 2026-11-16 维护者在 macOS 桌面开发版中手动试用本轮功能，确认无问题。
 
 **未验证：** Windows / Linux 实机、各输入法下的补全与拖动、多显示器下的写信窗口、真实大邮箱的补全耗时。
+
+<a id="exchange-ews-validation"></a>
+
+## 47. 自建 Exchange EWS（2026-11-16，自动测试）
+
+独立 Exchange 入口、真实协议配置、HTTPS / NTLMv2（含 Negotiate 下限定 NTLM 的 SPNEGO）、TLS channel binding、自动发现、按需 MIME、共用写回与发件箱已有实现，架构见[自建 Exchange](../architecture/exchange-ews.md)。本节记录该实现自身的证据，不继承其他客户端或其他实现的真实服务器验证结论。
+
+### 自动验证
+
+- 本机 macOS：TypeScript、ESLint、i18n（1505 条文案）、生成类型一致性、前端构建、Rust 格式与全 workspace / all-targets Clippy 检查通过。
+- `bun run rust:test`（`cargo test --workspace --locked`）：合计 1731 passed、0 failed、5 ignored；其中 core 单元测试 1432 项、账号集成 48 项、desktop 195 项通过，其余为 MCP/bridge 与协议集成测试。忽略项未作为通过证据。
+- 前端全量 `bun run frontend:test -- --maxWorkers=2`：117 个文件、1469 项测试通过，测试超时保持原值。首次 `bun run check` 的默认并发前端运行出现 15 项失败（14 项超时及 1 项焦点断言），限制并发后全量通过，未修改断言或增加超时；原 check 后续构建与 Rust 检查单独执行。
+- 账号兼容回归覆盖旧 JSON、canonical 幂等重放、凭据恢复日志、真实 EWS 端点存储、来源隔离及更换端点后的信任。同步回归覆盖原 IMAP 正文、预览、IDLE 和写回，以及 EWS 代理 UID、分页上限、循环父级、标记在途反向修改、软删/永久删除队列、失败后不回退 IMAP。
+- 协议受控服务端实际核对 NTLM MIC、SPNEGO mechListMIC 与 CBT，错误 CBT 被拒绝；覆盖密送与冻结 MIME、发送标记失败无请求、标记前连接关闭与标记后响应丢失的不同结果。SOAP 属性与顺序按 Microsoft EWS schema 核对，DTD/命名空间/分页游标和元数据部分失败有回归。
+- Linux 和 Windows 的 Cargo 依赖树确认不包含 macOS/iOS 专用的 async-dnssd；此检查不等同于实际平台编译或桌面验收。
+
+### 验证边界
+
+- 尚无本次实现对真实 Exchange 的登录、收发、密送投递、已发送副本对账或 EPA 组合实测。自动化使用合成消息和本地受控服务器，未读取真实账号凭据。
+- Windows / Linux 构建与三平台桌面行为需分别核对 CI 和实际安装包。浏览器自动化服务本次不可用，未把组件测试当作视觉或原生桌面验收。
+- EWS 使用固定 30 天起始窗口、每轮最多最新 1000 封和独立分页预算；达到上限时保留不完整覆盖，不能根据缺失项推断删除。未实现 SyncFolderItems 游标增量、服务器推送、共享/代理邮箱、Kerberos、EWS OAuth 或 SRV 发现。
+- 系统信任库中的企业 CA、TLS 终止代理、多前端 Exchange 拓扑和服务器重写 Message-ID 的行为仍待实测；无法确定副本身份时保留本机副本。
+
+### Exchange 官方产品图标（2026-11-16）
+
+独立 Exchange 入口改用 MicrosoftDocs 官方文档仓库发布的 192 × 192 RGBA PNG（9,730 字节），保持原文件字节，来源提交、许可证引用和 SHA-256 记录在[服务商图标说明](../../frontend/src/assets/providers/README.md#microsoft-exchange自建服务器)。添加列表、账号标签及启用服务商图标的头像复用本地素材，中英文 README 同步展示。
+
+- 文件哈希与下载原件一致，生产构建输出的 PNG 也与原件逐字节一致。
+- 已静态渲染并检查 14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景上的完整性和比例；未改色、裁切、去背景或描摹。此项是素材显示检查，不替代原生桌面操作验收。
+- 现有 providers / account-avatar / provider-picker 三个测试文件共 70 项通过；前端 lint、构建（含 TypeScript 检查）与 `git diff --check` 通过。
+
+### App 窗口集成测试的冷导入隔离（2026-11-16）
+
+[CI 运行 43835840783](https://github.com/GuqierMcl/MailX/actions/runs/43835840783) 的三平台 Rust 检查通过，前端 1469 项中仅 `App.test.tsx` 的主窗口「设置 → 关于」测试触发默认 5000ms 超时。本地单独运行也可复现；临时分段计时确认整棵 App 的动态冷导入会耗尽测试时限，超时后未完成的导入还可能继续干扰下一项窗口测试。计时探针已移除。
+
+主窗口与写信窗口的原有两个场景分别放入隔离的测试文件，使用静态 App 导入，并在模块求值前确定实际窗口 URL。测试直接渲染真实 App，沿用真实的更新上下文、点击操作和原有断言，按可访问名称等待设置对话框；不再在测试计时内重置并重新导入整棵模块树。未提高测试超时、禁用隔离或跳过断言。两个专项场景、TypeScript、lint 与 `git diff --check` 已通过；完整 CI 结果由 PR 检查记录提供。
+
+### 接入修正复核与合并主线（2026-11-17）
+
+复核 `d9eea6a` 的自动发现错误分类、登录名保留、SPNEGO 最终 token 兼容、发送上传预算、已缓存邮件元数据跳过、批量预览及限流写回：保留这些修正与对应回归。另收紧 SPNEGO 成功条件：只在已发送认证 token 后允许服务器省略最终 token；有最终 token 时必须完成 SSPI 校验且没有待发 token。新增真实 SSPI 受控服务器场景覆盖提前返回 200、返回未完成挑战和最终 MIC 缺失；正常省略最终 token 的场景仍通过。
+
+合并主线 `8374245`，保留 AI 聊天、历史记录、联系人建议和内联写信；EWS 迁移从分支原编号 32 顺延到 34，主线已提交的 32（助手历史）、33（收件人索引）及其 SQL 字节不变。分别验证从旧版 schema 31 和当前主线 schema 33 升级，原账号、凭据引用、幂等记录、聊天消息及索引保持。历史迁移校验继续有效，未自动修改任何实际用户数据库或迁移历史。
+
+合并后前端类型、lint、构建、i18n（1698 条）、Rust 全 workspace / all-targets Clippy 及差异检查通过；前端全量（两个 worker）131 个文件、1673 项通过。保留 App 主窗口/写信窗口分文件静态导入的修复，同时沿用本次合入主线的测试配置。完整 `bun run rust:test` 共 1782 passed、0 failed、6 ignored；EWS 协议专项 20 项、数据库升级专项 2 项通过。真实 Exchange 与桌面实测边界仍按上文记录。
+
+### 维护者手动验收（2026-11-17）
+
+维护者在本次会话中报告已完成手动测试，并明确允许合并 Exchange 功能。反馈未细分操作系统、Exchange 版本、认证/代理配置或逐项收发场景，因此记录为维护者整体手动验收，不外推为所有部署、EPA 组合和三平台桌面均已验证。合并前最新代码的前端和 Windows / macOS / Linux Rust CI 均通过。

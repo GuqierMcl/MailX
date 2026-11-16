@@ -151,4 +151,3 @@ describe('reply quote folding', () => {
     expect(count).toBeLessThan(settled + 10)
   })
 })
-

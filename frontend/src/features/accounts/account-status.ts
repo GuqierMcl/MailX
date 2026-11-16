@@ -5,6 +5,7 @@ import { signInNeeded } from './sign-in-state'
 
 /** Whether a saved credential or the route must be confirmed again before MailX uses it. */
 export function needsTrust(account: Account): boolean {
+  if (account.authentication.kind === 'ewsNtlm') return account.authentication.credential.trust === 'needsConfirmation' || (account.route.kind === 'custom' && account.route.authentication?.trust === 'needsConfirmation')
   return account.authentication.imap.trust === 'needsConfirmation'
     || account.authentication.smtp.trust === 'needsConfirmation'
     || (account.route.kind === 'custom' && account.route.authentication?.trust === 'needsConfirmation')
@@ -39,6 +40,7 @@ export function accountIssues(account: Account, sync: AccountSyncState | undefin
 
 /** How the account connects: the plain protocol pair, or the provider's browser sign-in. */
 export function connectionMethod(account: Account): string {
+  if ('ews' in account) return t('accounts:ewsConnection')
   return account.authentication.kind === 'oauth2'
     ? t('accounts:browserSignInMethod', { name: providerOf(account.providerId).name })
     : t('accounts:methodImapSmtp')
@@ -47,6 +49,7 @@ export function connectionMethod(account: Account): string {
 /** A credential problem to show beside the connection method, so it is never hidden in the fold. */
 export function credentialProblem(account: Account): string | null {
   if (needsTrust(account)) return t('accounts:credentialsNeedConfirmationShort')
+  if (account.authentication.kind === 'ewsNtlm' && !account.authentication.credential.passwordConfigured) return t('accounts:missingPassword')
   if (account.authentication.kind === 'password' && !(account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured)) return t('accounts:missingPassword')
   return null
 }

@@ -90,3 +90,9 @@ Microsoft 的全部知识（客户端 ID、端点、主机、声明、错误码�
 - **管理员关闭 SMTP AUTH。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭此协议”。IMAP 只返回通用的 `NO AUTHENTICATE failed`，无法区分，不猜测，也不分类。
 - **Windows 凭据大小。** Microsoft refresh token 常超过 1000 个字符，Windows 由桌面端与服务商无关的分条目包装存放，见[凭据库](secret-vault.md#7-oauth-凭证的大小限制)。
 - **尚未用真实账号验证。** 以上规则由受控测试和 Microsoft 文档支撑；授权、IMAP / SMTP 收发、IDLE 与各类租户策略下的实际表现仍待真实账号确认，见[验证记录](../development/validation.md)和[接入评估](../reference/microsoft-integration.md)。
+
+## 5. 自建 Exchange 与 EWS
+
+EWS 是独立邮件协议后端，实现在 `core/src/ews/`，通过账号的实际连接类型分派；不是依据微软品牌或邮箱后缀激活的 IMAP 兼容规则。独立「Exchange（自建服务器）」入口与 Microsoft 365 的 OAuth / IMAP/SMTP 入口分开。发现结果只是待选端点，不能自动授予密码信任。
+
+EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协议实现提供目录、邮件和 MIME 操作；事务、来源校验、重试、撤销及副本对账由应用服务负责。暂不依赖专有邮件头猜测已发送副本身份，证据不足时保留本机快照。架构和限制见[Exchange EWS 接入](exchange-ews.md)，实测范围见[验证记录](../development/validation.md#exchange-ews-validation)。

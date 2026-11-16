@@ -52,7 +52,7 @@ describe('provider picker', () => {
     expect(screen.getByRole('radio', { name: 'Another Mail' })).toHaveFocus()
   })
 
-  it.each(['zh-CN', 'en'])('keeps the whole Microsoft 365 / Exchange name in the list (%s) by letting names wrap instead of cutting them off', async (language) => {
+  it.each(['zh-CN', 'en'])('keeps the whole Microsoft 365 name in the list (%s) by letting names wrap instead of cutting them off', async (language) => {
     await i18n.changeLanguage(language)
     function Real() {
       const [selected, setSelected] = useState<MailProvider | null>(null)
@@ -62,7 +62,7 @@ describe('provider picker', () => {
     render(<Real />)
     const option = screen.getByRole('radio', { name: MICROSOFT_WORK_PROVIDER.name })
     const name = document.getElementById(option.getAttribute('aria-labelledby')!)!
-    expect(name).toHaveTextContent('Microsoft 365 / Exchange')
+    expect(name).toHaveTextContent('Microsoft 365')
     // `truncate` is what produced "Microsoft 365 / E..."; names wrap onto a second line instead.
     expect(name).not.toHaveClass('truncate')
     expect(name).toHaveClass('line-clamp-2', 'break-words')

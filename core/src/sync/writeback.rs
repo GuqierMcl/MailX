@@ -2,8 +2,8 @@
 //! for, back to the server.
 //!
 //! It runs beside the header sync on its own connection, never on the sync
-//! connection: sync opens folders read-only (`EXAMINE`) and that guarantee is
-//! kept; writing needs `SELECT`. The connection follows the account's route and
+//! connection: IMAP sync opens folders read-only (`EXAMINE`) and writing needs
+//! `SELECT`; EWS uses its own HTTPS requests. Each follows the account's route and
 //! credential trust like sync does, because it uses the same plan.
 use std::{
     collections::BTreeMap,
@@ -19,6 +19,13 @@ use crate::{
     imap::{self, ImapError, Session},
     storage::{Flag, PendingChange, deletions::PendingDeletion},
 };
+
+mod ews;
+
+enum WritePlan {
+    Imap(crate::accounts::sync_plan::SyncPlan),
+    Ews(crate::accounts::sync_plan::EwsPlan),
+}
 
 /// Changes taken from the queue per round, so one huge backlog cannot hold the
 /// connection forever.
@@ -347,7 +354,12 @@ pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: 
             .filter(|change| change.attempts < MAX_ATTEMPTS)
             .collect();
         let (deletions, given_back) = service.claim_due_deletions(&id, Utc::now())?;
-        let plan = (!changes.is_empty() || !deletions.is_empty()).then(|| service.sync_plan(&id));
+        let plan = (!changes.is_empty() || !deletions.is_empty()).then(|| {
+            match service.ews_plan(&id)? {
+                Some(plan) => Ok(WritePlan::Ews(plan)),
+                None => service.sync_plan(&id).map(WritePlan::Imap),
+            }
+        });
         Ok::<_, AppError>((changes, deletions, given_back, plan))
     })
     .await;
@@ -372,6 +384,12 @@ pub(crate) async fn run_round(service: &Arc<Mutex<AccountService>>, account_id: 
             return RoundEnd::Retry(report);
         }
         Err(_) => return RoundEnd::Blocked,
+    };
+    let plan = match plan {
+        WritePlan::Ews(plan) => {
+            return ews::run(service, account_id, plan, changes, deletions, report).await;
+        }
+        WritePlan::Imap(plan) => plan,
     };
     let queued = changes.len() + deletions.len();
     let mut session = match imap::open_session(&plan.route, &plan.login).await {

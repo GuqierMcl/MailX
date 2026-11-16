@@ -7,14 +7,15 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { ProviderAuthHelp } from './provider-auth-help'
 import { failureText, verificationReport, type ConnectionVerificationHandle, type VerificationState } from './use-connection-verification'
 
-type Protocol = 'imap' | 'smtp'
-type ProtocolResult = Pick<AccountConnectionVerification, 'imap' | 'smtp'>[Protocol]
+type Protocol = 'imap' | 'smtp' | 'ews'
+type ProtocolResult = AccountConnectionVerification['imap']
 
 /** The check and cancel buttons; `onStart` runs before a new check begins. */
-export function ConnectionVerificationActions({ verification, client, onStart }: {
+export function ConnectionVerificationActions({ verification, client, onStart, isEws = false }: {
   verification: ConnectionVerificationHandle
   client: MailxClient
   onStart?: () => void
+  isEws?: boolean
 }) {
   useTranslation()
   return (
@@ -24,7 +25,7 @@ export function ConnectionVerificationActions({ verification, client, onStart }:
         onStart?.()
         void verification.verify()
       }}>
-        {t(verification.checking ? 'accounts:verifyingConnection' : 'accounts:verifyConnection')}
+        {t(isEws ? (verification.checking ? 'accounts:ewsVerifyingConnection' : 'accounts:ewsVerifyConnection') : (verification.checking ? 'accounts:verifyingConnection' : 'accounts:verifyConnection'))}
       </Button>
     </>
   )
@@ -35,6 +36,7 @@ export function VerificationSummary({ state }: { state: VerificationState }) {
   useTranslation()
   const report = verificationReport(state)
   if (!report) return null
+  if (report.ews) return <span className={report.ews.status === 'verified' ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>· {t(report.ews.status === 'verified' ? 'accounts:verificationPassed' : 'accounts:verificationNotPassed')}</span>
   const incoming = report.imap.status === 'verified'
   const outgoing = report.smtp.status === 'verified'
   if (incoming && outgoing) return <span className="text-xs text-muted-foreground">· {t('accounts:verificationBothPassed')}</span>
@@ -59,6 +61,7 @@ export function ProtocolOutcome({ state, protocol }: { state: VerificationState;
   const report = verificationReport(state)
   if (!report) return null
   const result = report[protocol]
+  if (!result) return null
   return result.status === 'verified'
     ? <p className="text-xs text-muted-foreground">{t('accounts:verificationPassed')}</p>
     : <p className="text-xs text-destructive">{failureText(result.code)}</p>
@@ -66,11 +69,12 @@ export function ProtocolOutcome({ state, protocol }: { state: VerificationState;
 
 /** Reviewed provider guidance for a rejected login or a provider refusal; nothing otherwise. */
 export function VerificationHelp({ report, client, providerId }: {
-  report: Pick<AccountConnectionVerification, 'imap' | 'smtp'> | null
+  report: Pick<AccountConnectionVerification, 'imap' | 'smtp' | 'ews'> | null
   client: MailxClient
   providerId: string | null
 }) {
   if (!report) return null
+  if (report.ews) return null
   const authenticationFailed = report.imap.code === 'authentication' || report.smtp.code === 'authentication'
   const policyFailed = report.imap.code === 'providerPolicy' || report.smtp.code === 'providerPolicy'
   if (!authenticationFailed && !policyFailed) return null
@@ -79,16 +83,16 @@ export function VerificationHelp({ report, client, providerId }: {
 
 /** Saved and unsaved connections share the same protocol results and reviewed help. */
 export function ConnectionVerificationReport({ report, client, providerId }: {
-  report: Pick<AccountConnectionVerification, 'imap' | 'smtp'>
+  report: Pick<AccountConnectionVerification, 'imap' | 'smtp' | 'ews'>
   client: MailxClient
   providerId: string | null
 }) {
   useTranslation()
-  const passed = report.imap.status === 'verified' && report.smtp.status === 'verified'
+  const passed = report.ews ? report.ews.status === 'verified' : report.imap.status === 'verified' && report.smtp.status === 'verified'
   return <div className="flex w-full flex-col gap-3">
-    {passed && <p className="text-xs text-muted-foreground">{t('accounts:verificationSucceeded')}</p>}
+    {passed && <p className="text-xs text-muted-foreground">{t(report.ews ? 'accounts:ewsVerificationSucceeded' : 'accounts:verificationSucceeded')}</p>}
     <div className="flex flex-col gap-2">
-      {(['imap', 'smtp'] as const).map((protocol) => <ReportRow key={protocol} result={report[protocol]}
+      {report.ews ? <ReportRow result={report.ews} label={t('accounts:ewsConnection')} /> : (['imap', 'smtp'] as const).map((protocol) => <ReportRow key={protocol} result={report[protocol]}
         label={t(protocol === 'imap' ? 'accounts:verificationIncoming' : 'accounts:verificationOutgoing')} />)}
     </div>
     <VerificationHelp report={report} client={client} providerId={providerId} />

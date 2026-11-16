@@ -966,6 +966,35 @@ type DraftConnectionVerification = {
 
 测试是可选操作，成功只证明本次登录探测，不证明实际投递。字段变化、下一步、返回、关闭或卸载会取消并丢弃旧报告；测试完成和取消保留本地表单输入以便修正或保存，退出/最终提交继续遵循已有秘密清理规则。浏览器 mock 返回合成结果，不连接邮箱服务商。
 
+### 自建 Exchange（EWS）账号与自动发现
+
+账号的连接字段为互斥分支：旧格式继续使用顶层 `imap` / `smtp`，EWS 使用 `backend: "ews"` 和 `ews: { url, username }`。创建和连接更新沿用同一接口，EWS 只接受 `password/shared` 的 `SecretUpdate`。返回的认证摘要为 `{ kind: "ewsNtlm", credential: AuthenticationSummary }`，没有 IMAP/SMTP 占位端点；已保存账号禁止直接切换协议。旧账号、恢复日志及创建请求 canonical 的兼容边界见[Exchange 接入](../architecture/exchange-ews.md)。
+
+`accounts_discover_ews_settings` 仅授权受信主窗口，参数为 `{ request: DiscoverEwsSettings }`：
+
+```ts
+type DiscoverEwsSettings = {
+  emailAddress: string;
+  route: RouteInput;
+  targetGrant: string | null;
+  username: string | null;
+  password: string | null;
+};
+type EwsSettingsDiscovery = {
+  status: "found" | "authRequired" | "confirmationRequired" | "notFound"
+    | "rejected" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol";
+  endpoint: { url: string; username: string } | null;
+  source: string | null;
+  targetGrant: string | null;
+};
+```
+
+首次发现不带密码。需要认证或目标确认时，核心返回一次性、不透明的 `targetGrant`；后续请求必须匹配授权邮箱和具体目标，授权有短有效期、不得重放。发现不持久化凭据，不扩大到响应中的其他目标。网络失败返回固定类别，自定义代理失败不直连。接口不向 composer、邮件正文 iframe 或 MCP 开放。
+
+已有账号和草稿连接验证报告都可增加 `ews: ProtocolVerification`。存在该字段时展示单条 Exchange 结果，旧 `imap` / `smtp` 字段只作为兼容结构、不表示进行了这两种协议验证；它们标为不支持。无 `ews` 字段的旧账号报告语义不变。EWS 验证只认证并执行只读操作，不发送邮件。
+
+发件箱 `serverReply.code` 对 SMTP 保持数字，对 EWS 为 `null`，不伪造 SMTP 返回码。旧持久化数字记录仍可读取，accepted/failed/unknown 状态语义不变。
+
 ### 移除本机账号
 
 `MailxClient.removeAccount(request)` 调用主窗口专用 `accounts_remove`，参数为 `{ request: { accountId, expectedRevision } }`。UUID 和版本由 core 校验，未知字段被拒绝，启动必须 Ready；写信窗口、邮件正文、HTTP 和 MCP 没有此操作权限。

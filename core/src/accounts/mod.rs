@@ -6,6 +6,7 @@ mod contacts;
 mod deletions;
 pub(crate) mod draft_connection;
 mod drafts;
+pub(crate) mod ews;
 pub(crate) mod oauth;
 pub(crate) mod oauth_sessions;
 pub(crate) mod outbox;
@@ -98,6 +99,15 @@ impl AccountService {
                         .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
                     summary.password_configured = self.secrets.get(&profile.secret_ref)?.is_some();
                 }
+            }
+            AccountAuthenticationSummary::EwsNtlm(auth) => {
+                let profile = snapshot
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == auth.credential.id)
+                    .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+                auth.credential.password_configured =
+                    self.secrets.get(&profile.secret_ref)?.is_some();
             }
             AccountAuthenticationSummary::OAuth2(auth) => {
                 for summary in [&mut auth.imap, &mut auth.smtp] {
@@ -322,24 +332,34 @@ impl AccountService {
         old: Option<&Snapshot>,
     ) -> Result<(Snapshot, Vec<(String, SecretValue)>), AppError> {
         let id = old.map(|s| s.account.id.clone()).unwrap_or_else(new_id);
-        let imap_endpoint = TrustEndpoint::mail("imap", &config.imap);
-        let smtp_endpoint = TrustEndpoint::mail("smtp", &config.smtp);
-        let old_imap = old.and_then(|s| s.profile(&s.account.authentication.imap().id));
-        let old_smtp = old.and_then(|s| s.profile(&s.account.authentication.smtp().id));
+        if old.is_some_and(|old| old.account.connection.is_ews() != config.connection.is_ews()) {
+            return Err(AppError::validation("backend"));
+        }
+        let (imap_endpoint, smtp_endpoint) = match &config.connection {
+            MailConnection::ImapSmtp { imap, smtp } => (
+                TrustEndpoint::mail("imap", imap),
+                TrustEndpoint::mail("smtp", smtp),
+            ),
+            MailConnection::Ews { ews, .. } => {
+                let endpoint = TrustEndpoint::ews(ews)?;
+                (endpoint.clone(), endpoint)
+            }
+        };
+        let old_imap = old.and_then(|s| s.profile(&s.account.authentication.receive().id));
+        let old_smtp = old.and_then(|s| s.profile(&s.account.authentication.submit().id));
         let mut writes = vec![];
         let AuthenticationInput::Password { credentials } = config.authentication else {
             return Err(AppError::new(ErrorCode::Unsupported));
         };
         let (profiles, mode, imap_summary, smtp_summary) = match credentials {
             PasswordAuthenticationInput::Shared { password } => {
-                let profile = self.build_profile(
-                    &id,
-                    old_imap,
-                    password,
-                    &[imap_endpoint.clone(), smtp_endpoint.clone()],
-                    false,
-                    &mut writes,
-                )?;
+                let endpoints = if config.connection.is_ews() {
+                    vec![imap_endpoint.clone()]
+                } else {
+                    vec![imap_endpoint.clone(), smtp_endpoint.clone()]
+                };
+                let profile =
+                    self.build_profile(&id, old_imap, password, &endpoints, false, &mut writes)?;
                 let imap = profile.summary(&imap_endpoint);
                 let smtp = profile.summary(&smtp_endpoint);
                 (vec![profile], AuthenticationMode::Shared, imap, smtp)
@@ -387,7 +407,7 @@ impl AccountService {
             None => 1,
         };
         let source = old
-            .filter(|s| same_source(&s.account.imap, &config.imap))
+            .filter(|s| same_mailbox_source(&s.account.connection, &config.connection))
             .map(|s| s.account.mailbox_source_id.clone())
             .unwrap_or_else(new_id);
         let now = now();
@@ -404,13 +424,18 @@ impl AccountService {
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
-            imap: config.imap,
-            smtp: config.smtp,
-            authentication: AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
-                mode,
-                imap: imap_summary,
-                smtp: smtp_summary,
-            }),
+            authentication: if config.connection.is_ews() {
+                AccountAuthenticationSummary::EwsNtlm(EwsAuthenticationSummary {
+                    credential: imap_summary,
+                })
+            } else {
+                AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
+                    mode,
+                    imap: imap_summary,
+                    smtp: smtp_summary,
+                })
+            },
+            connection: config.connection,
             default_route_revision: if matches!(route, RouteConfig::Inherit) {
                 Some(1)
             } else {
@@ -581,10 +606,10 @@ impl AccountService {
             return Ok(false);
         };
         let imap = snapshot
-            .profile(&snapshot.account.authentication.imap().id)
+            .profile(&snapshot.account.authentication.receive().id)
             .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
         let smtp = snapshot
-            .profile(&snapshot.account.authentication.smtp().id)
+            .profile(&snapshot.account.authentication.submit().id)
             .ok_or_else(|| AppError::new(ErrorCode::Internal))?;
         match credentials {
             PasswordAuthenticationInput::Shared { password } => {
@@ -639,6 +664,16 @@ fn next_version(current: u32) -> Result<u32, AppError> {
 fn secret_key(account_id: &str) -> String {
     format!("mailx/{account_id}/{}", new_id())
 }
+fn same_mailbox_source(a: &MailConnection, b: &MailConnection) -> bool {
+    match (a, b) {
+        (MailConnection::ImapSmtp { imap: a, .. }, MailConnection::ImapSmtp { imap: b, .. }) => {
+            same_source(a, b)
+        }
+        (MailConnection::Ews { ews: a, .. }, MailConnection::Ews { ews: b, .. }) => a == b,
+        _ => false,
+    }
+}
+
 fn same_source(a: &ConnectionConfig, b: &ConnectionConfig) -> bool {
     a.host == b.host && a.port == b.port && a.username == b.username
 }
@@ -759,6 +794,22 @@ fn validate_route(route: &mut RouteInput) -> Result<(), AppError> {
     Ok(())
 }
 
+pub(crate) fn normalize_email_address(email: &str) -> Result<String, AppError> {
+    let email = email.trim().to_owned();
+    if !valid_text(&email, 320) || email.chars().any(char::is_whitespace) {
+        return Err(AppError::validation("emailAddress"));
+    }
+    let (local, domain) = email
+        .split_once('@')
+        .ok_or_else(|| AppError::validation("emailAddress"))?;
+    if local.is_empty() || domain.contains('@') {
+        return Err(AppError::validation("emailAddress"));
+    }
+    let mut host = domain.to_owned();
+    validate_host(&mut host, "emailAddress")?;
+    Ok(email)
+}
+
 fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
     config.email_address = config.email_address.trim().to_owned();
     if !valid_text(&config.email_address, 320)
@@ -781,21 +832,63 @@ fn validate_connection(config: &mut ConnectionInput) -> Result<(), AppError> {
     }) {
         return Err(AppError::validation("providerId"));
     }
-    for (name, connection) in [("imap", &mut config.imap), ("smtp", &mut config.smtp)] {
-        validate_host(&mut connection.host, &format!("{name}.host"))?;
-        if connection.port == 0 {
-            return Err(AppError::validation(&format!("{name}.port")));
+    if let MailConnection::ImapSmtp { imap, smtp } = &mut config.connection {
+        for (name, connection) in [("imap", imap), ("smtp", smtp)] {
+            validate_host(&mut connection.host, &format!("{name}.host"))?;
+            if connection.port == 0 {
+                return Err(AppError::validation(&format!("{name}.port")));
+            }
+            // Match the frontend: Unicode White_Space plus the JavaScript BOM whitespace.
+            connection.username = connection
+                .username
+                .trim_matches(|character: char| {
+                    character.is_whitespace() || character == '\u{feff}'
+                })
+                .to_owned();
+            if connection.username.is_empty() {
+                connection.username = config.email_address.clone();
+            }
+            if !valid_text(&connection.username, 320) {
+                return Err(AppError::validation(&format!("{name}.username")));
+            }
         }
-        // Match the frontend: Unicode White_Space plus the JavaScript BOM whitespace.
-        connection.username = connection
+    }
+    if let MailConnection::Ews { ews, .. } = &mut config.connection {
+        ews.username = ews
             .username
-            .trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
+            .trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
             .to_owned();
-        if connection.username.is_empty() {
-            connection.username = config.email_address.clone();
+        if ews.username.is_empty() {
+            ews.username = config.email_address.clone();
         }
-        if !valid_text(&connection.username, 320) {
-            return Err(AppError::validation(&format!("{name}.username")));
+        if !valid_text(&ews.username, 320) {
+            return Err(AppError::validation("ews.username"));
+        }
+        if ews.url.trim().chars().any(char::is_control) {
+            return Err(AppError::validation("ews.url"));
+        }
+        let url = url::Url::parse(ews.url.trim()).map_err(|_| AppError::validation("ews.url"))?;
+        if url.scheme() != "https"
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || !valid_text(url.as_str(), 2048)
+            || url.port() == Some(0)
+        {
+            return Err(AppError::validation("ews.url"));
+        }
+        let mut host = url.host_str().unwrap_or_default().to_owned();
+        validate_host(&mut host, "ews.url")?;
+        ews.url = url.to_string();
+        if !matches!(
+            config.authentication,
+            AuthenticationInput::Password {
+                credentials: PasswordAuthenticationInput::Shared { .. }
+            }
+        ) {
+            return Err(AppError::validation("authentication"));
         }
     }
     validate_route(&mut config.route)?;
@@ -882,7 +975,15 @@ fn canonical_config(
             route
         }
     };
-    let mut canonical = serde_json::json!({"displayName":profile.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"imap":config.imap,"smtp":config.smtp,"authenticationMode":mode,"route":route});
+    let mut canonical = serde_json::json!({"displayName":profile.display_name,"emailAddress":config.email_address,"providerId":config.provider_id,"authenticationMode":mode,"route":route});
+    if let serde_json::Value::Object(connection) =
+        serde_json::to_value(&config.connection).map_err(|_| AppError::new(ErrorCode::Internal))?
+    {
+        canonical
+            .as_object_mut()
+            .expect("object")
+            .extend(connection);
+    }
     // Added only when set, so requests recorded before colors existed still match.
     if let Some(color) = &profile.color {
         canonical["color"] = serde_json::json!(color);

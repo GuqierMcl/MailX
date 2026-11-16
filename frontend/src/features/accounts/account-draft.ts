@@ -9,6 +9,8 @@ export type SecretDraft = { replace: boolean; value: string }
 // Transient connection form state, intentionally distinct from the Rust-generated wire types.
 export type AccountDraft = {
   emailAddress: string
+  /** Only used by the separate Exchange form; never interpreted by IMAP/SMTP. */
+  ews?: { url: string; username: string; manual: boolean }
   imap: ConnectionDraft
   smtp: ConnectionDraft
   mode: AuthenticationMode
@@ -32,8 +34,8 @@ export function initialDraft(account: Account | null, provider?: MailProvider): 
   const secret = (configured?: boolean): SecretDraft => ({ replace: !configured, value: '' })
   return {
     emailAddress: account?.emailAddress ?? '',
-    imap: account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
-    smtp: account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
+    imap: account && 'imap' in account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
+    smtp: account && 'smtp' in account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
     mode: password?.mode ?? 'shared',
     sharedPassword: secret(password?.imap.passwordConfigured),
     imapPassword: secret(password?.imap.passwordConfigured),

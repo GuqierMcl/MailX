@@ -15,6 +15,7 @@ pub mod auth;
 pub mod drafts;
 pub mod error;
 pub mod events;
+mod ews;
 mod imap;
 pub mod localization;
 pub mod mail;
@@ -52,6 +53,7 @@ pub use app::{
     TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
     VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
+pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
     Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
     ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,

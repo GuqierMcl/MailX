@@ -523,3 +523,208 @@ async fn accounts_have_independent_lanes() {
     drop((first, second));
     harness.idle().await;
 }
+
+mod ews {
+    use super::*;
+    use crate::sync::ews::tests::{emails, fixture_with_ews, item, store};
+    use tokio::io::AsyncReadExt;
+
+    /// Reads one HTTP request and returns the ItemIds its SOAP body names.
+    async fn requested_ids(peer: &mut BufReader<DuplexStream>) -> Vec<String> {
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            assert!(peer.read_line(&mut line).await.unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                length = value.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        peer.read_exact(&mut body).await.unwrap();
+        let body = String::from_utf8(body).unwrap();
+        assert!(body.contains("<m:GetItem>"));
+        body.split("<t:ItemId Id=\"")
+            .skip(1)
+            .map(|rest| rest.split('"').next().unwrap().to_owned())
+            .collect()
+    }
+
+    /// Answers with each id's text body, or `ErrorItemNotFound` for `None`.
+    async fn answer(
+        peer: &mut BufReader<DuplexStream>,
+        ids: &[String],
+        text: fn(&str) -> Option<String>,
+    ) {
+        let responses: String = ids
+            .iter()
+            .map(|id| match text(id) {
+                Some(text) => format!(
+                    "<m:GetItemResponseMessage ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode><m:Items><t:Message><t:ItemId Id=\"{id}\" ChangeKey=\"key\"/><t:Body BodyType=\"Text\">{text}</t:Body></t:Message></m:Items></m:GetItemResponseMessage>"
+                ),
+                None => "<m:GetItemResponseMessage ResponseClass=\"Error\"><m:ResponseCode>ErrorItemNotFound</m:ResponseCode></m:GetItemResponseMessage>".into(),
+            })
+            .collect();
+        let body = format!(
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\" xmlns:t=\"http://schemas.microsoft.com/exchange/services/2006/types\"><s:Body><m:GetItemResponse><m:ResponseMessages>{responses}</m:ResponseMessages></m:GetItemResponse></s:Body></s:Envelope>"
+        );
+        peer.get_mut()
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    }
+
+    struct Ews {
+        _directory: tempfile::TempDir,
+        service: Arc<Mutex<AccountService>>,
+        shared: Arc<Shared>,
+        events: Arc<Mutex<Vec<EmailPreviews>>>,
+        /// Local email id by EWS item id.
+        ids: HashMap<String, String>,
+        batch: Vec<BodyIdentity>,
+    }
+
+    impl Ews {
+        fn new(remote: &[&str]) -> Self {
+            let mut fixture =
+                fixture_with_ews(Some("https://controlled.example/EWS/Exchange.asmx"));
+            let items: Vec<_> = remote.iter().map(|id| item(id, fixture.now)).collect();
+            store(&mut fixture, &items, false);
+            let ids: HashMap<String, String> = emails(&fixture)
+                .into_iter()
+                .map(|email| {
+                    let remote = email.subject.trim_start_matches("Synthetic ").to_owned();
+                    (remote, email.id)
+                })
+                .collect();
+            let local: Vec<String> = ids.values().cloned().collect();
+            let batch = fixture.service.preview_targets(&local).unwrap();
+            assert_eq!(batch.len(), remote.len());
+            let service = Arc::new(Mutex::new(fixture.service));
+            let events: Arc<Mutex<Vec<EmailPreviews>>> = Arc::default();
+            let sink = events.clone();
+            let shared = Arc::new(Shared {
+                service: Arc::downgrade(&service),
+                events: Arc::new(move |event: &CoreEvent| {
+                    if let CoreEvent::Previews(previews) = event {
+                        sink.lock().unwrap().push(previews.clone());
+                    }
+                }),
+                sequence: AtomicU64::new(0),
+                state: Mutex::new(State::default()),
+                connector: None,
+            });
+            Self {
+                _directory: fixture._directory,
+                service,
+                shared,
+                events,
+                ids,
+                batch,
+            }
+        }
+
+        async fn run(&self, client: &mut EwsClient, chunk: usize) -> Next {
+            let source = self.batch[0].mailbox_source_id.clone();
+            let items = ews_items(&self.shared, &source, &self.batch).await.unwrap();
+            preview_ews(&self.shared, &self.batch, client, items, chunk)
+                .await
+                .unwrap()
+        }
+
+        fn preview(&self, remote: &str) -> (PreviewState, String) {
+            let summary = self
+                .service
+                .lock()
+                .unwrap()
+                .get_email(&self.ids[remote])
+                .unwrap()
+                .summary;
+            (summary.preview_state, summary.preview)
+        }
+
+        fn announced(&self, remote: &str) -> Vec<PreviewState> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|event| event.items.iter())
+                .filter(|item| item.email_id == self.ids[remote])
+                .map(|item| item.preview_state)
+                .collect()
+        }
+    }
+
+    fn text(id: &str) -> Option<String> {
+        (id != "two").then(|| format!("body of {id}"))
+    }
+
+    #[tokio::test]
+    async fn ews_previews_use_one_get_item_for_the_batch() {
+        let ews = Ews::new(&["one", "two", "three"]);
+        let (stream, peer) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let mut peer = BufReader::new(peer);
+            let ids = requested_ids(&mut peer).await;
+            assert_eq!(ids.len(), 3, "every item rides in one request");
+            answer(&mut peer, &ids, text).await;
+        });
+        let mut client = EwsClient::test_stream(Box::new(stream)).await;
+        assert_eq!(
+            ews.run(&mut client, EWS_PREVIEW_CHUNK).await,
+            Next::Continue
+        );
+        server.await.unwrap();
+        assert_eq!(
+            ews.preview("one"),
+            (PreviewState::Ready, "body of one".into())
+        );
+        assert_eq!(
+            ews.preview("three"),
+            (PreviewState::Ready, "body of three".into())
+        );
+        // Gone on the server: left for the next sync, not recorded as failed.
+        assert_eq!(ews.preview("two").0, PreviewState::Missing);
+        assert_eq!(ews.announced("two"), vec![PreviewState::Missing]);
+    }
+
+    #[tokio::test]
+    async fn ews_previews_keep_what_arrived_before_a_request_failed() {
+        let ews = Ews::new(&["one", "three", "four"]);
+        let (stream, peer) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let mut peer = BufReader::new(peer);
+            let ids = requested_ids(&mut peer).await;
+            assert_eq!(ids.len(), 2);
+            answer(&mut peer, &ids, text).await;
+            assert_eq!(requested_ids(&mut peer).await.len(), 1);
+            // Dropping the peer loses the second reply.
+            ids
+        });
+        let mut client = EwsClient::test_stream(Box::new(stream)).await;
+        assert_eq!(ews.run(&mut client, 2).await, Next::Stop);
+        let answered = server.await.unwrap();
+        for remote in ["one", "three", "four"] {
+            if answered.iter().any(|id| id == remote) {
+                assert_eq!(
+                    ews.preview(remote),
+                    (PreviewState::Ready, format!("body of {remote}"))
+                );
+                assert_eq!(ews.announced(remote), vec![PreviewState::Ready]);
+            } else {
+                assert_eq!(ews.preview(remote).0, PreviewState::Missing);
+                assert_eq!(ews.announced(remote), vec![PreviewState::Missing]);
+            }
+        }
+    }
+}

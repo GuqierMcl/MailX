@@ -110,8 +110,9 @@ impl OutboxError {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerReplyInfo {
-    #[ts(type = "number")]
-    pub code: u16,
+    /// SMTP reply code. EWS acceptance has no SMTP code.
+    #[ts(type = "number | null")]
+    pub code: Option<u16>,
     pub text: String,
 }
 

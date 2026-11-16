@@ -10,6 +10,7 @@ import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import gmailLogo from '@/assets/providers/gmail.svg'
 import outlookLogo from '@/assets/providers/outlook.svg'
 import microsoftLogo from '@/assets/providers/microsoft.svg'
+import exchangeLogo from '@/assets/providers/exchange.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -71,6 +72,8 @@ export type MailProvider = {
   setup?: ProviderSetup
   /** Present for providers that sign in in the browser instead of with a password. */
   signIn?: SignInSetup
+  /** The explicit self-hosted Exchange path; independent from browser OAuth. */
+  connectionKind?: 'ews'
 }
 
 export const GENERIC_PROVIDER: MailProvider = {
@@ -81,6 +84,17 @@ export const GENERIC_PROVIDER: MailProvider = {
   get description() { return t('accounts:genericProviderDescription') },
   searchAliases: ['manual', 'custom', 'other', '手动', '自定义', '其他邮箱'],
   icon: Mail01Icon,
+}
+
+export const EXCHANGE_PROVIDER: MailProvider = {
+  id: 'exchange-self-hosted',
+  get name() { return t('accounts:exchangeProviderName') },
+  get domain() { return t('accounts:exchangeProviderDomain') },
+  get description() { return t('accounts:exchangeProviderDescription') },
+  searchAliases: ['Exchange', 'EWS', 'NTLM', 'self-hosted', '自建', '企业邮箱'],
+  logo: exchangeLogo,
+  icon: Mail01Icon,
+  connectionKind: 'ews',
 }
 
 const QQ_DOMAINS = ['qq.com', 'vip.qq.com', 'foxmail.com'] as const
@@ -276,7 +290,7 @@ export const MICROSOFT_WORK_PROVIDER: MailProvider = {
   },
 }
 
-export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, GENERIC_PROVIDER]
+export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, EXCHANGE_PROVIDER, GENERIC_PROVIDER]
 
 const CREDENTIAL_TEXT_KEYS = {
   password: {

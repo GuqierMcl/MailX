@@ -507,7 +507,7 @@ describe('accounts dialog', () => {
     it('has no edit-connection button, but keeps removing and verifying, and shows the real servers', async () => {
       const account = oauthAccount()
       const { dialog } = renderDialog([account])
-      expect(await within(dialog).findByText('Microsoft 365 / Exchange · 浏览器登录')).toBeInTheDocument()
+      expect(await within(dialog).findByText('Microsoft 365 · 浏览器登录')).toBeInTheDocument()
       await userEvent.click(within(dialog).getByRole('button', { name: '连接详情' }))
       expect(await within(dialog).findByText(/IMAP · outlook\.office365\.com:993 · TLS · lin@contoso\.com/)).toBeInTheDocument()
       expect(within(dialog).getByText(/SMTP · smtp\.office365\.com:587 · STARTTLS · lin@contoso\.com/)).toBeInTheDocument()
@@ -572,4 +572,22 @@ describe('accounts dialog', () => {
       expect(within(dialog).queryByRole('button', { name: '重新登录' })).not.toBeInTheDocument()
     })
   })
+})
+
+
+it('verifies a saved Exchange account and shows the HTTPS endpoint without IMAP/SMTP placeholders', async () => {
+  const base = exampleAccount()
+  const { imap: _imap, smtp: _smtp, ...common } = base
+  void _imap; void _smtp
+  const account: Account = { ...common, providerId: 'exchange-self-hosted', backend: 'ews', ews: { url: 'https://mail.example.com/EWS/Exchange.asmx', username: 'EXAMPLE\\alice' }, authentication: { kind: 'ewsNtlm', credential: base.authentication.imap } }
+  const client = testClient([account])
+  const unused = { status: 'failed' as const, stage: 'configuration' as const, code: 'unsupported' as const }
+  client.verifyAccountConnection.mockResolvedValue({ accountId: account.id, revision: account.revision, imap: unused, smtp: unused, ews: { status: 'verified', stage: 'complete', code: null } })
+  const { dialog } = renderDialog([account], {}, client)
+  await within(dialog).findByLabelText('账号名称')
+  await userEvent.click(within(dialog).getByRole('button', { name: '验证连接' }))
+  expect(await within(dialog).findByText('连接与登录验证通过，尚未测试实际发送。')).toBeInTheDocument()
+  await userEvent.click(within(dialog).getByRole('button', { name: '连接详情' }))
+  expect(within(dialog).getByText('https://mail.example.com/EWS/Exchange.asmx · EXAMPLE\\alice')).toBeInTheDocument()
+  expect(within(dialog).queryByText(/IMAP ·|SMTP ·/)).not.toBeInTheDocument()
 })

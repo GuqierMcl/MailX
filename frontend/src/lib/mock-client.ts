@@ -489,6 +489,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!account) throw notFound()
       return structuredClone(account)
     },
+    async discoverEwsSettings() { return { status: 'notFound' as const, endpoint: null, source: null, targetGrant: null } },
     async verifyAccountConnection(accountId, expectedRevision, signal) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       const account = accounts.find((row) => row.id === accountId)
@@ -498,6 +499,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         ? { status: 'failed', stage: 'configuration', code: 'credentialMissing' }
         : trust !== 'trusted' ? { status: 'failed', stage: 'configuration', code: 'credentialUntrusted' }
         : { status: 'verified', stage: 'complete', code: null }
+      if (account.authentication.kind === 'ewsNtlm') {
+        const unused = { status: 'failed' as const, stage: 'configuration' as const, code: 'unsupported' as const }
+        return { accountId, revision: account.revision, imap: unused, smtp: unused, ews: check(account.authentication.credential.passwordConfigured, account.authentication.credential.trust) }
+      }
       return { accountId, revision: account.revision, imap: check((account.authentication.kind === 'password' ? account.authentication.imap.passwordConfigured : account.authentication.imap.credentialConfigured), account.authentication.imap.trust), smtp: check((account.authentication.kind === 'password' ? account.authentication.smtp.passwordConfigured : account.authentication.smtp.credentialConfigured), account.authentication.smtp.trust) }
     },
     async verifyDraftConnection(connection, signal) {
@@ -512,7 +517,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         if (secret.action !== 'replace' || !secret.value) throw new MailxClientError({ code: 'validation', message: '', field })
       }
       const verified = { status: 'verified' as const, stage: 'complete' as const, code: null }
-      return { verificationId: crypto.randomUUID(), imap: { ...verified }, smtp: { ...verified } }
+      return { verificationId: crypto.randomUUID(), imap: { ...verified }, smtp: { ...verified }, ...('ews' in connection ? { ews: { ...verified } } : {}) }
     },
     async openProviderHelp(providerId) {
       const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
@@ -1367,7 +1372,7 @@ function createOAuthSessions() {
 }
 
 /** The servers the core's reviewed registrations use; the real host replaces whatever the page sends. */
-function registeredServers(providerId: string, emailAddress: string): Pick<AccountConfigInput, 'imap' | 'smtp'> {
+function registeredServers(providerId: string, emailAddress: string): { imap: import('@/generated/accounts').ConnectionConfig; smtp: import('@/generated/accounts').ConnectionConfig } {
   return {
     imap: { host: 'outlook.office365.com', port: 993, tls: 'implicit', username: emailAddress },
     smtp: { host: providerId === 'microsoft-personal' ? 'smtp-mail.outlook.com' : 'smtp.office365.com', port: 587, tls: 'startTls', username: emailAddress },
@@ -1427,9 +1432,8 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     emailAddress: config.emailAddress,
     providerId: config.providerId,
     mailboxSourceId: `mock-${id}`,
-    imap: config.imap,
-    smtp: config.smtp,
-    authentication: separate
+    ...('ews' in config ? { backend: 'ews' as const, ews: config.ews } : { imap: config.imap, smtp: config.smtp }),
+    authentication: 'ews' in config ? { kind: 'ewsNtlm', credential: auth('ews') } : separate
       ? { kind: 'password', mode: 'separate', imap: auth('imap'), smtp: auth('smtp') }
       : { kind: 'password', mode: 'shared', imap: auth('shared'), smtp: auth('shared') },
     route,

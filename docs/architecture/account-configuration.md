@@ -18,6 +18,10 @@
 
 `accountId` 是本地数据归属，`mailboxSourceId` 是接收来源世代。当前更改 IMAP 主机、端口或登录用户名会分配新来源 ID；更改名称、密码、SMTP 或路由不改变来源。仅更改 TLS 不改变来源，但可能改变凭证信任。后续远端映射、游标、待写 flags 必须包含来源 ID，防止另一个服务器复用相同 UID 时污染旧缓存。
 
+### 自建 Exchange 分支
+
+独立 EWS 账号使用 `MailConnection::Ews` 和真实 HTTPS URL、登录身份，使用一个密码类认证配置。旧 IMAP/SMTP 字段保持原有 JSON 形状，EWS 字段以 `backend: "ews"` 明确区分。创建、编辑、资料、SecretStore 与 credential journal 共用既有生命周期；EWS 的恢复日志、幂等序列化、端点信任与来源变化规则见[自建 Exchange](exchange-ews.md)。修改代理或密码不改变协议，第一期禁止在已有账号上切换协议。
+
 ## 2. 认证与写入型秘密
 
 当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，QQ / Foxmail、网易 163 / 126 / yeah.net、139 已有各自的授权码引导，iCloud 与 Gmail 分别提供 Apple 和 Google 应用专用密码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。

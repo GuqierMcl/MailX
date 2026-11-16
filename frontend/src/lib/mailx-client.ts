@@ -79,6 +79,8 @@ import type {
   TranslationProxyPasswordState,
   TranslationStatus,
   TranslationTest,
+  DiscoverEwsSettings,
+  EwsSettingsDiscovery,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
@@ -112,6 +114,7 @@ export interface MailxClient {
   retryStartup(): Promise<StartupStatus>
   listAccounts(): Promise<Account[]>
   getAccount(accountId: string): Promise<Account>
+  discoverEwsSettings(request: DiscoverEwsSettings): Promise<EwsSettingsDiscovery>
   /** Authenticates both saved endpoints without sending mail; abort cancels this attempt only. */
   verifyAccountConnection(accountId: string, expectedRevision: number, signal?: AbortSignal): Promise<AccountConnectionVerification>
   /** Tests the supplied connection without saving an account or sending mail. */
@@ -516,6 +519,7 @@ export function createDesktopClient(): MailxClient {
     retryStartup: () => call<StartupStatus>('app_retry_startup'),
     listAccounts: () => call<Account[]>('accounts_list'),
     getAccount: (accountId) => call<Account>('accounts_get', { accountId }),
+    discoverEwsSettings: (request) => call('accounts_discover_ews_settings', { request }),
     async verifyAccountConnection(accountId, expectedRevision, signal) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       const verificationId = crypto.randomUUID()

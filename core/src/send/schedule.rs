@@ -76,7 +76,7 @@ pub(crate) fn transition(
                 .collect(),
         }),
         SmtpOutcome::Accepted(reply) => Transition::Accept(ServerReplyInfo {
-            code: reply.code,
+            code: Some(reply.code),
             text: reply.text,
         }),
         SmtpOutcome::RejectedAfterData(reply) => Transition::Fail(OutboxError {

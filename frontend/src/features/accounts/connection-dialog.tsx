@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SettingsPage } from '@/features/settings/settings-layout'
 import type { MailxClient } from '@/lib/mailx-client'
 import { ConnectionForm } from './connection-form'
+import { EwsConnectionForm } from './ews-connection-form'
 import { useLeaveGuard } from './leave-guard'
 import { ProviderBadge } from './provider-badge'
 import { useAccount } from './use-account'
@@ -59,6 +60,14 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
                   </div>
                 </Delayed>
               </SettingsPage>
+            ) : 'ews' in account ? (
+              <EwsConnectionForm key={version} client={client} account={account}
+                submitLabel={t('accounts:saveAndReconnect')} submittingLabel={t('accounts:savingEllipsis')}
+                onBusyChange={guard.setBusy} onDirtyChange={guard.setDirty} onReload={() => { guard.setDirty(false); void reload() }}
+                onSubmit={async (connection) => {
+                  const saved = await client.updateConnection({ accountId: account.id, expectedRevision: account.revision, connection })
+                  onSaved(saved)
+                }} />
             ) : (
               <ConnectionForm
                 key={version}

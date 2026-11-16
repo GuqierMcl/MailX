@@ -6,7 +6,7 @@ use super::model::TrustEndpoint;
 use super::types::{CredentialTrust, RouteConfig};
 use super::{AccountService, validate_uuid};
 use crate::error::{AppError, ErrorCode};
-use crate::imap::ImapLogin;
+use crate::imap::{ImapLogin, ProtocolCredential};
 use crate::mail::Folder;
 use crate::net::{NetRoute, ProxyRoute};
 use crate::secrets::SecretStoreError;
@@ -24,6 +24,34 @@ pub(crate) struct SyncPlan {
 pub(crate) struct SyncIdentity {
     pub mailbox_source_id: String,
     pub revision: u32,
+    pub is_ews: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct EwsPlan {
+    pub mailbox_source_id: String,
+    pub endpoint: crate::ews::Endpoint,
+    pub user: String,
+    pub password: crate::secrets::SecretValue,
+    pub route: NetRoute,
+}
+
+#[derive(Debug)]
+pub(crate) enum SubmitPlan {
+    Smtp(SmtpPlan),
+    Ews {
+        plan: EwsPlan,
+        sender_address: String,
+    },
+}
+
+impl SubmitPlan {
+    pub(crate) fn sender_address(&self) -> &str {
+        match self {
+            Self::Smtp(plan) => &plan.sender_address,
+            Self::Ews { sender_address, .. } => sender_address,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -56,7 +84,49 @@ impl AccountService {
         Ok(SyncIdentity {
             mailbox_source_id: account.mailbox_source_id,
             revision: account.revision,
+            is_ews: account.connection.is_ews(),
         })
+    }
+
+    pub(crate) fn ews_plan(&self, account_id: &str) -> Result<Option<EwsPlan>, PlanError> {
+        let snapshot = self.storage.load(account_id)?;
+        let account = &snapshot.account;
+        let Some(ews) = account.connection.ews() else {
+            return Ok(None);
+        };
+        let endpoint = TrustEndpoint::ews(ews)?;
+        let profile = snapshot
+            .profile(&account.authentication.receive().id)
+            .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+        if profile.trust(&endpoint) != CredentialTrust::Trusted {
+            return Err(PlanError::CredentialUntrusted);
+        }
+        let ProtocolCredential::Password(password) = self.protocol_credential(profile, account)?
+        else {
+            return Err(PlanError::CredentialMissing);
+        };
+        let mut route = self.image_route(account_id)?;
+        route.image_proxy_dns = false;
+        Ok(Some(EwsPlan {
+            mailbox_source_id: account.mailbox_source_id.clone(),
+            endpoint: crate::ews::Endpoint::parse(&ews.url)
+                .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?,
+            user: ews.username.clone(),
+            password,
+            route,
+        }))
+    }
+
+    pub(crate) fn submit_plan(&self, account_id: &str) -> Result<SubmitPlan, PlanError> {
+        if let Some(plan) = self.ews_plan(account_id)? {
+            let sender_address = self.storage.account_sender(account_id)?.0;
+            Ok(SubmitPlan::Ews {
+                plan,
+                sender_address,
+            })
+        } else {
+            self.smtp_plan(account_id).map(SubmitPlan::Smtp)
+        }
     }
 
     /// Resolves credentials for an IMAP sync. A credential is only used for the
@@ -65,11 +135,12 @@ impl AccountService {
         let snapshot = self.storage.load(account_id)?;
         let account = &snapshot.account;
 
-        let endpoint = TrustEndpoint::mail("imap", &account.imap);
+        let imap = account.connection.imap()?;
+        let endpoint = TrustEndpoint::mail("imap", imap);
         let profile = snapshot
             .profiles
             .iter()
-            .find(|profile| profile.id == account.authentication.imap().id)
+            .find(|profile| profile.id == account.authentication.receive().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
         if profile.trust(&endpoint) != CredentialTrust::Trusted {
             return Err(PlanError::CredentialUntrusted);
@@ -82,10 +153,10 @@ impl AccountService {
         Ok(SyncPlan {
             mailbox_source_id: account.mailbox_source_id.clone(),
             login: ImapLogin {
-                host: account.imap.host.clone(),
-                port: account.imap.port,
-                tls: account.imap.tls,
-                username: account.imap.username.clone(),
+                host: imap.host.clone(),
+                port: imap.port,
+                tls: imap.tls,
+                username: imap.username.clone(),
                 credential,
             },
             route,
@@ -99,11 +170,12 @@ impl AccountService {
         let snapshot = self.storage.load(account_id)?;
         let account = &snapshot.account;
 
-        let endpoint = TrustEndpoint::mail("smtp", &account.smtp);
+        let smtp = account.connection.smtp()?;
+        let endpoint = TrustEndpoint::mail("smtp", smtp);
         let profile = snapshot
             .profiles
             .iter()
-            .find(|profile| profile.id == account.authentication.smtp().id)
+            .find(|profile| profile.id == account.authentication.submit().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
         if profile.trust(&endpoint) != CredentialTrust::Trusted {
             return Err(PlanError::CredentialUntrusted);
@@ -114,10 +186,10 @@ impl AccountService {
 
         Ok(SmtpPlan {
             login: SmtpLogin {
-                host: account.smtp.host.clone(),
-                port: account.smtp.port,
-                tls: account.smtp.tls,
-                username: account.smtp.username.clone(),
+                host: smtp.host.clone(),
+                port: smtp.port,
+                tls: smtp.tls,
+                username: smtp.username.clone(),
                 credential,
             },
             route,

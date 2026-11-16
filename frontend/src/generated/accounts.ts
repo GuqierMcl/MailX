@@ -16,6 +16,12 @@ export type TlsMode = "implicit" | "startTls";
 
 export type ConnectionConfig = { host: string, port: number, tls: TlsMode, username: string, };
 
+export type EwsConnectionConfig = { url: string, username: string, };
+
+export type EwsBackend = "ews";
+
+export type MailConnection = { backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, };
+
 export type SecretUpdate = { "action": "keep" } | { "action": "replace", value: string, };
 
 export type AuthenticationMode = "shared" | "separate";
@@ -75,7 +81,7 @@ senderName: string | null,
  */
 useProviderIcon: boolean, };
 
-export type ConnectionInput = { emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+export type ConnectionInput = { emailAddress: string, providerId: string | null, authentication: AuthenticationInput, route: RouteInput, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
 
 export type AccountConfigInput = { displayName: string,
 /**
@@ -89,7 +95,7 @@ senderName: string | null,
 /**
  * Prefer known provider artwork when available; omitted defaults to true.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AuthenticationInput, route: RouteInput, };
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, authentication: AuthenticationInput, route: RouteInput, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
@@ -115,13 +121,15 @@ export type AuthenticationSummary = { id: string, generation: number, passwordCo
 
 export type PasswordAuthenticationSummary = { mode: AuthenticationMode, imap: AuthenticationSummary, smtp: AuthenticationSummary, };
 
+export type EwsAuthenticationSummary = { credential: AuthenticationSummary, };
+
 export type ProtocolAuthenticationSummary = { id: string, generation: number, credentialConfigured: boolean, trust: CredentialTrust, };
 
 export type OAuthAuthenticationState = "connected" | "needsReauthorization";
 
 export type OAuthAuthenticationSummary = { configuration: OAuth2Configuration, state: OAuthAuthenticationState, imap: ProtocolAuthenticationSummary, smtp: ProtocolAuthenticationSummary, };
 
-export type AccountAuthenticationSummary = { "kind": "password" } & PasswordAuthenticationSummary | { "kind": "oauth2" } & OAuthAuthenticationSummary;
+export type AccountAuthenticationSummary = { "kind": "password" } & PasswordAuthenticationSummary | { "kind": "oauth2" } & OAuthAuthenticationSummary | { "kind": "ewsNtlm" } & EwsAuthenticationSummary;
 
 export type ProxyAuthenticationSummary = { username: string, passwordConfigured: boolean, trust: CredentialTrust, };
 
@@ -150,11 +158,17 @@ senderName: string | null,
 /**
  * Appearance only. Defaults to true for credential journals from older builds.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, imap: ConnectionConfig, smtp: ConnectionConfig, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
+useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */
-defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, createdAt: string, updatedAt: string, };
+defaultRouteRevision: number | null, connectionStatus: ConnectionStatus, createdAt: string, updatedAt: string, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
+
+export type DiscoverEwsSettings = { emailAddress: string, route: RouteInput, targetGrant: string | null, username: string | null, password: string | null, };
+
+export type EwsDiscoveryStatus = "found" | "authRequired" | "confirmationRequired" | "notFound" | "rejected" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol";
+
+export type EwsSettingsDiscovery = { status: EwsDiscoveryStatus, endpoint: EwsConnectionConfig | null, source: string | null, targetGrant: string | null, };
 
 export type VerifyAccountConnection = { accountId: string, expectedRevision: number,
 /**
@@ -176,9 +190,9 @@ export type ConnectionVerificationCode = "credentialUntrusted" | "credentialMiss
 
 export type ProtocolVerification = { status: ConnectionVerificationStatus, stage: ConnectionVerificationStage, code: ConnectionVerificationCode | null, };
 
-export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, };
+export type AccountConnectionVerification = { accountId: string, revision: number, imap: ProtocolVerification, smtp: ProtocolVerification, ews?: ProtocolVerification, };
 
-export type DraftConnectionVerification = { verificationId: string, imap: ProtocolVerification, smtp: ProtocolVerification, };
+export type DraftConnectionVerification = { verificationId: string, imap: ProtocolVerification, smtp: ProtocolVerification, ews?: ProtocolVerification, };
 
 export type FolderRole = "inbox" | "sent" | "drafts" | "archive" | "junk" | "trash" | "other";
 
@@ -946,7 +960,11 @@ export type OutboxError = {
  */
 reason: string, smtpCode: number | null, text: string | null, rejected: Array<RejectedRecipientInfo>, };
 
-export type ServerReplyInfo = { code: number, text: string, };
+export type ServerReplyInfo = {
+/**
+ * SMTP reply code. EWS acceptance has no SMTP code.
+ */
+code: number | null, text: string, };
 
 export type OutboxItem = { id: string,
 /**

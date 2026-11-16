@@ -12,6 +12,7 @@ use crate::accounts::draft_connection;
 use crate::accounts::types::ConnectionInput;
 use crate::accounts::{sync_plan::PlanError, validate_uuid};
 use crate::error::{AppError, ErrorCode};
+use crate::ews::{EwsClient, EwsError};
 use crate::imap::{self, ImapError};
 use crate::net::{NetError, NetRoute};
 use crate::smtp::{self, FailureReason, SmtpOutcome};
@@ -119,6 +120,9 @@ pub struct AccountConnectionVerification {
     pub revision: u32,
     pub imap: ProtocolVerification,
     pub smtp: ProtocolVerification,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ews: Option<ProtocolVerification>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -127,6 +131,9 @@ pub struct DraftConnectionVerification {
     pub verification_id: String,
     pub imap: ProtocolVerification,
     pub smtp: ProtocolVerification,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ews: Option<ProtocolVerification>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,6 +257,14 @@ impl VerificationRegistry {
     }
 }
 
+enum SavedPlans {
+    ImapSmtp(
+        Result<crate::accounts::sync_plan::SyncPlan, PlanError>,
+        Result<crate::smtp::SmtpPlan, PlanError>,
+    ),
+    Ews(Result<Option<crate::accounts::sync_plan::EwsPlan>, PlanError>),
+}
+
 impl MailxCore {
     /// Tests only the supplied new-account configuration. It never acquires the
     /// account service, writes durable state, or resolves stored credentials.
@@ -272,10 +287,26 @@ impl MailxCore {
             })
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
-            Ok::<_, AppError>(tokio::join!(
-                verify_imap(&plan.route, &plan.imap),
-                verify_smtp(&plan.route, &plan.smtp),
-            ))
+            match plan {
+                draft_connection::DraftConnectionPlan::ImapSmtp { route, imap, smtp } => {
+                    let (imap, smtp) =
+                        tokio::join!(verify_imap(&route, &imap), verify_smtp(&route, &smtp));
+                    Ok::<_, AppError>((imap, smtp, None))
+                }
+                draft_connection::DraftConnectionPlan::Ews {
+                    route,
+                    endpoint,
+                    user,
+                    password,
+                } => {
+                    let outcome = verify_ews(&route, &endpoint, &user, &password).await;
+                    let unused = ProtocolVerification::failed(
+                        ConnectionVerificationStage::Configuration,
+                        ConnectionVerificationCode::Unsupported,
+                    );
+                    Ok((unused.clone(), unused, Some(outcome)))
+                }
+            }
         })
         .await;
         let final_control = *cancelled.borrow();
@@ -284,14 +315,18 @@ impl MailxCore {
         } else if tokio::time::Instant::now() >= deadline {
             result = Err(VerificationControl::TimedOut);
         }
-        let (imap, smtp) = match result {
+        let (imap, smtp, ews) = match result {
             Ok(result) => result?,
-            Err(reason) => interrupted(reason),
+            Err(reason) => {
+                let (imap, smtp) = interrupted(reason);
+                (imap, smtp, None)
+            }
         };
         Ok(DraftConnectionVerification {
             verification_id: request.verification_id,
             imap,
             smtp,
+            ews,
         })
     }
 
@@ -335,27 +370,53 @@ impl MailxCore {
                 // open after it is released. Do not resolve another secret after
                 // an earlier blocking operation outlived cancellation/deadline.
                 check_active(&prepare_control, deadline)?;
+                if service.sync_identity(&account_id)?.is_ews {
+                    return Ok::<_, AppError>(SavedPlans::Ews(service.ews_plan(&account_id)));
+                }
                 let imap = service.sync_plan(&account_id);
                 check_active(&prepare_control, deadline)?;
                 let smtp = service.smtp_plan(&account_id);
                 check_active(&prepare_control, deadline)?;
-                Ok((imap, smtp))
+                Ok(SavedPlans::ImapSmtp(imap, smtp))
             })
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
-            let imap = async {
-                match plans.0 {
-                    Err(error) => plan_failure(error),
-                    Ok(plan) => verify_imap(&plan.route, &plan.login).await,
+            let (imap, smtp, ews) = match plans {
+                SavedPlans::ImapSmtp(imap, smtp) => {
+                    let incoming = async {
+                        match imap {
+                            Err(error) => plan_failure(error),
+                            Ok(plan) => verify_imap(&plan.route, &plan.login).await,
+                        }
+                    };
+                    let outgoing = async {
+                        match smtp {
+                            Err(error) => plan_failure(error),
+                            Ok(plan) => verify_smtp(&plan.route, &plan.login).await,
+                        }
+                    };
+                    let (imap, smtp) = tokio::join!(incoming, outgoing);
+                    (imap, smtp, None)
+                }
+                SavedPlans::Ews(plan) => {
+                    let outcome = match plan {
+                        Err(error) => plan_failure(error),
+                        Ok(Some(plan)) => {
+                            verify_ews(&plan.route, &plan.endpoint, &plan.user, &plan.password)
+                                .await
+                        }
+                        Ok(None) => ProtocolVerification::failed(
+                            ConnectionVerificationStage::Configuration,
+                            ConnectionVerificationCode::Configuration,
+                        ),
+                    };
+                    let unused = ProtocolVerification::failed(
+                        ConnectionVerificationStage::Configuration,
+                        ConnectionVerificationCode::Unsupported,
+                    );
+                    (unused.clone(), unused, Some(outcome))
                 }
             };
-            let smtp = async {
-                match plans.1 {
-                    Err(error) => plan_failure(error),
-                    Ok(plan) => verify_smtp(&plan.route, &plan.login).await,
-                }
-            };
-            let (imap, smtp) = tokio::join!(imap, smtp);
             // A report only describes the saved version that was probed. This
             // metadata read never accesses the credential store.
             let service = self.service.clone();
@@ -373,7 +434,7 @@ impl MailxCore {
             })
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
-            Ok::<_, AppError>((imap, smtp))
+            Ok::<_, AppError>((imap, smtp, ews))
         })
         .await;
         // Account updates and UI aborts may race a ready final metadata read.
@@ -384,18 +445,22 @@ impl MailxCore {
         } else if tokio::time::Instant::now() >= deadline {
             result = Err(VerificationControl::TimedOut);
         }
-        let (imap, smtp) = match result {
+        let (imap, smtp, ews) = match result {
             Ok(result) => result?,
             Err(VerificationControl::Invalidated) => {
                 return Err(AppError::new(ErrorCode::Conflict));
             }
-            Err(reason) => interrupted(reason),
+            Err(reason) => {
+                let (imap, smtp) = interrupted(reason);
+                (imap, smtp, None)
+            }
         };
         Ok(AccountConnectionVerification {
             account_id: request.account_id,
             revision,
             imap,
             smtp,
+            ews,
         })
     }
 
@@ -451,6 +516,34 @@ async fn verify_smtp(route: &NetRoute, login: &smtp::SmtpLogin) -> ProtocolVerif
         Ok(()) => ProtocolVerification::verified(),
         Err(error) => smtp_failure(error),
     }
+}
+
+async fn verify_ews(
+    route: &NetRoute,
+    endpoint: &crate::ews::Endpoint,
+    user: &str,
+    password: &crate::secrets::SecretValue,
+) -> ProtocolVerification {
+    // Connecting authenticates with the read-only GetFolder probe and checks
+    // its EWS response, so a second probe would only repeat the round trip.
+    match EwsClient::connect(route, endpoint, user, password).await {
+        Ok(_) => ProtocolVerification::verified(),
+        Err(error) => ews_failure(error),
+    }
+}
+fn ews_failure(error: EwsError) -> ProtocolVerification {
+    use ConnectionVerificationCode as C;
+    use ConnectionVerificationStage as S;
+    let (stage, code) = match error {
+        EwsError::Authentication => (S::Authentication, C::Authentication),
+        EwsError::AuthUnsupported => (S::Authentication, C::AuthUnavailable),
+        EwsError::Net(NetError::Proxy(_)) => (S::Connection, C::Proxy),
+        EwsError::Net(NetError::Tls(_)) => (S::Tls, C::Tls),
+        EwsError::Timeout | EwsError::Net(NetError::Timeout) => (S::Connection, C::Timeout),
+        EwsError::Net(_) => (S::Connection, C::Network),
+        _ => (S::Mailbox, C::Protocol),
+    };
+    ProtocolVerification::failed(stage, code)
 }
 
 fn check_active(

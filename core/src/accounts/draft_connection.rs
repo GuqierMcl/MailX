@@ -10,30 +10,23 @@ use crate::net::{NetRoute, ProxyRoute};
 use crate::secrets::SecretValue;
 use crate::smtp::SmtpLogin;
 
-pub(crate) struct DraftConnectionPlan {
-    pub route: NetRoute,
-    pub imap: ImapLogin,
-    pub smtp: SmtpLogin,
+pub(crate) enum DraftConnectionPlan {
+    ImapSmtp {
+        route: NetRoute,
+        imap: ImapLogin,
+        smtp: SmtpLogin,
+    },
+    Ews {
+        route: NetRoute,
+        endpoint: crate::ews::Endpoint,
+        user: String,
+        password: SecretValue,
+    },
 }
 
-pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan, AppError> {
-    validate_connection(&mut input)?;
-    validate_create_secrets(&input)?;
-    let AuthenticationInput::Password { credentials } = input.authentication else {
-        return Err(AppError::new(ErrorCode::Unsupported));
-    };
-    let (imap_password, smtp_password) = match credentials {
-        PasswordAuthenticationInput::Shared { password } => {
-            let password = replacement(password)?;
-            (password.clone(), password)
-        }
-        PasswordAuthenticationInput::Separate {
-            imap_password,
-            smtp_password,
-        } => (replacement(imap_password)?, replacement(smtp_password)?),
-    };
-    let route = match input.route {
-        // Matches the saved-account route until an application proxy exists.
+pub(crate) fn route_from_input(mut input: RouteInput) -> Result<NetRoute, AppError> {
+    super::validate_route(&mut input)?;
+    Ok(match input {
         RouteInput::Direct | RouteInput::Inherit => NetRoute::default(),
         RouteInput::Custom {
             proxy_kind,
@@ -52,22 +45,50 @@ pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan,
                     .transpose()?,
             }),
         },
+    })
+}
+
+pub(crate) fn prepare(mut input: ConnectionInput) -> Result<DraftConnectionPlan, AppError> {
+    validate_connection(&mut input)?;
+    validate_create_secrets(&input)?;
+    let AuthenticationInput::Password { credentials } = input.authentication else {
+        return Err(AppError::new(ErrorCode::Unsupported));
     };
-    Ok(DraftConnectionPlan {
-        route,
-        imap: ImapLogin {
-            host: input.imap.host,
-            port: input.imap.port,
-            tls: input.imap.tls,
-            username: input.imap.username,
-            credential: crate::imap::ProtocolCredential::Password(imap_password),
+    let (receive_password, submit_password) = match credentials {
+        PasswordAuthenticationInput::Shared { password } => {
+            let password = replacement(password)?;
+            (password.clone(), password)
+        }
+        PasswordAuthenticationInput::Separate {
+            imap_password,
+            smtp_password,
+        } => (replacement(imap_password)?, replacement(smtp_password)?),
+    };
+    let route = route_from_input(input.route)?;
+    Ok(match input.connection {
+        super::MailConnection::ImapSmtp { imap, smtp } => DraftConnectionPlan::ImapSmtp {
+            route,
+            imap: ImapLogin {
+                host: imap.host,
+                port: imap.port,
+                tls: imap.tls,
+                username: imap.username,
+                credential: crate::imap::ProtocolCredential::Password(receive_password),
+            },
+            smtp: SmtpLogin {
+                host: smtp.host,
+                port: smtp.port,
+                tls: smtp.tls,
+                username: smtp.username,
+                credential: crate::imap::ProtocolCredential::Password(submit_password),
+            },
         },
-        smtp: SmtpLogin {
-            host: input.smtp.host,
-            port: input.smtp.port,
-            tls: input.smtp.tls,
-            username: input.smtp.username,
-            credential: crate::imap::ProtocolCredential::Password(smtp_password),
+        super::MailConnection::Ews { ews, .. } => DraftConnectionPlan::Ews {
+            route,
+            endpoint: crate::ews::Endpoint::parse(&ews.url)
+                .map_err(|_| AppError::validation("ews.url"))?,
+            user: ews.username,
+            password: receive_password,
         },
     })
 }
@@ -103,19 +124,23 @@ mod tests {
             "imapPassword":{"action":"replace","value":" imap-secret "},
             "smtpPassword":{"action":"replace","value":" smtp-secret "}
         });
-        let plan = prepare(connection(input)).unwrap();
-        assert_eq!(plan.imap.host, "imap.example.test");
-        assert_eq!(plan.imap.username, "Fixture@example.test");
-        assert_eq!(plan.smtp.username, "SMTP-user");
+        let DraftConnectionPlan::ImapSmtp { route, imap, smtp } =
+            prepare(connection(input)).unwrap()
+        else {
+            panic!("IMAP fixture")
+        };
+        assert_eq!(imap.host, "imap.example.test");
+        assert_eq!(imap.username, "Fixture@example.test");
+        assert_eq!(smtp.username, "SMTP-user");
         assert_eq!(
-            plan.imap.credential.secret().unwrap().expose_secret(),
+            imap.credential.secret().unwrap().expose_secret(),
             " imap-secret "
         );
         assert_eq!(
-            plan.smtp.credential.secret().unwrap().expose_secret(),
+            smtp.credential.secret().unwrap().expose_secret(),
             " smtp-secret "
         );
-        assert!(plan.route.proxy.is_none());
+        assert!(route.proxy.is_none());
     }
 
     #[test]
@@ -150,9 +175,12 @@ mod tests {
             "imageProxyDns":true, "confirmImageProxyDns":true,
             "authentication":{"username":" proxy-user ","password":{"action":"replace","value":" proxy-secret "}}
         }));
-        let plan = prepare(connection(input)).unwrap();
-        assert!(!plan.route.image_proxy_dns);
-        let proxy = plan.route.proxy.unwrap();
+        let DraftConnectionPlan::ImapSmtp { route, .. } = prepare(connection(input)).unwrap()
+        else {
+            panic!("IMAP fixture")
+        };
+        assert!(!route.image_proxy_dns);
+        let proxy = route.proxy.unwrap();
         assert_eq!(proxy.host, "proxy.example.test");
         assert_eq!(proxy.port, 8080);
         let (username, password) = proxy.auth.unwrap();

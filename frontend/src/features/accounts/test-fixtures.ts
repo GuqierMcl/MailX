@@ -6,8 +6,8 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
-export function exampleAccount(): Account & { authentication: Extract<Account['authentication'], { kind: 'password' }> }
-export function exampleAccount(overrides: Partial<Account>): Account
+export function exampleAccount(): Account & { imap: import('@/generated/accounts').ConnectionConfig; smtp: import('@/generated/accounts').ConnectionConfig; authentication: Extract<Account['authentication'], { kind: 'password' }> }
+export function exampleAccount(overrides: Partial<Account>): Account & { imap: import('@/generated/accounts').ConnectionConfig; smtp: import('@/generated/accounts').ConnectionConfig }
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
@@ -43,6 +43,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     getStartupStatus: vi.fn<MailxClient['getStartupStatus']>().mockResolvedValue(startup),
     retryStartup: vi.fn<MailxClient['retryStartup']>().mockResolvedValue(startup),
     listAccounts: vi.fn<MailxClient['listAccounts']>().mockResolvedValue(rows),
+    discoverEwsSettings: vi.fn<MailxClient['discoverEwsSettings']>().mockResolvedValue({ status: 'notFound', endpoint: null, source: null, targetGrant: null }),
     getAccount: vi.fn<MailxClient['getAccount']>().mockImplementation(async (id) => rows.find((row) => row.id === id) ?? exampleAccount()),
     createAccount: vi.fn<MailxClient['createAccount']>().mockImplementation(async ({ config }) => exampleAccount({ useProviderIcon: config.useProviderIcon ?? true })),
     beginOAuthAccount: vi.fn<MailxClient['beginOAuthAccount']>().mockResolvedValue({ sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }),

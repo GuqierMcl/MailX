@@ -74,5 +74,5 @@ export function verificationReport(state: VerificationState): AccountConnectionV
 /** Whether either protocol was checked and did not pass. */
 export function verificationFailed(state: VerificationState): boolean {
   const report = verificationReport(state)
-  return !!report && (report.imap.status !== 'verified' || report.smtp.status !== 'verified')
+  return !!report && (report.ews ? report.ews.status !== 'verified' : report.imap.status !== 'verified' || report.smtp.status !== 'verified')
 }

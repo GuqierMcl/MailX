@@ -299,7 +299,11 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       setError({ key: 'composer:validation.senderUnavailable' })
       return null
     }
-    if (sender.authentication.smtp.trust !== 'trusted' || !(sender.authentication.kind === 'password' ? sender.authentication.smtp.passwordConfigured : sender.authentication.state === 'connected' && sender.authentication.smtp.credentialConfigured)) {
+    const authentication = sender.authentication
+    const usable = authentication.kind === 'ewsNtlm'
+      ? authentication.credential.trust === 'trusted' && authentication.credential.passwordConfigured
+      : authentication.smtp.trust === 'trusted' && (authentication.kind === 'password' ? authentication.smtp.passwordConfigured : authentication.state === 'connected' && authentication.smtp.credentialConfigured)
+    if (!usable) {
       setError({ key: 'composer:validation.credentials' })
       return null
     }

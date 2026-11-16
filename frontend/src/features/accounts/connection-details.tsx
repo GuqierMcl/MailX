@@ -17,12 +17,16 @@ export function ConnectionDetails({ account, verification, open, onOpenChange }:
   useTranslation()
   return (
     <SettingsDisclosure title={t('accounts:connectionDetails')} open={open} onOpenChange={onOpenChange}>
+      {'ews' in account ? <DetailRow label={t('accounts:ewsConnection')} value={`${account.ews.url} · ${account.ews.username}`}>
+        <ProtocolOutcome state={verification} protocol="ews" />
+      </DetailRow> : <>
       <DetailRow label={t('accounts:incomingServer')} value={server('IMAP', account.imap)}>
         <ProtocolOutcome state={verification} protocol="imap" />
       </DetailRow>
       <DetailRow label={t('accounts:outgoingServer')} value={server('SMTP', account.smtp)}>
         <ProtocolOutcome state={verification} protocol="smtp" />
       </DetailRow>
+      </>}
       <DetailRow label={t('accounts:credentials')} value={credentials(account, needsTrust(account))} />
       <DetailRow label={t('accounts:networkRoute')} value={route(account.route)} />
     </SettingsDisclosure>
@@ -42,13 +46,14 @@ function DetailRow({ label, value, children }: { label: string; value: string; c
   )
 }
 
-function server(protocol: string, connection: Account['imap']) {
+function server(protocol: string, connection: import('@/generated/accounts').ConnectionConfig) {
   const security = connection.tls === 'implicit' ? 'TLS' : 'STARTTLS'
   return `${protocol} · ${connection.host}:${connection.port} · ${security} · ${connection.username}`
 }
 
 function credentials(account: Account, trustNeeded: boolean) {
   if (account.authentication.kind === 'oauth2') return `${t('accounts:signedInThroughBrowser')} · ${t(account.authentication.state === 'connected' ? 'accounts:oauthConnected' : 'accounts:oauthNeedsReauthorization')}`
+  if (account.authentication.kind === 'ewsNtlm') return `${t('accounts:ewsPasswordLabel')} · ${trustNeeded ? t('accounts:needsConfirmation') : account.authentication.credential.passwordConfigured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`
   const mode = account.authentication.mode === 'shared' ? t('accounts:sharedPassword') : t('accounts:separatePasswords')
   const configured = account.authentication.imap.passwordConfigured && account.authentication.smtp.passwordConfigured
   return `${mode} · ${trustNeeded ? t('accounts:needsConfirmation') : configured ? t('accounts:storedInCredentialStore') : t('accounts:missingPassword')}`

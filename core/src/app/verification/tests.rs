@@ -380,3 +380,63 @@ fn provider_policy_diagnostic_is_a_fixed_code_with_no_server_text() {
         })
     );
 }
+
+#[tokio::test]
+async fn saved_exchange_diagnostics_use_one_https_plan_and_report_its_proxy_failure() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let directory = TempDir::new().unwrap();
+    let core = MailxCore::open(
+        directory.path(),
+        Arc::new(MemorySecrets::default()),
+        tokio::runtime::Handle::current(),
+        Arc::new(|_: &crate::CoreEvent| {}),
+    )
+    .unwrap();
+    let value = json!({
+        "requestId": Uuid::new_v4().to_string(),
+        "config": {
+            "displayName":"Exchange", "emailAddress":"alice@example.com", "providerId":"exchange-self-hosted",
+            "backend":"ews", "ews":{"url":"https://mail.example.com/EWS/Exchange.asmx","username":"EXAMPLE\\alice"},
+            "authentication":{"kind":"password","mode":"shared","password":{"action":"replace","value":"synthetic-secret"}},
+            "route":{"kind":"custom","proxyKind":"httpConnect","host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"dns":"proxy","authentication":null}
+        }
+    });
+    let account = core
+        .service
+        .lock()
+        .unwrap()
+        .create(serde_json::from_value(value).unwrap())
+        .unwrap();
+    let peer = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = [0; 1024];
+        let count = stream.read(&mut bytes).await.unwrap();
+        assert!(
+            std::str::from_utf8(&bytes[..count])
+                .unwrap()
+                .starts_with("CONNECT mail.example.com:443 ")
+        );
+        stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let report = core
+        .verify_account_connection(request(&account))
+        .await
+        .unwrap();
+    assert_eq!(
+        report.ews.unwrap().code,
+        Some(ConnectionVerificationCode::Proxy)
+    );
+    assert_eq!(
+        report.imap.code,
+        Some(ConnectionVerificationCode::Unsupported)
+    );
+    assert_eq!(
+        report.smtp.code,
+        Some(ConnectionVerificationCode::Unsupported)
+    );
+    peer.await.unwrap();
+}

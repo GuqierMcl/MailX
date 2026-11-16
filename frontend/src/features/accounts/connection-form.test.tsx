@@ -171,6 +171,7 @@ describe('connection form', () => {
     const [connection, draft] = submit.mock.calls[0]
     expect(connection).not.toHaveProperty('displayName')
     expect(connection.authentication).toEqual({ kind: 'password', mode: 'shared', password: { action: 'replace', value: 'synthetic-shared-secret' } })
+    if (!('imap' in connection)) throw new Error('IMAP fixture')
     expect(connection.imap.username).toBe('receive@example.com')
     expect(connection.smtp.username).toBe('send@example.com')
     // The caller gets the draft as submitted, so a wizard can come back to it.
