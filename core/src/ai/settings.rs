@@ -49,6 +49,11 @@ pub struct AiModelRef {
     pub name: String,
     pub context_length: Option<u32>,
     pub output_length: Option<u32>,
+    /// Whether the model supports tool calls, when the catalog knew. `None`
+    /// (unknown, and every older settings file) is treated as "try".
+    #[serde(default)]
+    #[ts(optional)]
+    pub tool_call: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -218,6 +223,7 @@ mod tests {
                 name: "M".into(),
                 context_length: None,
                 output_length: None,
+                tool_call: None,
             }),
             translation_model: None,
             route: ServiceRoute::Proxy {
@@ -236,6 +242,24 @@ mod tests {
         );
         assert_eq!(sanitized.default_model, None);
         assert_eq!(sanitized.route, ServiceRoute::Direct);
+    }
+
+    #[test]
+    fn tool_call_survives_normalizing_and_older_files_load_without_it() {
+        let json = |extra: &str| {
+            format!(
+                r#"{{"connectionId":"c","modelId":"m","name":"M","contextLength":null,"outputLength":null{extra}}}"#
+            )
+        };
+        let old: AiModelRef = serde_json::from_str(&json("")).unwrap();
+        assert_eq!(old.tool_call, None);
+        let new: AiModelRef = serde_json::from_str(&json(r#","toolCall":false"#)).unwrap();
+        assert_eq!(new.tool_call, Some(false));
+        let kept = new.clone().normalized().unwrap();
+        assert_eq!(kept.tool_call, Some(false));
+        let text = serde_json::to_string(&kept).unwrap();
+        assert!(text.contains(r#""toolCall":false"#), "{text}");
+        assert_eq!(serde_json::from_str::<AiModelRef>(&text).unwrap(), kept);
     }
 
     #[test]
@@ -265,6 +289,7 @@ mod tests {
                 name: "m".into(),
                 context_length: None,
                 output_length: None,
+                tool_call: None,
             }),
             ..AiSettings::default()
         };

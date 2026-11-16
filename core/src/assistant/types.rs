@@ -178,6 +178,10 @@ pub struct RunSnapshot {
     /// Everything the model has written so far.
     pub text: String,
     pub tools: Vec<ToolActivity>,
+    /// Whether this run may use tools. `false` for a chat on a model known to
+    /// lack tool calling (it can only answer from the conversation) and for
+    /// Now summaries; `true` for every other chat.
+    pub tools_available: bool,
     pub error: Option<ErrorCode>,
     pub finished_reason: Option<FinishedReason>,
     /// When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC

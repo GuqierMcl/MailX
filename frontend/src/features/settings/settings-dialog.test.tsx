@@ -31,6 +31,14 @@ describe('settings dialog', () => {
     expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never', senderAvatars: false } })
   })
 
+  it('shows what the assistant may do and the custom instructions on the AI page', async () => {
+    const client = testClient()
+    client.aiState.mockResolvedValue({ connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false })
+    const { dialog } = renderDialog(client, { section: 'ai' })
+    for (const name of ['整理邮件', 'AI 创建的草稿', '发送邮件']) expect(await within(dialog).findByRole('combobox', { name })).toBeInTheDocument()
+    expect(within(dialog).getByRole('textbox', { name: '自定义指令' })).toBeInTheDocument()
+  })
+
   it('keeps sender avatar lookups off until the avatar switch is turned on', async () => {
     const { client } = renderDialog(testClient(), { section: 'security' })
     const toggle = await screen.findByRole('switch', { name: '显示发件人头像' })

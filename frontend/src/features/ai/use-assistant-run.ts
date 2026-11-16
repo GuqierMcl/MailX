@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AssistantEvent, ErrorCode, FinishedReason, RunKind, RunSnapshot, RunState } from '@/generated/accounts'
+import type { AssistantEvent, ConfirmationRequest, ErrorCode, FinishedReason, PendingConfirmation, RunKind, RunSnapshot, RunState, ToolActivity } from '@/generated/accounts'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 
 /** `idle`: nothing started yet. `starting`: waiting for the host to answer `assistantStart`. */
 export type AssistantRunState = 'idle' | 'starting' | RunState
+
+/** A tool call with where in the text it began, so a view can show the reply's parts in the order they came. */
+/** `settledAt` is when this window first saw the call finish (a clock for undo windows), null while it runs. */
+export type RunTool = ToolActivity & { at: number; settledAt: number | null }
+/** A confirmation the run asked for, kept after it is answered; `at` as for `RunTool`. */
+export type RunConfirm = { requestId: string; callId: string; request: ConfirmationRequest; at: number }
 
 export type AssistantRun = {
   runId: string | null
@@ -14,6 +20,16 @@ export type AssistantRun = {
   finishedReason: FinishedReason | null
   /** When this window saw the run complete (the host sends no time of its own). */
   finishedAt: Date | null
+  /** Tool calls in the order they began; the latest state of each. Chat runs only. */
+  tools: RunTool[]
+  /** Every confirmation this run asked for, in order. */
+  confirms: RunConfirm[]
+  /** The confirmation the run is waiting on now. */
+  pending: PendingConfirmation | null
+  /** The conversation a chat run belongs to. */
+  conversationId: string | null
+  /** False once the host says the model cannot call tools. Absent means yes. */
+  toolsAvailable: boolean
   /** Starting, running or waiting for a confirmation. */
   active: boolean
   /**
@@ -25,9 +41,15 @@ export type AssistantRun = {
   cancel: () => void
 }
 
-type View = { runId: string | null; state: AssistantRunState; text: string; error: ErrorCode | null; finishedReason: FinishedReason | null; finishedAt: Date | null }
+type View = {
+  runId: string | null; state: AssistantRunState; text: string; error: ErrorCode | null; finishedReason: FinishedReason | null; finishedAt: Date | null
+  tools: RunTool[]; confirms: RunConfirm[]; pending: PendingConfirmation | null; conversationId: string | null; toolsAvailable: boolean
+}
 
-const IDLE: View = { runId: null, state: 'idle', text: '', error: null, finishedReason: null, finishedAt: null }
+const IDLE: View = {
+  runId: null, state: 'idle', text: '', error: null, finishedReason: null, finishedAt: null,
+  tools: [], confirms: [], pending: null, conversationId: null, toolsAvailable: true,
+}
 const ENDED: ReadonlySet<AssistantRunState> = new Set(['completed', 'failed', 'canceled', 'awaitingConsent'])
 /** Events seen before `assistantStart` answered are kept briefly, so none is lost to the race. */
 const EARLY_LIMIT = 200
@@ -82,7 +104,21 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     const finishedAt = snapshot.state === 'completed'
       ? (hostTime && !Number.isNaN(hostTime.getTime()) ? hostTime : live.current.finishedAt ?? new Date())
       : null
-    update({ runId: snapshot.runId, state: snapshot.state, text: snapshot.text, error: snapshot.error, finishedReason: snapshot.finishedReason, finishedAt }, true)
+    // The snapshot has no order between text and tools: what this window already placed keeps its place, the rest goes last.
+    const known = new Map(live.current.tools.map((tool) => [tool.callId, tool.at]))
+    const seen = new Map(live.current.tools.map((tool) => [tool.callId, tool.settledAt]))
+    const tools = snapshot.tools.map((tool): RunTool => ({
+      ...tool,
+      at: known.get(tool.callId) ?? snapshot.text.length,
+      settledAt: tool.status === 'running' ? null : seen.get(tool.callId) ?? Date.now(),
+    }))
+    const confirms = live.current.confirms.slice()
+    if (snapshot.pending && !confirms.some((item) => item.requestId === snapshot.pending!.requestId)) confirms.push({ ...snapshot.pending, at: snapshot.text.length })
+    update({
+      runId: snapshot.runId, state: snapshot.state, text: snapshot.text, error: snapshot.error, finishedReason: snapshot.finishedReason, finishedAt,
+      tools, confirms, pending: snapshot.pending, conversationId: snapshot.conversationId ?? live.current.conversationId,
+      toolsAvailable: snapshot.toolsAvailable,
+    }, true)
   }, [update])
 
   const apply = useCallback((event: AssistantEvent) => {
@@ -90,10 +126,31 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     const { kind } = event
     switch (kind.type) {
       case 'text': update({ text: live.current.text + kind.delta }, false); break
-      case 'state': update({ state: kind.state, finishedAt: kind.state === 'completed' ? new Date() : live.current.finishedAt }, true); break
+      case 'state': update({
+        state: kind.state,
+        pending: kind.state === 'awaitingConfirmation' ? live.current.pending : null,
+        finishedAt: kind.state === 'completed' ? new Date() : live.current.finishedAt,
+      }, true); break
+      case 'tool': {
+        const before = live.current.tools.find((tool) => tool.callId === kind.callId)
+        const at = before?.at ?? live.current.text.length
+        const settledAt = kind.status === 'running' ? null : before?.settledAt ?? Date.now()
+        const next: RunTool = { callId: kind.callId, name: kind.name, status: kind.status, summary: kind.summary, at, settledAt }
+        const tools = live.current.tools.some((tool) => tool.callId === kind.callId)
+          ? live.current.tools.map((tool) => tool.callId === kind.callId ? next : tool)
+          : [...live.current.tools, next]
+        update({ tools }, true)
+        break
+      }
+      case 'confirm': {
+        const pending: PendingConfirmation = { requestId: kind.requestId, callId: kind.callId, request: kind.request }
+        const confirms = live.current.confirms.some((item) => item.requestId === kind.requestId)
+          ? live.current.confirms : [...live.current.confirms, { ...pending, at: live.current.text.length }]
+        update({ pending, confirms }, true)
+        break
+      }
       case 'finished': update({ finishedReason: kind.reason }, true); break
       case 'failed': update({ error: kind.code }, true); break
-      // Tool activity and confirmations belong to chat views, which come later.
       default: break
     }
   }, [update])

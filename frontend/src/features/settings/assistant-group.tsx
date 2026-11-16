@@ -39,7 +39,7 @@ const hostOf = (baseUrl: string) => {
  * Settings → Integrations → AI → Assistant (ai-runtime §7). Everything except the consent goes
  * through the normal settings write; the consent has its own commands and is only revoked here.
  * `chat` shows the rows only the chat uses (what the assistant may do, custom instructions); the
- * app leaves them out until the chat ships, so no setting appears that changes nothing yet.
+ * app turns it on now that the chat exists, so no setting appears that changes nothing.
  */
 export function AssistantGroup({ client, ai, chat = false }: { client: MailxClient; ai: AiState; chat?: boolean }) {
   useTranslation()
@@ -56,7 +56,7 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
     <ModelRow client={client} ai={ai} assistant={assistant} off={off} update={update} />
     <ConsentRow client={client} ai={ai} assistant={assistant} off={off} />
     <AccountsRow client={client} assistant={assistant} off={off} update={update} />
-    {/* Only chat uses these; they appear when the chat does. */}
+    {/* Only the chat uses these. */}
     {chat && <>
       <ModeRow id="assistant.organize" label={t('settings:assistantOrganize')} description={t('settings:assistantOrganizeDescription')}
         value={assistant.organize} off={off} onChange={(organize) => update.mutate({ organize })} />

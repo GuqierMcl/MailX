@@ -20,7 +20,7 @@ const ready: AiState = {
 const SENTENCE = '今天有 3 封新邮件，银行的那封值得先看。'
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
+  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'r1'): AssistantEvent => ({ runId, seq, kind })
 
@@ -46,6 +46,8 @@ function setup({ ai = ready, assistant = {}, start = [snapshot()] }: { ai?: AiSt
     })
   }
   let send: (event: AssistantEvent) => void = () => undefined
+  let settingsChanged: (change: { revision: number }) => void = () => undefined
+  client.onSettingsChanged.mockImplementation(async (listener) => { settingsChanged = listener; return () => undefined })
   client.onAssistantEvent.mockImplementation((listener) => { send = listener; return () => undefined })
   const queue = [...start]
   client.assistantStart.mockImplementation(async () => {
@@ -60,7 +62,8 @@ function setup({ ai = ready, assistant = {}, start = [snapshot()] }: { ai?: AiSt
   }
   render(<TooltipProvider><Harness props={props} /></TooltipProvider>)
   const emit = (...events: AssistantEvent[]) => act(() => { for (const next of events) send(next) })
-  return { client, emit }
+  const notifySettings = (revision: number) => act(async () => settingsChanged({ revision }))
+  return { client, emit, notifySettings }
 }
 
 const preset = () => document.querySelector('[data-slot="now-summary-preset"]')!
@@ -242,6 +245,23 @@ describe('Now page: AI summary line', () => {
       expect(client.assistantGrantConsent).not.toHaveBeenCalled()
       expect(client.assistantStart).toHaveBeenCalledTimes(1)
       expect(screen.getByRole('button', { name: '用 AI 总结' })).toBeInTheDocument()
+    })
+
+    it('starts by itself once consent arrives from elsewhere (the chat, another window)', async () => {
+      const { client, emit, notifySettings } = setup({ start: [awaiting, snapshot({ runId: 'r2' })] })
+      await settled()
+      await screen.findByRole('button', { name: '用 AI 总结' })
+      expect(client.assistantStart).toHaveBeenCalledTimes(1)
+      const read = client.getSettings.getMockImplementation()!
+      client.getSettings.mockImplementation(async () => {
+        const current = await read()
+        return { ...current, revision: current.revision + 5, settings: { ...current.settings, assistant: { ...current.settings.assistant, consented: { connectionId: 'c1', baseUrl: 'https://api.openai.com/v1' } } } }
+      })
+      await notifySettings(1000)
+      await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
+      await emit(event(2, { type: 'text', delta: SENTENCE }, 'r2'), event(3, { type: 'state', state: 'completed' }, 'r2'))
+      expect(sentence(SENTENCE)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '用 AI 总结' })).not.toBeInTheDocument()
     })
   })
 

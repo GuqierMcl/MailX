@@ -787,6 +787,29 @@ describe('mock assistant', () => {
     await client.undoArchive(summary.undo.token)
   })
 
+  it('answers a plain question with a search step, a read step and markdown with a list and a link', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('what is new'))
+    const done = await finished(client, started.runId)
+    expect(done.tools.map((tool) => [tool.name, tool.status])).toEqual([['search_emails', 'done'], ['read_email', 'done']])
+    expect(done.tools[0].summary).toMatchObject({ type: 'found' })
+    expect(done.tools[1].summary).toMatchObject({ type: 'read' })
+    expect(done.text).toMatch(/\n- /)
+    expect(done.text).toContain('](https://example.com/help)')
+  })
+
+  it('writes a draft on request and reports it as a draft step', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('write me a draft'))
+    const done = await finished(client, started.runId)
+    expect(done.tools[0]).toMatchObject({ name: 'create_draft', status: 'done', summary: { type: 'draft' } })
+    const summary = done.tools[0].summary
+    if (summary.type !== 'draft') throw new Error('no draft')
+    expect((await client.getDraft(summary.draftId)).id).toBe(summary.draftId)
+  })
+
   it('asks before sending and respects the answer, once, for that request only', async () => {
     const client = mock()
     await client.assistantGrantConsent()

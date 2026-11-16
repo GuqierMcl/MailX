@@ -321,6 +321,7 @@ fn model_ref(connection_id: &str, model_id: &str, context: Option<u32>) -> AiMod
         name: model_id.into(),
         context_length: context,
         output_length: None,
+        tool_call: None,
     }
 }
 
@@ -1718,6 +1719,26 @@ async fn a_disabled_assistant_or_a_missing_model_is_a_fixed_error() {
 }
 
 #[tokio::test]
+async fn a_model_without_tool_calling_chats_without_tools() {
+    for (tool_call, expect_tools) in [(Some(false), false), (None, true), (Some(true), true)] {
+        let fx = Fx::new().await;
+        fx.model(vec![say("ok")]);
+        let mut own = model_ref(&fx.connection_id, "m", None);
+        own.tool_call = tool_call;
+        fx.configure(|a| a.model = Some(own));
+        let started = fx.chat("hi").await;
+        assert_eq!(started.tools_available, expect_tools, "{tool_call:?}");
+        let done = fx.finished(&started.run_id).await;
+        assert_eq!(done.state, RunState::Completed);
+        assert_eq!(done.tools_available, expect_tools);
+        let request = fx.request(0);
+        assert_eq!(request.get("tools").is_some(), expect_tools, "{request}");
+        let system = request["messages"][0]["content"].as_str().unwrap();
+        assert_eq!(system.contains("You have no tools"), !expect_tools);
+    }
+}
+
+#[tokio::test]
 async fn the_assistant_model_overrides_the_default_and_a_dangling_one_falls_back() {
     let fx = Fx::new().await;
     fx.model(vec![say("ok")]);
@@ -1743,6 +1764,7 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
     let snapshot = fx.finished(&started.run_id).await;
     assert_eq!(snapshot.state, RunState::Completed);
     assert!(snapshot.tools.is_empty());
+    assert!(!snapshot.tools_available);
     let generated = snapshot.completed_at.clone().expect("completed_at is set");
     assert!(
         chrono::DateTime::parse_from_rfc3339(&generated).is_ok() && generated.ends_with('Z'),

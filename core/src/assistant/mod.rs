@@ -201,6 +201,9 @@ impl Assistant {
                         return Err(error);
                     }
                 };
+                if ready.target.tool_call == Some(false) {
+                    inner.runs.set_no_tools(&run_id);
+                }
                 let task = tokio::spawn(agent::chat(
                     inner.clone(),
                     run_id.clone(),

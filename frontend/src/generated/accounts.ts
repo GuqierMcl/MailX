@@ -1072,7 +1072,12 @@ baseUrl: string,
  */
 useProxy: boolean, };
 
-export type AiModelRef = { connectionId: string, modelId: string, name: string, contextLength: number | null, outputLength: number | null, };
+export type AiModelRef = { connectionId: string, modelId: string, name: string, contextLength: number | null, outputLength: number | null,
+/**
+ * Whether the model supports tool calls, when the catalog knew. `None`
+ * (unknown, and every older settings file) is treated as "try".
+ */
+toolCall?: boolean, };
 
 export type AiSettings = { connections: Array<AiConnection>, defaultModel: AiModelRef | null,
 /**
@@ -1258,7 +1263,13 @@ export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
 /**
  * Everything the model has written so far.
  */
-text: string, tools: Array<ToolActivity>, error: ErrorCode | null, finishedReason: FinishedReason | null,
+text: string, tools: Array<ToolActivity>,
+/**
+ * Whether this run may use tools. `false` for a chat on a model known to
+ * lack tool calling (it can only answer from the conversation) and for
+ * Now summaries; `true` for every other chat.
+ */
+toolsAvailable: boolean, error: ErrorCode | null, finishedReason: FinishedReason | null,
 /**
  * When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC
  * with milliseconds; `None` while it is going. A Now summary answered

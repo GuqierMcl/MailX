@@ -693,7 +693,7 @@ type AiState = {
   route: ServiceRoute;              // AI 专用代理，类型与翻译路由相同
   proxyPasswordSet: boolean;
 };
-type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null };
+type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null; toolCall?: boolean | null };  // toolCall：模型是否支持工具调用，选择时取自目录；缺省或 null 为未知（按支持处理）
 type AiModel = { id: string; name: string; contextLength: number | null; outputLength: number | null; toolCall: boolean | null; source: "provider" | "catalog" };
 type AiCatalog = { providers: AiCatalogProvider[]; updatedAt: string | null; stale: boolean; refreshError: ErrorCode | null };
 type AiCatalogProvider = { id: string; name: string; protocol: AiProtocol; baseUrl: string; builtIn: boolean; local?: boolean };
@@ -707,7 +707,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### AI 助手（主窗口）
 
-设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面尚未接入，目前只有 `MailxClient` 方法（含浏览器预览用的模拟实现）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
+设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -731,6 +731,7 @@ type RunSnapshot = {
   runId: string; kind: "nowSummary" | "chat"; state: RunState;
   text: string;                     // 模型到目前为止写的全部文字
   tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
+  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述恒为 false
   error: ErrorCode | null;          // failed 时的固定错误码
   finishedReason: "stop" | "limit" | "length" | null;
   seq: number;                      // 快照包含的最后一个事件序号
@@ -755,6 +756,8 @@ type AssistantEventKind =
 ```
 
 **运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
+
+**无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 
 **事件与快照。** 事件按 `seq` 顺序到达；前端可以随时用 `assistantSnapshot` 重新取得状态（包括待确认的请求），再接收 `seq` 更大的事件，忽略小于等于快照 `seq` 的。事件只含模型输出的文字、结构化的工具摘要和固定错误码；提示词、邮件正文与服务商原文不会出现。
 

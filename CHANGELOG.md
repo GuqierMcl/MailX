@@ -14,6 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🚀 Feature
 
 - The assistant can write the Now page's summary line with your AI model, after you agree once to send mail content to that provider; Settings → Integrations → AI has a new Assistant group to turn it off, pick its model and choose which mailboxes it may read. / 助手可以用你的 AI 模型为“此刻”页面写概述句（首次需同意向该服务商发送邮件内容）；“设置 → 集成 → AI”新增“助手”一组，可关闭助手、选择模型和可读取的邮箱。 ([#138](https://github.com/GuqierMcl/MailX/pull/138))
+- Chat with the assistant on the Now page: it can find, sum up and sort mail, write drafts and send mail, shows what it did with undo for sorting, and asks before sending by default; Settings → Integrations → AI → Assistant now also sets what it may do on its own and custom instructions. / 可以在“此刻”页面和助手对话：查找、总结、整理邮件，起草和发送邮件，对话中显示它做了什么、整理可撤销，发信默认先确认；“设置 → 集成 → AI → 助手”新增可自行执行的操作与自定义指令。 ([#142](https://github.com/GuqierMcl/MailX/pull/142))
 
 ### ✨ Optimization
 

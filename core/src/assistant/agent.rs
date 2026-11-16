@@ -211,10 +211,17 @@ async fn chat_loop(
             Ok(Gate::NeedsConsent) => return Outcome::NeedsConsent,
             Err(error) => return Outcome::Failed(error.code),
         };
-        let system = prompt::chat_system(ready.locale, &utc_now(), &ready.settings.instructions);
-        if estimate(&system) + definitions_cost + estimate_messages(messages)
-            > budget(&ready.target)
-        {
+        // `None` (unknown) tries with tools; only a known "no" leaves them out.
+        let with_tools = ready.target.tool_call != Some(false);
+        let tools: &[ToolDefinition] = if with_tools { &definitions } else { &[] };
+        let system = prompt::chat_system(
+            ready.locale,
+            &utc_now(),
+            &ready.settings.instructions,
+            with_tools,
+        );
+        let tools_cost = if with_tools { definitions_cost } else { 0 };
+        if estimate(&system) + tools_cost + estimate_messages(messages) > budget(&ready.target) {
             return Outcome::Failed(ErrorCode::AssistantContextFull);
         }
         let turn = match model_turn(
@@ -223,7 +230,7 @@ async fn chat_loop(
             &ready,
             &system,
             messages,
-            &definitions,
+            tools,
             ready.target.output_length,
         )
         .await

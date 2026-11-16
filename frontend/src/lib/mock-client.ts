@@ -168,7 +168,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const MOCK_AI_MODELS: AiModel[] = [
     { id: 'large-1', name: 'Large 1', contextLength: 200000, outputLength: 32000, toolCall: true, source: 'provider' },
     { id: 'small-1', name: 'Small 1', contextLength: 128000, outputLength: 16000, toolCall: true, source: 'provider' },
-    { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: null, source: 'catalog' },
+    { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: false, source: 'catalog' },
   ]
   const aiKeys = new Map<string, string>()
   let aiConnections: Omit<AiConnectionState, 'hasKey'>[] = []

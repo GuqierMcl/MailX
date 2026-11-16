@@ -79,7 +79,7 @@ describe('AI settings: providers', () => {
     })
     expect(await screen.findByRole('heading', { name: '选择模型' })).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('option', { name: /Big Model/ }))
-    await waitFor(() => expect(client.aiSetDefaultModel).toHaveBeenCalledWith({ connectionId: 'new-1', modelId: 'big', name: 'Big Model', contextLength: 200000, outputLength: 8000 }))
+    await waitFor(() => expect(client.aiSetDefaultModel).toHaveBeenCalledWith({ connectionId: 'new-1', modelId: 'big', name: 'Big Model', contextLength: 200000, outputLength: 8000, toolCall: true }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByRole('combobox', { name: '默认模型' })).toHaveTextContent('Big Model')
     expect(screen.getByText('api.openai.com')).toBeInTheDocument()

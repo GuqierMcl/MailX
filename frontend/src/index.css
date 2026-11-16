@@ -348,3 +348,99 @@ html[data-translucent].dark .app-canvas {
       transform: translateX(-100%);}
     to {
       transform: translateX(250%);}}}
+
+/* The assistant chat (ai-chat-ui.md 4.3, 4.6, 6): a user message rises a little, the conversation view comes up from below. */
+@theme {
+  --animate-chat-rise: chat-rise var(--motion-medium) var(--ease-decel) both;
+  @keyframes chat-rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);}}
+  --animate-chat-in: chat-in var(--motion-view) var(--ease-decel) both;
+  @keyframes chat-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);}}
+  --animate-chat-fade: chat-fade var(--motion-view) var(--ease-out-soft) both;
+  @keyframes chat-fade {
+    from {
+      opacity: 0;}}
+  /* The input's rise when the assistant becomes usable: a short lift and fade. */
+  --animate-chat-input-in: chat-input-in var(--motion-view) var(--ease-decel) both;
+  @keyframes chat-input-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);}}}
+
+/* The input's gradient edge: a 1px ring cut out of a pre-drawn gradient. While working only the background drifts. */
+.ai-border {
+  padding: 1px;
+  background: linear-gradient(90deg, var(--ai-1), var(--ai-2), var(--ai-3), var(--ai-2), var(--ai-1));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);}
+.ai-border[data-flow="true"] {
+  animation: ai-border-drift 4s ease-in-out infinite alternate;}
+@keyframes ai-border-drift {
+  from {
+    background-position: 0 0;}
+  to {
+    background-position: 100% 0;}}
+/* The glow is a fixed blurred copy of the gradient; only its opacity changes. */
+.ai-glow {
+  background: var(--ai-gradient);
+  filter: blur(10px);}
+/* "Thinking": a slow band of the AI gradient across the words. Static under reduced motion. */
+.ai-shimmer {
+  background: linear-gradient(100deg, var(--muted-foreground) 35%, var(--ai-2) 50%, var(--muted-foreground) 65%);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: ai-shimmer 2.4s linear infinite;}
+@keyframes ai-shimmer {
+  from {
+    background-position: 100% 0;}
+  to {
+    background-position: -50% 0;}}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer {
+    animation: none;
+    background: var(--ai-gradient);
+    background-clip: text;
+    -webkit-background-clip: text;}
+  .ai-border[data-flow="true"] {
+    animation: none;}}
+
+/* Moving between the Now overview and the conversation. With the View Transitions API the page body is named only
+   while it runs: it fades out quickly and the new view comes up from below (or just fades, going back). The input,
+   named too, stays where it is. */
+html[data-now-transition] [data-slot="now-body"] {
+  view-transition-name: now-body;}
+html[data-now-transition] [data-slot="chat-footer"] {
+  view-transition-name: now-chat-input;}
+html[data-now-transition]::view-transition-old(root),
+html[data-now-transition]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;}
+::view-transition-group(now-body),
+::view-transition-group(now-chat-input) {
+  animation-duration: var(--motion-view);
+  animation-timing-function: var(--ease-out-soft);}
+::view-transition-old(now-body) {
+  animation: now-vt-out 190ms var(--ease-out-soft) both;}
+html[data-now-transition="conversation"]::view-transition-new(now-body) {
+  animation: now-vt-in var(--motion-view) var(--ease-decel) both;}
+html[data-now-transition="overview"]::view-transition-new(now-body) {
+  animation: now-vt-fade var(--motion-view) var(--ease-out-soft) both;}
+@keyframes now-vt-out {
+  to {
+    opacity: 0;}}
+@keyframes now-vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);}}
+@keyframes now-vt-fade {
+  from {
+    opacity: 0;}}

@@ -48,7 +48,7 @@ describe('AI settings: assistant', () => {
     expect(headings).toEqual(['服务商', '默认模型', '助手'])
   })
 
-  it('leaves out the rows only the chat uses until the chat ships', async () => {
+  it('leaves out the rows only the chat uses when the pane is not given the chat', async () => {
     await setup({ chat: false })
     await screen.findByRole('switch', { name: '启用助手' })
     expect(screen.getByRole('combobox', { name: '对话模型' })).toBeInTheDocument()
