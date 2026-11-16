@@ -16,6 +16,8 @@ pub struct AiModelTarget {
     pub(crate) output_length: Option<u32>,
     /// The model's context window in tokens, when the catalog knows it.
     pub(crate) context_length: Option<u32>,
+    /// Whether the model supports tool calls; `None` when unknown.
+    pub(crate) tool_call: Option<bool>,
     /// Empty for a connection without a key (local servers).
     pub(crate) key: SecretValue,
     pub(crate) route: NetRoute,
@@ -38,6 +40,11 @@ impl AiModelTarget {
         self
     }
 
+    pub(crate) fn with_tool_call(mut self, tool_call: Option<bool>) -> Self {
+        self.tool_call = tool_call;
+        self
+    }
+
     pub(crate) fn new(
         binding: AiConsent,
         protocol: AiProtocol,
@@ -52,6 +59,7 @@ impl AiModelTarget {
             model_id,
             output_length,
             context_length: None,
+            tool_call: None,
             key: SecretValue::new(key),
             route,
         }

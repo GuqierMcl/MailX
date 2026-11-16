@@ -20,7 +20,10 @@
     "conflict": "This draft changed elsewhere. The latest version has been loaded.",
     "conflictDescription": "Your unsaved changes were not applied.",
     "locked": "This message is queued for sending and can no longer be edited.",
-    "conflictBeforeSend": "This draft changed elsewhere. Review the latest version before sending."
+    "conflictBeforeSend": "This draft changed elsewhere. Review the latest version before sending.",
+    "attachmentMentioned": "You mentioned an attachment but haven’t added one",
+    "addAttachment": "Add attachment",
+    "sendAnyway": "Send anyway"
   },
   "draft": {
     "createdViaMcp": "Created via MCP",
@@ -52,12 +55,21 @@
     "bcc": "Bcc",
     "subject": "Subject",
     "body": "Message body",
-    "chooseSender": "Choose a sending account"
+    "chooseSender": "Choose a sending account",
+    "fromAccount": "From: {{name}}",
+    "ccShortcut": "Cc (Cmd/Ctrl+Alt+C)",
+    "bccShortcut": "Bcc (Cmd/Ctrl+Alt+B)"
+  },
+  "header": {
+    "expand": "Show sender and recipients: {{summary}}",
+    "separator": ", ",
+    "more": "{{names}} and others ({{total}} people)"
   },
   "editor": {
     "loadFailed": "Unable to load editor",
     "reload": "Reload editor",
-    "opening": "Opening editor…"
+    "opening": "Opening editor…",
+    "showQuote": "Show quoted text"
   },
   "send": {
     "sending": "Sending…",
@@ -236,7 +248,13 @@
     "editInvalid": "Invalid address: {{address}}. Click to edit.",
     "remove": "Remove {{address}}",
     "preview_other": "{{names}} and others ({{count}} recipients)",
-    "preview_one": "{{names}} ({{count}} recipient)"
+    "preview_one": "{{names}} ({{count}} recipient)",
+    "menu": "Options for {{address}}",
+    "moveToTo": "Move to To",
+    "moveToCc": "Move to Cc",
+    "moveToBcc": "Move to Bcc",
+    "copy": "Copy address",
+    "removeShort": "Remove"
   },
   "inlineImage": {
     "missing": "Image missing"

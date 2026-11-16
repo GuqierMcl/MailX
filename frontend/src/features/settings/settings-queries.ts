@@ -50,14 +50,14 @@ export const useUpdateAppearance = (client: MailxClient) => useSettingsSection(c
 export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(client, 'security', { remoteImages: 'ask', senderAvatars: false })
 export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
-export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0 })
+export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' })
 export const DEFAULT_TRANSLATION: TranslationSettings = {
   provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
 export const DEFAULT_ASSISTANT: AssistantSettings = {
-  enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '',
+  enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '', saveHistory: true,
 }
 /** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
 export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)

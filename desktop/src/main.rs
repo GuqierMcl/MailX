@@ -211,6 +211,14 @@ fn main() {
                             event,
                         );
                     }
+                    // Saved conversations changed; the history list refetches.
+                    mailx_core::CoreEvent::AssistantConversationsChanged(changed) => {
+                        let _ = handle.emit_to(
+                            EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                            assistant::CONVERSATIONS_EVENT,
+                            changed,
+                        );
+                    }
                 });
             let state = state::DesktopState::new(data_dir, secrets, events);
             app.manage(state.clone());
@@ -297,6 +305,7 @@ fn main() {
             commands::emails_select,
             commands::contacts_list_aggregations,
             commands::contacts_set_aggregation,
+            commands::contacts_suggest,
             commands::emails_undo_archive,
             commands::attachments_save,
             commands::avatars_get,
@@ -332,6 +341,10 @@ fn main() {
             assistant::assistant_respond,
             assistant::assistant_grant_consent,
             assistant::assistant_revoke_consent,
+            assistant::assistant_list_conversations,
+            assistant::assistant_get_conversation,
+            assistant::assistant_delete_conversation,
+            assistant::assistant_clear_conversations,
             commands::settings_get,
             commands::settings_update,
             commands::notifications_test,
@@ -361,6 +374,7 @@ fn main() {
             compose::outbox_resolve_unknown,
             compose::outbox_remove_local_copy,
             compose::composer_open,
+            compose::composer_focus,
             compose::composer_close,
             compose::composer_cancel_close,
             updater::updater_get_state,

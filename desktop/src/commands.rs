@@ -1095,6 +1095,34 @@ pub(crate) async fn contacts_list_aggregations(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SuggestContactsArgs {
+    query: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Recipient suggestions for a composer address field, from mail already on
+/// this device. Main and composer windows; not an MCP tool.
+#[tauri::command]
+pub(crate) async fn contacts_suggest(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<mailx_core::ContactSuggestion>>, ()> {
+    let args = authorize(&window, "contacts_suggest")
+        .and_then(|_| parse::<SuggestContactsArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.suggest_contacts(&args.query, args.limit))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetContactAggregationArgs {
     address: String,
     aggregated: bool,

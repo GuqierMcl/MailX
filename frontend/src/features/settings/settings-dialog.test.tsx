@@ -31,6 +31,14 @@ describe('settings dialog', () => {
     expect(client.updateSettings).toHaveBeenCalledWith({ security: { remoteImages: 'never', senderAvatars: false } })
   })
 
+  it('shows what the assistant may do and the custom instructions on the AI page', async () => {
+    const client = testClient()
+    client.aiState.mockResolvedValue({ connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false })
+    const { dialog } = renderDialog(client, { section: 'ai' })
+    for (const name of ['整理邮件', 'AI 创建的草稿', '发送邮件']) expect(await within(dialog).findByRole('combobox', { name })).toBeInTheDocument()
+    expect(within(dialog).getByRole('textbox', { name: '自定义指令' })).toBeInTheDocument()
+  })
+
   it('keeps sender avatar lookups off until the avatar switch is turned on', async () => {
     const { client } = renderDialog(testClient(), { section: 'security' })
     const toggle = await screen.findByRole('switch', { name: '显示发件人头像' })
@@ -80,18 +88,18 @@ describe('settings dialog', () => {
     expect(sender).toHaveTextContent('跟随当前邮箱')
     await userEvent.click(sender)
     await userEvent.click(await screen.findByRole('option', { name: /个人邮箱/ }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', undoSendSeconds: 0 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', undoSendSeconds: 0, openMode: 'window' } }))
 
     await userEvent.click(sender)
     await userEvent.click(await screen.findByRole('option', { name: '跟随当前邮箱' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 0 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' } }))
 
     const undo = within(dialog).getByRole('combobox', { name: '撤销发送' })
     expect(undo).toHaveTextContent('关闭（立即发送）')
     await userEvent.click(undo)
     for (const name of ['5 秒', '10 秒', '20 秒', '30 秒']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('option', { name: '20 秒' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 20 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 20, openMode: 'window' } }))
     await waitFor(() => expect(undo).toHaveTextContent('20 秒'))
   })
 
@@ -177,7 +185,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '' }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

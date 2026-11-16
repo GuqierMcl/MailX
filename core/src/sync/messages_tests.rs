@@ -83,6 +83,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
             | CoreEvent::DraftChanged(_)
             | CoreEvent::SentCopies(_)
             | CoreEvent::Assistant(_)
+            | CoreEvent::AssistantConversationsChanged(_)
             | CoreEvent::Previews(_)
             | CoreEvent::AccountRemoved(_)
             | CoreEvent::MailStateChanged(_) => {}

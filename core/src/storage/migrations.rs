@@ -215,9 +215,25 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 32,
+        description: "assistant chat conversations",
+        required_tables: &[
+            "assistant_conversations",
+            "assistant_conversation_accounts",
+            "assistant_messages",
+        ],
+        sql: include_str!("migrations/0032_assistant_conversations.sql"),
+    },
+    Migration {
+        version: 33,
+        description: "sender address and name index for recipient suggestions",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0033_sender_name_index.sql"),
+    },
+    Migration {
+        version: 34,
         description: "self-hosted Exchange connections and item identities",
         required_tables: &["ews_connections", "ews_items", "ews_folder_state"],
-        sql: include_str!("migrations/0032_exchange_ews.sql"),
+        sql: include_str!("migrations/0034_exchange_ews.sql"),
     },
 ];
 
@@ -623,7 +639,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 32);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 34);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -687,6 +703,87 @@ mod tests {
         let index: i64 = db
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_starred_unread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn assistant_conversations_migration_applies_fresh_and_upgrades_from_31() {
+        for upgraded in [false, true] {
+            let (_directory, mut db) = open_db();
+            db.pragma_update(None, "foreign_keys", true).unwrap();
+            if upgraded {
+                apply(&mut db, &manifest_up_to(31)).unwrap();
+                let exists: i64 = db
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master WHERE name = 'assistant_messages'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(exists, 0);
+            }
+            apply(&mut db, MIGRATIONS).unwrap();
+            db.execute(
+                "INSERT INTO assistant_conversations(id, title, created_at, updated_at, message_count)
+                 VALUES ('c', 'T', 't', 't', 1)",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                 VALUES ('c', 0, 'user', '{}', 't')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO assistant_conversation_accounts(conversation_id, account_id)
+                 VALUES ('c', 'a')",
+                [],
+            )
+            .unwrap();
+            assert!(
+                db.execute(
+                    "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                     VALUES ('c', 1, 'robot', '{}', 't')",
+                    [],
+                )
+                .is_err(),
+                "unknown roles are refused"
+            );
+            assert!(
+                db.execute(
+                    "INSERT INTO assistant_messages(conversation_id, seq, role, content, created_at)
+                     VALUES ('missing', 0, 'user', '{}', 't')",
+                    [],
+                )
+                .is_err(),
+                "a message needs its conversation"
+            );
+            db.execute("DELETE FROM assistant_conversations WHERE id = 'c'", [])
+                .unwrap();
+            for table in ["assistant_messages", "assistant_conversation_accounts"] {
+                let left: i64 = db
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                assert_eq!(left, 0, "{table} follows its conversation");
+            }
+        }
+    }
+
+    #[test]
+    fn sender_name_index_is_added_to_an_existing_database() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(32)).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let index: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_by_sender_name'",
                 [],
                 |row| row.get(0),
             )
@@ -1340,6 +1437,71 @@ mod tests {
                 .get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn ews_upgrade_preserves_main_chat_history_and_recipient_index() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(33)).unwrap();
+        db.execute_batch(
+            "INSERT INTO assistant_conversations(id,title,created_at,updated_at,message_count)
+             VALUES ('chat','Keep this chat','t','t',1);
+             INSERT INTO assistant_messages(conversation_id,seq,role,content,created_at)
+             VALUES ('chat',0,'user','{\"text\":\"keep\"}','t');",
+        )
+        .unwrap();
+        let history: Vec<(u32, String)> = db
+            .prepare("SELECT version,checksum FROM schema_migrations ORDER BY version")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT title FROM assistant_conversations WHERE id='chat'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "Keep this chat"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT content FROM assistant_messages WHERE conversation_id='chat'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "{\"text\":\"keep\"}"
+        );
+        for (version, checksum) in history {
+            let actual: String = db
+                .query_row(
+                    "SELECT checksum FROM schema_migrations WHERE version=?1",
+                    [version],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(actual, checksum);
+        }
+        assert!(
+            db.query_row(
+                "SELECT 1 FROM sqlite_master WHERE name='messages_by_sender_name'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .optional()
+            .unwrap()
+            .is_some()
+        );
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            34
         );
     }
 

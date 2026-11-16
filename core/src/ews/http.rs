@@ -208,7 +208,7 @@ impl Connection {
             .map_err(|_| EwsError::Authentication)?
             .credentials_handle;
         self.authorization_scheme = "Negotiate";
-        let (mut output, mut complete) = negotiate_step(
+        let (mut output, _) = negotiate_step(
             &mut negotiate,
             &mut handle,
             None,
@@ -221,12 +221,14 @@ impl Connection {
             if output.is_empty() {
                 return Err(EwsError::Protocol);
             }
+            // SSPI establishes NTLM's session key when it builds AUTHENTICATE,
+            // not when it builds NEGOTIATE. Query before sending this output:
+            // a key created while reading the reply cannot prove that the
+            // authentication token has already travelled to the server.
+            let authentication_sent = negotiate.query_context_session_key().is_ok();
             let response = self
                 .exchange(action, body.clone(), Some(&output), response_limit)
                 .await?;
-            if (200..300).contains(&response.status) && complete {
-                return Ok(response);
-            }
             if response.status != 401 && !(200..300).contains(&response.status) {
                 return Err(if response.status == 403 {
                     EwsError::Authentication
@@ -235,24 +237,33 @@ impl Connection {
                 });
             }
             let accepted = (200..300).contains(&response.status);
+            if accepted && !authentication_sent {
+                return Err(EwsError::Protocol);
+            }
             let input = match challenge(&response.headers, "Negotiate") {
                 Ok(Some(input)) => input,
-                // A final SPNEGO token is optional; the server already
-                // accepted this request over the verified TLS channel.
+                // Only the final token may be absent: AUTHENTICATE was sent
+                // and this request was accepted over the verified TLS channel.
                 Ok(None) | Err(EwsError::AuthUnsupported) if accepted => return Ok(response),
                 Ok(None) => return Err(EwsError::Authentication),
                 Err(error) => return Err(error),
             };
-            (output, complete) = negotiate_step(
+            let (next_output, complete) = negotiate_step(
                 &mut negotiate,
                 &mut handle,
                 Some(input),
                 channel_binding,
                 &self.authority,
             )?;
-            // A present final token must still verify (mechListMIC) above.
+            output = next_output;
+            // A present token must finish SPNEGO, including mechListMIC. A
+            // valid but incomplete token cannot replace missing final proof.
             if accepted {
-                return Ok(response);
+                return if complete && output.is_empty() {
+                    Ok(response)
+                } else {
+                    Err(EwsError::Protocol)
+                };
             }
         }
         Err(EwsError::Authentication)

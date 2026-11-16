@@ -1,3 +1,7 @@
+//! Also hosts the recipient suggestion tests, which need the same accounts,
+//! folders and local Sent copies.
+mod contact_suggestions;
+
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};

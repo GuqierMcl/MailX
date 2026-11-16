@@ -652,3 +652,51 @@ fn malformed_journal_never_partially_deletes_an_account() {
     assert_eq!(count(&f.service, "account_removals"), 0);
     assert_eq!(count(&f.service, "secret_gc"), 0);
 }
+
+#[test]
+fn removal_deletes_saved_assistant_conversations_that_touched_the_account_only() {
+    use crate::storage::assistant_chats::{Append, NewRow};
+    let mut f = setup();
+    let mut other_config = config(json!({"kind":"direct"}));
+    other_config["emailAddress"] = json!("other@example.test");
+    let other = f
+        .service
+        .create(create_request(&id(), other_config))
+        .unwrap();
+    let row = |text: &str| NewRow {
+        role: "user",
+        content: format!(r#"{{"type":"user","text":"{text}"}}"#),
+        created_at: "2030-01-01T00:00:00.000Z".into(),
+    };
+    let mut save = |title: &str, accounts: &[&str]| {
+        let conversation = id();
+        let accounts: Vec<String> = accounts.iter().map(|a| (*a).to_owned()).collect();
+        f.service
+            .assistant_chat_append(&Append {
+                id: &conversation,
+                create: Some(title),
+                from_seq: 0,
+                rows: &[row(title)],
+                accounts: &accounts,
+                now: "2030-01-01T00:00:00.000Z",
+            })
+            .unwrap();
+        conversation
+    };
+    let removed_account = f.account.id.clone();
+    let both = save("both", &[&removed_account, &other.id]);
+    let only_removed = save("removed", &[&removed_account]);
+    let only_other = save("other", &[&other.id]);
+    let none = save("none", &[]);
+
+    f.service.remove(request(&f.account)).unwrap();
+    for gone in [&both, &only_removed] {
+        assert!(!f.service.assistant_chat_exists(gone).unwrap());
+    }
+    for kept in [&only_other, &none] {
+        assert!(f.service.assistant_chat_exists(kept).unwrap());
+    }
+    assert_eq!(count(&f.service, "assistant_conversations"), 2);
+    assert_eq!(count(&f.service, "assistant_messages"), 2);
+    assert_eq!(count(&f.service, "assistant_conversation_accounts"), 1);
+}

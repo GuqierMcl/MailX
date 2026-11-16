@@ -290,6 +290,17 @@ name: string | null,
  */
 messageCount: number, latestReceivedAt: string | null, createdAt: string, };
 
+export type ContactSuggestion = {
+/**
+ * The newest non-empty display name seen with the address, trimmed.
+ * Untrusted text.
+ */
+name: string | null,
+/**
+ * ASCII-lowercased.
+ */
+address: string, };
+
 export type SnippetSegment = { text: string, hit: boolean, };
 
 export type EmailListQuery = {
@@ -649,6 +660,8 @@ whenFocused: boolean, sound: NotificationSound,
  */
 mutedAccounts: Array<string>, };
 
+export type ComposeOpenMode = "window" | "inline";
+
 export type ComposeSettings = {
 /**
  * Account used for new mail outside any account's folders; `""` for none.
@@ -659,7 +672,12 @@ defaultAccountId: string,
 /**
  * One of 0 (send at once), 5, 10, 20 or 30.
  */
-undoSendSeconds: number, };
+undoSendSeconds: number,
+/**
+ * Where new mail, replies and continued drafts open. Files written
+ * before the setting existed open a composer window.
+ */
+openMode: ComposeOpenMode, };
 
 export type McpSettings = {
 /**
@@ -1090,7 +1108,12 @@ baseUrl: string,
  */
 useProxy: boolean, };
 
-export type AiModelRef = { connectionId: string, modelId: string, name: string, contextLength: number | null, outputLength: number | null, };
+export type AiModelRef = { connectionId: string, modelId: string, name: string, contextLength: number | null, outputLength: number | null,
+/**
+ * Whether the model supports tool calls, when the catalog knew. `None`
+ * (unknown, and every older settings file) is treated as "try".
+ */
+toolCall?: boolean, };
 
 export type AiSettings = { connections: Array<AiConnection>, defaultModel: AiModelRef | null,
 /**
@@ -1209,7 +1232,13 @@ aiDrafts: AssistantMode, send: AssistantSendMode,
 /**
  * Appended to the system prompt, at most 2000 characters.
  */
-instructions: string, };
+instructions: string,
+/**
+ * Keep chat conversations on this device so they can be reopened.
+ * Turning it off stops saving new turns; what is already saved stays
+ * until the user deletes it.
+ */
+saveHistory: boolean, };
 
 export type StartRun = { kind: RunKind, };
 
@@ -1276,7 +1305,13 @@ export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
 /**
  * Everything the model has written so far.
  */
-text: string, tools: Array<ToolActivity>, error: ErrorCode | null, finishedReason: FinishedReason | null,
+text: string, tools: Array<ToolActivity>,
+/**
+ * Whether this run may use tools. `false` for a chat on a model known to
+ * lack tool calling (it can only answer from the conversation) and for
+ * Now summaries; `true` for every other chat.
+ */
+toolsAvailable: boolean, error: ErrorCode | null, finishedReason: FinishedReason | null,
 /**
  * When the run ended (`completed`, `failed` or `canceled`), RFC 3339 UTC
  * with milliseconds; `None` while it is going. A Now summary answered
@@ -1305,3 +1340,59 @@ export type AssistantEvent = { runId: string,
 seq: number, kind: AssistantEventKind, };
 
 export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "confirm", requestId: string, callId: string, request: ConfirmationRequest, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };
+
+export type ConversationSummary = { id: string,
+/**
+ * The first user message, shortened.
+ */
+title: string,
+/**
+ * RFC 3339 UTC with milliseconds: when the last turn was saved.
+ */
+updatedAt: string,
+/**
+ * Messages the user sent.
+ */
+messageCount: number, };
+
+export type ConversationList = {
+/**
+ * Newest first.
+ */
+items: Array<ConversationSummary>,
+/**
+ * Pass back as `cursor` for the next page; `None` at the end.
+ */
+nextCursor: string | null, };
+
+export type TurnState = "completed" | "failed" | "canceled";
+
+export type ConfirmOutcome = "approved" | "denied" | "expired";
+
+export type ChatTurnTool = { callId: string, name: string, status: ToolStatus,
+/**
+ * Never carries undo data: `changed.undo` is always `null`.
+ */
+summary: ToolActivitySummary, textOffset: number, };
+
+export type ChatTurnConfirmation = { callId: string, tool: string, action: ConfirmAction, outcome: ConfirmOutcome, textOffset: number, };
+
+export type ChatTurn = { "role": "user", text: string,
+/**
+ * RFC 3339 UTC with milliseconds.
+ */
+at: string, } | { "role": "assistant", text: string, tools: Array<ChatTurnTool>, confirmations: Array<ChatTurnConfirmation>, state: TurnState,
+/**
+ * Set when `state` is `completed`.
+ */
+finishedReason: FinishedReason | null,
+/**
+ * Set when `state` is `failed`.
+ */
+error: ErrorCode | null, at: string, };
+
+export type ConversationDetail = { id: string, title: string, createdAt: string, updatedAt: string, turns: Array<ChatTurn>, };
+
+export type ConversationChange = "saved" | "deleted" | "cleared";
+
+export type ConversationsChanged = { conversationId: string | null, change: ConversationChange, };

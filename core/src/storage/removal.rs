@@ -141,6 +141,13 @@ impl Storage {
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [id])?;
         }
+        // Saved assistant conversations whose tool calls touched this account
+        // go with it; their messages and account links follow by cascade.
+        tx.execute(
+            "DELETE FROM assistant_conversations WHERE id IN (
+               SELECT conversation_id FROM assistant_conversation_accounts WHERE account_id = ?1)",
+            [id],
+        )?;
         tx.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
         tx.commit()?;
         Ok(draft_ids)

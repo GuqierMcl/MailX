@@ -18,6 +18,7 @@ import type {
   OutboxItem,
   OutboxState,
   ConversationPage,
+  ContactSuggestion,
   EmailDetail,
   EmailPreviews,
   EmailSummary,
@@ -33,6 +34,7 @@ import type {
 import { cachedAppearance, parseFontFamilies } from '@/lib/appearance'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import { createMockAssistant } from '@/lib/mock-assistant'
+import { createMockConversations } from '@/lib/mock-conversations'
 import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
@@ -85,7 +87,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '' }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -95,7 +97,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
-        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+        // Like the core, fields a stored copy lacks (saved by an older preview) take their defaults.
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation,
+          assistant: { ...settings.settings.assistant, ...value.settings.assistant },
+          layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }
@@ -133,6 +138,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const email = emails.find((row) => !row.summary.isRead && !row.summary.archived && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox')
       return email ? { id: email.summary.id } : null
     },
+    firstFolder() {
+      const folder = folders.find((row) => row.role === 'inbox' && row.selectable)
+      return folder ? { id: folder.id } : null
+    },
     archive: async (emailIds) => (await client.archiveEmails(emailIds)).undoToken,
     async draftToSend() {
       const draft = await client.createDraft({
@@ -144,6 +153,21 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     send: (draft) => client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() }),
   })
+  // Saved chats: a chat is kept when its run ends, like the core does unless history is off.
+  const history = createMockConversations({
+    locale: () => settings.effectiveLocale,
+    saveHistory: () => settings.settings.assistant.saveHistory,
+    snapshot: (runId) => assistant.snapshot(runId),
+    firstEmail: () => {
+      const email = emails.find((row) => !row.summary.archived && folders.find((folder) => folder.id === row.summary.folderId)?.role === 'inbox')
+      return email ? { id: email.summary.id } : null
+    },
+    firstFolder: () => {
+      const folder = folders.find((row) => row.role === 'inbox' && row.selectable)
+      return folder ? { id: folder.id } : null
+    },
+  })
+  assistant.onEvent((event) => history.observe(event))
   const removedDrafts = new Set<string>()
   const removals = new Map<string, { revision: number; result: AccountRemoval }>()
   const removalListeners = new Set<(removal: AccountRemoval) => void>()
@@ -168,7 +192,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const MOCK_AI_MODELS: AiModel[] = [
     { id: 'large-1', name: 'Large 1', contextLength: 200000, outputLength: 32000, toolCall: true, source: 'provider' },
     { id: 'small-1', name: 'Small 1', contextLength: 128000, outputLength: 16000, toolCall: true, source: 'provider' },
-    { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: null, source: 'catalog' },
+    { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: false, source: 'catalog' },
   ]
   const aiKeys = new Map<string, string>()
   let aiConnections: Omit<AiConnectionState, 'hasKey'>[] = []
@@ -688,6 +712,12 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (!aggregated) contactRules.delete(key)
       else if (!contactRules.has(key)) contactRules.set(key, new Date().toISOString())
     },
+    async suggestContacts(query, limit) {
+      const role = (email: EmailDetail) => folders.find((folder) => folder.id === email.summary.folderId)?.role
+      const own = new Set([...accounts.map((account) => account.emailAddress), ...Object.values(dataset.me).map((me) => me.address)]
+        .map((address) => address.toLowerCase()))
+      return mockContactSuggestions(emails, role, own, query, limit)
+    },
     async getMailOverview(query) {
       // Same scope rules as the core (app/overview.rs): inbox mail that is not
       // archived; starred unread outside junk and trash.
@@ -1142,6 +1172,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const draft = clone(requireDraft(draftId))
       options.onOpenComposer?.(draft, fresh)
     },
+    // The preview's composer tabs cannot be brought forward, so none counts as open.
+    async focusComposer() { return false },
     closeComposer: async () => undefined,
     cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),
@@ -1159,14 +1191,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     openExternalLink: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
     onUpdateState: () => () => undefined,
     // The browser preview has no host: the switch only changes an in-memory status.
-    assistantStart: (request) => assistant.start(request),
+    assistantStart: async (request) => { const snapshot = await assistant.start(request); history.begin(request, snapshot); return snapshot },
     assistantCancel: (runId) => assistant.cancel(runId),
     assistantSnapshot: (runId) => assistant.snapshot(runId),
-    assistantRespond: (runId, requestId, approved) => assistant.respond(runId, requestId, approved),
+    assistantRespond: async (runId, requestId, approved) => { await assistant.respond(runId, requestId, approved); history.answered(runId, requestId, approved) },
     // Like the core, a consent change is a settings change: a new revision and the usual event.
     assistantGrantConsent: async () => { const consent = await assistant.grantConsent(); consentChanged(); return consent },
     assistantRevokeConsent: async () => { await assistant.revokeConsent(); consentChanged() },
     onAssistantEvent: (listener) => assistant.onEvent(listener),
+    assistantListConversations: (page) => history.list(page),
+    assistantGetConversation: (conversationId) => history.get(conversationId),
+    assistantDeleteConversation: (conversationId) => history.remove(conversationId),
+    assistantClearConversations: () => history.clear(),
+    onAssistantConversationsChanged: (listener) => history.onChanged(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),
     setAutostart: async () => { throw new MailxClientError({ code: 'hostUnavailable', message: '', field: null }) },
@@ -1917,6 +1954,77 @@ function mockActivity(
     topContacts,
     today: { received: today.length, unread: today.filter((email) => !email.summary.isRead).length },
   }
+}
+
+const NO_REPLY = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster']
+const CJK = /[\u1100-\u11ff\u2e80-\u2fdf\u3040-\u30ff\u3130-\u318f\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/u
+
+/** The core's matching for `contacts_suggest` (accounts/contacts.rs); `wanted` is lowercased. */
+function contactMatches(wanted: string, address: string, name: string | null): boolean {
+  const domain = address.includes('@') ? address.slice(address.lastIndexOf('@') + 1) : null
+  if (address.startsWith(wanted) || domain?.startsWith(wanted)) return true
+  if (!name) return false
+  const lower = name.toLowerCase()
+  if (CJK.test(lower)) return lower.includes(wanted)
+  for (let at = lower.indexOf(wanted); at >= 0; at = lower.indexOf(wanted, at + 1)) {
+    if (at === 0 || /[\s._-]/u.test(lower[at - 1])) return true
+  }
+  return false
+}
+
+/**
+ * Recipient suggestions with the core's rules (sending.md 17.4): senders outside junk and
+ * trash plus recipients of sent mail, never your own or no-reply addresses; people you wrote
+ * to first, then sent × 3 + received, the newest exchange and the address.
+ */
+function mockContactSuggestions(
+  emails: EmailDetail[],
+  role: (email: EmailDetail) => FolderRole | null | undefined,
+  own: Set<string>,
+  query: string,
+  limit = 8,
+): ContactSuggestion[] {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new MailxClientError({ code: 'validation', field: 'limit', message: '配置参数无效。' })
+  const trimmed = query.trim()
+  if ([...trimmed].length > 320) throw new MailxClientError({ code: 'validation', field: 'query', message: '配置参数无效。' })
+  if (!trimmed) return []
+  const wanted = trimmed.toLowerCase()
+  type Person = { sent: number, received: number, last: string, name: { at: string, value: string } | null }
+  const people = new Map<string, Person>()
+  const mention = (rawAddress: string, at: string, name: string | null | undefined, sent: boolean) => {
+    const address = rawAddress.toLowerCase()
+    const local = address.includes('@') ? address.slice(0, address.lastIndexOf('@')) : address
+    if (!address || own.has(address) || NO_REPLY.some((pattern) => local.includes(pattern))) return
+    const row = people.get(address) ?? { sent: 0, received: 0, last: '', name: null }
+    if (sent) row.sent += 1
+    else row.received += 1
+    if (row.last < at) row.last = at
+    const value = name?.trim()
+    if (value && (!row.name || row.name.at < at)) row.name = { at, value }
+    people.set(address, row)
+  }
+  for (const email of emails) {
+    const folder = role(email)
+    if (folder === 'junk' || folder === 'trash') continue
+    const at = email.summary.receivedAt
+    if (folder === 'sent') {
+      const recipients = new Map<string, string | null>()
+      for (const row of [...email.to, ...email.cc]) {
+        const key = row.address.toLowerCase()
+        if (!recipients.get(key)) recipients.set(key, row.name ?? null)
+      }
+      for (const [address, name] of recipients) mention(address, at, name, true)
+    }
+    mention(email.summary.from.address, at, email.summary.from.name, false)
+  }
+  return [...people]
+    .filter(([address, row]) => contactMatches(wanted, address, row.name?.value ?? null))
+    .sort(([a, x], [b, y]) => Number(y.sent > 0) - Number(x.sent > 0)
+      || (y.sent * 3 + y.received) - (x.sent * 3 + x.received)
+      || y.last.localeCompare(x.last)
+      || (a < b ? -1 : a > b ? 1 : 0))
+    .slice(0, limit)
+    .map(([address, row]) => ({ name: row.name?.value ?? null, address }))
 }
 
 /** Browser preview only (`?seed=outbox`): one rich draft plus sends that end failed, unknown and retrying. */

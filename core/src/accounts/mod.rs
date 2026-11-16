@@ -1,4 +1,5 @@
 mod archives;
+mod assistant_chats;
 mod attachments;
 pub(crate) mod bodies;
 mod contacts;

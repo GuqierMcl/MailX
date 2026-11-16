@@ -10,5 +10,5 @@ export function formatTokens(count: number) {
 export function modelRef(connectionId: string, model: AiModel | string): AiModelRef {
   return typeof model === 'string'
     ? { connectionId, modelId: model, name: model, contextLength: null, outputLength: null }
-    : { connectionId, modelId: model.id, name: model.name, contextLength: model.contextLength, outputLength: model.outputLength }
+    : { connectionId, modelId: model.id, name: model.name, contextLength: model.contextLength, outputLength: model.outputLength, toolCall: model.toolCall ?? undefined }
 }

@@ -8,7 +8,7 @@ import { useAssistantRun } from './use-assistant-run'
 const KIND: RunKind = { type: 'nowSummary', since: null, fresh: false }
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
+  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'r1'): AssistantEvent => ({ runId, seq, kind })
 const text = (seq: number, delta: string, runId = 'r1') => event(seq, { type: 'text', delta }, runId)

@@ -181,6 +181,10 @@ const MAIN_ONLY: &[&str] = &[
     "assistant_respond",
     "assistant_grant_consent",
     "assistant_revoke_consent",
+    "assistant_list_conversations",
+    "assistant_get_conversation",
+    "assistant_delete_conversation",
+    "assistant_clear_conversations",
     "settings_update",
     "autostart_get",
     "autostart_set",
@@ -197,6 +201,7 @@ const MAIN_ONLY: &[&str] = &[
     "outbox_resolve_unknown",
     "outbox_remove_local_copy",
     "composer_open",
+    "composer_focus",
     "updater_get_state",
     "updater_check",
     "updater_download",
@@ -218,19 +223,23 @@ const BOTH: &[&str] = &[
     "drafts_get",
     "drafts_update",
     "drafts_delete",
-];
-
-/// Commands only a composer window may call.
-const COMPOSER_ONLY: &[&str] = &[
+    "contacts_suggest",
+    // The composer's own commands, also used by the main window's inline
+    // composer (sending.md section 17.7). Dropped files stay composer-only:
+    // the main window does not take file drops.
     "outbox_queue_send",
-    "composer_close",
     "attachments_add",
-    "attachments_add_dropped",
     "attachments_remove",
     "attachments_policy",
     "inline_images_add",
     "inline_images_add_bytes",
     "inline_image_preview",
+];
+
+/// Commands only a composer window may call.
+const COMPOSER_ONLY: &[&str] = &[
+    "composer_close",
+    "attachments_add_dropped",
     "composer_cancel_close",
 ];
 
@@ -459,6 +468,10 @@ mod tests {
             "assistant_respond",
             "assistant_grant_consent",
             "assistant_revoke_consent",
+            "assistant_list_conversations",
+            "assistant_get_conversation",
+            "assistant_delete_conversation",
+            "assistant_clear_conversations",
         ] {
             assert_eq!(check("main", &app, command, None), Ok(WindowKind::Main));
             // A composer window (or a mail body frame) cannot answer a
@@ -551,6 +564,10 @@ mod tests {
             ("assistant_respond", true, false),
             ("assistant_grant_consent", true, false),
             ("assistant_revoke_consent", true, false),
+            ("assistant_list_conversations", true, false),
+            ("assistant_get_conversation", true, false),
+            ("assistant_delete_conversation", true, false),
+            ("assistant_clear_conversations", true, false),
             ("emails_set_flag", true, false),
             ("emails_delete", true, false),
             ("emails_verification_code_status", true, false),
@@ -564,6 +581,7 @@ mod tests {
             ("emails_select", true, false),
             ("contacts_list_aggregations", true, false),
             ("contacts_set_aggregation", true, false),
+            ("contacts_suggest", true, true),
             ("sync_states", true, false),
             ("sync_refresh", true, false),
             ("settings_get", true, true),
@@ -583,14 +601,14 @@ mod tests {
             ("drafts_prepare_body", true, false),
             ("drafts_update", true, true),
             ("drafts_delete", true, true),
-            ("attachments_add", false, true),
+            ("attachments_add", true, true),
             ("attachments_add_dropped", false, true),
-            ("attachments_remove", false, true),
-            ("attachments_policy", false, true),
-            ("inline_images_add", false, true),
-            ("inline_images_add_bytes", false, true),
-            ("inline_image_preview", false, true),
-            ("outbox_queue_send", false, true),
+            ("attachments_remove", true, true),
+            ("attachments_policy", true, true),
+            ("inline_images_add", true, true),
+            ("inline_images_add_bytes", true, true),
+            ("inline_image_preview", true, true),
+            ("outbox_queue_send", true, true),
             ("outbox_list", true, false),
             ("outbox_get", true, false),
             ("outbox_cancel", true, false),
@@ -598,6 +616,7 @@ mod tests {
             ("outbox_resolve_unknown", true, false),
             ("outbox_remove_local_copy", true, false),
             ("composer_open", true, false),
+            ("composer_focus", true, false),
             ("composer_close", false, true),
             ("composer_cancel_close", false, true),
             ("updater_get_state", true, false),
@@ -660,10 +679,26 @@ mod tests {
     }
 
     #[test]
-    fn queue_send_is_refused_from_main_and_resolve_is_allowed_from_it() {
+    fn main_may_queue_any_draft_for_its_inline_composer_and_resolve() {
         let app = url("tauri://localhost");
         let draft = id().hyphenated().to_string();
-        assert!(check("main", &app, "outbox_queue_send", Some(&draft)).is_err());
+        // The inline composer edits whichever draft the user opened there.
+        for command in [
+            "outbox_queue_send",
+            "attachments_add",
+            "attachments_remove",
+            "inline_images_add",
+            "inline_images_add_bytes",
+            "inline_image_preview",
+        ] {
+            assert_eq!(
+                check("main", &app, command, Some(&draft)),
+                Ok(WindowKind::Main),
+                "{command}"
+            );
+        }
+        // Dropped files only reach composer windows.
+        assert!(check("main", &app, "attachments_add_dropped", Some(&draft)).is_err());
         assert_eq!(
             check("main", &app, "outbox_resolve_unknown", None),
             Ok(WindowKind::Main)
@@ -672,6 +707,7 @@ mod tests {
         let label = composer_label(&id());
         assert!(check(&label, &app, "outbox_resolve_unknown", None).is_err());
         assert!(check(&label, &app, "composer_open", None).is_err());
+        assert!(check(&label, &app, "composer_focus", None).is_err());
         assert!(check("main", &app, "composer_close", None).is_err());
     }
 }

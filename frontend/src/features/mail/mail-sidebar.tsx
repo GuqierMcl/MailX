@@ -46,6 +46,7 @@ import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { formatFullTime } from './format'
 import { useManualSync } from './use-manual-sync'
+import { openIntent } from '@/features/outbox/use-compose'
 import { COMPOSE_SHORTCUT, ROLE_ICONS, type MailSidebarProps } from './sidebar-shared'
 
 export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, onSelect, onOpenAccounts, onOpenSettings, onCompose, draftCount, outboxCount, onRefresh }: MailSidebarProps) {
@@ -169,7 +170,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={onCompose} className="font-medium" title={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })}>
+            <SidebarMenuButton onClick={(event) => onCompose(openIntent(event))} className="font-medium" title={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })}>
               <HugeiconsIcon icon={PencilEdit02Icon} />
               <span>{t('mail:compose')}</span>
             </SidebarMenuButton>

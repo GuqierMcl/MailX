@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { buildFolderTree, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
+import { openIntent } from '@/features/outbox/use-compose'
 import { COMPOSE_SHORTCUT, ROLE_ICONS, type MailSidebarProps } from './sidebar-shared'
 
 /** A small number on an icon; past 99 it stops growing. */
@@ -77,7 +78,7 @@ function RailItem({ icon, label, name, active = false, onClick, mark }: {
   /** Accessible name, when it says more than `label` (e.g. the unread count). */
   name?: string
   active?: boolean
-  onClick: () => void
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
   mark?: React.ReactNode
 }) {
   return (
@@ -119,7 +120,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
 
   return (
     <div data-slot="mail-rail" className="flex h-full min-h-0 flex-col items-center gap-1 py-2">
-      <RailItem icon={PencilEdit02Icon} label={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })} onClick={onCompose} />
+      <RailItem icon={PencilEdit02Icon} label={t('mail:composeShortcut', { shortcut: COMPOSE_SHORTCUT })} onClick={(event) => onCompose(openIntent(event))} />
       <div className="mt-3 flex flex-col items-center gap-1">
         <RailItem icon={SunriseIcon} label={t('mail:nowView')} active={mailbox.kind === 'now'} onClick={choose({ kind: 'now' })} />
         <RailItem

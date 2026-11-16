@@ -353,6 +353,170 @@ async fn negotiate_only_spnego_selects_ntlm_and_validates_mic_and_cbt() {
     }
 }
 
+#[tokio::test]
+async fn spnego_rejects_early_success_with_or_without_an_incomplete_token() {
+    for include_token in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut peer, _) = listener.accept().await.unwrap();
+            let (head, _) = read_request(&mut peer).await;
+            assert!(!head.to_lowercase().contains("authorization"));
+            reply(
+                &mut peer,
+                "401 Unauthorized",
+                "WWW-Authenticate: Negotiate\r\n",
+                "",
+            )
+            .await;
+            let (head, _) = read_request(&mut peer).await;
+            let authorization = head
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                .unwrap()
+                .1
+                .trim();
+            let token = STANDARD
+                .decode(authorization.strip_prefix("Negotiate ").unwrap())
+                .unwrap();
+            let identity = AuthIdentity {
+                username: Username::parse("alice@example.test").unwrap(),
+                password: "controlled-password".to_owned().into(),
+            };
+            let mut negotiate =
+                Negotiate::new_server(http::ntlm_only_config(), vec![identity.clone()]).unwrap();
+            let credentials = Credentials::AuthIdentity(identity);
+            let mut handle = negotiate
+                .acquire_credentials_handle()
+                .with_credential_use(CredentialUse::Inbound)
+                .with_auth_data(&credentials)
+                .execute(&mut negotiate)
+                .unwrap()
+                .credentials_handle;
+            let (challenge, complete) =
+                accept_negotiate(&mut negotiate, &mut handle, token, BINDING).unwrap();
+            assert!(
+                !complete,
+                "only Type1 arrived; the password proof has not been sent"
+            );
+            let headers = if include_token {
+                // Genuine SSPI-generated challenge: valid ASN.1 is not proof
+                // of a completed exchange, even if a proxy labels it HTTP 200.
+                format!(
+                    "WWW-Authenticate: Negotiate {}\r\n",
+                    STANDARD.encode(challenge)
+                )
+            } else {
+                String::new()
+            };
+            reply(&mut peer, "200 OK", &headers, &folder_success()).await;
+        });
+        let endpoint = Endpoint::parse("https://mail.example/EWS/Exchange.asmx").unwrap();
+        let mut client = http::Connection::with_stream(
+            Box::new(TcpStream::connect(address).await.unwrap()),
+            &endpoint,
+        )
+        .await
+        .unwrap();
+        let result = client
+            .authenticate(
+                "alice@example.test",
+                &SecretValue::new("controlled-password".into()),
+                BINDING,
+            )
+            .await;
+        assert_eq!(result, Err(EwsError::Protocol));
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn spnego_rejects_a_present_final_token_without_required_completion_mic() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut peer, _) = listener.accept().await.unwrap();
+        read_request(&mut peer).await;
+        reply(
+            &mut peer,
+            "401 Unauthorized",
+            "WWW-Authenticate: Negotiate\r\n",
+            "",
+        )
+        .await;
+        let identity = AuthIdentity {
+            username: Username::parse("alice@example.test").unwrap(),
+            password: "controlled-password".to_owned().into(),
+        };
+        let mut negotiate =
+            Negotiate::new_server(http::ntlm_only_config(), vec![identity.clone()]).unwrap();
+        let credentials = Credentials::AuthIdentity(identity);
+        let mut handle = negotiate
+            .acquire_credentials_handle()
+            .with_credential_use(CredentialUse::Inbound)
+            .with_auth_data(&credentials)
+            .execute(&mut negotiate)
+            .unwrap()
+            .credentials_handle;
+        for _ in 0..6 {
+            let (head, _) = read_request(&mut peer).await;
+            let authorization = head
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                .unwrap()
+                .1
+                .trim();
+            let token = STANDARD
+                .decode(authorization.strip_prefix("Negotiate ").unwrap())
+                .unwrap();
+            let (output, complete) =
+                accept_negotiate(&mut negotiate, &mut handle, token, BINDING).unwrap();
+            if complete {
+                // DER fixture for SPNEGO NegTokenResp { negState: accept-completed }
+                // without mechListMIC. SSPI parses it, but must keep waiting for
+                // the MIC required by this context rather than report completion.
+                reply(
+                    &mut peer,
+                    "200 OK",
+                    "WWW-Authenticate: Negotiate oQcwBaADCgEA\r\n",
+                    &folder_success(),
+                )
+                .await;
+                return;
+            }
+            reply(
+                &mut peer,
+                "401 Unauthorized",
+                &format!(
+                    "WWW-Authenticate: Negotiate {}\r\n",
+                    STANDARD.encode(output)
+                ),
+                "",
+            )
+            .await;
+        }
+        panic!("controlled NTLM authentication did not complete");
+    });
+    let endpoint = Endpoint::parse("https://mail.example/EWS/Exchange.asmx").unwrap();
+    let mut client = http::Connection::with_stream(
+        Box::new(TcpStream::connect(address).await.unwrap()),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    let result = client
+        .authenticate(
+            "alice@example.test",
+            &SecretValue::new("controlled-password".into()),
+            BINDING,
+        )
+        .await;
+    assert_eq!(result, Err(EwsError::Protocol));
+    server.await.unwrap();
+}
+
 #[test]
 fn certificate_channel_binding_hashes_the_actual_der() {
     let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();

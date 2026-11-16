@@ -190,6 +190,7 @@
   "undoArchiveFailed": "无法撤销此次归档操作",
   "starredView": "星标",
   "nowView": "此刻",
+  "askAi": "问 AI",
   "more": "更多",
   "toggleAccounts": "{{action}}{{folder}}的各账号",
   "mailboxes": "邮箱",
@@ -305,5 +306,13 @@
   "verificationCopyFailed": "无法复制验证码",
   "verificationCopiedAndTrashed": "验证码已复制，邮件已移到已删除",
   "verificationCopiedKept": "验证码已复制，邮件无法移到已删除，已保留",
-  "verificationCleanupFailed": "验证码已复制，但未能将邮件移到已删除"
+  "verificationCleanupFailed": "验证码已复制，但未能将邮件移到已删除",
+  "inlineComposePopOut": "在新窗口中打开",
+  "inlineComposeClose": "关闭",
+  "inlineComposeSaved": "已存为草稿",
+  "inlineComposeContinue": "继续编辑",
+  "inlineComposeSaveFailed": "草稿没有保存",
+  "inlineComposeSaveFailedDescription": "写信区保持打开，可以重试后再离开。",
+  "inlineComposePopOutFailed": "无法在新窗口中打开",
+  "inlineComposeOpenFailed": "无法打开写信区"
 }

@@ -4,6 +4,9 @@ import type {
   AiCatalog,
   AiConsent,
   AssistantEvent,
+  ConversationDetail,
+  ConversationList,
+  ConversationsChanged,
   RunSnapshot,
   StartRun,
   AiModel,
@@ -67,6 +70,7 @@ import type {
   EmailSelection,
   FlagBatchOutcome,
   ContactAggregation,
+  ContactSuggestion,
   MailOverview,
   MailOverviewQuery,
   TranslationCacheStats,
@@ -196,6 +200,11 @@ export interface MailxClient {
   listContactAggregations(): Promise<ContactAggregation[]>
   /** Starts or stops aggregating a sender address (case-insensitive, all accounts); idempotent. */
   setContactAggregation(address: string, aggregated: boolean): Promise<void>
+  /**
+   * Recipient suggestions for a composer address field, from mail already on this device:
+   * people you wrote to first. `limit` defaults to 8, at most 20; a blank query returns none.
+   */
+  suggestContacts(query: string, limit?: number): Promise<ContactSuggestion[]>
   /** Restores only an archive operation's changes; newer changes are never overwritten. */
   undoArchive(undoToken: string): Promise<void>
   /** Committed local flag/archive changes, including those made by agents. */
@@ -336,7 +345,7 @@ export interface MailxClient {
   attachmentPolicy(accountId: string): Promise<AttachmentPolicy>
   /** Composer window. Fires when files are dropped on it (the paths stay in the host). */
   onFilesDropped(listener: () => void): () => void
-  /** Composer window only, own draft only. Queues the draft; the undo window comes from settings. */
+  /** A composer window (own draft only) or the main window's inline composer. Queues the draft; the undo window comes from settings. */
   queueSend(request: QueueSendRequest): Promise<OutboxItem>
   listOutbox(options?: { accountId?: string | null; includeAll?: boolean }): Promise<OutboxItem[]>
   getOutbox(id: string): Promise<OutboxItem>
@@ -349,6 +358,8 @@ export interface MailxClient {
   resolveUnknown(request: ResolveUnknownRequest): Promise<OutboxItem>
   /** Main window. Opens or focuses the draft's composer window; `fresh` marks a draft created for it. */
   openComposer(draftId: string, fresh?: boolean): Promise<void>
+  /** Main window. Focuses the draft's composer window if one is open; false when none is (nothing is opened). */
+  focusComposer(draftId: string): Promise<boolean>
   /** Composer window. Closes its own window; flush the draft first. */
   closeComposer(force?: boolean, generation?: number): Promise<void>
   /** Cancels the matching close or app quit attempt without discarding edits. */
@@ -387,6 +398,19 @@ export interface MailxClient {
   assistantRevokeConsent(): Promise<void>
   /** Run events in `seq` order: state, text, tool activity, confirmation requests, the end. */
   onAssistantEvent(listener: (event: AssistantEvent) => void): () => void
+  /**
+   * Saved chat conversations, newest first (kept on this device unless `assistant.saveHistory` is off).
+   * `limit` is 1 to 100 (default 50); `cursor` is the previous page's `nextCursor`.
+   */
+  assistantListConversations(page?: { limit?: number; cursor?: string | null }): Promise<ConversationList>
+  /** A saved conversation as turns that render like a live one; `notFound` when it is gone. */
+  assistantGetConversation(conversationId: string): Promise<ConversationDetail>
+  /** Deletes a conversation and stops the run that uses it, if any. `notFound` when it is gone. */
+  assistantDeleteConversation(conversationId: string): Promise<void>
+  /** Deletes every saved conversation and stops running chats. */
+  assistantClearConversations(): Promise<void>
+  /** Saved conversations changed (a turn was saved, one was deleted, an account's were removed): refetch the list. */
+  onAssistantConversationsChanged(listener: (changed: ConversationsChanged) => void): () => void
 
   // --- Updates (docs/architecture/updater.md). Main window only.
   /** The current update state, including whether this edition can install one. */
@@ -430,6 +454,7 @@ export const HOST_EVENTS = {
   updater: 'mailx://updater-state',
   mcp: 'mailx://mcp-status-changed',
   assistant: 'mailx://assistant',
+  assistantConversations: 'mailx://assistant-conversations',
 } as const
 
 export type BodyLinkIdentity = { emailId: string; index: number; documentToken: string }
@@ -560,6 +585,7 @@ export function createDesktopClient(): MailxClient {
     selectEmails: (query) => call<EmailSelection>('emails_select', { query }),
     listContactAggregations: () => call<ContactAggregation[]>('contacts_list_aggregations', {}),
     setContactAggregation: (address, aggregated) => call<void>('contacts_set_aggregation', { address, aggregated }),
+    suggestContacts: (query, limit) => call<ContactSuggestion[]>('contacts_suggest', limit === undefined ? { query } : { query, limit }),
     undoArchive: (undoToken) => call<void>('emails_undo_archive', { undoToken }),
     onMailStateChanged: (listener) => subscribe<MailStateChanged>('mailx://mail-state-changed', listener),
     onDeletions(listener) {
@@ -706,6 +732,7 @@ export function createDesktopClient(): MailxClient {
     resolveUnknown: ({ id, resolution, clientMutationId }) =>
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
     openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
+    focusComposer: (draftId) => call<boolean>('composer_focus', { draftId }),
     closeComposer: (force = false, generation) => call<void>('composer_close', { force, generation: generation ?? null }),
     cancelComposerClose: (generation) => call<void>('composer_cancel_close', { generation }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
@@ -728,6 +755,11 @@ export function createDesktopClient(): MailxClient {
     assistantGrantConsent: () => call<AiConsent>('assistant_grant_consent'),
     assistantRevokeConsent: () => call<void>('assistant_revoke_consent'),
     onAssistantEvent: (listener) => subscribe<AssistantEvent>(HOST_EVENTS.assistant, listener),
+    assistantListConversations: (page) => call<ConversationList>('assistant_list_conversations', { limit: page?.limit, cursor: page?.cursor }),
+    assistantGetConversation: (conversationId) => call<ConversationDetail>('assistant_get_conversation', { conversationId }),
+    assistantDeleteConversation: (conversationId) => call<void>('assistant_delete_conversation', { conversationId }),
+    assistantClearConversations: () => call<void>('assistant_clear_conversations'),
+    onAssistantConversationsChanged: (listener) => subscribe<ConversationsChanged>(HOST_EVENTS.assistantConversations, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
     getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),

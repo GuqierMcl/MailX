@@ -21,7 +21,7 @@ describe('mock account display preferences', () => {
     const content = { to: [], cc: [], bcc: [], subject: '', bodyHtml: '' }
     const draft = await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-fallback' })
     expect(draft.accountId).toBe(ids[0])
-    await main.updateSettings({ compose: { defaultAccountId: ids[1], undoSendSeconds: 0 }, layout: { accountOrder: ids } })
+    await main.updateSettings({ compose: { defaultAccountId: ids[1], undoSendSeconds: 0, openMode: 'window' }, layout: { accountOrder: ids } })
     expect((await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-default' })).accountId).toBe(ids[1])
     expect((await main.getDraft(draft.id)).accountId).toBe(ids[0])
   })
@@ -257,7 +257,7 @@ describe('mock drafts and sending', () => {
 
   it('cancels during the undo window and unlocks the draft', async () => {
     const client = createMockClient({ sendStepMs: 5 })
-    await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 5 } })
+    await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 5, openMode: 'window' } })
     const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
     const draftChanges: string[] = []
     client.onDrafts((change) => draftChanges.push(change.change))
@@ -291,6 +291,9 @@ describe('mock drafts and sending', () => {
     expect(forward.to).toEqual([])
     await expect(client.openComposer(reply.id)).resolves.toBeUndefined()
     await expect(client.openComposer('missing')).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    // The preview has no composer windows to bring forward, opened or not.
+    await expect(client.focusComposer(reply.id)).resolves.toBe(false)
+    await expect(client.focusComposer('missing')).resolves.toBe(false)
   })
 
   it('simulates failed, unknown and retried sends from the recipient address (browser preview only)', async () => {
@@ -589,6 +592,29 @@ describe('mock contact views and sender aggregation', () => {
   })
 })
 
+describe('mock recipient suggestions', () => {
+  it('suggests senders and recipients from the mock mail, never your own addresses', async () => {
+    const client = createMockClient()
+    const accounts = await client.listAccounts()
+    const own = new Set(accounts.map((account) => account.emailAddress.toLowerCase()))
+    const inbox = await client.listEmails(emailQuery({ folderRole: 'inbox' }))
+    const sender = inbox.items.map((item) => item.from).find((from) => !own.has(from.address.toLowerCase()) && !/no-?reply/i.test(from.address))
+    expect(sender).toBeDefined()
+    const address = sender!.address.toLowerCase()
+    const found = await client.suggestContacts(address.slice(0, 3).toUpperCase())
+    expect(found.map((item) => item.address)).toContain(address)
+    expect(found.length).toBeLessThanOrEqual(8)
+    expect(found.every((item) => !own.has(item.address))).toBe(true)
+    expect((await client.suggestContacts(address.slice(0, 3), 1)).length).toBeLessThanOrEqual(1)
+    expect(await client.suggestContacts('   ')).toEqual([])
+    expect(await client.suggestContacts('zzzz-no-such-person')).toEqual([])
+    for (const accountAddress of own) expect((await client.suggestContacts(accountAddress)).map((item) => item.address)).not.toContain(accountAddress)
+    await expect(client.suggestContacts('a', 0)).rejects.toMatchObject({ failure: { code: 'validation', field: 'limit' } })
+    await expect(client.suggestContacts('a', 21)).rejects.toMatchObject({ failure: { code: 'validation', field: 'limit' } })
+    await expect(client.suggestContacts('a'.repeat(321))).rejects.toMatchObject({ failure: { code: 'validation', field: 'query' } })
+  })
+})
+
 describe('mock translation', () => {
   async function ready() {
     const client = createMockClient({ seed: 'showcase' })
@@ -759,6 +785,48 @@ describe('mock assistant', () => {
     expect((await client.getSettings()).settings.assistant.consented).toBeNull()
   })
 
+  it('keeps chats like the core: seeded past ones, newest first, saved at the end, deletable', async () => {
+    const client = mock()
+    const changes: string[] = []
+    client.onAssistantConversationsChanged((changed) => changes.push(changed.change))
+    const seeded = await client.assistantListConversations()
+    expect(seeded.items).toHaveLength(2)
+    expect(seeded.items[0].updatedAt >= seeded.items[1].updatedAt).toBe(true)
+    const past = await client.assistantGetConversation(seeded.items[0].id)
+    expect(past.turns.map((turn) => turn.role)).toEqual(['user', 'assistant'])
+    expect(JSON.stringify(past)).not.toContain('token')
+
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('look at my mail'))
+    await finished(client, started.runId)
+    await vi.waitFor(() => expect(changes).toContain('saved'))
+    const listed = await client.assistantListConversations({ limit: 1 })
+    expect(listed.items[0].id).toBe(started.conversationId)
+    expect(listed.items[0].title).toBe('look at my mail')
+    expect(listed.nextCursor).not.toBeNull()
+    const next = await client.assistantListConversations({ limit: 1, cursor: listed.nextCursor })
+    expect(next.items).toHaveLength(1)
+    const saved = await client.assistantGetConversation(started.conversationId!)
+    expect(saved.turns.map((turn) => turn.role)).toEqual(['user', 'assistant'])
+
+    await client.assistantDeleteConversation(started.conversationId!)
+    await expect(client.assistantGetConversation(started.conversationId!)).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    await client.assistantClearConversations()
+    expect((await client.assistantListConversations()).items).toEqual([])
+    expect(changes.slice(-2)).toEqual(['deleted', 'cleared'])
+  })
+
+  it('does not save a chat while history is off', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    await client.updateSettings({ assistant: { ...(await client.getSettings()).settings.assistant, saveHistory: false } })
+    const before = (await client.assistantListConversations()).items.length
+    const started = await client.assistantStart(chat('private'))
+    await finished(client, started.runId)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await client.assistantListConversations()).items).toHaveLength(before)
+  })
+
   it('streams the Now summary in a few ordered text events', async () => {
     const client = mock()
     await client.assistantGrantConsent()
@@ -787,6 +855,29 @@ describe('mock assistant', () => {
     expect(summary).toMatchObject({ type: 'changed', count: 1, undo: { type: 'archive' } })
     if (summary.type !== 'changed' || summary.undo?.type !== 'archive') throw new Error('no undo')
     await client.undoArchive(summary.undo.token)
+  })
+
+  it('answers a plain question with a search step, a read step and markdown with a list and a link', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('what is new'))
+    const done = await finished(client, started.runId)
+    expect(done.tools.map((tool) => [tool.name, tool.status])).toEqual([['search_emails', 'done'], ['read_email', 'done']])
+    expect(done.tools[0].summary).toMatchObject({ type: 'found' })
+    expect(done.tools[1].summary).toMatchObject({ type: 'read' })
+    expect(done.text).toMatch(/\n- /)
+    expect(done.text).toContain('](https://example.com/help)')
+  })
+
+  it('writes a draft on request and reports it as a draft step', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('write me a draft'))
+    const done = await finished(client, started.runId)
+    expect(done.tools[0]).toMatchObject({ name: 'create_draft', status: 'done', summary: { type: 'draft' } })
+    const summary = done.tools[0].summary
+    if (summary.type !== 'draft') throw new Error('no draft')
+    expect((await client.getDraft(summary.draftId)).id).toBe(summary.draftId)
   })
 
   it('asks before sending and respects the answer, once, for that request only', async () => {

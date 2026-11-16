@@ -246,7 +246,7 @@ describe('composer window', () => {
     const { client } = setup()
     client.queueSend.mockResolvedValue({} as never)
     await body()
-    await userEvent.type(screen.getByRole('textbox', { name: '收件人' }), 'li@example.org{Enter}')
+    await userEvent.type(screen.getByRole('combobox', { name: '收件人' }), 'li@example.org{Enter}')
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
     await screen.findByRole('button', { name: '无主题，确认发送' })
     await new Promise((resolve) => setTimeout(resolve, 450))
@@ -290,7 +290,8 @@ describe('composer window', () => {
     await waitFor(() => expect(client.listAccounts).toHaveBeenCalledTimes(2))
     expect(client.closeComposer).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: '正文' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '发件人' })).toHaveTextContent('other@example.com')
+    // One account left: shown as plain text, not a picker.
+    expect(screen.getByRole('group', { name: '发件人：个人邮箱' })).toHaveTextContent('other@example.com')
   })
 
   it('ignores a late queue success after the account removal already closed its composer', async () => {

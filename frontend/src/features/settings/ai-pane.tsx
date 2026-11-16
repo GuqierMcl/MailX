@@ -31,7 +31,7 @@ const hostOf = (baseUrl: string) => {
   try { return new URL(baseUrl).host } catch { return baseUrl }
 }
 
-/** `assistantChat` shows the assistant settings only the chat uses; off until the chat ships. */
+/** `assistantChat` shows the assistant settings only the chat uses (what it may do, custom instructions). The app turns it on. */
 export function AiPane({ client, assistantChat = false }: { client: MailxClient; assistantChat?: boolean }) {
   useTranslation()
   const queryClient = useQueryClient()

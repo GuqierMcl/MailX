@@ -61,10 +61,13 @@ import { useVerificationCodes } from './use-verification-codes'
 import { isMailView } from './mailbox'
 import { DraftList, OutboxList } from '@/features/outbox/compose-lists'
 import { DraftDetail, DraftPlaceholder, OutboxDetail } from '@/features/outbox/compose-details'
-import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/features/outbox/use-compose'
+import { useComposeActions, useComposeEvents, useDrafts, useOutbox, type OpenIntent } from '@/features/outbox/use-compose'
+import { useInlineComposer } from '@/features/outbox/use-inline-composer'
+import { InlineComposerPane } from '@/features/outbox/inline-composer'
 import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 import { NowPage } from '@/features/now/now-page'
+import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -108,6 +111,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Bumped by the palette's "问 AI": the Now page focuses its input when it changes.
+  const [askToken, setAskToken] = useState(0)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const removedAccounts = useRef(new Set<string>())
@@ -188,12 +193,36 @@ export function Workbench({ client }: { client: MailxClient }) {
   // The outbox entry exists only while something is unfinished; if the view is open
   // when the last item completes, fall back to the inbox.
   // Picking a mailbox from anywhere (sidebar, rail, palette, notification) ends the contact view.
-  const showMailbox = useCallback((next: Mailbox) => {
+  const switchMailbox = useCallback((next: Mailbox) => {
     setContact(null)
     setSlide(null)
     setRestoreScroll(0)
     setMailbox(next)
   }, [])
+  // The inline composer sits in the reader (sending.md section 17.7). Opening it unfolds
+  // the reader; from the Now page, which has no reader, it goes to the unified inbox.
+  const composeActions = useRef<ReturnType<typeof useComposeActions> | null>(null)
+  const inline = useInlineComposer(client, {
+    onShow: () => {
+      setReaderChoice(false)
+      setMailbox((current) => current.kind === 'now' ? INITIAL_MAILBOX : current)
+    },
+    onContinue: (draftId) => void composeActions.current?.openDraft(draftId),
+  })
+  const leaveInline = inline.leave
+  // Navigating away from the inline composer saves it first (`leave`). The list and
+  // sidebar answer at once; the composer stays on screen until its draft is written,
+  // and stays put if that fails. The Now page has no reader, so it waits for the save.
+  const showMailbox = useCallback((next: Mailbox) => {
+    if (inline.draftId() === null) return switchMailbox(next)
+    if (next.kind === 'now') {
+      void leaveInline().then((ok) => { if (ok) switchMailbox(next) })
+      return
+    }
+    void leaveInline()
+    switchMailbox(next)
+  }, [inline, leaveInline, switchMailbox])
+  const leaveInlineFor = useCallback(() => { if (inline.draftId() !== null) void leaveInline() }, [inline, leaveInline])
   const outboxGone = mailbox.kind === 'outbox' && outbox.isSuccess && outboxCount === 0
   const selectOutboxItem = useCallback((outboxId: string) => {
     setOutboxChoice(outboxId)
@@ -207,7 +236,11 @@ export function Workbench({ client }: { client: MailxClient }) {
     void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     void queryClient.invalidateQueries({ queryKey: [...mailKeys.all, 'email'] })
   }, [queryClient])
-  useComposeEvents(client, selectOutboxItem, { onChange: refetchSentLists })
+  useComposeEvents(client, selectOutboxItem, {
+    onChange: refetchSentLists,
+    // Undoing a send reopens the draft where the setting says.
+    onReopen: (draftId) => composeActions.current ? composeActions.current.openDraft(draftId) : client.openComposer(draftId),
+  })
   // A copy removed from this device: the same refetch, without a send result.
   useEffect(() => client.onSentCopiesChanged(refetchSentLists), [client, refetchSentLists])
 
@@ -294,7 +327,10 @@ export function Workbench({ client }: { client: MailxClient }) {
   const starredView = activeMailbox.kind === 'starred'
   const folderRole = activeMailbox.kind === 'unified' ? activeMailbox.role : archivedView ? 'inbox' : null
   const selectedAccountId = activeMailbox.kind === 'folder' ? activeMailbox.folder.accountId : activeMailbox.kind === 'archived' ? activeMailbox.accountId : null
-  const compose = useComposeActions(client, accounts, selectedAccountId)
+  const openMode = settingsQuery.data?.settings.compose.openMode ?? 'window'
+  const compose = useComposeActions(client, accounts, selectedAccountId, { mode: openMode, inline })
+  useEffect(() => { composeActions.current = compose })
+  const inlineShown = inline.current !== null && !nowPage
   const sourceIdentity = JSON.stringify(accounts.filter((account) => !selectedAccountId || account.id === selectedAccountId)
     .map((account) => [account.id, account.mailboxSourceId]).sort())
   const currentSyncStates = Object.fromEntries(accounts.flatMap((account) => {
@@ -426,7 +462,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   useMarkOpenedAsRead(
     opened ? body.email?.summary : null,
     // The reader shows the selection summary instead while picking messages.
-    Boolean(opened && body.email && !body.detail.isPending && !selecting),
+    Boolean(opened && body.email && !body.detail.isPending && !selecting && !inlineShown),
     (email, flag, wanted) => void setFlag(email, flag, wanted),
   )
 
@@ -492,6 +528,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     const account = accounts.find((row) => row.id === accountId)
     if (!account) return
     if (emailId) {
+      leaveInlineFor()
       setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
       setAnchorId(emailId)
       setReaderChoice(false)
@@ -504,7 +541,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       setFilter('all')
       showMailbox({ kind: 'folder', folder: inbox })
     }
-  }), [client, exitSelection, showMailbox])
+  }), [client, exitSelection, leaveInlineFor, showMailbox])
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
@@ -514,6 +551,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     else if (action === 'compose') void composeNew()
   })
   useEffect(() => {
+    // Keyboard opens follow the setting; only a Shift-click flips it.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === 'n' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
         event.preventDefault()
@@ -580,6 +618,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   }
   // Every way of opening a message (list click, search result, notification) shows the reader.
   const openEmail = (email: { id: string; accountId: string }) => {
+    leaveInlineFor()
     keepListed(email.id)
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
     setAnchorId(email.id)
@@ -656,7 +695,8 @@ export function Workbench({ client }: { client: MailxClient }) {
       setReaderCollapsed(false)
       return true
     }
-    const summary = opened && !readerCollapsed && body.email?.summary.id === opened.id ? body.email.summary : null
+    // The inline composer covers the message, so acting shortcuts have nothing on screen to act on.
+    const summary = opened && !readerCollapsed && !inlineShown && body.email?.summary.id === opened.id ? body.email.summary : null
     if (!summary) return false
     // After archive or delete, the next row opens (the previous one at the end of the list).
     const advance = () => {
@@ -767,13 +807,15 @@ export function Workbench({ client }: { client: MailxClient }) {
     onSelect: selectMailbox,
     onOpenAccounts: () => setAccountsTarget({}),
     onOpenSettings: () => setSettings({ section: 'general' }),
-    onCompose: () => void compose.compose(),
+    onCompose: (intent?: OpenIntent) => void compose.compose(intent),
     draftCount,
     outboxCount,
   }
 
   return (
     <TooltipProvider>
+      {/* The assistant conversation lives here, above the views, so it survives leaving the Now page. */}
+      <AssistantChatProvider client={client}>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
       <ShellLayout
         navLabel={t('mail:mailboxNavigation')}
@@ -815,11 +857,12 @@ export function Workbench({ client }: { client: MailxClient }) {
             openEmail(email)
           }}
           onCompose={() => void compose.compose()}
+          onAskAi={() => { selectMailbox({ kind: 'now' }); setAskToken((token) => token + 1) }}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
           onOpenSettings={setSettings}
-          translation={mailView && !selecting && !readerCollapsed && translation.available ? translation : null}
+          translation={mailView && !selecting && !readerCollapsed && !inlineShown && translation.available ? translation : null}
         />
         {activeMailbox.kind === 'now' ? (
           <NowPage
@@ -834,6 +877,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             onOpenContact={openContactFromNow}
             onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
             onOpenEmail={openFromNow}
+            onOpenDraft={(id) => void compose.openDraft(id)}
+            focusInputToken={askToken}
             verification={verification}
           />
         ) : !layoutReady ? (
@@ -849,7 +894,7 @@ export function Workbench({ client }: { client: MailxClient }) {
                 error={drafts.isError ? errorText(drafts.error) : null}
                 accounts={accounts.length > 1 ? accounts : null}
                 selectedId={selectedDraft}
-                onSelect={(id) => { setDraftChoice(id); setReaderCollapsed(false) }}
+                onSelect={(id) => { leaveInlineFor(); setDraftChoice(id); setReaderCollapsed(false) }}
               />
             ) : activeMailbox.kind === 'outbox' ? (
               <OutboxList
@@ -858,7 +903,7 @@ export function Workbench({ client }: { client: MailxClient }) {
                 error={outbox.isError ? errorText(outbox.error) : null}
                 accounts={accounts.length > 1 ? accounts : null}
                 selectedId={selectedOutbox?.id ?? null}
-                onSelect={(id) => { setOutboxChoice(id); setReaderCollapsed(false) }}
+                onSelect={(id) => { leaveInlineFor(); setOutboxChoice(id); setReaderCollapsed(false) }}
               />
             ) : (
             // The whole pane content slides as one piece on a base <-> contact switch; the
@@ -903,7 +948,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               onDelete={deleteEmail.request}
               onRemoveLocal={requestRemoveLocal}
               canArchive={(email) => canArchive(email, folders)}
-              onRespond={(email, kind) => void compose.respond(email.id, kind)}
+              onRespond={(email, kind, intent) => void compose.respond(email.id, kind, intent)}
               onLoadMore={loadMore}
               selection={selection}
               selectionActions={selectionActions}
@@ -925,14 +970,16 @@ export function Workbench({ client }: { client: MailxClient }) {
             // Folded away, the reader is out of reach for Tab and screen readers too.
             inert={readerCollapsed}
           >
-            {activeMailbox.kind === 'drafts' ? (
+            {inlineShown ? (
+              <InlineComposerPane client={client} accounts={displayAccounts} inline={inline} />
+            ) : activeMailbox.kind === 'drafts' ? (
               selectedDraft ? (
                 <DraftDetail
                   key={selectedDraft}
                   client={client}
                   draftId={selectedDraft}
                   accounts={accounts}
-                  onEdit={(id) => void compose.openDraft(id)}
+                  onEdit={(id, intent) => void compose.openDraft(id, intent)}
                   onGone={() => setDraftChoice(null)}
                 />
               ) : <DraftPlaceholder />
@@ -942,7 +989,7 @@ export function Workbench({ client }: { client: MailxClient }) {
                 client={client}
                 item={selectedOutbox}
                 accounts={accounts}
-                onEdit={(id) => void compose.openDraft(id)}
+                onEdit={(id, intent) => void compose.openDraft(id, intent)}
               />
             ) : selecting ? (
               <SelectionSummary items={selection.items} accounts={displayAccounts} />
@@ -960,7 +1007,7 @@ export function Workbench({ client }: { client: MailxClient }) {
               error={opened && body.detail.isError ? errorText(body.detail.error) : removeError}
               downloading={body.pending}
               onDownload={body.download}
-              onRespond={(kind) => opened && void compose.respond(opened.id, kind)}
+              onRespond={(kind, intent) => opened && void compose.respond(opened.id, kind, intent)}
               onRemoveLocal={removeLocalCopy}
               translation={translation}
               onDelete={deleteEmail.request}
@@ -1002,6 +1049,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         onOpenChange={(open) => { if (!open) setRemoveLocalChoice(null) }}
         onConfirm={confirmRemoveLocal}
       />
+      </AssistantChatProvider>
     </TooltipProvider>
   )
 }

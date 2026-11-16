@@ -14,13 +14,14 @@ import {
   ViewIcon,
 } from '@hugeicons/core-free-icons'
 import type { EmailSummary } from '@/generated/accounts'
+import { openIntent, type OpenIntent } from '@/features/outbox/use-compose'
 
 export type RespondKind = 'reply' | 'replyAll' | 'forward'
 
 /** The message actions a list offers; a missing callback hides its items. */
 export type EmailMenuCallbacks = {
   onOpen?: (email: EmailSummary) => void
-  onRespond?: (email: EmailSummary, kind: RespondKind) => void
+  onRespond?: (email: EmailSummary, kind: RespondKind, intent?: OpenIntent) => void
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   onArchive?: (email: EmailSummary, archive: boolean) => void
   onDelete?: (email: EmailSummary) => void
@@ -46,7 +47,8 @@ export type EmailMenuAction = {
     | 'mail:viewContactMail' | 'mail:aggregateContact' | 'mail:unaggregateContact'
   icon: IconSvgElement
   destructive?: boolean
-  run: () => void
+  /** Gets the click, so a Shift-click on a respond item can flip where it opens. */
+  run: (event?: { shiftKey?: boolean; detail?: number }) => void
 }
 
 /**
@@ -63,7 +65,7 @@ export function emailMenuActions(email: EmailSummary, available: EmailMenuCallba
         ['reply', 'mail:reply', MailReply01Icon],
         ['replyAll', 'mail:replyAll', MailReplyAll01Icon],
         ['forward', 'mail:forward', Forward01Icon],
-      ] as const).map(([kind, label, icon]) => ({ kind, label, icon, run: () => onRespond(email, kind) }))
+      ] as const).map(([kind, label, icon]) => ({ kind, label, icon, run: (event) => onRespond(email, kind, openIntent(event)) }))
     : []
   // Rows of a local-only copy or without a sender address have no contact to speak of.
   const sender = email.from.address.trim().toLowerCase()

@@ -48,6 +48,9 @@ pub enum CoreEvent {
     /// tool activity. `seq` increases per run; a missed event is recovered
     /// from `Assistant::snapshot`.
     Assistant(crate::assistant::AssistantEvent),
+    /// Saved assistant conversations changed (a turn was saved, one was
+    /// deleted, or an account's were removed); the history list refetches.
+    AssistantConversationsChanged(crate::assistant::ConversationsChanged),
 }
 
 /// Origin is selected by the trusted caller, never from mail content.
