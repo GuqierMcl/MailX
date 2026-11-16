@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useEffect, useImperativeHandle, useRef, useState, type Ref, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { EditorState, Selection } from '@tiptap/pm/state'
@@ -19,6 +20,7 @@ import type { DraftAttachmentSummary, InlineImage } from '@/generated/accounts'
 import { InlineImageController } from './inline-image'
 import { allowedMailLink, mailEditorOptions } from './mail-body-editor-schema'
 import { MAIL_COLORS, MAIL_HIGHLIGHTS, type MailColor, type MailHighlight, type MailTextAlign } from './mail-body-format'
+import { expandReplyQuote, ReplyQuoteFold, replyQuoteFoldKey } from './reply-quote-fold'
 import './mail-body-editor.css'
 
 export type MailBodySelection = { from: number; to: number }
@@ -42,6 +44,8 @@ type MailBodyEditorProps = {
   onInsertImage?: () => void
   /** Image files found on the clipboard; the host stores them and inserts the nodes. */
   onPasteImages?: (files: File[]) => void
+  /** Fold the quoted original of a reply (display only); read when the editor starts. */
+  foldReplyQuote?: boolean
 }
 
 type LinkPopup = MailBodySelection & { href: string }
@@ -87,7 +91,7 @@ const blockActions: FormatAction[] = [
 ]
 
 /** A host-independent editor. Draft revisions, saving and sending live outside. */
-export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef, inlineImages, onInsertImage, onPasteImages }: MailBodyEditorProps) {
+export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef, inlineImages, onInsertImage, onPasteImages, foldReplyQuote = false }: MailBodyEditorProps) {
   const { i18n } = useTranslation('composer')
   const [linkPopup, setLinkPopup] = useState<LinkPopup | null>(null)
   const [linkError, setLinkError] = useState(false)
@@ -108,9 +112,12 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     images.attach()
     return () => images.detach()
   }, [images])
+  // The editor starts once; whether it folds is decided then.
+  const [foldQuote] = useState(foldReplyQuote)
   const options = mailEditorOptions(images)
   const editor = useEditor({
     ...options,
+    extensions: [...(options.extensions ?? []), ReplyQuoteFold.configure({ enabled: foldQuote })],
     content: value,
     editable: !readOnly,
     autofocus: false,
@@ -172,6 +179,8 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
       highlight: String(current.getAttributes('mailHighlight').highlight ?? ''),
       undo: current.can().undo(),
       redo: current.can().redo(),
+      // ProseMirror owns this element's place in the document; React only renders the button inside it.
+      quoteWidget: replyQuoteFoldKey.getState(current.state) != null ? current.storage.mailReplyQuoteFold?.widget ?? null : null,
     } : null,
   })
 
@@ -417,9 +426,9 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
           )}
         </div>
         <div className="mail-format-group mail-format-secondary">{alignButtons()}</div>
-        <div className="mail-format-group">{blockActions.slice(0, 2).map((action) => actionButton(action))}</div>
+        <div className="mail-format-group mail-format-tertiary">{blockActions.slice(0, 2).map((action) => actionButton(action))}</div>
         <div className="mail-format-group mail-format-secondary">{actionButton(blockActions[2])}</div>
-        <div className="mail-format-group">{actionButton(blockActions[3])}</div>
+        <div className="mail-format-group mail-format-tertiary">{actionButton(blockActions[3])}</div>
         <div className="mail-format-group mail-format-secondary">{historyButtons()}</div>
         <div className="mail-format-more">
           <IconButton ref={moreButton} label={t('composer:toolbar.more')} size="icon-sm" disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={moreOpen}
@@ -457,6 +466,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
           <div className="mail-format-group">{alignButtons(true)}</div>
           <div className="mail-format-group">{actionButton(blockActions[2], true)}</div>
           <div className="mail-format-group">{historyButtons(true)}</div>
+          <div className="mail-format-group mail-menu-tertiary">{blockActions.slice(0, 2).map((action) => actionButton(action, true))}{actionButton(blockActions[3], true)}</div>
         </div>
       )}
       {!readOnly && formatPopup && (
@@ -475,6 +485,14 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
         </div>
       )}
       <EditorContent editor={editor} className="mail-body-surface" />
+      {state?.quoteWidget && createPortal(
+        <IconButton label={t('composer:editor.showQuote')} size="icon-xs" className="mail-quote-fold-button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => { if (editor && !editor.isDestroyed) { expandReplyQuote(editor.view); editor.view.focus() } }}>
+          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} className="size-3.5" aria-hidden="true" />
+        </IconButton>,
+        state.quoteWidget,
+      )}
     </div>
   )
 }

@@ -21,7 +21,7 @@ describe('mock account display preferences', () => {
     const content = { to: [], cc: [], bcc: [], subject: '', bodyHtml: '' }
     const draft = await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-fallback' })
     expect(draft.accountId).toBe(ids[0])
-    await main.updateSettings({ compose: { defaultAccountId: ids[1], undoSendSeconds: 0 }, layout: { accountOrder: ids } })
+    await main.updateSettings({ compose: { defaultAccountId: ids[1], undoSendSeconds: 0, openMode: 'window' }, layout: { accountOrder: ids } })
     expect((await main.createDraft({ ...content, accountId: null, clientMutationId: 'display-order-default' })).accountId).toBe(ids[1])
     expect((await main.getDraft(draft.id)).accountId).toBe(ids[0])
   })
@@ -257,7 +257,7 @@ describe('mock drafts and sending', () => {
 
   it('cancels during the undo window and unlocks the draft', async () => {
     const client = createMockClient({ sendStepMs: 5 })
-    await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 5 } })
+    await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 5, openMode: 'window' } })
     const draft = await client.createDraft({ accountId: null, ...content, clientMutationId: 'm1' })
     const draftChanges: string[] = []
     client.onDrafts((change) => draftChanges.push(change.change))
@@ -291,6 +291,9 @@ describe('mock drafts and sending', () => {
     expect(forward.to).toEqual([])
     await expect(client.openComposer(reply.id)).resolves.toBeUndefined()
     await expect(client.openComposer('missing')).rejects.toMatchObject({ failure: { code: 'notFound' } })
+    // The preview has no composer windows to bring forward, opened or not.
+    await expect(client.focusComposer(reply.id)).resolves.toBe(false)
+    await expect(client.focusComposer('missing')).resolves.toBe(false)
   })
 
   it('simulates failed, unknown and retried sends from the recipient address (browser preview only)', async () => {
@@ -584,6 +587,29 @@ describe('mock contact views and sender aggregation', () => {
     expect(await client.listContactAggregations()).toEqual([])
     expect((await client.listEmails({ ...inbox, groupSenders: true })).items).toHaveLength(plain.length)
     await expect(client.setContactAggregation('nope', true)).rejects.toMatchObject({ failure: { code: 'validation', field: 'address' } })
+  })
+})
+
+describe('mock recipient suggestions', () => {
+  it('suggests senders and recipients from the mock mail, never your own addresses', async () => {
+    const client = createMockClient()
+    const accounts = await client.listAccounts()
+    const own = new Set(accounts.map((account) => account.emailAddress.toLowerCase()))
+    const inbox = await client.listEmails(emailQuery({ folderRole: 'inbox' }))
+    const sender = inbox.items.map((item) => item.from).find((from) => !own.has(from.address.toLowerCase()) && !/no-?reply/i.test(from.address))
+    expect(sender).toBeDefined()
+    const address = sender!.address.toLowerCase()
+    const found = await client.suggestContacts(address.slice(0, 3).toUpperCase())
+    expect(found.map((item) => item.address)).toContain(address)
+    expect(found.length).toBeLessThanOrEqual(8)
+    expect(found.every((item) => !own.has(item.address))).toBe(true)
+    expect((await client.suggestContacts(address.slice(0, 3), 1)).length).toBeLessThanOrEqual(1)
+    expect(await client.suggestContacts('   ')).toEqual([])
+    expect(await client.suggestContacts('zzzz-no-such-person')).toEqual([])
+    for (const accountAddress of own) expect((await client.suggestContacts(accountAddress)).map((item) => item.address)).not.toContain(accountAddress)
+    await expect(client.suggestContacts('a', 0)).rejects.toMatchObject({ failure: { code: 'validation', field: 'limit' } })
+    await expect(client.suggestContacts('a', 21)).rejects.toMatchObject({ failure: { code: 'validation', field: 'limit' } })
+    await expect(client.suggestContacts('a'.repeat(321))).rejects.toMatchObject({ failure: { code: 'validation', field: 'query' } })
   })
 })
 

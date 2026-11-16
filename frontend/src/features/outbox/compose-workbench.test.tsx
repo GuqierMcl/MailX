@@ -299,7 +299,7 @@ describe('send toasts and notifications', () => {
     expect((await screen.findAllByText('将在 10 秒后发送')).length).toBeGreaterThan(0)
     await userEvent.click((await screen.findAllByRole('button', { name: '撤销', hidden: true }))[0])
     await waitFor(() => expect(client.cancelOutbox).toHaveBeenCalledWith('out-1'))
-    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('draft-1'))
+    await waitFor(() => expect(client.openComposer).toHaveBeenCalledWith('draft-1', false))
   })
 
   it('says it cannot undo once sending has started', async () => {

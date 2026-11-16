@@ -1,6 +1,7 @@
 import type { IconSvgElement } from '@hugeicons/react'
 import { Delete02Icon, Folder01Icon, InboxIcon, SentIcon, SpamIcon } from '@hugeicons/core-free-icons'
 import type { Account, AccountSyncState, Folder, FolderRole } from '@/generated/accounts'
+import type { OpenIntent } from '@/features/outbox/use-compose'
 import type { Mailbox } from './mailbox'
 
 /** Shown in the tooltip; the shortcut itself is handled by the workbench. */
@@ -30,7 +31,8 @@ export type MailSidebarProps = {
   onSelect: (mailbox: Mailbox) => void
   onOpenAccounts: () => void
   onOpenSettings: () => void
-  onCompose: () => void
+  /** Shift-click passes `{ flip: true }`: this once, the other open mode. */
+  onCompose: (intent?: OpenIntent) => void
   /** Unfinished drafts; the entry is always there. */
   draftCount: number
   /** Unfinished sends (queued, sending, failed, unknown); the entry only appears when there are some. */

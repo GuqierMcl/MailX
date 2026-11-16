@@ -24,8 +24,8 @@ use crate::drafts::types::{
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
 use crate::mail::{
-    ContactAggregation, ConversationPage, EmailDeletion, EmailDetail, EmailListQuery, EmailPage,
-    EmailSelection, Folder,
+    ContactAggregation, ContactSuggestion, ConversationPage, EmailDeletion, EmailDetail,
+    EmailListQuery, EmailPage, EmailSelection, Folder,
 };
 use crate::secrets::SecretStore;
 use crate::send::types::{
@@ -407,6 +407,16 @@ impl MailxCore {
         self.accounts()?.list_contact_aggregations()
     }
 
+    /// Recipient suggestions for a composer address field, from mail
+    /// already on this device. `limit` defaults to 8, at most 20.
+    pub fn suggest_contacts(
+        &self,
+        query: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<ContactSuggestion>, AppError> {
+        self.accounts()?.suggest_contacts(query, limit)
+    }
+
     /// Starts or stops aggregating a sender address (case-insensitive,
     /// all accounts). Idempotent.
     pub fn set_contact_aggregation(&self, address: &str, aggregated: bool) -> Result<(), AppError> {
@@ -776,8 +786,9 @@ impl MailxCore {
     /// Queues a draft for sending: the MIME is built now from the draft and the
     /// account's current sender, the draft is locked, and the account's worker
     /// sends it once `undo_send_seconds` (from `compose.undoSendSeconds`; one
-    /// of 0, 5, 10, 20, 30) have passed. The composer and authorized MCP/model
-    /// callers may queue mail; the main window cannot.
+    /// of 0, 5, 10, 20, 30) have passed. The user's composer (a window, or the
+    /// main window's inline composer) and authorized MCP/model callers may
+    /// queue mail.
     pub fn queue_send(
         &self,
         caller: Caller,
@@ -790,14 +801,14 @@ impl MailxCore {
     /// Queues within a host-supplied account grant, including idempotent replays.
     pub fn queue_send_scoped(
         &self,
-        caller: Caller,
+        // Every principal may queue: the composer window and the main window's
+        // inline composer are the user at the keyboard; MCP / model callers are
+        // checked against their grant by the tool layer and `allowed_accounts`.
+        _caller: Caller,
         request: QueueSendRequest,
         undo_send_seconds: u32,
         allowed_accounts: Option<&[String]>,
     ) -> Result<OutboxItem, AppError> {
-        if caller == Caller::MainWindow {
-            return Err(AppError::new(ErrorCode::Forbidden));
-        }
         // The store lock is held to read the draft and again to commit; reading
         // attachment blobs and building the MIME happen in between, without it.
         let plan =

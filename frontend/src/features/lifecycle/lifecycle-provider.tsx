@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { errorText } from '@/i18n/errors'
 import type { CloseAction, LifecycleClient, LifecycleSnapshot } from './lifecycle-client'
 import { LifecycleContext } from './lifecycle-context'
-import { prepareMainWindowQuit } from './prepare-quit'
+import { InlineDraftUnsaved, prepareMainWindowQuit } from './prepare-quit'
 
 /** Kept outside startup admission so a failed mailbox startup never prevents closing. */
 export function LifecycleProvider({ client, children }: { client: LifecycleClient | null; children: ReactNode }) {
@@ -154,7 +154,7 @@ function QuitFailure({ error, onClose }: { error: unknown; onClose: () => void }
         <DialogTitle>{t('quitSaveFailedTitle')}</DialogTitle>
         <DialogDescription>{t('quitSaveFailedDescription')}</DialogDescription>
       </DialogHeader>
-      <p role="alert" className="text-sm text-destructive">{errorText(error)}</p>
+      <p role="alert" className="text-sm text-destructive">{error instanceof InlineDraftUnsaved ? t('quitInlineDraftFailed') : errorText(error)}</p>
       <DialogFooter><Button variant="outline" onClick={onClose}>{t('dismissQuitNotice')}</Button></DialogFooter>
     </DialogContent>
   </Dialog>

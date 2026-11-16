@@ -655,8 +655,8 @@ async fn parallel_sends_with_the_same_mutation_commit_once() {
     assert_eq!(
         f.core
             .queue_send(Caller::MainWindow, request, 30)
-            .unwrap_err()
-            .code,
-        ErrorCode::Forbidden
+            .unwrap()
+            .id,
+        first_item.id
     );
 }

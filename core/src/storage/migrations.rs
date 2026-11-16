@@ -223,6 +223,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         ],
         sql: include_str!("migrations/0032_assistant_conversations.sql"),
     },
+    Migration {
+        version: 33,
+        description: "sender address and name index for recipient suggestions",
+        required_tables: &["messages"],
+        sql: include_str!("migrations/0033_sender_name_index.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -627,7 +633,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 32);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 33);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -762,6 +768,21 @@ mod tests {
                 assert_eq!(left, 0, "{table} follows its conversation");
             }
         }
+    }
+
+    #[test]
+    fn sender_name_index_is_added_to_an_existing_database() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(32)).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let index: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'messages_by_sender_name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
     }
 
     #[test]

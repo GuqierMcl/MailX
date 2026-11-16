@@ -28,6 +28,7 @@ import { composeKeys } from '@/lib/query-client'
 import { errorSummary, recipientsPreview, STATE_LABELS } from './outbox-text'
 import { DraftBodyPreview } from './draft-body-preview'
 import { DraftAttachmentList } from './draft-attachment-list'
+import { openIntent, type OpenIntent } from './use-compose'
 
 const addressText = (list: MailAddress[]) => list.map((item) => (item.name ? `${item.name} <${item.address}>` : item.address)).join('，')
 
@@ -73,7 +74,8 @@ type DraftDetailProps = {
   client: MailxClient
   draftId: string
   accounts: Account[]
-  onEdit: (draftId: string) => void
+  /** `intent` carries a Shift-click (open the other way this once). */
+  onEdit: (draftId: string, intent?: OpenIntent) => void
   /** The draft is gone (deleted here or sent elsewhere). */
   onGone: () => void
 }
@@ -115,7 +117,7 @@ export function DraftDetail({ client, draftId, accounts, onEdit, onGone }: Draft
   return (
     <Frame scrollable={false} actions={(
       <>
-        <IconButton label={t('composer:action.continueEditing')} disabled={!data} onClick={() => onEdit(draftId)}>
+        <IconButton label={t('composer:action.continueEditing')} disabled={!data} onClick={(event) => onEdit(draftId, openIntent(event))}>
           <HugeiconsIcon icon={PencilEdit02Icon} />
         </IconButton>
         <IconButton label={t('composer:action.delete')} disabled={!data} onClick={() => setConfirming(true)}>
@@ -168,7 +170,7 @@ type OutboxDetailProps = {
   item: OutboxItem | null
   accounts: Account[]
   /** Opens the draft's composer (failed items: the draft is editable again). */
-  onEdit: (draftId: string) => void
+  onEdit: (draftId: string, intent?: OpenIntent) => void
 }
 
 /** One unfinished send: status, who and what, why it stopped, and what can be done now. */
@@ -203,7 +205,7 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
       <>
         {item.state === 'queued' && <Button disabled={act.isPending} onClick={undo}>{t('composer:action.undo')}</Button>}
         {canRetry && <Button variant="outline" disabled={act.isPending} onClick={() => act.mutate(() => client.retryOutboxNow(item.id))}>{t('composer:detail.retryNow')}</Button>}
-        {item.state === 'failed' && <Button disabled={!item.draftId} title={item.draftId ? undefined : t('composer:detail.draftGone')} onClick={() => item.draftId && onEdit(item.draftId)}>{t('composer:detail.editResend')}</Button>}
+        {item.state === 'failed' && <Button disabled={!item.draftId} title={item.draftId ? undefined : t('composer:detail.draftGone')} onClick={(event) => item.draftId && onEdit(item.draftId, openIntent(event))}>{t('composer:detail.editResend')}</Button>}
         {item.state === 'unknown' && (
           <>
             <Button disabled={act.isPending} onClick={() => resolve('markSent')}>{t('composer:detail.markSent')}</Button>

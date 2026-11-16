@@ -103,6 +103,8 @@ frontend/src/features/startup/
 
 `0032_assistant_conversations.sql` 新建 `assistant_conversations`、`assistant_conversation_accounts` 与 `assistant_messages`，保存与内置助手的聊天记录（见[存储与搜索](storage-search.md#助手对话记录)）。账号 id 不做外键：移除账号的事务显式删除涉及它的对话。
 
+`0033_sender_name_index.sql` 为 `messages` 建立 `(from_address, from_name)` 覆盖索引，收件人补全据此读取去重后的发件地址与显示名，不扫描邮件行；不新增表，不改已有数据。
+
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
 ## 4. 版本与执行规则

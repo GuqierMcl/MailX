@@ -384,5 +384,10 @@
   "assistantClearHistory": "Clear all chats",
   "assistantClearHistoryAsk": "Clear all chats?",
   "assistantClearHistoryConfirm": "Clear",
-  "assistantClearHistoryDone": "Cleared"
+  "assistantClearHistoryDone": "Cleared",
+  "composeOpenMode": "Open composer in",
+  "composeOpenModeDescription": "Where new mail, replies, forwards and continued drafts open. Shift-click to use the other place once.",
+  "composeOpenWindow": "New window",
+  "composeOpenInline": "Main window",
+  "quitInlineDraftFailed": "The message being written in the main window couldn't be saved."
 }

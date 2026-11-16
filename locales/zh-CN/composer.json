@@ -19,7 +19,10 @@
     "conflict": "草稿已在别处修改，已加载最新版本",
     "conflictDescription": "你刚才未保存的改动没有被应用。",
     "locked": "这封邮件已进入发送队列，不能再编辑",
-    "conflictBeforeSend": "草稿已在别处修改，已加载最新版本，请确认后再发送"
+    "conflictBeforeSend": "草稿已在别处修改，已加载最新版本，请确认后再发送",
+    "attachmentMentioned": "正文提到了附件，但还没有添加",
+    "addAttachment": "添加附件",
+    "sendAnyway": "仍要发送"
   },
   "draft": {
     "createdViaMcp": "由 MCP 创建",
@@ -51,12 +54,21 @@
     "bcc": "密送",
     "subject": "主题",
     "body": "正文",
-    "chooseSender": "选择发件账号"
+    "chooseSender": "选择发件账号",
+    "fromAccount": "发件人：{{name}}",
+    "ccShortcut": "抄送（Cmd/Ctrl+Alt+C）",
+    "bccShortcut": "密送（Cmd/Ctrl+Alt+B）"
+  },
+  "header": {
+    "expand": "展开发件人和收件人：{{summary}}",
+    "separator": "、",
+    "more": "{{names}} 等 {{total}} 人"
   },
   "editor": {
     "loadFailed": "编辑器加载失败",
     "reload": "重新加载编辑器",
-    "opening": "正在打开编辑器…"
+    "opening": "正在打开编辑器…",
+    "showQuote": "显示引用的原文"
   },
   "send": {
     "sending": "正在发送…",
@@ -232,7 +244,13 @@
     "invalid": "地址无效：{{address}}",
     "editInvalid": "地址无效：{{address}}，点击修改",
     "remove": "移除 {{address}}",
-    "preview_other": "{{names}} 等 {{count}} 位"
+    "preview_other": "{{names}} 等 {{count}} 位",
+    "menu": "{{address}} 的选项",
+    "moveToTo": "移到收件人",
+    "moveToCc": "移到抄送",
+    "moveToBcc": "移到密送",
+    "copy": "复制地址",
+    "removeShort": "移除"
   },
   "inlineImage": {
     "missing": "图片已丢失"

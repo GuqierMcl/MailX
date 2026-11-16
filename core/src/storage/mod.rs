@@ -14,7 +14,7 @@ pub(crate) mod archives;
 pub(crate) mod assistant_chats;
 pub(crate) mod attachments;
 pub(crate) mod bodies;
-mod contacts;
+pub(crate) mod contacts;
 pub(crate) mod conversations;
 pub(crate) mod deletions;
 pub(crate) mod drafts;

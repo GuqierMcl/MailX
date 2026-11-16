@@ -38,7 +38,8 @@ describe('editor loading', () => {
     expect(await screen.findByRole('textbox', { name: '正文' })).toHaveValue('<p>Saved body</p>')
     expect(screen.queryByText('正在打开编辑器…')).not.toBeInTheDocument()
     expect(client.updateDraft).not.toHaveBeenCalled()
-  })
+    // A fresh module graph (resetModules) imports the whole composer, which is slow on a busy machine.
+  }, 20_000)
 
   it('does not import at module load, and renders a preloaded editor without a loading frame', async () => {
     const importStarted = vi.fn(() => ({ default: PreviewEditor }))

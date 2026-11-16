@@ -248,13 +248,6 @@ async fn queueing_is_idempotent_checks_the_revision_and_the_caller() {
             .code,
         ErrorCode::Conflict
     );
-    assert_eq!(
-        fx.core
-            .queue_send(Caller::MainWindow, Fx::request(&draft), 0)
-            .unwrap_err()
-            .code,
-        ErrorCode::Forbidden
-    );
     fx.settle().await;
     assert_eq!(connections(&seen), 0);
     assert!(fx.core.list_outbox(None, true).unwrap().is_empty());
@@ -264,8 +257,14 @@ async fn queueing_is_idempotent_checks_the_revision_and_the_caller() {
         .core
         .queue_send(Caller::Composer, request.clone(), 30)
         .unwrap();
-    let again = fx.core.queue_send(Caller::Composer, request, 30).unwrap();
+    let again = fx
+        .core
+        .queue_send(Caller::Composer, request.clone(), 30)
+        .unwrap();
     assert_eq!(first.id, again.id);
+    // The main window's inline composer is the same user: a replay from it is the same item.
+    let inline = fx.core.queue_send(Caller::MainWindow, request, 30).unwrap();
+    assert_eq!(first.id, inline.id);
     assert_eq!(fx.core.list_outbox(None, true).unwrap().len(), 1);
     let other = fx.draft(&account);
     let reused = QueueSendRequest {

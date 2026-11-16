@@ -280,6 +280,12 @@ struct ResolveArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FocusArgs {
+    draft_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenArgs {
     draft_id: String,
     /// The draft was just created for this window (写邮件 / 回复 / 转发), so
@@ -606,6 +612,31 @@ pub(crate) async fn composer_open(
         open_checked_draft(&app, &state, id, fresh, None).await
     }
     .await;
+    Ok(respond(result))
+}
+
+/// Brings the draft's composer window forward if one is open; `false` when
+/// none is, and nothing is created. The main window asks before editing a
+/// draft in place, so one draft never has two editors.
+#[tauri::command]
+pub(crate) async fn composer_focus(
+    window: WebviewWindow,
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<bool>, ()> {
+    let result = authorize(&window, "composer_focus").and_then(|_| {
+        let args = parse::<FocusArgs>(request.body())?;
+        let id = parse_draft_id(&args.draft_id).ok_or_else(|| AppError::validation("draftId"))?;
+        let Some(existing) = app.get_webview_window(&composer_label(&id)) else {
+            return Ok(false);
+        };
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        existing
+            .set_focus()
+            .map(|()| true)
+            .map_err(|_| AppError::new(ErrorCode::Internal))
+    });
     Ok(respond(result))
 }
 

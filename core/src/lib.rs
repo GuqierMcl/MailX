@@ -78,11 +78,11 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     AiConsent, AppSettings, AppearanceSettings, AssistantMode, AssistantSendMode,
-    AssistantSettings, CloseBehavior, ComposeSettings, FontSize, GeneralSettings, LayoutSettings,
-    LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel, McpSettings, NotificationSettings,
-    NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings, ServiceRoute,
-    SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, ThemeMode,
-    TranslationProviderId, TranslationSettings, mail_body_css,
+    AssistantSettings, CloseBehavior, ComposeOpenMode, ComposeSettings, FontSize, GeneralSettings,
+    LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel, McpSettings,
+    NotificationSettings, NotificationSound, PreviewLines, RemoteImagePolicy, SecuritySettings,
+    ServiceRoute, SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, StartupView,
+    ThemeMode, TranslationProviderId, TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

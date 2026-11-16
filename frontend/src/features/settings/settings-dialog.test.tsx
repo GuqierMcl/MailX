@@ -88,18 +88,18 @@ describe('settings dialog', () => {
     expect(sender).toHaveTextContent('跟随当前邮箱')
     await userEvent.click(sender)
     await userEvent.click(await screen.findByRole('option', { name: /个人邮箱/ }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', undoSendSeconds: 0 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', undoSendSeconds: 0, openMode: 'window' } }))
 
     await userEvent.click(sender)
     await userEvent.click(await screen.findByRole('option', { name: '跟随当前邮箱' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 0 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' } }))
 
     const undo = within(dialog).getByRole('combobox', { name: '撤销发送' })
     expect(undo).toHaveTextContent('关闭（立即发送）')
     await userEvent.click(undo)
     for (const name of ['5 秒', '10 秒', '20 秒', '30 秒']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('option', { name: '20 秒' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 20 } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ compose: { defaultAccountId: '', undoSendSeconds: 20, openMode: 'window' } }))
     await waitFor(() => expect(undo).toHaveTextContent('20 秒'))
   })
 
@@ -185,7 +185,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0 }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })

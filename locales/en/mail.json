@@ -338,5 +338,13 @@
   "verificationCopyFailed": "Could not copy the code",
   "verificationCopiedAndTrashed": "Code copied; email moved to Trash",
   "verificationCopiedKept": "Code copied; email kept because it cannot be moved to Trash",
-  "verificationCleanupFailed": "Code copied, but the email could not be moved to Trash"
+  "verificationCleanupFailed": "Code copied, but the email could not be moved to Trash",
+  "inlineComposePopOut": "Open in new window",
+  "inlineComposeClose": "Close",
+  "inlineComposeSaved": "Saved to Drafts",
+  "inlineComposeContinue": "Continue editing",
+  "inlineComposeSaveFailed": "Draft not saved",
+  "inlineComposeSaveFailedDescription": "The composer stays open. Try again before leaving.",
+  "inlineComposePopOutFailed": "Couldn't open in a new window",
+  "inlineComposeOpenFailed": "Couldn't open the composer"
 }

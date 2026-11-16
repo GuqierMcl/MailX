@@ -2,13 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { i18n } from '@/i18n'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { testClient } from '@/features/accounts/test-fixtures'
 import { useDebouncedLayoutSave } from '@/features/settings/settings-queries'
 import { SettingsDialog } from '@/features/settings/settings-dialog'
 import type { MailxClient } from '@/lib/mailx-client'
 import type { LifecycleClient, LifecycleSnapshot } from './lifecycle-client'
 import { LifecycleProvider } from './lifecycle-provider'
+import { InlineDraftUnsaved, registerQuitSave } from './prepare-quit'
 
 function fixture(patch: Partial<LifecycleSnapshot> = {}) {
   let snapshot: LifecycleSnapshot = { revision: 1, platform: 'windows', backgroundAvailable: true, closeRequestId: 1, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
@@ -172,6 +174,23 @@ describe('main window quit acknowledgement', () => {
     await waitFor(() => expect(client.confirmQuit).toHaveBeenCalledWith(12))
   })
 
+  it('waits for the inline composer, and cancels the quit when its draft cannot be written', async () => {
+    const { client, publish } = fixture({ closeRequestId: null })
+    let result: 'ok' | 'fail' = 'fail'
+    const save = vi.fn(async () => { if (result === 'fail') throw new InlineDraftUnsaved() })
+    render(<LifecycleProvider client={client}><QuitSaver save={save} /></LifecycleProvider>)
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalled())
+    publish({ quitting: true, quitRequestId: 15 })
+    await waitFor(() => expect(client.cancelQuit).toHaveBeenCalledWith(15))
+    expect(client.confirmQuit).not.toHaveBeenCalled()
+    expect(await screen.findByRole('dialog', { name: '无法完成退出前的保存' })).toHaveTextContent('主窗口里正在写的邮件没能保存。')
+    publish({ quitting: false, quitRequestId: null })
+    result = 'ok'
+    publish({ quitting: true, quitRequestId: 16 })
+    await waitFor(() => expect(client.confirmQuit).toHaveBeenCalledWith(16))
+    expect(save).toHaveBeenCalledTimes(2)
+  })
+
   it('cancels a failed save and retains the layout for a later quit retry', async () => {
     const { client, publish } = fixture({ closeRequestId: null })
     const mail = testClient()
@@ -223,3 +242,9 @@ describe('main window quit acknowledgement', () => {
     expect(client.cancelQuit).toHaveBeenCalledWith(31)
   })
 })
+
+function QuitSaver({ save }: { save: () => Promise<void> }) {
+  const queryClient = useQueryClient()
+  useEffect(() => registerQuitSave(queryClient, save), [queryClient, save])
+  return null
+}

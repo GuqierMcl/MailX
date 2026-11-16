@@ -1,7 +1,35 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { flushPendingLayoutSaves } from '@/features/settings/pending-layout-saves'
 
-/** Waits for pending main-window mutations, including layout saves started by this flush. */
+type QuitSave = () => Promise<void>
+
+/** The inline composer could not write its draft; the quit is cancelled and the editor stays. */
+export class InlineDraftUnsaved extends Error {
+  constructor() {
+    super('inline draft not saved')
+    this.name = 'InlineDraftUnsaved'
+  }
+}
+const quitSaves = new WeakMap<QueryClient, Set<QuitSave>>()
+
+/**
+ * Work the main window must finish before an explicit quit, such as writing the
+ * inline composer's draft (sending.md section 17.7). A rejection cancels the quit.
+ */
+export function registerQuitSave(client: QueryClient, save: QuitSave): () => void {
+  let registered = quitSaves.get(client)
+  if (!registered) { registered = new Set(); quitSaves.set(client, registered) }
+  registered.add(save)
+  return () => { registered.delete(save) }
+}
+
+async function runQuitSaves(client: QueryClient): Promise<void> {
+  const results = await Promise.allSettled([...quitSaves.get(client) ?? []].map((save) => save()))
+  const failure = results.find((result) => result.status === 'rejected')
+  if (failure?.status === 'rejected') throw failure.reason
+}
+
+/** Waits for registered quit saves and pending main-window mutations, including layout saves started by this flush. */
 export function prepareMainWindowQuit(client: QueryClient, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new DOMException('Quit cancelled', 'AbortError')); return }
@@ -34,6 +62,7 @@ export function prepareMainWindowQuit(client: QueryClient, signal: AbortSignal):
     const stop = cache.subscribe(inspect)
     const abort = () => finish(false, new DOMException('Quit cancelled', 'AbortError'))
     signal.addEventListener('abort', abort, { once: true })
-    void flushPendingLayoutSaves(client).then(() => { flushed = true; inspect() }, (cause) => finish(false, cause))
+    void Promise.all([flushPendingLayoutSaves(client), runQuitSaves(client)])
+      .then(() => { flushed = true; inspect() }, (cause) => finish(false, cause))
   })
 }

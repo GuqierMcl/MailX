@@ -380,5 +380,10 @@
   "assistantClearHistory": "清除全部对话",
   "assistantClearHistoryAsk": "清除全部对话？",
   "assistantClearHistoryConfirm": "确定",
-  "assistantClearHistoryDone": "已清除"
+  "assistantClearHistoryDone": "已清除",
+  "composeOpenMode": "写信打开方式",
+  "composeOpenModeDescription": "写邮件、回复、转发和继续编辑草稿时在哪里写。按住 Shift 点击可临时换用另一种。",
+  "composeOpenWindow": "新窗口",
+  "composeOpenInline": "主窗口内",
+  "quitInlineDraftFailed": "主窗口里正在写的邮件没能保存。"
 }

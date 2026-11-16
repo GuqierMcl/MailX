@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
@@ -11,6 +11,16 @@ export const CONFIRM_GUARD_MS = 400
 export const CONFIRM_TIMEOUT_MS = 4000
 
 type Stage = 'idle' | 'checking' | 'confirm' | 'sending'
+
+export type SendButtonHandle = {
+  /**
+   * A first press with another check, e.g. one that skips a warning the user
+   * has just dismissed ("仍要发送"). Ignored unless the button is at "发送". The
+   * button takes focus, and the confirm stage keeps its guard and timeout, so a
+   * second press is still needed.
+   */
+  prepare: (onPrepare: () => Promise<number | null>) => void
+}
 
 type SendButtonProps = {
   /** An empty subject changes the confirm label. */
@@ -25,6 +35,7 @@ type SendButtonProps = {
   onConfirm: (expectedRevision: number) => Promise<void>
   /** Any change to this value (an edit, a reload) takes the button back to "发送". */
   resetToken: unknown
+  controlRef?: Ref<SendButtonHandle>
 }
 
 /**
@@ -32,7 +43,7 @@ type SendButtonProps = {
  * saves, the button then widens and changes color to ask again, the second press
  * sends. It is a guard against slips, not a security boundary.
  */
-export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, resetToken }: SendButtonProps) {
+export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, resetToken, controlRef }: SendButtonProps) {
   const { i18n } = useTranslation('composer')
   const [stage, setStage] = useState<Stage>('idle')
   const reducedMotion = usePrefersReducedMotion()
@@ -41,6 +52,7 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const stageRef = useRef<Stage>('idle')
   const alive = useRef(true)
+  const button = useRef<HTMLButtonElement>(null)
 
   const move = useCallback((next: Stage) => {
     stageRef.current = next
@@ -77,12 +89,12 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
     }
   }, [revert])
 
-  const press = useCallback(async () => {
+  const press = useCallback(async (prepare = onPrepare) => {
     const current = stageRef.current
     if (disabled || current === 'checking' || current === 'sending') return
     if (current === 'idle') {
       move('checking')
-      const saved = await onPrepare().catch(() => null)
+      const saved = await prepare().catch(() => null)
       if (!alive.current) return
       if (saved === null) {
         move('idle')
@@ -108,6 +120,13 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
   // Cmd/Ctrl+Enter is the same two presses.
   const pressRef = useRef(press)
   useEffect(() => { pressRef.current = press })
+  useImperativeHandle(controlRef, () => ({
+    prepare: (prepare) => {
+      if (stageRef.current !== 'idle') return
+      button.current?.focus()
+      void pressRef.current(prepare)
+    },
+  }), [])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && !event.isComposing) {
@@ -124,6 +143,7 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
   return (
     <>
       <Button
+        ref={button}
         type="button"
         data-stage={stage}
         aria-disabled={disabled || stage === 'checking' || stage === 'sending' || undefined}

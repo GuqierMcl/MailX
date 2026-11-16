@@ -62,7 +62,7 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 
 `RequestContext { principal, grant, request_id }` 由宿主用公有构造函数创建：`Principal::{BuiltinAgent { run_id }, LocalMcp { connection_id, client_name }}`（`client_name` 自报，只用于显示和审计），`Grant { accounts: AccountScope::{All, Only(ids)}, actions }`，`Action::{AccountsRead, MailRead, DraftCreate, DraftWrite, MailOrganize, MailArchive, MailSync, MailSend, OutboxRead, OutboxWrite, FilesRead}`（序列化为 `accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`、`mail:send`、`outbox:read`、`outbox:write`、`files:read`）。`Grant::mcp_default()` 是本地 MCP 首版统一授权（全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿，包含整理、归档、刷新、发送与发件箱动作，没有删除邮件动作）。界面状态由宿主提供：`Tools::with_draft_open_check`（草稿是否正开在写信窗口，默认从不）、`Tools::with_ui_opener`（把窗口带到前台并打开邮件，默认 `unavailable`）与 `Tools::with_draft_opener`（打开已有草稿，默认 `unavailable`），均在调用时读取。
 
-发送路径中的 `send::Caller` 由宿主提供：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`。两者在工具层检查 `mail:send` 与账号范围后走正常队列，不能通过输入伪造为 `Composer`。`MainWindow` 仍不能入队，处理 `unknown` 仍限用户 UI。宿主通过 `with_undo_send_seconds` 注入撤销窗口，读取失败会阻止发送。
+发送路径中的 `send::Caller` 由宿主提供：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`。两者在工具层检查 `mail:send` 与账号范围后走正常队列，不能通过输入伪造为 `Composer`。`MainWindow` 只因主窗口内写信可以入队（见[发信设计 17.7](sending.md#177-写信打开方式)），处理 `unknown` 仍限用户 UI。宿主通过 `with_undo_send_seconds` 注入撤销窗口，读取失败会阻止发送。
 
 账号范围：`list_accounts` 只返回范围内账号；`search_emails` 把请求的 `accountIds` 与范围取交集（范围外 id 被忽略，与不存在的账号表现相同）；`read_email` 先读出邮件所属账号，范围外与不存在的 `emailId` 返回同样的 `notFound`；`create_draft` 的账号不在范围内同样返回 `notFound`。
 

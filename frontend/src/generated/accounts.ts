@@ -276,6 +276,17 @@ name: string | null,
  */
 messageCount: number, latestReceivedAt: string | null, createdAt: string, };
 
+export type ContactSuggestion = {
+/**
+ * The newest non-empty display name seen with the address, trimmed.
+ * Untrusted text.
+ */
+name: string | null,
+/**
+ * ASCII-lowercased.
+ */
+address: string, };
+
 export type SnippetSegment = { text: string, hit: boolean, };
 
 export type EmailListQuery = {
@@ -635,6 +646,8 @@ whenFocused: boolean, sound: NotificationSound,
  */
 mutedAccounts: Array<string>, };
 
+export type ComposeOpenMode = "window" | "inline";
+
 export type ComposeSettings = {
 /**
  * Account used for new mail outside any account's folders; `""` for none.
@@ -645,7 +658,12 @@ defaultAccountId: string,
 /**
  * One of 0 (send at once), 5, 10, 20 or 30.
  */
-undoSendSeconds: number, };
+undoSendSeconds: number,
+/**
+ * Where new mail, replies and continued drafts open. Files written
+ * before the setting existed open a composer window.
+ */
+openMode: ComposeOpenMode, };
 
 export type McpSettings = {
 /**

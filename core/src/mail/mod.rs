@@ -167,6 +167,18 @@ pub struct ContactAggregation {
     pub created_at: String,
 }
 
+/// A recipient address offered while typing in the composer, built from mail
+/// already on this device (sending.md section 17.4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactSuggestion {
+    /// The newest non-empty display name seen with the address, trimmed.
+    /// Untrusted text.
+    pub name: Option<String>,
+    /// ASCII-lowercased.
+    pub address: String,
+}
+
 /// One run of a search snippet; `hit` marks the matched text. Plain text only.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
