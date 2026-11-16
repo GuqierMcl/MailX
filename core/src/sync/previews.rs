@@ -20,6 +20,7 @@ use crate::{
     AppError, ErrorCode,
     accounts::{AccountService, sync_plan::SyncPlan},
     events::{CoreEvent, EmailPreviewItem, EmailPreviews, Events},
+    ews::{EwsClient, EwsError},
     imap::{
         self, ImapError, PREVIEW_BATCH, PREVIEW_BATCH_BYTES, PREVIEW_FALLBACK_BYTES, PartialFetch,
     },
@@ -27,7 +28,7 @@ use crate::{
         PreviewState,
         preview::{PreviewText, extract},
     },
-    storage::{bodies::BodyIdentity, previews::PreviewOutcome},
+    storage::{bodies::BodyIdentity, ews::EwsItem, previews::PreviewOutcome},
 };
 
 pub(crate) struct PreviewManager {
@@ -280,18 +281,34 @@ fn announce_missing(shared: &Shared, ids: impl IntoIterator<Item = String>) {
     }
 }
 
+/// What the lane does after a batch.
+#[derive(Debug, PartialEq, Eq)]
+enum Next {
+    Continue,
+    /// A request failed after part of the batch was already stored and
+    /// announced; the rest of the lane is dropped like after an `Err`.
+    Stop,
+}
+
 async fn run(shared: Arc<Shared>, account_id: String) {
     while let Some(batch) = next_batch(&shared, &account_id) {
-        if process(&shared, &account_id, &batch).await.is_err() {
-            let dropped = stop(&shared, &account_id);
-            announce_missing(
-                &shared,
-                batch
-                    .into_iter()
-                    .map(|identity| identity.message_id)
-                    .chain(dropped),
-            );
-            return;
+        match process(&shared, &account_id, &batch).await {
+            Ok(Next::Continue) => {}
+            Ok(Next::Stop) => {
+                announce_missing(&shared, stop(&shared, &account_id));
+                return;
+            }
+            Err(_) => {
+                let dropped = stop(&shared, &account_id);
+                announce_missing(
+                    &shared,
+                    batch
+                        .into_iter()
+                        .map(|identity| identity.message_id)
+                        .chain(dropped),
+                );
+                return;
+            }
         }
     }
 }
@@ -326,6 +343,10 @@ async fn fetch_batch(
     session.fetch_previews(&uids, &sizes).await
 }
 
+/// Most items in one EWS `GetItem`. A batch is split so a request failing
+/// late keeps what the earlier ones returned.
+const EWS_PREVIEW_CHUNK: usize = 25;
+
 /// `Err` means a transient problem: nothing was written, rows stay `missing`
 /// and the caller announces them. Rows of the batch without a result (UID
 /// validity changed, absent from the reply) are announced here.
@@ -333,7 +354,7 @@ async fn process(
     shared: &Arc<Shared>,
     account_id: &str,
     batch: &[BodyIdentity],
-) -> Result<(), AppError> {
+) -> Result<Next, AppError> {
     let account = account_id.to_owned();
     let plan = with_service(shared, move |service| Ok(service.ews_plan(&account)))
         .await?
@@ -341,62 +362,130 @@ async fn process(
     let Some(plan) = plan else {
         return process_imap(shared, account_id, batch).await;
     };
-    let requested = batch.to_vec();
-    let source = plan.mailbox_source_id.clone();
-    let items = with_service(shared, move |service| {
-        requested
-            .into_iter()
-            .map(|identity| {
-                if identity.mailbox_source_id != source || !service.body_current(&identity)? {
-                    return Ok((identity, None));
-                }
-                let target = crate::storage::messages::SyncTarget {
-                    account_id: identity.account_id.clone(),
-                    mailbox_source_id: identity.mailbox_source_id.clone(),
-                    folder_id: identity.folder_id.clone(),
-                    uid_validity: identity.uid_validity,
-                };
-                let item = service.ews_item(&target, identity.uid)?;
-                Ok((identity, item))
-            })
-            .collect::<Result<Vec<_>, AppError>>()
-    })
-    .await?;
-    let mut client =
-        crate::ews::EwsClient::connect(&plan.route, &plan.endpoint, &plan.user, &plan.password)
-            .await
-            .map_err(|_| internal())?;
-    let mut outcomes = Vec::new();
-    for (identity, item) in items {
-        let Some(item) = item else {
-            continue;
-        };
-        let preview = match client
-            .preview(
-                &item.item_id,
-                item.change_key.as_deref(),
-                PREVIEW_FALLBACK_BYTES as usize,
-            )
-            .await
-        {
-            Ok(text) => {
-                let text = crate::mail::render::preview(text.as_deref());
-                (!text.is_empty()).then_some(text)
-            }
-            Err(crate::ews::EwsError::TooLarge) => None,
-            Err(crate::ews::EwsError::NotFound) => continue,
-            Err(_) => return Err(internal()),
-        };
-        outcomes.push(PreviewOutcome { identity, preview });
+    let items = ews_items(shared, &plan.mailbox_source_id, batch).await?;
+    if items.is_empty() {
+        commit_outcomes(shared, batch, Vec::new()).await?;
+        return Ok(Next::Continue);
     }
-    commit_outcomes(shared, batch, outcomes).await
+    let mut client = EwsClient::connect(&plan.route, &plan.endpoint, &plan.user, &plan.password)
+        .await
+        .map_err(|_| internal())?;
+    preview_ews(shared, batch, &mut client, items, EWS_PREVIEW_CHUNK).await
+}
+
+/// The stored EWS item of each batch row whose body is still current.
+async fn ews_items(
+    shared: &Arc<Shared>,
+    source: &str,
+    batch: &[BodyIdentity],
+) -> Result<Vec<(BodyIdentity, EwsItem)>, AppError> {
+    let requested = batch.to_vec();
+    let source = source.to_owned();
+    with_service(shared, move |service| {
+        let mut items = Vec::new();
+        for identity in requested {
+            if identity.mailbox_source_id != source || !service.body_current(&identity)? {
+                continue;
+            }
+            let target = crate::storage::messages::SyncTarget {
+                account_id: identity.account_id.clone(),
+                mailbox_source_id: identity.mailbox_source_id.clone(),
+                folder_id: identity.folder_id.clone(),
+                uid_validity: identity.uid_validity,
+            };
+            if let Some(item) = service.ews_item(&target, identity.uid)? {
+                items.push((identity, item));
+            }
+        }
+        Ok(items)
+    })
+    .await
+}
+
+/// Stores what the server returned, even when a later request failed; then
+/// the lane stops and the rest stays `missing` for a later request.
+async fn preview_ews(
+    shared: &Arc<Shared>,
+    batch: &[BodyIdentity],
+    client: &mut EwsClient,
+    items: Vec<(BodyIdentity, EwsItem)>,
+    chunk: usize,
+) -> Result<Next, AppError> {
+    let (outcomes, complete) = fetch_ews(client, &items, chunk).await;
+    commit_outcomes(shared, batch, outcomes).await?;
+    Ok(if complete { Next::Continue } else { Next::Stop })
+}
+
+/// One `GetItem` per `chunk` items. Returns the outcomes so far and whether
+/// every request succeeded; the first failed request ends the fetch.
+async fn fetch_ews(
+    client: &mut EwsClient,
+    items: &[(BodyIdentity, EwsItem)],
+    chunk: usize,
+) -> (Vec<PreviewOutcome>, bool) {
+    let limit = PREVIEW_FALLBACK_BYTES as usize;
+    let mut outcomes = Vec::with_capacity(items.len());
+    for part in items.chunks(chunk.max(1)) {
+        let ids: Vec<(&str, Option<&str>)> = part
+            .iter()
+            .map(|(_, item)| (item.item_id.as_str(), item.change_key.as_deref()))
+            .collect();
+        match client.previews(&ids, limit).await {
+            Ok(results) => {
+                outcomes.extend(
+                    part.iter()
+                        .zip(results)
+                        .filter_map(|((identity, _), result)| ews_outcome(identity, result)),
+                );
+                continue;
+            }
+            // Which item made the reply too large is unknown: each is asked
+            // alone, and only the one that is too large fails.
+            Err(EwsError::TooLarge) if part.len() > 1 => {}
+            Err(EwsError::TooLarge) => {
+                outcomes.extend(ews_outcome(&part[0].0, Err(EwsError::TooLarge)));
+                continue;
+            }
+            Err(_) => return (outcomes, false),
+        }
+        for (identity, item) in part {
+            let alone = [(item.item_id.as_str(), item.change_key.as_deref())];
+            let result = match client.previews(&alone, limit).await {
+                Ok(results) => results.into_iter().next().ok_or(EwsError::Protocol),
+                Err(EwsError::TooLarge) => Err(EwsError::TooLarge),
+                Err(_) => return (outcomes, false),
+            };
+            outcomes.extend(ews_outcome(identity, result.and_then(|result| result)));
+        }
+    }
+    (outcomes, true)
+}
+
+/// `None` leaves the row `missing` (gone, or refused this time); a reply too
+/// large or without text is recorded as `failed`.
+fn ews_outcome(
+    identity: &BodyIdentity,
+    result: Result<Option<String>, EwsError>,
+) -> Option<PreviewOutcome> {
+    let preview = match result {
+        Ok(text) => {
+            let text = crate::mail::render::preview(text.as_deref());
+            (!text.is_empty()).then_some(text)
+        }
+        Err(EwsError::TooLarge) => None,
+        Err(_) => return None,
+    };
+    Some(PreviewOutcome {
+        identity: identity.clone(),
+        preview,
+    })
 }
 
 async fn process_imap(
     shared: &Arc<Shared>,
     account_id: &str,
     batch: &[BodyIdentity],
-) -> Result<(), AppError> {
+) -> Result<Next, AppError> {
     let account = account_id.to_owned();
     let Ok(plan) = with_service(shared, move |service| Ok(service.sync_plan(&account))).await?
     else {
@@ -447,7 +536,8 @@ async fn process_imap(
         }
         Err(_) => return Err(internal()),
     };
-    commit_outcomes(shared, batch, outcomes).await
+    commit_outcomes(shared, batch, outcomes).await?;
+    Ok(Next::Continue)
 }
 
 async fn commit_outcomes(

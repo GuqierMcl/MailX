@@ -15,6 +15,14 @@ impl AccountService {
         self.storage.ews_assign(target, items)
     }
 
+    pub(crate) fn ews_cached_items(
+        &self,
+        target: &SyncTarget,
+        item_ids: &[&str],
+    ) -> Result<std::collections::HashSet<String>, AppError> {
+        self.storage.ews_cached_items(target, item_ids)
+    }
+
     pub(crate) fn ews_item(
         &self,
         target: &SyncTarget,

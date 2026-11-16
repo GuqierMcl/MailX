@@ -41,6 +41,8 @@ async fn push(
     deletions: Vec<PendingDeletion>,
     mut report: WriteBackReport,
 ) -> RoundEnd {
+    // Work not yet settled; all of it stays queued if the round stops early.
+    let mut unsettled = changes.len() + deletions.len();
     let mut groups: BTreeMap<(String, u32), Vec<PendingChange>> = BTreeMap::new();
     for change in changes {
         groups
@@ -49,6 +51,7 @@ async fn push(
             .push(change);
     }
     for (_, changes) in groups {
+        unsettled -= changes.len();
         let first = &changes[0];
         let target = SyncTarget {
             account_id: first.account_id.clone(),
@@ -91,6 +94,10 @@ async fn push(
                 }
             }
             Err(EwsError::Authentication | EwsError::AuthUnsupported) => return RoundEnd::Blocked,
+            Err(error) if unavailable(&error) => {
+                report.waiting += changes.len() + unsettled;
+                return stopped(service, account, report).await;
+            }
             Err(_) => {
                 for change in &changes {
                     let _ = service.retry(change);
@@ -101,6 +108,7 @@ async fn push(
     }
     // Keep the shared undo deadline, claims, retry cap and tombstone cleanup.
     for deletion in deletions {
+        unsettled -= 1;
         let ids = vec![deletion.message_id.clone()];
         let target = SyncTarget {
             account_id: account.to_owned(),
@@ -132,6 +140,11 @@ async fn push(
                 Err(_) => report.waiting += 1,
             },
             Err(EwsError::Authentication | EwsError::AuthUnsupported) => return RoundEnd::Blocked,
+            // Claimed rows come back next round; the attempt cap is not spent.
+            Err(error) if unavailable(&error) => {
+                report.waiting += 1 + unsettled;
+                return stopped(service, account, report).await;
+            }
             Err(_) => deletion_refused(service.as_ref(), &ids, &mut report),
         }
     }
@@ -141,6 +154,30 @@ async fn push(
     } else {
         RoundEnd::Done(report)
     }
+}
+
+/// The connection or Exchange itself failed, which says nothing about the
+/// item: like an IMAP transport error, the round ends and every unsettled
+/// change keeps its attempts. Only a refusal of the item itself counts
+/// towards giving it back.
+fn unavailable(error: &EwsError) -> bool {
+    match error {
+        EwsError::Net(_) | EwsError::Timeout | EwsError::Protocol | EwsError::Unknown => true,
+        EwsError::Server { code } => matches!(
+            code.as_str(),
+            "ErrorServerBusy" | "ErrorExceededConnectionCount" | "ErrorMailboxStoreUnavailable"
+        ),
+        _ => false,
+    }
+}
+
+async fn stopped(
+    service: &Arc<Mutex<AccountService>>,
+    account: &str,
+    mut report: WriteBackReport,
+) -> RoundEnd {
+    report.next_deletion_in = next_deletion_in(service, account).await;
+    RoundEnd::Retry(report)
 }
 
 async fn lookup(

@@ -116,14 +116,10 @@ async fn attempt(
         let first = connection
             .exchange("Autodiscover", body.to_owned(), None, MAX_DISCOVERY)
             .await?;
-        if (300..400).contains(&first.status) {
-            return redirect(first, endpoint);
-        }
-        if first.status == 200 {
-            return parse(&first.body, endpoint);
-        }
+        // No credential was sent yet, so nothing but 401 says anything
+        // about the password; a 404 or 5xx is reported as such.
         if first.status != 401 {
-            return Err(EwsError::Authentication);
+            return outcome(first, endpoint, false);
         }
         match offered(&first.headers) {
             DiscoveryAuth::Ntlm | DiscoveryAuth::Negotiate => {
@@ -152,8 +148,21 @@ async fn attempt(
             .exchange("Autodiscover", body.to_owned(), None, MAX_DISCOVERY)
             .await?
     };
+    outcome(reply, endpoint, credentials.is_some())
+}
+
+/// After credentials were sent, 401/403 means they were refused rather than
+/// that the host should ask for a password again.
+fn outcome(
+    reply: http::Reply,
+    endpoint: &Endpoint,
+    credentialed: bool,
+) -> Result<Discovery, EwsError> {
     if (300..400).contains(&reply.status) {
         return redirect(reply, endpoint);
+    }
+    if credentialed && matches!(reply.status, 401 | 403) {
+        return Err(EwsError::Authentication);
     }
     if reply.status == 401 {
         return Ok(Discovery {
@@ -374,6 +383,44 @@ mod tests {
         );
         assert!(!result.authentication_required);
         assert_eq!(result.source, source.as_str());
+    }
+    fn reply(status: u16, challenge: Option<&str>) -> http::Reply {
+        let mut headers = hyper::HeaderMap::new();
+        if let Some(challenge) = challenge {
+            headers.insert(header::WWW_AUTHENTICATE, challenge.parse().unwrap());
+        }
+        http::Reply {
+            status,
+            headers,
+            body: Vec::new(),
+        }
+    }
+    #[test]
+    fn refused_credentials_are_rejected_not_asked_for_again() {
+        let source = Endpoint::parse("https://mail.example/autodiscover/autodiscover.xml").unwrap();
+        for status in [401, 403] {
+            assert!(matches!(
+                outcome(reply(status, Some("Basic realm=\"x\"")), &source, true),
+                Err(EwsError::Authentication)
+            ));
+        }
+        let anonymous = outcome(reply(401, Some("Basic realm=\"x\"")), &source, false).unwrap();
+        assert!(anonymous.authentication_required);
+        assert_eq!(anonymous.auth, DiscoveryAuth::Basic);
+    }
+    #[test]
+    fn server_failures_before_credentials_are_not_password_errors() {
+        let source = Endpoint::parse("https://mail.example/autodiscover/autodiscover.xml").unwrap();
+        assert!(matches!(
+            outcome(reply(404, None), &source, false),
+            Err(EwsError::NotFound)
+        ));
+        for status in [403, 500, 503] {
+            assert!(matches!(
+                outcome(reply(status, None), &source, false),
+                Err(EwsError::Protocol)
+            ));
+        }
     }
     #[test]
     fn negotiate_does_not_claim_kerberos_only_or_ntlm() {

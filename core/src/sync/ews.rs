@@ -193,10 +193,40 @@ async fn sync_folder(
         .and_hms_opt(0, 0, 0)
         .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?
         .and_utc();
-    let (items, capped) = enumerate(client, remote_name, since).await?;
+    let (mut items, capped) = enumerate(client, remote_name, since).await?;
+    // Polling never rewrites the headers of a message already cached, so only
+    // items without a present local copy need the extra recipient GetItem.
+    // Read/flag state still comes from every FindItem summary.
+    let guard = target.clone();
+    let ids: Vec<_> = items.iter().map(|item| item.id.clone()).collect();
+    let cached = with_store(shared, token, move |service| {
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        service.ews_cached_items(&guard, &ids)
+    })
+    .await?;
+    let mut fetch: Vec<_> = items
+        .iter()
+        .filter(|item| !cached.contains(&item.id))
+        .cloned()
+        .collect();
+    client.recipients(&mut fetch).await.map_err(error)?;
+    let mut fetched: HashMap<_, _> = fetch
+        .into_iter()
+        .map(|item| (item.id.clone(), item))
+        .collect();
+    for item in &mut items {
+        if let Some(full) = fetched.remove(&item.id) {
+            *item = full;
+        }
+    }
     let guard = target.clone();
     let stored = with_store(shared, token, move |service| {
-        store_snapshot(service, &guard, &cursor, &items, capped, counts, now)
+        let snapshot = Snapshot {
+            items,
+            capped,
+            without_recipients: cached,
+        };
+        store_snapshot(service, &guard, &cursor, &snapshot, counts, now)
     })
     .await?;
     round.changed = stored.changed;
@@ -220,12 +250,14 @@ async fn enumerate(
             .await
             .map_err(error)?;
         pages += 1;
-        if page.items.is_empty() && page.next_offset.is_some() {
+        // Non-mail items (posts, appointments) occupy page slots but are
+        // omitted from `items`; only a page with no elements at all is empty.
+        if page.scanned == 0 && page.next_offset.is_some() {
             return Err(
                 ImapError::Protocol("Exchange returned an empty nonterminal page".into()).into(),
             );
         }
-        scanned += page.items.len();
+        scanned += page.scanned;
         for item in page.items {
             if ids.insert(item.id.clone()) {
                 items.push(item);
@@ -244,15 +276,29 @@ async fn enumerate(
     }
 }
 
+/// One folder enumeration ready to commit.
+struct Snapshot {
+    items: Vec<EwsItem>,
+    /// The newest-first listing hit its budget; it proves no disappearance.
+    capped: bool,
+    /// Items whose recipients were not loaded because they looked cached.
+    without_recipients: HashSet<String>,
+}
+
 fn store_snapshot(
     service: &mut AccountService,
     target: &SyncTarget,
     cursor: &FolderSyncCursor,
-    items: &[EwsItem],
-    capped: bool,
+    snapshot: &Snapshot,
     counts: Option<(u32, u32)>,
     now: DateTime<Utc>,
 ) -> Result<FolderRound, AppError> {
+    let Snapshot {
+        items,
+        capped,
+        without_recipients,
+    } = snapshot;
+    let capped = *capped;
     let mut round = FolderRound {
         changed: cursor.created,
         ..FolderRound::default()
@@ -295,6 +341,9 @@ fn store_snapshot(
         .iter()
         .zip(&assigned)
         .filter(|(_, assigned)| !cached_ids.contains(&assigned.uid))
+        // Recipients were skipped because the item looked cached. If its local
+        // copy vanished meanwhile, wait for the next round's full metadata.
+        .filter(|(item, _)| !without_recipients.contains(&item.id))
         .map(|(item, assigned)| message_record(assigned.uid, item, now))
         .collect();
     let flags: Vec<_> = items

@@ -100,21 +100,26 @@ pub(crate) fn item(id: &str, now: DateTime<Utc>) -> EwsItem {
 }
 
 pub(in crate::sync) fn store(f: &mut Fixture, items: &[EwsItem], capped: bool) -> FolderRound {
+    store_with(f, items, capped, HashSet::new())
+}
+
+fn store_with(
+    f: &mut Fixture,
+    items: &[EwsItem],
+    capped: bool,
+    without_recipients: HashSet<String>,
+) -> FolderRound {
     let cursor = f
         .service
         .ensure_generation(&f.target, "2026-10-17")
         .unwrap()
         .unwrap();
-    store_snapshot(
-        &mut f.service,
-        &f.target,
-        &cursor,
-        items,
+    let snapshot = Snapshot {
+        items: items.to_vec(),
         capped,
-        None,
-        f.now,
-    )
-    .unwrap()
+        without_recipients,
+    };
+    store_snapshot(&mut f.service, &f.target, &cursor, &snapshot, None, f.now).unwrap()
 }
 
 pub(crate) fn emails(f: &Fixture) -> Vec<crate::mail::EmailSummary> {
@@ -170,6 +175,60 @@ fn ews_polling_preserves_local_pending_flags_and_never_downloads_a_body() {
             .iter()
             .all(|change| change.flag != Flag::Seen)
     );
+}
+
+#[test]
+fn cached_ews_items_skip_recipients_but_still_take_server_state_changes() {
+    let mut f = fixture();
+    let mut first = item("one", f.now);
+    first.to = vec![MailAddress {
+        name: None,
+        address: "visible@example.invalid".into(),
+    }];
+    store(&mut f, std::slice::from_ref(&first), false);
+    let cached = f
+        .service
+        .ews_cached_items(&f.target, &["one", "unknown"])
+        .unwrap();
+    assert_eq!(cached, HashSet::from(["one".to_owned()]));
+    // Another client marks it read and flagged: a new change key, and the
+    // summary listing carries the new state without recipients.
+    let mut changed = item("one", f.now);
+    changed.change_key = Some("key2".into());
+    changed.is_read = true;
+    changed.is_flagged = true;
+    assert!(store_with(&mut f, &[changed], false, cached).changed);
+    let row = emails(&f).remove(0);
+    assert!(row.is_read && row.is_starred && !row.pending_changes);
+    assert_eq!(
+        f.service.get_email(&row.id).unwrap().to[0].address,
+        "visible@example.invalid",
+        "the cached header is kept, not blanked by the skipped fetch"
+    );
+    assert_eq!(
+        f.service
+            .ews_item(&f.target, 1)
+            .unwrap()
+            .unwrap()
+            .change_key
+            .as_deref(),
+        Some("key2")
+    );
+}
+
+#[test]
+fn an_ews_item_without_loaded_recipients_is_never_inserted_with_blank_headers() {
+    let mut f = fixture();
+    let new = item("one", f.now);
+    store_with(
+        &mut f,
+        std::slice::from_ref(&new),
+        false,
+        HashSet::from(["one".to_owned()]),
+    );
+    assert!(emails(&f).is_empty());
+    store(&mut f, &[new], false);
+    assert_eq!(emails(&f).len(), 1);
 }
 
 #[test]
@@ -354,6 +413,37 @@ async fn an_empty_nonterminal_ews_page_fails_instead_of_looping() {
 }
 
 #[tokio::test]
+async fn a_page_of_only_non_mail_ews_items_advances_instead_of_failing() {
+    let (stream, peer) = tokio::io::duplex(16 * 1024);
+    let server = tokio::spawn(async move {
+        let mut peer = tokio::io::BufReader::new(peer);
+        let request = soap_request(&mut peer).await;
+        assert!(request.contains("FindItem") && request.contains("Offset=\"0\""));
+        soap_reply(&mut peer,"FindItem","<m:RootFolder IncludesLastItemInRange=\"false\" IndexedPagingOffset=\"2\"><t:Items><t:PostItem><t:ItemId Id=\"post\"/></t:PostItem><t:CalendarItem><t:ItemId Id=\"event\"/></t:CalendarItem></t:Items></m:RootFolder>").await;
+        let request = soap_request(&mut peer).await;
+        assert!(request.contains("FindItem") && request.contains("Offset=\"2\""));
+        soap_reply(&mut peer,"FindItem","<m:RootFolder IncludesLastItemInRange=\"true\"><t:Items><t:Message><t:ItemId Id=\"mail\"/></t:Message></t:Items></m:RootFolder>").await;
+    });
+    let mut client = EwsClient::test_stream(Box::new(stream)).await;
+    let (items, capped) = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        enumerate(&mut client, "inbox", Utc::now()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        ["mail"]
+    );
+    assert!(!capped);
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn repeated_ews_items_with_advancing_cursors_stop_at_the_page_budget() {
     let (stream, peer) = tokio::io::duplex(16 * 1024);
     let server = tokio::spawn(async move {
@@ -361,13 +451,6 @@ async fn repeated_ews_items_with_advancing_cursors_stop_at_the_page_budget() {
         for next in 1..=MAX_PAGES {
             assert!(soap_request(&mut peer).await.contains("FindItem"));
             soap_reply(&mut peer,"FindItem",&format!("<m:RootFolder IncludesLastItemInRange=\"false\" IndexedPagingOffset=\"{next}\"><t:Items><t:Message><t:ItemId Id=\"duplicate\"/></t:Message></t:Items></m:RootFolder>")).await;
-            assert!(soap_request(&mut peer).await.contains("GetItem"));
-            soap_reply(
-                &mut peer,
-                "GetItem",
-                "<m:Items><t:Message><t:ItemId Id=\"duplicate\"/></t:Message></m:Items>",
-            )
-            .await;
         }
     });
     let mut client = EwsClient::test_stream(Box::new(stream)).await;

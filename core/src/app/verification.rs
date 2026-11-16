@@ -524,11 +524,10 @@ async fn verify_ews(
     user: &str,
     password: &crate::secrets::SecretValue,
 ) -> ProtocolVerification {
+    // Connecting authenticates with the read-only GetFolder probe and checks
+    // its EWS response, so a second probe would only repeat the round trip.
     match EwsClient::connect(route, endpoint, user, password).await {
-        Ok(mut client) => match client.verify().await {
-            Ok(_) => ProtocolVerification::verified(),
-            Err(error) => ews_failure(error),
-        },
+        Ok(_) => ProtocolVerification::verified(),
         Err(error) => ews_failure(error),
     }
 }

@@ -21,6 +21,13 @@ use crate::smtp::DataStarted;
 
 pub(super) const MAX_RESPONSE: usize = 48 * 1024 * 1024;
 const REQUEST_BUDGET: Duration = Duration::from_secs(30);
+/// Delivery allows server processing time plus upload at a slow uplink.
+const DELIVERY_BASE: Duration = Duration::from_secs(120);
+const DELIVERY_MIN_BYTES_PER_SECOND: u64 = 32 * 1024;
+
+fn delivery_budget(body_len: usize) -> Duration {
+    DELIVERY_BASE + Duration::from_secs(body_len as u64 / DELIVERY_MIN_BYTES_PER_SECOND)
+}
 
 pub(super) struct Reply {
     pub status: u16,
@@ -227,8 +234,15 @@ impl Connection {
                     EwsError::Protocol
                 });
             }
-            let input =
-                challenge(&response.headers, "Negotiate")?.ok_or(EwsError::Authentication)?;
+            let accepted = (200..300).contains(&response.status);
+            let input = match challenge(&response.headers, "Negotiate") {
+                Ok(Some(input)) => input,
+                // A final SPNEGO token is optional; the server already
+                // accepted this request over the verified TLS channel.
+                Ok(None) | Err(EwsError::AuthUnsupported) if accepted => return Ok(response),
+                Ok(None) => return Err(EwsError::Authentication),
+                Err(error) => return Err(error),
+            };
             (output, complete) = negotiate_step(
                 &mut negotiate,
                 &mut handle,
@@ -236,7 +250,8 @@ impl Connection {
                 channel_binding,
                 &self.authority,
             )?;
-            if (200..300).contains(&response.status) && complete && output.is_empty() {
+            // A present final token must still verify (mechListMIC) above.
+            if accepted {
                 return Ok(response);
             }
         }
@@ -262,6 +277,7 @@ impl Connection {
                     "connection closed before delivery".into(),
                 ))
             })?;
+        let budget = delivery_budget(body.len());
         let request = self.request("CreateItem", body, None)?;
         before_delivery
             .run()
@@ -269,7 +285,7 @@ impl Connection {
             .map_err(|_| EwsError::DataMarkFailed)?;
         // Once handed to hyper, transport errors/timeout/redirects are ambiguous.
         // No retry can be introduced here without risking duplicate delivery.
-        let reply = tokio::time::timeout(REQUEST_BUDGET, async {
+        let reply = tokio::time::timeout(budget, async {
             let response = self
                 .sender
                 .send_request(request)
@@ -557,4 +573,17 @@ pub(super) fn channel_binding(der: &[u8]) -> Result<Vec<u8>, EwsError> {
     let mut binding = b"tls-server-end-point:".to_vec();
     binding.extend_from_slice(&hash);
     Ok(binding)
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    #[test]
+    fn delivery_budget_grows_with_the_upload_size() {
+        assert_eq!(delivery_budget(0), DELIVERY_BASE);
+        // A maximum-size (~43 MB base64) message is not cut at a fixed 30 s.
+        let large = delivery_budget(43 * 1024 * 1024);
+        assert!(large >= DELIVERY_BASE + Duration::from_secs(1300));
+        assert!(large > REQUEST_BUDGET * 10);
+    }
 }

@@ -28,13 +28,18 @@ fn envelope(body: String) -> String {
 }
 
 pub(super) fn probe() -> String {
-    distinguished("inbox")
+    distinguished(&["inbox"])
 }
 
-pub(super) fn distinguished(name: &str) -> String {
+/// One `GetFolder` for several well-known folders; the server answers with
+/// one response message per id, in request order.
+pub(super) fn distinguished(names: &[&str]) -> String {
     envelope(format!(
-        "<m:GetFolder><m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape><m:FolderIds><t:DistinguishedFolderId Id=\"{}\"/></m:FolderIds></m:GetFolder>",
-        escape(name)
+        "<m:GetFolder><m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape><m:FolderIds>{}</m:FolderIds></m:GetFolder>",
+        names
+            .iter()
+            .map(|name| format!("<t:DistinguishedFolderId Id=\"{}\"/>", escape(name)))
+            .collect::<String>()
     ))
 }
 
@@ -103,10 +108,14 @@ pub(super) fn get_mime(id: &str, key: Option<&str>) -> String {
     ))
 }
 
-pub(super) fn get_preview(id: &str, key: Option<&str>) -> String {
+/// One `GetItem` for the text bodies of several items.
+pub(super) fn get_previews(items: &[(&str, Option<&str>)]) -> String {
     envelope(format!(
         "<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:BodyType>Text</t:BodyType><t:AdditionalProperties><t:FieldURI FieldURI=\"item:Body\"/></t:AdditionalProperties></m:ItemShape><m:ItemIds>{}</m:ItemIds></m:GetItem>",
-        item_id(id, key)
+        items
+            .iter()
+            .map(|(id, key)| item_id(id, *key))
+            .collect::<String>()
     ))
 }
 
@@ -435,15 +444,35 @@ pub(super) fn parse_folders(
     Ok((folders, next))
 }
 
-pub(super) fn folder_id(bytes: &[u8]) -> Result<String, EwsError> {
+/// One result per requested folder, in request order. A malformed or
+/// mislabelled reply fails the whole call; a refused id fails only itself.
+pub(super) fn folder_ids(
+    bytes: &[u8],
+    expected: usize,
+) -> Result<Vec<Result<String, EwsError>>, EwsError> {
     let doc = document(bytes)?;
-    let response = response(&doc, "GetFolderResponseMessage")?;
-    let folders = child(response, MESSAGES, "Folders").ok_or(EwsError::Protocol)?;
-    let folder = folders
-        .children()
-        .find(Node::is_element)
-        .ok_or(EwsError::Protocol)?;
-    identifier(folder, "FolderId").map(|value| value.0)
+    let messages = response_messages(&doc, "GetFolderResponseMessage")?;
+    let responses: Vec<_> = messages.children().filter(Node::is_element).collect();
+    if responses.len() != expected {
+        return Err(EwsError::Protocol);
+    }
+    let mut result = Vec::with_capacity(expected);
+    for response in responses {
+        if let Err(error) = check_response(response, "GetFolderResponseMessage") {
+            if error == EwsError::Protocol {
+                return Err(error);
+            }
+            result.push(Err(error));
+            continue;
+        }
+        let folders = child(response, MESSAGES, "Folders").ok_or(EwsError::Protocol)?;
+        let folder = folders
+            .children()
+            .find(Node::is_element)
+            .ok_or(EwsError::Protocol)?;
+        result.push(Ok(identifier(folder, "FolderId")?.0));
+    }
+    Ok(result)
 }
 
 fn mailboxes(node: Node<'_, '_>, name: &str) -> Vec<MailAddress> {
@@ -515,6 +544,7 @@ pub(super) fn parse_items(bytes: &[u8], offset: usize) -> Result<EwsPage, EwsErr
     }
     Ok(EwsPage {
         items,
+        scanned: count,
         next_offset: page_offset(root, offset, count)?,
     })
 }
@@ -550,9 +580,45 @@ pub(super) fn parse_mime(bytes: &[u8], limit: usize) -> Result<Vec<u8>, EwsError
     Ok(mime)
 }
 
-pub(super) fn parse_preview(bytes: &[u8], limit: usize) -> Result<Option<String>, EwsError> {
+/// One result per requested item, in request order. A whole-response error
+/// fails the call; an item the server refused (gone, busy) fails only itself.
+pub(super) fn parse_previews(
+    bytes: &[u8],
+    expected: &[&str],
+    limit: usize,
+) -> Result<Vec<Result<Option<String>, EwsError>>, EwsError> {
     let doc = document(bytes)?;
-    let item = get_item(&doc)?;
+    let messages = response_messages(&doc, "GetItemResponseMessage")?;
+    let responses: Vec<_> = messages.children().filter(Node::is_element).collect();
+    if responses.len() != expected.len() {
+        return Err(EwsError::Protocol);
+    }
+    let mut result = Vec::with_capacity(expected.len());
+    for (response, expected_id) in responses.into_iter().zip(expected) {
+        if let Err(error) = check_response(response, "GetItemResponseMessage") {
+            // A mislabelled element is a broken reply, not one refused item.
+            if error == EwsError::Protocol {
+                return Err(error);
+            }
+            result.push(Err(error));
+            continue;
+        }
+        let items = child(response, MESSAGES, "Items").ok_or(EwsError::Protocol)?;
+        let mut items = items.children().filter(Node::is_element);
+        let item = items.next().ok_or(EwsError::Protocol)?;
+        if items.next().is_some() {
+            return Err(EwsError::Protocol);
+        }
+        let (id, _) = identifier(item, "ItemId")?;
+        if id != *expected_id {
+            return Err(EwsError::Protocol);
+        }
+        result.push(preview_body(item, limit));
+    }
+    Ok(result)
+}
+
+fn preview_body(item: Node<'_, '_>, limit: usize) -> Result<Option<String>, EwsError> {
     let Some(body) = child(item, TYPES, "Body") else {
         return Ok(None);
     };

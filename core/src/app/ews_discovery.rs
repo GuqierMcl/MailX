@@ -175,13 +175,21 @@ impl MailxCore {
             .transpose()?;
         Ok(EwsSettingsDiscovery {
             status,
-            endpoint: result.endpoint.map(|url| EwsConnectionConfig {
-                url,
-                username: result.login.unwrap_or(email),
-            }),
+            endpoint: result
+                .endpoint
+                .map(|url| found_config(url, result.login, username)),
             source,
             target_grant,
         })
+    }
+}
+
+/// Without a server-provided LoginName, keep the username the caller entered
+/// (e.g. `DOMAIN\user`); it defaults to the email address.
+fn found_config(url: String, login: Option<String>, username: &str) -> EwsConnectionConfig {
+    EwsConnectionConfig {
+        url,
+        username: login.unwrap_or_else(|| username.to_owned()),
     }
 }
 
@@ -233,6 +241,18 @@ mod tests {
             },
         );
         assert!(registry.consume("expired", "alice@example.com").is_err());
+    }
+    #[test]
+    fn found_settings_keep_the_entered_username_without_a_login_name() {
+        let url = "https://mail.example.com/EWS/Exchange.asmx".to_owned();
+        assert_eq!(
+            found_config(url.clone(), None, "CORP\\alice").username,
+            "CORP\\alice"
+        );
+        assert_eq!(
+            found_config(url, Some("alice@corp.example".into()), "CORP\\alice").username,
+            "alice@corp.example"
+        );
     }
     #[tokio::test]
     async fn a_password_without_a_host_grant_is_rejected_before_network() {

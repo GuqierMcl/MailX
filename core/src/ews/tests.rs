@@ -23,6 +23,15 @@ fn success(operation: &str, body: &str) -> String {
     )
 }
 
+/// A response carrying several already-built response messages.
+fn batch(operation: &str, messages: &str) -> String {
+    format!(
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:m=\"{}\" xmlns:t=\"{}\"><s:Body><m:{operation}Response><m:ResponseMessages>{messages}</m:ResponseMessages></m:{operation}Response></s:Body></s:Envelope>",
+        soap::MESSAGES,
+        soap::TYPES
+    )
+}
+
 fn folder_success() -> String {
     success(
         "GetFolder",
@@ -224,7 +233,8 @@ fn accept_negotiate(
 
 #[tokio::test]
 async fn negotiate_only_spnego_selects_ntlm_and_validates_mic_and_cbt() {
-    for valid in [true, false] {
+    // Some servers accept with 200 but omit the optional final SPNEGO token.
+    for (valid, final_token) in [(true, true), (true, false), (false, true)] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -276,10 +286,14 @@ async fn negotiate_only_spnego_selects_ntlm_and_validates_mic_and_cbt() {
                 );
                 match result {
                     Ok((output, complete)) => {
-                        let headers = format!(
-                            "WWW-Authenticate: Negotiate {}\r\n",
-                            STANDARD.encode(output)
-                        );
+                        let headers = if complete && !final_token {
+                            String::new()
+                        } else {
+                            format!(
+                                "WWW-Authenticate: Negotiate {}\r\n",
+                                STANDARD.encode(output)
+                            )
+                        };
                         let response_body = if complete {
                             folder_success()
                         } else {
@@ -457,14 +471,21 @@ async fn item_pagination_loads_recipient_metadata_without_fetching_bodies() {
     });
     let mut client =
         EwsClient::test_stream(Box::new(TcpStream::connect(address).await.unwrap())).await;
-    let first = client.items("folder", Utc::now(), 0, 50).await.unwrap();
+    let mut first = client.items("folder", Utc::now(), 0, 50).await.unwrap();
     assert_eq!(first.next_offset, Some(1));
+    assert_eq!(first.scanned, 1);
+    assert!(
+        first.items[0].to.is_empty(),
+        "FindItem alone has no recipients"
+    );
+    client.recipients(&mut first.items).await.unwrap();
     assert_eq!(first.items[0].to[0].address, "visible@example.org");
     assert_eq!(first.items[0].reply_to[0].address, "reply@example.org");
-    let last = client
+    let mut last = client
         .items("folder", Utc::now(), first.next_offset.unwrap(), 50)
         .await
         .unwrap();
+    client.recipients(&mut last.items).await.unwrap();
     assert_eq!(last.next_offset, None);
     assert_eq!(last.items[0].id, "item1");
     server.await.unwrap();
@@ -496,28 +517,24 @@ async fn folders_walk_all_pages_and_get_roles_by_identity() {
             );
             reply(&mut peer, "200 OK", "", &page).await;
         }
+        // All roles share one GetFolder; missing ones fail only their own message.
+        let (_, request) = read_request(&mut peer).await;
+        let request = String::from_utf8(request).unwrap();
+        assert_eq!(request.matches("<t:DistinguishedFolderId").count(), 5);
+        let mut messages = String::new();
         for role in ["inbox", "sentitems", "drafts", "deleteditems", "junkemail"] {
-            let (_, request) = read_request(&mut peer).await;
-            assert!(
-                String::from_utf8(request)
-                    .unwrap()
-                    .contains(&format!("Id=\"{role}\""))
-            );
-            let response = if role == "inbox" || role == "sentitems" {
-                success(
-                    "GetFolder",
-                    &format!(
-                        "<m:Folders><t:Folder><t:FolderId Id=\"folder{}\"/></t:Folder></m:Folders>",
-                        if role == "inbox" { 0 } else { 1 }
-                    ),
-                )
-            } else {
-                success("GetFolder", "")
-                    .replace("ResponseClass=\"Success\"", "ResponseClass=\"Error\"")
-                    .replace("NoError", "ErrorFolderNotFound")
-            };
-            reply(&mut peer, "200 OK", "", &response).await;
+            assert!(request.contains(&format!("Id=\"{role}\"")));
+            messages.push_str(&match role {
+                "inbox" | "sentitems" => format!(
+                    "<m:GetFolderResponseMessage ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode><m:Folders><t:Folder><t:FolderId Id=\"folder{}\"/></t:Folder></m:Folders></m:GetFolderResponseMessage>",
+                    if role == "inbox" { 0 } else { 1 }
+                ),
+                "drafts" => "<m:GetFolderResponseMessage ResponseClass=\"Error\"><m:ResponseCode>ErrorMailboxStoreUnavailable</m:ResponseCode></m:GetFolderResponseMessage>".into(),
+                _ => "<m:GetFolderResponseMessage ResponseClass=\"Error\"><m:ResponseCode>ErrorFolderNotFound</m:ResponseCode></m:GetFolderResponseMessage>".into(),
+            });
         }
+        let response = batch("GetFolder", &messages);
+        reply(&mut peer, "200 OK", "", &response).await;
     });
     let mut client =
         EwsClient::test_stream(Box::new(TcpStream::connect(address).await.unwrap())).await;
@@ -527,6 +544,38 @@ async fn folders_walk_all_pages_and_get_roles_by_identity() {
     assert_eq!(folders[1].role, Some(EwsFolderRole::Sent));
     assert_eq!(folders[1].parent_id.as_deref(), Some("folder0"));
     server.await.unwrap();
+}
+
+#[test]
+fn folder_role_batches_reject_missing_or_mislabelled_messages() {
+    let ok = "<m:GetFolderResponseMessage ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode><m:Folders><t:Folder><t:FolderId Id=\"inbox-id\"/></t:Folder></m:Folders></m:GetFolderResponseMessage>";
+    let response = batch("GetFolder", ok);
+    assert_eq!(
+        soap::folder_ids(response.as_bytes(), 1).unwrap(),
+        [Ok("inbox-id".to_owned())]
+    );
+    // Fewer answers than ids cannot be matched back to roles.
+    assert_eq!(
+        soap::folder_ids(response.as_bytes(), 5),
+        Err(EwsError::Protocol)
+    );
+    let mislabelled = batch(
+        "GetFolder",
+        &ok.replace("GetFolderResponseMessage", "GetItemResponseMessage"),
+    );
+    assert_eq!(
+        soap::folder_ids(mislabelled.as_bytes(), 1),
+        Err(EwsError::Protocol)
+    );
+    // A transport-level auth refusal for one role still fails the round.
+    let denied = batch(
+        "GetFolder",
+        "<m:GetFolderResponseMessage ResponseClass=\"Error\"><m:ResponseCode>ErrorAccessDenied</m:ResponseCode></m:GetFolderResponseMessage>",
+    );
+    assert_eq!(
+        soap::folder_ids(denied.as_bytes(), 1).unwrap(),
+        [Err(EwsError::Authentication)]
+    );
 }
 
 #[tokio::test]

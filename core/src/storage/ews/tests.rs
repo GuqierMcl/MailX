@@ -155,3 +155,58 @@ fn ews_mapping_never_reuses_uids_and_folder_removal_cascades_it() {
         0
     );
 }
+
+#[test]
+fn ews_assign_writes_only_new_items_and_changed_keys() {
+    let (_directory, mut storage, target) = fixture();
+    storage
+        .ews_assign(&target, &keys(&[("a", "key1"), ("b", "key1")]))
+        .unwrap()
+        .unwrap();
+    storage
+        .db
+        .execute_batch(
+            "CREATE TEMP TABLE writes(kind TEXT);
+             CREATE TEMP TRIGGER item_update AFTER UPDATE ON ews_items
+             BEGIN INSERT INTO writes VALUES ('item'); END;
+             CREATE TEMP TRIGGER state_update AFTER UPDATE ON ews_folder_state
+             BEGIN INSERT INTO writes VALUES ('state'); END;",
+        )
+        .unwrap();
+    let writes = |storage: &Storage| -> Vec<String> {
+        storage
+            .db
+            .prepare("SELECT kind FROM writes ORDER BY rowid")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let quiet = storage
+        .ews_assign(&target, &keys(&[("a", "key1"), ("b", "key1")]))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        quiet.iter().map(|item| item.uid).collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert!(
+        writes(&storage).is_empty(),
+        "an unchanged listing writes nothing"
+    );
+    storage
+        .ews_assign(&target, &keys(&[("a", "key1"), ("b", "key2")]))
+        .unwrap()
+        .unwrap();
+    assert_eq!(writes(&storage), ["item"]);
+    assert_eq!(
+        storage
+            .ews_item(&target, 2)
+            .unwrap()
+            .unwrap()
+            .change_key
+            .as_deref(),
+        Some("key2")
+    );
+}

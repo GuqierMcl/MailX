@@ -258,3 +258,164 @@ async fn ews_soft_and_permanent_deletions_complete_the_shared_queue() {
         server.await.unwrap();
     }
 }
+
+async fn refusal(peer: &mut BufReader<DuplexStream>, operation: &str, code: &str) {
+    let body = format!(
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\"><s:Body><m:{operation}Response><m:ResponseMessages><m:{operation}ResponseMessage ResponseClass=\"Error\"><m:ResponseCode>{code}</m:ResponseCode></m:{operation}ResponseMessage></m:ResponseMessages></m:{operation}Response></s:Body></s:Envelope>"
+    );
+    peer.get_mut()
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+}
+
+/// Messages "one" and "two", each with a queued unread toggle and a claimed
+/// permanent deletion.
+fn queued_work(
+    f: &mut crate::sync::ews::tests::Fixture,
+) -> (Vec<PendingChange>, Vec<PendingDeletion>) {
+    let mut one = item("one", f.now);
+    one.is_read = true;
+    let mut two = item("two", f.now);
+    two.is_read = true;
+    store(f, &[one, two], false);
+    let ids: Vec<String> = emails(f).into_iter().map(|email| email.id).collect();
+    for id in &ids {
+        f.service.set_message_flag(id, Flag::Seen, false).unwrap();
+    }
+    f.service
+        .schedule_deletion(&ids, true, f.now, chrono::Duration::zero())
+        .unwrap();
+    let changes = f
+        .service
+        .pending_flag_changes(&f.target.account_id, 10)
+        .unwrap();
+    let (deletions, _) = f
+        .service
+        .claim_due_deletions(&f.target.account_id, f.now)
+        .unwrap();
+    assert_eq!((changes.len(), deletions.len()), (2, 2));
+    (changes, deletions)
+}
+
+fn attempts(
+    service: &Arc<Mutex<AccountService>>,
+    account: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> (Vec<u32>, Vec<u32>) {
+    let mut service = service.lock().unwrap();
+    let flags = service
+        .pending_flag_changes(account, 10)
+        .unwrap()
+        .into_iter()
+        .map(|change| change.attempts)
+        .collect();
+    let (deletions, given_back) = service.claim_due_deletions(account, now).unwrap();
+    assert_eq!(given_back, 0);
+    (
+        flags,
+        deletions
+            .into_iter()
+            .map(|deletion| deletion.attempts)
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn ews_unavailable_server_keeps_every_queued_change_without_spending_attempts() {
+    // Throttling answers, then a dropped connection, both before anything settled.
+    for (busy_on_flags, close) in [(true, false), (false, false), (false, true)] {
+        let mut f = fixture_with_ews(Some("https://controlled.example/EWS/Exchange.asmx"));
+        let (changes, deletions) = queued_work(&mut f);
+        let (account, source, now) = (
+            f.target.account_id.clone(),
+            f.target.mailbox_source_id.clone(),
+            f.now,
+        );
+        let service = Arc::new(Mutex::new(f.service));
+        let (stream, peer) = tokio::io::duplex(16 * 1024);
+        let server = tokio::spawn(async move {
+            let mut peer = BufReader::new(peer);
+            if busy_on_flags {
+                request(&mut peer).await;
+                refusal(&mut peer, "UpdateItem", "ErrorServerBusy").await;
+                return;
+            }
+            for _ in 0..2 {
+                request(&mut peer).await;
+                success(&mut peer, "UpdateItem").await;
+            }
+            request(&mut peer).await;
+            if !close {
+                refusal(&mut peer, "DeleteItem", "ErrorServerBusy").await;
+            }
+            // Dropping the peer closes the connection mid-request.
+        });
+        let mut client = EwsClient::test_stream(Box::new(stream)).await;
+        let result = push(
+            &service,
+            &account,
+            &source,
+            &mut client,
+            changes,
+            deletions,
+            WriteBackReport::default(),
+        )
+        .await;
+        server.await.unwrap();
+        let (sent, waiting) = if busy_on_flags { (0, 4) } else { (2, 2) };
+        match result {
+            RoundEnd::Retry(report) => {
+                assert_eq!((report.sent, report.waiting), (sent, waiting));
+                assert_eq!((report.deleted, report.deletions_given_back), (0, 0));
+            }
+            _ => panic!("an unavailable server must leave the round to retry"),
+        }
+        let (flags, deletions) = attempts(&service, &account, now);
+        assert_eq!(flags, if busy_on_flags { vec![0, 0] } else { vec![] });
+        assert_eq!(deletions, vec![0, 0], "no attempt was spent on the item");
+    }
+}
+
+#[tokio::test]
+async fn ews_item_refusal_still_counts_against_the_deletion() {
+    let mut f = fixture_with_ews(Some("https://controlled.example/EWS/Exchange.asmx"));
+    let (_, deletions) = queued_work(&mut f);
+    let (account, source, now) = (
+        f.target.account_id.clone(),
+        f.target.mailbox_source_id.clone(),
+        f.now,
+    );
+    let service = Arc::new(Mutex::new(f.service));
+    let (stream, peer) = tokio::io::duplex(16 * 1024);
+    let server = tokio::spawn(async move {
+        let mut peer = BufReader::new(peer);
+        for _ in 0..2 {
+            request(&mut peer).await;
+            refusal(&mut peer, "DeleteItem", "ErrorAccessDeniedForItem").await;
+        }
+    });
+    let mut client = EwsClient::test_stream(Box::new(stream)).await;
+    let result = push(
+        &service,
+        &account,
+        &source,
+        &mut client,
+        Vec::new(),
+        deletions,
+        WriteBackReport::default(),
+    )
+    .await;
+    server.await.unwrap();
+    assert!(matches!(
+        result,
+        RoundEnd::Retry(WriteBackReport { waiting: 2, .. })
+    ));
+    assert_eq!(attempts(&service, &account, now).1, vec![1, 1]);
+}

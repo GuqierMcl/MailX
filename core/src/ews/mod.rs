@@ -112,6 +112,9 @@ pub(crate) struct EwsItem {
 
 pub(crate) struct EwsPage {
     pub items: Vec<EwsItem>,
+    /// Item elements the server returned, including non-mail items that
+    /// `items` omits. Paging and empty-page checks use this raw count.
+    pub scanned: usize,
     /// None only for a server-confirmed last page. Invalid/stuck cursors fail.
     pub next_offset: Option<usize>,
 }
@@ -141,6 +144,8 @@ impl EwsClient {
         Ok(Self { http })
     }
 
+    /// `connect` already runs this probe; tests use it as a read-only request.
+    #[cfg(test)]
     pub(crate) async fn verify(&mut self) -> Result<(), EwsError> {
         let response = self.http.post("GetFolder", soap::probe()).await?;
         soap::check(&response, "GetFolderResponseMessage")
@@ -170,18 +175,22 @@ impl EwsClient {
             }
         }
         // Roles are server identities, never names (which are localized).
-        for (name, role) in [
+        // One GetFolder answers all of them, one response message per id.
+        const ROLES: [(&str, EwsFolderRole); 5] = [
             ("inbox", EwsFolderRole::Inbox),
             ("sentitems", EwsFolderRole::Sent),
             ("drafts", EwsFolderRole::Drafts),
             ("deleteditems", EwsFolderRole::Deleted),
             ("junkemail", EwsFolderRole::Junk),
-        ] {
-            let response = self
-                .http
-                .post("GetFolder", soap::distinguished(name))
-                .await?;
-            match soap::folder_id(&response) {
+        ];
+        let names = ROLES.map(|(name, _)| name);
+        let response = self
+            .http
+            .post("GetFolder", soap::distinguished(&names))
+            .await?;
+        let ids = soap::folder_ids(&response, ROLES.len())?;
+        for ((_, role), id) in ROLES.into_iter().zip(ids) {
+            match id {
                 Ok(id) => {
                     if let Some(folder) = folders.iter_mut().find(|folder| folder.id == id) {
                         folder.role = Some(role);
@@ -196,7 +205,9 @@ impl EwsClient {
         Ok(folders)
     }
 
-    /// Metadata only, newest received first, within the caller's sync window.
+    /// Summary metadata only, newest received first, within the caller's sync
+    /// window. Recipients are not part of FindItem's summary shape; callers
+    /// load them with [`Self::recipients`] only for items they will store.
     pub(crate) async fn items(
         &mut self,
         folder_id: &str,
@@ -211,10 +222,12 @@ impl EwsClient {
             .http
             .post("FindItem", soap::items(folder_id, since, offset, limit))
             .await?;
-        let mut page = soap::parse_items(&response, offset)?;
-        // EWS does not expose recipient collections in FindItem's summary
-        // shape. Load them in bounded metadata batches, without body or MIME.
-        for items in page.items.chunks_mut(50) {
+        soap::parse_items(&response, offset)
+    }
+
+    /// Fills To/Cc/Reply-To in bounded metadata batches, without body or MIME.
+    pub(crate) async fn recipients(&mut self, items: &mut [EwsItem]) -> Result<(), EwsError> {
+        for items in items.chunks_mut(50) {
             let ids: Vec<_> = items.iter().map(|item| item.id.as_str()).collect();
             let response = self
                 .http
@@ -229,7 +242,7 @@ impl EwsClient {
                 }
             }
         }
-        Ok(page)
+        Ok(())
     }
 
     pub(crate) async fn mime(
@@ -245,17 +258,19 @@ impl EwsClient {
         soap::parse_mime(&response, limit)
     }
 
-    pub(crate) async fn preview(
+    /// Text bodies for `items` (id, change key) in one `GetItem`, one result
+    /// per item in the same order. `Err` means the whole request failed.
+    pub(crate) async fn previews(
         &mut self,
-        id: &str,
-        change_key: Option<&str>,
+        items: &[(&str, Option<&str>)],
         limit: usize,
-    ) -> Result<Option<String>, EwsError> {
-        let response = self
-            .http
-            .post("GetItem", soap::get_preview(id, change_key))
-            .await?;
-        soap::parse_preview(&response, limit)
+    ) -> Result<Vec<Result<Option<String>, EwsError>>, EwsError> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let response = self.http.post("GetItem", soap::get_previews(items)).await?;
+        let ids: Vec<&str> = items.iter().map(|(id, _)| *id).collect();
+        soap::parse_previews(&response, &ids, limit)
     }
 
     pub(crate) async fn set_flags(
