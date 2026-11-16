@@ -1299,6 +1299,7 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 ### 自动验证
 
 - 本机 macOS：TypeScript、ESLint、i18n（1505 条文案）、生成类型一致性、前端构建、Rust 格式与全 workspace / all-targets Clippy 检查通过。
+- `bun run rust:test`（`cargo test --workspace --locked`）：合计 1731 passed、0 failed、5 ignored；其中 core 单元测试 1432 项、账号集成 48 项、desktop 195 项通过，其余为 MCP/bridge 与协议集成测试。忽略项未作为通过证据。
 - 前端全量 `bun run frontend:test -- --maxWorkers=2`：117 个文件、1469 项测试通过，测试超时保持原值。首次 `bun run check` 的默认并发前端运行出现 15 项失败（14 项超时及 1 项焦点断言），限制并发后全量通过，未修改断言或增加超时；原 check 后续构建与 Rust 检查单独执行。
 - 账号兼容回归覆盖旧 JSON、canonical 幂等重放、凭据恢复日志、真实 EWS 端点存储、来源隔离及更换端点后的信任。同步回归覆盖原 IMAP 正文、预览、IDLE 和写回，以及 EWS 代理 UID、分页上限、循环父级、标记在途反向修改、软删/永久删除队列、失败后不回退 IMAP。
 - 协议受控服务端实际核对 NTLM MIC、SPNEGO mechListMIC 与 CBT，错误 CBT 被拒绝；覆盖密送与冻结 MIME、发送标记失败无请求、标记前连接关闭与标记后响应丢失的不同结果。SOAP 属性与顺序按 Microsoft EWS schema 核对，DTD/命名空间/分页游标和元数据部分失败有回归。
