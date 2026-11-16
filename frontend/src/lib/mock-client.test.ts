@@ -329,7 +329,7 @@ describe('showcase seed', () => {
     expect(page.items.some((item) => item.isStarred)).toBe(true)
     expect(page.items.some((item) => !item.isRead)).toBe(true)
     const addresses = [
-      ...accounts.flatMap((account) => [account.emailAddress, account.imap.username, account.smtp.username]),
+      ...accounts.flatMap((account) => 'imap' in account ? [account.emailAddress, account.imap.username, account.smtp.username] : [account.emailAddress, account.ews.username]),
       ...page.items.map((item) => item.from.address),
     ]
     for (const detail of await Promise.all(page.items.map((item) => client.getEmail(item.id)))) {
@@ -465,6 +465,7 @@ describe('mock browser sign-in', () => {
     const { sessionId } = await signIn(client, providerId)
     const account = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
     expect(account.emailAddress).toBe(address)
+    if (!('imap' in account)) throw new Error('OAuth IMAP fixture')
     expect(account.imap).toEqual({ host: 'outlook.office365.com', port: 993, tls: 'implicit', username: address })
     expect(account.smtp).toEqual({ host: smtpHost, port: 587, tls: 'startTls', username: address })
     expect(await client.getAccount(account.id)).toMatchObject({ imap: account.imap, smtp: account.smtp })
@@ -481,6 +482,7 @@ describe('mock browser sign-in', () => {
     expect(await client.confirmOAuthMailbox({ sessionId, emailAddress: ' real@outlook.com ' })).toEqual({ kind: 'verified', emailAddress: 'real@outlook.com' })
     const account = await client.createOAuthAccount({ sessionId, requestId: crypto.randomUUID(), profile })
     expect(account.emailAddress).toBe('real@outlook.com')
+    if (!('imap' in account)) throw new Error('OAuth IMAP fixture')
     expect(account.imap.username).toBe('real@outlook.com')
   })
 

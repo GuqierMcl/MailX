@@ -16,9 +16,11 @@ use tokio::task::JoinHandle;
 use super::Clock;
 use super::schedule::{self, Transition};
 use super::types::{OutboxChanged, OutboxError};
+use crate::accounts::sync_plan::{EwsPlan, SubmitPlan};
 use crate::accounts::{AccountService, Next, SendAdmission};
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events};
+use crate::ews::{EwsClient, EwsError};
 use crate::send::types::OutboxState;
 use crate::smtp::{self, DataStarted, SmtpOutcome, Timeouts, TlsSource, plan_failure};
 use crate::storage::outbox::{Changed, ClaimedJob};
@@ -378,11 +380,15 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
             }
             Next::Job { job, plan } => {
                 let item_id = job.item.id.clone();
-                let outcome = match plan {
-                    Err(error) => Ok(plan_failure(&error)),
+                let outcome = match *plan {
+                    Err(error) => Ok(SubmitOutcome::Smtp(plan_failure(&error))),
                     // The address changed between claiming and planning: the
                     // snapshot's sender no longer matches the account.
-                    Ok(plan) if !plan.sender_address.eq_ignore_ascii_case(&job.envelope.from) => {
+                    Ok(plan)
+                        if !plan
+                            .sender_address()
+                            .eq_ignore_ascii_case(&job.envelope.from) =>
+                    {
                         Err(OutboxError::reason("accountChanged"))
                     }
                     Ok(plan) => match read_snapshot(&job).await {
@@ -391,25 +397,32 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                         None => Err(OutboxError::reason("snapshotMissing")),
                         Some(mime) => {
                             let hook = data_started(&shared, &service, item_id.clone());
-                            let attempt = smtp::send_with_tls(
-                                &plan.route,
-                                &plan.login,
-                                &job.envelope,
-                                &mime,
-                                &shared.config.timeouts,
-                                &shared.config.tls,
-                                hook,
-                            )
-                            .await;
-                            let account_id = job.item.account_id.clone();
-                            let size = attempt.advertised_size;
-                            blocking(&service, move |service| {
-                                service.record_smtp_size(&account_id, size);
-                                Ok(())
-                            })
-                            .await
-                            .ok();
-                            Ok(attempt.outcome)
+                            match plan {
+                                SubmitPlan::Ews { plan, .. } => {
+                                    Ok(send_via_ews(&plan, &mime, &job.envelope, hook).await)
+                                }
+                                SubmitPlan::Smtp(plan) => {
+                                    let attempt = smtp::send_with_tls(
+                                        &plan.route,
+                                        &plan.login,
+                                        &job.envelope,
+                                        &mime,
+                                        &shared.config.timeouts,
+                                        &shared.config.tls,
+                                        hook,
+                                    )
+                                    .await;
+                                    let account_id = job.item.account_id.clone();
+                                    let size = attempt.advertised_size;
+                                    blocking(&service, move |service| {
+                                        service.record_smtp_size(&account_id, size);
+                                        Ok(())
+                                    })
+                                    .await
+                                    .ok();
+                                    Ok(SubmitOutcome::Smtp(attempt.outcome))
+                                }
+                            }
                         }
                     },
                 };
@@ -425,6 +438,80 @@ async fn run(shared: Arc<Shared>, account_id: String, wake: Arc<Notify>) {
                 .await;
             }
         }
+    }
+}
+
+/// Protocol adapters preserve the existing queue's accepted/failed/unknown
+/// boundary without inventing an SMTP status for an EWS response.
+enum SubmitOutcome {
+    Smtp(SmtpOutcome),
+    Accepted,
+    Failed(OutboxError),
+    Unknown,
+}
+
+async fn send_via_ews(
+    plan: &EwsPlan,
+    mime: &[u8],
+    envelope: &crate::smtp::message::SmtpEnvelope,
+    hook: DataStarted,
+) -> SubmitOutcome {
+    use crate::smtp::{FailureReason, PreDataFailure};
+    let mut client =
+        match EwsClient::connect(&plan.route, &plan.endpoint, &plan.user, &plan.password).await {
+            Ok(client) => client,
+            Err(error) => {
+                let (reason, retry) = match error {
+                    EwsError::Net(crate::net::NetError::Proxy(_)) => (FailureReason::Proxy, true),
+                    EwsError::Net(crate::net::NetError::Tls(_)) => {
+                        (FailureReason::TlsVerification, false)
+                    }
+                    EwsError::Timeout | EwsError::Net(crate::net::NetError::Timeout) => {
+                        (FailureReason::Timeout, true)
+                    }
+                    EwsError::Net(_) => (FailureReason::Network, true),
+                    EwsError::Authentication => (FailureReason::AuthRejected, false),
+                    EwsError::AuthUnsupported => (FailureReason::AuthUnavailable, false),
+                    _ => (FailureReason::Protocol, false),
+                };
+                let failure = PreDataFailure::new(reason);
+                return SubmitOutcome::Smtp(if retry {
+                    SmtpOutcome::Transient(failure)
+                } else {
+                    SmtpOutcome::Permanent(failure)
+                });
+            }
+        };
+    match client.send(mime, envelope, hook).await {
+        Ok(()) => SubmitOutcome::Accepted,
+        Err(EwsError::DataMarkFailed) => {
+            SubmitOutcome::Failed(OutboxError::reason("dataMarkFailed"))
+        }
+        Err(EwsError::Server { .. } | EwsError::Authentication | EwsError::NotFound) => {
+            SubmitOutcome::Failed(OutboxError::reason("rejectedAfterData"))
+        }
+        Err(EwsError::Unknown) => SubmitOutcome::Unknown,
+        // The EWS transport returns these only before the durable callback.
+        // Errors after it may have sent bytes and are explicitly `Unknown`.
+        Err(EwsError::Timeout | EwsError::Net(crate::net::NetError::Timeout)) => {
+            SubmitOutcome::Smtp(SmtpOutcome::Transient(PreDataFailure::new(
+                FailureReason::Timeout,
+            )))
+        }
+        Err(EwsError::Net(crate::net::NetError::Tls(_))) => {
+            SubmitOutcome::Failed(OutboxError::reason("tlsVerification"))
+        }
+        Err(EwsError::Net(crate::net::NetError::Proxy(_))) => SubmitOutcome::Smtp(
+            SmtpOutcome::Transient(PreDataFailure::new(FailureReason::Proxy)),
+        ),
+        Err(EwsError::Net(_)) => SubmitOutcome::Smtp(SmtpOutcome::Transient(PreDataFailure::new(
+            FailureReason::Network,
+        ))),
+        Err(EwsError::TooLarge) => SubmitOutcome::Failed(OutboxError::reason("messageTooLarge")),
+        Err(EwsError::AuthUnsupported) => {
+            SubmitOutcome::Failed(OutboxError::reason("authUnavailable"))
+        }
+        Err(EwsError::Protocol) => SubmitOutcome::Failed(OutboxError::reason("protocol")),
     }
 }
 
@@ -452,12 +539,20 @@ async fn record(
     id: &str,
     attempts: u32,
     first_queued: DateTime<Utc>,
-    outcome: Result<SmtpOutcome, OutboxError>,
+    outcome: Result<SubmitOutcome, OutboxError>,
 ) {
     let now = shared.config.clock.now();
     let id = id.to_owned();
     let transition = match outcome {
-        Ok(outcome) => schedule::transition(outcome, attempts, first_queued, now),
+        Ok(SubmitOutcome::Smtp(outcome)) => {
+            schedule::transition(outcome, attempts, first_queued, now)
+        }
+        Ok(SubmitOutcome::Accepted) => Transition::Accept(super::types::ServerReplyInfo {
+            code: None,
+            text: "EWS accepted".into(),
+        }),
+        Ok(SubmitOutcome::Failed(error)) => Transition::Fail(error),
+        Ok(SubmitOutcome::Unknown) => Transition::Unknown(OutboxError::reason("unknown")),
         Err(error) => Transition::Fail(error),
     };
     let result = blocking(service, move |service| match transition {

@@ -11,23 +11,25 @@ pub(crate) fn summary(
     imap: &AuthRecord,
     smtp: &AuthRecord,
     account: &Account,
-) -> AccountAuthenticationSummary {
-    AccountAuthenticationSummary::OAuth2(OAuthAuthenticationSummary {
-        configuration: OAuth2Configuration {
-            provider_id: binding.provider_id.clone(),
-            issuer: binding.issuer.clone(),
-            client_registration_id: binding.client_registration_id.clone(),
-            authorization_subject: Some(binding.subject.clone()),
-            target_mailbox_resource: Some(binding.mailbox.clone()),
+) -> Result<AccountAuthenticationSummary, AppError> {
+    Ok(AccountAuthenticationSummary::OAuth2(
+        OAuthAuthenticationSummary {
+            configuration: OAuth2Configuration {
+                provider_id: binding.provider_id.clone(),
+                issuer: binding.issuer.clone(),
+                client_registration_id: binding.client_registration_id.clone(),
+                authorization_subject: Some(binding.subject.clone()),
+                target_mailbox_resource: Some(binding.mailbox.clone()),
+            },
+            state: OAuthAuthenticationState::Connected,
+            imap: ProtocolAuthenticationSummary::from(
+                &imap.summary(&TrustEndpoint::mail("imap", account.connection.imap()?)),
+            ),
+            smtp: ProtocolAuthenticationSummary::from(
+                &smtp.summary(&TrustEndpoint::mail("smtp", account.connection.smtp()?)),
+            ),
         },
-        state: OAuthAuthenticationState::Connected,
-        imap: ProtocolAuthenticationSummary::from(
-            &imap.summary(&TrustEndpoint::mail("imap", &account.imap)),
-        ),
-        smtp: ProtocolAuthenticationSummary::from(
-            &smtp.summary(&TrustEndpoint::mail("smtp", &account.smtp)),
-        ),
-    })
+    ))
 }
 fn binding_matches_registration(
     binding: &GrantBinding,
@@ -270,7 +272,11 @@ impl AccountService {
             return Err(sync_plan::PlanError::CredentialUntrusted);
         }
         registration
-            .validate_mail_target(&binding.mailbox, &account.imap, &account.smtp)
+            .validate_mail_target(
+                &binding.mailbox,
+                account.connection.imap()?,
+                account.connection.smtp()?,
+            )
             .map_err(|_| sync_plan::PlanError::CredentialUntrusted)?;
         if let Some(manager) = managers.get(&profile.secret_ref) {
             return Ok(ProtocolCredential::ManagedOAuth2(manager.clone()));
@@ -323,8 +329,7 @@ impl AccountService {
                     use_provider_icon: account.use_provider_icon,
                     email_address: account.email_address,
                     provider_id: account.provider_id,
-                    imap: account.imap,
-                    smtp: account.smtp,
+                    connection: account.connection,
                     authentication: AuthenticationInput::OAuth2 {
                         configuration: auth.configuration,
                     },
@@ -353,8 +358,8 @@ impl AccountService {
         registration
             .validate_mail_target(
                 &old.account.email_address,
-                &old.account.imap,
-                &old.account.smtp,
+                old.account.connection.imap()?,
+                old.account.connection.smtp()?,
             )
             .map_err(|_| AppError::validation("authentication"))?;
         let old_binding = old
@@ -399,12 +404,12 @@ impl AccountService {
         snapshot.account.revision = next_version(expected_revision)?;
         snapshot.account.updated_at = now();
         let imap = snapshot
-            .profile(&old.account.authentication.imap().id)
+            .profile(&old.account.authentication.receive().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
         let smtp = snapshot
-            .profile(&old.account.authentication.smtp().id)
+            .profile(&old.account.authentication.submit().id)
             .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
-        snapshot.account.authentication = summary(&binding, imap, smtp, &snapshot.account);
+        snapshot.account.authentication = summary(&binding, imap, smtp, &snapshot.account)?;
         let retained = snapshot.refs();
         let journal = Journal {
             id: new_id(),
@@ -439,7 +444,11 @@ impl AccountService {
         validate_uuid(&request.request_id, "requestId")?;
         let binding = authorization.binding;
         registration
-            .validate_mail_target(&binding.mailbox, &request.config.imap, &request.config.smtp)
+            .validate_mail_target(
+                &binding.mailbox,
+                request.config.connection.imap()?,
+                request.config.connection.smtp()?,
+            )
             .map_err(|_| AppError::validation("authentication"))?;
         if !binding_matches_registration(&binding, &registration)
             || !binding
@@ -474,8 +483,8 @@ impl AccountService {
             generation: 1,
             secret_ref: secret_ref.clone(),
             trusted_endpoints: vec![
-                TrustEndpoint::mail("imap", &connection.imap),
-                TrustEndpoint::mail("smtp", &connection.smtp),
+                TrustEndpoint::mail("imap", connection.connection.imap()?),
+                TrustEndpoint::mail("smtp", connection.connection.smtp()?),
             ],
             oauth: Some(binding.clone()),
         };
@@ -498,8 +507,7 @@ impl AccountService {
             email_address: connection.email_address,
             provider_id: connection.provider_id,
             mailbox_source_id: new_id(),
-            imap: connection.imap,
-            smtp: connection.smtp,
+            connection: connection.connection,
             authentication: AccountAuthenticationSummary::Password(PasswordAuthenticationSummary {
                 mode: AuthenticationMode::Shared,
                 imap: auth.summary(&auth.trusted_endpoints[0]),
@@ -512,7 +520,7 @@ impl AccountService {
             created_at: timestamp.clone(),
             updated_at: timestamp,
         };
-        account.authentication = summary(&binding, &auth, &auth, &account);
+        account.authentication = summary(&binding, &auth, &auth, &account)?;
         let journal = Journal {
             id: new_id(),
             expected_revision: None,
@@ -538,8 +546,7 @@ pub(crate) fn normalize_oauth_request(request: &mut CreateAccountRequest) -> Res
     let mut connection = request.config.clone().split().1;
     validate_connection(&mut connection)?;
     request.config.email_address = connection.email_address;
-    request.config.imap = connection.imap;
-    request.config.smtp = connection.smtp;
+    request.config.connection = connection.connection;
     request.config.route = connection.route;
     Ok(())
 }
@@ -565,8 +572,7 @@ pub(crate) fn create_request(
             use_provider_icon: profile.use_provider_icon,
             email_address: mailbox.trim().to_owned(),
             provider_id: Some(registration.id.clone()),
-            imap,
-            smtp,
+            connection: MailConnection::ImapSmtp { imap, smtp },
             authentication: AuthenticationInput::OAuth2 {
                 configuration: OAuth2Configuration {
                     provider_id: registration.id.clone(),
@@ -749,12 +755,32 @@ mod tests {
                 .unwrap();
             let shown = service.get(&account.id).unwrap();
             for saved in [&account, &shown] {
-                assert_eq!(saved.imap.host, "outlook.office365.com", "{provider}");
-                assert_eq!((saved.imap.port, saved.imap.tls), (993, TlsMode::Implicit));
-                assert_eq!(saved.imap.username, "lin@contoso.com");
-                assert_eq!(saved.smtp.host, smtp_host, "{provider}");
-                assert_eq!((saved.smtp.port, saved.smtp.tls), (587, TlsMode::StartTls));
-                assert_eq!(saved.smtp.username, "lin@contoso.com");
+                assert_eq!(
+                    saved.connection.imap().unwrap().host,
+                    "outlook.office365.com",
+                    "{provider}"
+                );
+                assert_eq!(
+                    (
+                        saved.connection.imap().unwrap().port,
+                        saved.connection.imap().unwrap().tls
+                    ),
+                    (993, TlsMode::Implicit)
+                );
+                assert_eq!(saved.connection.imap().unwrap().username, "lin@contoso.com");
+                assert_eq!(
+                    saved.connection.smtp().unwrap().host,
+                    smtp_host,
+                    "{provider}"
+                );
+                assert_eq!(
+                    (
+                        saved.connection.smtp().unwrap().port,
+                        saved.connection.smtp().unwrap().tls
+                    ),
+                    (587, TlsMode::StartTls)
+                );
+                assert_eq!(saved.connection.smtp().unwrap().username, "lin@contoso.com");
                 assert!(matches!(saved.route, RouteConfig::Inherit));
             }
         }
@@ -849,7 +875,7 @@ mod tests {
             .reauthorize_oauth(&account.id, 1, verified("stable-subject"), registration())
             .unwrap();
         assert_eq!(changed.revision, 2);
-        assert_eq!(changed.authentication.imap().generation, 2);
+        assert_eq!(changed.authentication.receive().generation, 2);
         assert!(!manager.is_valid());
         assert_eq!(
             service
@@ -1158,24 +1184,40 @@ mod tests {
     fn normalization_precedes_mail_policy_and_arbitrary_mail_targets_are_rejected() {
         let mut request = request();
         request.config.email_address = "  lin@example.com  ".into();
-        request.config.imap.username.clear();
-        request.config.smtp.username = "  ".into();
+        request
+            .config
+            .connection
+            .imap_smtp_mut()
+            .unwrap()
+            .0
+            .username
+            .clear();
+        request
+            .config
+            .connection
+            .imap_smtp_mut()
+            .unwrap()
+            .1
+            .username = "  ".into();
         normalize_oauth_request(&mut request).unwrap();
         assert_eq!(request.config.email_address, "lin@example.com");
-        assert_eq!(request.config.imap.username, "lin@example.com");
+        assert_eq!(
+            request.config.connection.imap().unwrap().username,
+            "lin@example.com"
+        );
         let mut reg = registration();
         reg.mail_policy.imap.login = crate::auth::MailLoginPolicy::Mailbox;
         reg.mail_policy.smtp.login = crate::auth::MailLoginPolicy::Mailbox;
         assert!(
             reg.validate_mail_target(
                 &request.config.email_address,
-                &request.config.imap,
-                &request.config.smtp
+                request.config.connection.imap().unwrap(),
+                request.config.connection.smtp().unwrap()
             )
             .is_ok()
         );
         for changed in [0, 1, 2, 3] {
-            let mut config = request.config.imap.clone();
+            let mut config = request.config.connection.imap().unwrap().clone();
             match changed {
                 0 => config.host = "attacker.invalid".into(),
                 1 => config.port = 443,
@@ -1186,7 +1228,7 @@ mod tests {
                 reg.validate_mail_target(
                     &request.config.email_address,
                     &config,
-                    &request.config.smtp
+                    request.config.connection.smtp().unwrap()
                 )
                 .is_err()
             );
@@ -1398,9 +1440,9 @@ mod tests {
                 service.sync_plan(&account.id).unwrap();
                 let mut snapshot = service.storage.load(&account.id).unwrap();
                 let connection = if protocol == "imap" {
-                    &mut snapshot.account.imap
+                    snapshot.account.connection.imap_smtp_mut().unwrap().0
                 } else {
-                    &mut snapshot.account.smtp
+                    snapshot.account.connection.imap_smtp_mut().unwrap().1
                 };
                 match field {
                     "host" => connection.host = "attacker.invalid".into(),
@@ -1410,8 +1452,8 @@ mod tests {
                 }
                 service.storage.db.execute("UPDATE mail_connections SET host=?3,port=?4,tls=?5,username=?6 WHERE account_id=?1 AND protocol=?2",rusqlite::params![account.id,protocol,connection.host,connection.port,if connection.tls==TlsMode::Implicit{"implicit"}else{"startTls"},connection.username]).unwrap();
                 snapshot.profiles[0].trusted_endpoints = vec![
-                    TrustEndpoint::mail("imap", &snapshot.account.imap),
-                    TrustEndpoint::mail("smtp", &snapshot.account.smtp),
+                    TrustEndpoint::mail("imap", snapshot.account.connection.imap().unwrap()),
+                    TrustEndpoint::mail("smtp", snapshot.account.connection.smtp().unwrap()),
                 ];
                 service
                     .storage

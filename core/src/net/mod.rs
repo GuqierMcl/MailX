@@ -99,6 +99,24 @@ pub(crate) async fn upgrade_tls(stream: BoxedStream, host: &str) -> Result<Boxed
     handshake(stream, host, tls_config()?).await
 }
 
+/// EWS binds NTLM to the verified TLS server certificate. Capture it before
+/// erasing the TLS stream type; the certificate belongs to this exact tunnel.
+pub(crate) async fn upgrade_tls_with_peer_certificate(
+    stream: BoxedStream,
+    host: &str,
+) -> Result<(BoxedStream, Vec<u8>), NetError> {
+    let stream = tls_handshake(stream, host, tls_config()?).await?;
+    let certificate = stream
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|certificates| certificates.first())
+        .ok_or_else(|| NetError::Tls("server certificate unavailable".into()))?
+        .as_ref()
+        .to_vec();
+    Ok((Box::new(stream), certificate))
+}
+
 /// Test-only injection point: the same handshake with a test trust store.
 /// There is deliberately no production counterpart.
 #[cfg(test)]
@@ -115,6 +133,14 @@ async fn handshake(
     host: &str,
     config: Arc<ClientConfig>,
 ) -> Result<BoxedStream, NetError> {
+    Ok(Box::new(tls_handshake(stream, host, config).await?))
+}
+
+async fn tls_handshake(
+    stream: BoxedStream,
+    host: &str,
+    config: Arc<ClientConfig>,
+) -> Result<tokio_rustls::client::TlsStream<BoxedStream>, NetError> {
     let name = ServerName::try_from(host.to_owned())
         .map_err(|_| NetError::Tls("invalid TLS server name".into()))?;
     let handshake = TlsConnector::from(config).connect(name, stream);
@@ -122,7 +148,7 @@ async fn handshake(
         .await
         .map_err(|_| NetError::Timeout)?
         .map_err(tls_handshake_error)?;
-    Ok(Box::new(stream))
+    Ok(stream)
 }
 
 fn tls_handshake_error(_error: std::io::Error) -> NetError {

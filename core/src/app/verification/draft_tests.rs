@@ -130,7 +130,13 @@ async fn cancellation_before_registration_prevents_preparation_and_network() {
     let (_directory, core, secrets) = setup();
     let mut attempt = request(port, port);
     // Even invalid pending credentials are not prepared after an early abort.
-    attempt.connection.imap.port = 0;
+    attempt
+        .connection
+        .connection
+        .imap_smtp_mut()
+        .unwrap()
+        .0
+        .port = 0;
     core.cancel_draft_verification(CancelDraftVerification {
         verification_id: attempt.verification_id.clone(),
     })
@@ -329,7 +335,10 @@ async fn the_shared_imap_probe_only_authenticates_checks_liveness_and_logs_out()
                 .unwrap();
         }
     });
-    let session = imap::test_body_session(Box::new(client), &plan.imap)
+    let draft_connection::DraftConnectionPlan::ImapSmtp { imap: login, .. } = plan else {
+        panic!("IMAP fixture")
+    };
+    let session = imap::test_body_session(Box::new(client), &login)
         .await
         .unwrap();
     let result = verify_authenticated_imap(session).await;
@@ -391,4 +400,43 @@ fn cancellation_while_draft_preparation_is_queued_never_opens_a_socket() {
         );
         assert_eq!(secrets.0.load(Ordering::SeqCst), 0);
     });
+}
+
+#[tokio::test]
+async fn unsaved_exchange_diagnostics_use_only_the_supplied_https_route() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (_directory, core, secrets) = setup();
+    let connection = serde_json::from_value(json!({
+        "emailAddress":"alice@example.com","providerId":"exchange-self-hosted","backend":"ews",
+        "ews":{"url":"https://mail.example.com/EWS/Exchange.asmx","username":"EXAMPLE\\alice"},
+        "authentication":{"kind":"password","mode":"shared","password":{"action":"replace","value":"synthetic-secret"}},
+        "route":{"kind":"custom","proxyKind":"httpConnect","host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"dns":"proxy","authentication":null}
+    })).unwrap();
+    let peer = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = [0; 1024];
+        let count = stream.read(&mut bytes).await.unwrap();
+        assert!(
+            std::str::from_utf8(&bytes[..count])
+                .unwrap()
+                .starts_with("CONNECT mail.example.com:443 ")
+        );
+        stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let report = core
+        .verify_draft_connection(VerifyDraftConnection {
+            verification_id: Uuid::new_v4().to_string(),
+            connection,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        report.ews.unwrap().code,
+        Some(ConnectionVerificationCode::Proxy)
+    );
+    assert_eq!(secrets.0.load(Ordering::SeqCst), 0);
+    peer.await.unwrap();
 }

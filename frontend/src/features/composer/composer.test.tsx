@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/toast'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
-import type { Draft } from '@/generated/accounts'
+import type { Account, Draft } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { Composer } from './composer'
 import { AUTOSAVE_DELAY_MS, SAVING_INDICATOR_DELAY_MS } from './use-draft-editor'
@@ -26,8 +26,8 @@ function draft(overrides: Partial<Draft> = {}): Draft {
   }
 }
 
-function setup(initial: Draft = draft()) {
-  const client = testClient([account])
+function setup(initial: Draft = draft(), sender: Account = account) {
+  const client = testClient([sender])
   let current = initial
   client.getDraft.mockImplementation(async () => structuredClone(current))
   client.updateDraft.mockImplementation(async (request) => {
@@ -40,7 +40,7 @@ function setup(initial: Draft = draft()) {
   const view = render(
     <>
       <Toaster />
-      <Composer client={client} draftId={DRAFT_ID} accounts={[account]} onSent={onSent} onDiscarded={onDiscarded} controllerRef={controller} />
+      <Composer client={client} draftId={DRAFT_ID} accounts={[sender]} onSent={onSent} onDiscarded={onDiscarded} controllerRef={controller} />
     </>,
   )
   return { client, onSent, onDiscarded, controller, view, setCurrent: (next: Draft) => { current = next } }
@@ -444,4 +444,20 @@ describe('attachments', () => {
     await body()
     expect(await screen.findByText(/约 2 MB/)).toBeInTheDocument()
   })
+})
+
+
+it.each(['trusted', 'needsConfirmation'] as const)('checks the Exchange credential before preparing a send (%s)', async (trust) => {
+  const { imap: _imap, smtp: _smtp, ...common } = account
+  void _imap; void _smtp
+  const sender: Account = { ...common, backend: 'ews', ews: { url: 'https://mail.example.com/EWS/Exchange.asmx', username: 'EXAMPLE\\alice' }, authentication: { kind: 'ewsNtlm', credential: { id: 'ews-secret', generation: 1, passwordConfigured: true, trust } } }
+  const { client } = setup(draft({ to: [{ name: null, address: 'recipient@example.com' }], subject: 'Exchange' }), sender)
+  await body()
+  await userEvent.click(screen.getByRole('button', { name: '发送' }))
+  if (trust === 'trusted') expect(await screen.findByRole('button', { name: '确认发送' })).toBeInTheDocument()
+  else {
+    expect(await screen.findByRole('alert')).toHaveTextContent('凭证需要重新确认')
+    expect(screen.queryByRole('button', { name: '确认发送' })).not.toBeInTheDocument()
+  }
+  expect(client.queueSend).not.toHaveBeenCalled()
 })

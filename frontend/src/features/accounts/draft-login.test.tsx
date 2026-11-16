@@ -163,7 +163,9 @@ describe('testing a connection before saving an account', () => {
     expect(screen.queryByText(succeeded)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '测试登录' }))
     expect(await screen.findByText(succeeded)).toBeInTheDocument()
-    expect(client.verifyDraftConnection.mock.calls[1][0].imap.username).toBe('changed-user')
+    const checked = client.verifyDraftConnection.mock.calls[1][0]
+    if (!('imap' in checked)) throw new Error('IMAP fixture')
+    expect(checked.imap.username).toBe('changed-user')
     await act(async () => pending.resolve({ ...success, smtp: { status: 'failed', stage: 'authentication', code: 'authentication' } }))
     expect(screen.getByText(succeeded)).toBeInTheDocument()
     expect(screen.queryByText('未通过')).not.toBeInTheDocument()

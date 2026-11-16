@@ -11,6 +11,8 @@ export function errorText(error: unknown, context?: ErrorContext): string {
     if ('field' in failure && failure.field === 'autostart') return t('settings:autostartSystemError')
     if (code === 'validation' && 'field' in failure && typeof failure.field === 'string') {
       const field = failure.field
+      if (field === 'ews.url') return t('accounts:ewsInvalidUrl')
+      if (field === 'targetGrant') return t('accounts:ewsDiscoveryExpired')
       if (/\.port$|^proxyPort$/.test(field)) return t('accounts:invalidPort')
       if (/\.host$|^proxyHost$/.test(field)) return t('accounts:invalidHost')
       if (/\.username$/.test(field)) return t('accounts:loginRequired')

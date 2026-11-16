@@ -406,7 +406,7 @@ async fn acceptance_keeps_the_copy_deletes_the_draft_and_emits_events() {
     let draft = fx.draft(&account);
     let item = fx.queue(&draft, 0);
     let done = fx.reaches(&item.id, OutboxState::Accepted).await;
-    assert_eq!(done.server_reply.as_ref().unwrap().code, 250);
+    assert_eq!(done.server_reply.as_ref().unwrap().code, Some(250));
     assert_eq!(
         done.accepted_at.as_deref(),
         Some("2026-10-23T12:00:00.000Z")
@@ -556,7 +556,7 @@ async fn a_failed_item_can_be_edited_and_sent_again_with_a_new_message_id() {
 
     // The user fixes the connection and edits the draft.
     let mut value = Fx::account_config("lin@example.com", good, 1);
-    value["imap"]["port"] = json!(account.imap.port);
+    value["imap"]["port"] = json!(account.connection.imap().unwrap().port);
     fx.core
         .update_account_connection(connection_update(&account.id, account.revision, value))
         .unwrap();
@@ -763,7 +763,7 @@ async fn resending_an_unknown_item_keeps_the_message_id_and_the_bytes() {
 
     // The user points the account at a working server before resending.
     let mut value = Fx::account_config("lin@example.com", good, 1);
-    value["imap"]["port"] = json!(account.imap.port);
+    value["imap"]["port"] = json!(account.connection.imap().unwrap().port);
     fx.core
         .update_account_connection(connection_update(&account.id, account.revision, value))
         .unwrap();
@@ -810,7 +810,7 @@ async fn changing_the_account_address_fails_unsent_items_but_a_new_route_does_no
 
     // A connection change alone keeps the queue and uses it from then on.
     let mut value = Fx::account_config("lin@example.com", port, 1);
-    value["imap"]["port"] = json!(account.imap.port);
+    value["imap"]["port"] = json!(account.connection.imap().unwrap().port);
     value["smtp"]["username"] = json!("lin2");
     let updated = fx
         .core
@@ -823,7 +823,7 @@ async fn changing_the_account_address_fails_unsent_items_but_a_new_route_does_no
     );
 
     let mut value = Fx::account_config("other@example.com", port, 1);
-    value["imap"]["port"] = json!(account.imap.port);
+    value["imap"]["port"] = json!(account.connection.imap().unwrap().port);
     fx.core
         .update_account_connection(connection_update(&account.id, updated.revision, value))
         .unwrap();

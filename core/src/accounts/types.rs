@@ -19,6 +19,74 @@ pub struct ConnectionConfig {
     pub username: String,
 }
 
+/// A self-hosted Exchange endpoint. Authentication is NTLMv2 over verified HTTPS.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EwsConnectionConfig {
+    pub url: String,
+    pub username: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum EwsBackend {
+    #[serde(rename = "ews")]
+    Ews,
+}
+
+/// The legacy IMAP/SMTP wire shape stays unchanged, including in recovery
+/// journals. Exchange has an explicit discriminator and no synthetic mail ports.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum MailConnection {
+    Ews {
+        backend: EwsBackend,
+        ews: EwsConnectionConfig,
+    },
+    ImapSmtp {
+        imap: ConnectionConfig,
+        smtp: ConnectionConfig,
+    },
+}
+
+impl MailConnection {
+    pub fn imap(&self) -> Result<&ConnectionConfig, crate::AppError> {
+        self.imap_smtp()
+            .map(|(imap, _)| imap)
+            .ok_or_else(|| crate::AppError::new(crate::ErrorCode::Unsupported))
+    }
+
+    pub fn smtp(&self) -> Result<&ConnectionConfig, crate::AppError> {
+        self.imap_smtp()
+            .map(|(_, smtp)| smtp)
+            .ok_or_else(|| crate::AppError::new(crate::ErrorCode::Unsupported))
+    }
+
+    pub fn imap_smtp_mut(&mut self) -> Option<(&mut ConnectionConfig, &mut ConnectionConfig)> {
+        match self {
+            Self::ImapSmtp { imap, smtp } => Some((imap, smtp)),
+            Self::Ews { .. } => None,
+        }
+    }
+
+    pub fn imap_smtp(&self) -> Option<(&ConnectionConfig, &ConnectionConfig)> {
+        match self {
+            Self::ImapSmtp { imap, smtp } => Some((imap, smtp)),
+            Self::Ews { .. } => None,
+        }
+    }
+
+    pub fn ews(&self) -> Option<&EwsConnectionConfig> {
+        match self {
+            Self::Ews { ews, .. } => Some(ews),
+            Self::ImapSmtp { .. } => None,
+        }
+    }
+
+    pub fn is_ews(&self) -> bool {
+        matches!(self, Self::Ews { .. })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
 pub enum SecretUpdate {
@@ -143,19 +211,23 @@ fn default_use_provider_icon() -> bool {
 
 /// How MailX reaches the mailbox: identity, servers, credentials and route.
 #[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// The flattened connection rejects unknown remaining fields. Combining an
+// outer deny_unknown_fields with an untagged flatten rejects legacy endpoints.
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionInput {
     pub email_address: String,
     pub provider_id: Option<String>,
-    pub imap: ConnectionConfig,
-    pub smtp: ConnectionConfig,
+    #[serde(flatten)]
+    pub connection: MailConnection,
     pub authentication: AuthenticationInput,
     pub route: RouteInput,
 }
 
 /// A new account: its profile and its connection in one request.
 #[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// The flattened connection rejects unknown remaining fields. Combining an
+// outer deny_unknown_fields with an untagged flatten rejects legacy endpoints.
+#[serde(rename_all = "camelCase")]
 pub struct AccountConfigInput {
     pub display_name: String,
     /// `#rrggbb`; omitted or `null` for the neutral default.
@@ -169,8 +241,8 @@ pub struct AccountConfigInput {
     pub use_provider_icon: bool,
     pub email_address: String,
     pub provider_id: Option<String>,
-    pub imap: ConnectionConfig,
-    pub smtp: ConnectionConfig,
+    #[serde(flatten)]
+    pub connection: MailConnection,
     pub authentication: AuthenticationInput,
     pub route: RouteInput,
 }
@@ -187,8 +259,7 @@ impl AccountConfigInput {
             ConnectionInput {
                 email_address: self.email_address,
                 provider_id: self.provider_id,
-                imap: self.imap,
-                smtp: self.smtp,
+                connection: self.connection,
                 authentication: self.authentication,
                 route: self.route,
             },
@@ -267,6 +338,12 @@ pub struct PasswordAuthenticationSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EwsAuthenticationSummary {
+    pub credential: AuthenticationSummary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolAuthenticationSummary {
     pub id: String,
@@ -298,6 +375,8 @@ pub enum AccountAuthenticationSummary {
     Password(PasswordAuthenticationSummary),
     #[serde(rename = "oauth2")]
     OAuth2(OAuthAuthenticationSummary),
+    #[serde(rename = "ewsNtlm")]
+    EwsNtlm(EwsAuthenticationSummary),
 }
 
 impl<'de> Deserialize<'de> for AccountAuthenticationSummary {
@@ -308,6 +387,8 @@ impl<'de> Deserialize<'de> for AccountAuthenticationSummary {
             Password(PasswordAuthenticationSummary),
             #[serde(rename = "oauth2")]
             OAuth2(OAuthAuthenticationSummary),
+            #[serde(rename = "ewsNtlm")]
+            EwsNtlm(EwsAuthenticationSummary),
         }
         #[derive(Deserialize)]
         #[serde(untagged)]
@@ -320,6 +401,7 @@ impl<'de> Deserialize<'de> for AccountAuthenticationSummary {
                 Ok(Self::Password(value))
             }
             Compatible::Tagged(Tagged::OAuth2(value)) => Ok(Self::OAuth2(value)),
+            Compatible::Tagged(Tagged::EwsNtlm(value)) => Ok(Self::EwsNtlm(value)),
         }
     }
 }
@@ -331,19 +413,21 @@ impl AccountAuthenticationSummary {
     pub fn password(&self) -> Option<&PasswordAuthenticationSummary> {
         match self {
             Self::Password(value) => Some(value),
-            Self::OAuth2(_) => None,
+            Self::OAuth2(_) | Self::EwsNtlm(_) => None,
         }
     }
-    pub fn imap(&self) -> ProtocolAuthenticationSummary {
+    pub fn receive(&self) -> ProtocolAuthenticationSummary {
         match self {
             Self::Password(value) => ProtocolAuthenticationSummary::from(&value.imap),
             Self::OAuth2(value) => value.imap.clone(),
+            Self::EwsNtlm(value) => ProtocolAuthenticationSummary::from(&value.credential),
         }
     }
-    pub fn smtp(&self) -> ProtocolAuthenticationSummary {
+    pub fn submit(&self) -> ProtocolAuthenticationSummary {
         match self {
             Self::Password(value) => ProtocolAuthenticationSummary::from(&value.smtp),
             Self::OAuth2(value) => value.smtp.clone(),
+            Self::EwsNtlm(value) => ProtocolAuthenticationSummary::from(&value.credential),
         }
     }
 }
@@ -421,8 +505,8 @@ pub struct Account {
     pub email_address: String,
     pub provider_id: Option<String>,
     pub mailbox_source_id: String,
-    pub imap: ConnectionConfig,
-    pub smtp: ConnectionConfig,
+    #[serde(flatten)]
+    pub connection: MailConnection,
     pub authentication: AccountAuthenticationSummary,
     pub route: RouteConfig,
     #[ts(type = "number")]

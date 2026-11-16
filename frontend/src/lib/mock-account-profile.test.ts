@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AccountConfigInput } from '@/generated/accounts'
 import { createMockClient } from './mock-client'
 
-function config(useProviderIcon = true): AccountConfigInput {
+function config(useProviderIcon = true): Extract<AccountConfigInput, { imap: unknown }> {
   return {
     displayName: 'QQ 账号', color: '#2563eb', senderName: null,
     useProviderIcon,

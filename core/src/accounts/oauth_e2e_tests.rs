@@ -645,8 +645,7 @@ async fn a_reauthorization_accepts_only_the_accounts_own_address() {
         )
         .unwrap();
         let (imap, smtp) = registration.mail_connections("lin@example.com");
-        request.config.imap = imap;
-        request.config.smtp = smtp;
+        request.config.connection = crate::MailConnection::ImapSmtp { imap, smtp };
         let coordinator = oauth_sessions::SessionCoordinator::default();
         let start = coordinator
             .begin_reauthorization(

@@ -213,6 +213,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["folder_sync_cursors"],
         sql: include_str!("migrations/0031_cursor_history_complete.sql"),
     },
+    Migration {
+        version: 32,
+        description: "self-hosted Exchange connections and item identities",
+        required_tables: &["ews_connections", "ews_items", "ews_folder_state"],
+        sql: include_str!("migrations/0032_exchange_ews.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -617,7 +623,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 31);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 32);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1281,6 +1287,58 @@ mod tests {
                 0
             ))
             .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn ews_upgrade_preserves_existing_mail_connections_and_secret_references() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(31)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id,revision,display_name,email_address,mailbox_source_id,created_at,updated_at)
+             VALUES ('a',5,'Work','alice@example.test','original-source','t','t');
+             INSERT INTO auth_profiles(id,account_id,kind,config_version,generation,secret_ref,trusted_endpoints_json)
+             VALUES ('p','a','password',1,4,'original-secret-ref','[]');
+             INSERT INTO mail_connections(account_id,protocol,host,port,tls,username,auth_profile_id)
+             VALUES ('a','imap','imap.example.test',993,'implicit','alice','p'),
+                    ('a','smtp','smtp.example.test',587,'startTls','alice','p');
+             INSERT INTO create_requests(request_id,account_id,canonical_config)
+             VALUES ('request','a','original-canonical');"
+        ).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let account: (String, String, u32) = db
+            .query_row(
+                "SELECT mail_backend,mailbox_source_id,revision FROM accounts WHERE id='a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(account, ("imapSmtp".into(), "original-source".into(), 5));
+        assert_eq!(db.query_row("SELECT count(*) FROM mail_connections WHERE account_id='a' AND auth_profile_id='p'", [], |r| r.get::<_,i64>(0)).unwrap(), 2);
+        assert_eq!(
+            db.query_row(
+                "SELECT secret_ref FROM auth_profiles WHERE id='p'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "original-secret-ref"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT canonical_config FROM create_requests WHERE request_id='request'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "original-canonical"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM ews_connections", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
             0
         );
     }

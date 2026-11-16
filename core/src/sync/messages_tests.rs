@@ -91,6 +91,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
     let token = WorkerToken {
         account_id: account.id.clone(),
         source: account.mailbox_source_id.clone(),
+        is_ews: false,
         revision: account.revision,
         generation: 1,
     };
@@ -236,7 +237,11 @@ async fn run_with(
         .unwrap()
         .get(&fixture.account_id)
         .unwrap()
-        .imap;
+        .connection
+        .imap_smtp()
+        .unwrap()
+        .0
+        .clone();
     let login = ImapLogin {
         host: endpoint.host,
         port: 993,

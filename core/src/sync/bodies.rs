@@ -425,25 +425,35 @@ async fn run(
     {
         return fail(&shared, &token, BodyFailureCode::TooLarge).await;
     }
-    let plan = store(&shared, &token, |service, identity| {
-        Ok(service.sync_plan(&identity.account_id))
+    let ews = store(&shared, &token, |service, identity| {
+        Ok(service.ews_read_plan(identity))
     })
     .await?;
-    let plan = match plan {
-        Ok(plan) => plan,
+    let fetched = match ews {
+        Ok(Some((plan, item))) => super::ews::fetch_mime(&plan, &item, MAX_MESSAGE_BYTES).await,
         Err(error) => return fail(&shared, &token, plan_failure(error)).await,
-    };
-    let fetched = async {
-        let mut session = connect(&shared, &plan).await?;
-        let mailbox = session.examine(&token.identity.remote_name).await?;
-        if mailbox.uid_validity != token.identity.uid_validity {
-            return Ok(None);
-        }
-        session
-            .fetch_message(token.identity.uid, token.identity.size)
+        Ok(None) => {
+            let plan = store(&shared, &token, |service, identity| {
+                Ok(service.sync_plan(&identity.account_id))
+            })
+            .await?;
+            let plan = match plan {
+                Ok(plan) => plan,
+                Err(error) => return fail(&shared, &token, plan_failure(error)).await,
+            };
+            async {
+                let mut session = connect(&shared, &plan).await?;
+                let mailbox = session.examine(&token.identity.remote_name).await?;
+                if mailbox.uid_validity != token.identity.uid_validity {
+                    return Ok(None);
+                }
+                session
+                    .fetch_message(token.identity.uid, token.identity.size)
+                    .await
+            }
             .await
-    }
-    .await;
+        }
+    };
     let raw = match fetched {
         Ok(Some(raw)) => raw,
         Ok(None) => return fail(&shared, &token, BodyFailureCode::Stale).await,

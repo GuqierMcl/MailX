@@ -45,6 +45,8 @@ mod bodies;
 #[cfg(any(test, feature = "test-support"))]
 mod body_fixture;
 mod draft_bodies;
+mod ews_discovery;
+pub use ews_discovery::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 mod flags;
 mod oauth;
 mod organize;
@@ -110,6 +112,7 @@ pub struct MailxCore {
     events: Events,
     verification: Arc<verification::VerificationRegistry>,
     draft_verification: Arc<verification::VerificationRegistry>,
+    ews_discovery: Arc<ews_discovery::DiscoveryRegistry>,
     archive_undo: Arc<Mutex<organize::ArchiveUndoRegistry>>,
     oauth_sessions: Arc<crate::accounts::oauth_sessions::SessionCoordinator>,
     translation: Arc<translation::Translations>,
@@ -257,6 +260,7 @@ impl MailxCore {
             events,
             verification: Arc::default(),
             draft_verification: Arc::default(),
+            ews_discovery: Arc::default(),
             archive_undo: Arc::default(),
             oauth_sessions: Arc::default(),
             translation,

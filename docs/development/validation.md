@@ -1289,3 +1289,24 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 **浏览器预览（macOS / Edge，合成客户端）：** 通过 `?seed=showcase` 的固定合成验证码邮件检查卡片与阅读区，观察到模拟复制成功反馈；复制未写入真实系统剪贴板。已查看固定名称“复制验证码”及短成功态“已复制”；提示条标签与等宽码值共用行高、基线对齐并留 8px 间距。已观察清理开关的关闭默认值；“增强”新页面的位置与交互尚未包含在这次预览证据内。
 
 **未验证：** 真实邮件服务商的复制后 Trash 写回 / 撤销、通知复制后原生撤销、Windows / Linux 运行、Linux 剪贴板所有权、三平台通知中心 / 后台 / 锁屏 / 专注模式交互。此前维护者确认的 macOS 开发模式通知复制不覆盖本阶段新增清理流程。合成预览不替代原生宿主或真实服务商验证，识别覆盖率和误识别率仍未测量。
+
+<a id="exchange-ews-validation"></a>
+
+## 46. 自建 Exchange EWS（2026-11-16，自动测试）
+
+独立 Exchange 入口、真实协议配置、HTTPS / NTLMv2（含 Negotiate 下限定 NTLM 的 SPNEGO）、TLS channel binding、自动发现、按需 MIME、共用写回与发件箱已有实现，架构见[自建 Exchange](../architecture/exchange-ews.md)。本节记录该实现自身的证据，不继承其他客户端或其他实现的真实服务器验证结论。
+
+### 自动验证
+
+- 本机 macOS：TypeScript、ESLint、i18n（1505 条文案）、生成类型一致性、前端构建、Rust 格式与全 workspace / all-targets Clippy 检查通过。
+- 前端全量 `bun run frontend:test -- --maxWorkers=2`：117 个文件、1469 项测试通过，测试超时保持原值。首次 `bun run check` 的默认并发前端运行出现 15 项失败（14 项超时及 1 项焦点断言），限制并发后全量通过，未修改断言或增加超时；原 check 后续构建与 Rust 检查单独执行。
+- 账号兼容回归覆盖旧 JSON、canonical 幂等重放、凭据恢复日志、真实 EWS 端点存储、来源隔离及更换端点后的信任。同步回归覆盖原 IMAP 正文、预览、IDLE 和写回，以及 EWS 代理 UID、分页上限、循环父级、标记在途反向修改、软删/永久删除队列、失败后不回退 IMAP。
+- 协议受控服务端实际核对 NTLM MIC、SPNEGO mechListMIC 与 CBT，错误 CBT 被拒绝；覆盖密送与冻结 MIME、发送标记失败无请求、标记前连接关闭与标记后响应丢失的不同结果。SOAP 属性与顺序按 Microsoft EWS schema 核对，DTD/命名空间/分页游标和元数据部分失败有回归。
+- Linux 和 Windows 的 Cargo 依赖树确认不包含 macOS/iOS 专用的 async-dnssd；此检查不等同于实际平台编译或桌面验收。
+
+### 验证边界
+
+- 尚无本次实现对真实 Exchange 的登录、收发、密送投递、已发送副本对账或 EPA 组合实测。自动化使用合成消息和本地受控服务器，未读取真实账号凭据。
+- Windows / Linux 构建与三平台桌面行为需分别核对 CI 和实际安装包。浏览器自动化服务本次不可用，未把组件测试当作视觉或原生桌面验收。
+- EWS 使用固定 30 天起始窗口、每轮最多最新 1000 封和独立分页预算；达到上限时保留不完整覆盖，不能根据缺失项推断删除。未实现 SyncFolderItems 游标增量、服务器推送、共享/代理邮箱、Kerberos、EWS OAuth 或 SRV 发现。
+- 系统信任库中的企业 CA、TLS 终止代理、多前端 Exchange 拓扑和服务器重写 Message-ID 的行为仍待实测；无法确定副本身份时保留本机副本。

@@ -135,6 +135,7 @@ impl Storage {
             "credential_journal",
             "create_requests",
             "mail_connections",
+            "ews_connections",
             "network_routes",
             "auth_profiles",
         ] {

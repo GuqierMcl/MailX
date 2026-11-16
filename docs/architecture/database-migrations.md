@@ -99,6 +99,10 @@ frontend/src/features/startup/
 
 历史 SQL 字节不变，旧配置快照缺少代理字段时默认关闭，旧账号快照或 journal 缺少 `useProviderIcon` 时默认开启。邮件联网在启动准入后进行。备份恢复与完整升级保障仍是后续工作。
 
+### EWS 配置与标识映射
+
+`0032_exchange_ews.sql` 为账号增加默认 `imapSmtp` 的 `mail_backend`，新增真实 EWS 连接表、按来源和文件夹隔离的 ItemId 映射以及本地 UID 分配状态。旧账号端点、认证引用和来源 ID 不变化，不重建 `mail_connections` 或历史 SQL。EWS 不产生假的 IMAP/SMTP 行，删除账号或文件夹时一起清理其映射；恢复日志继续接受旧账号 JSON。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

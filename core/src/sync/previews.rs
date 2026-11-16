@@ -1,4 +1,4 @@
-//! Partial-fetch previews for rows a list is showing.
+//! Bounded protocol previews for rows a list is showing.
 //!
 //! Independent of body downloads: each account has its own single-session lane
 //! and never touches the body manager's gate, so opening a message is never
@@ -335,6 +335,69 @@ async fn process(
     batch: &[BodyIdentity],
 ) -> Result<(), AppError> {
     let account = account_id.to_owned();
+    let plan = with_service(shared, move |service| Ok(service.ews_plan(&account)))
+        .await?
+        .map_err(|_| internal())?;
+    let Some(plan) = plan else {
+        return process_imap(shared, account_id, batch).await;
+    };
+    let requested = batch.to_vec();
+    let source = plan.mailbox_source_id.clone();
+    let items = with_service(shared, move |service| {
+        requested
+            .into_iter()
+            .map(|identity| {
+                if identity.mailbox_source_id != source || !service.body_current(&identity)? {
+                    return Ok((identity, None));
+                }
+                let target = crate::storage::messages::SyncTarget {
+                    account_id: identity.account_id.clone(),
+                    mailbox_source_id: identity.mailbox_source_id.clone(),
+                    folder_id: identity.folder_id.clone(),
+                    uid_validity: identity.uid_validity,
+                };
+                let item = service.ews_item(&target, identity.uid)?;
+                Ok((identity, item))
+            })
+            .collect::<Result<Vec<_>, AppError>>()
+    })
+    .await?;
+    let mut client =
+        crate::ews::EwsClient::connect(&plan.route, &plan.endpoint, &plan.user, &plan.password)
+            .await
+            .map_err(|_| internal())?;
+    let mut outcomes = Vec::new();
+    for (identity, item) in items {
+        let Some(item) = item else {
+            continue;
+        };
+        let preview = match client
+            .preview(
+                &item.item_id,
+                item.change_key.as_deref(),
+                PREVIEW_FALLBACK_BYTES as usize,
+            )
+            .await
+        {
+            Ok(text) => {
+                let text = crate::mail::render::preview(text.as_deref());
+                (!text.is_empty()).then_some(text)
+            }
+            Err(crate::ews::EwsError::TooLarge) => None,
+            Err(crate::ews::EwsError::NotFound) => continue,
+            Err(_) => return Err(internal()),
+        };
+        outcomes.push(PreviewOutcome { identity, preview });
+    }
+    commit_outcomes(shared, batch, outcomes).await
+}
+
+async fn process_imap(
+    shared: &Arc<Shared>,
+    account_id: &str,
+    batch: &[BodyIdentity],
+) -> Result<(), AppError> {
+    let account = account_id.to_owned();
     let Ok(plan) = with_service(shared, move |service| Ok(service.sync_plan(&account))).await?
     else {
         // Disabled or credentials unavailable: not an account to connect to.
@@ -384,6 +447,14 @@ async fn process(
         }
         Err(_) => return Err(internal()),
     };
+    commit_outcomes(shared, batch, outcomes).await
+}
+
+async fn commit_outcomes(
+    shared: &Arc<Shared>,
+    batch: &[BodyIdentity],
+    outcomes: Vec<PreviewOutcome>,
+) -> Result<(), AppError> {
     let written = if outcomes.is_empty() {
         Vec::new()
     } else {

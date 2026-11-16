@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { clearSecrets, type AccountDraft } from './account-draft'
 import { nextAccountColor } from './account-color'
 import { ConnectionForm } from './connection-form'
+import { EwsConnectionForm } from './ews-connection-form'
 import { useLeaveGuard } from './leave-guard'
 import { ProfileFields } from './profile-fields'
 import { ProviderPicker } from './provider-picker'
@@ -25,6 +26,7 @@ const PROFILE_FIELDS = new Set(['displayName', 'color', 'senderName', 'useProvid
 
 type Step =
   | { kind: 'method'; selected: MailProvider | null }
+  | { kind: 'ews'; method: MailProvider; resume?: AccountDraft; error?: ClientFailure }
   | { kind: 'connection'; method: MailProvider; resume?: AccountDraft; error?: ClientFailure }
   /** Step 2 of a browser sign-in provider: sign in first, the address is learned from it. */
   | { kind: 'signIn'; method: MailProvider; resume?: AccountDraft; error?: ClientFailure }
@@ -110,11 +112,11 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
   const selectedMethod = step.kind === 'method' && step.selected && filterProviders([step.selected], providerQuery).length > 0
     ? step.selected : null
   const color = colorChoice !== undefined ? colorChoice
-    : step.kind !== 'method' && step.method.id === null ? nextAccountColor(accounts) : null
+    : step.kind !== 'method' && (step.method.id === null || step.method.connectionKind === 'ews') ? nextAccountColor(accounts) : null
 
   const showConnection = (method: MailProvider, resume?: AccountDraft, error?: ClientFailure, way: 'forward' | 'back' = 'forward') => {
     setDirection(way)
-    setStep(method.signIn ? { kind: 'signIn', method, resume, error } : { kind: 'connection', method, resume, error })
+    setStep(method.connectionKind === 'ews' ? { kind: 'ews', method, resume, error } : method.signIn ? { kind: 'signIn', method, resume, error } : { kind: 'connection', method, resume, error })
     setFormVersion((version) => version + 1)
   }
 
@@ -126,7 +128,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
 
   const back = () => {
     // The chosen method stays selected, so going back and forth is one click.
-    if (step.kind === 'connection' || step.kind === 'signIn') {
+    if (step.kind === 'connection' || step.kind === 'signIn' || step.kind === 'ews') {
       guard.leave(() => {
         setDirection('back')
         setStep({ kind: 'method', selected: step.method })
@@ -210,6 +212,22 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                   <Button disabled={!selectedMethod} onClick={() => selectedMethod && showConnection(selectedMethod)}>{t('accounts:next')}</Button>
                 </footer>
               </>
+            )}
+            {step.kind === 'ews' && (
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                <EwsConnectionForm key={formVersion} client={client} account={null}
+                  initialDraft={step.resume} initialError={step.error}
+                  submitLabel={t('accounts:next')} submittingLabel={t('accounts:next')}
+                  onBack={back} onBusyChange={guard.setBusy} onDirtyChange={(dirty) => dirty && guard.setDirty(true)}
+                  onSubmit={(connection, draft) => {
+                    setDirection('forward')
+                    setStep({ kind: 'profile', method: step.method, connection, draft })
+                    if (!nameTouched) setDisplayName(connection.emailAddress)
+                    setNameError(null)
+                    setSaveError(null)
+                    guard.setDirty(true)
+                  }} />
+              </div>
             )}
             {step.kind === 'connection' && (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">

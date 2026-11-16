@@ -146,8 +146,16 @@ impl SessionCoordinator {
             .map_err(|_| OAuthError::InvalidRegistration)?;
         registration.validate_mail_target(
             &request.config.email_address,
-            &request.config.imap,
-            &request.config.smtp,
+            request
+                .config
+                .connection
+                .imap()
+                .map_err(|_| OAuthError::InvalidRegistration)?,
+            request
+                .config
+                .connection
+                .smtp()
+                .map_err(|_| OAuthError::InvalidRegistration)?,
         )?;
         let mailbox = request.config.email_address.clone();
         self.begin_target(

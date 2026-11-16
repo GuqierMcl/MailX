@@ -61,7 +61,7 @@ fn accept(f: &Fixture, n: u32) {
         .outbox_accept(
             &local_id(n),
             &ServerReplyInfo {
-                code: 250,
+                code: Some(250),
                 text: "accepted".into(),
             },
             chrono::Utc::now(),

@@ -270,7 +270,7 @@ function LoadedAccount({ client, account, sync, edits, holdEdits, dropEdits, rel
     <SettingsPage footer={<>
       <Button variant="destructive" disabled={removing || !client.available} onClick={() => setConfirming(true)}>{t('accounts:removeAccount')}</Button>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <ConnectionVerificationActions verification={verification} client={client} onStart={() => setDetailsOpen(null)} />
+        <ConnectionVerificationActions verification={verification} client={client} isEws={'ews' in account} onStart={() => setDetailsOpen(null)} />
         {issues.oauth ? (
           <SignInAgain
             client={client}
@@ -303,7 +303,7 @@ function LoadedAccount({ client, account, sync, edits, holdEdits, dropEdits, rel
         }}
       /></fieldset>
       <SettingsGroup title={t('accounts:connection')} description={t('accounts:connectionDescription')}>
-        <SettingsRow label={t('accounts:connectionMethod')} description={t(passed ? 'accounts:verificationSucceeded' : 'accounts:verificationHint')}>
+        <SettingsRow label={t('accounts:connectionMethod')} description={t(passed ? ('ews' in account ? 'accounts:ewsVerificationSucceeded' : 'accounts:verificationSucceeded') : 'accounts:verificationHint')}>
           <span className="flex flex-wrap items-baseline justify-end gap-x-1.5 text-xs">
             <span>{connectionMethod(account)}</span>
             {problem && <span className="text-destructive">· {problem}</span>}

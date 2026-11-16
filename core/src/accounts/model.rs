@@ -8,6 +8,9 @@ pub(crate) struct TrustEndpoint {
     pub port: u16,
     pub tls: Option<TlsMode>,
     pub username: String,
+    /// Only HTTPS mail protocols use a path; absent in historical journals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 impl TrustEndpoint {
     pub fn mail(protocol: &str, connection: &ConnectionConfig) -> Self {
@@ -17,7 +20,21 @@ impl TrustEndpoint {
             port: connection.port,
             tls: Some(connection.tls),
             username: connection.username.clone(),
+            path: None,
         }
+    }
+
+    pub fn ews(config: &EwsConnectionConfig) -> Result<Self, crate::AppError> {
+        let url =
+            url::Url::parse(&config.url).map_err(|_| crate::AppError::validation("ews.url"))?;
+        Ok(Self {
+            protocol: "ewsNtlm".into(),
+            host: url.host_str().unwrap_or_default().to_owned(),
+            port: url.port_or_known_default().unwrap_or(443),
+            tls: Some(TlsMode::Implicit),
+            username: config.username.clone(),
+            path: Some(url.path().to_owned()),
+        })
     }
 }
 

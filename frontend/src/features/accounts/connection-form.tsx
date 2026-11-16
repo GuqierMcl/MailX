@@ -117,7 +117,7 @@ function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
   )
 }
 
-function PasswordField({ id, label, value, onChange, canKeep, error, placeholder }: {
+export function PasswordField({ id, label, value, onChange, canKeep, error, placeholder }: {
   id: string
   label: string
   value: SecretDraft
@@ -242,7 +242,7 @@ export function ConnectionForm({
   const oauth = account?.authentication.kind === 'oauth2'
   const sameMode = password?.mode === draft.mode
   const oldProxyAuth = account?.route.kind === 'custom' ? account.route.authentication : null
-  const needsTrust = account && (account.authentication.imap.trust === 'needsConfirmation'
+  const needsTrust = account && account.authentication.kind !== 'ewsNtlm' && (account.authentication.imap.trust === 'needsConfirmation'
     || account.authentication.smtp.trust === 'needsConfirmation'
     || oldProxyAuth?.trust === 'needsConfirmation')
 
