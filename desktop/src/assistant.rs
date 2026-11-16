@@ -3,7 +3,10 @@
 //! itself lives in `mailx_core::Assistant`; this module only authorizes,
 //! parses and forwards. The consent is granted here and nowhere else (the
 //! settings patch ignores it).
-use mailx_core::{AiConsent, ApiResult, AppError, ErrorCode, RunSnapshot, StartRun};
+use mailx_core::{
+    AiConsent, ApiResult, AppError, ConversationDetail, ConversationList, ErrorCode, RunSnapshot,
+    StartRun,
+};
 use serde::Deserialize;
 use tauri::{State, WebviewWindow};
 
@@ -12,6 +15,8 @@ use crate::state::DesktopState;
 
 /// Pushed to the main window for every assistant event.
 pub(crate) const EVENT: &str = "mailx://assistant";
+/// Pushed to the main window when saved conversations changed.
+pub(crate) const CONVERSATIONS_EVENT: &str = "mailx://assistant-conversations";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +28,21 @@ struct StartArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RunArgs {
     run_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ListArgs {
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ConversationArgs {
+    conversation_id: String,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +175,87 @@ pub(crate) async fn assistant_revoke_consent(
                 settings_changed(&app, &state);
             }
             result
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_list_conversations(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<ConversationList>, ()> {
+    let args = authorize(&window, "assistant_list_conversations")
+        .and_then(|_| parse::<ListArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            state
+                .assistant(&app)?
+                .list_conversations(args.limit, args.cursor)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_get_conversation(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<ConversationDetail>, ()> {
+    let args = authorize(&window, "assistant_get_conversation")
+        .and_then(|_| parse::<ConversationArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            state
+                .assistant(&app)?
+                .get_conversation(&args.conversation_id)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_delete_conversation(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "assistant_delete_conversation")
+        .and_then(|_| parse::<ConversationArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            state
+                .assistant(&app)?
+                .delete_conversation(&args.conversation_id)
+                .await
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_clear_conversations(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "assistant_clear_conversations")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.assistant(&app)?.clear_conversations().await
         }
         .await,
     ))

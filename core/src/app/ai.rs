@@ -720,7 +720,8 @@ impl AiService {
             key,
             route,
         )
-        .with_context_length(model.context_length))
+        .with_context_length(model.context_length)
+        .with_tool_call(model.tool_call))
     }
 
     // ------------------------------------------------------------ catalog

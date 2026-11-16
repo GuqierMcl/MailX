@@ -65,6 +65,7 @@ import { useComposeActions, useComposeEvents, useDrafts, useOutbox } from '@/fea
 import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 import { NowPage } from '@/features/now/now-page'
+import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -108,6 +109,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Bumped by the palette's "问 AI": the Now page focuses its input when it changes.
+  const [askToken, setAskToken] = useState(0)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const removedAccounts = useRef(new Set<string>())
@@ -774,6 +777,8 @@ export function Workbench({ client }: { client: MailxClient }) {
 
   return (
     <TooltipProvider>
+      {/* The assistant conversation lives here, above the views, so it survives leaving the Now page. */}
+      <AssistantChatProvider client={client}>
       <AvatarSourceProvider client={client} enabled={senderAvatars}>
       <ShellLayout
         navLabel={t('mail:mailboxNavigation')}
@@ -815,6 +820,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             openEmail(email)
           }}
           onCompose={() => void compose.compose()}
+          onAskAi={() => { selectMailbox({ kind: 'now' }); setAskToken((token) => token + 1) }}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
@@ -834,6 +840,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             onOpenContact={openContactFromNow}
             onOpenAccount={(accountId) => setAccountsTarget({ accountId })}
             onOpenEmail={openFromNow}
+            onOpenDraft={(id) => void compose.openDraft(id)}
+            focusInputToken={askToken}
             verification={verification}
           />
         ) : !layoutReady ? (
@@ -1002,6 +1010,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         onOpenChange={(open) => { if (!open) setRemoveLocalChoice(null) }}
         onConfirm={confirmRemoveLocal}
       />
+      </AssistantChatProvider>
     </TooltipProvider>
   )
 }

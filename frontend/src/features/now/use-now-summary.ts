@@ -55,6 +55,17 @@ export function useNowSummary({ client, ready, since, dayStarts }: { client: Mai
     started.current = true
     begin(false)
   }, [usable, ready, begin])
+  // Consent given elsewhere (the chat, another window) while this line waits for it: try again once.
+  const consented = assistant?.consented ?? null
+  const waitingFor = useRef<typeof consented | undefined>(undefined)
+  useEffect(() => {
+    if (state !== 'awaitingConsent') { waitingFor.current = undefined; return }
+    if (waitingFor.current === undefined) { waitingFor.current = consented; return }
+    if (consented && consented !== waitingFor.current) {
+      waitingFor.current = consented
+      begin(false)
+    }
+  }, [state, consented, begin])
 
   const live = usable && (state === 'completed' || state === 'running' || state === 'awaitingConfirmation') ? text.trim() : ''
   const running = usable && (state === 'running' || state === 'awaitingConfirmation')

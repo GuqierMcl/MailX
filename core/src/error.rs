@@ -1,7 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorCode {
     Validation,

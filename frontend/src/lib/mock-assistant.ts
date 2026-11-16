@@ -18,6 +18,8 @@ export type MockAssistantDeps = {
   locale: () => string
   overview: () => { unread: number; starred: number }
   firstUnread: () => { id: string } | null
+  /** A folder the reply can point to (its id as the folder tree has it); without it the reply has no folder card. */
+  firstFolder?: () => { id: string } | null
   /** Archives the emails and returns the undo token the host would hand to the UI. */
   archive: (emailIds: string[]) => Promise<string | null>
   /** A draft addressed to someone new, as the assistant would have written it. */
@@ -134,8 +136,33 @@ export function createMockAssistant(deps: MockAssistantDeps) {
         emit(run, { type: 'tool', callId: 'call-1', name: 'send_email', status: 'denied', summary: { type: 'denied' } })
         await say(run, zh() ? '好的，没有发送。' : 'Okay, I did not send it.')
       }
+    } else if (/草稿|draft/i.test(message) && !/发|send/i.test(message)) {
+      const { draft } = await deps.draftToSend()
+      emit(run, { type: 'tool', callId: 'call-1', name: 'create_draft', status: 'running', summary: { type: 'pending' } })
+      await sleep()
+      emit(run, { type: 'tool', callId: 'call-1', name: 'create_draft', status: 'done', summary: { type: 'draft', draftId: draft.id, subject: draft.subject } })
+      await say(run, zh() ? '草稿放在草稿箱里了，你可以打开看看，改好再发。' : 'The draft is in your drafts. Open it, edit if you like, then send.')
     } else {
-      await say(run, zh() ? '我可以帮你查找、整理邮件，或者起草回复。' : 'I can search and organize your mail, or draft replies.')
+      // A search, a read, then a reply with a list and a link.
+      const target = deps.firstUnread()
+      const { unread } = deps.overview()
+      emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'running', summary: { type: 'pending' } })
+      await sleep()
+      emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'done', summary: { type: 'found', count: Math.max(unread, 3) } })
+      if (target) {
+        emit(run, { type: 'tool', callId: 'call-2', name: 'read_email', status: 'running', summary: { type: 'pending' } })
+        await sleep()
+        emit(run, { type: 'tool', callId: 'call-2', name: 'read_email', status: 'done', summary: { type: 'read', emailIds: [target.id] } })
+      }
+      const email = target?.id
+      const folder = deps.firstFolder?.()?.id
+      // Links to local mail and folders: a card on a line of its own, a chip inside a sentence.
+      const emailCard = email ? `[${zh() ? '账单提醒' : 'Billing reminder'}](mailx://email/${email})\n\n` : ''
+      const emailChip = email ? (zh() ? `比较急的是[这封邮件](mailx://email/${email})。\n\n` : `The urgent one is [this email](mailx://email/${email}).\n\n`) : ''
+      const folderCard = folder ? `[${zh() ? '收件箱' : 'Inbox'}](mailx://folder/${folder})\n\n` : ''
+      await say(run, zh()
+        ? `收件箱里有 ${unread} 封未读邮件。先看这几项：\n\n- **账单提醒**：这周内要处理\n- 一封需要回复的 *项目* 邮件\n- 几封可以直接归档的通知\n\n${emailCard}${emailChip}${folderCard}想了解更多，可以看[帮助文档](https://example.com/help)，或者说“归档”“写草稿”“发送”试试。`
+        : `You have ${unread} unread emails. Start with these:\n\n- **Billing reminder**: due this week\n- A *project* email that needs a reply\n- A few notifications you can archive\n\n${emailCard}${emailChip}${folderCard}See the [help page](https://example.com/help) for more, or say "archive", "draft" or "send" to try them.`)
     }
     finish(run)
   }
@@ -143,7 +170,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
   function create(kind: RunSnapshot['kind'], state: RunSnapshot['state'], conversationId: string | null): Run {
     const run: Run = {
       waiting: null,
-      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], error: null, finishedReason: null, completedAt: null, seq: 0, conversationId, pending: null },
+      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], toolsAvailable: kind === 'chat', error: null, finishedReason: null, completedAt: null, seq: 0, conversationId, pending: null },
     }
     runs.set(run.snap.runId, run)
     emit(run, { type: 'state', state })

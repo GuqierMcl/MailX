@@ -378,5 +378,11 @@
   "assistantSendDirectHint": "The AI can send mail without asking.",
   "assistantInstructions": "Custom instructions",
   "assistantInstructionsDescription": "How to address you, tone, signature habits. Added to every request.",
-  "assistantInstructionsCount": "{{length}} / {{max}}"
+  "assistantInstructionsCount": "{{length}} / {{max}}",
+  "assistantSaveHistory": "Save chat history",
+  "assistantSaveHistoryDescription": "Kept on this computer and shown in History.",
+  "assistantClearHistory": "Clear all chats",
+  "assistantClearHistoryAsk": "Clear all chats?",
+  "assistantClearHistoryConfirm": "Clear",
+  "assistantClearHistoryDone": "Cleared"
 }

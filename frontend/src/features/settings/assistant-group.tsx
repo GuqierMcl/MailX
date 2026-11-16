@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -18,7 +18,7 @@ import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import { loadMailTree } from '@/features/mail/mail-tree'
 import type { AiModelRef, AiState, AssistantMode, AssistantSendMode, AssistantSettings } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
-import { mailKeys, settingsKeys } from '@/lib/query-client'
+import { assistantKeys, mailKeys, settingsKeys } from '@/lib/query-client'
 import { ModelList } from './ai-model-picker'
 import { useModelGroups } from './ai-queries'
 import { SettingsGroup, SettingsRow } from './settings-layout'
@@ -39,7 +39,7 @@ const hostOf = (baseUrl: string) => {
  * Settings → Integrations → AI → Assistant (ai-runtime §7). Everything except the consent goes
  * through the normal settings write; the consent has its own commands and is only revoked here.
  * `chat` shows the rows only the chat uses (what the assistant may do, custom instructions); the
- * app leaves them out until the chat ships, so no setting appears that changes nothing yet.
+ * app turns it on now that the chat exists, so no setting appears that changes nothing.
  */
 export function AssistantGroup({ client, ai, chat = false }: { client: MailxClient; ai: AiState; chat?: boolean }) {
   useTranslation()
@@ -56,7 +56,7 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
     <ModelRow client={client} ai={ai} assistant={assistant} off={off} update={update} />
     <ConsentRow client={client} ai={ai} assistant={assistant} off={off} />
     <AccountsRow client={client} assistant={assistant} off={off} update={update} />
-    {/* Only chat uses these; they appear when the chat does. */}
+    {/* Only the chat uses these. */}
     {chat && <>
       <ModeRow id="assistant.organize" label={t('settings:assistantOrganize')} description={t('settings:assistantOrganizeDescription')}
         value={assistant.organize} off={off} onChange={(organize) => update.mutate({ organize })} />
@@ -64,6 +64,7 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
         value={assistant.aiDrafts} off={off} onChange={(aiDrafts) => update.mutate({ aiDrafts })} />
       <SendRow assistant={assistant} off={off} update={update} />
       <InstructionsRow key={assistant.instructions} assistant={assistant} off={off} update={update} />
+      <HistoryRow client={client} assistant={assistant} off={off} update={update} />
     </>}
   </SettingsGroup>
 }
@@ -186,6 +187,47 @@ function InstructionsRow({ assistant, off, update }: { assistant: AssistantSetti
       <Textarea id="assistant.instructions" className="min-h-24 resize-y" value={value} disabled={off} maxLength={INSTRUCTIONS_MAX} spellCheck={false}
         onChange={(event) => setValue(event.target.value)} onBlur={commit} />
       {length >= COUNTER_FROM && <span className="text-xs text-muted-foreground tabular-nums">{t('settings:assistantInstructionsCount', { length, max: INSTRUCTIONS_MAX })}</span>}
+    </div>
+  </SettingsRow>
+}
+
+/**
+ * Whether chats are kept on this computer. Turning it off only stops saving new ones; what is already
+ * saved stays until it is deleted, here or in the history panel. Clearing asks in place, not in a dialog.
+ */
+function HistoryRow({ client, assistant, off, update }: { client: MailxClient; assistant: AssistantSettings; off: boolean; update: Update }) {
+  useTranslation()
+  const queryClient = useQueryClient()
+  const [phase, setPhase] = useState<'idle' | 'asking' | 'clearing' | 'done'>('idle')
+  const [failure, setFailure] = useState<string | null>(null)
+  useEffect(() => {
+    if (phase !== 'done') return
+    const timer = setTimeout(() => setPhase('idle'), 2000)
+    return () => clearTimeout(timer)
+  }, [phase])
+  const clear = () => {
+    setFailure(null)
+    setPhase('clearing')
+    client.assistantClearConversations().then(
+      () => { setPhase('done'); void queryClient.invalidateQueries({ queryKey: assistantKeys.all }) },
+      (error: unknown) => { setPhase('idle'); setFailure(errorText(error)) },
+    )
+  }
+  return <SettingsRow label={t('settings:assistantSaveHistory')} description={t('settings:assistantSaveHistoryDescription')} htmlFor="assistant.saveHistory">
+    <div className="flex flex-col items-end gap-2">
+      <Switch id="assistant.saveHistory" checked={assistant.saveHistory} disabled={off} onCheckedChange={(saveHistory) => update.mutate({ saveHistory })} />
+      {phase === 'asking' ? (
+        <div role="group" aria-label={t('settings:assistantClearHistoryAsk')} className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{t('settings:assistantClearHistoryAsk')}</span>
+          <Button variant="ghost" size="sm" autoFocus onClick={() => setPhase('idle')}>{t('ai:cancel')}</Button>
+          <Button variant="destructive" size="sm" onClick={clear}>{t('settings:assistantClearHistoryConfirm')}</Button>
+        </div>
+      ) : phase === 'done' ? (
+        <span role="status" className="text-sm text-muted-foreground">{t('settings:assistantClearHistoryDone')}</span>
+      ) : (
+        <Button variant="outline" size="sm" disabled={off || phase === 'clearing'} onClick={() => setPhase('asking')}>{t('settings:assistantClearHistory')}</Button>
+      )}
+      {failure && <span role="alert" className="max-w-72 text-right text-xs text-destructive">{failure}</span>}
     </div>
   </SettingsRow>
 }
