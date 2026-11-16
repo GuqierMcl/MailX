@@ -374,5 +374,11 @@
   "assistantSendDirectHint": "AI 可以不经确认发出邮件。",
   "assistantInstructions": "自定义指令",
   "assistantInstructionsDescription": "称呼、语气、签名习惯等，会附在每次请求里。",
-  "assistantInstructionsCount": "{{length}} / {{max}}"
+  "assistantInstructionsCount": "{{length}} / {{max}}",
+  "assistantSaveHistory": "保存对话记录",
+  "assistantSaveHistoryDescription": "保存在这台电脑上，可在历史对话中查看。",
+  "assistantClearHistory": "清除全部对话",
+  "assistantClearHistoryAsk": "清除全部对话？",
+  "assistantClearHistoryConfirm": "确定",
+  "assistantClearHistoryDone": "已清除"
 }

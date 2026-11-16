@@ -5,6 +5,25 @@
   "consentTitle": "Send your mail to {{service}}?",
   "consentBody": "The assistant reads the subject, sender and text of the mail it works with, and sends them to this service. Attachment contents and images are not sent.",
   "consentConfirm": "Agree",
+  "history": {
+    "title": "History",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "earlier": "Earlier",
+    "empty": "No past chats yet",
+    "untitled": "Untitled chat",
+    "delete": "Delete chat",
+    "deleteAsk": "Delete?",
+    "confirm": "Delete",
+    "clearAll": "Clear all",
+    "clearAsk": "Clear all chats?",
+    "loadMore": "Load more",
+    "notSaved": "Chats are not saved",
+    "turnOn": "Turn on",
+    "loadFailed": "Couldn't load past chats",
+    "openFailed": "Couldn't open that chat",
+    "deleteFailed": "Couldn't delete."
+  },
   "chat": {
     "placeholder": "Ask about your mail",
     "send": "Send",
@@ -142,7 +161,8 @@
           "organize": "Approved · done",
           "draft": "Approved · draft updated"
         },
-        "denied": "Cancelled"
+        "denied": "Cancelled",
+        "expired": "No answer"
       }
     }
   }

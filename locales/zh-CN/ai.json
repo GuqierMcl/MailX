@@ -5,6 +5,25 @@
   "consentTitle": "把邮件内容发送给{{service}}？",
   "consentBody": "助手会读取邮件的主题、发件人和正文文字，并发送给这个服务。附件内容和图片不会发送。",
   "consentConfirm": "同意",
+  "history": {
+    "title": "历史对话",
+    "today": "今天",
+    "yesterday": "昨天",
+    "earlier": "更早",
+    "empty": "还没有历史对话",
+    "untitled": "未命名对话",
+    "delete": "删除对话",
+    "deleteAsk": "删除？",
+    "confirm": "确定",
+    "clearAll": "清除全部",
+    "clearAsk": "清除全部对话？",
+    "loadMore": "加载更多",
+    "notSaved": "未保存对话记录",
+    "turnOn": "开启",
+    "loadFailed": "没能加载历史对话",
+    "openFailed": "没能打开这段对话",
+    "deleteFailed": "没能删除。"
+  },
   "chat": {
     "placeholder": "问问你的邮件",
     "send": "发送",
@@ -141,7 +160,8 @@
           "organize": "已同意 · 已整理",
           "draft": "已同意 · 草稿已更新"
         },
-        "denied": "已取消"
+        "denied": "已取消",
+        "expired": "没有回应"
       }
     }
   }

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PendingConfirmation } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
-import type { ChatMessage, ChatTurn } from './chat-model'
+import { savedMessages, type ChatMessage, type ChatTurn } from './chat-model'
 import { useAssistantRun, type AssistantRun } from './use-assistant-run'
 
 /** How a `send` ended: `consent` means nothing was sent and the user must agree first. */
 export type SendResult = 'sent' | 'consent' | 'failed' | 'busy' | 'empty'
+
+/** How opening a saved conversation ended: `stale` means a newer request (or a reset) took its place. */
+export type OpenResult = 'opened' | 'failed' | 'busy' | 'stale'
 
 export type AssistantChat = {
   /** Everything said in this conversation, oldest first; the last assistant turn may still be streaming. */
@@ -25,6 +28,15 @@ export type AssistantChat = {
   retry: () => Promise<SendResult>
   /** Starts over with an empty conversation. */
   reset: () => void
+  /** The saved conversation this one belongs to; null until the first answer of a new conversation brings its id. */
+  conversationId: string | null
+  /** Changes whenever another conversation takes the screen (opened from history, or a new one), so a view can fade and rewind. */
+  viewKey: number
+  /**
+   * Shows a saved conversation and makes it the one the next message continues. A reply still going in
+   * the conversation being left is stopped (the core cancels the run; what it wrote so far is saved).
+   */
+  openConversation: (id: string) => Promise<OpenResult>
   /** Calls whose undo was used, so a remounted page does not offer it again. */
   undone: ReadonlySet<string>
   markUndone: (callId: string) => void
@@ -51,6 +63,9 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
   const [undone, setUndone] = useState<ReadonlySet<string>>(() => new Set())
   const [noTools, setNoTools] = useState(false)
   const conversation = useRef<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [viewKey, setViewKey] = useState(0)
+  const opening = useRef(0)
   const lastMessage = useRef<string | null>(null)
   const counter = useRef(0)
   const sending = useRef(false)
@@ -65,12 +80,24 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
   const latest = useRef({ run, live, open })
   useEffect(() => { latest.current = { run, live, open } })
 
+  // The conversation on screen was deleted elsewhere (the history panel of another window,
+  // Settings → clear all, an account removal): keep showing it, but the next message starts a
+  // new conversation instead of continuing one the host no longer has.
+  useEffect(() => client.onAssistantConversationsChanged((change) => {
+    const gone = change.change === 'cleared' || (change.change === 'deleted' && change.conversationId === conversation.current)
+    if (gone && conversation.current) {
+      conversation.current = null
+      setConversationId(null)
+    }
+  }), [client])
+
   const begin = useCallback(async (message: string): Promise<SendResult> => {
     const snapshot = await latest.current.run.start({ type: 'chat', ...(conversation.current ? { conversationId: conversation.current } : {}), message })
     if (snapshot?.state === 'awaitingConsent') return 'consent'
     if (!snapshot) return 'failed'
     // The conversation exists in the host only once a run really started.
     conversation.current = snapshot.conversationId ?? conversation.current
+    setConversationId(conversation.current)
     return 'sent'
   }, [])
 
@@ -123,13 +150,43 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
 
   const reset = useCallback(() => {
     latest.current.run.cancel()
+    opening.current += 1
     conversation.current = null
+    setConversationId(null)
+    setViewKey((key) => key + 1)
     lastMessage.current = null
     setHistory([])
     setOpen(false)
     setAnswers({})
     setUndone(new Set())
   }, [])
+
+  const openConversation = useCallback(async (id: string): Promise<OpenResult> => {
+    if (id === conversation.current) return 'opened'
+    if (sending.current) return 'busy'
+    opening.current += 1
+    const ticket = opening.current
+    let detail
+    try {
+      detail = await client.assistantGetConversation(id)
+    } catch {
+      return ticket === opening.current ? 'failed' : 'stale'
+    }
+    if (ticket !== opening.current) return 'stale'
+    if (sending.current) return 'busy'
+    // Leaving a conversation with a reply still being written stops that reply; nothing is asked.
+    latest.current.run.cancel()
+    conversation.current = id
+    setConversationId(id)
+    lastMessage.current = null
+    setHistory(savedMessages(detail))
+    setOpen(false)
+    setAnswers({})
+    setUndone(new Set())
+    setNoTools(false)
+    setViewKey((key) => key + 1)
+    return 'opened'
+  }, [client])
 
   const markUndone = useCallback((callId: string) => setUndone((set) => new Set(set).add(callId)), [])
 
@@ -148,5 +205,5 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     () => (live ? [...history, { id: `reply-${turnNo}`, role: 'assistant', turn: live }] : history),
     [history, live, turnNo],
   )
-  return { messages, busy: open && run.active, pending: open ? run.pending : null, toolsAvailable: !noTools, send, stop, respond, retry, reset, undone, markUndone }
+  return { messages, busy: open && run.active, pending: open ? run.pending : null, toolsAvailable: !noTools, send, stop, respond, retry, reset, conversationId, viewKey, openConversation, undone, markUndone }
 }

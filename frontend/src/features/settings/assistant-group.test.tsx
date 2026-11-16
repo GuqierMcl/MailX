@@ -151,4 +151,34 @@ describe('AI settings: assistant', () => {
     await setup({ assistant: { instructions: 'x'.repeat(1850) } })
     expect(await screen.findByText('1850 / 2000')).toBeInTheDocument()
   })
+
+  it('saves "保存对话记录" and leaves what is saved alone when it is turned off', async () => {
+    const { client } = await setup()
+    const toggle = await screen.findByRole('switch', { name: '保存对话记录' })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText('保存在这台电脑上，可在历史对话中查看。')).toBeInTheDocument()
+    await userEvent.click(toggle)
+    await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ saveHistory: false }))
+    expect(client.assistantClearConversations).not.toHaveBeenCalled()
+    expect(client.assistantDeleteConversation).not.toHaveBeenCalled()
+  })
+
+  it('clears all conversations through the client, after a question in the row', async () => {
+    const { client } = await setup()
+    await userEvent.click(await screen.findByRole('button', { name: '清除全部对话' }))
+    expect(screen.getByText('清除全部对话？')).toBeInTheDocument()
+    expect(client.assistantClearConversations).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: '清除全部对话' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '清除全部对话' }))
+    await userEvent.click(screen.getByRole('button', { name: '确定' }))
+    await waitFor(() => expect(client.assistantClearConversations).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('已清除')).toBeInTheDocument()
+  })
+
+  it('leaves the history rows out when the pane is not given the chat', async () => {
+    await setup({ chat: false })
+    await screen.findByRole('switch', { name: '启用助手' })
+    expect(screen.queryByRole('switch', { name: '保存对话记录' })).not.toBeInTheDocument()
+  })
 })

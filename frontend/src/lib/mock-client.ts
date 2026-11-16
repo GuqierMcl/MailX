@@ -96,7 +96,10 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['en', 'zh-CN'].includes(value.effectiveLocale) &&
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
-        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation, layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+        // Like the core, fields a stored copy lacks (saved by an older preview) take their defaults.
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation,
+          assistant: { ...settings.settings.assistant, ...value.settings.assistant },
+          layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }

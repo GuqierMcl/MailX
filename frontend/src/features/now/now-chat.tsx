@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon, ArrowLeft01Icon, ChatAdd01Icon } from '@hugeicons/core-free-icons'
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { AiMark } from '@/features/ai/ai-mark'
 import { AiConsentDialog } from '@/features/ai/ai-consent-dialog'
 import { ChatEnvContext, type ChatEnv } from '@/features/ai/chat-env'
+import { ChatHistory } from '@/features/ai/chat-history'
 import { ChatInput } from '@/features/ai/chat-input'
 import { ChatMessages } from '@/features/ai/chat-messages'
 import type { AssistantChat } from '@/features/ai/use-assistant-chat'
@@ -91,6 +92,16 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   const go = useCallback((next: View) => setView(next), [])
 
   const { attach, node: scroller, atBottom, scrollToBottom, onScroll, onWheel } = useStickToBottom(messages, { reduced, enabled: conversation })
+
+  // Another conversation took the screen (picked from history): start at its end. Again a frame later, once the
+  // long-ago messages that the browser skips have settled to their real height.
+  const viewKey = chat?.viewKey ?? 0
+  useLayoutEffect(() => {
+    if (viewKey === 0) return
+    scrollToBottom(false)
+    const frame = requestAnimationFrame(() => scrollToBottom(false))
+    return () => cancelAnimationFrame(frame)
+  }, [scrollToBottom, viewKey])
 
   const send = useCallback((message: string) => {
     if (!chat) return
@@ -190,12 +201,16 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
               <HugeiconsIcon icon={ChatAdd01Icon} aria-hidden strokeWidth={2} data-icon="inline-start" />
               {t('ai:chat.newConversation')}
             </Button>
+            <ChatHistory client={client} chat={chat} onStartOver={newChat} />
           </div>
           <div ref={attach} onScroll={onScroll} onWheel={onWheel} data-slot="chat-scroller" className="relative min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]">
             <div className="mx-auto w-full max-w-190 px-5 pt-4 sm:px-10" style={{ paddingBottom: 'calc(var(--chat-footer-h, 6rem) + 1.5rem)' }}>
-              <ChatEnvContext value={env}>
-                <ChatMessages messages={messages} />
-              </ChatEnvContext>
+              {/* A different conversation replaces the list under a new key: it fades in and none of its messages replay their entrance. */}
+              <div key={viewKey} className={cn(viewKey > 0 && !reduced && 'animate-now-text-in')}>
+                <ChatEnvContext value={env}>
+                  <ChatMessages messages={messages} />
+                </ChatEnvContext>
+              </div>
             </div>
           </div>
         </div>

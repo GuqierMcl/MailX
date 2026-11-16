@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { AiGeneratedMark } from './ai-mark'
 import { confirmStatus, turnFragments, turnWorking, type ChatMessage, type ChatTurn } from './chat-model'
 import { useChatEnv } from './chat-env'
-import { ConfirmCard } from './confirm-card'
+import { ConfirmCard, ConfirmOutcomeLine } from './confirm-card'
 import { Markdown } from './markdown-view'
 import { ToolRow } from './tool-parts'
 import { cn } from '@/lib/utils'
@@ -61,6 +61,7 @@ const AssistantMessage = memo(function AssistantMessage({ turn, latest }: { turn
               onAnswered={env.focusInput}
             />
           )
+          case 'outcome': return <ConfirmOutcomeLine key={fragment.key} outcome={fragment.outcome} />
         }
       })}
       {thinking && (
@@ -73,7 +74,7 @@ const AssistantMessage = memo(function AssistantMessage({ turn, latest }: { turn
       {failed && (
         <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
           <span>{errorText(turn.error ? { code: turn.error } : null)}</span>
-          {latest && <Button type="button" variant="ghost" size="lg" onClick={env.retry}>{t('ai:chat.retry')}</Button>}
+          {latest && !turn.saved && <Button type="button" variant="ghost" size="lg" onClick={env.retry}>{t('ai:chat.retry')}</Button>}
         </p>
       )}
       {/* Announced once, when the reply is complete, not as it is written; the text itself is read in the log. */}

@@ -1,5 +1,8 @@
-import type { ErrorCode, FinishedReason } from '@/generated/accounts'
+import type { ChatTurn as SavedTurn, ConfirmAction, ConfirmOutcome, ConversationDetail, ErrorCode, FinishedReason } from '@/generated/accounts'
 import type { AssistantRunState, RunConfirm, RunTool } from './use-assistant-run'
+
+/** What the user answered to a confirmation of a saved reply: only the outcome is kept, never the details. */
+export type SavedOutcome = { callId: string; tool: string; action: ConfirmAction; outcome: ConfirmOutcome; at: number }
 
 /** One reply of the assistant, as the chat keeps it for the session. */
 export type ChatTurn = {
@@ -14,6 +17,8 @@ export type ChatTurn = {
   error: ErrorCode | null
   finishedReason: FinishedReason | null
   finishedAt: Date | null
+  /** Set on a reply read back from the saved conversations: its confirmations are one-line outcomes and it cannot be retried. */
+  saved?: { outcomes: SavedOutcome[] }
 }
 
 export type ChatMessage =
@@ -25,6 +30,7 @@ export type Fragment =
   | { key: string; kind: 'text'; text: string; streaming: boolean }
   | { key: string; kind: 'tool'; tool: RunTool }
   | { key: string; kind: 'confirm'; confirm: RunConfirm }
+  | { key: string; kind: 'outcome'; outcome: SavedOutcome }
 
 export type ConfirmStatus = 'waiting' | 'approved' | 'denied' | 'closed'
 
@@ -42,10 +48,12 @@ export function confirmStatus(turn: ChatTurn, requestId: string): ConfirmStatus 
  * has no row of its own: the card says what happened to it. Only the text after the last part grows.
  */
 export function turnFragments(turn: ChatTurn): Fragment[] {
-  const confirmed = new Set(turn.confirms.map((confirm) => confirm.callId))
-  const parts: ({ at: number } & ({ kind: 'tool'; tool: RunTool } | { kind: 'confirm'; confirm: RunConfirm }))[] = [
+  const outcomes = turn.saved?.outcomes ?? []
+  const confirmed = new Set([...turn.confirms.map((confirm) => confirm.callId), ...outcomes.map((outcome) => outcome.callId)])
+  const parts: ({ at: number } & ({ kind: 'tool'; tool: RunTool } | { kind: 'confirm'; confirm: RunConfirm } | { kind: 'outcome'; outcome: SavedOutcome }))[] = [
     ...turn.tools.filter((tool) => !confirmed.has(tool.callId)).map((tool) => ({ at: tool.at, kind: 'tool' as const, tool })),
     ...turn.confirms.map((confirm) => ({ at: confirm.at, kind: 'confirm' as const, confirm })),
+    ...outcomes.map((outcome) => ({ at: outcome.at, kind: 'outcome' as const, outcome })),
   ].sort((a, b) => a.at - b.at)
   const out: Fragment[] = []
   const live = turnWorking(turn)
@@ -57,7 +65,9 @@ export function turnFragments(turn: ChatTurn): Fragment[] {
   }
   for (const part of parts) {
     text(Math.min(part.at, turn.text.length), false)
-    out.push(part.kind === 'tool' ? { key: `tool-${part.tool.callId}`, kind: 'tool', tool: part.tool } : { key: `confirm-${part.confirm.requestId}`, kind: 'confirm', confirm: part.confirm })
+    if (part.kind === 'tool') out.push({ key: `tool-${part.tool.callId}`, kind: 'tool', tool: part.tool })
+    else if (part.kind === 'confirm') out.push({ key: `confirm-${part.confirm.requestId}`, kind: 'confirm', confirm: part.confirm })
+    else out.push({ key: `outcome-${part.outcome.callId}`, kind: 'outcome', outcome: part.outcome })
   }
   text(turn.text.length, true)
   return out
@@ -68,4 +78,24 @@ export function toolEmailIds(tool: RunTool): string[] {
   const { summary } = tool
   if (summary.type === 'read' || summary.type === 'changed') return [...new Set(summary.emailIds)]
   return []
+}
+
+/** A saved reply as the chat shows it. `textOffset` puts tools and answered confirmations back where they were live. */
+function savedReply(turn: Extract<SavedTurn, { role: 'assistant' }>): ChatTurn {
+  const finished = new Date(turn.at)
+  return {
+    state: turn.state, text: turn.text,
+    // Saved activities carry no undo (the host drops it); `settledAt` null keeps any undo window closed.
+    tools: turn.tools.map((tool) => ({ callId: tool.callId, name: tool.name, status: tool.status, summary: tool.summary, at: tool.textOffset, settledAt: null })),
+    confirms: [], answers: {}, pendingId: null, error: turn.error, finishedReason: turn.finishedReason,
+    finishedAt: turn.state === 'completed' && !Number.isNaN(finished.getTime()) ? finished : null,
+    saved: { outcomes: turn.confirmations.map((item) => ({ callId: item.callId, tool: item.tool, action: item.action, outcome: item.outcome, at: item.textOffset })) },
+  }
+}
+
+/** The messages of a saved conversation, oldest first, in the model the live chat renders. */
+export function savedMessages(detail: ConversationDetail): ChatMessage[] {
+  return detail.turns.map((turn, index): ChatMessage => turn.role === 'user'
+    ? { id: `saved-${index}`, role: 'user', text: turn.text }
+    : { id: `saved-${index}`, role: 'assistant', turn: savedReply(turn) })
 }

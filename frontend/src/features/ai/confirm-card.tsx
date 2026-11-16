@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import type { ConfirmationDetails, ConfirmationRequest, MailAddress } from '@/generated/accounts'
 import { formatSize } from '@/features/mail/format'
 import { cn } from '@/lib/utils'
-import type { ConfirmStatus } from './chat-model'
+import type { ConfirmStatus, SavedOutcome } from './chat-model'
 
 /** Which words the card uses: the action, narrowed by what exactly it changes. */
 type ConfirmKind = 'send' | 'retrySend' | 'cancelSend' | 'archive' | 'unarchive' | 'flags' | 'refresh' | 'draftCreate' | 'draftUpdate' | 'draftDelete'
@@ -184,5 +184,18 @@ export function ConfirmCard({ request, status, onRespond, onAnswered, cardRef }:
         </>}
       </p>
     </div>
+  )
+}
+
+/** What a saved confirmation says now: the answer in one line, in the card's own words (the details are not kept). */
+export function ConfirmOutcomeLine({ outcome }: { outcome: SavedOutcome }) {
+  useTranslation()
+  const key = outcome.action === 'send' ? 'send' : outcome.action === 'cancelSend' ? 'cancelSend' : outcome.action === 'organize' ? 'organize' : 'draft'
+  const result = outcome.outcome === 'approved' ? t(`ai:chat.confirm.result.approved.${key}`) : outcome.outcome === 'denied' ? t('ai:chat.confirm.result.denied') : t('ai:chat.confirm.result.expired')
+  return (
+    <p data-slot="confirm-card" data-status={outcome.outcome} className="flex items-center gap-1.5 px-1 py-1.5 text-sm text-muted-foreground">
+      <HugeiconsIcon icon={Tick02Icon} aria-hidden className={cn('size-3.5', outcome.outcome !== 'approved' && 'invisible')} />
+      {result}
+    </p>
   )
 }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@/test/render'
 import { testClient } from '@/features/accounts/test-fixtures'
-import type { AssistantEvent, AssistantEventKind, ConfirmationRequest, RunSnapshot } from '@/generated/accounts'
+import type { AssistantEvent, AssistantEventKind, ConfirmationRequest, ConversationsChanged, RunSnapshot } from '@/generated/accounts'
 import { turnFragments } from './chat-model'
 import { useAssistantChat } from './use-assistant-chat'
 
@@ -18,10 +18,13 @@ function setup() {
   const client = testClient()
   let send: (event: AssistantEvent) => void = () => undefined
   client.onAssistantEvent.mockImplementation((listener) => { send = listener; return () => undefined })
+  let changed: (change: ConversationsChanged) => void = () => undefined
+  client.onAssistantConversationsChanged.mockImplementation((listener) => { changed = listener; return () => undefined })
   client.assistantStart.mockResolvedValue(snapshot())
   const emit = (...events: AssistantEvent[]) => act(() => { for (const next of events) send(next) })
+  const conversations = (change: ConversationsChanged) => act(() => { changed(change) })
   const view = renderHook(() => useAssistantChat(client))
-  return { client, emit, ...view }
+  return { client, emit, conversations, ...view }
 }
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -55,6 +58,24 @@ describe('useAssistantChat', () => {
     await act(async () => { await result.current.send('第二句') })
     expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '第二句' } })
     expect(result.current.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+  })
+
+  it('starts a new conversation after the one on screen was deleted or cleared elsewhere', async () => {
+    const { client, result, emit, conversations } = setup()
+    await act(async () => { await result.current.send('一') })
+    await emit(event(2, { type: 'state', state: 'completed' }))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.conversationId).toBe('c1')
+    // Another conversation going away changes nothing.
+    await conversations({ conversationId: 'other', change: 'deleted' })
+    expect(result.current.conversationId).toBe('c1')
+    await conversations({ conversationId: null, change: 'cleared' })
+    expect(result.current.conversationId).toBeNull()
+    // What was said stays on screen; the next message no longer names the cleared conversation.
+    expect(result.current.messages.length).toBeGreaterThan(0)
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2', conversationId: 'c2' }))
+    await act(async () => { await result.current.send('二') })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', message: '二' } })
   })
 
   it('stops the reply, and keeps the words written so far', async () => {
