@@ -1,33 +1,32 @@
-import { useCallback } from 'react'
-import { flushSync } from 'react-dom'
+import { useEffect, useState } from 'react'
 
-type TransitionDocument = Document & { startViewTransition?: (update: () => void) => { finished: Promise<unknown> } }
+/** Which way the views are moving; null when they are at rest. */
+export type SwapPhase = 'to-conversation' | 'to-overview' | null
+
+/** The longer of the two animations (in 250ms, out 170ms); the phase ends a beat after it. */
+export const SWAP_MS = 250
+const SETTLE_MS = 30
 
 /**
- * Runs a view change inside a View Transition when the browser has them (ai-chat-ui.md 6.2). The
- * `direction` is written on the root for the length of the transition; index.css names the page body
- * and the input only then, so nothing is captured at other times. Returns whether a transition ran:
- * when it did not, the caller's own CSS cross-fade applies (and with reduced motion, nothing does).
+ * Tells the Now page when the overview and the conversation trade places (ai-chat-ui.md 6.2). Both
+ * views are live DOM and only their `transform` and `opacity` move (CSS classes keyed on the phase),
+ * so text stays crisp and colours stay true; a View Transition would animate blurred snapshots.
+ * The phase starts in the same render that sees the change, and ends on a
+ * timer, so the classes (and `will-change`) are gone as soon as the motion is. Reduced motion never
+ * enters a phase: the swap is instant.
  */
-export function useViewSwap(reduced: boolean) {
-  return useCallback((direction: 'conversation' | 'overview', update: () => void): boolean => {
-    const doc = document as TransitionDocument
-    if (reduced || typeof doc.startViewTransition !== 'function') {
-      update()
-      return false
-    }
-    const root = document.documentElement
-    root.dataset.nowTransition = direction
-    let transition: { finished: Promise<unknown> }
-    try {
-      transition = doc.startViewTransition(() => { flushSync(update) })
-    } catch {
-      delete root.dataset.nowTransition
-      update()
-      return false
-    }
-    const done = () => { delete root.dataset.nowTransition }
-    transition.finished.then(done, done)
-    return true
-  }, [reduced])
+export function useViewSwap(conversation: boolean, reduced: boolean): SwapPhase {
+  const [phase, setPhase] = useState<SwapPhase>(null)
+  const [seen, setSeen] = useState(conversation)
+  // Noticed while rendering, so the very first frame of the new view already carries the motion.
+  if (seen !== conversation) {
+    setSeen(conversation)
+    setPhase(reduced ? null : conversation ? 'to-conversation' : 'to-overview')
+  }
+  useEffect(() => {
+    if (phase === null) return
+    const timer = setTimeout(() => setPhase(null), SWAP_MS + SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [phase])
+  return reduced ? null : phase
 }

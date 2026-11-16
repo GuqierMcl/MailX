@@ -36,6 +36,9 @@
     "hideDetails": "Hide details",
     "openEmail": "Open email",
     "unknownEmail": "Email",
+    "openEmailNamed": "Open email: {{subject}}",
+    "openFolderNamed": "Open folder: {{name}}",
+    "folderUnread": "{{count}} unread",
     "moreEmails": "{{count}} more",
     "summaryUnread": "{{count}} unread",
     "tool": {

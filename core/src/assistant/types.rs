@@ -79,7 +79,7 @@ impl RunState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum FinishedReason {
     /// The model gave its answer.
@@ -90,7 +90,7 @@ pub enum FinishedReason {
     Length,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolStatus {
     Running,
@@ -102,7 +102,7 @@ pub enum ToolStatus {
 }
 
 /// A short, model-independent account of one tool call for the interface.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -136,7 +136,7 @@ pub enum ToolActivitySummary {
 }
 
 /// How the UI takes back an organize call, through commands it already has.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -152,7 +152,7 @@ pub enum ToolUndo {
     Flags { restore: Vec<FlagRestore> },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct FlagRestore {
     pub email_id: String,
@@ -160,7 +160,7 @@ pub struct FlagRestore {
     pub is_starred: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolActivity {
     pub call_id: String,
@@ -210,7 +210,7 @@ pub struct PendingConfirmation {
 
 /// What kind of step needs the user. The labels follow the settings
 /// categories in `docs/architecture/ai-permissions.md`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ConfirmAction {
     /// `send_email`, including a retry.
@@ -379,4 +379,131 @@ pub enum AssistantEventKind {
     Failed {
         code: ErrorCode,
     },
+}
+
+// ------------------------------------------------------- saved conversations
+
+/// Page size of `list_conversations` when none is given, and its maximum.
+pub const DEFAULT_CONVERSATION_PAGE: u32 = 50;
+pub const MAX_CONVERSATION_PAGE: u32 = 100;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub id: String,
+    /// The first user message, shortened.
+    pub title: String,
+    /// RFC 3339 UTC with milliseconds: when the last turn was saved.
+    pub updated_at: String,
+    /// Messages the user sent.
+    pub message_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationList {
+    /// Newest first.
+    pub items: Vec<ConversationSummary>,
+    /// Pass back as `cursor` for the next page; `None` at the end.
+    pub next_cursor: Option<String>,
+}
+
+/// How a saved reply ended. A reply cut off by a restart is `canceled`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnState {
+    Completed,
+    Failed,
+    Canceled,
+}
+
+/// What the user answered to a confirmation (or did not).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfirmOutcome {
+    Approved,
+    Denied,
+    /// Nobody answered in time; counts as declined.
+    Expired,
+}
+
+/// A tool call of a saved reply. `textOffset` is where in the reply's text the
+/// call began, in UTF-16 code units (what `String.length` counts), so the
+/// interface can place it between the same words as it did live.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTurnTool {
+    pub call_id: String,
+    pub name: String,
+    pub status: ToolStatus,
+    /// Never carries undo data: `changed.undo` is always `null`.
+    pub summary: ToolActivitySummary,
+    pub text_offset: u32,
+}
+
+/// A confirmation the user answered, as one line. The details card is not
+/// kept. The call it belonged to is in `tools` under the same `callId`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTurnConfirmation {
+    pub call_id: String,
+    pub tool: String,
+    pub action: ConfirmAction,
+    pub outcome: ConfirmOutcome,
+    pub text_offset: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(
+    tag = "role",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ChatTurn {
+    User {
+        text: String,
+        /// RFC 3339 UTC with milliseconds.
+        at: String,
+    },
+    /// Everything the assistant wrote and did in answer to one user message.
+    Assistant {
+        text: String,
+        tools: Vec<ChatTurnTool>,
+        confirmations: Vec<ChatTurnConfirmation>,
+        state: TurnState,
+        /// Set when `state` is `completed`.
+        finished_reason: Option<FinishedReason>,
+        /// Set when `state` is `failed`.
+        error: Option<ErrorCode>,
+        at: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationDetail {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub turns: Vec<ChatTurn>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ConversationChange {
+    /// A turn was saved (the conversation is new or moved up the list).
+    Saved,
+    Deleted,
+    /// Every saved conversation was deleted, or an account's were removed.
+    Cleared,
+}
+
+/// Saved conversations changed; lists refetch. `conversationId` is `None`
+/// for `cleared`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationsChanged {
+    pub conversation_id: Option<String>,
+    pub change: ConversationChange,
 }

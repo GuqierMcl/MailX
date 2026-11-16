@@ -27,7 +27,7 @@ const tool = (over: Partial<ToolActivity> & { settledAt?: number | null; at?: nu
 function setup(env: Partial<ChatEnv> = {}) {
   const client = testClient([account])
   const handlers = { onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(), markUndone: vi.fn() }
-  const value: ChatEnv = { client, undone: new Set(), ...handlers, ...env }
+  const value: ChatEnv = { client, accounts: [], folders: [], onOpenFolder: vi.fn(), undone: new Set(), ...handlers, ...env }
   const view = (children: React.ReactNode) => <TooltipProvider><ChatEnvContext value={value}>{children}</ChatEnvContext></TooltipProvider>
   return { client, ...handlers, view }
 }

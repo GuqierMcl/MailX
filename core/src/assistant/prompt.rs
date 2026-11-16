@@ -3,7 +3,7 @@
 use crate::SupportedLocale;
 
 /// Part of the Now summary cache key.
-pub(crate) const PROMPT_VERSION: u32 = 2;
+pub(crate) const PROMPT_VERSION: u32 = 3;
 
 /// Marks the start and end of tool output in the conversation.
 pub(crate) const RESULT_OPEN: &str = "<tool_result";
@@ -52,7 +52,15 @@ pub(crate) fn chat_system(
          Actions: never say an action happened unless a tool result says so. If a tool result \
          says the user declined or the action was not permitted, say so and do not try to work \
          around it. Do not send mail unless the user clearly asked you to send it. Prefer a few \
-         precise searches over many broad ones, and keep answers short.",
+         precise searches over many broad ones, and keep answers short.\n\
+         \n\
+         References: when you mention a specific email or folder that a tool result gave you, \
+         write a Markdown link whose target is `mailx://email/<id>` or `mailx://folder/<id>`, \
+         for example [Invoice from Acme](mailx://email/EMAIL_ID). Take the id exactly as the \
+         tool result shows it (the `id` of an email or folder) and never make one up or alter \
+         it. Put a link on a line of its own to show it as a card; use it inline in a \
+         sentence for a short mention. Do not write raw ids anywhere else. Never link \
+         anything else with the mailx scheme.",
         language = language(locale),
         role = role,
     );
@@ -105,6 +113,23 @@ mod tests {
             assert!(prompt.contains(needle), "{needle}");
         }
         assert!(!prompt.contains("user_instructions"));
+    }
+
+    #[test]
+    fn the_chat_prompt_teaches_reference_links() {
+        let prompt = chat_system(SupportedLocale::En, "now", "", true);
+        for needle in [
+            "mailx://email/<id>",
+            "mailx://folder/<id>",
+            "exactly as the tool result shows it",
+            "never make one up",
+            "on a line of its own",
+            "inline",
+        ] {
+            assert!(prompt.contains(needle), "{needle}");
+        }
+        // The Now summary stays plain text.
+        assert!(!summary_system(SupportedLocale::En).contains("mailx://"));
     }
 
     #[test]

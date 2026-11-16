@@ -13,13 +13,34 @@ export type Inline =
   | { type: 'strong'; children: Inline[] }
   | { type: 'em'; children: Inline[] }
   | { type: 'link'; href: string; children: Inline[] }
+  | { type: 'ref'; kind: RefKind; id: string; label: string }
 
 export type MarkdownBlock =
   | { type: 'paragraph'; children: Inline[] }
   | { type: 'heading'; children: Inline[] }
   | { type: 'code'; text: string }
+  /** A reference that stands alone on its line: shown as a card. */
+  | { type: 'ref'; kind: RefKind; id: string; label: string }
   | { type: 'quote'; children: MarkdownBlock[] }
   | { type: 'list'; ordered: boolean; start: number; items: MarkdownBlock[][] }
+
+/** What a `mailx://` link in a reply can point to: a mail or a folder of this app. */
+export type RefKind = 'email' | 'folder'
+
+const REF_ID: Record<RefKind, RegExp> = {
+  // Core ids are UUIDs; the mock data's ids are short words and numbers. Nothing else (no spaces, slashes or dots-only).
+  email: /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/,
+  // A folder id may carry a path (`<account>:projects/mailx` in the mock data).
+  folder: /^[A-Za-z0-9][A-Za-z0-9:_/-]{0,127}$/,
+}
+
+/** `mailx://email/<id>` or `mailx://folder/<id>` as a reference, or null: any other `mailx:` address is not one. */
+export function parseRef(url: string, label: string): Extract<Inline, { type: 'ref' }> | null {
+  const match = /^mailx:\/\/(email|folder)\/([^\s?#]+)$/.exec(url.trim())
+  if (!match) return null
+  const kind = match[1] as RefKind
+  return REF_ID[kind].test(match[2]) ? { type: 'ref', kind, id: match[2], label } : null
+}
 
 /** The address of a link the app may open, or null: only http(s) and mailto, nothing else. */
 export function safeHref(raw: string): string | null {
@@ -96,6 +117,8 @@ export function parseBlock(source: string, open = false): MarkdownBlock[] {
       blocks.push({ type: 'code', text: body.join('\n') })
       continue
     }
+    const ref = refLine(line)
+    if (ref) { blocks.push(ref); at += 1; continue }
     if (RULE.test(line) && !LIST_ITEM.test(line)) { at += 1; continue }
     const heading = HEADING.exec(line)
     if (heading) {
@@ -131,10 +154,18 @@ export function parseBlock(source: string, open = false): MarkdownBlock[] {
       continue
     }
     const paragraph: string[] = []
-    while (at < lines.length && (paragraph.length === 0 || !startsBlock(lines[at]))) { paragraph.push(lines[at]); at += 1 }
+    while (at < lines.length && (paragraph.length === 0 || (!startsBlock(lines[at]) && !refLine(lines[at])))) { paragraph.push(lines[at]); at += 1 }
     blocks.push({ type: 'paragraph', children: parseInline(paragraph.map((row) => row.trim()).join('\n'), open && at >= lines.length) })
   }
   return blocks
+}
+
+/** A line that holds nothing but one reference: it becomes a card of its own. */
+function refLine(line: string): Extract<MarkdownBlock, { type: 'ref' }> | null {
+  const text = line.trim()
+  if (!text.startsWith('[')) return null
+  const link = linkAt(text, 0)
+  return link && link.end === text.length ? parseRef(link.url, link.label) : null
 }
 
 const indent = (line: string) => line.length - line.trimStart().length
@@ -172,8 +203,10 @@ export function parseInline(text: string, open = false): Inline[] {
     if (char === '[') {
       const link = linkAt(text, at)
       if (link) {
-        const href = safeHref(link.url)
-        if (href) push({ type: 'link', href, children: parseInline(link.label, false) })
+        const ref = parseRef(link.url, link.label)
+        const href = ref ? null : safeHref(link.url)
+        if (ref) push(ref)
+        else if (href) push({ type: 'link', href, children: parseInline(link.label, false) })
         else literal += link.label
         at = link.end
         continue

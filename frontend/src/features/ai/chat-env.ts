@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { Account, Folder } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 
 /** What the chat's parts need from the place that hosts them (the Now page today, the reader and composer later). */
@@ -8,6 +9,11 @@ export type ChatEnv = {
   onOpenEmail: (email: { id: string; accountId: string }) => void
   /** Opens a draft in the compose window. */
   onOpenDraft: (draftId: string) => void
+  /** The accounts and folders as the host has them loaded: folder cards in replies are drawn from these. */
+  accounts: Account[]
+  folders: Folder[]
+  /** Shows a folder's mail, as a click on it in the sidebar does. */
+  onOpenFolder: (folder: Folder) => void
   /** Answers the pending confirmation. */
   respond: (approved: boolean) => void
   /** Asks again after a failure. */

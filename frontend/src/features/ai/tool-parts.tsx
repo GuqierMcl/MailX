@@ -12,7 +12,7 @@ import type { ToolUndo } from '@/generated/accounts'
 import { SenderAvatar } from '@/features/mail/sender-avatar'
 import { displayName, formatFullTime } from '@/features/mail/format'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
-import { mailKeys } from '@/lib/query-client'
+import { useAssistantEmail } from './use-assistant-email'
 import { cn } from '@/lib/utils'
 import { toolEmailIds } from './chat-model'
 import { CHIP_LIMIT, UNDO_WINDOW_MS, toolLabel } from './tool-labels'
@@ -71,12 +71,7 @@ function UndoButton({ tool, undo }: { tool: RunTool; undo: ToolUndo }) {
 /** A small tag for one email an answer or step refers to; it opens the mail the way the page's own rows do. */
 export function EmailChip({ emailId }: { emailId: string }) {
   const { client, onOpenEmail } = useChatEnv()
-  const email = useQuery({
-    queryKey: [...mailKeys.all, 'assistant-email', emailId],
-    queryFn: () => client.getEmail(emailId),
-    staleTime: 60_000,
-    retry: false,
-  })
+  const email = useAssistantEmail(client, emailId)
   const summary = email.data?.summary
   const subject = summary ? summary.subject || t('mail:noSubject') : t('ai:chat.unknownEmail')
   const chip = (

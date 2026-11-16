@@ -100,3 +100,44 @@ describe('blocks', () => {
     for (let at = 0; at <= full.length; at += 1) expect(() => parseMarkdown(full.slice(0, at), true)).not.toThrow()
   })
 })
+
+describe('mailx references', () => {
+  const UUID = '3f2b8c1e-5d4a-4c7b-9e10-aa11bb22cc33'
+
+  it('makes a card of a reference alone on its line, and a chip inside a sentence', () => {
+    expect(parseMarkdown(`[账单](mailx://email/${UUID})`)).toEqual([{ type: 'ref', kind: 'email', id: UUID, label: '账单' }])
+    expect(parseMarkdown(`看这里：\n[收件箱](mailx://folder/${UUID})\n然后呢`)).toEqual([
+      { type: 'paragraph', children: [{ type: 'text', text: '看这里：' }] },
+      { type: 'ref', kind: 'folder', id: UUID, label: '收件箱' },
+      { type: 'paragraph', children: [{ type: 'text', text: '然后呢' }] },
+    ])
+    expect(parseMarkdown(`请先看[这封](mailx://email/${UUID})。`)).toEqual([{
+      type: 'paragraph',
+      children: [{ type: 'text', text: '请先看' }, { type: 'ref', kind: 'email', id: UUID, label: '这封' }, { type: 'text', text: '。' }],
+    }])
+  })
+
+  it('reads folder ids that carry a path', () => {
+    expect(parseInline('[x](mailx://folder/acc:projects/mailx)')).toEqual([{ type: 'ref', kind: 'folder', id: 'acc:projects/mailx', label: 'x' }])
+  })
+
+  it('keeps any other mailx address, or a malformed id, as plain text', () => {
+    for (const bad of ['mailx://email/', 'mailx://email/a b', 'mailx://email/../x', 'mailx://email/a/b', 'mailx://folder/', 'mailx://folder/-x', 'mailx://folder/a?b=1', 'mailx://other/1', 'mailx://draft/abc', 'mailx:email/abc', `mailx://email/${'a'.repeat(129)}`]) {
+      expect(parseInline(`[label](${bad})`), bad).toEqual([{ type: 'text', text: 'label' }])
+      expect(parseMarkdown(`[label](${bad})`), bad).toEqual([{ type: 'paragraph', children: [{ type: 'text', text: 'label' }] }])
+    }
+  })
+
+  it('leaves http links alone and never turns a reference into a link', () => {
+    expect(parseInline('[a](https://example.com)')).toEqual([{ type: 'link', href: 'https://example.com/', children: [{ type: 'text', text: 'a' }] }])
+    expect(parseInline(`[a](mailx://email/${UUID})`)).toEqual([{ type: 'ref', kind: 'email', id: UUID, label: 'a' }])
+  })
+
+  it('stays text while the address is still arriving', () => {
+    for (const partial of ['[x](mailx://ema', '[x](mailx://email/3f2b8c1e', '[x](mailx:/']) {
+      expect(() => parseMarkdown(partial, true), partial).not.toThrow()
+      expect(parseMarkdown(partial, true).every((block) => block.type === 'paragraph'), partial).toBe(true)
+    }
+    expect(parseMarkdown('[x](mailx://ema', true)).toEqual([{ type: 'paragraph', children: [{ type: 'text', text: '[x](mailx://ema' }] }])
+  })
+})

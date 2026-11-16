@@ -56,6 +56,10 @@ pub struct AssistantSettings {
     pub send: AssistantSendMode,
     /// Appended to the system prompt, at most 2000 characters.
     pub instructions: String,
+    /// Keep chat conversations on this device so they can be reopened.
+    /// Turning it off stops saving new turns; what is already saved stays
+    /// until the user deletes it.
+    pub save_history: bool,
 }
 
 impl Default for AssistantSettings {
@@ -69,6 +73,7 @@ impl Default for AssistantSettings {
             ai_drafts: AssistantMode::Direct,
             send: AssistantSendMode::Confirm,
             instructions: String::new(),
+            save_history: true,
         }
     }
 }
@@ -154,7 +159,7 @@ pub(super) fn repair_assistant(value: &mut serde_json::Value) {
         return;
     };
     section.retain(|key, v| match key.as_str() {
-        "enabled" => v.is_boolean(),
+        "enabled" | "saveHistory" => v.is_boolean(),
         "model" => v.is_null() || serde_json::from_value::<AiModelRef>(v.clone()).is_ok(),
         "consented" => v.is_null() || serde_json::from_value::<AiConsent>(v.clone()).is_ok(),
         "excludedAccounts" => v

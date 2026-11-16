@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::{
-    conversations::{Conversations, MAX_CONVERSATIONS, STOPPED_MARKER},
+    conversations::{Conversations, MAX_CONVERSATIONS, STOPPED_MARKER, ToolRecord},
     runs::{KEEP_FINISHED_FOR, KEEP_FINISHED_RUNS, MAX_ACTIVE_RUNS, Runs},
     *,
 };
@@ -1542,11 +1542,13 @@ async fn cancel_mid_stream_closes_the_connection_and_ends_canceled() {
     // The conversation is free and its history ends with the assistant.
     let conversation = started.conversation_id.unwrap();
     until("the conversation to be freed", || {
-        fx.assistant
-            .inner
-            .conversations
-            .history(&conversation)
-            .is_some_and(|h| matches!(h.last(), Some(ChatMessage::Assistant { .. })))
+        fx.assistant.inner.conversations.is_idle(&conversation)
+            && fx
+                .assistant
+                .inner
+                .conversations
+                .history(&conversation)
+                .is_some_and(|h| matches!(h.last(), Some(ChatMessage::Assistant { .. })))
     })
     .await;
     fx.model(vec![say("fine")]);
@@ -1794,14 +1796,16 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
     assert_eq!(again.text, "You have mail.");
     assert_eq!(again.seq, 0);
     assert_eq!(fx.requests(), 1, "no second model call");
-    // The cached answer shows when it was generated, not when it was fetched.
+    // The cached answer shows when it was generated, not when it was fetched. The cache is
+    // stamped just before the run itself completes, so the two may differ by a few ms either way.
     let cached_at = again.completed_at.clone().expect("cached completed_at");
-    assert!(cached_at.as_str() >= generated.as_str());
     assert!(
         chrono::DateTime::parse_from_rfc3339(&cached_at)
             .unwrap()
             .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&generated).unwrap())
-            < chrono::Duration::seconds(5)
+            .num_milliseconds()
+            .abs()
+            < 5_000
     );
     tokio::time::sleep(Duration::from_millis(30)).await;
     let later = fx.assistant.start(summary_request()).await.unwrap();
@@ -1986,4 +1990,685 @@ fn a_dropped_guard_leaves_history_ending_with_the_assistant() {
     let (guard, _) = store.begin(Some(&id), "q2".into()).unwrap();
     guard.rollback();
     assert_eq!(store.history(&id).unwrap().len(), 2);
+}
+
+// ------------------------------------------------------ saved conversations
+
+impl Fx {
+    /// A second assistant over the same storage, as after a restart: it has
+    /// no conversations in memory.
+    fn reopened(&self) -> Assistant {
+        let tools = Tools::new(self.core.clone(), String::new).with_undo_send_seconds(|| Ok(30));
+        Assistant::new(
+            self.core.clone(),
+            self.ai.clone(),
+            self.settings.clone(),
+            tools,
+            Arc::new(|_: &CoreEvent| {}),
+        )
+    }
+
+    async fn list(&self) -> Vec<ConversationSummary> {
+        self.assistant
+            .list_conversations(Some(MAX_CONVERSATION_PAGE), None)
+            .await
+            .unwrap()
+            .items
+    }
+
+    fn stored_contents(&self, id: &str) -> Vec<String> {
+        let mut statement = self
+            .db
+            .prepare(
+                "SELECT content FROM assistant_messages WHERE conversation_id = ?1 ORDER BY seq",
+            )
+            .unwrap();
+        statement
+            .query_map([id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn stored_rows(&self) -> i64 {
+        self.db
+            .query_row("SELECT count(*) FROM assistant_messages", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    /// Waits until the conversation has no run (its last save is done).
+    async fn idle(&self, id: &str) {
+        until("the conversation to be free", || {
+            self.assistant.inner.conversations.is_idle(id)
+        })
+        .await;
+    }
+
+    async fn turns(&self, id: &str) -> Vec<ChatTurn> {
+        self.assistant.get_conversation(id).await.unwrap().turns
+    }
+}
+
+fn assistant_turn(turn: &ChatTurn) -> (&str, &[ChatTurnTool], &[ChatTurnConfirmation]) {
+    match turn {
+        ChatTurn::Assistant {
+            text,
+            tools,
+            confirmations,
+            ..
+        } => (text, tools, confirmations),
+        ChatTurn::User { .. } => panic!("expected an assistant turn: {turn:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_conversation_is_saved_and_reads_back_with_tools_and_the_answer_to_a_question() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    let mut first = vec![oa_text("Let me do that. ")];
+    first.extend(calls(&[(
+        "c1",
+        "set_email_flags",
+        json!({"emailIds": [fx.emails[0]], "isRead": true}),
+    )]));
+    fx.model(vec![
+        first,
+        say("Marked."),
+        calls(&[("s1", "search_emails", json!({"query": "hello"}))]),
+        say("Found it."),
+    ]);
+    let started = fx.chat("  Please\n mark   the first mail read  ").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, true)
+        .unwrap();
+    fx.finished(&started.run_id).await;
+    let id = started.conversation_id.unwrap();
+    // The run is reported finished only after it was saved.
+    let listed = fx.list().await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, id);
+    assert_eq!(listed[0].title, "Please mark the first mail read");
+    assert_eq!(listed[0].message_count, 1);
+
+    let second = fx
+        .assistant
+        .start(chat_request(Some(&id), "now find hello"))
+        .await
+        .unwrap();
+    fx.finished(&second.run_id).await;
+    let detail = fx.assistant.get_conversation(&id).await.unwrap();
+    assert_eq!(detail.id, id);
+    assert_eq!(detail.title, "Please mark the first mail read");
+    assert_eq!(detail.turns.len(), 4);
+    assert!(matches!(
+        &detail.turns[0],
+        ChatTurn::User { text, .. } if text == "Please\n mark   the first mail read"
+    ));
+
+    let (text, tools, confirmations) = assistant_turn(&detail.turns[1]);
+    assert_eq!(text, "Let me do that. Marked.");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].call_id, "c1");
+    assert_eq!(tools[0].status, ToolStatus::Done);
+    assert_eq!(
+        tools[0].text_offset, 16,
+        "after the words said before the call"
+    );
+    // The change could be taken back live; the saved copy cannot be.
+    assert!(matches!(
+        &tools[0].summary,
+        ToolActivitySummary::Changed {
+            undo: None,
+            count: 1,
+            ..
+        }
+    ));
+    assert_eq!(
+        confirmations,
+        [ChatTurnConfirmation {
+            call_id: "c1".into(),
+            tool: "set_email_flags".into(),
+            action: ConfirmAction::Organize,
+            outcome: ConfirmOutcome::Approved,
+            text_offset: 16,
+        }]
+    );
+    assert!(matches!(
+        &detail.turns[1],
+        ChatTurn::Assistant {
+            state: TurnState::Completed,
+            finished_reason: Some(FinishedReason::Stop),
+            error: None,
+            ..
+        }
+    ));
+    let (text, tools, confirmations) = assistant_turn(&detail.turns[3]);
+    assert_eq!(text, "Found it.");
+    assert_eq!(tools[0].summary, ToolActivitySummary::Found { count: 1 });
+    assert!(confirmations.is_empty());
+
+    // Nothing that undoes a change or waits for an answer is on disk.
+    let stored = fx.stored_contents(&id).join("\n");
+    for needle in [
+        "\"undo\":{",
+        "restore",
+        "token",
+        "\"pending\":",
+        "requestId",
+        "bodyPreview",
+    ] {
+        assert!(!stored.contains(needle), "{needle} was stored");
+    }
+    // The conversation moved up the list with the second message.
+    assert_eq!(fx.list().await[0].message_count, 2);
+}
+
+#[tokio::test]
+async fn a_denied_or_unanswered_question_is_saved_as_its_outcome() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.organize = AssistantMode::Ask);
+    fx.assistant
+        .set_confirmation_timeout(Duration::from_millis(400));
+    fx.model(vec![
+        calls(&[("a", "archive_emails", json!({"emailIds": [fx.emails[0]]}))]),
+        calls(&[("b", "archive_emails", json!({"emailIds": [fx.emails[1]]}))]),
+        say("Done."),
+    ]);
+    let started = fx.chat("archive two").await;
+    let asked = pending(&fx.assistant, &started.run_id).await;
+    fx.assistant
+        .respond(&started.run_id, &asked.request_id, false)
+        .unwrap();
+    fx.finished(&started.run_id).await;
+    let turns = fx.turns(&started.conversation_id.unwrap()).await;
+    let (_, tools, confirmations) = assistant_turn(&turns[1]);
+    assert_eq!(tools.len(), 2);
+    assert!(tools.iter().all(|t| t.status == ToolStatus::Denied));
+    let outcomes: Vec<_> = confirmations
+        .iter()
+        .map(|c| (c.call_id.as_str(), c.outcome))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("a", ConfirmOutcome::Denied),
+            ("b", ConfirmOutcome::Expired)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_reopened_assistant_continues_a_saved_conversation_with_its_stored_history() {
+    let fx = Fx::new().await;
+    fx.model(vec![
+        calls(&[("s1", "search_emails", json!({"query": "hello"}))]),
+        say("One mail."),
+        say("Only if you ask."),
+    ]);
+    let first = fx.chat_and_wait("what is in my box?").await;
+    let id = first.conversation_id.unwrap();
+
+    let again = fx.reopened();
+    assert_eq!(again.inner.conversations.len(), 0);
+    let second = again
+        .start(chat_request(Some(&id), "and more?"))
+        .await
+        .unwrap();
+    assert_eq!(second.conversation_id.as_deref(), Some(id.as_str()));
+    finished(&again, &second.run_id).await;
+
+    let request = fx.request(2);
+    let messages = request["messages"].as_array().unwrap();
+    let roles: Vec<&str> = messages
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        roles,
+        ["system", "user", "assistant", "tool", "assistant", "user"]
+    );
+    assert_eq!(messages[1]["content"], "what is in my box?");
+    assert_eq!(
+        messages[2]["tool_calls"][0]["function"]["name"],
+        "search_emails"
+    );
+    assert!(
+        messages[3]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("<tool_result")
+    );
+    assert_eq!(messages[4]["content"], "One mail.");
+    // The same conversation, not a copy.
+    assert_eq!(fx.list().await.len(), 1);
+    assert_eq!(fx.turns(&id).await.len(), 4);
+    // An unknown id is still unknown.
+    assert_eq!(
+        again
+            .start(chat_request(Some("missing"), "hi"))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+}
+
+#[tokio::test]
+async fn a_reply_cut_off_by_a_restart_reads_back_as_stopped_and_can_be_continued() {
+    let fx = Fx::new().await;
+    // What a crash mid-run leaves: committed rows without a closing row.
+    let id = uuid::Uuid::new_v4().to_string();
+    let record = ToolRecord {
+        activity: ToolActivity {
+            call_id: "t".into(),
+            name: "search_emails".into(),
+            status: ToolStatus::Done,
+            summary: ToolActivitySummary::Found { count: 3 },
+        },
+        confirmation: None,
+    };
+    let rows = vec![
+        history::message_row(
+            &ChatMessage::User("look".into()),
+            None,
+            "2030-01-01T00:00:00.000Z",
+        ),
+        history::message_row(
+            &ChatMessage::Assistant {
+                text: "Looking. ".into(),
+                tool_calls: vec![crate::ai::client::stream::ToolCallRequest {
+                    id: "t".into(),
+                    name: "search_emails".into(),
+                    arguments: json!({}),
+                }],
+            },
+            None,
+            "2030-01-01T00:00:01.000Z",
+        ),
+        history::message_row(
+            &ChatMessage::ToolResult {
+                call_id: "t".into(),
+                content: "x".into(),
+                is_error: false,
+            },
+            Some(&record),
+            "2030-01-01T00:00:02.000Z",
+        ),
+    ];
+    fx.core.with_accounts_for_test(|service| {
+        service
+            .assistant_chat_append(&crate::storage::assistant_chats::Append {
+                id: &id,
+                create: Some("look"),
+                from_seq: 0,
+                rows: &rows,
+                accounts: &[],
+                now: "2030-01-01T00:00:02.000Z",
+            })
+            .unwrap()
+    });
+    let turns = fx.turns(&id).await;
+    assert!(matches!(
+        &turns[1],
+        ChatTurn::Assistant {
+            state: TurnState::Canceled,
+            finished_reason: None,
+            error: None,
+            ..
+        }
+    ));
+    fx.model(vec![say("Back again.")]);
+    let run = fx
+        .assistant
+        .start(chat_request(Some(&id), "continue"))
+        .await
+        .unwrap();
+    fx.finished(&run.run_id).await;
+    let request = fx.request(0);
+    let roles: Vec<&str> = request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    // The interrupted reply is closed with the assistant's stopped note.
+    assert_eq!(
+        roles,
+        ["system", "user", "assistant", "tool", "assistant", "user"]
+    );
+    assert_eq!(request["messages"][4]["content"], STOPPED_MARKER);
+    let turns = fx.turns(&id).await;
+    assert_eq!(turns.len(), 4);
+    let (text, _, _) = assistant_turn(&turns[1]);
+    assert_eq!(text, "Looking. ", "the stopped note is not shown as text");
+}
+
+#[tokio::test]
+async fn a_canceled_run_is_saved_as_stopped() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("one")]);
+    let first = fx.chat_and_wait("first").await;
+    let id = first.conversation_id.unwrap();
+    fx.hold(vec![vec![oa_text("par")]]);
+    let second = fx
+        .assistant
+        .start(chat_request(Some(&id), "second"))
+        .await
+        .unwrap();
+    until("text", || {
+        fx.assistant.snapshot(&second.run_id).unwrap().text == "par"
+    })
+    .await;
+    fx.assistant.cancel(&second.run_id).unwrap();
+    fx.idle(&id).await;
+    let turns = fx.turns(&id).await;
+    assert_eq!(turns.len(), 4);
+    assert!(matches!(
+        &turns[3],
+        ChatTurn::Assistant {
+            state: TurnState::Canceled,
+            ..
+        }
+    ));
+    assert!(matches!(&turns[2], ChatTurn::User { text, .. } if text == "second"));
+}
+
+#[tokio::test]
+async fn a_failed_run_is_saved_with_its_error_code() {
+    let fx = Fx::new().await;
+    fx.script.lock().unwrap().status = Some(401);
+    let run = fx.chat_and_wait("hello").await;
+    assert_eq!(run.state, RunState::Failed);
+    let turns = fx.turns(&run.conversation_id.unwrap()).await;
+    assert!(matches!(
+        &turns[1],
+        ChatTurn::Assistant {
+            state: TurnState::Failed,
+            error: Some(ErrorCode::AiKeyRejected),
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn the_list_is_newest_first_pages_by_cursor_and_keeps_a_hundred() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("ok")]);
+    let mut ids = Vec::new();
+    for n in 0..3 {
+        let run = fx.chat_and_wait(&format!("question {n}")).await;
+        ids.push(run.conversation_id.unwrap());
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let first = fx
+        .assistant
+        .list_conversations(Some(2), None)
+        .await
+        .unwrap();
+    let titles: Vec<&str> = first.items.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, ["question 2", "question 1"]);
+    let second = fx
+        .assistant
+        .list_conversations(Some(2), first.next_cursor.clone())
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].id, ids[0]);
+    assert_eq!(second.next_cursor, None);
+    for (limit, cursor) in [
+        (Some(0), None),
+        (Some(101), None),
+        (None, Some("junk".to_owned())),
+    ] {
+        assert_eq!(
+            fx.assistant
+                .list_conversations(limit, cursor)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Validation
+        );
+    }
+
+    // The newest hundred stay; a save that pushes past that drops the oldest.
+    fx.core.with_accounts_for_test(|service| {
+        for n in 0..105 {
+            let id = uuid::Uuid::new_v4().to_string();
+            let now = format!("2031-01-01T00:00:{:02}.{:03}Z", n / 100, n % 100);
+            service
+                .assistant_chat_append(&crate::storage::assistant_chats::Append {
+                    id: &id,
+                    create: Some("filler"),
+                    from_seq: 0,
+                    rows: &[],
+                    accounts: &[],
+                    now: &now,
+                })
+                .unwrap();
+        }
+    });
+    let page = fx
+        .assistant
+        .list_conversations(Some(MAX_CONVERSATION_PAGE), None)
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 100);
+    assert_eq!(page.next_cursor, None);
+    assert!(page.items.iter().all(|c| c.title == "filler"));
+}
+
+#[tokio::test]
+async fn deleting_and_clearing_remove_saved_and_memory_copies_and_say_so() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("ok")]);
+    let a = fx.chat_and_wait("a").await.conversation_id.unwrap();
+    let b = fx.chat_and_wait("b").await.conversation_id.unwrap();
+    fx.assistant.delete_conversation(&a).await.unwrap();
+    assert_eq!(
+        fx.assistant.get_conversation(&a).await.unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        fx.assistant.delete_conversation(&a).await.unwrap_err().code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        fx.assistant
+            .start(chat_request(Some(&a), "more"))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(fx.list().await.len(), 1);
+    assert!(fx.stored_contents(&a).is_empty());
+    fx.assistant.clear_conversations().await.unwrap();
+    assert!(fx.list().await.is_empty());
+    assert_eq!(fx.stored_rows(), 0);
+    assert_eq!(
+        fx.assistant
+            .start(chat_request(Some(&b), "more"))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    let changes: Vec<(Option<String>, ConversationChange)> = fx
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            CoreEvent::AssistantConversationsChanged(c) => {
+                Some((c.conversation_id.clone(), c.change))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            (Some(a.clone()), ConversationChange::Saved),
+            (Some(b.clone()), ConversationChange::Saved),
+            (Some(a), ConversationChange::Deleted),
+            (None, ConversationChange::Cleared),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_conversation_cancels_its_run_and_nothing_brings_it_back() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("one")]);
+    let id = fx.chat_and_wait("first").await.conversation_id.unwrap();
+    fx.hold(vec![vec![oa_text("par")]]);
+    let run = fx
+        .assistant
+        .start(chat_request(Some(&id), "second"))
+        .await
+        .unwrap();
+    until("text", || {
+        fx.assistant.snapshot(&run.run_id).unwrap().text == "par"
+    })
+    .await;
+    fx.assistant.delete_conversation(&id).await.unwrap();
+    assert_eq!(
+        fx.assistant.snapshot(&run.run_id).unwrap().state,
+        RunState::Canceled
+    );
+    // Let the canceled run's own save come and go.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(fx.list().await.is_empty());
+    assert_eq!(fx.stored_rows(), 0);
+    assert_eq!(fx.assistant.inner.conversations.len(), 0);
+}
+
+#[tokio::test]
+async fn with_history_off_nothing_new_is_saved_and_what_was_saved_stays() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("ok")]);
+    let id = fx.chat_and_wait("kept").await.conversation_id.unwrap();
+    let rows = fx.stored_rows();
+    fx.configure(|a| a.save_history = false);
+
+    // A new conversation is not saved at all ...
+    let other = fx.chat_and_wait("private").await.conversation_id.unwrap();
+    assert_eq!(fx.list().await.len(), 1);
+    // ... a saved one gets no new turns ...
+    let more = fx
+        .assistant
+        .start(chat_request(Some(&id), "private too"))
+        .await
+        .unwrap();
+    fx.finished(&more.run_id).await;
+    assert_eq!(fx.stored_rows(), rows);
+    // ... and turning history on again does not save what ran while it was off.
+    fx.configure(|a| a.save_history = true);
+    let again = fx
+        .assistant
+        .start(chat_request(Some(&other), "still private"))
+        .await
+        .unwrap();
+    fx.finished(&again.run_id).await;
+    assert_eq!(fx.stored_rows(), rows);
+    assert_eq!(fx.list().await.len(), 1);
+    // The working copy still answers with its history.
+    assert_eq!(fx.requests(), 4);
+    assert_eq!(fx.request(3)["messages"].as_array().unwrap().len(), 4);
+    // New conversations save again.
+    fx.chat_and_wait("public").await;
+    assert_eq!(fx.list().await.len(), 2);
+}
+
+#[tokio::test]
+async fn removing_an_account_deletes_the_conversations_that_touched_it_and_only_those() {
+    let fx = Fx::new().await;
+    let other = fx.other_account();
+    fx.model(vec![
+        calls(&[("s", "search_emails", json!({"query": "hello"}))]),
+        say("Here."),
+        calls(&[("f", "list_folders", json!({"accountId": other}))]),
+        say("No folders."),
+        say("Just chatting."),
+    ]);
+    let about_mail = fx.chat_and_wait("search").await.conversation_id.unwrap();
+    let about_other = fx
+        .chat_and_wait("folders of the other")
+        .await
+        .conversation_id
+        .unwrap();
+    let plain = fx.chat_and_wait("hello").await.conversation_id.unwrap();
+    let linked = |id: &str| -> Vec<String> {
+        let mut statement = fx
+            .db
+            .prepare(
+                "SELECT account_id FROM assistant_conversation_accounts
+                 WHERE conversation_id = ?1 ORDER BY 1",
+            )
+            .unwrap();
+        statement
+            .query_map([id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert_eq!(linked(&about_mail), std::slice::from_ref(&fx.account));
+    assert_eq!(linked(&about_other), std::slice::from_ref(&other));
+    assert!(linked(&plain).is_empty());
+
+    fx.core
+        .remove_account(crate::RemoveAccountRequest {
+            account_id: other.clone(),
+            expected_revision: 1,
+        })
+        .unwrap();
+    let left: Vec<String> = fx.list().await.into_iter().map(|c| c.id).collect();
+    assert!(left.contains(&about_mail) && left.contains(&plain));
+    assert!(!left.contains(&about_other));
+    assert!(fx.stored_contents(&about_other).is_empty());
+    assert!(linked(&about_other).is_empty());
+    // The working copy of the removed conversation cannot be continued.
+    assert_eq!(
+        fx.assistant
+            .start(chat_request(Some(&about_other), "more"))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert!(fx.events.lock().unwrap().iter().any(|e| matches!(
+        e,
+        CoreEvent::AssistantConversationsChanged(c) if c.change == ConversationChange::Cleared
+    )));
+}
+
+#[test]
+fn a_conversation_with_four_hundred_messages_is_full() {
+    let store = Arc::new(Conversations::default());
+    let (guard, _) = store.begin(None, "m".into()).unwrap();
+    let id = guard.id.clone();
+    let messages: Vec<ChatMessage> = (0..conversations::MAX_MESSAGES)
+        .map(|n| {
+            if n % 2 == 0 {
+                ChatMessage::User(format!("q{n}"))
+            } else {
+                ChatMessage::Assistant {
+                    text: "a".into(),
+                    tool_calls: Vec::new(),
+                }
+            }
+        })
+        .collect();
+    store.commit(&id, &messages, &conversations::RunExtras::default());
+    drop(guard);
+    assert_eq!(
+        store
+            .begin(Some(&id), "one more".into())
+            .err()
+            .map(|e| e.code),
+        Some(ErrorCode::AssistantContextFull)
+    );
 }

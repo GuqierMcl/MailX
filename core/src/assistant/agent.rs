@@ -9,12 +9,14 @@ use serde_json::Value;
 
 use super::{
     Gate, Inner, Ready, confirm,
-    conversations::ActiveConversation,
+    conversations::{ActiveConversation, RunExtras, ToolRecord},
+    history::{self, End, SaveGuard},
     policy::{self, Decision, DraftSource},
     prompt,
     summary::MAX_OUTPUT_TOKENS,
     types::{
-        ConfirmationRequest, FinishedReason, FlagRestore, ToolActivitySummary, ToolStatus, ToolUndo,
+        ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason, FlagRestore,
+        ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
     },
 };
 use crate::{
@@ -165,7 +167,18 @@ pub(crate) async fn chat(
         inner: inner.clone(),
         run_id: run_id.clone(),
     };
-    let outcome = chat_loop(&inner, &run_id, &conversation.id, &mut messages).await;
+    // Saves the reply when it ends, however it ends: normally below, or as
+    // stopped when the task is dropped (cancel) or panics.
+    let mut save = SaveGuard::new(inner.clone(), conversation);
+    let id = save.id();
+    let mut extras = RunExtras::default();
+    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras).await;
+    save.finish(match &outcome {
+        Outcome::Finished(reason) => End::finished(*reason),
+        Outcome::Failed(code) => End::failed(*code),
+        Outcome::NeedsConsent => End::canceled(),
+    })
+    .await;
     report(&inner, &run_id, outcome);
 }
 
@@ -190,6 +203,7 @@ async fn chat_loop(
     run_id: &str,
     conversation_id: &str,
     messages: &mut Vec<ChatMessage>,
+    extras: &mut RunExtras,
 ) -> Outcome {
     let definitions = definitions(&inner.tools);
     let definitions_cost = estimate(
@@ -243,7 +257,9 @@ async fn chat_loop(
             tool_calls: turn.calls.clone(),
         });
         if turn.calls.is_empty() {
-            inner.conversations.commit(conversation_id, messages);
+            inner
+                .conversations
+                .commit(conversation_id, messages, extras);
             return Outcome::Finished(if turn.reason == Some(FinishReason::Length) {
                 FinishedReason::Length
             } else {
@@ -264,9 +280,26 @@ async fn chat_loop(
                 );
                 run_call(inner, run_id, call, &mut memory).await
             };
-            inner
-                .runs
-                .tool(run_id, &call.id, &call.name, result.status, result.summary);
+            inner.runs.tool(
+                run_id,
+                &call.id,
+                &call.name,
+                result.status,
+                result.summary.clone(),
+            );
+            extras.records.insert(
+                messages.len(),
+                ToolRecord {
+                    activity: ToolActivity {
+                        call_id: call.id.clone(),
+                        name: call.name.clone(),
+                        status: result.status,
+                        summary: result.summary,
+                    },
+                    confirmation: result.confirmation,
+                },
+            );
+            extras.accounts.extend(result.accounts);
             messages.push(ChatMessage::ToolResult {
                 call_id: call.id.clone(),
                 content: result.content,
@@ -274,7 +307,10 @@ async fn chat_loop(
             });
         }
         // The turn is whole again: assistant message and all its results.
-        inner.conversations.commit(conversation_id, messages);
+        inner
+            .conversations
+            .commit(conversation_id, messages, extras);
+        history::persist(inner, conversation_id, None).await;
     }
     Outcome::Finished(FinishedReason::Limit)
 }
@@ -298,6 +334,10 @@ struct Executed {
     is_error: bool,
     /// Addresses found in a read or search result.
     addresses: Vec<String>,
+    /// Accounts the call named or its result belonged to.
+    accounts: Vec<String>,
+    /// What the user answered, when they were asked.
+    confirmation: Option<(ConfirmAction, ConfirmOutcome)>,
 }
 
 impl Executed {
@@ -310,6 +350,8 @@ impl Executed {
             content: format!("Error {code}: {message}"),
             is_error: true,
             addresses: Vec::new(),
+            accounts: Vec::new(),
+            confirmation: None,
         }
     }
 
@@ -323,6 +365,8 @@ impl Executed {
             ),
             is_error: true,
             addresses: Vec::new(),
+            accounts: Vec::new(),
+            confirmation: None,
         }
     }
 
@@ -352,22 +396,29 @@ async fn run_call(
     if memory.declined.contains(&key) {
         return Executed::denied("The user already declined this exact action in this run.");
     }
-    let executed = match run_tool(inner, run_id, call, false, &memory.seen).await {
+    let mut confirmation = None;
+    let mut executed = match run_tool(inner, run_id, call, false, &memory.seen).await {
         Step::Done(done) => done,
         Step::Ask(request) => {
+            let action = request.action;
             let Some((request_id, answer)) = inner.runs.ask(run_id, &call.id, *request) else {
                 return Executed::failed("canceled", "The run was stopped.");
             };
             match tokio::time::timeout(inner.confirmation_timeout(), answer).await {
-                Ok(Ok(true)) => match run_tool(inner, run_id, call, true, &memory.seen).await {
-                    Step::Done(done) => done,
-                    Step::Ask(_) => Executed::declined(),
-                },
+                Ok(Ok(true)) => {
+                    confirmation = Some((action, ConfirmOutcome::Approved));
+                    match run_tool(inner, run_id, call, true, &memory.seen).await {
+                        Step::Done(done) => done,
+                        Step::Ask(_) => Executed::declined(),
+                    }
+                }
                 Ok(_) => {
+                    confirmation = Some((action, ConfirmOutcome::Denied));
                     memory.declined.insert(key);
                     Executed::declined()
                 }
                 Err(_) => {
+                    confirmation = Some((action, ConfirmOutcome::Expired));
                     inner.runs.expire(run_id, &request_id);
                     memory.declined.insert(key);
                     Executed::denied("The user did not answer in time.")
@@ -376,6 +427,7 @@ async fn run_call(
         }
     };
     memory.seen.extend(executed.addresses.iter().cloned());
+    executed.confirmation = confirmation;
     executed
 }
 
@@ -503,17 +555,26 @@ fn execute(
             if matches!(call.name.as_str(), "read_email" | "search_emails") {
                 collect_addresses(&output, &mut addresses);
             }
+            let mut accounts = std::collections::BTreeSet::new();
+            history::touched_accounts(&call.arguments, &output, &mut accounts);
             Executed {
                 status: ToolStatus::Done,
                 summary: summarize(&call.name, &call.arguments, &output, &trusted),
                 content: prompt::wrap_result(&call.name, &text),
                 is_error: false,
                 addresses,
+                accounts: accounts.into_iter().collect(),
+                confirmation: None,
             }
         }
         Err(ToolError { code, message, .. }) => {
             // Both are fixed strings of the tool layer, never mail or server text.
-            Executed::failed(&code_text(code), &message)
+            let mut failed = Executed::failed(&code_text(code), &message);
+            // The call named these accounts even though it did not succeed.
+            let mut named = std::collections::BTreeSet::new();
+            history::touched_accounts(&call.arguments, &Value::Null, &mut named);
+            failed.accounts = named.into_iter().collect();
+            failed
         }
     })
 }

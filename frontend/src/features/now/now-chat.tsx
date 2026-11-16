@@ -13,6 +13,8 @@ import type { AssistantChat } from '@/features/ai/use-assistant-chat'
 import { useStickToBottom } from '@/features/ai/use-stick-to-bottom'
 import { escapeBelongsToSomethingElse } from '@/features/mail/use-close-on-escape'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
+import type { Account, Folder } from '@/generated/accounts'
+import type { Mailbox } from '@/features/mail/mailbox'
 import type { MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 import { useViewSwap } from './use-view-swap'
@@ -40,11 +42,11 @@ function Pill({ onClick, children, className }: { onClick: () => void; children:
  * the overview. The conversation itself lives in `chat`, above the page, so it survives leaving it;
  * which of the two views shows is this page's own state (it opens on the overview).
  *
- * The overview and the conversation swap with a View Transition where the browser has one, else with
- * a CSS fade; reduced motion swaps at once. The input is mounted once outside both, so its text and
- * focus ride through the change.
+ * The overview and the conversation trade places with a short fade and a slight shift of the live
+ * views (`useViewSwap`); reduced motion swaps at once. The input is mounted once outside both, so its
+ * text and focus ride through the change.
  */
-export function NowChatShell({ client, chat, usable, service, summary, onOpenEmail, onOpenDraft, focusToken = 0, children }: {
+export function NowChatShell({ client, chat, usable, service, summary, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken = 0, children }: {
   client: MailxClient
   /** Null where no conversation is kept (no provider): the page is then just the overview. */
   chat: AssistantChat | null
@@ -55,15 +57,17 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   summary: string
   onOpenEmail: (email: { id: string; accountId: string }) => void
   onOpenDraft: (draftId: string) => void
+  /** What the folder cards in replies are drawn from, and how a click on one opens its mailbox. */
+  accounts: Account[]
+  folders: Folder[]
+  onSelectMailbox: (mailbox: Mailbox) => void
   /** Changes when something outside asks to start typing (the command palette). */
   focusToken?: number
   children: ReactNode
 }) {
   useTranslation()
   const reduced = usePrefersReducedMotion()
-  const swap = useViewSwap(reduced)
-  const [view, setView] = useState<View>('overview')
-  const [enter, setEnter] = useState(false)
+    const [view, setView] = useState<View>('overview')
   const [input, setInput] = useState<HTMLTextAreaElement | null>(null)
   const footer = useRef<HTMLDivElement | null>(null)
   const shell = useRef<HTMLDivElement | null>(null)
@@ -79,12 +83,12 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   const conversation = view === 'conversation' && chat !== null && (chatOn || hasMessages)
   const busy = chat?.busy ?? false
 
-  const go = useCallback((next: View) => {
-    if (next === view) return
-    const ran = swap(next, () => setView(next))
-    // No transition API: the entering view fades in by CSS (never with reduced motion).
-    setEnter(!ran && !reduced)
-  }, [reduced, swap, view])
+  const phase = useViewSwap(conversation, reduced)
+  // The conversation stays on screen while it leaves. The overview behind it is out of reach (inert, hidden from
+  // assistive tech) from the start of the swap, and not drawn at all once the swap is over.
+  const showConversation = conversation || phase === 'to-overview'
+  const overviewHidden = conversation && phase === null
+  const go = useCallback((next: View) => setView(next), [])
 
   const { attach, node: scroller, atBottom, scrollToBottom, onScroll, onWheel } = useStickToBottom(messages, { reduced, enabled: conversation })
 
@@ -150,9 +154,9 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   }, [conversation, pendingId, scroller])
 
   const env = useMemo<ChatEnv | null>(() => chat && {
-    client, onOpenEmail, onOpenDraft, respond: (approved) => { void chat.respond(approved) }, retry: () => { void chat.retry() },
+    client, onOpenEmail, onOpenDraft, accounts, folders, onOpenFolder: (folder) => onSelectMailbox({ kind: 'folder', folder }), respond: (approved) => { void chat.respond(approved) }, retry: () => { void chat.retry() },
     focusInput, undone: chat.undone, markUndone: chat.markUndone,
-  }, [chat, client, focusInput, onOpenDraft, onOpenEmail])
+  }, [accounts, chat, client, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox])
 
   const showConfirmPill = chat?.pending && (!conversation || !cardShown)
 
@@ -160,15 +164,22 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
     <div ref={shell} data-slot="now-chat" className="absolute inset-0">
       {/* The overview stays mounted behind the conversation, so its scroll position and entrance are not replayed on return. */}
       <div
-        data-slot={conversation ? 'now-overview-hidden' : 'now-body'}
+        data-slot="now-overview"
+        data-phase={phase ?? undefined}
         inert={conversation}
         aria-hidden={conversation || undefined}
-        className={cn('absolute inset-0', conversation && 'invisible', enter && !conversation && 'animate-chat-fade')}
+        className={cn('absolute inset-0', overviewHidden && 'invisible', phase && 'pointer-events-none will-change-[transform,opacity]', phase === 'to-conversation' && 'animate-view-out-up', phase === 'to-overview' && 'animate-view-in-down')}
       >
         {children}
       </div>
-      {conversation && chat && env && (
-        <div data-slot="now-body" className={cn('absolute inset-0 flex flex-col', enter && 'animate-chat-in')}>
+      {showConversation && chat && env && (
+        <div
+          data-slot="now-conversation"
+          data-phase={phase ?? undefined}
+          inert={phase === 'to-overview'}
+          aria-hidden={phase === 'to-overview' || undefined}
+          className={cn('absolute inset-0 flex flex-col', phase && 'pointer-events-none will-change-[transform,opacity]', phase === 'to-conversation' && 'animate-view-in-up', phase === 'to-overview' && 'animate-view-out-down')}
+        >
           <div className="mx-auto flex w-full max-w-190 shrink-0 items-center gap-1 px-2 pt-3 sm:px-8">
             <Button type="button" variant="ghost" size="lg" onClick={leave}>
               <HugeiconsIcon icon={ArrowLeft01Icon} aria-hidden strokeWidth={2} data-icon="inline-start" />

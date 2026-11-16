@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { Alert02Icon, Attachment01Icon, CheckmarkCircle02Icon, Copy01Icon, File01Icon, MailUpload01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import type { Account, AccountSyncState, CodeCandidate, EmailSummary, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
+import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
 import { IconButton } from '@/components/icon-button'
 import { cn } from '@/lib/utils'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -25,6 +25,7 @@ import { useFreshCodes } from './use-fresh-codes'
 import { GreetingIcon } from './greeting-icon'
 import { NowAmbient } from './now-ambient'
 import { relativeTime } from './relative-time'
+import { MailRowCard, rowClass } from './mail-row-card'
 import { compareWeeks, dayStarts, syncSummary } from './activity'
 import { ActivityChart } from './activity-chart'
 import { SummaryLine } from './summary-line'
@@ -181,6 +182,9 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
         summary={chatSummary}
         onOpenEmail={onOpenEmail}
         onOpenDraft={onOpenDraft ?? noop}
+        accounts={accounts}
+        folders={folders}
+        onSelectMailbox={onSelectMailbox}
         focusToken={focusInputToken}
       >
       <div className="relative h-full overflow-y-auto">
@@ -236,7 +240,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
                     <ul className="flex flex-col">
                       {unreadRows.map((email) => (
                         <li key={email.id}>
-                          <MailRow email={email} language={language} now={minute} isNew={Date.parse(email.receivedAt) > sinceTime} onOpen={onOpenEmail} />
+                          <MailRowCard email={email} language={language} now={minute} isNew={Date.parse(email.receivedAt) > sinceTime} onOpen={onOpenEmail} />
                         </li>
                       ))}
                     </ul>
@@ -423,7 +427,6 @@ function CodeRow({ code, language, now, verification, onOpenEmail }: { code: Sho
   )
 }
 
-const rowClass = 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring'
 const linkClass = 'rounded-md px-3 py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
 
 function motionProps(mode: EntranceMode, index: number, className?: string) {
@@ -453,22 +456,6 @@ function StatButton({ value, label, mode, onClick }: { value: number; label: str
     >
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold tabular-nums">{shown}</span>
-    </button>
-  )
-}
-
-function MailRow({ email, language, now, isNew, onOpen }: { email: EmailSummary; language: string; now: number; isNew: boolean; onOpen: (email: EmailSummary) => void }) {
-  const subject = email.subject || t('mail:noSubject')
-  return (
-    <button type="button" onClick={() => onOpen(email)} className={rowClass}>
-      <SenderAvatar sender={email.from} accountId={email.accountId} size="sm" />
-      {/* Side by side when there is room, stacked in a narrow window. */}
-      <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-        <span className="truncate font-medium sm:w-32 sm:shrink-0">{displayName(email.from)}</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">{subject}</span>
-      </span>
-      {isNew && <span data-slot="now-new-tag" className="shrink-0 rounded-sm bg-foreground/5 px-1.5 py-px text-[11px] text-muted-foreground">{t('now:newTag')}</span>}
-      <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(email.receivedAt, language, now)}</span>
     </button>
   )
 }

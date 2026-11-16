@@ -36,6 +36,9 @@
     "hideDetails": "收起详情",
     "openEmail": "打开邮件",
     "unknownEmail": "邮件",
+    "openEmailNamed": "打开邮件：{{subject}}",
+    "openFolderNamed": "打开文件夹：{{name}}",
+    "folderUnread": "{{count}} 封未读",
     "moreEmails": "另外 {{count}} 封",
     "summaryUnread": "{{count}} 封未读",
     "tool": {

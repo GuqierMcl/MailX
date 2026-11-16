@@ -11,6 +11,7 @@ use std::{
 };
 
 pub(crate) mod archives;
+pub(crate) mod assistant_chats;
 pub(crate) mod attachments;
 pub(crate) mod bodies;
 mod contacts;

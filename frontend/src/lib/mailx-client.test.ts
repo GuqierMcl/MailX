@@ -306,6 +306,11 @@ describe('desktop assistant commands', () => {
     await client.assistantRespond('run-1', 'req-1', true)
     await expect(client.assistantGrantConsent()).resolves.toEqual(consent)
     await client.assistantRevokeConsent()
+    await client.assistantListConversations({ limit: 20, cursor: 'c|1' })
+    await client.assistantListConversations()
+    await client.assistantGetConversation('conv-1')
+    await client.assistantDeleteConversation('conv-1')
+    await client.assistantClearConversations()
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['assistant_start', { request: { kind: { type: 'chat', message: 'hi' } } }],
       ['assistant_cancel', { runId: 'run-1' }],
@@ -313,6 +318,11 @@ describe('desktop assistant commands', () => {
       ['assistant_respond', { runId: 'run-1', requestId: 'req-1', approved: true }],
       ['assistant_grant_consent', undefined],
       ['assistant_revoke_consent', undefined],
+      ['assistant_list_conversations', { limit: 20, cursor: 'c|1' }],
+      ['assistant_list_conversations', { limit: undefined, cursor: undefined }],
+      ['assistant_get_conversation', { conversationId: 'conv-1' }],
+      ['assistant_delete_conversation', { conversationId: 'conv-1' }],
+      ['assistant_clear_conversations', undefined],
     ])
   })
 

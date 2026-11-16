@@ -180,6 +180,10 @@ const MAIN_ONLY: &[&str] = &[
     "assistant_respond",
     "assistant_grant_consent",
     "assistant_revoke_consent",
+    "assistant_list_conversations",
+    "assistant_get_conversation",
+    "assistant_delete_conversation",
+    "assistant_clear_conversations",
     "settings_update",
     "autostart_get",
     "autostart_set",
@@ -458,6 +462,10 @@ mod tests {
             "assistant_respond",
             "assistant_grant_consent",
             "assistant_revoke_consent",
+            "assistant_list_conversations",
+            "assistant_get_conversation",
+            "assistant_delete_conversation",
+            "assistant_clear_conversations",
         ] {
             assert_eq!(check("main", &app, command, None), Ok(WindowKind::Main));
             // A composer window (or a mail body frame) cannot answer a
@@ -549,6 +557,10 @@ mod tests {
             ("assistant_respond", true, false),
             ("assistant_grant_consent", true, false),
             ("assistant_revoke_consent", true, false),
+            ("assistant_list_conversations", true, false),
+            ("assistant_get_conversation", true, false),
+            ("assistant_delete_conversation", true, false),
+            ("assistant_clear_conversations", true, false),
             ("emails_set_flag", true, false),
             ("emails_delete", true, false),
             ("emails_verification_code_status", true, false),

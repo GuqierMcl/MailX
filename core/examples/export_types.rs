@@ -219,5 +219,15 @@ fn main() {
         RunSnapshot,
         AssistantEvent,
         AssistantEventKind,
+        ConversationSummary,
+        ConversationList,
+        TurnState,
+        ConfirmOutcome,
+        ChatTurnTool,
+        ChatTurnConfirmation,
+        ChatTurn,
+        ConversationDetail,
+        ConversationChange,
+        ConversationsChanged,
     );
 }

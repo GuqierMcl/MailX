@@ -272,3 +272,70 @@ describe('Now page: confirmation', () => {
     expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
   })
 })
+
+describe('Now page: swapping views', () => {
+  const overview = () => document.querySelector('[data-slot="now-overview"]') as HTMLElement
+  const conversation = () => document.querySelector('[data-slot="now-conversation"]') as HTMLElement | null
+  const animating = (node: Element | null) => node ? /animate-view-/.test(node.className) || node.className.includes('will-change') : false
+
+  it('moves the live views with classes, never with a view transition', async () => {
+    const start = vi.fn()
+    Object.defineProperty(document, 'startViewTransition', { configurable: true, value: start })
+    try {
+      const { emit } = setup()
+      await screen.findByRole('heading', { level: 1 })
+      expect(animating(overview())).toBe(false)
+      await ask('你好')
+      await screen.findByRole('button', { name: '返回' })
+      // During the swap: the overview leaves upward, the conversation comes up from below, neither takes clicks.
+      expect(overview()).toHaveAttribute('data-phase', 'to-conversation')
+      expect(overview()).toHaveClass('animate-view-out-up', 'pointer-events-none', 'will-change-[transform,opacity]')
+      expect(overview()).toHaveAttribute('inert')
+      expect(conversation()).toHaveClass('animate-view-in-up', 'pointer-events-none')
+      expect(document.documentElement.dataset.nowTransition).toBeUndefined()
+      // The input is outside both, so it is not part of the motion.
+      expect(document.querySelector('[data-slot="chat-footer"]')?.closest('[data-slot="now-overview"], [data-slot="now-conversation"]')).toBeNull()
+      // Afterwards: nothing animates, no will-change, the overview is hidden from everyone.
+      await waitFor(() => expect(overview()).not.toHaveAttribute('data-phase'))
+      expect(animating(overview())).toBe(false)
+      expect(animating(conversation())).toBe(false)
+      expect(overview()).toHaveClass('invisible')
+      expect(overview()).toHaveAttribute('inert')
+      expect(overview()).toHaveAttribute('aria-hidden', 'true')
+      await emit(...done(2))
+
+      // And back.
+      await userEvent.click(screen.getByRole('button', { name: '返回' }))
+      expect(conversation()).toHaveAttribute('data-phase', 'to-overview')
+      expect(conversation()).toHaveClass('animate-view-out-down', 'pointer-events-none')
+      expect(conversation()).toHaveAttribute('inert')
+      expect(overview()).toHaveClass('animate-view-in-down')
+      expect(overview()).not.toHaveAttribute('inert')
+      await waitFor(() => expect(conversation()).toBeNull())
+      expect(animating(overview())).toBe(false)
+      expect(overview()).not.toHaveClass('invisible')
+      expect(start).not.toHaveBeenCalled()
+    } finally {
+      delete (document as unknown as Record<string, unknown>).startViewTransition
+    }
+  })
+
+  it('swaps at once with reduced motion', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('reduce'), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }))
+    setup()
+    await screen.findByRole('heading', { level: 1 })
+    await ask('你好')
+    await screen.findByRole('button', { name: '返回' })
+    expect(overview()).not.toHaveAttribute('data-phase')
+    expect(animating(overview())).toBe(false)
+    expect(animating(conversation())).toBe(false)
+    expect(overview()).toHaveClass('invisible')
+    await userEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(conversation()).toBeNull()
+    expect(animating(overview())).toBe(false)
+    expect(overview()).not.toHaveClass('invisible')
+  })
+})

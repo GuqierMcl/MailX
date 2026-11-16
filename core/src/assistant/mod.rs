@@ -4,8 +4,10 @@
 //! `docs/architecture/ai-permissions.md`.
 //!
 //! Hosts construct an [`Assistant`] next to the core and forward its
-//! [`CoreEvent::Assistant`](crate::CoreEvent) events. Everything is in memory:
-//! runs, conversations and cached summaries vanish with the process.
+//! [`CoreEvent::Assistant`](crate::CoreEvent) events. Runs and cached summaries
+//! are in memory and vanish with the process. Chat conversations are also
+//! saved to local storage unless the user turned that off (`history`); a saved
+//! one can be listed, shown, continued, and deleted.
 //!
 //! **Consent** is enforced here. A run only starts when
 //! `assistant.consented` equals the binding (connection id and normalized base
@@ -18,6 +20,7 @@
 mod agent;
 mod confirm;
 mod conversations;
+mod history;
 mod policy;
 mod prompt;
 mod runs;
@@ -35,7 +38,8 @@ use std::{
 };
 
 use crate::{
-    AppError, ErrorCode, MailOverviewQuery, MailxCore, SupportedLocale,
+    AppError, CoreEvent, ErrorCode, MailOverviewQuery, MailxCore, SupportedLocale,
+    accounts::AccountService,
     ai::AiModelTarget,
     app::AiService,
     events::Events,
@@ -46,10 +50,13 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
-    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason, FlagRestore,
-    MAX_MESSAGE_CHARS, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot,
-    RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    AssistantEvent, AssistantEventKind, ChatTurn, ChatTurnConfirmation, ChatTurnTool,
+    ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
+    ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
+    ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
+    FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, OrganizeChange,
+    PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState, StartRun, ToolActivity,
+    ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -67,6 +74,10 @@ pub(crate) struct Inner {
     conversations: Arc<Conversations>,
     summaries: SummaryCache,
     confirmation_timeout_ms: AtomicU64,
+    events: Events,
+    /// Saving a conversation and deleting one never overlap, so a save in
+    /// flight cannot bring a deleted conversation back.
+    save_gate: tokio::sync::Mutex<()>,
 }
 
 /// What a run needs, resolved from the settings at one moment.
@@ -82,6 +93,18 @@ pub(crate) enum Gate {
 }
 
 impl Inner {
+    /// Runs `f` on a blocking thread with the account service (and so the
+    /// local database).
+    pub(crate) async fn with_store<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut AccountService) -> Result<T, AppError> + Send + 'static,
+    ) -> Result<T, AppError> {
+        let core = self.core.clone();
+        tokio::task::spawn_blocking(move || f(&mut *core.accounts()?))
+            .await
+            .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
     pub(crate) fn confirmation_timeout(&self) -> Duration {
         Duration::from_millis(self.confirmation_timeout_ms.load(Ordering::Relaxed))
     }
@@ -127,12 +150,14 @@ impl Assistant {
                 ai,
                 settings,
                 tools: Arc::new(tools),
-                runs: Runs::new(events),
+                runs: Runs::new(events.clone()),
                 conversations: Arc::new(Conversations::default()),
                 summaries: SummaryCache::default(),
                 confirmation_timeout_ms: AtomicU64::new(
                     u64::try_from(agent::CONFIRMATION_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
                 ),
+                events,
+                save_gate: tokio::sync::Mutex::new(()),
             }),
         }
     }
@@ -187,6 +212,9 @@ impl Assistant {
                 conversation_id, ..
             } => {
                 let message = message.unwrap_or_default();
+                if let Some(id) = conversation_id.as_deref() {
+                    self.ensure_loaded(id).await?;
+                }
                 let (conversation, history) = inner
                     .conversations
                     .begin(conversation_id.as_deref(), message)?;
@@ -214,6 +242,152 @@ impl Assistant {
                 inner.runs.snapshot(&run_id)
             }
         }
+    }
+
+    /// Makes sure a conversation the user continues is in memory: a saved one
+    /// is read from storage; one that was removed there since (its account
+    /// was deleted) is `NotFound`.
+    async fn ensure_loaded(&self, id: &str) -> Result<(), AppError> {
+        let inner = &self.inner;
+        match inner.conversations.saved_state(id) {
+            Some(false) => return Ok(()),
+            Some(true) => {
+                let owned = id.to_owned();
+                if inner
+                    .with_store(move |service| service.assistant_chat_exists(&owned))
+                    .await?
+                {
+                    return Ok(());
+                }
+                inner.conversations.remove_idle(id);
+                return Err(AppError::new(ErrorCode::NotFound));
+            }
+            None => {}
+        }
+        let owned = id.to_owned();
+        let stored = inner
+            .with_store(move |service| service.assistant_chat_get(&owned))
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        inner
+            .conversations
+            .insert_loaded(id, history::load(&stored.rows)?)
+    }
+
+    /// Saved conversations, newest first. `limit` is 1 to
+    /// [`MAX_CONVERSATION_PAGE`] (default [`DEFAULT_CONVERSATION_PAGE`]);
+    /// `cursor` is the previous page's `nextCursor`.
+    ///
+    /// Errors: `Validation` (`limit`, `cursor`).
+    pub async fn list_conversations(
+        &self,
+        limit: Option<u32>,
+        cursor: Option<String>,
+    ) -> Result<ConversationList, AppError> {
+        let limit = limit.unwrap_or(DEFAULT_CONVERSATION_PAGE);
+        if limit == 0 || limit > MAX_CONVERSATION_PAGE {
+            return Err(AppError::validation("limit"));
+        }
+        let after = cursor
+            .as_deref()
+            .map(|cursor| {
+                cursor
+                    .split_once('|')
+                    .map(|(at, id)| (at.to_owned(), id.to_owned()))
+                    .ok_or_else(|| AppError::validation("cursor"))
+            })
+            .transpose()?;
+        let wanted = limit as usize;
+        let mut found = self
+            .inner
+            .with_store(move |service| {
+                service.assistant_chat_list(
+                    wanted + 1,
+                    after.as_ref().map(|(at, id)| (at.as_str(), id.as_str())),
+                )
+            })
+            .await?;
+        let more = found.len() > wanted;
+        found.truncate(wanted);
+        let next_cursor = more
+            .then(|| {
+                found
+                    .last()
+                    .map(|last| format!("{}|{}", last.updated_at, last.id))
+            })
+            .flatten();
+        Ok(ConversationList {
+            items: found
+                .into_iter()
+                .map(|stored| ConversationSummary {
+                    id: stored.id,
+                    title: stored.title,
+                    updated_at: stored.updated_at,
+                    message_count: stored.message_count,
+                })
+                .collect(),
+            next_cursor,
+        })
+    }
+
+    /// A saved conversation as turns the interface can show. `NotFound` for
+    /// an unknown id.
+    pub async fn get_conversation(&self, id: &str) -> Result<ConversationDetail, AppError> {
+        let owned = id.to_owned();
+        let stored = self
+            .inner
+            .with_store(move |service| service.assistant_chat_get(&owned))
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        Ok(ConversationDetail {
+            turns: history::turns(&stored.rows),
+            id: stored.id,
+            title: stored.title,
+            created_at: stored.created_at,
+            updated_at: stored.updated_at,
+        })
+    }
+
+    /// Deletes a conversation, saved and in memory. A run that is using it is
+    /// canceled. `NotFound` for an unknown id.
+    pub async fn delete_conversation(&self, id: &str) -> Result<(), AppError> {
+        let inner = &self.inner;
+        let _gate = inner.save_gate.lock().await;
+        inner.runs.cancel_conversation(id);
+        let in_memory = inner.conversations.remove(id);
+        let owned = id.to_owned();
+        let stored = inner
+            .with_store(move |service| service.assistant_chat_delete(&owned))
+            .await?;
+        if !in_memory && !stored {
+            return Err(AppError::new(ErrorCode::NotFound));
+        }
+        inner.events.emit(&CoreEvent::AssistantConversationsChanged(
+            ConversationsChanged {
+                conversation_id: Some(id.to_owned()),
+                change: ConversationChange::Deleted,
+            },
+        ));
+        Ok(())
+    }
+
+    /// Deletes every conversation, saved and in memory, and cancels the chat
+    /// runs that are going.
+    pub async fn clear_conversations(&self) -> Result<(), AppError> {
+        let inner = &self.inner;
+        let _gate = inner.save_gate.lock().await;
+        inner.runs.cancel_chats();
+        inner.conversations.clear();
+        inner
+            .with_store(|service| service.assistant_chat_clear())
+            .await?;
+        inner.events.emit(&CoreEvent::AssistantConversationsChanged(
+            ConversationsChanged {
+                conversation_id: None,
+                change: ConversationChange::Cleared,
+            },
+        ));
+        Ok(())
     }
 
     async fn start_summary(
