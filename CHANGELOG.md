@@ -19,6 +19,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- Show the official Exchange product logo in account setup and account labels. / 在账号添加入口和账号标识中使用 Exchange 官方产品图标。 ([#143](https://github.com/GuqierMcl/MailX/pull/143))
+
 - Update checks now start about five seconds after launch and repeat every hour. / 更新检查改为启动约 5 秒后开始，之后每小时检查一次。 ([#139](https://github.com/GuqierMcl/MailX/pull/139))
 
 ## [0.3.0] - 2026-11-14

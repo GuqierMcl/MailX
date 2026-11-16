@@ -78,16 +78,24 @@
 - 原图：[`outlook_48x1.svg`](https://res-1.cdn.office.net/files/fabric-cdn-prod_20251008.001/assets/brand-icons/product/svg/outlook_48x1.svg)，`content-type: image/svg+xml`，`last-modified: Thu, 09 Oct 2025 07:37:12 GMT`。本地文件与下载原件字节一致；只含路径与内部渐变，没有脚本、外部资源或字体依赖。
 - 使用条件：依 [Microsoft Fabric Assets License](https://aka.ms/fluentui-assets-license)（`microsoft_fabric_assets_license_agreement_nov_2019.pdf`）第 1(b) 条，可以用这些素材“说明应用与一项或多项 Microsoft 产品和服务集成”；附件 1 允许在不可点击的并列清单中使用图标，旁边须有完整产品名称，图标保持原样、全彩正色版本。MailX 在服务商列表和账号标识里，图标旁边都显示“Outlook”名称，不作改色、反色、裁切或变形，也不让它充当可点击的 Microsoft 标识。许可证条款以原文为准，发布前如需更严格的判断应由权利人确认。
 
-## Microsoft 365 / Exchange（Microsoft 标识）
+## Microsoft 365（Microsoft 标识）
 
-- 文件：`microsoft.svg`，21 × 21 静态 SVG，343 字节，直接保存 Microsoft 官方原文件（四色方块标识，`<title>MS-SymbolLockup</title>`）；统一用于浅深主题，透明背景，没有修改。用于“Microsoft 365 / Exchange”入口（`microsoft-work`，工作或学校邮箱）。
+- 文件：`microsoft.svg`，21 × 21 静态 SVG，343 字节，直接保存 Microsoft 官方原文件（四色方块标识，`<title>MS-SymbolLockup</title>`）；统一用于浅深主题，透明背景，没有修改。用于“Microsoft 365”入口（`microsoft-work`，工作或学校邮箱）。
 - 来源页面：Microsoft Learn [Sign in with Microsoft branding guidelines](https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps)，提供该文件供应用使用，并说明：用户尚未登录时，应称“工作或学校账号”，并用 Microsoft 标识表示这些账号由 Microsoft 管理；不得改动标识。核验日期：2026-11-10。
 - 原图：[`ms-symbollockup_mssymbol_19.svg`](https://learn.microsoft.com/en-us/entra/identity-platform/media/howto-add-branding-in-apps/ms-symbollockup_mssymbol_19.svg)。本地文件与下载原件字节一致，只含四个纯色矩形，没有脚本、外部资源或字体依赖。
-- 为什么这里用公司标识而不是 Exchange 产品图标：本规范通常不让集团标识替代产品图标，但此入口的情况不同。Microsoft 的 Fluent 产品图标集（可用于应用集成的授权来源）没有 Exchange 图标；Microsoft 365 架构图标包只允许用于图表、培训和文档，不能用于应用界面；Fluent 的 `office` 图标是已停用的旧 Office 标识。而 Microsoft 自己的登录品牌指南要求工作或学校账号使用 Microsoft 标识。因此采用该标识，名称仍写“Microsoft 365 / Exchange”，不单独表示 Exchange 产品。若 Microsoft 之后发布适用于应用的 Exchange 或 Microsoft 365 产品图标，应改用并更新本节。
+- 此入口表示 Microsoft 工作或学校账号的浏览器登录，采用登录品牌指南指定的 Microsoft 标识。独立的自建 Exchange 入口采用下面的 Exchange 产品图标；两者分别标识云端登录和自建服务器接入。
+
+## Microsoft Exchange（自建服务器）
+
+- 文件：`exchange.png`，192 × 192 RGBA PNG，9,730 字节，直接保存 Microsoft 官方原文件。统一用于浅深主题，保留完整蓝色图形、白色 E 字标和透明背景，没有裁切、缩放文件、改色或格式转换。
+- 官方来源：[MicrosoftDocs / microsoft-365-docs 中的产品图标](https://github.com/MicrosoftDocs/microsoft-365-docs/blob/f732381b56f7c3aa64fb28abe56213b30ccdb7e3/microsoft-365/media/logos/exchange.png)。[Adding M365 product logos](https://github.com/MicrosoftDocs/microsoft-365-docs/commit/f732381b56f7c3aa64fb28abe56213b30ccdb7e3) 提交明确加入该 Exchange 产品素材，不属于架构图标包；核验日期：2026-11-16。
+- [原始 PNG（固定提交）](https://raw.githubusercontent.com/MicrosoftDocs/microsoft-365-docs/f732381b56f7c3aa64fb28abe56213b30ccdb7e3/microsoft-365/media/logos/exchange.png)。本地文件与官方原件字节一致，SHA-256 为 `c5b2dbc1cc27483d5513ed183a5dedac5d59ad101a57593909b24e1048281ebd`。
+- 素材署名：Microsoft。来源仓库的文档许可为 [CC BY 4.0](https://github.com/MicrosoftDocs/microsoft-365-docs/blob/f732381b56f7c3aa64fb28abe56213b30ccdb7e3/LICENSE)（[许可说明](https://creativecommons.org/licenses/by/4.0/)）；原图未修改。该许可不授予商标权，Exchange 名称与标识仍属于 Microsoft。此图仅用于标识 MailX 支持的产品，不表示 Microsoft 背书。
+- 使用方式：`exchange-self-hosted` 的 `logo` 本地导入；选择入口、账号标签和启用服务商图标的头像沿用现有 `object-contain` 等比显示，关闭服务商图标偏好时仍显示账号首字。
 
 ## 文件核验与维护
 
-QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱的核验日期：2026-11-11；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
+QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱的核验日期：2026-11-11；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10；Exchange 的核验日期：2026-11-16。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -100,5 +108,6 @@ QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱�
 | `gmail.svg` | `0a242131424b796a26247a8edd41d66fa294da6d177897526a19b7e81aedfdb8` |
 | `outlook.svg` | `81bfb24bb128298a9ed0ea6fe8d9ba8cff703b26d6a7cbd18cc4314cecba8f1f` |
 | `microsoft.svg` | `929f48f88c8ca7f3f5d294be47ec4caf51acc28ac25340c19a903125d7ecd84a` |
+| `exchange.png` | `c5b2dbc1cc27483d5513ed183a5dedac5d59ad101a57593909b24e1048281ebd` |
 
 服务商名称及图形属于各自权利人，与 MailX 自有品牌资源分开维护。

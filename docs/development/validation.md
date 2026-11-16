@@ -1311,3 +1311,11 @@ macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `sho
 - Windows / Linux 构建与三平台桌面行为需分别核对 CI 和实际安装包。浏览器自动化服务本次不可用，未把组件测试当作视觉或原生桌面验收。
 - EWS 使用固定 30 天起始窗口、每轮最多最新 1000 封和独立分页预算；达到上限时保留不完整覆盖，不能根据缺失项推断删除。未实现 SyncFolderItems 游标增量、服务器推送、共享/代理邮箱、Kerberos、EWS OAuth 或 SRV 发现。
 - 系统信任库中的企业 CA、TLS 终止代理、多前端 Exchange 拓扑和服务器重写 Message-ID 的行为仍待实测；无法确定副本身份时保留本机副本。
+
+### Exchange 官方产品图标（2026-11-16）
+
+独立 Exchange 入口改用 MicrosoftDocs 官方文档仓库发布的 192 × 192 RGBA PNG（9,730 字节），保持原文件字节，来源提交、许可证引用和 SHA-256 记录在[服务商图标说明](../../frontend/src/assets/providers/README.md#microsoft-exchange自建服务器)。添加列表、账号标签及启用服务商图标的头像复用本地素材，中英文 README 同步展示。
+
+- 文件哈希与下载原件一致，生产构建输出的 PNG 也与原件逐字节一致。
+- 已静态渲染并检查 14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景上的完整性和比例；未改色、裁切、去背景或描摹。此项是素材显示检查，不替代原生桌面操作验收。
+- 现有 providers / account-avatar / provider-picker 三个测试文件共 70 项通过；前端 lint、构建（含 TypeScript 检查）与 `git diff --check` 通过。

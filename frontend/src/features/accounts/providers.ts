@@ -10,6 +10,7 @@ import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import gmailLogo from '@/assets/providers/gmail.svg'
 import outlookLogo from '@/assets/providers/outlook.svg'
 import microsoftLogo from '@/assets/providers/microsoft.svg'
+import exchangeLogo from '@/assets/providers/exchange.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
 export type ProviderPreset = {
@@ -91,6 +92,7 @@ export const EXCHANGE_PROVIDER: MailProvider = {
   get domain() { return t('accounts:exchangeProviderDomain') },
   get description() { return t('accounts:exchangeProviderDescription') },
   searchAliases: ['Exchange', 'EWS', 'NTLM', 'self-hosted', '自建', '企业邮箱'],
+  logo: exchangeLogo,
   icon: Mail01Icon,
   connectionKind: 'ews',
 }

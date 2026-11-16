@@ -34,11 +34,11 @@
 
 ## 支持的邮箱
 
-以下服务商内置预设。多数服务商只需选择后填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好；Outlook 和 Microsoft 365 则改为在浏览器中登录。
+MailX 为以下邮箱服务提供独立添加入口。多数服务商只需选择后填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好；Outlook 和 Microsoft 365 则改为在浏览器中登录。
 
-| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Gmail | iCloud 邮箱 | Outlook | Microsoft 365 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 |
+| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> | <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Gmail | iCloud 邮箱 | Outlook | Microsoft 365 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 | Exchange（自建服务器） |
 
 Gmail 接受 `@gmail.com` 和 `@googlemail.com` 地址，使用 Google 应用专用密码，需要先开启两步验证。生成方法和不可用的情况见[添加账号指南](docs/guides/zh-CN/README.md#gmail)。
 
