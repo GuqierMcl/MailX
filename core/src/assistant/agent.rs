@@ -13,7 +13,7 @@ use super::{
     history::{self, End, SaveGuard},
     policy::{self, Decision, DraftSource},
     prompt,
-    summary::SUMMARY_OUTPUT_CAP,
+    summary::{self, SUMMARY_OUTPUT_CAP},
     types::{
         ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason, FlagRestore,
         ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
@@ -776,7 +776,10 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
         Err(error) => return Outcome::Failed(error.code),
     };
     let system = prompt::summary_system(ready.locale);
-    let messages = [ChatMessage::User(input)];
+    let recent = inner.summaries.recent(ready.locale);
+    let messages = [ChatMessage::User(summary::with_recent_lines(
+        &input, &recent,
+    ))];
     let max_output = ready
         .target
         .output_length
@@ -807,6 +810,7 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
     if turn.reason == Some(FinishReason::Length) {
         return Outcome::Failed(ErrorCode::AiInvalidResponse);
     }
+    inner.summaries.remember(ready.locale, &answer);
     inner.summaries.put(key, answer, super::runs::now_rfc3339());
     Outcome::Finished(FinishedReason::Stop)
 }

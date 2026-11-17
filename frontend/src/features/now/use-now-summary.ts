@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { MailxClient } from '@/lib/mailx-client'
 import { assistantTarget } from '@/features/ai/assistant-target'
 import { useAssistantRun } from '@/features/ai/use-assistant-run'
 import { useAiState } from '@/features/settings/ai-queries'
 import { useSettings } from '@/features/settings/settings-queries'
+import { occasionOn } from './calendar'
 
 export type NowSummary = {
   /**
@@ -48,11 +50,16 @@ export function useNowSummary({ client, ready, since, dayStarts }: { client: Mai
   const target = on ? assistantTarget(ai.data, assistant) : null
   const usable = target !== null
   const { start, state, text, finishedAt, error } = useAssistantRun(client)
+  const { i18n } = useTranslation()
   // What the page is showing now; a refresh asks about the same period, not a later one.
-  const latest = useRef({ since, dayStarts })
-  useEffect(() => { latest.current = { since, dayStarts } })
+  const latest = useRef({ since, dayStarts, language: i18n.language })
+  useEffect(() => { latest.current = { since, dayStarts, language: i18n.language } })
   const begin = useCallback((fresh: boolean) => {
-    void start({ type: 'nowSummary', since: latest.current.since, dayStarts: latest.current.dayStarts, fresh })
+    const { since, dayStarts, language } = latest.current
+    // What today is, by the same rules as the preset line. A closed id the host turns into a fact, never text.
+    const found = occasionOn(new Date(), language)
+    const occasion = found ? (found.kind === 'holiday' ? found.holiday : found.term) : undefined
+    void start({ type: 'nowSummary', since, dayStarts, fresh, ...(occasion ? { occasion } : {}) })
   }, [start])
   const refresh = useCallback(() => begin(true), [begin])
   const started = useRef(false)

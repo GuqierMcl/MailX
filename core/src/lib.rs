@@ -57,8 +57,8 @@ pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
     Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
     ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
-    FlagRestore, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState,
-    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    FlagRestore, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot,
+    RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 pub use assistant::{
     ChatTurn, ChatTurnConfirmation, ChatTurnTool, ConfirmOutcome, ConversationChange,

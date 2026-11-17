@@ -209,6 +209,7 @@ fn main() {
         AssistantSettings,
         StartRun,
         RunKind,
+        Occasion,
         RunKindTag,
         RunState,
         FinishedReason,

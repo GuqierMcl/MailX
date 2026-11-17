@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiState, AssistantEvent, AssistantEventKind, EmailPage, MailOverview, RunSnapshot } from '@/generated/accounts'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { i18n } from '@/i18n'
 import { MailxClientError } from '@/lib/mailx-client'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
@@ -95,9 +96,60 @@ describe('Now page: AI summary line', () => {
     await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    expect(client.assistantStart).toHaveBeenCalledWith({ kind: { type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()), fresh: false } })
+    expect(client.assistantStart).toHaveBeenCalledWith({ kind: expect.objectContaining({ type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()), fresh: false }) })
     // The overview came first.
     expect(client.getMailOverview.mock.invocationCallOrder[0]).toBeLessThan(client.assistantStart.mock.invocationCallOrder[0])
+  })
+
+  describe('occasion', () => {
+    /** The run request of the page's first summary on this local day, in this language. */
+    async function started(day: Date, language: string) {
+      await act(async () => { await i18n.changeLanguage(language) })
+      vi.useFakeTimers({ toFake: ['Date'], now: day })
+      try {
+        const { client } = setup()
+        await settled()
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
+        return (client.assistantStart.mock.calls[0][0] as { kind: Record<string, unknown> }).kind
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+
+    // The preset line's rules: a holiday for the language (English knows only New Year's Day), a solar
+    // term only for Chinese. 2026: Mid-Autumn Festival on 25 September, Start of Winter on 7 November.
+    it.each([
+      ['a holiday in Chinese', new Date(2026, 0, 1, 10), 'zh-CN', 'newYear'],
+      ['a holiday in English', new Date(2026, 0, 1, 10), 'en', 'newYear'],
+      ['a lunar festival in Chinese', new Date(2026, 8, 25, 10), 'zh-CN', 'midAutumn'],
+      ['a solar term in Chinese', new Date(2026, 10, 7, 10), 'zh-CN', 'lidong'],
+    ] as const)('sends %s', async (_name, day, language, occasion) => {
+      expect((await started(day, language)).occasion).toBe(occasion)
+    })
+
+    it.each([
+      ['an ordinary day', new Date(2026, 10, 18, 10), 'zh-CN'],
+      ['a lunar festival in English', new Date(2026, 8, 25, 10), 'en'],
+      ['a solar term in English', new Date(2026, 10, 7, 10), 'en'],
+    ] as const)('sends none on %s', async (_name, day, language) => {
+      expect(await started(day, language)).not.toHaveProperty('occasion')
+    })
+
+    it('sends it again on a refresh', async () => {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 7, 10) })
+      try {
+        const { client, emit } = setup()
+        await settled()
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
+        await emit(event(2, { type: 'text', delta: SENTENCE }), event(3, { type: 'finished', reason: 'stop' }), event(4, { type: 'state', state: 'completed' }))
+        await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
+        expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ fresh: true, occasion: 'lidong' }) })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it('keeps the preset while it works, then replaces it with the AI sentence, its mark and its time', async () => {

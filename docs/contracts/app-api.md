@@ -744,8 +744,13 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 ```ts
 type StartRun = { kind: RunKind };
 type RunKind =
-  | { type: "nowSummary"; since: string | null; dayStarts?: string[]; fresh?: boolean }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容。fresh 为 true（「重新生成」）时跳过 30 分钟缓存、重新请求模型，新答案替换缓存项；省略为 false
+  | { type: "nowSummary"; since: string | null; dayStarts?: string[]; fresh?: boolean; occasion?: Occasion }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容。fresh 为 true（「重新生成」）时跳过 30 分钟缓存、重新请求模型，新答案替换缓存项；省略为 false。occasion 是今天的节日或节气（可省略），界面按预设句的同一规则算出：节日按界面语言，节气只在中文界面发送；核心把它变成一行事实，缓存键随之不同
   | { type: "chat"; conversationId?: string; message: string };         // 不带 conversationId 即新对话；message 1–20000 字符
+// 封闭列表，与前端 calendar.ts 的 id 一致，不是自由文本；其他值在反序列化时就被拒绝（validation）
+type Occasion =
+  | "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn"
+  | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi"
+  | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
 type RunSnapshot = {
   runId: string; kind: "nowSummary" | "chat"; state: RunState;
@@ -775,7 +780,7 @@ type AssistantEventKind =
   | { type: "failed"; code: ErrorCode };
 ```
 
-**运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断；`nowSummary` 运行不会以 `length` 结束：被截断的概述句按 `failed` / `aiInvalidResponse` 处理，不缓存）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
+**运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断；`nowSummary` 运行不会以 `length` 结束：被截断的概述句按 `failed` / `aiInvalidResponse` 处理，不缓存）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入（事实、观察与 `occasion`）、模型、提示词版本与语言在 30 分钟内命中缓存（此前几句概述只在新运行时附给模型，不进缓存键），直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
 
 **无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 
@@ -849,7 +854,7 @@ type ConversationsChanged = { conversationId: string | null; change: "saved" | "
 
 **同意规则。** 同意绑定“连接 id 与规范化的服务地址”（`AiConsent`，与翻译共用类型）：换连接或改地址需要重新同意，换模型、换密钥不需要。`assistantGrantConsent` 记录当前助手模型（`assistant.model`，缺省跟随 `ai.defaultModel`）所属连接，没有可用模型时返回 `aiNotConfigured`。同意只能由这两个命令设置与撤销；设置读取里 `assistant.consented` 可见，但写入会被忽略。
 
-**错误码。** `assistantStart` 的失败：`assistantDisabled`（助手在设置里关闭）、`aiNotConfigured`（没有可用的模型或连接）、`assistantBusy`（已有 2 个进行中的运行，或该对话已有运行）、`notFound`（`conversationId` 不存在）、`validation`（`message` 为空或过长，`since` / `dayStarts` 无效）、`coreNotReady`。运行失败时快照的 `error` 为固定码：上述 `assistantDisabled`、`aiNotConfigured`，以及 `assistantContextFull`（对话接近模型上下文的八成，请新开对话）、`aiKeyRejected`、`aiQuotaExceeded`、`aiModelNotFound`、`aiRateLimited`、`aiRequestRejected`、`aiUnavailable`、`aiNetwork`、`aiProxy`（代理失败不回退直连）、`aiTimeout`、`aiInvalidResponse`、`internal`；含义同上文 AI 服务商一节，服务商原文不外传。工具失败不使运行失败：它是对应活动的 `failed` 状态与 `error` 摘要（`code` 为工具层固定码），同时作为错误结果交给模型。
+**错误码。** `assistantStart` 的失败：`assistantDisabled`（助手在设置里关闭）、`aiNotConfigured`（没有可用的模型或连接）、`assistantBusy`（已有 2 个进行中的运行，或该对话已有运行）、`notFound`（`conversationId` 不存在）、`validation`（`message` 为空或过长，`since` / `dayStarts` 无效，`occasion` 不在列表内）、`coreNotReady`。运行失败时快照的 `error` 为固定码：上述 `assistantDisabled`、`aiNotConfigured`，以及 `assistantContextFull`（对话接近模型上下文的八成，请新开对话）、`aiKeyRejected`、`aiQuotaExceeded`、`aiModelNotFound`、`aiRateLimited`、`aiRequestRejected`、`aiUnavailable`、`aiNetwork`、`aiProxy`（代理失败不回退直连）、`aiTimeout`、`aiInvalidResponse`、`internal`；含义同上文 AI 服务商一节，服务商原文不外传。工具失败不使运行失败：它是对应活动的 `failed` 状态与 `error` 摘要（`code` 为工具层固定码），同时作为错误结果交给模型。
 
 ### 全局提示（Toast）
 

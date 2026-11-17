@@ -1247,7 +1247,15 @@ export type RunKind = { "type": "nowSummary", since: string | null, dayStarts?: 
  * Skip the cached answer and ask the model again (the refresh
  * button); the new answer replaces the cached one.
  */
-fresh: boolean, } | { "type": "chat", conversationId?: string, message: string, };
+fresh: boolean,
+/**
+ * What today is on the user's calendar, when it is something: the
+ * interface works it out the same way as for the preset line. A closed
+ * list, never free text, so it cannot carry anything into the prompt.
+ */
+occasion?: Occasion, } | { "type": "chat", conversationId?: string, message: string, };
+
+export type Occasion = "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn" | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi" | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 
 export type RunKindTag = "nowSummary" | "chat";
 
