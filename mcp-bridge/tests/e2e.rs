@@ -95,12 +95,20 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
 
     let list = bridge.request(2, "tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 22);
+    assert_eq!(tools.len(), 25);
     assert!(
         tools
             .iter()
             .all(|tool| tool["name"].as_str().unwrap().starts_with("mailx_"))
     );
+
+    for name in [
+        "mailx_get_conversation",
+        "mailx_suggest_contacts",
+        "mailx_save_email_attachment",
+    ] {
+        assert!(tools.iter().any(|tool| tool["name"] == name));
+    }
 
     let accounts = bridge
         .request(
@@ -127,6 +135,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         )
         .await;
     assert_ne!(draft["result"]["isError"], json!(true));
+    assert!(draft["result"]["structuredContent"]["revision"].is_u64());
     let draft_id = draft["result"]["structuredContent"]["draftId"].clone();
     let read = bridge
         .request(

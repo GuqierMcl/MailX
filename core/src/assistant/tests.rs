@@ -2930,3 +2930,111 @@ fn a_conversation_with_four_hundred_messages_is_full() {
         Some(ErrorCode::AssistantContextFull)
     );
 }
+
+#[tokio::test]
+async fn conversation_and_contact_tools_run_as_reads_and_register_seen_recipients() {
+    for name in ["get_conversation", "suggest_contacts"] {
+        let fx = Fx::new().await;
+        fx.configure(|a| {
+            a.organize = AssistantMode::Ask;
+            a.ai_drafts = AssistantMode::Ask;
+        });
+        fx.db
+            .execute(
+                "UPDATE messages SET from_address='recipient@example.test', from_name='Recipient'",
+                [],
+            )
+            .unwrap();
+        let draft = fx.user_draft();
+        let args = if name == "get_conversation" {
+            json!({"emailId":fx.emails[0]})
+        } else {
+            json!({"query":"recipient"})
+        };
+        fx.model(vec![
+            calls(&[("read", name, args)]),
+            calls(&[("send", "send_email", json!({"action":"send","draftId":draft.id,"expectedRevision":draft.revision,"clientMutationId":uuid::Uuid::new_v4().to_string()}))]),
+            say("Not sent."),
+        ]);
+        let started = fx.chat("Find the recipient and prepare to send").await;
+        let asked = pending(&fx.assistant, &started.run_id).await;
+        let snapshot = fx.assistant.snapshot(&started.run_id).unwrap();
+        assert_eq!(snapshot.tools[0].name, name);
+        assert_eq!(snapshot.tools[0].status, ToolStatus::Done);
+        assert_eq!(
+            snapshot.tools[0].summary,
+            ToolActivitySummary::Found { count: 1 }
+        );
+        let results = tool_messages(&fx.request(1));
+        assert!(results[0].starts_with(&format!(
+            "<tool_result name=\"{name}\" trust=\"untrusted\">"
+        )));
+        let ConfirmationDetails::Send { warnings, .. } = &asked.request.details else {
+            panic!("expected send confirmation");
+        };
+        assert!(
+            !warnings.contains(&ConfirmWarning::NotInConversation),
+            "{name} results were not registered as seen"
+        );
+        fx.assistant
+            .respond(&started.run_id, &asked.request_id, false)
+            .unwrap();
+        assert_eq!(
+            fx.finished(&started.run_id).await.state,
+            RunState::Completed
+        );
+    }
+}
+
+#[tokio::test]
+async fn contact_lookup_tracks_every_queried_account_for_saved_history_cleanup() {
+    let fx = Fx::new().await;
+    let other = fx.other_account();
+    fx.db
+        .execute(
+            "UPDATE messages SET from_address='recipient@example.test', from_name='Recipient'",
+            [],
+        )
+        .unwrap();
+    fx.model(vec![
+        calls(&[("contacts", "suggest_contacts", json!({"query":"recipient"}))]),
+        say("Found recipient."),
+    ]);
+    let snapshot = fx.chat_and_wait("Find the recipient").await;
+    let id = snapshot.conversation_id.unwrap();
+    let response = tool_messages(&fx.request(1));
+    let output: Value = serde_json::from_str(
+        response[0]
+            .split_once('\n')
+            .unwrap()
+            .1
+            .rsplit_once('\n')
+            .unwrap()
+            .0,
+    )
+    .unwrap();
+    assert!(
+        output["accountIds"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(other))
+    );
+    let mut statement = fx.db.prepare("SELECT account_id FROM assistant_conversation_accounts WHERE conversation_id=?1 ORDER BY account_id").unwrap();
+    let linked: Vec<String> = statement
+        .query_map([&id], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut expected = vec![fx.account.clone(), other.clone()];
+    expected.sort();
+    assert_eq!(linked, expected);
+    drop(statement);
+    fx.core
+        .remove_account(crate::RemoveAccountRequest {
+            account_id: other,
+            expected_revision: 1,
+        })
+        .unwrap();
+    assert!(fx.list().await.iter().all(|item| item.id != id));
+    assert!(fx.stored_contents(&id).is_empty());
+}

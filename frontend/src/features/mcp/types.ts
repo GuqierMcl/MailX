@@ -29,3 +29,29 @@ export type McpClientConfig = {
   /** The same paths for display only, with the home directory written as `~`. Never copy these. */
   display: { command: string; discovery: string }
 }
+
+/** Supported local client adapters, owned by the desktop host. */
+export type McpAgentId = 'claudeCode' | 'codex' | 'cursor' | 'openCode' | 'trae' | 'deepseekHarness'
+
+export type McpAgent = {
+  id: McpAgentId
+  name: string
+  method: 'cli' | 'deeplink' | 'config' | 'manual'
+  configuration: 'missing' | 'configured' | 'conflict' | 'unavailable' | 'manual'
+  available: boolean
+  snippet: string
+  docsUrl: string
+  /** Display only. The host determines the actual configuration path. */
+  configPath?: string
+}
+
+export type McpSetupResult = {
+  state: 'configured' | 'unchanged' | 'handoff' | 'conflict' | 'unavailable' | 'removed'
+  agent: McpAgent
+}
+
+export type McpDiagnostic = {
+  ok: boolean
+  code: 'ready' | 'disabled' | 'coreUnavailable' | 'bridgeUnavailable' | 'timeout' | 'protocolError'
+  toolCount?: number
+}

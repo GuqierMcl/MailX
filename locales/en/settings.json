@@ -9,10 +9,22 @@
     "logo": "MailX logo",
     "updates": "Software updates",
     "project": "Project and feedback",
-    "github": { "title": "GitHub", "description": "Explore the source code and project activity" },
-    "bug": { "title": "Report a problem", "description": "Report a problem using the GitHub template" },
-    "feature": { "title": "Suggest a feature", "description": "Share ideas to help improve MailX" },
-    "releases": { "title": "Release notes", "description": "See what changed in each release" },
+    "github": {
+      "title": "GitHub",
+      "description": "Explore the source code and project activity"
+    },
+    "bug": {
+      "title": "Report a problem",
+      "description": "Report a problem using the GitHub template"
+    },
+    "feature": {
+      "title": "Suggest a feature",
+      "description": "Share ideas to help improve MailX"
+    },
+    "releases": {
+      "title": "Release notes",
+      "description": "See what changed in each release"
+    },
     "external": "Opens in your system browser",
     "openFailed": "Could not open the link",
     "openFailedHint": "Copy the link and open it in your browser.",
@@ -181,8 +193,8 @@
     "tokenUnavailable": "A secure token could not be generated",
     "acceptFailed": "The listener stopped while running"
   },
-  "mcpClients": "Connect a client",
-  "mcpClientsHint": "Copy the configuration and paste it into your MCP client.",
+  "mcpClients": "Manual configuration",
+  "mcpClientsHint": "Use the generic configuration below for other compatible clients.",
   "mcpCopyConfig": "Copy client configuration",
   "mcpCopyShort": "Copy",
   "mcpManualSetup": "Manual setup",
@@ -196,7 +208,7 @@
   "mcpConfirmTitle": "Turn on the MCP server?",
   "mcpConfirmAccess": "External programs can read mail and drafts from all accounts, create, edit and delete drafts, manage attachments, and send mail without per-message confirmation.",
   "mcpConfirmLimits": "MailX attempts to sync read and starred flags to the server; archiving stays on this device. Mail cannot be deleted.",
-  "mcpConfirmLocal": "Programs running as your system user can connect and read local files to attach.",
+  "mcpConfirmLocal": "Programs running as your system user can connect, read local files to attach, and export mail attachments to this device.",
   "mcpConfirmOff": "You can turn it off here at any time.",
   "mcpConfirmCancel": "Cancel",
   "mcpConfirmEnable": "Turn on",
@@ -389,5 +401,57 @@
   "composeOpenModeDescription": "Where new mail, replies, forwards and continued drafts open. Shift-click to use the other place once.",
   "composeOpenWindow": "New window",
   "composeOpenInline": "Main window",
-  "quitInlineDraftFailed": "The message being written in the main window couldn't be saved."
+  "quitInlineDraftFailed": "The message being written in the main window couldn't be saved.",
+  "mcpClientLabelsHint": "These names are reported by the clients themselves.",
+  "mcpAgents": "Connect an agent",
+  "mcpAgentsHint": "Add MailX to a client on this computer. Adding a configuration does not turn on the server or mean the client is connected.",
+  "mcpAgentsLoading": "Checking client configurations…",
+  "mcpAgentState": {
+    "missing": "Not configured",
+    "configured": "Configuration added",
+    "conflict": "A different MailX configuration exists",
+    "unavailable": "Configuration could not be checked",
+    "manual": "Manual setup"
+  },
+  "mcpAgentLocalHint": "Uses your personal client configuration. Reload the client after setup.",
+  "mcpAgentDeeplinkHint": "Finish importing in {{name}}, then check the connected clients above.",
+  "mcpAgentManualHint": "An official automatic setup method has not been confirmed. Copy the configuration snippet and consult the client documentation.",
+  "mcpAgentUnavailableHint": "Automatic setup is unavailable here. Copy the configuration to set up the client manually.",
+  "mcpAgentConnectLabel": "Set up {{name}}",
+  "mcpAgentConnect": "Connect",
+  "mcpAgentReconnect": "Check setup",
+  "mcpAgentRepair": "Repair",
+  "mcpAgentWorking": "Working…",
+  "mcpAgentCopyLabel": "Copy {{name}} configuration",
+  "mcpAgentCopied": "{{name}} configuration copied",
+  "mcpAgentRemoveLabel": "Remove {{name}} configuration",
+  "mcpAgentRemove": "Remove",
+  "mcpAgentDocsLabel": "Open {{name}} documentation",
+  "mcpAgentDocs": "Documentation",
+  "mcpAgentsRefresh": "Check configurations",
+  "mcpActionFailed": "Could not complete MCP setup",
+  "mcpSetupOutcome": {
+    "configured": "Configuration added. Reload the client to connect.",
+    "unchanged": "The configuration is already up to date. Reload the client if it is not connected.",
+    "handoff": "Import opened in the client. Finish its confirmation to connect.",
+    "conflict": "The configuration changed. Check it before replacing anything.",
+    "unavailable": "Automatic setup is unavailable. Use the copied configuration instead.",
+    "removed": "MailX configuration removed. Reload the client to disconnect."
+  },
+  "mcpDiagnostics": "Connection check",
+  "mcpDiagnosticsHint": "Checks the MailX bridge and tool list without reading mail. A successful check does not mean an agent is connected.",
+  "mcpDiagnose": "Check MailX connection",
+  "mcpDiagnosing": "Checking…",
+  "mcpDiagnostic": {
+    "ready": "MailX is ready. Reload your agent if it has not connected.",
+    "disabled": "Turn on the MCP server above, then check again.",
+    "coreUnavailable": "Keep MailX running and wait until its MCP server is ready, then check again.",
+    "bridgeUnavailable": "The MailX bridge is unavailable. Check the app installation and repair the client configuration.",
+    "timeout": "The connection check timed out. Try again after restarting the MCP server.",
+    "protocolError": "The bridge could not complete the MCP handshake. Restart the server and check again."
+  },
+  "mcpConflictTitle": "Replace the MailX configuration in {{name}}?",
+  "mcpConflictDescription": "This entry points to another MailX installation or data folder. Replacing it will connect this client to the current MailX. Other client settings will be kept.",
+  "mcpConflictReplace": "Replace MailX entry",
+  "mcpAgentHarnessHint": "Add a stdio server in Harness settings, or copy this configuration for your personal Harness profile."
 }

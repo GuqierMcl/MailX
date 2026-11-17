@@ -258,6 +258,64 @@ impl Storage {
             .collect()
     }
 
+    /// Account and content filters run before the keyset cursor and LIMIT.
+    pub(crate) fn list_drafts_page(
+        &self,
+        account_ids: &[String],
+        origin: Option<&str>,
+        query: Option<&str>,
+        after: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<DraftSummary>, AppError> {
+        // Match Rust's Unicode whitespace handling used by Draft::is_blank.
+        let whitespace = " \t\r\n\u{b}\u{c}\u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
+        let sql = format!(
+            "SELECT {COLUMNS} FROM drafts d
+            WHERE account_id IN (SELECT value FROM json_each(?1))
+              AND (?2 IS NULL OR origin = ?2)
+              AND (?3 IS NULL OR instr(lower(subject), lower(?3)) > 0)
+              AND (length(trim(subject, ?7)) > 0 OR length(trim(body_text, ?7)) > 0
+                   OR json_array_length(to_addresses) > 0 OR json_array_length(cc_addresses) > 0
+                   OR json_array_length(bcc_addresses) > 0
+                   OR EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id = d.id))
+              AND (?4 IS NULL OR updated_at < ?4 OR (updated_at = ?4 AND id < ?5))
+            ORDER BY updated_at DESC, id DESC LIMIT ?6"
+        );
+        let rows = self
+            .db
+            .prepare(&sql)?
+            .query_map(
+                params![
+                    encode(&account_ids)?,
+                    origin,
+                    query,
+                    after.map(|p| p.0),
+                    after.map(|p| p.1),
+                    limit,
+                    whitespace
+                ],
+                parse,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|draft| {
+                let draft = draft?;
+                Ok(DraftSummary {
+                    preview: preview(&draft.body_text),
+                    id: draft.id,
+                    account_id: draft.account_id,
+                    kind: draft.kind,
+                    source_email_id: draft.source_email_id,
+                    to: draft.to,
+                    subject: draft.subject,
+                    updated_at: draft.updated_at,
+                    revision: draft.revision,
+                    origin: draft.origin,
+                })
+            })
+            .collect()
+    }
+
     /// Removes blank drafts that no live outbox item holds.
     pub(crate) fn purge_blank_drafts(&self) -> Result<(), AppError> {
         let mut statement = self.db.prepare(&format!("SELECT {COLUMNS} FROM drafts"))?;

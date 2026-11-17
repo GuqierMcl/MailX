@@ -437,6 +437,26 @@ impl MailxCore {
         self.accounts()?.get_conversation(email_id)
     }
 
+    pub(crate) fn conversation_page(
+        &self,
+        email_id: &str,
+        after: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<ConversationPage, AppError> {
+        self.accounts()?.conversation_page(email_id, after, limit)
+    }
+
+    /// Local contact suggestions restricted before ranking to these accounts.
+    pub fn suggest_contacts_scoped(
+        &self,
+        query: &str,
+        limit: Option<u32>,
+        account_ids: &[String],
+    ) -> Result<Vec<ContactSuggestion>, AppError> {
+        self.accounts()?
+            .suggest_contacts_scoped(query, limit, Some(account_ids))
+    }
+
     /// Explicit user-opened body request; shared work survives individual IPC
     /// waiter cancellation and always honors the account's configured route.
     pub async fn fetch_body(&self, email_id: String) -> Result<EmailDetail, AppError> {

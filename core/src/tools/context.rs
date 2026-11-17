@@ -82,6 +82,9 @@ pub enum Action {
     OutboxWrite,
     #[serde(rename = "files:read")]
     FilesRead,
+    /// Export a received attachment to a host-managed directory.
+    #[serde(rename = "files:write")]
+    FilesWrite,
     #[serde(rename = "draft:create")]
     DraftCreate,
     /// Update or delete existing drafts.
@@ -134,6 +137,7 @@ impl Grant {
                 Action::OutboxRead,
                 Action::OutboxWrite,
                 Action::FilesRead,
+                Action::FilesWrite,
                 Action::DraftCreate,
                 Action::DraftWrite,
             ],

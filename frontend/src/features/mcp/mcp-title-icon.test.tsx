@@ -28,7 +28,7 @@ describe('McpTitleIcon', () => {
     expect(screen.queryByTestId('mcp-status-dot')).not.toBeInTheDocument()
   })
 
-  it('shows a green dot and the status in the label while running', async () => {
+  it('shows a green dot and the status in the label when a client is connected', async () => {
     render(withTitleBar(<McpTitleIcon client={setup(true, { state: 'running', clients: [{ label: 'Cursor' }] })} />))
     const button = await screen.findByRole('button', { name: 'MCP 服务器：运行中，1 个客户端已连接' })
     expect(screen.getByTestId('mcp-status-dot')).toHaveClass('bg-emerald-500')
@@ -39,8 +39,30 @@ describe('McpTitleIcon', () => {
   it('says nobody is connected when running without clients', async () => {
     render(withTitleBar(<McpTitleIcon client={setup(true, { state: 'running', clients: [] })} />))
     const button = await screen.findByRole('button', { name: 'MCP 服务器：运行中，暂无客户端连接' })
+    expect(screen.queryByTestId('mcp-status-dot')).not.toBeInTheDocument()
     await userEvent.hover(button)
     expect(screen.queryByText(/已连接：/)).not.toBeInTheDocument()
+  })
+
+  it('updates the green dot as clients connect and disconnect', async () => {
+    const client = setup(true, { state: 'running', clients: [] })
+    let push: (status: McpStatus) => void = () => undefined
+    client.onMcpStatus.mockImplementation((listener) => { push = listener; return () => undefined })
+    render(withTitleBar(<McpTitleIcon client={client} />))
+    await screen.findByRole('button', { name: 'MCP 服务器：运行中，暂无客户端连接' })
+    expect(screen.queryByTestId('mcp-status-dot')).not.toBeInTheDocument()
+
+    push({ state: 'running', clients: [{ label: 'Codex' }, { label: 'Cursor' }] })
+    await screen.findByRole('button', { name: 'MCP 服务器：运行中，2 个客户端已连接' })
+    expect(screen.getByTestId('mcp-status-dot')).toHaveClass('bg-emerald-500')
+
+    push({ state: 'running', clients: [{ label: 'Cursor' }] })
+    await screen.findByRole('button', { name: 'MCP 服务器：运行中，1 个客户端已连接' })
+    expect(screen.getByTestId('mcp-status-dot')).toHaveClass('bg-emerald-500')
+
+    push({ state: 'running', clients: [] })
+    await screen.findByRole('button', { name: 'MCP 服务器：运行中，暂无客户端连接' })
+    expect(screen.queryByTestId('mcp-status-dot')).not.toBeInTheDocument()
   })
 
   it('lists connected clients, merging repeats and naming unidentified ones', async () => {

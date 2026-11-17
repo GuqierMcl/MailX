@@ -43,6 +43,8 @@ const READ_TOOLS: &[&str] = &[
     "search_emails",
     "read_email",
     "list_folders",
+    "get_conversation",
+    "suggest_contacts",
     "list_drafts",
     "read_draft",
     "list_outbox",
@@ -114,7 +116,7 @@ pub(crate) fn classify(tool: &str, settings: &AssistantSettings, source: DraftSo
     }
 }
 
-/// The grant for one call: every action the local MCP grant holds, over the
+/// The grant for one call: shared mail actions, excluding MCP-only file exports, over the
 /// accounts the user left available. `all_accounts` are the ids that exist
 /// now; nothing excluded keeps the open scope.
 pub(crate) fn grant(settings: &AssistantSettings, all_accounts: &[String]) -> Grant {
@@ -129,7 +131,14 @@ pub(crate) fn grant(settings: &AssistantSettings, all_accounts: &[String]) -> Gr
                 .collect(),
         )
     };
-    Grant::new(accounts, Grant::mcp_default().actions.iter().copied())
+    Grant::new(
+        accounts,
+        Grant::mcp_default()
+            .actions
+            .iter()
+            .copied()
+            .filter(|action| *action != crate::tools::Action::FilesWrite),
+    )
 }
 
 /// Every action a grant holds, for tests.
@@ -279,10 +288,15 @@ mod tests {
     }
 
     #[test]
-    fn grant_covers_every_mcp_action_and_hides_excluded_accounts() {
+    fn grant_covers_shared_mail_actions_and_hides_excluded_accounts() {
         let open = grant(&AssistantSettings::default(), &["a".into(), "b".into()]);
         assert_eq!(open.accounts, AccountScope::All);
-        assert_eq!(actions(&open), actions(&Grant::mcp_default()));
+        let expected: Vec<_> = actions(&Grant::mcp_default())
+            .into_iter()
+            .filter(|action| *action != crate::tools::Action::FilesWrite)
+            .collect();
+        assert_eq!(actions(&open), expected);
+        assert!(!open.allows(crate::tools::Action::FilesWrite));
         let narrowed = grant(
             &AssistantSettings {
                 excluded_accounts: vec!["b".into()],

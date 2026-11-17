@@ -30,7 +30,7 @@ English | [简体中文](README.zh-CN.md)
 - **Sending you can trust** — Every message goes through a send queue, with an optional undo delay and retries for eligible failures. A message the server may already have accepted is never sent twice on its own. Local sent copies appear in the Sent folder while waiting for a matching server copy.
 - **Per-account network routing** — Each account can connect directly or through its own SOCKS5 or HTTP proxy. If the proxy fails, MailX stops rather than quietly connecting without it.
 - **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications, optional background operation and launch at login, in-app updates, light and dark themes, English and Chinese.
-- **Connect your AI tools** — An optional local MCP server lets compatible clients search and read mail, organize messages, manage drafts and attachments, and send mail. Copy the client configuration from Settings → MCP; MailX must be running.
+- **Connect your AI tools** — An optional local MCP server lets compatible clients search and read mail, organize messages, manage drafts and attachments, and send mail. Connect a supported client or copy its configuration from Settings → MCP; MailX must be running.
 
 ## Supported Mailboxes
 
@@ -59,7 +59,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 - **Connections you control.** MailX connects to your mail servers (through the account's proxy if set) and checks GitHub for updates, which you can turn off. Enabling avatar lookups or allowing remote images also makes requests to the relevant image services. Avatar lookups are off by default, and remote images ask first.
 - **Mail you send carries its own images.** Pictures inserted into the body travel inside the message; displaying them does not require downloading from an external image server.
 - **Translation sends text only when you ask.** After you agree, translating a message sends its subject and text to the service you chose (Microsoft or Google for the no-setup services), and nothing else; a key of your own stays in the system keychain, and an optional proxy is used for translation only. Saved translations stay on this computer.
-- **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
+- **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments, attachment export and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
 
 ## Roadmap
 

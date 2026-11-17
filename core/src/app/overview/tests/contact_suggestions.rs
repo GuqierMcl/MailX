@@ -402,3 +402,61 @@ fn contact_suggestions_timing() {
         );
     }
 }
+
+#[test]
+fn scoped_contacts_do_not_use_other_account_names_sent_rank_or_own_address_exclusions() {
+    let mut f = setup();
+    f.put_at(
+        0,
+        "INBOX",
+        &[
+            from("alice@team.test", Some("Alice local"), hours(1)),
+            from("shared@team.test", Some("Local name"), hours(2)),
+            from(
+                "home@example.test",
+                Some("Other account as a correspondent"),
+                hours(3),
+            ),
+        ],
+    );
+    f.put_at(
+        1,
+        "INBOX",
+        &[from("shared@team.test", Some("Private name"), hours(10))],
+    );
+    f.put_at(
+        1,
+        "Sent",
+        &[sent_to(
+            &[("hidden@team.test", Some("Private recipient"))],
+            hours(11),
+        )],
+    );
+    let scope = [f.accounts[0].id.clone()];
+    let results = f
+        .service
+        .suggest_contacts_scoped("team", Some(1), Some(&scope))
+        .unwrap();
+    assert_eq!(addresses(&results), ["shared@team.test"]);
+    assert_eq!(results[0].name.as_deref(), Some("Local name"));
+    assert_eq!(
+        addresses(
+            &f.service
+                .suggest_contacts_scoped("home", None, Some(&scope))
+                .unwrap()
+        ),
+        ["home@example.test"]
+    );
+    assert!(
+        f.service
+            .suggest_contacts_scoped("team", None, Some(&[]))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        f.service
+            .suggest_contacts_scoped("private", None, Some(&scope))
+            .unwrap()
+            .is_empty()
+    );
+}

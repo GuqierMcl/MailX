@@ -211,6 +211,10 @@ const MAIN_ONLY: &[&str] = &[
     "mcp_get_status",
     "mcp_set_enabled",
     "mcp_client_config",
+    "mcp_agents",
+    "mcp_agent_setup",
+    "mcp_agent_remove",
+    "mcp_diagnose",
 ];
 
 /// Commands both kinds may call.
@@ -589,6 +593,10 @@ mod tests {
             ("mcp_get_status", true, false),
             ("mcp_set_enabled", true, false),
             ("mcp_client_config", true, false),
+            ("mcp_agents", true, false),
+            ("mcp_agent_setup", true, false),
+            ("mcp_agent_remove", true, false),
+            ("mcp_diagnose", true, false),
             ("notifications_test", true, false),
             ("notifications_preview_sound", true, false),
             ("window_get_chrome", true, true),

@@ -10,6 +10,7 @@ mod compose_files;
 mod lifecycle;
 mod locale;
 mod mcp;
+mod mcp_clients;
 mod mcp_sidecar;
 mod notifications;
 mod secret_split;
@@ -386,6 +387,10 @@ fn main() {
             mcp::mcp_get_status,
             mcp::mcp_set_enabled,
             mcp::mcp_client_config,
+            mcp_clients::mcp_agents,
+            mcp_clients::mcp_agent_setup,
+            mcp_clients::mcp_agent_remove,
+            mcp_clients::mcp_diagnose,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the MailX desktop host")

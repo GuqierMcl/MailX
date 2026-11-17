@@ -2978,6 +2978,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ecded084f9b9a718d39668a42657c32253663d1f6afb3fbb9134f0305f73f48"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "jsonptr"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3235,9 +3245,11 @@ name = "mailx-desktop"
 version = "0.4.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "dunce",
  "gtk",
+ "jsonc-parser",
  "keyring",
  "libappindicator-sys",
  "mailx-core",
@@ -3262,6 +3274,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
+ "toml_edit 0.25.17+spec-1.1.0",
  "uuid",
  "windows",
  "winreg",
@@ -6841,6 +6854,7 @@ dependencies = [
  "indexmap 2.14.2",
  "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

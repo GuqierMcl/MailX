@@ -60,7 +60,7 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 
 本地 MCP 首版的简化及其风险说明见 [MCP 草案](../contracts/mcp.md#首版授权有意简化)。
 
-`RequestContext { principal, grant, request_id }` 由宿主用公有构造函数创建：`Principal::{BuiltinAgent { run_id }, LocalMcp { connection_id, client_name }}`（`client_name` 自报，只用于显示和审计），`Grant { accounts: AccountScope::{All, Only(ids)}, actions }`，`Action::{AccountsRead, MailRead, DraftCreate, DraftWrite, MailOrganize, MailArchive, MailSync, MailSend, OutboxRead, OutboxWrite, FilesRead}`（序列化为 `accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`、`mail:send`、`outbox:read`、`outbox:write`、`files:read`）。`Grant::mcp_default()` 是本地 MCP 首版统一授权（全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿，包含整理、归档、刷新、发送与发件箱动作，没有删除邮件动作）。界面状态由宿主提供：`Tools::with_draft_open_check`（草稿是否正开在写信窗口，默认从不）、`Tools::with_ui_opener`（把窗口带到前台并打开邮件，默认 `unavailable`）与 `Tools::with_draft_opener`（打开已有草稿，默认 `unavailable`），均在调用时读取。
+`RequestContext { principal, grant, request_id }` 由宿主用公有构造函数创建：`Principal::{BuiltinAgent { run_id }, LocalMcp { connection_id, client_name }}`（`client_name` 自报，只用于显示和审计），`Grant { accounts: AccountScope::{All, Only(ids)}, actions }`，`Action::{AccountsRead, MailRead, DraftCreate, DraftWrite, MailOrganize, MailArchive, MailSync, MailSend, OutboxRead, OutboxWrite, FilesRead, FilesWrite}`（序列化为 `accounts:read`、`mail:read`、`draft:create`、`draft:write`、`mail:organize`、`mail:archive`、`mail:sync`、`mail:send`、`outbox:read`、`outbox:write`、`files:read`、`files:write`）。`Grant::mcp_default()` 是本地 MCP 首版统一授权（全部账号、读取邮件与草稿、创建 / 修改 / 删除草稿，包含整理、归档、刷新、发送、发件箱与受控附件导出动作，没有删除邮件动作）。界面状态由宿主提供：`Tools::with_draft_open_check`（草稿是否正开在写信窗口，默认从不）、`Tools::with_ui_opener`（把窗口带到前台并打开邮件，默认 `unavailable`）与 `Tools::with_draft_opener`（打开已有草稿，默认 `unavailable`），均在调用时读取。
 
 发送路径中的 `send::Caller` 由宿主提供：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`。两者在工具层检查 `mail:send` 与账号范围后走正常队列，不能通过输入伪造为 `Composer`。`MainWindow` 只因主窗口内写信可以入队（见[发信设计 17.7](sending.md#177-写信打开方式)），处理 `unknown` 仍限用户 UI。宿主通过 `with_undo_send_seconds` 注入撤销窗口，读取失败会阻止发送。
 
@@ -84,7 +84,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | `list_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |
 | `create_reply_draft` | ✓ | ✓ | 回复 / 全部回复 / 转发草稿，调用方文字放在引用之上，来源标记随主体；原邮件正文须已缓存，永不发送 |
 | `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |
-| `list_drafts` | ✓ | ✓ | 范围内全部草稿（不限来源）的摘要，最多 100 条，含 `revision`、`origin`、`locked`、`open`，无正文；`mail:read`；已实现 |
+| `list_drafts` | ✓ | ✓ | 范围内全部草稿（不限来源）的摘要，按账号 / 来源 / 主题筛选，每页最多 100 条，支持游标，含 `revision`、`origin`、`locked`、`open`，无正文；`mail:read`；已实现 |
 | `read_draft` | ✓ | ✓ | 单个草稿的收件人、`bodyHtml`、`bodyText`、附件元信息与 `revision`；`mail:read`；已实现 |
 | `update_draft` | ✓ | ✓ | 按 `expectedRevision` 修改给出的字段，不改 `origin` 与附件；`conflict` / `draftLocked` / `draftOpen`；`draft:write`；已实现 |
 | `delete_draft` | ✓ | ✓ | 按 `expectedRevision` 删除草稿（破坏性注解）；`draft:write`；已实现 |
@@ -101,8 +101,11 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | `list_outbox` / `get_outbox` | ✓ | ✓ | 有界查询范围内发送任务，返回稳定状态与错误类别 |
 | `cancel_outbox` | ✓ | ✓ | 仅取消 queued，发送开始后拒绝 |
 | `add_draft_attachment` / `remove_draft_attachment` | ✓ | ✓ | 按 revision 添加本机普通文件 / 移除普通附件，保留草稿打开保护 |
+| `get_conversation` | ✓ | ✓ | 按种子邮件所属账号查询本机已知会话，摘要有界分页，返回完整性说明；正文由 `read_email` 读取 |
+| `suggest_contacts` | ✓ | ✓ | 本机往来地址建议，在候选和统计阶段限制授权账号，不访问远程通讯录 |
+| `save_email_attachment` | | ✓ | 将指定收到的附件写入宿主提供的导出目录，创建唯一文件，不覆盖，不暴露内部 blob 路径；需要 `mail:read` 与 `files:write` |
 
-二十二个 MCP 工具（二十个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
+二十五个 MCP 工具（二十二个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
 
 发送工具随本地 MCP 总开关授权，直接发信无需逐封确认。首次发送核对草稿版本和幂等键，复用现有快照、发送队列与事件；规则见[发送与附件工具](mail-send-tools.md)。
 
@@ -126,7 +129,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 ## 6. 结果与错误
 
 - 邮件正文、主题和发件显示信息作为不可信材料返回，不能被当作系统指令拼接。
-- 结果不包括 API Key、邮箱密码、refresh token、本地路径或无关账号信息。
+- 结果不包括 API Key、邮箱密码、refresh token、内部存储路径或无关账号信息；显式附件导出仅返回本次导出文件的路径。
 - 业务失败返回 `ToolError { code, message, field? }`。错误码（camelCase，稳定）：`unknownTool`、`invalidInput`、`notPermitted`、`notFound`、`bodyNotCached`、`downloadTimeout`、`downloadFailed`、`bodyTooLarge`、`unavailable`、`internal`。`message` 是固定的英文短句，不含路径、凭证或服务器文本；`AppError` 只保留错误码映射（`Validation` / `IdempotencyConflict` / `Conflict` → `invalidInput`，`NotFound` → `notFound`，`BodyNotCached` → `bodyNotCached`，`Forbidden` → `notPermitted`，存储 / 核心未就绪 / 密钥库不可用 → `unavailable`，其余 → `internal`）。
 - MCP 适配层把参数或协议错误映射为 JSON-RPC 错误，把业务失败映射为工具错误结果。
 - 纯文本分页按 Unicode 字符计数，不切断编码；读取不自动标记已读。
@@ -136,7 +139,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 本地 MCP 是工具层的首个使用方，内置 AI 的前端另行设计。为避免工具层只为 MCP 服务，工具层测试在进程内分别以 MCP 与内置 Agent 主体调用。
 
 1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。已具备（`DraftOrigin::{User, Mcp, Ai}`、`create_draft_with_origin`、界面标记、HTML-only 邮件的分行纯文本）。本地 MCP 已创建来源为 `mcp` 的草稿，内置 Agent 尚未接入。
-2. 工具层骨架、`RequestContext` 与二十二个工具：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；平台和客户端证据范围见上方状态及验证记录。
+2. 工具层骨架、`RequestContext` 与当前工具目录：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；平台和客户端证据范围见上方状态及验证记录。
 3. M0 原型验证 `rmcp` 与本地 IPC，随后实现 MCP 适配层、桌面 IPC 监听与 stdio bridge。
 4. 设置中的 MCP 页、标题栏运行状态图标、复制客户端配置与 bridge 随应用分发。
 5. 至少两个目标 MCP 客户端联调。

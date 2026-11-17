@@ -120,9 +120,11 @@ impl From<ArchiveFilter> for ArchiveScope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchEmailsInput {
     /// Full-text query, at most 256 characters. Omit to list recent mail.
+    #[schemars(length(max = 256))]
     pub query: Option<String>,
     /// Restrict to these accounts (at most 20). Accounts outside the
     /// connection's scope are ignored. Omit for every permitted account.
+    #[schemars(length(max = 20))]
     pub account_ids: Option<Vec<String>>,
     /// Search only folders with this role. Omit to search every folder except
     /// trash and junk; name `trash` or `junk` to search those.
@@ -142,9 +144,14 @@ pub struct SearchEmailsInput {
     /// lists and include it in text searches. This is not folderRole archive.
     pub archive: Option<ArchiveFilter>,
     pub has_attachment: Option<bool>,
+    /// Exact sender address, case-insensitive (at most 320 characters).
+    #[schemars(length(max = 320))]
+    pub from_address: Option<String>,
     /// Page size, 1 to the audience maximum (default 20, MCP maximum 100).
+    #[schemars(range(min = 1, max = 100))]
     pub limit: Option<u32>,
     /// `nextCursor` from the previous page; other filters must stay the same.
+    #[schemars(length(min = 1, max = 1024))]
     pub cursor: Option<String>,
 }
 
@@ -158,6 +165,11 @@ pub struct EmailHit {
     pub subject: String,
     /// Untrusted third-party content.
     pub from: Address,
+    /// Leading recipients (at most three) and their total count.
+    pub to: Recipients,
+    /// Plain-text full-text hit; absent when only headers matched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_snippet: Option<Vec<HitSegment>>,
     pub received_at: String,
     /// Untrusted third-party content.
     pub preview: String,
@@ -169,6 +181,54 @@ pub struct EmailHit {
     pub has_attachment: bool,
     /// Whether `read_email` can return the body without a download.
     pub body_cached: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Recipients {
+    pub addresses: Vec<Address>,
+    pub total: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HitSegment {
+    pub text: String,
+    pub hit: bool,
+}
+
+impl From<crate::mail::EmailSummary> for EmailHit {
+    fn from(e: crate::mail::EmailSummary) -> Self {
+        Self {
+            id: e.id,
+            account_id: e.account_id,
+            folder_id: e.folder_id,
+            subject: e.subject,
+            from: e.from.into(),
+            to: Recipients {
+                addresses: e.to.addresses.into_iter().map(Address::from).collect(),
+                total: e.to.total,
+            },
+            match_snippet: e.match_snippet.map(|parts| {
+                parts
+                    .into_iter()
+                    .map(|part| HitSegment {
+                        text: part.text,
+                        hit: part.hit,
+                    })
+                    .collect()
+            }),
+            received_at: e.received_at,
+            preview: e.preview,
+            is_read: e.is_read,
+            is_starred: e.is_starred,
+            archived: e.archived,
+            pending_changes: e.pending_changes,
+            local_only: e.local_only,
+            has_attachment: e.has_attachment,
+            body_cached: e.body_state == BodyState::Ready,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -249,6 +309,7 @@ pub struct ReadEmailInput {
     pub offset: Option<usize>,
     /// Characters to return, 1 to the audience maximum (default 8000,
     /// maximum 32000).
+    #[schemars(range(min = 1, max = 32000))]
     pub max_chars: Option<usize>,
     /// Download the body from the mail server first when it is not stored
     /// on this device (default false). Has no effect on a stored body.
@@ -258,6 +319,7 @@ pub struct ReadEmailInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentInfo {
+    pub id: String,
     /// Untrusted third-party content.
     pub name: String,
     pub mime_type: String,
@@ -392,6 +454,13 @@ fn search_emails(
     call: &ToolCall<'_>,
     input: SearchEmailsInput,
 ) -> Result<SearchEmailsOutput, ToolError> {
+    if input.from_address.as_ref().is_some_and(|address| {
+        address.trim().is_empty()
+            || address.chars().count() > 320
+            || address.chars().any(char::is_control)
+    }) {
+        return Err(ToolError::invalid("fromAddress", "invalid sender address"));
+    }
     let policy = call.policy;
     let limit = input.limit.unwrap_or(policy.default_page_size);
     if limit == 0 || limit > policy.max_page_size {
@@ -480,30 +549,11 @@ fn search_emails(
         received_before: input.received_before,
         limit: Some(limit),
         cursor: input.cursor,
-        from_address: None,
+        from_address: input.from_address,
         group_senders: false,
     })?;
     Ok(SearchEmailsOutput {
-        emails: page
-            .items
-            .into_iter()
-            .map(|e| EmailHit {
-                id: e.id,
-                account_id: e.account_id,
-                folder_id: e.folder_id,
-                subject: e.subject,
-                from: e.from.into(),
-                received_at: e.received_at,
-                preview: e.preview,
-                is_read: e.is_read,
-                is_starred: e.is_starred,
-                archived: e.archived,
-                pending_changes: e.pending_changes,
-                local_only: e.local_only,
-                has_attachment: e.has_attachment,
-                body_cached: e.body_state == BodyState::Ready,
-            })
-            .collect(),
+        emails: page.items.into_iter().map(EmailHit::from).collect(),
         next_cursor: page.next_cursor,
         coverage: page.coverage.into(),
     })
@@ -563,6 +613,7 @@ fn read_email(call: &ToolCall<'_>, input: ReadEmailInput) -> Result<ReadEmailOut
             .attachments
             .into_iter()
             .map(|a| AttachmentInfo {
+                id: a.id,
                 name: a.filename,
                 mime_type: a.mime_type,
                 size: a.size,

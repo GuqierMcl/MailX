@@ -5,11 +5,12 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import type { Draft, EmailDetail, EmailSummary, ToolActivity } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
+import { i18n } from '@/i18n'
 import { ChatEnvContext, type ChatEnv } from './chat-env'
 import { ChatMessages } from './chat-messages'
 import type { ChatMessage, ChatTurn } from './chat-model'
 import type { RunTool } from './use-assistant-run'
-import { UNDO_WINDOW_MS } from './tool-labels'
+import { toolLabel, UNDO_WINDOW_MS } from './tool-labels'
 import { ToolRow } from './tool-parts'
 
 const account = exampleAccount({ displayName: '工作邮箱' })
@@ -35,6 +36,31 @@ function setup(env: Partial<ChatEnv> = {}) {
 afterEach(() => { vi.useRealTimers() })
 
 describe('ToolRow', () => {
+  it.each([
+    ['get_conversation', '正在查看往来邮件…', '找到了 3 封往来邮件'],
+    ['suggest_contacts', '正在查找联系人…', '找到了 3 位联系人'],
+  ])('describes %s with its found count', (name, running, done) => {
+    const { view } = setup()
+    const { rerender } = render(view(<ToolRow tool={tool({ name, status: 'running', summary: { type: 'pending' } })} />))
+    expect(screen.getByText(running)).toBeInTheDocument()
+    rerender(view(<ToolRow tool={tool({ name, summary: { type: 'found', count: 3 } })} />))
+    expect(screen.getByText(done)).toBeInTheDocument()
+    expect(screen.queryByText('完成了一步')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['get_conversation', 'Found 1 email in the conversation', 'Found 2 emails in the conversation'],
+    ['suggest_contacts', 'Found 1 contact', 'Found 2 contacts'],
+  ])('uses English singular and plural counts for %s', async (name, singular, plural) => {
+    await i18n.changeLanguage('en')
+    try {
+      expect(toolLabel(tool({ name, summary: { type: 'found', count: 1 } }))).toBe(singular)
+      expect(toolLabel(tool({ name, summary: { type: 'found', count: 2 } }))).toBe(plural)
+    } finally {
+      await i18n.changeLanguage('zh-CN')
+    }
+  })
+
   it('says what it is doing, then what it did, without raw tool names', () => {
     const { view } = setup()
     const { rerender } = render(view(<ToolRow tool={tool({ name: 'search_emails', status: 'running', summary: { type: 'pending' } })} />))

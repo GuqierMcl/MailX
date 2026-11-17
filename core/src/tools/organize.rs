@@ -18,6 +18,7 @@ const MAX_ID_CHARS: usize = 64;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetEmailFlagsInput {
     /// One to 50 distinct ids from search_emails or read_email.
+    #[schemars(length(min = 1, max = 50))]
     pub email_ids: Vec<String>,
     pub is_read: Option<bool>,
     pub is_starred: Option<bool>,
@@ -84,6 +85,7 @@ pub struct SetEmailFlagsOutput {
 pub struct ArchiveEmailsInput {
     /// One to 50 distinct inbox message ids. Any invalid or inaccessible
     /// message rejects the whole batch without changing it.
+    #[schemars(length(min = 1, max = 50))]
     pub email_ids: Vec<String>,
 }
 

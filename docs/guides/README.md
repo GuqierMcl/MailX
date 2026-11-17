@@ -189,9 +189,20 @@ The Sent folder shows a local copy until MailX matches it to the provider's save
 
 MailX includes a local MCP server. A built-in AI assistant is not available yet. MCP is off by default.
 
-1. Open Settings → MCP, turn it on and read the authorization confirmation. The master switch gives connected local clients reading, mail organizing, draft and local file attachment management, and direct sending for all accounts, **with no per-message send confirmation**.
-2. Click Copy client configuration and add it to a compatible MCP client. The configuration uses the bridge installed with the app; copy it again if you move the installation. Follow each client's own documentation for importing it.
-3. Keep MailX running; the settings page shows the state and connected clients. It keeps working when the main window is closed and the app stays in the background. Fully quitting the app or turning MCP off makes the client connection unavailable. Turning MCP off does not cancel queued sends; handle those in the outbox.
+1. Open Settings → MCP, turn it on and read the authorization confirmation. The master switch gives connected local clients reading, mail organizing, draft and local file attachment management, attachment export, and direct sending for all accounts, **with no per-message send confirmation**.
+2. Under Connect an agent, choose your client. Claude Code, Codex and OpenCode use personal configurations; Cursor and Trae open their official import flow, which you finish in the client. Existing unrelated settings are preserved. A conflicting MailX entry requires an explicit replacement.
+3. Reload the client if needed, then use Check MailX connection to check the bridge and tool list. Configuration added and a successful check do not mean the client is connected: actual sessions appear in the server's connected-client list, using names reported by the clients.
+4. Keep MailX running. MCP keeps working when the main window is closed and the app stays in the background. Fully quitting the app or turning MCP off makes the client connection unavailable. Turning MCP off does not cancel queued sends; handle those in the outbox.
+
+The MCP icon in the top-right title bar appears while the server is enabled. Its green dot appears when a client is connected and disappears after all clients disconnect.
+
+DeepSeek Harness has a dedicated configuration and documentation link. Add a local stdio server in Harness settings using the command and arguments under Manual setup, or use its Cordis YAML configuration with your personal profile. MailX does not automatically edit the Harness configuration tree. Other compatible clients can use Copy client configuration under Manual configuration; Codex and OpenCode should use their own row's format.
+
+Setup errors appear beside the affected client; connection-check errors appear below that check. Retrying clears the previous result. Check configurations reads the current client configuration again and clears old setup feedback. If you move MailX or its data directory, use setup again and review any replacement request. Remove deletes only the matching MailX entry in the selected personal configuration; for clients using an import flow, manage removal in that client.
+
+Setup retains a backup beside an existing client configuration. If MailX stops unexpectedly during a configuration update and the original file is missing, restore it from that backup. Concurrent edits are not automatically merged; an editor that keeps an old file open may save into the backup.
+
+Clients can search exact sender addresses, inspect locally known conversations, find recipient suggestions from cached correspondence and paginate drafts. Received attachments can be exported to MailX's local export directory; each export creates a new file and returns its location for a client on the same computer. Exported files remain on disk until you remove them. Search and conversation results describe local coverage and may omit older or uncached server history.
 
 A client may send the mail it reads to the AI service it uses, so choose clients and models with your privacy in mind. There is no per-client or per-account authorization yet, and MCP cannot delete mail. Compatibility of clients, platforms and tools is recorded in the [validation record](../development/validation.md).
 

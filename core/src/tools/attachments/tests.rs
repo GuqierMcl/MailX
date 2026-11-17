@@ -390,3 +390,99 @@ fn windows_accepts_disk_paths_but_not_networks_devices_or_streams() {
         assert!(validate_path(path).is_err(), "{path}");
     }
 }
+
+#[tokio::test]
+async fn received_attachment_exports_are_scoped_new_files_and_require_the_write_grant() {
+    let directory = TempDir::new().unwrap();
+    let raw = b"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=parts\r\n\r\n--parts\r\nContent-Type: text/plain\r\n\r\nMessage\r\n--parts\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=\"../../report.txt\"\r\n\r\nReport contents\r\n--parts--\r\n";
+    let (core, emails) = MailxCore::body_test_fixture_with_events(
+        directory.path(),
+        tokio::runtime::Handle::current(),
+        &[raw],
+        Arc::new(|_: &CoreEvent| {}),
+    )
+    .unwrap();
+    let destination = directory.path().join("exports");
+    let tools =
+        Tools::new(core.clone(), String::new).with_attachment_export_dir(destination.clone());
+    let ctx = &contexts()[0];
+    let detail = tools
+        .call(ctx, "read_email", json!({"emailId":emails[0]}))
+        .unwrap();
+    let attachment = &detail["attachments"][0]["id"];
+    assert!(attachment.as_str().is_some());
+    let input = json!({"emailId":emails[0],"attachmentId":attachment});
+    let denied = RequestContext::new(
+        ctx.principal.clone(),
+        Grant::new(AccountScope::All, [Action::MailRead]),
+        "denied-export",
+    );
+    assert_eq!(
+        tools
+            .call(&denied, "save_email_attachment", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::NotPermitted
+    );
+    assert!(!destination.exists());
+    let denied = RequestContext::new(
+        ctx.principal.clone(),
+        Grant::new(
+            AccountScope::Only(vec![]),
+            [Action::MailRead, Action::FilesWrite],
+        ),
+        "hidden-export",
+    );
+    assert_eq!(
+        tools
+            .call(&denied, "save_email_attachment", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::NotFound
+    );
+    let unavailable = Tools::new(core, String::new);
+    assert_eq!(
+        unavailable
+            .call(ctx, "save_email_attachment", input.clone())
+            .unwrap_err()
+            .code,
+        ToolErrorCode::Unavailable
+    );
+    let first = tools
+        .call(ctx, "save_email_attachment", input.clone())
+        .unwrap();
+    let path = Path::new(first["filePath"].as_str().unwrap());
+    assert_eq!(path.parent(), Some(destination.as_path()));
+    assert_eq!(first["name"], "report.txt");
+    assert_eq!(std::fs::read(path).unwrap(), b"Report contents");
+    let second = tools
+        .call(ctx, "save_email_attachment", input.clone())
+        .unwrap();
+    assert_ne!(first["filePath"], second["filePath"]);
+    assert_eq!(std::fs::read(path).unwrap(), b"Report contents");
+    assert_eq!(
+        tools
+            .call(&contexts()[1], "save_email_attachment", input)
+            .unwrap_err()
+            .code,
+        ToolErrorCode::UnknownTool
+    );
+}
+
+#[test]
+fn export_never_overwrites_an_existing_file_or_follows_a_directory_link() {
+    let directory = TempDir::new().unwrap();
+    export_file(directory.path(), "report.txt", b"original").unwrap();
+    assert!(export_file(directory.path(), "report.txt", b"replacement").is_err());
+    assert_eq!(
+        std::fs::read(directory.path().join("report.txt")).unwrap(),
+        b"original"
+    );
+    #[cfg(unix)]
+    {
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(directory.path(), &link).unwrap();
+        assert!(export_file(&link, "escaped.txt", b"escape").is_err());
+        assert!(!directory.path().join("escaped.txt").exists());
+    }
+}

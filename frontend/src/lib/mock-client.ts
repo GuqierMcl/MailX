@@ -40,6 +40,7 @@ import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
+import { mockMcpAgents } from '@/features/mcp/mock-agents'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
@@ -116,6 +117,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   let previewRequest = 0
   const draftListeners = new Set<(change: DraftChanged) => void>()
   let mcpStatus: McpStatus = { state: 'off' }
+  const mcpConfig: McpClientConfig = { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }
+  let mcpAgents = mockMcpAgents(mcpConfig)
   const mcpListeners = new Set<(status: McpStatus) => void>()
   const lockedDrafts = new Set<string>()
   const consentChanged = () => {
@@ -1212,7 +1215,22 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       for (const listener of mcpListeners) listener(structuredClone(mcpStatus))
       return structuredClone(mcpStatus)
     },
-    getMcpClientConfig: async (): Promise<McpClientConfig> => ({ command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }),
+    getMcpClientConfig: async () => structuredClone(mcpConfig),
+    getMcpAgents: async () => structuredClone(mcpAgents),
+    async setupMcpAgent(id, replace = false) {
+      const agent = mcpAgents.find((item) => item.id === id)!
+      if (!agent.available) return { state: 'unavailable', agent: structuredClone(agent) }
+      if (agent.method === 'deeplink') return { state: 'handoff', agent: structuredClone(agent) }
+      if (agent.configuration === 'conflict' && !replace) return { state: 'conflict', agent: structuredClone(agent) }
+      const state = agent.configuration === 'configured' ? 'unchanged' : 'configured'
+      mcpAgents = mcpAgents.map((item) => item.id === id ? { ...item, configuration: 'configured' } : item)
+      return { state, agent: structuredClone(mcpAgents.find((item) => item.id === id)!) }
+    },
+    async removeMcpAgent(id) {
+      mcpAgents = mcpAgents.map((item) => item.id === id ? { ...item, configuration: 'missing' } : item)
+      return { state: 'removed', agent: structuredClone(mcpAgents.find((item) => item.id === id)!) }
+    },
+    diagnoseMcp: async () => mcpStatus.state === 'running' ? { ok: true, code: 'ready', toolCount: 25 } : { ok: false, code: 'disabled' },
     onMcpStatus(listener) { mcpListeners.add(listener); return () => { mcpListeners.delete(listener) } },
     // The consent is the assistant's own (granted by `assistantGrantConsent`), never part of a settings write.
     getSettings: async () => { readStoredSettings(); return structuredClone({ ...settings, settings: { ...settings.settings, assistant: { ...settings.settings.assistant, consented: assistant.consent() } } }) },

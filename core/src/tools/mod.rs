@@ -10,10 +10,12 @@ mod accounts;
 mod attachments;
 mod audit;
 mod context;
+mod discovery;
 mod drafts;
 mod error;
 mod mail;
 mod organize;
+mod paging;
 mod sending;
 mod spec;
 #[cfg(test)]
@@ -24,18 +26,19 @@ mod ui;
 pub use accounts::{AccountInfo, ListAccountsInput, ListAccountsOutput, SyncStatus};
 pub use attachments::{
     AddDraftAttachmentInput, AddDraftAttachmentOutput, RemoveDraftAttachmentInput,
-    RemoveDraftAttachmentOutput,
+    RemoveDraftAttachmentOutput, SaveEmailAttachmentInput, SaveEmailAttachmentOutput,
 };
 pub use audit::{NoAudit, ToolAudit, ToolCallRecord};
 pub use context::{AccountScope, Action, Audience, Grant, Principal, RequestContext};
+pub use discovery::{ContactsInput, ContactsOutput, ConversationInput, ConversationOutput};
 pub use drafts::{
     CreateDraftInput, CreateDraftOutput, DeleteDraftInput, DeleteDraftOutput, DraftIdInput,
     ListDraftsInput, ListDraftsOutput, ReadDraftOutput, UpdateDraftInput, UpdateDraftOutput,
 };
 pub use error::{ToolError, ToolErrorCode};
 pub use mail::{
-    Address, AttachmentInfo, EmailHit, ReadEmailInput, ReadEmailOutput, SearchEmailsInput,
-    SearchEmailsOutput,
+    Address, AttachmentInfo, EmailHit, HitSegment, ReadEmailInput, ReadEmailOutput, Recipients,
+    SearchEmailsInput, SearchEmailsOutput,
 };
 pub use organize::{
     ArchiveEmailsInput, ArchiveEmailsOutput, SetEmailFlagsInput, SetEmailFlagsOutput,

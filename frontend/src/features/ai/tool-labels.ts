@@ -5,11 +5,11 @@ import type { RunTool } from './use-assistant-run'
 export const UNDO_WINDOW_MS = 60_000
 /** Most email chips listed under one step. */
 export const CHIP_LIMIT = 5
-type CountedTool = 'search_emails' | 'read_email' | 'archive_emails' | 'unarchive_emails' | 'set_email_flags'
+type CountedTool = 'search_emails' | 'read_email' | 'get_conversation' | 'suggest_contacts' | 'archive_emails' | 'unarchive_emails' | 'set_email_flags'
 type PlainTool = 'list_accounts' | 'list_folders' | 'list_drafts' | 'read_draft' | 'list_outbox' | 'get_outbox' | 'refresh_sync'
   | 'create_draft' | 'create_reply_draft' | 'update_draft' | 'delete_draft' | 'add_draft_attachment' | 'remove_draft_attachment'
   | 'send_email' | 'cancel_outbox' | 'other'
-const COUNTED: ReadonlySet<string> = new Set<CountedTool>(['search_emails', 'read_email', 'archive_emails', 'unarchive_emails', 'set_email_flags'])
+const COUNTED: ReadonlySet<string> = new Set<CountedTool>(['search_emails', 'read_email', 'get_conversation', 'suggest_contacts', 'archive_emails', 'unarchive_emails', 'set_email_flags'])
 const PLAIN: ReadonlySet<string> = new Set<PlainTool>([
   'list_accounts', 'list_folders', 'list_drafts', 'read_draft', 'list_outbox', 'get_outbox', 'refresh_sync', 'create_draft', 'create_reply_draft',
   'update_draft', 'delete_draft', 'add_draft_attachment', 'remove_draft_attachment', 'send_email', 'cancel_outbox',

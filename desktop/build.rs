@@ -139,6 +139,10 @@ fn main() {
             "mcp_get_status",
             "mcp_set_enabled",
             "mcp_client_config",
+            "mcp_agents",
+            "mcp_agent_setup",
+            "mcp_agent_remove",
+            "mcp_diagnose",
         ]),
     ))
     .expect("failed to prepare the MailX desktop host");
