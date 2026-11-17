@@ -51,10 +51,11 @@ export function ProviderPicker({ selected, query, onQueryChange, onSelect, onAdv
           {visible.map((provider, index) => {
             const checked = selected?.id === provider.id
             const rowId = `${id}-${index}`
+            // Anchor the sr-only radio to its row so native focus scrolls only the list.
             return (
               <label key={provider.id ?? 'generic'} onDoubleClick={() => onAdvance(provider)}
                 className={cn(
-                  'grid min-h-16 cursor-pointer grid-cols-[2rem_minmax(0,1fr)_minmax(0,1.5fr)_1rem] items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset sm:grid-cols-[2.5rem_8rem_minmax(0,1fr)_1rem] sm:gap-3',
+                  'relative grid min-h-16 cursor-pointer grid-cols-[2rem_minmax(0,1fr)_minmax(0,1.5fr)_1rem] items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset sm:grid-cols-[2.5rem_8rem_minmax(0,1fr)_1rem] sm:gap-3',
                   checked && 'bg-primary/5 hover:bg-primary/5',
                 )}>
                 <input type="radio" name={`${id}-provider`} value={provider.id ?? ''} checked={checked}

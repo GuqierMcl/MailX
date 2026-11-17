@@ -11,6 +11,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🩹 Fixed
+
+- Selecting a provider near the bottom of the add-account list no longer scrolls the entire dialog upward. / 添加邮箱时，选择服务商列表下方的选项不再导致整个弹窗内容上移。 ([#146](https://github.com/GuqierMcl/MailX/pull/146))
+
 ## [0.4.0] - 2026-11-17
 
 ### 🚀 Feature
