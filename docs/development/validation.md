@@ -1384,3 +1384,10 @@ MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态
 ### MCP 智能体 Logo（2026-11-18）
 
 接入列表的六个智能体名称旁加入本地 SVG；Codex 与 Cursor 使用浅深主题变体，OpenCode 单色原件用 CSS mask 跟随前景色，DeepSeek Harness 使用 DeepSeek 标识。资源 XML 解析、活动内容与外部引用检查、48px 栅格渲染通过。macOS / Microsoft Edge 合成预览中目测中文浅色与英文深色的名称 / 图标对齐，六个标识可读；临时预览源文件已移除。现有 MCP 页 20 项测试、TypeScript、lint 与生产构建通过。未新增真实客户端接入或三平台桌面验证。
+
+
+### MCP 标题栏连接指示（2026-11-18）
+
+主界面右上角 MCP 图标开启服务后保持可见，无客户端时不显示绿点；有客户端连接时显示绿点，最后一个客户端断开后移除；失败红点与关闭后隐藏沿用既有行为。MCP 设置与标题栏专项共 28 项测试通过，覆盖连接数 `0 → 2 → 1 → 0` 的事件更新；类型检查、lint 与差异检查通过。独立上下文 `gpt-6-astra` 核对该行为、双语指南以及同步最新 main 后的内置助手代码，未发现需修复缺陷。变更纳入同一 [PR #148](https://github.com/GuqierMcl/MailX/pull/148)。
+
+同步最新 main 后重新执行 `bun run check`、`bun run rust:test`、`bun run rust:fmt` 与 `bun run rust:clippy` 全部通过：前端 131 个文件 / 1,702 项，Rust 合计 1,851 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。
