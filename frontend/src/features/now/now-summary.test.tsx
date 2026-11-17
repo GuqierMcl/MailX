@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiState, AssistantEvent, AssistantEventKind, EmailPage, MailOverview, RunSnapshot } from '@/generated/accounts'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { i18n } from '@/i18n'
 import { MailxClientError } from '@/lib/mailx-client'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
@@ -18,6 +19,7 @@ const ready: AiState = {
   translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false,
 }
 const SENTENCE = '今天有 3 封新邮件，银行的那封值得先看。'
+const RETRY = 'AI 这次没写出来，再试一次'
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
   runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
@@ -94,9 +96,60 @@ describe('Now page: AI summary line', () => {
     await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    expect(client.assistantStart).toHaveBeenCalledWith({ kind: { type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()), fresh: false } })
+    expect(client.assistantStart).toHaveBeenCalledWith({ kind: expect.objectContaining({ type: 'nowSummary', since: start.toISOString(), dayStarts: dayStarts(new Date()), fresh: false }) })
     // The overview came first.
     expect(client.getMailOverview.mock.invocationCallOrder[0]).toBeLessThan(client.assistantStart.mock.invocationCallOrder[0])
+  })
+
+  describe('occasion', () => {
+    /** The run request of the page's first summary on this local day, in this language. */
+    async function started(day: Date, language: string) {
+      await act(async () => { await i18n.changeLanguage(language) })
+      vi.useFakeTimers({ toFake: ['Date'], now: day })
+      try {
+        const { client } = setup()
+        await settled()
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
+        return (client.assistantStart.mock.calls[0][0] as { kind: Record<string, unknown> }).kind
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+
+    // The preset line's rules: a holiday for the language (English knows only New Year's Day), a solar
+    // term only for Chinese. 2026: Mid-Autumn Festival on 25 September, Start of Winter on 7 November.
+    it.each([
+      ['a holiday in Chinese', new Date(2026, 0, 1, 10), 'zh-CN', 'newYear'],
+      ['a holiday in English', new Date(2026, 0, 1, 10), 'en', 'newYear'],
+      ['a lunar festival in Chinese', new Date(2026, 8, 25, 10), 'zh-CN', 'midAutumn'],
+      ['a solar term in Chinese', new Date(2026, 10, 7, 10), 'zh-CN', 'lidong'],
+    ] as const)('sends %s', async (_name, day, language, occasion) => {
+      expect((await started(day, language)).occasion).toBe(occasion)
+    })
+
+    it.each([
+      ['an ordinary day', new Date(2026, 10, 18, 10), 'zh-CN'],
+      ['a lunar festival in English', new Date(2026, 8, 25, 10), 'en'],
+      ['a solar term in English', new Date(2026, 10, 7, 10), 'en'],
+    ] as const)('sends none on %s', async (_name, day, language) => {
+      expect(await started(day, language)).not.toHaveProperty('occasion')
+    })
+
+    it('sends it again on a refresh', async () => {
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 7, 10) })
+      try {
+        const { client, emit } = setup()
+        await settled()
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(1))
+        await emit(event(2, { type: 'text', delta: SENTENCE }), event(3, { type: 'finished', reason: 'stop' }), event(4, { type: 'state', state: 'completed' }))
+        await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+        await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
+        expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ fresh: true, occasion: 'lidong' }) })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it('keeps the preset while it works, then replaces it with the AI sentence, its mark and its time', async () => {
@@ -265,8 +318,8 @@ describe('Now page: AI summary line', () => {
     })
   })
 
-  describe('failures keep the preset and say nothing', () => {
-    it.each(['assistantDisabled', 'aiNotConfigured', 'aiNetwork'] as const)('when the start is refused with %s', async (code) => {
+  describe('failures keep the preset', () => {
+    it.each(['assistantDisabled', 'aiNotConfigured'] as const)('and offer no retry when the start is refused with %s', async (code) => {
       const { client } = setup({ start: [new MailxClientError({ code, message: 'x', field: null })] })
       await settled()
       await waitFor(() => expect(client.assistantStart).toHaveBeenCalled())
@@ -276,10 +329,11 @@ describe('Now page: AI summary line', () => {
       expect(workingLine()).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '用 AI 总结' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
       expect(client.assistantStart).toHaveBeenCalledTimes(1)
     })
 
-    it('when the run fails after some text, the preset comes back', async () => {
+    it('and offer a quiet retry when the run fails after some text', async () => {
       const { emit } = setup()
       await settled()
       await waitFor(() => expect(workingLine()).toBeInTheDocument())
@@ -290,6 +344,55 @@ describe('Now page: AI summary line', () => {
       expect(preset()).not.toHaveAttribute('aria-hidden')
       await waitFor(() => expect(workingLine()).not.toBeInTheDocument())
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      const retry = await screen.findByRole('button', { name: RETRY })
+      expect(retry.className).toMatch(/text-muted-foreground\/60/)
+    })
+  })
+
+  describe('retrying a failed first run', () => {
+    const fail = (id = 'r1') => [event(2, { type: 'failed', code: 'aiInvalidResponse' }, id), event(3, { type: 'state', state: 'failed' }, id)]
+
+    it('offers a retry after a failed first run; clicking it starts a fresh run, and the button goes while it works', async () => {
+      const { client, emit } = setup({ start: [snapshot(), snapshot({ runId: 'r2' })] })
+      await settled()
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+      await emit(...fail())
+      const retry = await screen.findByRole('button', { name: RETRY })
+      expect(aiLayer()).toHaveAttribute('data-shown', 'false')
+      await userEvent.click(retry)
+      await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
+      expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ type: 'nowSummary', fresh: true }) })
+      await waitFor(() => expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument())
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      await emit(event(2, { type: 'text', delta: SENTENCE }, 'r2'), event(3, { type: 'state', state: 'completed' }, 'r2'))
+      expect(sentence(SENTENCE)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '重新生成' })).toBeInTheDocument()
+    })
+
+    it('offers it when the start itself fails with a network error', async () => {
+      setup({ start: [new MailxClientError({ code: 'aiNetwork', message: 'x', field: null })] })
+      await settled()
+      expect(await screen.findByRole('button', { name: RETRY })).toBeInTheDocument()
+    })
+
+    it('is absent while a sentence is kept, even after a failed refresh', async () => {
+      const { emit } = setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 }), snapshot({ runId: 'r2' })] })
+      await settled()
+      await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      await emit(...fail('r2'))
+      await waitFor(() => expect(workingLine()).not.toBeInTheDocument())
+      expect(sentence(SENTENCE)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+    })
+
+    it('is absent while waiting for consent', async () => {
+      setup({ start: [snapshot({ state: 'awaitingConsent' })] })
+      await settled()
+      await screen.findByRole('button', { name: '用 AI 总结' })
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
     })
   })
 
@@ -299,6 +402,7 @@ describe('Now page: AI summary line', () => {
     await act(async () => { await Promise.resolve() })
     expect(off.client.assistantStart).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '用 AI 总结' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
   })
 
   it('runs nothing without a model', async () => {

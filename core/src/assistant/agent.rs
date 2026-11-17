@@ -13,7 +13,7 @@ use super::{
     history::{self, End, SaveGuard},
     policy::{self, Decision, DraftSource},
     prompt,
-    summary::MAX_OUTPUT_TOKENS,
+    summary::{self, SUMMARY_OUTPUT_CAP},
     types::{
         ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason, FlagRestore,
         ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
@@ -21,12 +21,15 @@ use super::{
 };
 use crate::{
     ErrorCode,
-    ai::client::{
-        Endpoint,
-        stream::{
-            CHAT_STREAM_LIMITS, ChatMessage, ChatRequest, FinishReason, StreamEvent,
-            ToolCallRequest, ToolDefinition, stream_chat,
+    ai::{
+        client::{
+            Endpoint,
+            stream::{
+                CHAT_STREAM_LIMITS, ChatMessage, ChatRequest, FinishReason, StreamEvent,
+                ToolCallRequest, ToolDefinition, stream_chat,
+            },
         },
+        reasoning::Reasoning,
     },
     tools::{Audience, Principal, RequestContext, ToolError, Tools, TrustedOutput},
 };
@@ -112,6 +115,13 @@ struct Turn {
     reason: Option<FinishReason>,
 }
 
+/// What a model turn asks beyond the messages.
+struct TurnOptions {
+    /// `None` sends no cap on OpenAI-compatible servers.
+    max_output: Option<u32>,
+    reasoning: Reasoning,
+}
+
 /// One streaming request. Text goes to the run as it arrives; what the model
 /// said before a failure stays in the run's snapshot.
 async fn model_turn(
@@ -121,7 +131,7 @@ async fn model_turn(
     system: &str,
     messages: &[ChatMessage],
     tools: &[ToolDefinition],
-    max_output: Option<u32>,
+    options: TurnOptions,
 ) -> Result<Turn, ErrorCode> {
     let target = &ready.target;
     let endpoint = Endpoint {
@@ -135,7 +145,9 @@ async fn model_turn(
         system: Some(system),
         messages,
         tools,
-        max_output,
+        max_output: options.max_output,
+        provider_id: &target.provider_id,
+        reasoning: options.reasoning,
     };
     let mut turn = Turn::default();
     stream_chat(
@@ -245,7 +257,10 @@ async fn chat_loop(
             &system,
             messages,
             tools,
-            ready.target.output_length,
+            TurnOptions {
+                max_output: ready.target.output_length,
+                reasoning: Reasoning::Default,
+            },
         )
         .await
         {
@@ -761,11 +776,14 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
         Err(error) => return Outcome::Failed(error.code),
     };
     let system = prompt::summary_system(ready.locale);
-    let messages = [ChatMessage::User(input)];
+    let recent = inner.summaries.recent(ready.locale);
+    let messages = [ChatMessage::User(summary::with_recent_lines(
+        &input, &recent,
+    ))];
     let max_output = ready
         .target
         .output_length
-        .map_or(MAX_OUTPUT_TOKENS, |n| n.min(MAX_OUTPUT_TOKENS));
+        .map_or(SUMMARY_OUTPUT_CAP, |n| n.min(SUMMARY_OUTPUT_CAP));
     let turn = match model_turn(
         inner,
         run_id,
@@ -773,7 +791,10 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
         &system,
         &messages,
         &[],
-        Some(max_output),
+        TurnOptions {
+            max_output: Some(max_output),
+            reasoning: Reasoning::Off,
+        },
     )
     .await
     {
@@ -784,15 +805,14 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
     if answer.is_empty() {
         return Outcome::Failed(ErrorCode::AiInvalidResponse);
     }
-    let cut = turn.reason == Some(FinishReason::Length);
-    if !cut {
-        inner.summaries.put(key, answer, super::runs::now_rfc3339());
+    // A line that hit the output cap ends mid-sentence: that is a failure, not
+    // a finished line, and it is never cached.
+    if turn.reason == Some(FinishReason::Length) {
+        return Outcome::Failed(ErrorCode::AiInvalidResponse);
     }
-    Outcome::Finished(if cut {
-        FinishedReason::Length
-    } else {
-        FinishedReason::Stop
-    })
+    inner.summaries.remember(ready.locale, &answer);
+    inner.summaries.put(key, answer, super::runs::now_rfc3339());
+    Outcome::Finished(FinishedReason::Stop)
 }
 
 #[cfg(test)]

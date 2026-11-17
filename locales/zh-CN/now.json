@@ -143,5 +143,6 @@
   "syncIssue": "部分邮箱同步异常",
   "aiSummarize": "用 AI 总结",
   "aiRefresh": "重新生成",
+  "aiRetry": "AI 这次没写出来，再试一次",
   "aiSummaryLabel": "AI 概述"
 }

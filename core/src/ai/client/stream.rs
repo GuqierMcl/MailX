@@ -19,7 +19,7 @@ use serde_json::Value;
 use super::{Endpoint, auth_headers, http_error, status_error, url};
 use crate::{
     ErrorCode,
-    ai::settings::AiProtocol,
+    ai::{reasoning::Reasoning, settings::AiProtocol},
     net::http::{self, HttpRequest, StreamLimits},
 };
 
@@ -45,6 +45,11 @@ pub(crate) struct ChatRequest<'a> {
     /// `None` sends no cap on OpenAI-compatible servers; Anthropic always gets
     /// one.
     pub max_output: Option<u32>,
+    /// The catalog id of the provider behind the endpoint (`"deepseek"`,
+    /// `"custom"`); only used to pick the provider's own thinking switch.
+    pub provider_id: &'a str,
+    /// A request for less thinking, applied where the provider documents how.
+    pub reasoning: Reasoning,
 }
 
 #[derive(Clone, Debug, PartialEq)]

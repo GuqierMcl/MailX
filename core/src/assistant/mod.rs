@@ -54,9 +54,9 @@ pub use types::{
     ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
     ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
     ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
-    FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, OrganizeChange,
-    PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState, StartRun, ToolActivity,
-    ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion,
+    OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState, StartRun,
+    ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -207,7 +207,11 @@ impl Assistant {
                 since,
                 day_starts,
                 fresh,
-            } => self.start_summary(*ready, since, day_starts, fresh).await,
+                occasion,
+            } => {
+                self.start_summary(*ready, since, day_starts, fresh, occasion)
+                    .await
+            }
             RunKind::Chat {
                 conversation_id, ..
             } => {
@@ -396,15 +400,25 @@ impl Assistant {
         since: Option<String>,
         day_starts: Option<Vec<String>>,
         fresh: bool,
+        occasion: Option<Occasion>,
     ) -> Result<RunSnapshot, AppError> {
         let inner = &self.inner;
-        let has_since = since.is_some();
-        let query = MailOverviewQuery { since, day_starts };
+        let query = MailOverviewQuery {
+            since: since.clone(),
+            day_starts,
+        };
         let core = inner.core.clone();
         let overview = tokio::task::spawn_blocking(move || core.mail_overview(&query))
             .await
             .map_err(|_| AppError::new(ErrorCode::Internal))??;
-        let input = summary::build_input(&overview, &ready.settings.excluded_accounts, has_since);
+        let input = summary::build_input(
+            &overview,
+            &ready.settings.excluded_accounts,
+            since.as_deref(),
+            occasion,
+        );
+        // The key is made from the facts alone: the lines shown lately are
+        // added when the model is asked, and must not change what is cached.
         let key = SummaryCache::key(&input, &ready.target.model_id, ready.locale);
         // A refresh asks the model again; its answer replaces the cached one.
         if !fresh && let Some((text, completed_at)) = inner.summaries.get(&key) {

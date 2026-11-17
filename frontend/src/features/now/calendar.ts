@@ -121,3 +121,20 @@ export function solarTermOn(date: Date): SolarTerm | null {
   }
   return null
 }
+
+/** What a local date is, if anything: a holiday, or (for Chinese interfaces only) a solar term. */
+export type DayOccasion = { kind: 'holiday'; holiday: Holiday } | { kind: 'solarTerm'; term: SolarTerm }
+
+/**
+ * The one rule behind the preset line and the AI line: the holiday for this language, else, only when the
+ * language is Chinese, the solar term. A holiday wins.
+ */
+export function occasionOn(date: Date, language: string): DayOccasion | null {
+  const holiday = holidayOn(date, language)
+  if (holiday) return { kind: 'holiday', holiday }
+  if (language.startsWith('zh')) {
+    const term = solarTermOn(date)
+    if (term) return { kind: 'solarTerm', term }
+  }
+  return null
+}

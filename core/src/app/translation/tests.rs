@@ -1499,6 +1499,7 @@ fn binding(connection: &str, base_url: &str) -> AiConsent {
 fn ai_target(model: &str, key: &str) -> AiModelTarget {
     AiModelTarget::new(
         binding(CONNECTION, BASE_URL),
+        "custom".into(),
         crate::ai::AiProtocol::OpenaiCompatible,
         model.into(),
         None,

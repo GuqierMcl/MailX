@@ -11,8 +11,13 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- The Now page AI line now picks one thing worth noticing (a quiet inbox, a busy day, mail piled up while you were away, the time of day or a festival) instead of reciting numbers. / 「此刻」页 AI 问候语改为挑一件值得一提的事来说（安静的收件箱、忙碌的一天、离开期间攒下的邮件、时间或节日），不再罗列数字。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
+
 ### 🩹 Fixed
 
+- Fixed the Now page AI line often not appearing with models that think before answering (such as DeepSeek); a failed line can now be retried. / 修复了「此刻」页 AI 问候语在先思考再回答的模型（如 DeepSeek）上经常出不来的问题，生成失败时可以重试。
 - Selecting a provider near the bottom of the add-account list no longer scrolls the entire dialog upward. / 添加邮箱时，选择服务商列表下方的选项不再导致整个弹窗内容上移。 ([#146](https://github.com/GuqierMcl/MailX/pull/146))
 
 ## [0.4.0] - 2026-11-17

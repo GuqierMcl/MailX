@@ -8,7 +8,10 @@ use super::{
     ChatMessage, ChatRequest, Decoder, FinishReason, StreamEvent, ToolCallRequest, Usage,
     parse_arguments, sse::SseEvent, token_count,
 };
-use crate::ErrorCode;
+use crate::{
+    ErrorCode,
+    ai::{reasoning, settings::AiProtocol},
+};
 
 pub(super) fn body(request: &ChatRequest<'_>) -> Value {
     let mut messages = Vec::new();
@@ -66,6 +69,14 @@ pub(super) fn body(request: &ChatRequest<'_>) -> Value {
     }
     if let Some(max) = request.max_output {
         body["max_tokens"] = json!(max);
+    }
+    let fields = reasoning::body_fields(
+        AiProtocol::OpenaiCompatible,
+        request.provider_id,
+        request.reasoning,
+    );
+    for (name, value) in fields {
+        body[name] = value;
     }
     body
 }

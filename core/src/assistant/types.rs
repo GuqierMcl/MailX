@@ -35,6 +35,12 @@ pub enum RunKind {
         /// button); the new answer replaces the cached one.
         #[serde(default)]
         fresh: bool,
+        /// What today is on the user's calendar, when it is something: the
+        /// interface works it out the same way as for the preset line. A closed
+        /// list, never free text, so it cannot carry anything into the prompt.
+        #[serde(default)]
+        #[ts(optional)]
+        occasion: Option<Occasion>,
     },
     /// One user message in a conversation; `conversationId` `None` opens a
     /// new conversation.
@@ -44,6 +50,43 @@ pub enum RunKind {
         conversation_id: Option<String>,
         message: String,
     },
+}
+
+/// A holiday or solar term the Now page knows (`frontend/src/features/now/calendar.ts`);
+/// the ids are the same. Solar terms are only sent for Chinese interfaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Occasion {
+    NewYear,
+    SpringFestival,
+    Lantern,
+    DragonBoat,
+    Qixi,
+    MidAutumn,
+    Xiaohan,
+    Dahan,
+    Lichun,
+    Yushui,
+    Jingzhe,
+    Chunfen,
+    Qingming,
+    Guyu,
+    Lixia,
+    Xiaoman,
+    Mangzhong,
+    Xiazhi,
+    Xiaoshu,
+    Dashu,
+    Liqiu,
+    Chushu,
+    Bailu,
+    Qiufen,
+    Hanlu,
+    Shuangjiang,
+    Lidong,
+    Xiaoxue,
+    Daxue,
+    Dongzhi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]

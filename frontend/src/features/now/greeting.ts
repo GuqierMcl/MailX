@@ -1,7 +1,7 @@
 import type { ParseKeys } from 'i18next'
 import type { IconSvgElement } from '@hugeicons/react'
 import { MoonStarIcon, Sun01Icon, Sun03Icon, SunCloud01Icon, SunriseIcon, SunsetIcon } from '@hugeicons/core-free-icons'
-import { holidayOn, solarTermOn, type Holiday, type SolarTerm } from './calendar'
+import { occasionOn, type Holiday, type SolarTerm } from './calendar'
 
 /** A message key of the `now` namespace. */
 export type NowKey = Extract<ParseKeys<['now']>, `now:${string}`>
@@ -83,12 +83,9 @@ export type MailState = {
  */
 export function lineContext(date: Date, language: string, state: MailState): LineContext {
   if (state.attention) return { kind: 'attention' }
-  const holiday = holidayOn(date, language)
-  if (holiday) return { kind: 'holiday', holiday }
-  if (language.startsWith('zh')) {
-    const term = solarTermOn(date)
-    if (term) return { kind: 'solarTerm', term }
-  }
+  const occasion = occasionOn(date, language)
+  if (occasion?.kind === 'holiday') return { kind: 'holiday', holiday: occasion.holiday }
+  if (occasion?.kind === 'solarTerm') return { kind: 'solarTerm', term: occasion.term }
   if (state.newMail > 0) return { kind: 'newMail', count: state.newMail }
   const weekday = date.getDay()
   if (weekday === 1) return { kind: 'monday' }
