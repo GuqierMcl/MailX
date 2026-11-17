@@ -20,6 +20,7 @@ fn target(base_url: &str, protocol: AiProtocol, output_length: Option<u32>) -> A
             connection_id: "6f1f3d3e-8a40-4a39-9d3c-0f5f7a6b2c11".into(),
             base_url: base_url.into(),
         },
+        "custom".into(),
         protocol,
         "some-model".into(),
         output_length,

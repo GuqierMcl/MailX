@@ -18,6 +18,7 @@ const ready: AiState = {
   translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false,
 }
 const SENTENCE = '今天有 3 封新邮件，银行的那封值得先看。'
+const RETRY = 'AI 这次没写出来，再试一次'
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
   runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
@@ -265,8 +266,8 @@ describe('Now page: AI summary line', () => {
     })
   })
 
-  describe('failures keep the preset and say nothing', () => {
-    it.each(['assistantDisabled', 'aiNotConfigured', 'aiNetwork'] as const)('when the start is refused with %s', async (code) => {
+  describe('failures keep the preset', () => {
+    it.each(['assistantDisabled', 'aiNotConfigured'] as const)('and offer no retry when the start is refused with %s', async (code) => {
       const { client } = setup({ start: [new MailxClientError({ code, message: 'x', field: null })] })
       await settled()
       await waitFor(() => expect(client.assistantStart).toHaveBeenCalled())
@@ -276,10 +277,11 @@ describe('Now page: AI summary line', () => {
       expect(workingLine()).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '用 AI 总结' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
       expect(client.assistantStart).toHaveBeenCalledTimes(1)
     })
 
-    it('when the run fails after some text, the preset comes back', async () => {
+    it('and offer a quiet retry when the run fails after some text', async () => {
       const { emit } = setup()
       await settled()
       await waitFor(() => expect(workingLine()).toBeInTheDocument())
@@ -290,6 +292,55 @@ describe('Now page: AI summary line', () => {
       expect(preset()).not.toHaveAttribute('aria-hidden')
       await waitFor(() => expect(workingLine()).not.toBeInTheDocument())
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      const retry = await screen.findByRole('button', { name: RETRY })
+      expect(retry.className).toMatch(/text-muted-foreground\/60/)
+    })
+  })
+
+  describe('retrying a failed first run', () => {
+    const fail = (id = 'r1') => [event(2, { type: 'failed', code: 'aiInvalidResponse' }, id), event(3, { type: 'state', state: 'failed' }, id)]
+
+    it('offers a retry after a failed first run; clicking it starts a fresh run, and the button goes while it works', async () => {
+      const { client, emit } = setup({ start: [snapshot(), snapshot({ runId: 'r2' })] })
+      await settled()
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+      await emit(...fail())
+      const retry = await screen.findByRole('button', { name: RETRY })
+      expect(aiLayer()).toHaveAttribute('data-shown', 'false')
+      await userEvent.click(retry)
+      await waitFor(() => expect(client.assistantStart).toHaveBeenCalledTimes(2))
+      expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ type: 'nowSummary', fresh: true }) })
+      await waitFor(() => expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument())
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      await emit(event(2, { type: 'text', delta: SENTENCE }, 'r2'), event(3, { type: 'state', state: 'completed' }, 'r2'))
+      expect(sentence(SENTENCE)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '重新生成' })).toBeInTheDocument()
+    })
+
+    it('offers it when the start itself fails with a network error', async () => {
+      setup({ start: [new MailxClientError({ code: 'aiNetwork', message: 'x', field: null })] })
+      await settled()
+      expect(await screen.findByRole('button', { name: RETRY })).toBeInTheDocument()
+    })
+
+    it('is absent while a sentence is kept, even after a failed refresh', async () => {
+      const { emit } = setup({ start: [snapshot({ state: 'completed', text: SENTENCE, seq: 4 }), snapshot({ runId: 'r2' })] })
+      await settled()
+      await userEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+      await waitFor(() => expect(workingLine()).toBeInTheDocument())
+      await emit(...fail('r2'))
+      await waitFor(() => expect(workingLine()).not.toBeInTheDocument())
+      expect(sentence(SENTENCE)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
+    })
+
+    it('is absent while waiting for consent', async () => {
+      setup({ start: [snapshot({ state: 'awaitingConsent' })] })
+      await settled()
+      await screen.findByRole('button', { name: '用 AI 总结' })
+      expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
     })
   })
 
@@ -299,6 +350,7 @@ describe('Now page: AI summary line', () => {
     await act(async () => { await Promise.resolve() })
     expect(off.client.assistantStart).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '用 AI 总结' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: RETRY })).not.toBeInTheDocument()
   })
 
   it('runs nothing without a model', async () => {

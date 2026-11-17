@@ -163,7 +163,7 @@ AI connects directly by default. Under "Advanced" you can set a proxy (SOCKS5 or
 
 Under "Assistant" in the same page you can turn the assistant on or off, pick the model it uses (it follows the default model unless you choose another), and choose which mailboxes it may read.
 
-With a model set up, the Now page offers "Summarize with AI" next to its summary line. The first time, MailX asks whether the subjects, senders and text of your mail may be sent to that provider; attachments and images are not sent. After you agree, the line is written by the model, marked with a small sparkle, and you can hover it to see when it was written or write it again. If anything goes wrong, the usual line stays. To take back your agreement, choose "Revoke" under "Sending mail content"; switching to a provider at another address asks again.
+With a model set up, the Now page offers "Summarize with AI" next to its summary line. The first time, MailX asks whether the subjects, senders and text of your mail may be sent to that provider; attachments and images are not sent. After you agree, the line is written by the model, marked with a small sparkle, and you can hover it to see when it was written or write it again. If anything goes wrong, the usual line stays, with a small button next to it to try again. To take back your agreement, choose "Revoke" under "Sending mail content"; switching to a provider at another address asks again.
 
 ### Chat with the assistant
 

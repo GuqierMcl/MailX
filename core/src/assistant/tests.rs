@@ -1775,7 +1775,8 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
 
     let request = fx.request(0);
     assert!(request.get("tools").is_none(), "no tools: {request}");
-    assert_eq!(request["max_tokens"], 200);
+    assert_eq!(request["max_tokens"], 4096);
+    assert!(request.get("thinking").is_none(), "{request}");
     let system = request["messages"][0]["content"].as_str().unwrap();
     assert!(system.contains("never change a number") && system.contains("untrusted"));
     let facts = request["messages"][1]["content"].as_str().unwrap();
@@ -1885,6 +1886,56 @@ async fn a_failed_summary_is_not_cached() {
     let again = fx.assistant.start(summary_request()).await.unwrap();
     assert_eq!(again.state, RunState::Running);
     assert_eq!(fx.finished(&again.run_id).await.text, "Now it works.");
+}
+
+#[tokio::test]
+async fn a_summary_cut_off_by_the_output_cap_fails_and_is_not_cached() {
+    let fx = Fx::new().await;
+    fx.model(vec![vec![
+        oa_text("目前没有新邮件，今天也没有"),
+        oa_finish("length"),
+        done(),
+    ]]);
+    let started = fx.assistant.start(summary_request()).await.unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Failed);
+    assert_eq!(snapshot.error, Some(ErrorCode::AiInvalidResponse));
+    // Nothing was cached: the next start asks the model again.
+    fx.model(vec![say("All quiet.")]);
+    let again = fx.assistant.start(summary_request()).await.unwrap();
+    assert_eq!(again.state, RunState::Running);
+    assert_eq!(fx.finished(&again.run_id).await.text, "All quiet.");
+}
+
+#[tokio::test]
+async fn the_summary_turns_thinking_off_for_deepseek_and_the_chat_does_not() {
+    let fx = Fx::new().await;
+    fx.ai
+        .save_connection(SaveAiConnection {
+            id: Some(fx.connection_id.clone()),
+            provider_id: "deepseek".into(),
+            name: "DeepSeek".into(),
+            protocol: AiProtocol::OpenaiCompatible,
+            base_url: format!("{}/v1/", fx.server.http.url()),
+            use_proxy: false,
+            api_key: None,
+            verify: false,
+        })
+        .await
+        .unwrap();
+    fx.model(vec![say("Hi.")]);
+    let started = fx.assistant.start(summary_request()).await.unwrap();
+    fx.finished(&started.run_id).await;
+    assert_eq!(
+        fx.request(0)["thinking"],
+        json!({"type": "disabled"}),
+        "{}",
+        fx.request(0)
+    );
+
+    assert_eq!(fx.chat_and_wait("hello").await.state, RunState::Completed);
+    let chat = fx.request(1);
+    assert!(chat.get("thinking").is_none(), "{chat}");
 }
 
 #[tokio::test]

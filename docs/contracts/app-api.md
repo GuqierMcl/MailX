@@ -775,7 +775,7 @@ type AssistantEventKind =
   | { type: "failed"; code: ErrorCode };
 ```
 
-**运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
+**运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断；`nowSummary` 运行不会以 `length` 结束：被截断的概述句按 `failed` / `aiInvalidResponse` 处理，不缓存）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入、模型与语言在 30 分钟内命中缓存，直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
 
 **无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 

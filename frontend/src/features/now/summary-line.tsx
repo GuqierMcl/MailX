@@ -20,7 +20,8 @@ const SWAP_MS = 200
  * The line under the greeting: the preset sentence, or the AI's once it is there (now-page.md 5.1).
  * Both sit in the same grid cell and cross-fade, so the line keeps its height until the AI text
  * needs more. While the run works, a thin AI line glides under it; the mark, the time tooltip and
- * the refresh button appear with the finished text.
+ * the refresh button appear with the finished text. If the first run fails, the preset
+ * stays and a quiet retry button sits next to it.
  *
  * A refresh keeps the old sentence on screen (with the working line under it) and swaps in the new
  * one at the end with a cross-fade, so the line neither blanks nor jumps while text streams in.
@@ -31,7 +32,7 @@ export function SummaryLine({ client, preset, summary, mode }: { client: MailxCl
   useTranslation()
   const reduced = usePrefersReducedMotion()
   const [asking, setAsking] = useState(false)
-  const { text, working, refreshing, completedAt, needsConsent, service, refresh } = summary
+  const { text, working, refreshing, completedAt, failed, needsConsent, service, refresh } = summary
   const ai = text !== ''
   const done = completedAt !== null
 
@@ -97,6 +98,12 @@ export function SummaryLine({ client, preset, summary, mode }: { client: MailxCl
         </div>
         <AiWorkingLine active={working} className="-bottom-1.5" />
       </div>
+      {failed && (
+        <IconButton label={t('now:aiRetry')} size="icon-xs" onClick={refresh}
+          className="text-muted-foreground/60 hover:text-foreground focus-visible:text-foreground">
+          <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+        </IconButton>
+      )}
       {needsConsent && (
         <button type="button" onClick={() => setAsking(true)}
           className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"

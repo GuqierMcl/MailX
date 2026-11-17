@@ -10,6 +10,8 @@ use crate::{net::NetRoute, secrets::SecretValue, settings::AiConsent};
 pub struct AiModelTarget {
     /// The connection id and normalized base URL; what consent binds to.
     pub binding: AiConsent,
+    /// The catalog id of the provider (`"deepseek"`, `"custom"`).
+    pub(crate) provider_id: String,
     pub(crate) protocol: AiProtocol,
     pub(crate) model_id: String,
     /// The model's output limit in tokens, when the catalog knows it.
@@ -27,6 +29,7 @@ impl fmt::Debug for AiModelTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AiModelTarget")
             .field("binding", &self.binding)
+            .field("provider_id", &self.provider_id)
             .field("protocol", &self.protocol)
             .field("model_id", &self.model_id)
             .field("output_length", &self.output_length)
@@ -47,6 +50,7 @@ impl AiModelTarget {
 
     pub(crate) fn new(
         binding: AiConsent,
+        provider_id: String,
         protocol: AiProtocol,
         model_id: String,
         output_length: Option<u32>,
@@ -55,6 +59,7 @@ impl AiModelTarget {
     ) -> Self {
         Self {
             binding,
+            provider_id,
             protocol,
             model_id,
             output_length,

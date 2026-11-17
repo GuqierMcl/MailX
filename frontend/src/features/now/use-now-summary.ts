@@ -18,6 +18,12 @@ export type NowSummary = {
   refreshing: boolean
   /** The shown sentence is finished; the host's completion time (a cached answer keeps its original one). */
   completedAt: Date | null
+  /**
+   * The first run failed and no sentence is kept, so only the preset line shows: offer a retry. Not
+   * set while a run is going, when a sentence is kept (a failed refresh leaves it as it was), when
+   * consent is missing, or when the assistant is off or has no model (retrying cannot help there).
+   */
+  failed: boolean
   /** The assistant is ready but has no consent yet: offer "用 AI 总结". */
   needsConsent: boolean
   /** The connection the mail would go to, for the consent dialog. */
@@ -29,9 +35,9 @@ export type NowSummary = {
 /**
  * The AI sentence on the Now page (now-page.md 5.1). When the assistant is on and a model is usable,
  * one `nowSummary` run starts once the overview is in, with the same `since` and `dayStarts` the page
- * uses. A missing consent leaves the preset line and an offer; any failure leaves the preset line and
- * says nothing. Leaving the page cancels the run (the run hook does). Only a refresh starts another,
- * and it asks the host to skip its cache. The finished sentence is kept here, because the run hook
+ * uses. A missing consent leaves the preset line and an offer; a failure leaves the preset line, with a quiet
+ * retry button when no earlier sentence is kept. Leaving the page cancels the run (the run hook does). Only a
+ * refresh (or that retry) starts another, and it asks the host to skip its cache. The finished sentence is kept here, because the run hook
  * clears its text whenever it starts a run.
  */
 export function useNowSummary({ client, ready, since, dayStarts }: { client: MailxClient; ready: boolean; since: string; dayStarts: string[] }): NowSummary {
@@ -41,7 +47,7 @@ export function useNowSummary({ client, ready, since, dayStarts }: { client: Mai
   const ai = useAiState(client, on)
   const target = on ? assistantTarget(ai.data, assistant) : null
   const usable = target !== null
-  const { start, state, text, finishedAt } = useAssistantRun(client)
+  const { start, state, text, finishedAt, error } = useAssistantRun(client)
   // What the page is showing now; a refresh asks about the same period, not a later one.
   const latest = useRef({ since, dayStarts })
   useEffect(() => { latest.current = { since, dayStarts } })
@@ -74,6 +80,8 @@ export function useNowSummary({ client, ready, since, dayStarts }: { client: Mai
   const [kept, setKept] = useState<{ text: string; at: Date | null } | null>(null)
   if (finished && (kept?.text !== live || kept.at !== finishedAt)) setKept({ text: live, at: finishedAt })
   const holding = usable && kept !== null
+  // A refused start (assistant off, no model) is not worth a retry.
+  const failed = usable && !holding && state === 'failed' && error !== 'assistantDisabled' && error !== 'aiNotConfigured'
   const busy = usable && (state === 'starting' || running)
   return {
     // A refresh changes the line only when it completes (see SummaryLine); until then the kept sentence stays.
@@ -81,6 +89,7 @@ export function useNowSummary({ client, ready, since, dayStarts }: { client: Mai
     working: running || (holding && busy),
     refreshing: holding && busy,
     completedAt: finished ? finishedAt : holding ? kept.at : null,
+    failed,
     needsConsent: usable && state === 'awaitingConsent',
     service: target?.connection.name ?? '',
     refresh,

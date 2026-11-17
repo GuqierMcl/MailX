@@ -105,6 +105,8 @@ async fn go(protocol: AiProtocol, server: &MockStream) -> Run {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     run_with(protocol, server, &request, LIMITS, &NetRoute::default()).await
 }
@@ -310,6 +312,8 @@ async fn openai_request_has_the_expected_shape() {
         messages: &messages,
         tools: &tools,
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let run = run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(run.result, Ok(()));
@@ -349,6 +353,8 @@ async fn openai_request_has_the_expected_shape() {
         messages: &user("hi"),
         tools: &[],
         max_output: Some(256),
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(
@@ -356,6 +362,55 @@ async fn openai_request_has_the_expected_shape() {
         json!({"model":"m","stream":true,"max_tokens":256,
                "messages":[{"role":"user","content":"hi"}]})
     );
+}
+
+#[tokio::test]
+async fn openai_turns_thinking_off_only_for_a_provider_with_a_known_switch() {
+    let server = serve(vec![oa_text("x"), oa_finish("stop"), done()]).await;
+    for (provider_id, reasoning, switched) in [
+        ("deepseek", Reasoning::Off, true),
+        ("deepseek", Reasoning::Default, false),
+        ("openai", Reasoning::Off, false),
+        ("custom", Reasoning::Off, false),
+    ] {
+        let request = ChatRequest {
+            model: "m",
+            system: None,
+            messages: &user("hi"),
+            tools: &[],
+            max_output: Some(4096),
+            provider_id,
+            reasoning,
+        };
+        run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
+        let body = server.http.last().json();
+        if switched {
+            assert_eq!(body["thinking"], json!({"type": "disabled"}), "{body}");
+        } else {
+            assert!(body.get("thinking").is_none(), "{provider_id}: {body}");
+        }
+    }
+
+    // The Anthropic protocol never gets the field, whatever the provider id.
+    let server = serve(vec![
+        an_start(1),
+        an_block(0, json!({"type": "text", "text": ""})),
+        an_text(0, "x"),
+        an_stop(0),
+        an_end("end_turn", 2),
+    ])
+    .await;
+    let request = ChatRequest {
+        model: "m",
+        system: None,
+        messages: &user("hi"),
+        tools: &[],
+        max_output: None,
+        provider_id: "deepseek",
+        reasoning: Reasoning::Off,
+    };
+    run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
+    assert!(server.http.last().json().get("thinking").is_none());
 }
 
 #[tokio::test]
@@ -637,6 +692,8 @@ async fn anthropic_request_has_the_expected_shape() {
         messages: &messages,
         tools: &tools,
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let run = run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(run.result, Ok(()));
@@ -677,6 +734,8 @@ async fn anthropic_request_has_the_expected_shape() {
         messages: &user("hi"),
         tools: &[],
         max_output: Some(100),
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(
@@ -809,6 +868,8 @@ async fn a_silent_gap_longer_than_idle_times_out_and_keeps_earlier_events() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let limits = StreamLimits {
         idle: Duration::from_millis(200),
@@ -834,6 +895,8 @@ async fn steady_chunks_still_hit_the_total_limit() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let limits = StreamLimits {
         idle: Duration::from_secs(2),
@@ -869,6 +932,8 @@ async fn a_server_that_never_answers_times_out_at_first_byte() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let limits = StreamLimits {
         first_byte: Duration::from_millis(200),
@@ -889,6 +954,8 @@ async fn a_body_over_the_cap_is_rejected() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let limits = StreamLimits {
         max_bytes: 700,
@@ -917,6 +984,8 @@ async fn dropping_the_stream_mid_way_closes_the_connection() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     {
@@ -946,6 +1015,8 @@ async fn a_failed_proxy_is_an_error_not_a_direct_connection() {
         messages: &messages,
         tools: &[],
         max_output: None,
+        provider_id: "custom",
+        reasoning: Reasoning::Default,
     };
     let run = run_with(OPENAI, &server, &request, LIMITS, &route).await;
     assert_eq!(run.result, Err(ErrorCode::AiProxy));

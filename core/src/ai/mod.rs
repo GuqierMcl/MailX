@@ -6,6 +6,7 @@ pub(crate) mod catalog;
 pub(crate) mod client;
 pub(crate) mod icons;
 pub(crate) mod models;
+pub(crate) mod reasoning;
 pub mod settings;
 pub mod target;
 pub(crate) mod validation;

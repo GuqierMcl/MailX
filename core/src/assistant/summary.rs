@@ -15,8 +15,11 @@ use crate::{MailOverview, SupportedLocale};
 /// A cached answer is reused this long.
 pub(crate) const CACHE_FOR: Duration = Duration::from_secs(30 * 60);
 const CACHE_ENTRIES: usize = 16;
-/// The summary is short; the model is not allowed to ramble.
-pub(crate) const MAX_OUTPUT_TOKENS: u32 = 200;
+/// The most output tokens one summary may use. The line itself is a sentence or
+/// two (the prompt asks for that), but the cap also has to cover the model's
+/// thinking: a model that thinks first can spend hundreds of tokens before the
+/// first word, and a cap near the length of the line leaves it empty or cut off.
+pub(crate) const SUMMARY_OUTPUT_CAP: u32 = 4096;
 const MAX_SUBJECT_CHARS: usize = 120;
 const MAX_SENDER_CHARS: usize = 60;
 

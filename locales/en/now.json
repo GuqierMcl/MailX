@@ -162,5 +162,6 @@
   "syncIssue": "Some mailboxes have sync problems",
   "aiSummarize": "Summarize with AI",
   "aiRefresh": "Regenerate",
+  "aiRetry": "AI couldn't write this one. Try again",
   "aiSummaryLabel": "AI summary"
 }
