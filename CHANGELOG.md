@@ -15,7 +15,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - Add client-specific MCP setup and connection diagnostics for external agents, with guided import where automatic setup is unavailable. / 新增外部智能体的 MCP 专属接入与连接诊断，无法自动接入时提供导入指引。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 - Let MCP clients inspect mail conversations, find local correspondents and export received attachments. / MCP 客户端可查看邮件会话、查找本机往来联系人并导出收到的附件。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
-- The assistant chat shows when the model is thinking and for how long; click "Thought for N seconds" to read its thinking, collapsed by default and also in saved chats. / 助手对话会显示模型正在思考及思考时长，点击“思考了 N 秒”可查看思考过程，默认收起，已保存的对话同样如此。
+- The assistant chat shows when the model is thinking and for how long; click "Thought for N seconds" to read its thinking, collapsed by default and also in saved chats. / 助手对话会显示模型正在思考及思考时长，点击“思考了 N 秒”可查看思考过程，默认收起，已保存的对话同样如此。 ([#151](https://github.com/GuqierMcl/MailX/pull/151))
 
 ### ✨ Optimization
 
@@ -32,8 +32,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🩹 Fixed
 
-- The assistant now sends a thinking model's reasoning back with later requests in the same chat, as some servers require when thinking is combined with tool calls, and long thinking is no longer cut off after three minutes. / 助手在同一对话的后续请求中会回传思考模型的推理内容（部分服务器在思考配合工具调用时要求如此），较长的思考也不再在三分钟时被截断。
-- Fixed the Now page AI line often not appearing with models that think before answering (such as DeepSeek); a failed line can now be retried. / 修复了「此刻」页 AI 问候语在先思考再回答的模型（如 DeepSeek）上经常出不来的问题，生成失败时可以重试。
+- The assistant now sends a thinking model's reasoning back with later requests in the same chat, as some servers require when thinking is combined with tool calls, and long thinking is no longer cut off after three minutes. / 助手在同一对话的后续请求中会回传思考模型的推理内容（部分服务器在思考配合工具调用时要求如此），较长的思考也不再在三分钟时被截断。 ([#151](https://github.com/GuqierMcl/MailX/pull/151))
+- Fixed the Now page AI line often not appearing with models that think before answering (such as DeepSeek); a failed line can now be retried. / 修复了「此刻」页 AI 问候语在先思考再回答的模型（如 DeepSeek）上经常出不来的问题，生成失败时可以重试。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
 - Selecting a provider near the bottom of the add-account list no longer scrolls the entire dialog upward. / 添加邮箱时，选择服务商列表下方的选项不再导致整个弹窗内容上移。 ([#146](https://github.com/GuqierMcl/MailX/pull/146))
 
 ## [0.4.0] - 2026-11-17
