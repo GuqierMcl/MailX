@@ -232,6 +232,7 @@ impl DesktopState {
 
     /// The app icon badge preferences, for code already off the async
     /// runtime. `None` when settings cannot be read.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn badge_settings(&self) -> Option<mailx_core::BadgeSettings> {
         Some(self.settings_store().ok()?.get().ok()?.settings.badge)
     }
