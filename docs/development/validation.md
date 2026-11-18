@@ -1392,6 +1392,18 @@ MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态
 
 同步最新 main 后重新执行 `bun run check`、`bun run rust:test`、`bun run rust:fmt` 与 `bun run rust:clippy` 全部通过：前端 131 个文件 / 1,702 项，Rust 合计 1,851 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。
 
+## macOS 开发签名与调试进程生命周期（2026-11-18）
+
+本机 macOS 27.0.1 / Apple Silicon、Bun 1.3.12、Tauri CLI 2.12.2 下，开发入口使用固定本机自签名证书与显式 designated requirement，设计见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
+
+- `bun run version:test`：81 项通过、0 项失败、1 项显式原生测试跳过；覆盖双架构 runner、含空格路径、Tauri / Cargo / 应用参数分隔、release / 自定义 runner 拒绝、初始化残留保留、损坏配置与符号链接拒绝，以及签名失败不启动应用、`exec` 后 PID 连续性和无终端进程组退出。
+- 单独运行 `MAILX_TEST_MACOS_KEYCHAIN=1 bun test ./scripts/macos-dev-signing.test.mjs`：6 项通过。探针在临时钥匙串创建合成凭证，禁止系统交互后，三次内容不同的构建均能读取；CDHash 改变而指定身份要求保持一致。未签名重编译与锁定钥匙串均明确失败，解锁后恢复；临时钥匙串已清理，没有读取真实账号凭证。
+- 实际隔离桌面启动通过，使用空账号临时数据目录与独立测试 Tauri identifier；Cargo 日志确认签名 runner 被调用。触发 Rust 文件的 watch 重编译后，旧应用退出、新应用直接成为 Tauri 子进程，开发会话继续运行；前后 CDHash 不同、指定身份要求一致。
+- 实际开发会话经 Ctrl+C 结束后，测试应用和 Vite 均退出。无终端场景分别向 `tauri.mjs` 与 `dev-isolated.mjs` 外层进程发送 SIGTERM，桌面应用、Cargo、Vite 和中间启动进程均结束，未遗留子进程。测试数据目录已清理；本机持久开发签名身份保留供后续构建复用。
+- `bun run version:check`、shell 语法检查、所有新增脚本的 LF / 空白检查与 `git diff --check` 通过；`tauri dev --help`、`tauri build --help` 正常，`tauri dev --release` 明确拒绝。
+
+本次未读取或修改已有 MailX vault，也未接入真实邮箱；尚未验证旧 vault 首次授权、安装版正式签名、Intel macOS 或 Windows / Linux 实机行为。合成钥匙串结果不能代替这些范围。本次仅改变开发脚本与文档，未重复运行前端及 Rust 全量测试；实际桌面 debug 编译与启动已执行。
+
 ## 助手思考内容的捕获、回传与展示（2026-11-18）
 
 思考内容按协议捕获与原样回传，不按服务商分支：OpenAI 兼容接口按收到时的字段名（`reasoning_content` / `reasoning`）回传，没收到就不发；Anthropic 接口的 `thinking`（含签名）与 `redacted_thinking` 块按原位置回传；只回传给同一协议、连接、地址与模型。原 DeepSeek 专用的关闭思考开关已移除。
