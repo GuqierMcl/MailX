@@ -75,32 +75,41 @@ impl MailxCore {
         email_id: String,
         attachment_id: String,
     ) -> Result<AttachmentFile, AppError> {
-        let index = part_index(&email_id, &attachment_id)?;
         let core = self.clone();
         tokio::task::spawn_blocking(move || {
-            let (identity, raw, part, blobs) = {
-                let service = core.accounts()?;
-                let identity = service.body_identity(&email_id)?;
-                let (raw, part) = service
-                    .body_attachment(&identity, index)?
-                    .ok_or_else(missing)?;
-                (identity, raw, part, service.body_blobs())
-            };
-            let message = blobs.read(&raw).map_err(|_| missing())?;
-            let unchanged = core
-                .accounts()?
-                .body_stamp(&identity)?
-                .is_some_and(|(current, _)| current == raw);
-            if !unchanged {
-                return Err(missing());
-            }
-            let content = render::attachment_content(&message, index).map_err(|_| missing())?;
-            Ok(AttachmentFile {
-                info: info(&part),
-                bytes: content.bytes,
-            })
+            core.attachment_content_blocking(&email_id, &attachment_id)
         })
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal))?
+    }
+
+    /// Synchronous equivalent for the shared blocking tool layer.
+    pub(crate) fn attachment_content_blocking(
+        &self,
+        email_id: &str,
+        attachment_id: &str,
+    ) -> Result<AttachmentFile, AppError> {
+        let index = part_index(email_id, attachment_id)?;
+        let (identity, raw, part, blobs) = {
+            let service = self.accounts()?;
+            let identity = service.body_identity(email_id)?;
+            let (raw, part) = service
+                .body_attachment(&identity, index)?
+                .ok_or_else(missing)?;
+            (identity, raw, part, service.body_blobs())
+        };
+        let message = blobs.read(&raw).map_err(|_| missing())?;
+        let unchanged = self
+            .accounts()?
+            .body_stamp(&identity)?
+            .is_some_and(|(current, _)| current == raw);
+        if !unchanged {
+            return Err(missing());
+        }
+        let content = render::attachment_content(&message, index).map_err(|_| missing())?;
+        Ok(AttachmentFile {
+            info: info(&part),
+            bytes: content.bytes,
+        })
     }
 }

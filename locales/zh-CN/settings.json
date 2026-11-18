@@ -9,10 +9,22 @@
     "logo": "MailX 标志",
     "updates": "软件更新",
     "project": "项目与反馈",
-    "github": { "title": "GitHub", "description": "查看源代码与项目进展" },
-    "bug": { "title": "反馈问题", "description": "通过 GitHub 模板报告问题" },
-    "feature": { "title": "功能建议", "description": "分享想法，帮助改进 MailX" },
-    "releases": { "title": "更新内容", "description": "查看各版本发布说明" },
+    "github": {
+      "title": "GitHub",
+      "description": "查看源代码与项目进展"
+    },
+    "bug": {
+      "title": "反馈问题",
+      "description": "通过 GitHub 模板报告问题"
+    },
+    "feature": {
+      "title": "功能建议",
+      "description": "分享想法，帮助改进 MailX"
+    },
+    "releases": {
+      "title": "更新内容",
+      "description": "查看各版本发布说明"
+    },
     "external": "在系统浏览器中打开",
     "openFailed": "无法打开链接",
     "openFailedHint": "可以复制链接，在浏览器中打开。",
@@ -180,8 +192,8 @@
     "tokenUnavailable": "无法生成安全令牌",
     "acceptFailed": "监听在运行中中断"
   },
-  "mcpClients": "连接客户端",
-  "mcpClientsHint": "复制配置并粘贴到支持 MCP 的客户端中。",
+  "mcpClients": "手动配置",
+  "mcpClientsHint": "其他兼容客户端可使用下方的通用配置。",
   "mcpCopyConfig": "复制客户端配置",
   "mcpCopyShort": "复制",
   "mcpManualSetup": "手动配置",
@@ -195,7 +207,7 @@
   "mcpConfirmTitle": "开启 MCP 服务器？",
   "mcpConfirmAccess": "外部程序可读取所有账号的邮件和草稿，创建、修改和删除草稿，管理附件，并直接发送邮件，无需逐封确认。",
   "mcpConfirmLimits": "已读和星标会尝试同步到服务器，归档仅在本机生效；不能删除邮件。",
-  "mcpConfirmLocal": "同一系统用户下的程序都可连接，并可读取本机文件作为附件。",
+  "mcpConfirmLocal": "同一系统用户下的程序都可连接，读取本机文件作为附件，并将邮件附件导出到本机。",
   "mcpConfirmOff": "你可以随时在这里关闭。",
   "mcpConfirmCancel": "取消",
   "mcpConfirmEnable": "开启",
@@ -385,5 +397,57 @@
   "composeOpenModeDescription": "写邮件、回复、转发和继续编辑草稿时在哪里写。按住 Shift 点击可临时换用另一种。",
   "composeOpenWindow": "新窗口",
   "composeOpenInline": "主窗口内",
-  "quitInlineDraftFailed": "主窗口里正在写的邮件没能保存。"
+  "quitInlineDraftFailed": "主窗口里正在写的邮件没能保存。",
+  "mcpClientLabelsHint": "以上名称由客户端自行报告。",
+  "mcpAgents": "接入智能体",
+  "mcpAgentsHint": "将 MailX 接入这台电脑上的客户端。添加配置不会开启服务器，也不表示客户端已连接。",
+  "mcpAgentsLoading": "正在检查客户端配置…",
+  "mcpAgentState": {
+    "missing": "未配置",
+    "configured": "已添加配置",
+    "conflict": "已有不同的 MailX 配置",
+    "unavailable": "无法检查配置",
+    "manual": "手动接入"
+  },
+  "mcpAgentLocalHint": "使用个人客户端配置，完成后请重载客户端。",
+  "mcpAgentDeeplinkHint": "在 {{name}} 中完成导入，再查看上方的已连接客户端。",
+  "mcpAgentManualHint": "暂未确认官方自动接入方式，可复制配置片段并参考客户端说明。",
+  "mcpAgentUnavailableHint": "当前无法自动接入，可复制配置后手动添加。",
+  "mcpAgentConnectLabel": "接入 {{name}}",
+  "mcpAgentConnect": "接入",
+  "mcpAgentReconnect": "检查接入",
+  "mcpAgentRepair": "修复",
+  "mcpAgentWorking": "正在处理…",
+  "mcpAgentCopyLabel": "复制 {{name}} 配置",
+  "mcpAgentCopied": "已复制 {{name}} 配置",
+  "mcpAgentRemoveLabel": "移除 {{name}} 配置",
+  "mcpAgentRemove": "移除",
+  "mcpAgentDocsLabel": "查看 {{name}} 说明",
+  "mcpAgentDocs": "查看说明",
+  "mcpAgentsRefresh": "检查配置",
+  "mcpActionFailed": "无法完成 MCP 接入",
+  "mcpSetupOutcome": {
+    "configured": "已添加配置，请重载客户端以连接。",
+    "unchanged": "配置已是最新；如果尚未连接，请重载客户端。",
+    "handoff": "已打开客户端导入，请在客户端中完成确认。",
+    "conflict": "配置已发生变化，请检查后再决定是否替换。",
+    "unavailable": "无法自动接入，请复制配置后手动添加。",
+    "removed": "已移除 MailX 配置，请重载客户端以断开连接。"
+  },
+  "mcpDiagnostics": "连接检查",
+  "mcpDiagnosticsHint": "检查 MailX 桥接程序和工具列表，不读取邮件。检查通过不表示智能体已连接。",
+  "mcpDiagnose": "检查 MailX 连接",
+  "mcpDiagnosing": "正在检查…",
+  "mcpDiagnostic": {
+    "ready": "MailX 连接正常；智能体尚未连接时，请重载客户端。",
+    "disabled": "请先在上方开启 MCP 服务器，再重新检查。",
+    "coreUnavailable": "请保持 MailX 运行，待 MCP 服务器就绪后重新检查。",
+    "bridgeUnavailable": "MailX 桥接程序不可用，请检查应用安装并修复客户端配置。",
+    "timeout": "连接检查超时，请重启 MCP 服务器后重试。",
+    "protocolError": "桥接程序未能完成 MCP 握手，请重启服务器后重新检查。"
+  },
+  "mcpConflictTitle": "替换 {{name}} 中的 MailX 配置？",
+  "mcpConflictDescription": "此条目指向其他 MailX 安装位置或数据目录。替换后，客户端将连接当前 MailX；其他客户端设置会保留。",
+  "mcpConflictReplace": "替换 MailX 条目",
+  "mcpAgentHarnessHint": "可在 Harness 设置中添加 stdio 服务器，或复制专属配置用于个人 Harness 配置。"
 }

@@ -83,7 +83,7 @@ import type {
   EwsSettingsDiscovery,
 } from '@/generated/accounts'
 import type { StartupStatus } from '@/generated/startup'
-import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
+import type { McpAgent, McpAgentId, McpClientConfig, McpDiagnostic, McpSetupResult, McpStatus } from '@/features/mcp/types'
 import type { UpdateSnapshot } from '@/features/updater/types'
 
 export type ClientFailure = AppError | {
@@ -433,6 +433,14 @@ export interface MailxClient {
   setMcpEnabled(enabled: boolean): Promise<McpStatus>
   /** Command and arguments for a client's `mcpServers` entry; `--discovery` is always among them. */
   getMcpClientConfig(): Promise<McpClientConfig>
+  /** Lists host-owned client adapters and their configuration state, not live connections. */
+  getMcpAgents(): Promise<McpAgent[]>
+  /** Adds only MailX's entry. Replacing a conflicting entry requires an explicit choice. */
+  setupMcpAgent(id: McpAgentId, replace?: boolean): Promise<McpSetupResult>
+  /** Removes only the MailX entry recognized by the selected adapter. */
+  removeMcpAgent(id: McpAgentId): Promise<McpSetupResult>
+  /** Checks the bridge using initialize/tools/list without reading mail. */
+  diagnoseMcp(): Promise<McpDiagnostic>
   /** Status changes: connections coming and going, start failures, stop. */
   onMcpStatus(listener: (status: McpStatus) => void): () => void
   /** Every change of the update state. */
@@ -763,6 +771,10 @@ export function createDesktopClient(): MailxClient {
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
     getMcpClientConfig: () => call<McpClientConfig>('mcp_client_config'),
+    getMcpAgents: () => call<McpAgent[]>('mcp_agents'),
+    setupMcpAgent: (id, replace = false) => call<McpSetupResult>('mcp_agent_setup', { id, replace }),
+    removeMcpAgent: (id) => call<McpSetupResult>('mcp_agent_remove', { id }),
+    diagnoseMcp: () => call<McpDiagnostic>('mcp_diagnose'),
     onMcpStatus: (listener) => subscribe<McpStatus>(HOST_EVENTS.mcp, listener),
   }
 }

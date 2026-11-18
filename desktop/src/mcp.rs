@@ -56,7 +56,7 @@ pub(crate) fn shared_tools(
     core: mailx_core::MailxCore,
 ) -> mailx_core::tools::Tools {
     let default_state = state.clone();
-    mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
+    let tools = mailx_core::tools::Tools::new(core, move || default_state.default_account_id())
         .with_undo_send_seconds({
             let send_state = state.clone();
             move || send_state.undo_send_seconds().map_err(Into::into)
@@ -77,7 +77,11 @@ pub(crate) fn shared_tools(
                 crate::window_access::draft_open_in(handle.webview_windows().into_keys(), draft_id)
             }
         })
-        .with_audit(Arc::new(StderrAudit))
+        .with_audit(Arc::new(StderrAudit));
+    match state.data_dir() {
+        Ok(directory) => tools.with_attachment_export_dir(directory.join("mcp").join("exports")),
+        Err(_) => tools,
+    }
 }
 
 #[derive(Default)]

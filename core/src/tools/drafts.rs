@@ -25,12 +25,16 @@ pub struct CreateDraftInput {
     /// Id from list_accounts; choose by emailAddress. Omit for its isDefault account.
     pub account_id: Option<String>,
     /// Recipients, at most 50.
+    #[schemars(length(max = 50))]
     pub to: Vec<Address>,
     /// At most 50.
+    #[schemars(length(max = 50))]
     pub cc: Option<Vec<Address>>,
     /// At most 50.
+    #[schemars(length(max = 50))]
     pub bcc: Option<Vec<Address>>,
     /// At most 998 characters.
+    #[schemars(length(max = 998))]
     pub subject: String,
     /// HTML body, at most 200000 bytes. MailX sanitizes it to its composer
     /// whitelist (scripts, styles and remote content are removed).
@@ -42,6 +46,7 @@ pub struct CreateDraftInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDraftOutput {
+    pub revision: u32,
     pub draft_id: String,
     pub account_id: String,
     pub sender_email_address: String,
@@ -84,6 +89,7 @@ pub struct CreateReplyDraftInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReplyDraftOutput {
+    pub revision: u32,
     pub draft_id: String,
     pub account_id: String,
     pub sender_email_address: String,
@@ -119,7 +125,7 @@ pub(super) fn register(tools: &mut Tools) {
     let list = ToolSpec::new::<ListDraftsInput, ListDraftsOutput>(
         "list_drafts",
         "List drafts",
-        "List the user's mail drafts, newest first, at most 100 (truncated says whether more exist). Each entry has \
+        "List the user's mail drafts, newest first, at most 100 per page. Use nextCursor to continue with unchanged filters. Filter by account, origin or subject query. truncated says whether more exist. Each entry has \
          id, accountId, subject, up to 5 recipient addresses, updatedAt, origin (user, mcp or ai: who created it), \
          revision, locked (queued or being sent) and open (the user has it open in an editor window right now). \
          No bodies; call read_draft for one.",
@@ -276,6 +282,7 @@ fn create_draft(
     call.note_resource(&draft.account_id);
     call.note_resource(&draft.id);
     Ok(CreateDraftOutput {
+        revision: draft.revision,
         sender_email_address: call.core.account_email_address(&draft.account_id)?,
         draft_id: draft.id,
         account_id: draft.account_id,
@@ -326,6 +333,7 @@ fn create_reply_draft(
     call.note_resource(&draft.account_id);
     call.note_resource(&draft.id);
     Ok(CreateReplyDraftOutput {
+        revision: draft.revision,
         sender_email_address: call.core.account_email_address(&draft.account_id)?,
         draft_id: draft.id,
         account_id: draft.account_id,
@@ -334,7 +342,7 @@ fn create_reply_draft(
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum DraftOriginOut {
     User,
@@ -355,6 +363,14 @@ impl From<DraftOrigin> for DraftOriginOut {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListDraftsInput {
+    /// Page size, default and maximum 100.
+    #[schemars(range(min = 1, max = 100))]
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+    pub origin: Option<DraftOriginOut>,
+    /// Subject substring, at most 256 characters (ASCII case-insensitive).
+    #[schemars(length(max = 256))]
+    pub query: Option<String>,
     /// Only this account's drafts. Omit for every permitted account.
     pub account_id: Option<String>,
 }
@@ -382,8 +398,10 @@ pub struct DraftListItem {
 #[serde(rename_all = "camelCase")]
 pub struct ListDraftsOutput {
     pub drafts: Vec<DraftListItem>,
-    /// More drafts exist than the 100 returned.
+    /// More drafts match after this page.
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -496,12 +514,60 @@ fn list_drafts(call: &ToolCall<'_>, input: ListDraftsInput) -> Result<ListDrafts
         }
         call.require_account(id)?;
     }
-    let all = call.core.list_drafts(input.account_id.as_deref())?;
-    let mut visible = all
-        .into_iter()
-        .filter(|d| call.ctx.grant.accounts.permits(&d.account_id));
+    let limit = input.limit.unwrap_or(MAX_LISTED_DRAFTS as u32);
+    if limit == 0 || limit > call.policy.max_page_size {
+        return Err(ToolError::invalid("limit", "out of range"));
+    }
+    if input
+        .query
+        .as_ref()
+        .is_some_and(|q| q.chars().count() > 256)
+    {
+        return Err(ToolError::invalid("query", "too long"));
+    }
+    let mut accounts: Vec<String> = match input.account_id {
+        Some(id) => vec![id],
+        None => call
+            .core
+            .account_identities()?
+            .into_iter()
+            .filter(|a| call.ctx.grant.accounts.permits(&a.id))
+            .map(|a| a.id)
+            .collect(),
+    };
+    accounts.sort();
+    accounts.dedup();
+    let origin = input.origin.map(|origin| match origin {
+        DraftOriginOut::User => "user",
+        DraftOriginOut::Mcp => "mcp",
+        DraftOriginOut::Ai => "ai",
+    });
+    let query = input
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty());
+    let filter = serde_json::json!(["drafts", accounts, origin, query]).to_string();
+    let cursor = super::paging::decode(input.cursor.as_deref(), &filter)?;
+    let mut summaries = call.core.accounts()?.list_drafts_page(
+        &accounts,
+        origin,
+        query,
+        cursor.as_ref().map(|c| (c.at.as_str(), c.id.as_str())),
+        limit + 1,
+    )?;
+    let truncated = summaries.len() > limit as usize;
+    summaries.truncate(limit as usize);
+    let next_cursor = if truncated {
+        summaries
+            .last()
+            .map(|last| super::paging::encode(filter, last.updated_at.clone(), last.id.clone()))
+            .transpose()?
+    } else {
+        None
+    };
     let mut drafts = Vec::new();
-    for summary in visible.by_ref().take(MAX_LISTED_DRAFTS) {
+    for summary in summaries {
         let locked = call.core.draft_locked(&summary.id)?;
         drafts.push(DraftListItem {
             sender_email_address: call.core.account_email_address(&summary.account_id)?,
@@ -522,8 +588,11 @@ fn list_drafts(call: &ToolCall<'_>, input: ListDraftsInput) -> Result<ListDrafts
             revision: summary.revision,
         });
     }
-    let truncated = visible.next().is_some();
-    Ok(ListDraftsOutput { drafts, truncated })
+    Ok(ListDraftsOutput {
+        drafts,
+        truncated,
+        next_cursor,
+    })
 }
 
 fn read_draft(call: &ToolCall<'_>, input: DraftIdInput) -> Result<ReadDraftOutput, ToolError> {

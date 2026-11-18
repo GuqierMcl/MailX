@@ -1,5 +1,6 @@
 //! Tool metadata, the registry, and the single call path every transport uses.
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use schemars::generate::SchemaSettings;
@@ -223,11 +224,16 @@ pub struct ToolCall<'a> {
     draft_open: &'a (dyn Fn(&str) -> bool + Send + Sync),
     ui_opener: &'a UiOpener,
     draft_opener: &'a UiOpener,
+    attachment_export_dir: Option<&'a Path>,
     resources: RefCell<Vec<String>>,
     trusted: RefCell<TrustedOutput>,
 }
 
 impl ToolCall<'_> {
+    pub(super) fn attachment_export_dir(&self) -> Result<&Path, ToolError> {
+        self.attachment_export_dir
+            .ok_or_else(|| ToolError::new(ToolErrorCode::Unavailable))
+    }
     /// The host's default account id (may be empty when none is set).
     pub fn default_account_id(&self) -> String {
         (self.default_account)()
@@ -306,6 +312,7 @@ pub struct Tools {
     draft_open: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     ui_opener: Arc<UiOpener>,
     draft_opener: Arc<UiOpener>,
+    attachment_export_dir: Option<PathBuf>,
     audit: Arc<dyn ToolAudit>,
     entries: Vec<Entry>,
 }
@@ -325,6 +332,7 @@ impl Tools {
             draft_open: Arc::new(|_| false),
             ui_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             draft_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
+            attachment_export_dir: None,
             audit: Arc::new(NoAudit),
             entries: Vec::new(),
         };
@@ -335,7 +343,15 @@ impl Tools {
         super::sending::register(&mut tools);
         super::attachments::register(&mut tools);
         super::ui::register(&mut tools);
+        super::discovery::register(&mut tools);
+        super::attachments::register_exports(&mut tools);
         tools
+    }
+
+    /// The host-controlled directory for explicitly exported attachments.
+    pub fn with_attachment_export_dir(mut self, directory: PathBuf) -> Self {
+        self.attachment_export_dir = Some(directory);
+        self
     }
 
     /// Host setting read on each send. A settings failure must not bypass
@@ -516,6 +532,7 @@ impl Tools {
             draft_open: &*self.draft_open,
             ui_opener: &*self.ui_opener,
             draft_opener: &*self.draft_opener,
+            attachment_export_dir: self.attachment_export_dir.as_deref(),
             resources: RefCell::new(Vec::new()),
             trusted: RefCell::default(),
         };

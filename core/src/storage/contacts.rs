@@ -102,8 +102,8 @@ impl CandidateFilter {
     /// Exactly the parameters [`Self::sql`] refers to.
     fn params(&self) -> Vec<String> {
         match self {
-            Self::All => vec![],
-            Self::Contains(text) => vec![text.clone()],
+            Self::All => vec![String::new(); 4],
+            Self::Contains(text) => vec![text.clone(), String::new(), String::new(), String::new()],
             Self::Prefix(text) => vec![
                 text.clone(),
                 text.replace('\\', "\\\\")
@@ -133,6 +133,17 @@ fn stats(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, ContactStats)> {
 }
 
 impl Storage {
+    pub(crate) fn contact_own_addresses(
+        &self,
+        account_ids: Option<&[String]>,
+    ) -> Result<Vec<String>, AppError> {
+        let mut statement = self.db.prepare("SELECT DISTINCT lower(email_address) FROM accounts WHERE (?1 IS NULL OR id IN (SELECT value FROM json_each(?1)))")?;
+        let rows = statement
+            .query_map([account_ids.map(keys).transpose()?], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Adds or removes the rule for a normalized address; idempotent.
     pub(crate) fn set_contact_aggregation(
         &mut self,
@@ -200,6 +211,7 @@ impl Storage {
     pub(crate) fn contact_candidates(
         &self,
         filter: &CandidateFilter,
+        account_ids: Option<&[String]>,
     ) -> Result<Vec<String>, AppError> {
         let address = "json_extract(j.value, '$.address')";
         let name = "json_extract(j.value, '$.name')";
@@ -208,26 +220,34 @@ impl Storage {
         // distinct recipient lists of sent-role rows.
         let sql = format!(
             "WITH p AS MATERIALIZED (SELECT DISTINCT from_address AS address, from_name AS name
-                                       FROM messages),
+                                       FROM messages WHERE (?5 IS NULL OR account_id IN (SELECT value FROM json_each(?5)))),
                   u AS MATERIALIZED (SELECT DISTINCT to_addresses AS to_list, cc_addresses AS cc_list
                                        FROM messages
-                                      WHERE folder_id IN (SELECT id FROM folders WHERE role = 'sent')),
+                                      WHERE folder_id IN (SELECT id FROM folders WHERE role = 'sent')
+                                        AND (?5 IS NULL OR account_id IN (SELECT value FROM json_each(?5)))),
                   t AS (SELECT to_list AS list FROM u UNION SELECT cc_list FROM u)
              SELECT lower(p.address) FROM p WHERE p.address <> '' AND ({})
              UNION
              SELECT lower({address}) FROM t, json_each(t.list) j WHERE ({})
              UNION
              SELECT lower(j.value) FROM outbox o, json_each(o.envelope, '$.recipients') j
-              WHERE o.state = 'accepted' AND ({})",
+              WHERE o.state = 'accepted' AND (?5 IS NULL OR o.account_id IN (SELECT value FROM json_each(?5))) AND ({})",
             filter.sql("p.address", Some("p.name")),
             filter.sql(address, Some(name)),
             filter.sql("j.value", None),
         );
         let mut statement = self.db.prepare(&sql)?;
         let rows = statement
-            .query_map(params_from_iter(filter.params()), |row| {
-                row.get::<_, Option<String>>(0)
-            })?
+            .query_map(
+                params_from_iter(
+                    filter
+                        .params()
+                        .into_iter()
+                        .map(Some)
+                        .chain(std::iter::once(account_ids.map(keys).transpose()?)),
+                ),
+                |row| row.get::<_, Option<String>>(0),
+            )?
             .filter_map(Result::transpose)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows
@@ -242,6 +262,7 @@ impl Storage {
     pub(crate) fn contact_received(
         &self,
         addresses: &[String],
+        account_ids: Option<&[String]>,
     ) -> Result<Vec<(String, ContactStats)>, AppError> {
         if addresses.is_empty() {
             return Ok(vec![]);
@@ -250,13 +271,17 @@ impl Storage {
             "SELECT lower(m.from_address), COUNT(*), MAX(m.received_at), {}
              {VISIBLE_MESSAGES} AND {OUTSIDE_JUNK}
                AND lower(m.from_address) IN (SELECT value FROM json_each(?1))
+               AND (?2 IS NULL OR m.account_id IN (SELECT value FROM json_each(?2)))
              GROUP BY lower(m.from_address)",
             newest_name("m.received_at", "m.from_name"),
         );
         Ok(self
             .db
             .prepare(&sql)?
-            .query_map([keys(addresses)?], stats)?
+            .query_map(
+                params![keys(addresses)?, account_ids.map(keys).transpose()?],
+                stats,
+            )?
             .collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -267,6 +292,7 @@ impl Storage {
     pub(crate) fn contact_sent(
         &self,
         addresses: &[String],
+        account_ids: Option<&[String]>,
     ) -> Result<Vec<(String, ContactStats)>, AppError> {
         if addresses.is_empty() {
             return Ok(vec![]);
@@ -274,8 +300,10 @@ impl Storage {
         let sql = format!(
             "WITH k AS (SELECT value AS address FROM json_each(?1)),
                   s AS (SELECT m.id, m.received_at, m.to_addresses, m.cc_addresses
-                        {VISIBLE_MESSAGES} AND {SENT}),
-                  l AS (SELECT o.id, o.accepted_at, o.envelope {LOCAL_COPIES}),
+                        {VISIBLE_MESSAGES} AND {SENT}
+                          AND (?2 IS NULL OR m.account_id IN (SELECT value FROM json_each(?2)))),
+                  l AS (SELECT o.id, o.accepted_at, o.envelope {LOCAL_COPIES}
+                          AND (?2 IS NULL OR o.account_id IN (SELECT value FROM json_each(?2)))),
                   r(message, address, name, at) AS (
                     SELECT s.id, lower(json_extract(j.value, '$.address')),
                            json_extract(j.value, '$.name'), s.received_at
@@ -295,7 +323,10 @@ impl Storage {
         Ok(self
             .db
             .prepare(&sql)?
-            .query_map([keys(addresses)?], stats)?
+            .query_map(
+                params![keys(addresses)?, account_ids.map(keys).transpose()?],
+                stats,
+            )?
             .collect::<Result<Vec<_>, _>>()?)
     }
 }

@@ -9,6 +9,21 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: vi.fn() }))
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(isTauri).mockReturnValue(true) })
 
 describe('desktop client boundary', () => {
+  it('forwards MCP adapter IDs and explicit replacement without accepting file paths', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'request' })
+    const client = createDesktopClient()
+    await client.getMcpAgents()
+    await client.setupMcpAgent('openCode')
+    await client.setupMcpAgent('codex', true)
+    await client.removeMcpAgent('openCode')
+    await client.diagnoseMcp()
+    expect(invoke).toHaveBeenNthCalledWith(1, 'mcp_agents', undefined)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'mcp_agent_setup', { id: 'openCode', replace: false })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'mcp_agent_setup', { id: 'codex', replace: true })
+    expect(invoke).toHaveBeenNthCalledWith(4, 'mcp_agent_remove', { id: 'openCode' })
+    expect(invoke).toHaveBeenNthCalledWith(5, 'mcp_diagnose', undefined)
+  })
+
   it('manages login startup through host commands with no caller-supplied paths', async () => {
     vi.mocked(invoke).mockResolvedValue({ ok: true, data: { enabled: true, available: true }, requestId: 'request' })
     const client = createDesktopClient()

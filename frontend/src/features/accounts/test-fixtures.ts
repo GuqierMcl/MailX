@@ -5,6 +5,7 @@ import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
 import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
+import { mockMcpAgents } from '@/features/mcp/mock-agents'
 
 export function exampleAccount(): Account & { imap: import('@/generated/accounts').ConnectionConfig; smtp: import('@/generated/accounts').ConnectionConfig; authentication: Extract<Account['authentication'], { kind: 'password' }> }
 export function exampleAccount(overrides: Partial<Account>): Account & { imap: import('@/generated/accounts').ConnectionConfig; smtp: import('@/generated/accounts').ConnectionConfig }
@@ -36,6 +37,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
+  let mcpAgents = mockMcpAgents({ command: '/opt/MailX/mailx-mcp', args: ['--discovery', '/data/mcp-discovery.json'], display: { command: '/opt/MailX/mailx-mcp', discovery: '~/data/mcp-discovery.json' } })
   return {
     available: true,
     getAutostart: vi.fn<MailxClient['getAutostart']>().mockImplementation(async () => ({ ...autostart })),
@@ -185,6 +187,21 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
       return enabled ? { state: 'running', clients: [] } : { state: 'off' }
     }),
     getMcpClientConfig: vi.fn<MailxClient['getMcpClientConfig']>().mockResolvedValue({ command: '/opt/MailX/mailx-mcp', args: ['--discovery', '/data/mcp-discovery.json'], display: { command: '/opt/MailX/mailx-mcp', discovery: '~/data/mcp-discovery.json' } }),
+    getMcpAgents: vi.fn<MailxClient['getMcpAgents']>().mockImplementation(async () => structuredClone(mcpAgents)),
+    setupMcpAgent: vi.fn<MailxClient['setupMcpAgent']>().mockImplementation(async (id, replace = false) => {
+      const agent = mcpAgents.find((item) => item.id === id)!
+      if (!agent.available) return { state: 'unavailable', agent: structuredClone(agent) }
+      if (agent.method === 'deeplink') return { state: 'handoff', agent: structuredClone(agent) }
+      if (agent.configuration === 'conflict' && !replace) return { state: 'conflict', agent: structuredClone(agent) }
+      const state = agent.configuration === 'configured' ? 'unchanged' : 'configured'
+      mcpAgents = mcpAgents.map((item) => item.id === id ? { ...item, configuration: 'configured' } : item)
+      return { state, agent: structuredClone(mcpAgents.find((item) => item.id === id)!) }
+    }),
+    removeMcpAgent: vi.fn<MailxClient['removeMcpAgent']>().mockImplementation(async (id) => {
+      mcpAgents = mcpAgents.map((item) => item.id === id ? { ...item, configuration: 'missing' } : item)
+      return { state: 'removed', agent: structuredClone(mcpAgents.find((item) => item.id === id)!) }
+    }),
+    diagnoseMcp: vi.fn<MailxClient['diagnoseMcp']>().mockResolvedValue({ ok: true, code: 'ready', toolCount: 25 }),
     onMcpStatus: vi.fn<MailxClient['onMcpStatus']>().mockReturnValue(() => undefined),
     assistantStart: vi.fn<MailxClient['assistantStart']>(),
     assistantCancel: vi.fn<MailxClient['assistantCancel']>().mockResolvedValue(undefined),

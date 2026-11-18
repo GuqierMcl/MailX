@@ -291,6 +291,18 @@ impl AccountService {
         self.storage.list_drafts(account_id)
     }
 
+    pub(crate) fn list_drafts_page(
+        &self,
+        account_ids: &[String],
+        origin: Option<&str>,
+        query: Option<&str>,
+        after: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Vec<DraftSummary>, AppError> {
+        self.storage
+            .list_drafts_page(account_ids, origin, query, after, limit)
+    }
+
     pub fn update_draft(&mut self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
         validate_uuid(&request.id, "draftId")?;
         let current = self.storage.get_draft(&request.id)?;

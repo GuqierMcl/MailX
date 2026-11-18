@@ -189,7 +189,11 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
             expected.push("show_email_in_app");
             expected.push("show_draft_in_app");
         }
-        assert_eq!(ids.len(), if audience == Audience::Mcp { 22 } else { 20 });
+        expected.extend(["get_conversation", "suggest_contacts"]);
+        if audience == Audience::Mcp {
+            expected.push("save_email_attachment");
+        }
+        assert_eq!(ids.len(), if audience == Audience::Mcp { 25 } else { 22 });
         assert_eq!(ids, expected);
         let delete = list.iter().find(|t| t.id == "delete_draft").unwrap();
         assert!(delete.annotations.destructive && !delete.annotations.read_only);
@@ -258,7 +262,9 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
             "list_drafts",
             "read_draft",
             "show_email_in_app",
-            "show_draft_in_app"
+            "show_draft_in_app",
+            "get_conversation",
+            "suggest_contacts"
         ]
     );
 }
@@ -485,7 +491,8 @@ async fn search_lists_mail_with_cursor_and_filters() {
                 "pendingChanges",
                 "preview",
                 "receivedAt",
-                "subject"
+                "subject",
+                "to"
             ]
         );
         assert_eq!(hit["bodyCached"], true);
@@ -2518,3 +2525,6 @@ async fn refresh_sync_is_scoped_and_reports_an_idle_worker_without_claiming_comp
         assert_eq!(output["userActionRequired"], false);
     }
 }
+
+#[path = "enhancement_tests.rs"]
+mod enhancements;

@@ -62,6 +62,8 @@
     "summaryUnread": "{{count}} unread",
     "tool": {
       "search_emails": { "running": "Searching mail…", "done_one": "Searched {{count}} email", "done_other": "Searched {{count}} emails" },
+      "get_conversation": { "running": "Looking at the conversation…", "done_one": "Found {{count}} email in the conversation", "done_other": "Found {{count}} emails in the conversation" },
+      "suggest_contacts": { "running": "Looking for contacts…", "done_one": "Found {{count}} contact", "done_other": "Found {{count}} contacts" },
       "read_email": { "running": "Reading mail…", "done_one": "Read {{count}} email", "done_other": "Read {{count}} emails" },
       "list_accounts": { "running": "Looking at accounts…", "done": "Looked at accounts" },
       "list_folders": { "running": "Looking at folders…", "done": "Looked at folders" },

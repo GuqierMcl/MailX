@@ -34,6 +34,7 @@ pub enum ToolErrorCode {
     AttachmentTooLarge,
     TooManyAttachments,
     FileUnavailable,
+    FileWriteFailed,
     /// Storage or the core is not ready; retrying later may work.
     Unavailable,
     Internal,
@@ -63,6 +64,7 @@ impl ToolErrorCode {
             Self::AttachmentTooLarge => "The attachments exceed the allowed size.",
             Self::TooManyAttachments => "The draft has too many attachments.",
             Self::FileUnavailable => "The attachment file could not be read.",
+            Self::FileWriteFailed => "The attachment could not be exported.",
             Self::Unavailable => "MailX is temporarily unavailable. Try again later.",
             Self::Internal => "An internal error occurred.",
         }

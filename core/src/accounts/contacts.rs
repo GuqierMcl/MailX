@@ -64,6 +64,15 @@ impl AccountService {
         query: &str,
         limit: Option<u32>,
     ) -> Result<Vec<ContactSuggestion>, AppError> {
+        self.suggest_contacts_scoped(query, limit, None)
+    }
+
+    pub(crate) fn suggest_contacts_scoped(
+        &self,
+        query: &str,
+        limit: Option<u32>,
+        account_ids: Option<&[String]>,
+    ) -> Result<Vec<ContactSuggestion>, AppError> {
         let limit = limit.unwrap_or(DEFAULT_CONTACT_SUGGESTIONS);
         if !(1..=MAX_CONTACT_SUGGESTIONS).contains(&limit) {
             return Err(AppError::validation("limit"));
@@ -76,17 +85,21 @@ impl AccountService {
             return Ok(vec![]);
         }
         let wanted = query.to_lowercase();
-        let own: HashSet<String> = self.storage.overview_own_addresses()?.into_iter().collect();
+        let own: HashSet<String> = self
+            .storage
+            .contact_own_addresses(account_ids)?
+            .into_iter()
+            .collect();
         let candidates: Vec<String> = self
             .storage
-            .contact_candidates(&prefilter(query))?
+            .contact_candidates(&prefilter(query), account_ids)?
             .into_iter()
             .filter(|address| !own.contains(address) && !no_reply(address))
             .collect();
         // People written to rank first, so the others are counted only when
         // too few of them match.
         let mut written: HashMap<String, Person> = HashMap::new();
-        for (address, stats) in self.storage.contact_sent(&candidates)? {
+        for (address, stats) in self.storage.contact_sent(&candidates, account_ids)? {
             if stats.count > 0 {
                 let person = written.entry(address).or_default();
                 person.sent_to = true;
@@ -96,7 +109,7 @@ impl AccountService {
         let (known, others): (Vec<String>, Vec<String>) = candidates
             .into_iter()
             .partition(|address| written.contains_key(address));
-        for (address, stats) in self.storage.contact_received(&known)? {
+        for (address, stats) in self.storage.contact_received(&known, account_ids)? {
             written.entry(address).or_default().add(stats, 1);
         }
         let matching = |people: HashMap<String, Person>| {
@@ -111,7 +124,7 @@ impl AccountService {
         let mut ranked: Vec<(String, Person)> = matching(written).collect();
         if ranked.len() < limit as usize {
             let mut received: HashMap<String, Person> = HashMap::new();
-            for (address, stats) in self.storage.contact_received(&others)? {
+            for (address, stats) in self.storage.contact_received(&others, account_ids)? {
                 received.entry(address).or_default().add(stats, 1);
             }
             ranked.extend(matching(received));

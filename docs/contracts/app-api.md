@@ -566,7 +566,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 联系人聚合（主窗口）
 
-用户可以把某个发件地址“聚合”：之后在收件箱类视图中，该地址的所有邮件折叠成一行，点击后打开该发件人的联系人视图（`fromAddress` 查询）。规则保存在本机 `contact_aggregations` 表（迁移 0026），对所有账号生效，只按邮箱地址（ASCII 小写）匹配。MCP 工具与契约不受影响，`EmailListQuery` 的新增字段不出现在 MCP 工具输入中。
+用户可以把某个发件地址“聚合”：之后在收件箱类视图中，该地址的所有邮件折叠成一行，点击后打开该发件人的联系人视图（`fromAddress` 查询）。规则保存在本机 `contact_aggregations` 表（迁移 0026），对所有账号生效，只按邮箱地址（ASCII 小写）匹配。MCP 搜索通过 `fromAddress` 复用精确发件人筛选，但不使用界面的发件人聚合显示；接口见 [MCP 契约](mcp.md)。
 
 - **折叠行。** `groupSenders: true` 且无 `text`、无 `fromAddress` 时，列表中该发件人的所有邮件被一行取代，这一行就是通过本次查询全部条件的该发件人最新一封邮件（`id`、主题、标记、`receivedAt`、预览均取自它），并带 `EmailSummary.senderGroup: SenderGroup | null`，`SenderGroup { address, total, unread }`（`address` 为规范化地址，`total` / `unread` 为通过所有筛选条件的邮件数与其中未读数）。因此“未读”页只在发件人有未读邮件时才显示折叠行，且行为其最新未读邮件。折叠行与普通行按 `(receivedAt DESC, id DESC)`（以其最新邮件为准）混排并共用同一游标，分页无重复、无遗漏，包括时间戳相同的情况。本机已发送副本从不折叠。
 - **全选。** `selectEmails` 在折叠生效时排除已聚合发件人的邮件（折叠行不可选择），其余与 `emails_list` 的独立行一致。
@@ -576,7 +576,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 收件人补全（主窗口与写信窗口）
 
-写信时收件人、抄送、密送输入框的候选，设计见[写信与发送 17.4](../architecture/sending.md#174-收件人自动补全)。候选全部来自本机已缓存的邮件，不新建需要同步维护的联系人表；不进入 MCP 工具。
+写信时收件人、抄送、密送输入框的候选，设计见[写信与发送 17.4](../architecture/sending.md#174-收件人自动补全)。候选全部来自本机已缓存的邮件，不新建需要同步维护的联系人表。MCP 的 `suggest_contacts` 复用同一规则，并在候选、统计与排序之前限制授权账号，见 [MCP 契约](mcp.md)。
 
 - **命令。** `suggestContacts(query, limit?)` 对应 `contacts_suggest { query: string, limit?: number }`，返回按相关度排序的 `ContactSuggestion[]`，`ContactSuggestion { name: string | null, address }`：`address` 为 ASCII 小写；`name` 取该地址最近一次出现的非空显示名（去首尾空白，不可信文本）。`limit` 默认 8，取值 1–20，否则 `validation`（字段 `limit`）；`query` 去首尾空白后为空时返回空列表，超过 320 个字符返回 `validation`（字段 `query`）。主窗口与写信窗口都可调用，参数拒绝未知字段。
 - **来源。** 收到的邮件的发件人：所有账号的可见邮件，垃圾邮件和已删除邮件除外（与联系人视图一致，本机归档的仍计入）；本人发出的邮件的收件人：已发送角色文件夹中邮件的收件人与抄送，以及尚未匹配到服务器副本的本机已发送副本的 SMTP 收件人（含密送）。排除本人所有账号的地址，以及本地部分含 `noreply`、`no-reply`、`donotreply`、`do-not-reply`、`mailer-daemon`、`postmaster`（不区分大小写）的地址。

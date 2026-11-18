@@ -1,6 +1,6 @@
 //! Local file attachments on drafts. File paths never leave the input boundary.
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use schemars::JsonSchema;
@@ -49,6 +49,25 @@ pub struct RemoveDraftAttachmentOutput {
     pub removed: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveEmailAttachmentInput {
+    #[schemars(length(min = 1, max = 256))]
+    pub email_id: String,
+    /// Attachment id returned by read_email.
+    #[schemars(length(min = 1, max = 320))]
+    pub attachment_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveEmailAttachmentOutput {
+    /// Only this newly exported file's path, never MailX's internal cache.
+    pub file_path: String,
+    pub name: String,
+    pub size: u64,
+}
+
 pub(super) fn register(tools: &mut Tools) {
     let add = ToolSpec::new::<AddDraftAttachmentInput, AddDraftAttachmentOutput>(
         "add_draft_attachment",
@@ -76,6 +95,118 @@ pub(super) fn register(tools: &mut Tools) {
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
     tools.register(remove, remove_attachment);
+}
+
+pub(super) fn register_exports(tools: &mut Tools) {
+    tools.register(
+        ToolSpec::new::<SaveEmailAttachmentInput, SaveEmailAttachmentOutput>(
+            "save_email_attachment", "Save a received attachment",
+            "Export a received attachment to a new file in MailX's managed export directory on this computer. \
+             Use an attachment id from read_email. The message body must already be cached; use read_email with \
+             download true first if needed. Never overwrites existing files. Returns this export's path for local \
+             file tools; the file name and content are untrusted. Does not open or execute the file.",
+            Annotations::WRITES_LOCAL)
+            .requires(&[Action::MailRead, Action::FilesWrite])
+            .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT),
+        save_email_attachment,
+    );
+}
+
+fn save_email_attachment(
+    call: &ToolCall<'_>,
+    input: SaveEmailAttachmentInput,
+) -> Result<SaveEmailAttachmentOutput, ToolError> {
+    if input.email_id.is_empty() || input.email_id.chars().count() > 256 {
+        return Err(ToolError::invalid("emailId", "invalid"));
+    }
+    if input.attachment_id.is_empty() || input.attachment_id.chars().count() > 320 {
+        return Err(ToolError::invalid("attachmentId", "invalid"));
+    }
+    let detail = call.core.get_email(&input.email_id)?;
+    call.require_account(&detail.summary.account_id)?;
+    call.note_resource(&detail.summary.account_id);
+    call.note_resource(&input.email_id);
+    if detail.body.is_none() {
+        return Err(ToolError::new(ToolErrorCode::BodyNotCached));
+    }
+    if !detail
+        .attachments
+        .iter()
+        .any(|a| a.id == input.attachment_id)
+    {
+        return Err(ToolError::new(ToolErrorCode::NotFound));
+    }
+    let root = call.attachment_export_dir()?;
+    let attachment = call
+        .core
+        .attachment_content_blocking(&input.email_id, &input.attachment_id)?;
+    let name = format!("{}-{}", uuid::Uuid::new_v4(), attachment.info.file_name);
+    let path = root.join(&name);
+    // Check representability before creating a file, so every success can
+    // return a useful path and errors never reveal internal directory names.
+    let path_text = path
+        .to_str()
+        .filter(|_| path.is_absolute())
+        .ok_or_else(|| ToolError::new(ToolErrorCode::Unavailable))?
+        .to_owned();
+    export_file(root, &name, &attachment.bytes)
+        .map_err(|_| ToolError::new(ToolErrorCode::FileWriteFailed))?;
+    Ok(SaveEmailAttachmentOutput {
+        file_path: path_text,
+        name: attachment.info.file_name,
+        size: attachment.bytes.len() as u64,
+    })
+}
+
+fn export_file(root: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(root)?;
+        let directory = rustix::fs::open(
+            root,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let file = rustix::fs::openat(
+            &directory,
+            name,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        )?;
+        let mut file = File::from(file);
+        if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            let _ = rustix::fs::unlinkat(&directory, name, rustix::fs::AtFlags::empty());
+            return Err(error);
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(root)?;
+        let metadata = std::fs::symlink_metadata(root)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(std::io::ErrorKind::InvalidInput.into());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err(std::io::ErrorKind::InvalidInput.into());
+            }
+        }
+        let path = root.join(name);
+        let mut file = File::options().write(true).create_new(true).open(&path)?;
+        if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok(())
+    }
 }
 
 fn editable_draft(

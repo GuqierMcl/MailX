@@ -683,6 +683,74 @@ impl Storage {
         })
     }
 
+    /// Keyset-paged conversation metadata. Copies are collapsed in SQL before
+    /// pagination, with the same preference as the desktop conversation.
+    pub(crate) fn conversation_page(
+        &self,
+        email_id: &str,
+        after: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<ConversationPage, AppError> {
+        let own = self.get_email(email_id)?.summary;
+        if email_id.starts_with(LOCAL_SENT_PREFIX) {
+            return Ok(ConversationPage {
+                messages: if after.is_none() { vec![own] } else { vec![] },
+                possibly_incomplete: false,
+            });
+        }
+        let conversation: Option<String> = self.db.query_row(
+            "SELECT conversation_id FROM messages WHERE id = ?1",
+            [email_id],
+            |row| row.get(0),
+        )?;
+        let Some(conversation) = conversation else {
+            return Ok(ConversationPage {
+                messages: if after.is_none() { vec![own] } else { vec![] },
+                possibly_incomplete: false,
+            });
+        };
+        let sql = format!(
+            "WITH ranked AS (
+               SELECT {SUMMARY_COLUMNS}, m.id AS cursor_id, m.received_at AS cursor_at,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY CASE WHEN COALESCE(m.message_id_header, '') = ''
+                          THEN 'i:' || m.id ELSE 'm:' || m.message_id_header END
+                        ORDER BY (m.id = ?3) DESC, (COALESCE(f.role, '') = 'sent') ASC,
+                                 m.received_at ASC, m.id ASC) AS copy_rank
+               {VISIBLE_MESSAGES} AND m.account_id = ?1 AND m.conversation_id = ?2
+                 AND (COALESCE(f.role, '') NOT IN ('junk', 'trash') OR m.id = ?3))
+             SELECT * FROM ranked WHERE copy_rank = 1
+               AND (?4 IS NULL OR cursor_at > ?4 OR (cursor_at = ?4 AND cursor_id > ?5))
+             ORDER BY cursor_at ASC, cursor_id ASC LIMIT ?6"
+        );
+        let messages = self
+            .db
+            .prepare(&sql)?
+            .query_map(
+                params![
+                    own.account_id,
+                    conversation,
+                    email_id,
+                    after.map(|p| p.0),
+                    after.map(|p| p.1),
+                    limit
+                ],
+                summary,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let possibly_incomplete = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM folders f
+               JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
+               LEFT JOIN folder_sync_cursors c ON c.folder_id = f.id
+               WHERE f.account_id = ?1 AND f.selectable = 1 AND COALESCE(f.role, '') NOT IN ('junk', 'trash')
+                 AND (c.folder_id IS NULL OR c.window_capped = 1 OR c.backfill_done = 0))",
+            [&own.account_id], |row| row.get(0))?;
+        Ok(ConversationPage {
+            messages,
+            possibly_incomplete,
+        })
+    }
+
     pub(crate) fn get_email(&self, id: &str) -> Result<EmailDetail, AppError> {
         if let Some(outbox_id) = id.strip_prefix(LOCAL_SENT_PREFIX) {
             return self.local_email(outbox_id);

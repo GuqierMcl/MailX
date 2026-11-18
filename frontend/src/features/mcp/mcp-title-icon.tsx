@@ -12,8 +12,8 @@ import { useMcpStatus } from './use-mcp-status'
 
 /**
  * The MCP server's state in the title bar, only while the server is switched on.
- * A dot says running (green) or failed (red); while the server is still starting
- * there is no dot. The text carries the same state, so colour is never the only cue.
+ * A green dot means a client is connected; a red dot reports a failure.
+ * Starting or running without clients has no dot. The label also states the status.
  */
 export function McpTitleIcon({ client }: { client: MailxClient }) {
   const { t } = useTranslation('settings')
@@ -23,7 +23,7 @@ export function McpTitleIcon({ client }: { client: MailxClient }) {
   const clients = status?.state === 'running' ? mcpClientGroups(status.clients) : []
   const text = status?.state === 'running' && clients.length === 0 ? t('mcpStatusRunningNone') : mcpStatusText(status, true)
   const label = t('mcpTitleLabel', { status: text })
-  const dot = status?.state === 'running' ? 'bg-emerald-500' : status?.state === 'failed' ? 'bg-destructive' : null
+  const dot = status?.state === 'running' && status.clients.length > 0 ? 'bg-emerald-500' : status?.state === 'failed' ? 'bg-destructive' : null
   return (
     <TitleBarActions side="trailing" order={-2}>
       <TooltipProvider>

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -18,6 +17,8 @@ import { mcpClientSnippet } from '@/features/mcp/client-snippet'
 import { errorText } from '@/i18n/errors'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings } from './settings-queries'
+import { McpAgentSetup } from './mcp-agent-setup'
+import { McpFeedback } from './mcp-feedback'
 
 export function McpPane({ client }: { client: MailxClient }) {
   const { t } = useTranslation('settings')
@@ -63,28 +64,30 @@ export function McpPane({ client }: { client: MailxClient }) {
   const clients = status?.state === 'running' ? mcpClientGroups(status.clients) : []
 
   return <SettingsPage>
-    {(settings.isError || error !== null) && <Alert variant="destructive">
-      <AlertTitle>{t(settings.isError ? 'readFailed' : 'mcpToggleFailed')}</AlertTitle>
-      <AlertDescription>{errorText(settings.error ?? error)}</AlertDescription>
-    </Alert>}
     <SettingsGroup title={t('mcp')}>
+      {(settings.isError || error !== null) && <McpFeedback tone="error">
+        <span className="block">{t(settings.isError ? 'readFailed' : 'mcpToggleFailed')}</span>
+        {errorText(settings.error ?? error)}
+      </McpFeedback>}
       <SettingsRow label={t('mcpEnable')} htmlFor="mcp.enabled">
         <Switch id="mcp.enabled" checked={enabled} disabled={!settings.data || pending}
           onCheckedChange={(next) => { if (next) setConfirming(true); else void apply(false) }} />
       </SettingsRow>
       <SettingsRow label={t('mcpStatus')}>
-        <span role="status" className="text-sm text-muted-foreground">{mcpStatusText(status, enabled)}</span>
+        <span role="status" aria-label={t('mcpStatus')} className="text-sm text-muted-foreground">{mcpStatusText(status, enabled)}</span>
       </SettingsRow>
       {clients.length > 0 && <ul aria-label={t('mcpClientsConnected')} className="space-y-0.5 text-xs text-muted-foreground">
         {clients.map((name) => <li key={name}>{name}</li>)}
       </ul>}
+      {clients.length > 0 && <p className="text-xs text-muted-foreground">{t('mcpClientLabelsHint')}</p>}
     </SettingsGroup>
+    <McpAgentSetup client={client} />
     <SettingsGroup title={t('mcpClients')} description={t('mcpClientsHint')}>
       <div>
         <Button variant="outline" size="sm" disabled={config.isError} onClick={() => void copy()}>{t('mcpCopyConfig')}</Button>
       </div>
       {config.isError
-        ? <p role="alert" className="text-sm text-destructive">{errorText(config.error)}</p>
+        ? <McpFeedback tone="error">{errorText(config.error)}</McpFeedback>
         : <Collapsible>
           <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground">{t('mcpManualSetup')}</CollapsibleTrigger>
           <CollapsibleContent className="mt-2 flex flex-col gap-2">

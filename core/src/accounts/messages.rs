@@ -219,6 +219,16 @@ impl AccountService {
         self.storage.get_conversation(email_id)
     }
 
+    pub(crate) fn conversation_page(
+        &self,
+        email_id: &str,
+        after: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<ConversationPage, AppError> {
+        validate_email_id(email_id)?;
+        self.storage.conversation_page(email_id, after, limit)
+    }
+
     pub(crate) fn sync_folders(
         &self,
         account_id: &str,

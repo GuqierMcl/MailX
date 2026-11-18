@@ -567,7 +567,10 @@ fn execute(
             let text = serde_json::to_string(&output).unwrap_or_default();
             let text: String = text.chars().take(MAX_RESULT_CHARS).collect();
             let mut addresses = Vec::new();
-            if matches!(call.name.as_str(), "read_email" | "search_emails") {
+            if matches!(
+                call.name.as_str(),
+                "read_email" | "search_emails" | "get_conversation" | "suggest_contacts"
+            ) {
                 collect_addresses(&output, &mut addresses);
             }
             let mut accounts = std::collections::BTreeSet::new();
@@ -681,8 +684,11 @@ fn summarize(
     trusted: &TrustedOutput,
 ) -> ToolActivitySummary {
     match name {
-        "search_emails" => ToolActivitySummary::Found {
+        "search_emails" | "get_conversation" => ToolActivitySummary::Found {
             count: count(output.get("emails")),
+        },
+        "suggest_contacts" => ToolActivitySummary::Found {
+            count: count(output.get("contacts")),
         },
         "list_accounts" => ToolActivitySummary::Found {
             count: count(output.get("accounts")),

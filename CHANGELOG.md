@@ -11,9 +11,22 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- Add client-specific MCP setup and connection diagnostics for external agents, with guided import where automatic setup is unavailable. / 新增外部智能体的 MCP 专属接入与连接诊断，无法自动接入时提供导入指引。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+- Let MCP clients inspect mail conversations, find local correspondents and export received attachments. / MCP 客户端可查看邮件会话、查找本机往来联系人并导出收到的附件。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+
 ### ✨ Optimization
 
 - The Now page AI line now picks one thing worth noticing (a quiet inbox, a busy day, mail piled up while you were away, the time of day or a festival) instead of reciting numbers. / 「此刻」页 AI 问候语改为挑一件值得一提的事来说（安静的收件箱、忙碌的一天、离开期间攒下的邮件、时间或节日），不再罗列数字。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
+
+- Show the title-bar MCP green dot only while a client is connected. / 标题栏 MCP 仅在有客户端连接时显示绿点。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+
+- Show matching agent logos in MCP setup, with light and dark theme support. / MCP 接入列表显示对应智能体 Logo，并适配浅深主题。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+
+- Show MCP setup and connection errors beside the relevant action with compact feedback that matches the settings page. / MCP 接入与连接错误改为对应操作旁的轻量行内提示，与设置页风格一致。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+
+- Improve MCP search with exact sender filters, matching excerpts and recipient summaries, return draft revisions on creation, and support paginated draft lists. / MCP 搜索支持精确发件人筛选、命中片段与收件人摘要，创建草稿时返回修订号，草稿列表支持分页。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 
 ### 🩹 Fixed
 

@@ -62,6 +62,8 @@
     "summaryUnread": "{{count}} 封未读",
     "tool": {
       "search_emails": { "running": "正在搜索邮件…", "done_other": "搜索了 {{count}} 封邮件" },
+      "get_conversation": { "running": "正在查看往来邮件…", "done_other": "找到了 {{count}} 封往来邮件" },
+      "suggest_contacts": { "running": "正在查找联系人…", "done_other": "找到了 {{count}} 位联系人" },
       "read_email": { "running": "正在阅读邮件…", "done_other": "阅读了 {{count}} 封邮件" },
       "list_accounts": { "running": "正在查看账号…", "done": "查看了账号" },
       "list_folders": { "running": "正在查看文件夹…", "done": "查看了文件夹" },
