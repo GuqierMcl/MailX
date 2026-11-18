@@ -58,6 +58,10 @@
     "openEmailNamed": "打开邮件：{{subject}}",
     "openFolderNamed": "打开文件夹：{{name}}",
     "folderUnread": "{{count}} 封未读",
+    "copyCode": "复制代码",
+    "codeCopied": "已复制",
+    "taskDone": "已完成",
+    "taskOpen": "未完成",
     "moreEmails": "另外 {{count}} 封",
     "summaryUnread": "{{count}} 封未读",
     "tool": {

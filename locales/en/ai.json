@@ -58,6 +58,10 @@
     "openEmailNamed": "Open email: {{subject}}",
     "openFolderNamed": "Open folder: {{name}}",
     "folderUnread": "{{count}} unread",
+    "copyCode": "Copy code",
+    "codeCopied": "Copied",
+    "taskDone": "Done",
+    "taskOpen": "Not done",
     "moreEmails": "{{count}} more",
     "summaryUnread": "{{count}} unread",
     "tool": {

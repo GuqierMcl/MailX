@@ -102,8 +102,19 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     finish(run)
   }
 
+  /** A reply that uses most of the Markdown the chat can show, to preview it while it streams. */
+  function markdownShowcase(): string {
+    const email = deps.firstUnread()?.id
+    const card = email ? `[${zh() ? '账单提醒' : 'Billing reminder'}](mailx://email/${email})\n\n` : ''
+    return zh()
+      ? `## 本周待办\n\n按紧急程度排好了，~~周一的会议~~已经取消：\n\n1. **付账单**\n\n   周五前处理，金额见下表。\n2. 回复项目邮件\n   - 确认排期\n   - 附上 \`roadmap.pdf\`\n\n| 事项 | 截止 | 金额 |\n|:--|:-:|--:|\n| 账单 | 周五 | ¥1,280.00 |\n| 续费 | 下周一 | ¥96.00 |\n\n- [x] 读完周报\n- [ ] 回复王五\n\n> 引用的原文放在这里。\n\n### 过滤规则示例\n\n\`\`\`sieve\nif header :contains "subject" "账单" {\n  fileinto "Bills";\n}\n\`\`\`\n\n---\n\n${card}详细说明见 https://example.com/help。`
+      : `## This week\n\nSorted by urgency; ~~Monday's meeting~~ was canceled:\n\n1. **Pay the bill**\n\n   Due Friday, amounts below.\n2. Reply to the project email\n   - confirm the dates\n   - attach \`roadmap.pdf\`\n\n| Item | Due | Amount |\n|:--|:-:|--:|\n| Bill | Fri | $1,280.00 |\n| Renewal | Mon | $96.00 |\n\n- [x] Read the weekly report\n- [ ] Reply to Wang\n\n> The quoted original goes here.\n\n### A filter rule\n\n\`\`\`sieve\nif header :contains "subject" "bill" {\n  fileinto "Bills";\n}\n\`\`\`\n\n---\n\n${card}See https://example.com/help for details.`
+  }
+
   async function chat(run: Run, message: string) {
-    if (/归档|archive/i.test(message)) {
+    if (/markdown|格式|排版|表格/i.test(message)) {
+      await say(run, markdownShowcase())
+    } else if (/归档|archive/i.test(message)) {
       const target = deps.firstUnread()
       await say(run, zh() ? '好的，我来归档。' : 'Sure, archiving.')
       if (!target) { await say(run, zh() ? '没有可归档的邮件。' : 'There is nothing to archive.'); return finish(run) }
