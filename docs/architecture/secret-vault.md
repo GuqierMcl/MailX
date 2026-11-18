@@ -12,7 +12,7 @@
 - 旧服务名下 3 个条目的可信应用记录分别有 91、81、6 条，几乎全是各次构建的 `target/debug`、`target/release` 路径。
 - 用 `security` 命令迁移出来的新条目，可信应用只有 `security` 和一个 debug 二进制，不含安装版，所以安装版首次读取必弹窗。应用自己创建的条目，创建者默认可信，不属于这种情况。
 
-所以：3 个账号 = 3 次弹窗，账号越多越多。正式签名（Developer ID）能让升级后“还是同一个应用”，是根治办法，但依赖付费账号和第 4 阶段的签名工作；单条目设计与它互补，不依赖它。
+所以：3 个账号 = 3 次弹窗，账号越多越多。单条目设计减少需要授权的条目数；稳定代码签名使不同构建继续被识别为同一个应用。正式安装包的 Developer ID 签名依赖发布签名工作，开发构建则使用下文的本机固定自签名身份，两者与单条目设计互补。
 
 ## 2. 方案
 
@@ -101,3 +101,21 @@ Microsoft 的 refresh token 常超过 1000 个字符，加上 scopes 与目标�
 - 本身就以头部标记开头的明文值也按拆分格式保存，读回时不会被误认为头部。
 
 macOS 单条保险库不受此限，但整体仍随账号数增长。Linux 的 Secret Service 没有这一限制。验证使用模拟该上限的内存 `SecretStore` 替身，在所有平台上运行；尚未在真实 Windows 凭据管理器上实测，也没有用真实 Microsoft 令牌长度验证。
+
+## 8. macOS 开发构建的稳定代码身份
+
+单条目保险库与进程内缓存不能保留 ad-hoc 签名构建之间的访问身份。开发签名脚本改编自 [dbx 的本机开发签名实现](https://github.com/t8y2/dbx/blob/eacef66c4ff6fef5bc9a045211435e69d9561c9c/scripts/macos-dev-signing.mjs)（Apache-2.0），接入 MailX 的 Bun / Tauri 入口，并增加命令超时、配置原子发布和钥匙串搜索顺序保留等处理。
+
+`scripts/macos-dev-signing.mjs` 在用户级持久目录 `~/Library/Application Support/MailX/development-signing` 中生成并复用本机自签名代码签名证书、签名钥匙串及其配置。显式 designated requirement 同时绑定开发代码标识与证书指纹：
+
+```text
+identifier "com.mailxapp.desktop.dev" and certificate leaf = H"<固定证书指纹>"
+```
+
+二进制重新编译时 CDHash 可以改变，但该身份要求保持一致。`scripts/tauri.mjs` 向 macOS 的 Cargo 目标注入 runner，每次 debug 二进制运行前先签名并严格验证，覆盖首次启动和 Tauri watch 的自动重编译。`scripts/macos-dev-runner.sh` 先调用签名入口，成功后通过 shell `exec` 启动应用，保留 runner 的 PID，使 Tauri 重编译和退出时能终止实际应用，避免中间启动器遗留旧进程。直接绕过入口运行 Cargo 不属于这一保证范围。
+
+签名身份目录限制为当前用户访问，并检查目录与文件所有者、拒绝符号链接；初始化有排他锁，损坏、缺失或过期的既有身份不会被自动替换。开发流程不接受 release 构建或自定义 runner，避免签名步骤被绕过。该本机证书只用于开发构建，不替代正式安装包签名。
+
+签名专用钥匙串保存的是签名证书私钥；业务密码仍保存在 `SystemSecretStore` 原来的 vault 中。`SecretStore`、凭证引用、数据库与 journal 的持久化契约均不变。首次切换签名身份读取旧条目可能仍需授权；已保存该身份的授权、钥匙串已解锁且证书不变时，后续构建可复用授权。锁定、拒绝访问及旧逐条目迁移继续遵循原有错误和重试语义。
+
+开发代码签名标识与 Tauri 应用标识是两种用途：签名步骤不会隔离账号或修改 Tauri identifier。普通 `tauri dev` 仍按原规则共享安装版数据，日常开发与智能体调试使用 `desktop:dev:isolated`。命令、首次授权与故障处理见[开发指南](../development/README.md#macos-开发签名与钥匙串授权)，合成测试及实机结果见[验证记录](../development/validation.md)。

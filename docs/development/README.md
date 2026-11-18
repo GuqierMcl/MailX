@@ -92,6 +92,26 @@ git diff --check
 
 正常 Tauri 开发和构建使用 `frontend/dist`，不再在 `desktop/` 内维护另一份前端资源。Tauri 生成的 schema 与命令权限文件忽略提交，由 `build.rs` 重新生成。`git diff --check` 不覆盖未跟踪文件，新文件需额外检查。
 
+### macOS 开发签名与钥匙串授权
+
+`bun run tauri dev`、`bun run desktop:dev` 和 `bun run desktop:dev:isolated` 在 macOS 上自动使用固定的本机开发签名身份。首次启动时，`scripts/macos-dev-signing.mjs` 生成自签名代码签名证书和独立的签名钥匙串，保存在 `~/Library/Application Support/MailX/development-signing`；以后在不同工作树和清理构建目录后继续复用。无需 Developer ID，签名私钥不进入仓库。
+
+`scripts/tauri.mjs` 通过 Cargo runner 在每次 debug 构建完成后签名、验证，再启动桌面程序，包括 Tauri watch 自动重编译后的启动。runner 的 shell 脚本签名后用 `exec` 替换为应用，使 Tauri 在重编译和退出时能直接管理应用进程。代码身份要求同时绑定 `com.mailxapp.desktop.dev` 和固定证书指纹，因此二进制内容变化后仍具有相同的钥匙串访问身份。首次使用已有 vault 时可能需要授权一次；钥匙串已解锁且授权已保存、签名证书不变时，后续重新构建可以继续使用这份授权。该身份仅用于开发代码签名，不会改变 Tauri 的应用 identifier、数据目录或凭证 service；日常开发和智能体调试仍建议通过 `bun run desktop:dev:isolated` 启动。
+
+macOS 的启动入口转发 `SIGINT` / `SIGTERM` 到独立的子进程组；直接启动和隔离入口均支持智能体在没有终端时停止整个开发会话，包含桌面应用、Cargo 和 Vite。
+
+独立签名钥匙串只保存开发签名身份，邮件密码与密钥仍由现有系统 `SecretStore` 管理。证书、钥匙串或配置缺失、损坏、过期时，脚本会报错并保留现有身份，不会自动重新生成；显式更换开发身份后，需要重新授权已有凭证。不要把该目录作为可随意删除的构建缓存。
+
+开发签名流程只接受 debug 桌面程序，拒绝 `tauri dev --release` 和自定义 runner；release 构建使用 `bun run tauri build`。直接 `cargo run` 或绕过仓库脚本启动不会自动执行开发签名。Windows、Linux 和正式发布签名流程保持原有行为。
+
+默认脚本测试不操作系统钥匙串。macOS 上可显式运行合成凭证测试：
+
+```sh
+MAILX_TEST_MACOS_KEYCHAIN=1 bun test ./scripts/macos-dev-signing.test.mjs
+```
+
+该测试使用临时签名身份与合成凭证，检查不同构建保持相同代码身份且无需交互读取钥匙串，并清理临时钥匙串。实际执行结果与桌面验证范围见[验证记录](validation.md)；设计细节见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
+
 ### 中英文文本维护
 
 共享译文放在根目录 `locales/{zh-CN,en}/`，前端通过 `i18next + react-i18next` 使用，Rust 编译时嵌入通知与引用模板子集。新增界面文案、Tooltip、读屏标签或错误映射时，同步补齐两种语言；模块配置保存语义 key，React 组件订阅语言变化，避免将译文冻结在模块初始化时。运行 `bun run i18n:check`、类型检查及受影响的行为测试；新增设置 DTO 还需生成并检查类型漂移。根 `check` 与前端 CI 已包含资源门禁。
