@@ -9,7 +9,7 @@
 
 [English](../README.md) | 简体中文
 
-本页说明桌面版的基本操作。已发布安装包以 [Releases](https://github.com/GuqierMcl/MailX/releases) 为准；功能验证范围见[验证记录](../../development/validation.md)，后续功能见[路线图](../../roadmap/README.md)。
+本页说明桌面版的基本操作。已发布安装包以 [Releases](https://github.com/GuqierMcl/MailX/releases) 为准；验证方式见[验证指引](../../development/validation.md)，后续功能见[路线图](../../roadmap/README.md)。
 
 ## 安装与添加账号
 
@@ -54,7 +54,7 @@ Outlook 入口已用个人 Outlook.com 账号测试；Microsoft 365 入口尚未
 
 账号通过轮询同步，按需下载正文和附件，支持已读、星标、带撤销的删除及共用发送队列，已缓存邮件可离线阅读。发送成功表示 Exchange 已接受；无法确定是否接受时，MailX 不自动重发。同步使用下文说明的有界本地缓存窗口与覆盖限制，不完整列表不会被用来推断服务器删除。
 
-HTTPS 证书必须受操作系统信任。暂不提供 Basic、仅 Kerberos、共享或代理邮箱、EWS OAuth 和 DNS SRV 发现。支持通过 Negotiate 协商 NTLM；仅接受 Kerberos 的服务器暂不支持。Exchange 部署、扩展保护和企业代理需要实测，范围见[验证记录](../../development/validation.md#exchange-ews-validation)。需要改用其他邮件协议时，请新增相应类型的账号。
+HTTPS 证书必须受操作系统信任。暂不提供 Basic、仅 Kerberos、共享或代理邮箱、EWS OAuth 和 DNS SRV 发现。支持通过 Negotiate 协商 NTLM；仅接受 Kerberos 的服务器暂不支持。Exchange 部署、扩展保护和企业代理需要实测，验收方式见[验证指引](../../development/validation.md#exchange-ews-validation)。需要改用其他邮件协议时，请新增相应类型的账号。
 
 ## 管理账号
 
@@ -211,7 +211,7 @@ DeepSeek Harness 提供专属配置和说明链接。可使用“手动配置”
 
 客户端可按精确发件地址搜索、查看本机已知会话、从缓存往来中查找收件地址，并分页查看草稿。收到的附件可导出到 MailX 的本机导出目录，每次创建新文件并返回位置，供同机客户端使用；导出文件留在磁盘中，需要时自行删除。搜索与会话结果描述的是本机覆盖范围，可能缺少较早或尚未缓存的服务器历史。
 
-客户端可能将读取的邮件内容发给其使用的 AI 服务，应按自己的隐私需求选择客户端和模型。当前没有逐客户端或逐账号授权界面，MCP 不支持删除邮件。客户端、平台与工具组合的兼容性见[验证记录](../../development/validation.md)。
+客户端可能将读取的邮件内容发给其使用的 AI 服务，应按自己的隐私需求选择客户端和模型。当前没有逐客户端或逐账号授权界面，MCP 不支持删除邮件。客户端、平台与工具组合的兼容性验收方式见[验证指引](../../development/validation.md)。
 
 ## 验证码快捷复制
 

@@ -1,6 +1,6 @@
 # 网络、凭证与不可信内容边界
 
-本文记录账号配置、凭证、IMAP / SMTP 账号路由、正文隔离、发送队列与本地 MCP 的安全边界；通用 OAuth 基础已实现但生产服务商未开放，内置 AI 及 Web 凭证保护仍为后续设计。保存账号后由后台任务按账号路由同步，用户界面与获授权的 MCP 工具经同一发送队列发信。真实服务商与平台验证范围见[验证记录](../development/validation.md)。
+本文记录账号配置、凭证、IMAP / SMTP 账号路由、正文隔离、发送队列与本地 MCP 的安全边界；通用 OAuth 基础已实现但生产服务商未开放，内置 AI 及 Web 凭证保护仍为后续设计。保存账号后由后台任务按账号路由同步，用户界面与获授权的 MCP 工具经同一发送队列发信。真实服务商与平台验证范围见[验证指引](../development/validation.md)。
 
 ## 1. 信任边界
 
@@ -45,7 +45,7 @@ OAuth 通用基础采用授权码 + PKCE，检查一次性 `state`、回调来�
 
 当前 core 通过后端 `SecretStore` 读写秘密，桌面提供系统凭据适配。SQLite 仅保存引用；凭证更新以非敏感 journal 处理跨存储恢复，端点变化保留旧信任范围，见[账号配置](account-configuration.md)。系统库的暂不可用与条目确实缺失分别表达；不会通过删除数据或降级明文来处理故障。下列平台与 Web 能力按实际验证范围交付。
 
-- 桌面系统凭据库目标为 Windows Credential Manager、macOS Keychain、Linux Secret Service；当前平台构建与实际存取证据见[验证策略](../development/validation.md)，不能由适配代码推断全平台已通过。系统凭据库不可用时提示配置问题，不静默改为明文文件。
+- 桌面系统凭据库目标为 Windows Credential Manager、macOS Keychain、Linux Secret Service；当前平台构建与实际存取证据见[验证指引](../development/validation.md)，不能由适配代码推断全平台已通过。系统凭据库不可用时提示配置问题，不静默改为明文文件。
 - 邮箱授权码、refresh token、代理密码、翻译服务密钥和模型 API Key 只经受控写入入口进入后端；当前 UI 仅得认证类型、授权状态、凭证是否已配置与 `trust` 等脱敏元数据。凭证输入可短暂存在表单内存，提交后清空，不进入 localStorage、状态持久化或日志。
 - 未来 Web 版采用成熟 AEAD 库保护凭证值，主密钥经只读 secret 文件注入且位于 `/data` 之外；随机唯一 nonce，AAD 绑定记录 ID / 版本。密码哈希、密钥加密和数据目录加密是不同用途，不能混用。
 - M5 实现时再确定并记录密钥格式、轮换 / 恢复方案与验证向量；主密钥丢失不能靠登录密码恢复。不得将主密钥与加密数据一并存为“加密备份”。
@@ -68,7 +68,7 @@ Tauri 的信任边界和能力机制要求限制 WebView 对原生能力的访�
 
 实际协议为 macOS / Linux 的 `mailx-body://localhost` 和 Windows 的 `http://mailx-body.localhost`。Wry 会重写 Windows 传入请求的 scheme，因此资源与 CSP 必须按浏览器实际 origin 生成。协议仅 GET；404 不暴露原因，其他方法为 405；所有响应包含 CSP、nosniff、no-referrer、no-store。图片 CSP 限定当前邮件 /part 与 /remote 路径，不能通过资源加载触发 /link。每次 document / part / remote / link / links_open 都重新验证绑定。
 
-导航在提交前拦截，WebView2 保留 204 后备。普通前端与 Rust 检查自动运行；修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证。专用 Body WebView 工作流及测试脚手架已移除，普通测试不等同于真实引擎隔离验证，也不能沿用旧实现的通过结论。验证方式与执行证据统一见[验证记录](../development/validation.md#body-native-validation)。
+导航在提交前拦截，WebView2 保留 204 后备。普通前端与 Rust 检查自动运行；修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证。专用 Body WebView 工作流及测试脚手架已移除，普通测试不等同于真实引擎隔离验证，也不能沿用旧实现的通过结论。验证方式与执行证据统一见[验证指引](../development/validation.md#body-native-validation)。
 
 ## 6. 端点与 SSRF
 

@@ -101,7 +101,7 @@ SMTP 已支持本轮服务器公告的 LOGIN/PLAIN；本轮 agent 未执行真�
 | `imap.163.com:993`、`imap.126.com:993` | 均成功建立 TLS 1.2；登录前公告 IMAP4rev1、ID、SPECIAL-USE、XLIST、UIDPLUS、AUTH=XOAUTH2 等能力。 |
 | `smtp.163.com:465`、`smtp.126.com:465` | 均成功建立 TLS 1.2；EHLO 公告 AUTH LOGIN / PLAIN / XOAUTH2、8BITMIME 等能力。 |
 
-这些结果仅证明当时网络可达、证书有效和未登录能力公告；登录后能力、授权码认证、目录访问、实际发信、其他集群和账号策略仍待验。历史 `imaphz.qiye.163.com` 企业邮箱 STATUS 中文名兼容记录仅属于该企业账号，不能替代免费 163/126 的证据，见[验证策略](../development/validation.md#2026-10-25-网易企业邮箱-status-目录名兼容)。
+这些结果仅证明当时网络可达、证书有效和未登录能力公告；登录后能力、授权码认证、目录访问、实际发信、其他集群和账号策略仍待验。历史 `imaphz.qiye.163.com` 企业邮箱 STATUS 中文名兼容记录仅属于该企业账号，不能替代免费 163/126 的证据，见[验证指引](../development/validation.md#2026-10-25-网易企业邮箱-status-目录名兼容)。
 
 ### 用户真实邮箱手测反馈
 

@@ -9,7 +9,7 @@ MailX has a Rust mail core, a React + TypeScript + Vite + shadcn frontend, a Tau
 1. Pick one independently verifiable task within a milestone and state the expected behaviour and the evidence that will show it works.
 2. Send the implementation together with the matching architecture, contract and test notes. For interface changes, describe the callers and compatibility impact first.
 3. Documentation separates initial sketches, later designs and implemented behaviour. A starting sketch can be replaced by a new design; later work is not required to follow it mechanically. Mark something implemented only once the code and the verification evidence both exist.
-4. Before committing, run `git diff --check` and review relative links for sensitive information. Rust changes need formatting, Clippy, tests and the relevant build; see the [validation strategy](docs/development/validation.md).
+4. Before committing, run `git diff --check` and review relative links for sensitive information. Rust changes need formatting, Clippy, tests and the relevant build; see the [validation guidance](docs/development/validation.md).
 
 ## Project conventions
 

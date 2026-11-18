@@ -1,6 +1,6 @@
 # 桌面关闭、后台运行与退出
 
-状态：**Implemented**。本文说明关窗、后台恢复、退出与登录启动的行为；平台与场景证据见[验证记录](../development/validation.md)。
+状态：**Implemented**。本文说明关窗、后台恢复、退出与登录启动的行为；平台与场景证据见[验证指引](../development/validation.md)。
 
 ## 用户选择
 
@@ -47,7 +47,7 @@ Linux 依赖 tao 运行时加载的 `libunity`（Unity LauncherEntry），安装
 
 ## 登录自动启动与静默启动
 
-登录自动启动与静默启动已有实现。平台行为、系统策略与异常场景的证据见[验证记录](../development/validation.md#login-autostart)。
+登录自动启动与静默启动已有实现。平台行为、系统策略与异常场景的证据见[验证指引](../development/validation.md#login-autostart)。
 
 设置 → 通用 → 启动提供“开机自启动”与“静默启动”，两项默认关闭。开机自启动指当前用户登录图形桌面后启动 MailX，不是开机前的系统服务。安装、升级、普通启动和设置加载都不创建启动项，只有用户主动开启才写入。关闭时移除当前用户的 MailX 启动项，重复关闭幂等。
 

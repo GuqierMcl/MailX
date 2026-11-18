@@ -119,7 +119,7 @@ SMTP accepted、收件方实际到达和已发送可见分别记录。副本未�
 
 预设复用按账号默认开启的 `useProviderIcon`；关闭后仍显示首字母头像。旧的通用配置 139 账号不自动迁移 `providerId`、替换端点或重建缓存。图标来源与处理方式见[服务商图标说明](../../frontend/src/assets/providers/README.md)。
 
-调研阶段已检查 UTF-8 / LF、本地链接与空白格式，18 个引用的官方页面均可访问，并完成代码事实与官方条件的独立复核。公开端点探测如第 3 节；实施阶段的自动检查与模拟客户端验证单独记录在[验证策略](../development/validation.md#2026-10-29-139-邮箱预设与授权码引导)。
+调研阶段已检查 UTF-8 / LF、本地链接与空白格式，18 个引用的官方页面均可访问，并完成代码事实与官方条件的独立复核。公开端点探测如第 3 节；实施阶段的自动检查与模拟客户端验证单独记录在[验证指引](../development/validation.md#2026-10-29-139-邮箱预设与授权码引导)。
 
 ## 7. 官方来源
 
@@ -144,4 +144,4 @@ SMTP accepted、收件方实际到达和已发送可见分别记录。副本未�
 - **[S17] [尊享会员](https://help.mail.10086.cn/statichtml/0/Content/4430.html)**：超大附件权益，不能等同标准 SMTP 附件传输能力。
 - **[S18] [已发送的邮件会保存到“已发送”文件夹吗？](https://help.mail.10086.cn/statichtml/0/Content/4538.html)**：网页写信的保存开关，不能替代 SMTP 副本测试。
 
-仓库依据另见[账号配置](../architecture/account-configuration.md)、[同步设计](../architecture/mail-sync.md)、[发送设计](../architecture/sending.md)和[验证策略](../development/validation.md)。
+仓库依据另见[账号配置](../architecture/account-configuration.md)、[同步设计](../architecture/mail-sync.md)、[发送设计](../architecture/sending.md)和[验证指引](../development/validation.md)。

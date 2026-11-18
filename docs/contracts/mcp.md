@@ -1,6 +1,6 @@
 # MCP 初始设计
 
-状态：**本地 MCP 已实现 / 契约未冻结 / 远程接口为 Planned**。本地服务端、stdio bridge、桌面生命周期与状态接口，以及设置页、标题栏状态图标、客户端接入、连接诊断和 sidecar 分发均已有实现。工具与内置 Agent 的设计共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)；平台和客户端证据见[验证记录](../development/validation.md)。
+状态：**本地 MCP 已实现 / 契约未冻结 / 远程接口为 Planned**。本地服务端、stdio bridge、桌面生命周期与状态接口，以及设置页、标题栏状态图标、客户端接入、连接诊断和 sidecar 分发均已有实现。工具与内置 Agent 的设计共用工具层，见 [ADR 0004](../adr/0004-shared-tool-layer.md) 与[工具层与调用入口](../architecture/agent-tools.md)；平台和客户端证据见[验证指引](../development/validation.md)。
 
 ## 1. 角色与协议
 
@@ -227,4 +227,4 @@ stdio bridge 作为 Tauri sidecar（`bundle.externalBin = ["binaries/mailx-mcp"]
 
 **设置页与分发**：设置 → MCP 页保留开关（开启前确认）、运行状态与错误、已连接客户端、复制配置和默认折叠的手动配置；访问范围与能力边界集中在开启确认中说明；标题栏状态图标见 [UI 设计](../architecture/ui-design.md)。命令 `mcp_client_config` 的实现与 AppImage 复制逻辑在 `desktop/src/mcp_sidecar.rs`，有自动测试。
 
-**手测范围与剩余缺口**：平台、客户端、sidecar 分发和工具组合的记录集中维护于[验证记录](../development/validation.md#mcp-send-attachments)，不由后端自动测试推定完整桌面行为已验收。
+**手测范围与剩余缺口**：平台、客户端、sidecar 分发和工具组合的记录集中维护于[验证指引](../development/validation.md#mcp-send-attachments)，不由后端自动测试推定完整桌面行为已验收。

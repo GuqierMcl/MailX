@@ -173,7 +173,7 @@ P0–P3 的代码已落地。自动检查与平台体验验收分别记录，平
 - 编辑器：输入未保存内容后切换语言，选区、正文、dirty 状态和 revision 保持；发送确认不自动推进、撤销窗口不因翻译重新计时。
 - Rust：通知预览关闭时不含发件人 / 主题；共享模板的特殊字符被转义；回复线程与发送状态行为回归。
 
-现有检查入口包括 `bun run i18n:check`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run types:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 和 `git diff --check`。根 `bun run check` 包含资源门禁。2026-10-25 已确认资源门禁、前端类型与 lint、完整前端测试、生产构建、Rust workspace 测试、格式、clippy 和类型漂移检查通过，浏览器 mock 已检查基本语言持久化和写信预览同步。具体证据见[验证记录](../development/validation.md#2026-10-25-中英文文本适配)，不能据此推定三平台桌面验收通过。
+现有检查入口包括 `bun run i18n:check`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run types:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 和 `git diff --check`。根 `bun run check` 包含资源门禁。2026-10-25 已确认资源门禁、前端类型与 lint、完整前端测试、生产构建、Rust workspace 测试、格式、clippy 和类型漂移检查通过，浏览器 mock 已检查基本语言持久化和写信预览同步。具体证据见[验证指引](../development/validation.md#2026-10-25-中英文文本适配)，不能据此推定三平台桌面验收通过。
 
 ### 手动验证
 
@@ -189,6 +189,6 @@ P0–P3 的代码已落地。自动检查与平台体验验收分别记录，平
 
 ## 9. 文档维护与参考
 
-当前契约见[应用 API](../contracts/app-api.md)中的设置、窗口权限、事件、错误与草稿创建说明，首屏与跨窗口行为见[桌面与 Web](desktop-web.md#应用偏好)，证据和剩余手验见[验证策略](../development/validation.md#2026-10-25-中英文文本适配)。新增功能应与中英文资源、无障碍标签和相应状态提示一起提交。
+当前契约见[应用 API](../contracts/app-api.md)中的设置、窗口权限、事件、错误与草稿创建说明，首屏与跨窗口行为见[桌面与 Web](desktop-web.md#应用偏好)，证据和剩余手验见[验证指引](../development/validation.md#2026-10-25-中英文文本适配)。新增功能应与中英文资源、无障碍标签和相应状态提示一起提交。
 
 官方实现参考：[React 集成与语言切换](https://react.i18next.com/latest/usetranslation-hook)、[回退规则](https://www.i18next.com/principles/fallback)、[复数](https://www.i18next.com/translation-function/plurals)、[TypeScript](https://www.i18next.com/overview/typescript)。后续区域格式化可参考 [Formatting](https://www.i18next.com/translation-function/formatting)。最终行为以锁定依赖版本和项目测试为准。

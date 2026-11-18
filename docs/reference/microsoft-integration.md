@@ -90,7 +90,7 @@ XOAUTH2 字符串为 `base64("user=" + 邮箱 + "\x01auth=Bearer " + access_toke
 
 暂不覆盖：自建 Exchange Server 的 EWS 接入（管理员开启了 IMAP / SMTP 时，现有“手动配置 IMAP/SMTP”即可使用）、世纪互联中国版、共享邮箱、Graph 同步。
 
-已验证：2026-11-10 在 macOS 开发版上用一个 Outlook.com 个人账号完成浏览器登录、添加账号与 IMAP 文件夹 / 收件箱同步，见[验证记录第 38 节](../development/validation.md)。
+已验证：2026-11-10 在 macOS 开发版上用一个 Outlook.com 个人账号完成浏览器登录、添加账号与 IMAP 文件夹 / 收件箱同步，见[验证指引](../development/validation.md)。
 
 仍待真实账号验证：
 

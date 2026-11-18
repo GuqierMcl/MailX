@@ -2,7 +2,7 @@
 
 状态：**Implemented / 专用预设、官方图标、应用专用密码引导与官方帮助入口已有实现；真实账号兼容尚待验收**。
 
-本评估区分 Apple 官方要求、MailX 当前实现和待验证行为。公开端点探测及调研基线集中记录在[验证记录](../development/validation.md#icloud-mail-feasibility)，不将公开握手成功视为真实邮箱兼容通过。
+本评估区分 Apple 官方要求、MailX 当前实现和待验证行为。公开端点探测及调研基线集中记录在[验证指引](../development/validation.md#icloud-mail-feasibility)，不将公开握手成功视为真实邮箱兼容通过。
 
 ## 1. 结论与建议范围
 
@@ -82,7 +82,7 @@ MailX 已为 SMTP accepted 的邮件保留本机副本，标准策略按同账�
 
 Apple 官方指引列出每天 1,000 封邮件、每天 1,000 位收件人、单封最多 500 位收件人，收发邮件大小 20 MB；Mail Drop 可扩大至 5 GB。免费 iCloud 空间为共享的 5 GB，用满后无法收发邮件 [S4]。不将这些上限当成投递保证，不用 MailX 本地发送数推算剩余额度，也不把 Mail Drop 写成标准 SMTP 已具备的能力。
 
-MailX 当前限制的是普通附件和内嵌图片**原始总字节 20 MiB**，不是完整 MIME 大小；编码、正文和头部会增加体积。公开 SMTP 本次公告的 `SIZE` 与官方 20 MB 指引分别记录在[验证记录](../development/validation.md#icloud-mail-feasibility)，不能据一次公告上调产品承诺或推导安全的原始附件上限。
+MailX 当前限制的是普通附件和内嵌图片**原始总字节 20 MiB**，不是完整 MIME 大小；编码、正文和头部会增加体积。公开 SMTP 本次公告的 `SIZE` 与官方 20 MB 指引分别记录在[验证指引](../development/validation.md#icloud-mail-feasibility)，不能据一次公告上调产品承诺或推导安全的原始附件上限。
 
 现有 SMTP 会根据当次 EHLO SIZE 对完整 MIME 做发送前检查，并提供附件容量提示，但不能保证低于 SIZE 的邮件一定获准发送。真实验收应覆盖普通小附件和接近限制的合成样本；MailX 没有 Mail Drop 或超限自动上传功能 [S9]。
 
@@ -97,7 +97,7 @@ MailX 当前限制的是普通附件和内嵌图片**原始总字节 20 MiB**，
 | 工作包 | 内容与完成标准 |
 | --- | --- |
 | A：真实最小 PoC（待验） | 经 iCloud 或通用入口接入一个已开通的主邮箱，显式填写用户名与应用专用密码；验证收发登录、LIST / EXAMINE、正文读取和一次获授权的实际投递，核对服务器已发送副本。排除认证和目录访问阻断。 |
-| B：专用预设（已实现） | iCloud 入口、993/587 参数、应用专用密码双语引导和固定帮助链接；复用高级用户名、路由及凭证修改，不改变已有手动账号。自动回归与本轮检查结果见[验证记录](../development/validation.md#icloud-mail-feasibility)。 |
+| B：专用预设（已实现） | iCloud 入口、993/587 参数、应用专用密码双语引导和固定帮助链接；复用高级用户名、路由及凭证修改，不改变已有手动账号。自动回归与本轮检查结果见[验证指引](../development/validation.md#icloud-mail-feasibility)。 |
 | C：基础兼容验收 | 首次/增量同步、中文与自定义目录、正文和附件、已读/星标写回、删除与撤销、IDLE 或轮询、重启离线缓存、应用专用密码撤销及替换恢复；分别记录 SMTP accepted、收件端到达和已发送可见。 |
 | D：扩大范围 | `me.com` / `mac.com`、别名、自定义域、SOCKS5 / HTTP CONNECT、其他平台分别取得证据；Apple 授权登录另行评估。 |
 
