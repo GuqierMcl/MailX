@@ -93,6 +93,15 @@ async fn run_with(
     Run { events, result }
 }
 
+fn origin() -> ReasoningOrigin {
+    ReasoningOrigin {
+        protocol: AiProtocol::OpenaiCompatible,
+        connection_id: "00000000-0000-4000-8000-000000000001".into(),
+        base_url: "https://ai.example/v1".into(),
+        model: "m".into(),
+    }
+}
+
 fn user(text: &str) -> Vec<ChatMessage> {
     vec![ChatMessage::User(text.into())]
 }
@@ -105,8 +114,7 @@ async fn go(protocol: AiProtocol, server: &MockStream) -> Run {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     run_with(protocol, server, &request, LIMITS, &NetRoute::default()).await
 }
@@ -284,6 +292,7 @@ async fn openai_request_has_the_expected_shape() {
                 call("c1", "search", json!({"q":"x"})),
                 call("c2", "list", json!({})),
             ],
+            reasoning: None,
         },
         ChatMessage::ToolResult {
             call_id: "c1".into(),
@@ -298,6 +307,7 @@ async fn openai_request_has_the_expected_shape() {
         ChatMessage::Assistant {
             text: "Done.".into(),
             tool_calls: vec![],
+            reasoning: None,
         },
         ChatMessage::User("thanks".into()),
     ];
@@ -312,8 +322,7 @@ async fn openai_request_has_the_expected_shape() {
         messages: &messages,
         tools: &tools,
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let run = run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(run.result, Ok(()));
@@ -353,8 +362,7 @@ async fn openai_request_has_the_expected_shape() {
         messages: &user("hi"),
         tools: &[],
         max_output: Some(256),
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(
@@ -365,33 +373,21 @@ async fn openai_request_has_the_expected_shape() {
 }
 
 #[tokio::test]
-async fn openai_turns_thinking_off_only_for_a_provider_with_a_known_switch() {
+async fn no_thinking_switch_is_sent_on_either_protocol() {
     let server = serve(vec![oa_text("x"), oa_finish("stop"), done()]).await;
-    for (provider_id, reasoning, switched) in [
-        ("deepseek", Reasoning::Off, true),
-        ("deepseek", Reasoning::Default, false),
-        ("openai", Reasoning::Off, false),
-        ("custom", Reasoning::Off, false),
-    ] {
-        let request = ChatRequest {
-            model: "m",
-            system: None,
-            messages: &user("hi"),
-            tools: &[],
-            max_output: Some(4096),
-            provider_id,
-            reasoning,
-        };
-        run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
-        let body = server.http.last().json();
-        if switched {
-            assert_eq!(body["thinking"], json!({"type": "disabled"}), "{body}");
-        } else {
-            assert!(body.get("thinking").is_none(), "{provider_id}: {body}");
-        }
-    }
+    let request = ChatRequest {
+        model: "deepseek-chat",
+        system: None,
+        messages: &user("hi"),
+        tools: &[],
+        max_output: Some(4096),
+        origin: &origin(),
+    };
+    run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
+    let body = server.http.last().json();
+    assert!(body.get("thinking").is_none(), "{body}");
+    assert!(body.get("reasoning_effort").is_none(), "{body}");
 
-    // The Anthropic protocol never gets the field, whatever the provider id.
     let server = serve(vec![
         an_start(1),
         an_block(0, json!({"type": "text", "text": ""})),
@@ -400,15 +396,6 @@ async fn openai_turns_thinking_off_only_for_a_provider_with_a_known_switch() {
         an_end("end_turn", 2),
     ])
     .await;
-    let request = ChatRequest {
-        model: "m",
-        system: None,
-        messages: &user("hi"),
-        tools: &[],
-        max_output: None,
-        provider_id: "deepseek",
-        reasoning: Reasoning::Off,
-    };
     run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
     assert!(server.http.last().json().get("thinking").is_none());
 }
@@ -576,7 +563,7 @@ fn an_ping() -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn anthropic_streams_text_ignores_thinking_and_reports_usage() {
+async fn anthropic_streams_text_after_thinking_and_reports_usage() {
     let events = vec![
         an_start(25),
         an_ping(),
@@ -660,6 +647,7 @@ async fn anthropic_request_has_the_expected_shape() {
                 call("c1", "search", json!({"q":"x"})),
                 call("c2", "list", json!({})),
             ],
+            reasoning: None,
         },
         ChatMessage::ToolResult {
             call_id: "c1".into(),
@@ -674,6 +662,7 @@ async fn anthropic_request_has_the_expected_shape() {
         ChatMessage::Assistant {
             text: String::new(),
             tool_calls: vec![call("c3", "list", json!({}))],
+            reasoning: None,
         },
         ChatMessage::ToolResult {
             call_id: "c3".into(),
@@ -692,8 +681,7 @@ async fn anthropic_request_has_the_expected_shape() {
         messages: &messages,
         tools: &tools,
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let run = run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(run.result, Ok(()));
@@ -734,8 +722,7 @@ async fn anthropic_request_has_the_expected_shape() {
         messages: &user("hi"),
         tools: &[],
         max_output: Some(100),
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
     assert_eq!(
@@ -868,8 +855,7 @@ async fn a_silent_gap_longer_than_idle_times_out_and_keeps_earlier_events() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let limits = StreamLimits {
         idle: Duration::from_millis(200),
@@ -895,8 +881,7 @@ async fn steady_chunks_still_hit_the_total_limit() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let limits = StreamLimits {
         idle: Duration::from_secs(2),
@@ -932,8 +917,7 @@ async fn a_server_that_never_answers_times_out_at_first_byte() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let limits = StreamLimits {
         first_byte: Duration::from_millis(200),
@@ -954,8 +938,7 @@ async fn a_body_over_the_cap_is_rejected() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let limits = StreamLimits {
         max_bytes: 700,
@@ -984,8 +967,7 @@ async fn dropping_the_stream_mid_way_closes_the_connection() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     {
@@ -1015,8 +997,7 @@ async fn a_failed_proxy_is_an_error_not_a_direct_connection() {
         messages: &messages,
         tools: &[],
         max_output: None,
-        provider_id: "custom",
-        reasoning: Reasoning::Default,
+        origin: &origin(),
     };
     let run = run_with(OPENAI, &server, &request, LIMITS, &route).await;
     assert_eq!(run.result, Err(ErrorCode::AiProxy));
@@ -1033,4 +1014,335 @@ fn the_endpoint_debug_output_hides_the_key() {
         route: &route,
     };
     assert!(!format!("{endpoint:?}").contains("sk-secret"));
+}
+
+// ---- Reasoning ----
+
+use crate::ai::reasoning::{
+    AnthropicPart, AssistantReasoning, ReasoningEcho, ReasoningField, ReasoningSpan,
+};
+
+impl Run {
+    fn reasoning(&self) -> String {
+        self.events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::Reasoning(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn echo(&self) -> Option<&ReasoningEcho> {
+        self.events.iter().find_map(|e| match e {
+            StreamEvent::ReasoningEcho(echo) => Some(echo),
+            _ => None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn openai_streams_reasoning_content_and_remembers_the_field() {
+    let server = serve(pieces(
+        vec![
+            data(json!({"choices":[{"delta":{"role":"assistant","reasoning_content":""}}]})),
+            data(json!({"choices":[{"delta":{"reasoning_content":"先想"}}]})),
+            data(json!({"choices":[{"delta":{"reasoning_content":"一下"}}]})),
+            oa_call(0, Some("c1"), Some("search"), "{}"),
+            oa_finish("tool_calls"),
+            done(),
+        ],
+        4,
+    ))
+    .await;
+    let run = go(OPENAI, &server).await;
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(run.reasoning(), "先想一下");
+    assert_eq!(
+        run.echo(),
+        Some(&ReasoningEcho::Field {
+            field: ReasoningField::ReasoningContent,
+            text: "先想一下".into()
+        })
+    );
+    // Reasoning first, then the call, then what to send back, then the end.
+    let kinds: Vec<&str> = run
+        .events
+        .iter()
+        .map(|e| match e {
+            StreamEvent::Text(_) => "text",
+            StreamEvent::Reasoning(_) => "reasoning",
+            StreamEvent::ReasoningEcho(_) => "echo",
+            StreamEvent::ToolCall(_) => "call",
+            StreamEvent::Finished { .. } => "finished",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        ["reasoning", "reasoning", "call", "echo", "finished"]
+    );
+}
+
+#[tokio::test]
+async fn openai_reads_a_string_reasoning_field_and_ignores_other_shapes() {
+    let server = serve(vec![
+        data(json!({"choices":[{"delta":{"reasoning":"hmm"}}]})),
+        // Not a string: some servers send structured details; not ours to echo.
+        data(json!({"choices":[{"delta":{"reasoning":{"effort":"low"}}}]})),
+        oa_text("Hi"),
+        oa_finish("stop"),
+        done(),
+    ])
+    .await;
+    let run = go(OPENAI, &server).await;
+    assert_eq!(run.reasoning(), "hmm");
+    assert_eq!(run.text(), "Hi");
+    assert_eq!(
+        run.echo(),
+        Some(&ReasoningEcho::Field {
+            field: ReasoningField::Reasoning,
+            text: "hmm".into()
+        })
+    );
+
+    // Nothing at all: no reasoning events and nothing to send back.
+    let server = serve(vec![oa_text("Hi"), oa_finish("stop"), done()]).await;
+    let run = go(OPENAI, &server).await;
+    assert_eq!(run.reasoning(), "");
+    assert_eq!(run.echo(), None);
+}
+
+#[tokio::test]
+async fn anthropic_streams_thinking_and_keeps_blocks_in_order() {
+    let events = vec![
+        an_start(25),
+        an_block(0, json!({"type":"thinking","thinking":""})),
+        an_delta(0, json!({"type":"thinking_delta","thinking":"hm"})),
+        an_delta(0, json!({"type":"thinking_delta","thinking":"m"})),
+        an_delta(0, json!({"type":"signature_delta","signature":"sig-"})),
+        an_delta(0, json!({"type":"signature_delta","signature":"1"})),
+        an_stop(0),
+        an_block(1, json!({"type":"text","text":""})),
+        an_text(1, "你好"),
+        an_stop(1),
+        an_block(2, json!({"type":"redacted_thinking","data":"opaque=="})),
+        an_stop(2),
+        an_block(
+            3,
+            json!({"type":"tool_use","id":"toolu_1","name":"search","input":{}}),
+        ),
+        an_json(3, "{}"),
+        an_stop(3),
+        an_end("tool_use", 15),
+    ];
+    for size in [1, 7, 5000] {
+        let server = serve(pieces(events.clone(), size)).await;
+        let run = go(ANTHROPIC, &server).await;
+        assert_eq!(run.result, Ok(()), "size {size}");
+        assert_eq!(run.reasoning(), "hmm");
+        assert_eq!(run.text(), "你好");
+        // The redacted block opens a stretch with no text.
+        let reasoning: Vec<&StreamEvent> = run
+            .events
+            .iter()
+            .filter(|e| matches!(e, StreamEvent::Reasoning(_)))
+            .collect();
+        assert_eq!(reasoning.len(), 4, "size {size}");
+        assert_eq!(
+            run.echo(),
+            Some(&ReasoningEcho::Blocks {
+                parts: vec![
+                    AnthropicPart::Thinking {
+                        thinking: "hmm".into(),
+                        signature: Some("sig-1".into()),
+                    },
+                    AnthropicPart::Text { bytes: 6 },
+                    AnthropicPart::RedactedThinking {
+                        data: "opaque==".into()
+                    },
+                    AnthropicPart::ToolUse {
+                        id: "toolu_1".into()
+                    },
+                ]
+            })
+        );
+        assert_eq!(run.finished().unwrap().0, FinishReason::ToolCalls);
+    }
+
+    // Without thinking there is nothing to send back.
+    let server = serve(vec![
+        an_start(1),
+        an_block(0, json!({"type":"text","text":"x"})),
+        an_stop(0),
+        an_end("end_turn", 1),
+    ])
+    .await;
+    assert_eq!(go(ANTHROPIC, &server).await.echo(), None);
+}
+
+fn with_reasoning(echo: ReasoningEcho, origin: ReasoningOrigin) -> Option<AssistantReasoning> {
+    Some(AssistantReasoning {
+        origin,
+        echo: Some(echo),
+        spans: vec![ReasoningSpan {
+            bytes: 2,
+            duration_ms: 1200,
+            text_at: 0,
+            tools_before: 0,
+        }],
+    })
+}
+
+#[tokio::test]
+async fn openai_sends_reasoning_back_under_the_field_it_came_in() {
+    let server = serve(vec![oa_text("x"), oa_finish("stop"), done()]).await;
+    let mut other = origin();
+    other.model = "another-model".into();
+    for (field, from, sent) in [
+        (ReasoningField::ReasoningContent, origin(), true),
+        (ReasoningField::Reasoning, origin(), true),
+        (ReasoningField::ReasoningContent, other.clone(), false),
+    ] {
+        let messages = vec![
+            ChatMessage::User("find".into()),
+            ChatMessage::Assistant {
+                text: String::new(),
+                tool_calls: vec![call("c1", "search", json!({}))],
+                reasoning: with_reasoning(
+                    ReasoningEcho::Field {
+                        field,
+                        text: "想想".into(),
+                    },
+                    from,
+                ),
+            },
+            ChatMessage::ToolResult {
+                call_id: "c1".into(),
+                content: "r".into(),
+                is_error: false,
+            },
+            ChatMessage::Assistant {
+                text: "plain".into(),
+                tool_calls: vec![],
+                reasoning: None,
+            },
+        ];
+        let request = ChatRequest {
+            model: "m",
+            system: None,
+            messages: &messages,
+            tools: &[],
+            max_output: None,
+            origin: &origin(),
+        };
+        run_with(OPENAI, &server, &request, LIMITS, &NetRoute::default()).await;
+        let body = server.http.last().json();
+        let thought = &body["messages"][1];
+        let names = ["reasoning_content", "reasoning"];
+        for name in names {
+            let expected = sent && name == field.name();
+            assert_eq!(
+                thought.get(name).is_some(),
+                expected,
+                "{name} for {field:?}: {thought}"
+            );
+        }
+        if sent {
+            assert_eq!(thought[field.name()], "想想");
+        }
+        // A message without reasoning never gets the field.
+        for name in names {
+            assert!(body["messages"][3].get(name).is_none(), "{body}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn anthropic_sends_thinking_back_unchanged_in_its_place() {
+    let server = serve(vec![an_start(1), an_end("end_turn", 1)]).await;
+    let mut anthropic = origin();
+    anthropic.protocol = AiProtocol::Anthropic;
+    let parts = vec![
+        AnthropicPart::Thinking {
+            thinking: "hmm".into(),
+            signature: Some("sig".into()),
+        },
+        AnthropicPart::Text { bytes: 4 },
+        AnthropicPart::ToolUse { id: "c1".into() },
+        AnthropicPart::RedactedThinking {
+            data: "opaque".into(),
+        },
+        AnthropicPart::Thinking {
+            thinking: "unsigned".into(),
+            signature: None,
+        },
+        AnthropicPart::ToolUse { id: "c2".into() },
+    ];
+    let messages = |from: ReasoningOrigin| {
+        vec![
+            ChatMessage::User("go".into()),
+            ChatMessage::Assistant {
+                text: "Look".into(),
+                tool_calls: vec![
+                    call("c1", "search", json!({})),
+                    call("c2", "list", json!({})),
+                ],
+                reasoning: with_reasoning(
+                    ReasoningEcho::Blocks {
+                        parts: parts.clone(),
+                    },
+                    from,
+                ),
+            },
+            ChatMessage::ToolResult {
+                call_id: "c1".into(),
+                content: "a".into(),
+                is_error: false,
+            },
+            ChatMessage::ToolResult {
+                call_id: "c2".into(),
+                content: "b".into(),
+                is_error: false,
+            },
+        ]
+    };
+    let same = messages(anthropic.clone());
+    let request = ChatRequest {
+        model: "m",
+        system: None,
+        messages: &same,
+        tools: &[],
+        max_output: None,
+        origin: &anthropic,
+    };
+    run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
+    assert_eq!(
+        server.http.last().json()["messages"][1]["content"],
+        json!([
+            {"type":"thinking","thinking":"hmm","signature":"sig"},
+            {"type":"text","text":"Look"},
+            {"type":"tool_use","id":"c1","name":"search","input":{}},
+            {"type":"redacted_thinking","data":"opaque"},
+            {"type":"thinking","thinking":"unsigned"},
+            {"type":"tool_use","id":"c2","name":"list","input":{}}
+        ])
+    );
+
+    // From another connection: the blocks are left out, the rest stays.
+    let mut elsewhere = anthropic.clone();
+    elsewhere.connection_id = "00000000-0000-4000-8000-000000000002".into();
+    let moved = messages(elsewhere);
+    let request = ChatRequest {
+        messages: &moved,
+        ..request
+    };
+    run_with(ANTHROPIC, &server, &request, LIMITS, &NetRoute::default()).await;
+    assert_eq!(
+        server.http.last().json()["messages"][1]["content"],
+        json!([
+            {"type":"text","text":"Look"},
+            {"type":"tool_use","id":"c1","name":"search","input":{}},
+            {"type":"tool_use","id":"c2","name":"list","input":{}}
+        ])
+    );
 }

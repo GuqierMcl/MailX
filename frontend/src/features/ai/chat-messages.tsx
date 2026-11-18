@@ -8,10 +8,11 @@ import { confirmStatus, turnFragments, turnWorking, type ChatMessage, type ChatT
 import { useChatEnv } from './chat-env'
 import { ConfirmCard, ConfirmOutcomeLine } from './confirm-card'
 import { Markdown } from './markdown-view'
+import { ThinkingRow } from './thinking-row'
 import { ToolRow } from './tool-parts'
 import { cn } from '@/lib/utils'
 
-/** After this long without a first word, the thinking line says the model is slow to answer. */
+/** After this long with nothing at all from the model, the thinking line says it is slow to answer. */
 export const SLOW_REPLY_MS = 10_000
 /** Messages this far from the end are left to the browser to skip while off screen. */
 const RECENT_MESSAGES = 4
@@ -41,6 +42,7 @@ const AssistantMessage = memo(function AssistantMessage({ turn, latest }: { turn
   const env = useChatEnv()
   const fragments = turnFragments(turn)
   const working = turnWorking(turn)
+  // The generic line covers only the wait before anything arrives; a thinking stretch has its own line.
   const thinking = working && turn.state !== 'awaitingConfirmation' && fragments.length === 0
   const slow = useAfter(thinking, SLOW_REPLY_MS)
   const openLink = (url: string) => { void env.client.openExternalLink(url).catch(() => undefined) }
@@ -51,6 +53,7 @@ const AssistantMessage = memo(function AssistantMessage({ turn, latest }: { turn
       {fragments.map((fragment) => {
         switch (fragment.kind) {
           case 'text': return <Markdown key={fragment.key} text={fragment.text} streaming={fragment.streaming} onOpenLink={openLink} />
+          case 'thought': return <ThinkingRow key={fragment.key} thought={fragment.thought} working={working} />
           case 'tool': return <ToolRow key={fragment.key} tool={fragment.tool} />
           case 'confirm': return (
             <ConfirmCard

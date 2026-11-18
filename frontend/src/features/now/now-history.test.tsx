@@ -17,7 +17,7 @@ const ready: AiState = {
 }
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'chat1', kind: 'chat', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'conv-live', pending: null, ...over,
+  runId: 'chat1', kind: 'chat', state: 'running', text: '', tools: [], reasoning: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'conv-live', pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'chat1'): AssistantEvent => ({ runId, seq, kind })
 const done = (from: number) => [event(from, { type: 'finished', reason: 'stop' }), event(from + 1, { type: 'state', state: 'completed' })]
@@ -36,10 +36,11 @@ const PAST: ConversationDetail = {
         { callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 3 }, textOffset: 0 },
         { callId: 'b', name: 'archive_emails', status: 'done', summary: { type: 'changed', count: 2, emailIds: [], undo: null }, textOffset: 4 },
       ],
+      reasoning: [],
       confirmations: [{ callId: 'b', tool: 'archive_emails', action: 'organize', outcome: 'approved', textOffset: 4 }],
     },
     { role: 'user', text: '再发一封', at: daysAgo(3) },
-    { role: 'assistant', text: '', state: 'failed', finishedReason: null, error: 'aiUnavailable', tools: [], confirmations: [], at: daysAgo(3) },
+    { role: 'assistant', text: '', state: 'failed', finishedReason: null, error: 'aiUnavailable', tools: [], reasoning: [], confirmations: [], at: daysAgo(3) },
   ],
 }
 
@@ -140,7 +141,7 @@ describe('history button and panel', () => {
       ...PAST,
       turns: [
         { role: 'user', text: '查一下', at: daysAgo(1) },
-        { role: 'assistant', text: '先看看。结果如下。', state: 'completed', finishedReason: 'stop', error: null, at: daysAgo(1), confirmations: [], tools: [{ callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }] },
+        { role: 'assistant', text: '先看看。结果如下。', state: 'completed', finishedReason: 'stop', error: null, at: daysAgo(1), confirmations: [], reasoning: [], tools: [{ callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }] },
       ],
     })
     const panel = await openPanel()

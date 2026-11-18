@@ -19,7 +19,10 @@ use serde_json::Value;
 use super::{Endpoint, auth_headers, http_error, status_error, url};
 use crate::{
     ErrorCode,
-    ai::{reasoning::Reasoning, settings::AiProtocol},
+    ai::{
+        reasoning::{AssistantReasoning, ReasoningEcho, ReasoningOrigin},
+        settings::AiProtocol,
+    },
     net::http::{self, HttpRequest, StreamLimits},
 };
 
@@ -28,12 +31,13 @@ use crate::{
 /// leave invalid tool JSON. Every current Claude model allows at least 4096.
 const ANTHROPIC_STREAM_DEFAULT_MAX_TOKENS: u32 = 4096;
 
-/// The limits for a chat turn (first piece 30 s, 60 s between pieces, 180 s in
-/// all); local models may need more.
+/// The limits for a model turn: first piece 30 s, 60 s between pieces (any
+/// bytes count, reasoning included) and 10 minutes in all, so a model that
+/// thinks at length while it keeps streaming is not cut off.
 pub(crate) const CHAT_STREAM_LIMITS: StreamLimits = StreamLimits {
     first_byte: std::time::Duration::from_secs(30),
     idle: std::time::Duration::from_secs(60),
-    total: std::time::Duration::from_secs(180),
+    total: std::time::Duration::from_secs(10 * 60),
     max_bytes: 8 * 1024 * 1024,
 };
 
@@ -45,11 +49,9 @@ pub(crate) struct ChatRequest<'a> {
     /// `None` sends no cap on OpenAI-compatible servers; Anthropic always gets
     /// one.
     pub max_output: Option<u32>,
-    /// The catalog id of the provider behind the endpoint (`"deepseek"`,
-    /// `"custom"`); only used to pick the provider's own thinking switch.
-    pub provider_id: &'a str,
-    /// A request for less thinking, applied where the provider documents how.
-    pub reasoning: Reasoning,
+    /// Who answers this request: stored reasoning goes back only to the
+    /// server and model that produced it.
+    pub origin: &'a ReasoningOrigin,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,6 +60,8 @@ pub(crate) enum ChatMessage {
     Assistant {
         text: String,
         tool_calls: Vec<ToolCallRequest>,
+        /// What the model reasoned in this turn, kept to be sent back.
+        reasoning: Option<AssistantReasoning>,
     },
     ToolResult {
         call_id: String,
@@ -84,6 +88,12 @@ pub(crate) struct ToolCallRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum StreamEvent {
     Text(String),
+    /// Readable reasoning as it streams. Empty when a reasoning block starts
+    /// without text (redacted thinking, or a block that fills in later).
+    Reasoning(String),
+    /// Everything to send back for this reply's reasoning, once, before
+    /// `Finished`; absent when the server sent none.
+    ReasoningEcho(ReasoningEcho),
     /// Whole: the arguments are complete, valid JSON.
     ToolCall(ToolCallRequest),
     Finished {

@@ -90,6 +90,7 @@ impl Conversation {
             self.messages.push(ChatMessage::Assistant {
                 text: STOPPED_MARKER.to_owned(),
                 tool_calls: Vec::new(),
+                reasoning: None,
             });
             self.stamps.push(now_rfc3339());
         }

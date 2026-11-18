@@ -43,7 +43,7 @@ export type AssistantChat = {
 }
 
 const turnOf = (run: AssistantRun, answers: Record<string, boolean>): ChatTurn => ({
-  state: run.state, text: run.text, tools: run.tools, confirms: run.confirms, answers,
+  state: run.state, text: run.text, tools: run.tools, reasoning: run.reasoning, confirms: run.confirms, answers,
   pendingId: run.pending?.requestId ?? null, error: run.error, finishedReason: run.finishedReason, finishedAt: run.finishedAt,
 })
 
@@ -75,7 +75,7 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     () => (open ? turnOf(run, answers) : null),
     // The run object is new every render; its parts are what changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [open, run.state, run.text, run.tools, run.confirms, run.pending, run.error, run.finishedReason, run.finishedAt, answers],
+    [open, run.state, run.text, run.tools, run.reasoning, run.confirms, run.pending, run.error, run.finishedReason, run.finishedAt, answers],
   )
   const latest = useRef({ run, live, open })
   useEffect(() => { latest.current = { run, live, open } })

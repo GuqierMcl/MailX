@@ -2,6 +2,7 @@ import type {
   AssistantEvent,
   ChatTurn,
   ChatTurnConfirmation,
+  ChatTurnReasoning,
   ChatTurnTool,
   ConfirmAction,
   ConfirmOutcome,
@@ -76,7 +77,7 @@ export function createMockConversations(deps: MockConversationsDeps) {
         id: crypto.randomUUID(), title: title(second), createdAt: ago(60 * 26), updatedAt: ago(60 * 26),
         turns: [
           { role: 'user', text: second, at: ago(60 * 26) },
-          { role: 'assistant', text: zh() ? '已经归档了 2 封推广邮件。' : 'Archived 2 promotional emails.', tools: [archived], confirmations: [asked], state: 'completed', finishedReason: 'stop', error: null, at: ago(60 * 26) },
+          { role: 'assistant', text: zh() ? '已经归档了 2 封推广邮件。' : 'Archived 2 promotional emails.', tools: [archived], reasoning: [], confirmations: [asked], state: 'completed', finishedReason: 'stop', error: null, at: ago(60 * 26) },
         ],
       },
       {
@@ -86,7 +87,12 @@ export function createMockConversations(deps: MockConversationsDeps) {
           {
             role: 'assistant',
             text: zh() ? `先看账单提醒：${card}${inbox}其余的可以晚点再看。` : `Start with the billing reminder:${card}${inbox}The rest can wait.`,
-            tools: [found], confirmations: [], state: 'completed', finishedReason: 'stop', error: null, at: ago(60 * 5),
+            tools: [found],
+            reasoning: [
+              { text: zh() ? '用户想知道这周要处理什么。先搜一下未读和近期的邮件。' : 'The user wants to know what needs attention this week. Search unread and recent mail first.', durationMs: 4200, textOffset: 0, toolsBefore: 0 },
+              { text: zh() ? '账单提醒有截止日期，放在最前面。' : 'The billing reminder has a deadline; put it first.', durationMs: 700, textOffset: 0, toolsBefore: 1 },
+            ],
+            confirmations: [], state: 'completed', finishedReason: 'stop', error: null, at: ago(60 * 5),
           },
         ],
       },
@@ -113,9 +119,12 @@ export function createMockConversations(deps: MockConversationsDeps) {
       callId: question.callId, tool: question.tool, action: question.action, textOffset: question.offset,
       outcome: run.answers.get(question.callId) ?? 'expired',
     }))
+    const reasoning: ChatTurnReasoning[] = snapshot.reasoning.map((thought) => ({
+      text: thought.text, durationMs: thought.durationMs ?? 0, textOffset: thought.textOffset, toolsBefore: thought.toolsBefore,
+    }))
     const user: ChatTurn = { role: 'user', text: run.message, at }
     const reply: ChatTurn = {
-      role: 'assistant', text: snapshot.text, tools, confirmations,
+      role: 'assistant', text: snapshot.text, tools, reasoning, confirmations,
       state: snapshot.state === 'completed' ? 'completed' : snapshot.state === 'failed' ? 'failed' : 'canceled',
       finishedReason: snapshot.finishedReason, error: snapshot.error, at,
     }

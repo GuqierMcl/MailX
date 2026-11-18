@@ -1391,3 +1391,13 @@ MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态
 主界面右上角 MCP 图标开启服务后保持可见，无客户端时不显示绿点；有客户端连接时显示绿点，最后一个客户端断开后移除；失败红点与关闭后隐藏沿用既有行为。MCP 设置与标题栏专项共 28 项测试通过，覆盖连接数 `0 → 2 → 1 → 0` 的事件更新；类型检查、lint 与差异检查通过。独立上下文 `gpt-6-astra` 核对该行为、双语指南以及同步最新 main 后的内置助手代码，未发现需修复缺陷。变更纳入同一 [PR #148](https://github.com/GuqierMcl/MailX/pull/148)。
 
 同步最新 main 后重新执行 `bun run check`、`bun run rust:test`、`bun run rust:fmt` 与 `bun run rust:clippy` 全部通过：前端 131 个文件 / 1,702 项，Rust 合计 1,851 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。
+
+## 助手思考内容的捕获、回传与展示（2026-11-18）
+
+思考内容按协议捕获与原样回传，不按服务商分支：OpenAI 兼容接口按收到时的字段名（`reasoning_content` / `reasoning`）回传，没收到就不发；Anthropic 接口的 `thinking`（含签名）与 `redacted_thinking` 块按原位置回传；只回传给同一协议、连接、地址与模型。原 DeepSeek 专用的关闭思考开关已移除。
+
+自动测试：两种协议的解码与请求体回传、来源不一致时不回传、工具调用后与追问时的回传、读回历史对话后继续、旧格式历史记录读取、上下文预算计入；前端思考行（进行中 / 结束 / 展开 / 脱敏 / 减少动态效果）、等待提示只在未收到任何数据时显示、读回对话的位置还原。同步含 #149 的 main 后，`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`（core 1,545 项通过、2 项既有忽略）、`types:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test`（133 个文件 / 1,743 项）、生产构建与 `git diff --check` 通过。浏览器预览（模拟助手）目测思考行与工具行对齐、展开原文的样式。
+
+维护者手动验收（macOS，`bun run desktop:dev:isolated`，真实 DeepSeek）：会调用工具的提问正常回答并显示思考时长；同一对话追问正常；从历史对话重新打开后追问正常；「此刻」概述句完整生成。
+
+尚未验证：Anthropic 协议的思考（默认关闭，仅模拟数据）、其他返回思考内容的服务商（Kimi、Qwen、GLM、OpenRouter、本地 vLLM / Ollama 等），以及 Windows / Linux 桌面。

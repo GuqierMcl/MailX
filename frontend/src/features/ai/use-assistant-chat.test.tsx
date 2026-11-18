@@ -6,7 +6,7 @@ import { turnFragments } from './chat-model'
 import { useAssistantChat } from './use-assistant-chat'
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'r1', kind: 'chat', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'c1', pending: null, ...over,
+  runId: 'r1', kind: 'chat', state: 'running', text: '', tools: [], reasoning: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'c1', pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'r1'): AssistantEvent => ({ runId, seq, kind })
 const SEND: ConfirmationRequest = {

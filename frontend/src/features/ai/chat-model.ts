@@ -1,5 +1,5 @@
 import type { ChatTurn as SavedTurn, ConfirmAction, ConfirmOutcome, ConversationDetail, ErrorCode, FinishedReason } from '@/generated/accounts'
-import type { AssistantRunState, RunConfirm, RunTool } from './use-assistant-run'
+import type { AssistantRunState, RunConfirm, RunThought, RunTool } from './use-assistant-run'
 
 /** What the user answered to a confirmation of a saved reply: only the outcome is kept, never the details. */
 export type SavedOutcome = { callId: string; tool: string; action: ConfirmAction; outcome: ConfirmOutcome; at: number }
@@ -9,6 +9,8 @@ export type ChatTurn = {
   state: AssistantRunState
   text: string
   tools: RunTool[]
+  /** The model's thinking, stretch by stretch; absent means none. */
+  reasoning?: RunThought[]
   confirms: RunConfirm[]
   /** What the user answered to each confirmation, by request id. */
   answers: Record<string, boolean>
@@ -28,6 +30,7 @@ export type ChatMessage =
 /** The parts of a reply in the order they came. */
 export type Fragment =
   | { key: string; kind: 'text'; text: string; streaming: boolean }
+  | { key: string; kind: 'thought'; thought: RunThought }
   | { key: string; kind: 'tool'; tool: RunTool }
   | { key: string; kind: 'confirm'; confirm: RunConfirm }
   | { key: string; kind: 'outcome'; outcome: SavedOutcome }
@@ -43,18 +46,29 @@ export function confirmStatus(turn: ChatTurn, requestId: string): ConfirmStatus 
   return turn.pendingId === requestId && turn.state === 'awaitingConfirmation' ? 'waiting' : 'closed'
 }
 
+type Part = { at: number; order: number } & (
+  | { kind: 'thought'; thought: RunThought }
+  | { kind: 'tool'; tool: RunTool }
+  | { kind: 'confirm'; confirm: RunConfirm }
+  | { kind: 'outcome'; outcome: SavedOutcome })
+
 /**
- * Text, tool calls and confirmations in the order they began. A tool whose confirmation card is shown
- * has no row of its own: the card says what happened to it. Only the text after the last part grows.
+ * Text, thinking, tool calls and confirmations in the order they began. A tool whose confirmation card is
+ * shown has no row of its own: the card says what happened to it. Only the text after the last part grows.
+ * Parts at the same text offset keep the order they came in: a thinking stretch goes before the tool
+ * calls that began after it (`toolsBefore`), a confirmation takes its call's place.
  */
 export function turnFragments(turn: ChatTurn): Fragment[] {
   const outcomes = turn.saved?.outcomes ?? []
   const confirmed = new Set([...turn.confirms.map((confirm) => confirm.callId), ...outcomes.map((outcome) => outcome.callId)])
-  const parts: ({ at: number } & ({ kind: 'tool'; tool: RunTool } | { kind: 'confirm'; confirm: RunConfirm } | { kind: 'outcome'; outcome: SavedOutcome }))[] = [
-    ...turn.tools.filter((tool) => !confirmed.has(tool.callId)).map((tool) => ({ at: tool.at, kind: 'tool' as const, tool })),
-    ...turn.confirms.map((confirm) => ({ at: confirm.at, kind: 'confirm' as const, confirm })),
-    ...outcomes.map((outcome) => ({ at: outcome.at, kind: 'outcome' as const, outcome })),
-  ].sort((a, b) => a.at - b.at)
+  const index = new Map(turn.tools.map((tool, at) => [tool.callId, at]))
+  const callOrder = (callId: string) => 2 * (index.get(callId) ?? turn.tools.length) + 1
+  const parts: Part[] = [
+    ...(turn.reasoning ?? []).map((thought): Part => ({ at: thought.at, order: 2 * thought.toolsBefore, kind: 'thought', thought })),
+    ...turn.tools.filter((tool) => !confirmed.has(tool.callId)).map((tool): Part => ({ at: tool.at, order: callOrder(tool.callId), kind: 'tool', tool })),
+    ...turn.confirms.map((confirm): Part => ({ at: confirm.at, order: callOrder(confirm.callId), kind: 'confirm', confirm })),
+    ...outcomes.map((outcome): Part => ({ at: outcome.at, order: callOrder(outcome.callId), kind: 'outcome', outcome })),
+  ].sort((a, b) => a.at - b.at || a.order - b.order)
   const out: Fragment[] = []
   const live = turnWorking(turn)
   let from = 0
@@ -65,7 +79,8 @@ export function turnFragments(turn: ChatTurn): Fragment[] {
   }
   for (const part of parts) {
     text(Math.min(part.at, turn.text.length), false)
-    if (part.kind === 'tool') out.push({ key: `tool-${part.tool.callId}`, kind: 'tool', tool: part.tool })
+    if (part.kind === 'thought') out.push({ key: `thought-${part.thought.segment}`, kind: 'thought', thought: part.thought })
+    else if (part.kind === 'tool') out.push({ key: `tool-${part.tool.callId}`, kind: 'tool', tool: part.tool })
     else if (part.kind === 'confirm') out.push({ key: `confirm-${part.confirm.requestId}`, kind: 'confirm', confirm: part.confirm })
     else out.push({ key: `outcome-${part.outcome.callId}`, kind: 'outcome', outcome: part.outcome })
   }
@@ -80,13 +95,16 @@ export function toolEmailIds(tool: RunTool): string[] {
   return []
 }
 
-/** A saved reply as the chat shows it. `textOffset` puts tools and answered confirmations back where they were live. */
+/** A saved reply as the chat shows it. `textOffset` puts tools, thinking and answered confirmations back where they were live. */
 function savedReply(turn: Extract<SavedTurn, { role: 'assistant' }>): ChatTurn {
   const finished = new Date(turn.at)
   return {
     state: turn.state, text: turn.text,
     // Saved activities carry no undo (the host drops it); `settledAt` null keeps any undo window closed.
     tools: turn.tools.map((tool) => ({ callId: tool.callId, name: tool.name, status: tool.status, summary: tool.summary, at: tool.textOffset, settledAt: null })),
+    reasoning: turn.reasoning.map((thought, segment) => ({
+      segment, text: thought.text, at: thought.textOffset, toolsBefore: thought.toolsBefore, startedAt: 0, durationMs: thought.durationMs,
+    })),
     confirms: [], answers: {}, pendingId: null, error: turn.error, finishedReason: turn.finishedReason,
     finishedAt: turn.state === 'completed' && !Number.isNaN(finished.getTime()) ? finished : null,
     saved: { outcomes: turn.confirmations.map((item) => ({ callId: item.callId, tool: item.tool, action: item.action, outcome: item.outcome, at: item.textOffset })) },

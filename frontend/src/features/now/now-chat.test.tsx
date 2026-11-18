@@ -22,7 +22,7 @@ const SEND: ConfirmationRequest = {
 }
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'chat1', kind: 'chat', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'conv1', pending: null, ...over,
+  runId: 'chat1', kind: 'chat', state: 'running', text: '', tools: [], reasoning: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: 'conv1', pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'chat1'): AssistantEvent => ({ runId, seq, kind })
 const done = (from: number, runId = 'chat1') => [event(from, { type: 'finished', reason: 'stop' }, runId), event(from + 1, { type: 'state', state: 'completed' }, runId)]

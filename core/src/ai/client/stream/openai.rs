@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     ErrorCode,
-    ai::{reasoning, settings::AiProtocol},
+    ai::reasoning::{ReasoningEcho, ReasoningField, echo_for},
 };
 
 pub(super) fn body(request: &ChatRequest<'_>) -> Value {
@@ -21,13 +21,23 @@ pub(super) fn body(request: &ChatRequest<'_>) -> Value {
     for message in request.messages {
         messages.push(match message {
             ChatMessage::User(text) => json!({"role": "user", "content": text}),
-            ChatMessage::Assistant { text, tool_calls } => {
+            ChatMessage::Assistant {
+                text,
+                tool_calls,
+                reasoning,
+            } => {
                 let content = if text.is_empty() && !tool_calls.is_empty() {
                     Value::Null
                 } else {
                     json!(text)
                 };
                 let mut message = json!({"role": "assistant", "content": content});
+                // Only what this server sent, under the name it used.
+                if let Some(ReasoningEcho::Field { field, text }) =
+                    echo_for(reasoning.as_ref(), request.origin)
+                {
+                    message[field.name()] = json!(text);
+                }
                 if !tool_calls.is_empty() {
                     message["tool_calls"] = tool_calls
                         .iter()
@@ -70,14 +80,6 @@ pub(super) fn body(request: &ChatRequest<'_>) -> Value {
     if let Some(max) = request.max_output {
         body["max_tokens"] = json!(max);
     }
-    let fields = reasoning::body_fields(
-        AiProtocol::OpenaiCompatible,
-        request.provider_id,
-        request.reasoning,
-    );
-    for (name, value) in fields {
-        body[name] = value;
-    }
     body
 }
 
@@ -95,6 +97,9 @@ pub(super) struct OpenAiDecoder {
     usage: Option<Usage>,
     any_output: bool,
     last_index: Option<u64>,
+    /// The field the server's reasoning came in, once one did.
+    reasoning_field: Option<ReasoningField>,
+    reasoning: String,
 }
 
 impl OpenAiDecoder {
@@ -129,6 +134,30 @@ impl OpenAiDecoder {
         self.any_output = true;
     }
 
+    /// Reasoning text of a delta: `reasoning_content`, or `reasoning` when it
+    /// is a string. The first field seen is the one kept.
+    fn reasoning_fragment(&mut self, delta: &Value, out: &mut Vec<StreamEvent>) {
+        let fields = match self.reasoning_field {
+            Some(field) => [Some(field), None],
+            None => [
+                Some(ReasoningField::ReasoningContent),
+                Some(ReasoningField::Reasoning),
+            ],
+        };
+        for field in fields.into_iter().flatten() {
+            if let Some(text) = delta
+                .get(field.name())
+                .and_then(Value::as_str)
+                .filter(|t| !t.is_empty())
+            {
+                self.reasoning_field = Some(field);
+                self.reasoning.push_str(text);
+                out.push(StreamEvent::Reasoning(text.to_owned()));
+                return;
+            }
+        }
+    }
+
     fn finish(&mut self, out: &mut Vec<StreamEvent>) -> Result<(), ErrorCode> {
         let mut emitted = false;
         for (index, call) in std::mem::take(&mut self.calls) {
@@ -146,6 +175,12 @@ impl OpenAiDecoder {
                 arguments: parse_arguments(&call.arguments)?,
             }));
             emitted = true;
+        }
+        if let Some(field) = self.reasoning_field.take() {
+            out.push(StreamEvent::ReasoningEcho(ReasoningEcho::Field {
+                field,
+                text: std::mem::take(&mut self.reasoning),
+            }));
         }
         let reason = match self.reason.take() {
             // Some servers report `stop` after tool calls.
@@ -198,7 +233,7 @@ impl Decoder for OpenAiDecoder {
             return Ok(false);
         };
         if let Some(delta) = choice.get("delta") {
-            // `reasoning_content` and other fields are ignored.
+            self.reasoning_fragment(delta, out);
             if let Some(text) = delta
                 .get("content")
                 .and_then(Value::as_str)
