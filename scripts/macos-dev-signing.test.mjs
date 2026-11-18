@@ -1,5 +1,3 @@
-// Keychain probe adapted from t8y2/dbx scripts/dev-tauri.test.mjs (Apache-2.0),
-// commit eacef66c4ff6fef5bc9a045211435e69d9561c9c; ported to Bun and MailX.
 import { expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";

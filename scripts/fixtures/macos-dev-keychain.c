@@ -1,5 +1,3 @@
-// Adapted from t8y2/dbx scripts/fixtures/macos-dev-keychain.c (Apache-2.0),
-// commit eacef66c4ff6fef5bc9a045211435e69d9561c9c; added explicit create/read modes.
 // Synthetic Keychain probe: never use an actual account password here.
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>

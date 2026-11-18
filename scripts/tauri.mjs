@@ -1,5 +1,3 @@
-// Development runner adapted from t8y2/dbx scripts/dev-tauri.mjs (Apache-2.0),
-// commit eacef66c4ff6fef5bc9a045211435e69d9561c9c; integrated with MailX's CLI.
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";

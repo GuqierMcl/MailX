@@ -1,6 +1,3 @@
-// Adapted from t8y2/dbx scripts/macos-dev-signing.mjs (Apache-2.0), commit
-// eacef66c4ff6fef5bc9a045211435e69d9561c9c. Modified for MailX: bounded commands,
-// atomic config publication, validation and preservation of keychain ordering.
 // A persistent, machine-local signing identity keeps macOS Keychain ACLs valid
 // when a development executable is rebuilt. No mailbox credentials live here.
 import { execFileSync } from "node:child_process";
