@@ -18,6 +18,7 @@ const WINDOW_DAYS: i64 = 30;
 const WINDOW_LIMIT: usize = 1_000;
 const HEADER_BATCH_SIZE: usize = 200;
 const FLAGS_BATCH_SIZE: usize = 500;
+const FLAGS_RETRY_BATCH_SIZE: usize = 25;
 /// Mail received longer ago than this (e.g. found after days offline) is old
 /// news and never notified.
 const NEW_MAIL_MAX_AGE_HOURS: i64 = 24;
@@ -175,7 +176,7 @@ pub(super) async fn sync_folder(
     *changed |= cursor.created;
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
         .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
-    let remote = session.search_since(since).await?;
+    let remote = session.search_since(since, mailbox).await?;
     let guard = target.clone();
     let cached = with_store(shared, token, move |service| service.cached_uids(&guard)).await?;
     let plan = plan_messages(&cursor, &cached, &remote);
@@ -283,22 +284,15 @@ pub(super) async fn sync_folder(
             );
         }
     }
-    for batch in plan.refresh_flags.chunks(FLAGS_BATCH_SIZE) {
-        let flags = session.fetch_flags(batch).await?;
-        let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
-        let complete = batch.iter().all(|uid| fetched.contains(uid));
-        let guard = target.clone();
-        written(
-            with_store(shared, token, move |service| {
-                service.apply_flags(&guard, &flags)
-            })
-            .await?,
-            changed,
-        )?;
-        if !complete {
-            return Err(ImapError::Mailbox("mailbox changed during flag fetch".into()).into());
-        }
-    }
+    refresh_cached_flags(
+        shared,
+        token,
+        session,
+        &target,
+        &plan.refresh_flags,
+        changed,
+    )
+    .await?;
     let guard = target;
     written(
         with_store(shared, token, move |service| {
@@ -317,6 +311,75 @@ pub(super) async fn sync_folder(
         },
     );
     Ok(())
+}
+
+async fn refresh_cached_flags(
+    shared: &std::sync::Arc<Shared>,
+    token: &WorkerToken,
+    session: &mut Session,
+    target: &SyncTarget,
+    uids: &[u32],
+    changed: &mut bool,
+) -> Result<(), SyncError> {
+    let mut unresolved = 0;
+    for batch in uids.chunks(FLAGS_BATCH_SIZE) {
+        let flags = session.fetch_flags(batch).await?;
+        let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
+        store_flags(shared, token, target, flags, changed).await?;
+        let missing: Vec<u32> = batch
+            .iter()
+            .copied()
+            .filter(|uid| !fetched.contains(uid))
+            .collect();
+        if missing.is_empty() {
+            continue;
+        }
+
+        // FETCH can omit a UID that was expunged since enumeration. Confirm
+        // disappearance in the selected folder before changing local state.
+        let present = session.search_uids(&missing).await?;
+        let gone: Vec<u32> = missing
+            .into_iter()
+            .filter(|uid| present.binary_search(uid).is_err())
+            .collect();
+        if !gone.is_empty() {
+            let guard = target.clone();
+            written(
+                with_store(shared, token, move |service| {
+                    service.mark_deleted(&guard, &gone)
+                })
+                .await?,
+                changed,
+            )?;
+        }
+        for retry in present.chunks(FLAGS_RETRY_BATCH_SIZE) {
+            let flags = session.fetch_flags(retry).await?;
+            let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
+            unresolved += retry.iter().filter(|uid| !fetched.contains(uid)).count();
+            store_flags(shared, token, target, flags, changed).await?;
+        }
+    }
+    if unresolved > 0 {
+        return Err(ImapError::FlagsIncomplete(unresolved).into());
+    }
+    Ok(())
+}
+
+async fn store_flags(
+    shared: &std::sync::Arc<Shared>,
+    token: &WorkerToken,
+    target: &SyncTarget,
+    flags: Vec<(u32, Vec<String>)>,
+    changed: &mut bool,
+) -> Result<(), SyncError> {
+    let guard = target.clone();
+    written(
+        with_store(shared, token, move |service| {
+            service.apply_flags(&guard, &flags)
+        })
+        .await?,
+        changed,
+    )
 }
 
 async fn reconcile_cached_sent(

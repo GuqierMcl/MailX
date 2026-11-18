@@ -94,6 +94,8 @@ pub(crate) enum ImapError {
     Rejected,
     /// A completed command whose mailbox data is unusable; connection is healthy.
     Mailbox(String),
+    /// A reconciliation round still lacks flags for some requested messages.
+    FlagsIncomplete(usize),
     /// A declared or received body exceeds the bounded message budget.
     TooLarge,
     Timeout,
@@ -110,6 +112,7 @@ impl fmt::Display for ImapError {
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
             Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
             Self::Mailbox(reason) => write!(formatter, "mailbox response error: {reason}"),
+            Self::FlagsIncomplete(count) => write!(formatter, "missing FLAGS for {count} UID(s)"),
             Self::TooLarge => formatter.write_str("message exceeds size limit"),
             Self::Timeout => formatter.write_str("server stopped responding"),
         }
@@ -118,7 +121,10 @@ impl fmt::Display for ImapError {
 
 impl ImapError {
     pub(crate) fn session_usable(&self) -> bool {
-        matches!(self, Self::Rejected | Self::Mailbox(_))
+        matches!(
+            self,
+            Self::Rejected | Self::Mailbox(_) | Self::FlagsIncomplete(_)
+        )
     }
 }
 
@@ -180,8 +186,7 @@ async fn step<T, E: Into<ImapError>>(
 pub(crate) struct Session {
     inner: async_imap::Session<BoxedStream>,
     body_guard: Option<body::ReceiveGuard>,
-    /// The `[CODE]` of the tagged OK that ended the last checked command, e.g.
-    /// `READ-ONLY` or `READ-WRITE`. Only SELECT reads it.
+    /// The response code that ended the last checked command.
     completion: Option<ResponseCodeKind>,
     /// Capability atoms the server announced after login, upper-cased.
     capabilities: Vec<String>,
@@ -192,6 +197,7 @@ pub(crate) struct Session {
 enum ResponseCodeKind {
     ReadOnly,
     ReadWrite,
+    UidValidity(u32),
     Other,
 }
 
@@ -764,14 +770,18 @@ impl Session {
             Err(ImapError::Mailbox(_)) => {}
             Err(error) => return Err(error),
         }
-        let mailbox = self.examine(name).await?;
+        let mut mailbox = self.examine(name).await?;
         let messages = mailbox
             .exists
             .ok_or_else(|| ImapError::Mailbox("EXAMINE did not return a message count".into()))?;
         // This is the whole folder, not the fixed header window. EXAMINE's
         // [UNSEEN n] is a sequence number, not an unread count.
-        let unseen = u32::try_from(self.search("UID SEARCH UNSEEN").await?.len())
-            .map_err(|_| ImapError::Mailbox("unread count exceeds the supported range".into()))?;
+        let unseen = u32::try_from(
+            self.search("UID SEARCH UNSEEN", Some(&mut mailbox))
+                .await?
+                .len(),
+        )
+        .map_err(|_| ImapError::Mailbox("unread count exceeds the supported range".into()))?;
         Ok((
             FolderStatus {
                 messages,
@@ -893,23 +903,69 @@ impl Session {
         Ok(flags)
     }
 
-    pub(crate) async fn search_since(&mut self, date: NaiveDate) -> Result<Vec<u32>, ImapError> {
+    pub(crate) async fn search_since(
+        &mut self,
+        date: NaiveDate,
+        mut mailbox: MailboxInfo,
+    ) -> Result<Vec<u32>, ImapError> {
         // Chrono's default %b is locale-independent English. No external input
         // may be interpolated into async-imap's unescaped SEARCH expression.
         let query = format!("UID SEARCH SINCE {}", date.format("%d-%b-%Y"));
-        self.search(&query).await
+        self.search(&query, Some(&mut mailbox)).await
     }
 
-    async fn search(&mut self, query: &str) -> Result<Vec<u32>, ImapError> {
+    pub(crate) async fn search_uids(&mut self, requested: &[u32]) -> Result<Vec<u32>, ImapError> {
+        let query = format!("UID SEARCH UID {}", nonempty_uid_set(requested)?);
+        let found = self.search(&query, None).await?;
+        if found.iter().any(|uid| !requested.contains(uid)) {
+            return Err(ImapError::Mailbox(
+                "SEARCH returned unrequested UIDs".into(),
+            ));
+        }
+        Ok(found)
+    }
+
+    async fn search(
+        &mut self,
+        query: &str,
+        mailbox: Option<&mut MailboxInfo>,
+    ) -> Result<Vec<u32>, ImapError> {
+        // A bare OK is usable only when the selected mailbox was independently
+        // confirmed empty and no update since then invalidated that evidence.
+        let empty_generation = mailbox
+            .as_ref()
+            .filter(|mailbox| mailbox.exists == Some(0))
+            .map(|mailbox| mailbox.uid_validity);
+        let mut confirmed_empty = empty_generation.is_some();
         let batches = self
             .checked_command(query, |response, _| {
                 Ok(match response {
                     Response::MailboxData(MailboxDatum::Search(uids)) => Some(uids.clone()),
+                    Response::MailboxData(MailboxDatum::Exists(count)) => {
+                        confirmed_empty &= *count == 0;
+                        None
+                    }
+                    Response::Data { outcome, .. } => {
+                        if let Some(ResponseCode::UidValidity(value)) = outcome.code {
+                            confirmed_empty &= empty_generation == Some(value);
+                        }
+                        None
+                    }
                     _ => None,
                 })
             })
             .await?;
-        if batches.is_empty() {
+        if let Some(ResponseCodeKind::UidValidity(value)) = self.completion {
+            confirmed_empty &= empty_generation == Some(value);
+        }
+        // The STATUS fallback can reuse this selection for a second SEARCH.
+        if let Some(mailbox) = mailbox
+            && empty_generation.is_some()
+            && (!confirmed_empty || batches.iter().any(|row| !row.is_empty()))
+        {
+            mailbox.exists = None;
+        }
+        if batches.is_empty() && !confirmed_empty {
             return Err(ImapError::Mailbox(
                 "SEARCH did not return enumeration data".into(),
             ));
@@ -1056,6 +1112,9 @@ impl Session {
                         self.completion = Some(match outcome.code {
                             Some(ResponseCode::ReadOnly) => ResponseCodeKind::ReadOnly,
                             Some(ResponseCode::ReadWrite) => ResponseCodeKind::ReadWrite,
+                            Some(ResponseCode::UidValidity(value)) => {
+                                ResponseCodeKind::UidValidity(value)
+                            }
                             _ => ResponseCodeKind::Other,
                         });
                         return match status {
@@ -1277,6 +1336,12 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
     use super::*;
+
+    const UNKNOWN_MAILBOX: MailboxInfo = MailboxInfo {
+        uid_validity: 9,
+        uid_next: None,
+        exists: None,
+    };
 
     #[test]
     fn read_failures_name_the_command_and_cause_without_server_text() {
@@ -1791,8 +1856,9 @@ mod tests {
             ("LOGOUT".into(), "{tag} OK\r\n".into()),
         ]).await;
         assert_eq!(session.status("INBOX").await.unwrap().unseen, 2);
+        let mailbox = session.examine("INBOX").await.unwrap();
         assert_eq!(
-            session.examine("INBOX").await.unwrap(),
+            mailbox,
             MailboxInfo {
                 uid_validity: 9,
                 uid_next: Some(43),
@@ -1801,7 +1867,7 @@ mod tests {
         );
         assert_eq!(
             session
-                .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap())
+                .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(), mailbox)
                 .await
                 .unwrap(),
             vec![7, 19, 42]
@@ -1921,15 +1987,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_requires_an_explicit_enumeration_even_when_empty() {
+    async fn search_requires_explicit_enumeration_when_mailbox_count_is_unknown() {
         let date = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
         let (mut session, server) = header_session(vec![
             ("UID SEARCH".into(), "{tag} OK\r\n".into()),
             ("UID SEARCH".into(), "* SEARCH\r\n{tag} OK\r\n".into()),
         ])
         .await;
-        assert!(session.search_since(date).await.is_err());
-        assert!(session.search_since(date).await.unwrap().is_empty());
+        assert!(session.search_since(date, UNKNOWN_MAILBOX).await.is_err());
+        assert!(
+            session
+                .search_since(date, UNKNOWN_MAILBOX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         server.await.unwrap();
     }
 
@@ -1974,7 +2046,10 @@ mod tests {
         .await;
         assert!(matches!(
             session
-                .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap())
+                .search_since(
+                    NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(),
+                    UNKNOWN_MAILBOX
+                )
                 .await,
             Err(ImapError::Rejected)
         ));
@@ -2018,7 +2093,7 @@ mod tests {
                 "EXAMINE \"&g0l6P3ux-\"".into(),
                 "* 0 EXISTS\r\n* OK [UIDVALIDITY 10] valid\r\n{tag} OK [READ-ONLY]\r\n".into(),
             ),
-            ("UID SEARCH UNSEEN".into(), "* SEARCH\r\n{tag} OK\r\n".into()),
+            ("UID SEARCH UNSEEN".into(), "{tag} OK\r\n".into()),
         ])
         .await;
         let (sent, examined) = session.status_or_examine("&XfJT0ZAB-").await.unwrap();
@@ -2088,6 +2163,7 @@ mod tests {
     #[tokio::test]
     async fn fallback_requires_complete_examine_and_unread_enumeration() {
         let valid_examine = "* 3 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n";
+        let empty_examine = "* 0 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n";
         for (examine, search) in [
             ("* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n", None),
             ("* 3 EXISTS\r\n{tag} OK\r\n", None),
@@ -2100,6 +2176,8 @@ mod tests {
             (valid_examine, Some("* SEARCH 7\r\n{tag} NO private\r\n")),
             (valid_examine, Some("* SEARCH 7\r\n")),
             (valid_examine, Some("* SEARCH 0\r\n{tag} OK\r\n")),
+            (empty_examine, Some("{tag} NO private\r\n")),
+            (empty_examine, Some("* 0 EXISTS\r\n")),
         ] {
             let mut script = vec![
                 ("STATUS".into(), "{tag} OK\r\n".into()),
@@ -2112,6 +2190,27 @@ mod tests {
             assert!(session.status_or_examine("INBOX").await.is_err());
             server.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn unread_search_invalidates_empty_evidence_for_the_next_search() {
+        let (mut session, server) = header_session(vec![
+            ("STATUS".into(), "{tag} OK\r\n".into()),
+            (
+                "EXAMINE".into(),
+                "* 0 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID SEARCH UNSEEN".into(),
+                "* 1 EXISTS\r\n* SEARCH\r\n{tag} OK\r\n".into(),
+            ),
+            ("UID SEARCH SINCE".into(), "{tag} OK\r\n".into()),
+        ])
+        .await;
+        let (_, mailbox) = session.status_or_examine("INBOX").await.unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+        assert!(session.search_since(date, mailbox.unwrap()).await.is_err());
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -2243,7 +2342,10 @@ mod tests {
             let (mut session, server) =
                 header_session(vec![("UID SEARCH".into(), reply.into())]).await;
             let error = session
-                .search_since(NaiveDate::from_ymd_opt(2026, 9, 18).unwrap())
+                .search_since(
+                    NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(),
+                    UNKNOWN_MAILBOX,
+                )
                 .await
                 .unwrap_err();
             assert!(!error.session_usable());

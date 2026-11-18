@@ -151,6 +151,8 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 - `core/src/imap/mod.rs`：脚本化 IMAP 会话验证 STATUS → EXAMINE → UID SEARCH SINCE → UID FETCH，使用头部字面量；禁止 SELECT、STORE 与非 PEEK 正文读取；UID 集合压缩、BODYSTRUCTURE 附件判断，以及短 tag 的精确完成匹配。
 - `core/src/sync/headers.rs`：UTF-8 B / Q、GBK / GB2312 等 encoded-word、损坏字段兜底、地址组、收件日期优先级和 UTC 时间规范化；`mail-parser` 必须启用 `full_encoding`。
 - 全目录同步：完整 LIST → 目录解释 → SQLite → 目录调度链路，可选性来自 `\Noselect`；单目录 STATUS / EXAMINE / SEARCH / FETCH 拒绝、不完整 LIST、超时 / 断线后继续后续目录；目录新增、删除、改名、变为不可选；同 UID 跨目录隔离；STATUS 计数未知与真实零值区分。STATUS 完整成功但目录名不可用时的 EXAMINE 兼容路径（如网易企业邮箱返回问号名称）不得把无法匹配的 STATUS 行当作目标目录数据。
+- 空目录搜索：用脚本化 IMAP 服务分别验证 `UID SEARCH SINCE` 与 STATUS 计数回退的 `UID SEARCH UNSEEN`。同一只读 EXAMINE 明确报告 `0 EXISTS` 后，合法的显式空 SEARCH 和省略 SEARCH 数据的匹配 tagged OK 都允许完成空目录同步，计数回退应提交已知的零计数。覆盖遗漏 EXISTS、非零 EXISTS、搜索中出现非零 EXISTS 或 UIDVALIDITY 变化、tag 不匹配及命令拒绝，确认缺省 SEARCH 在这些场景不会被当作空结果或触发缓存删除。显式返回匹配 UID 的常规搜索仍能继续同步。
+- FLAGS 响应不完整：用脚本化 IMAP 服务让 `UID FETCH` 返回 tagged OK 并漏回部分请求的 UID。分别模拟重新搜索确认消失、仍存在且较小批次重试成功、仍存在且重试后仍缺少 FLAGS。确认只移除完整搜索确认消失的邮件，成功重试后应用新状态，始终缺失时保留旧缓存、继续同步其他邮件并报告可重试的 `flagsIncomplete`。目录和账号的成功时间不因未完成的标志同步推进，后续轮次能继续重试。定向搜索被拒绝、中断或只返回 tagged OK 时保留漏回邮件的本地记录。
 - `core/src/mail/render/`：真实 HTML 与纯文本区分、字符集解码、alternative / mixed 与嵌套附件、UTF-8 边界截断、MIME 深度、脚本 / URL / CSS 净化、远程图片计数、CID 与 data 图片的真实格式和预算。
 - `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝，累计 payload 与控制数据预算，截断 / 重复 / 错误 UID / 超时拒绝。
 - `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取与净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除保护。
@@ -160,6 +162,7 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 真实账号验收只读执行，检查：
 
 - 固定窗口起点、首次与增量同步、目录刷新后的恢复、计数与统一收件箱聚合一致、缓存中没有重复的 `(folder_id, uid_validity, uid)`；重开应用可读缓存，另做一次断网重开。
+- 空目录和加入第一封邮件后的状态转换分别检查同步结果与计数。要确认服务商是否省略空搜索结果，记录同一只读选择下脱敏的 EXISTS、UIDVALIDITY、SEARCH 数据有无和完成状态。本地显示或数据库中的零计数只用于核对同步结果。
 - 中文与 GBK / GB2312 主题、发件人显示；只读同步不改变服务器已读状态；网页端已读、删除、星标与本地记录的对应关系，差异按服务商解释而不是记作缺陷。
 - 正文下载失败时脱敏诊断只观察原因码、阶段与 MIME 类型 / 字符集，不保存账号、主题、正文、附件名、私人链接或凭证；修复后按 UI 重试恢复。
 - HTML 与纯文本显示、CID 图片、远程图片阻止计数与加载、编号外链显示完整地址且取消零打开；恶意邮件、大小边界与跨平台隔离只用合成样本，不向真实邮箱发送恶意测试邮件。

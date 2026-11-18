@@ -27,6 +27,7 @@
   "tls": "无法建立安全连接，请检查服务器的加密配置。",
   "timeout": "连接超时，请稍后重试。",
   "protocol": "邮箱服务器返回了无法识别的回复。",
+  "flagsIncomplete": "部分邮件状态暂未更新。",
   "storage": "无法读写本地数据，请检查可用空间与访问权限。",
   "accountNotFound": "账号不存在。",
   "attachmentTooLarge": "附件总大小超过上限。",
