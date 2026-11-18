@@ -14,10 +14,10 @@
 // installed app runs), settings, downloaded bodies and the image cache. Passwords
 // and keys are not copied: they stay in the system credential store under the
 // installed profile's service. Any extra arguments go to `tauri dev`.
-import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { runCommand } from "./tauri.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -93,13 +93,9 @@ export async function copyInstalled(from, to, { replace = false } = {}) {
 function launch(dev, args) {
   const config = JSON.stringify({ identifier: DEV_IDENTIFIER });
   const bun = process.platform === "win32" ? "bun.exe" : "bun";
-  const result = spawnSync(bun, [join(root, "scripts", "tauri.mjs"), "dev", "--config", config, ...args], {
-    cwd: root,
-    stdio: "inherit",
+  runCommand(bun, [join(root, "scripts", "tauri.mjs"), "dev", "--config", config, ...args], {
     env: { ...process.env, [OVERRIDE]: dev },
   });
-  if (result.error) throw result.error;
-  return result.status ?? 1;
 }
 
 if (import.meta.main) {
@@ -113,7 +109,7 @@ if (import.meta.main) {
     }
     if (!options.copyOnly) {
       console.log(`Dev profile: ${dev} (identifier ${DEV_IDENTIFIER})`);
-      process.exit(launch(dev, options.tauri));
+      launch(dev, options.tauri);
     }
   } catch (error) {
     console.error(error.message);
