@@ -256,6 +256,12 @@ Settings → About shows the MailX logo and your current version above the updat
 
 To report a problem or suggest a feature, sign in to GitHub if needed, fill in the template and submit it there. MailX does not automatically fill in your version or system details; include the information requested by the template.
 
+### Local diagnostic logs
+
+MailX writes diagnostic logs in the `logs/` subfolder of its data directory. On macOS the default is `~/Library/Application Support/MailX/logs/`. If you set `MAILX_DATA_DIR`, look in the `logs/` subfolder of that directory. MailX keeps the current `diagnostics.jsonl` and up to four previous files, `diagnostics.1.jsonl` through `diagnostics.4.jsonl`, at up to 1 MiB each.
+
+MailX records app and mail core startup, sync failures, retries and recovery, and selected IMAP response counts as it runs. These logs remain available after a restart and stay on this device unless you share them. They contain no credentials, email addresses, folder names, message contents or raw server replies. When reporting a problem, include only the relevant excerpt.
+
 ## Upgrading and keeping your data
 
 MailX prepares your local data automatically when you first launch it after an update. Older versions may be unable to open data prepared by a newer version. To roll back, keep a copy of the data from before the update.

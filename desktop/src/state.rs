@@ -360,6 +360,16 @@ impl DesktopState {
             .initialization_in_flight
             .store(false, Ordering::Release);
         let ready = matches!(status, StartupStatus::Ready { .. });
+        if let Some(sink) = self.0.events.diagnostics() {
+            use mailx_core::diagnostics::DiagnosticEvent;
+            match &status {
+                StartupStatus::Ready { .. } => sink(DiagnosticEvent::StartupReady),
+                StartupStatus::Failed { error, .. } => {
+                    sink(DiagnosticEvent::StartupFailure { code: error.code });
+                }
+                StartupStatus::Initializing { .. } => {}
+            }
+        }
         if let Ok(mut current) = self.0.startup.lock() {
             *current = status;
         }
@@ -459,10 +469,14 @@ mod tests {
     #[test]
     fn startup_publishes_ready_before_business_call() {
         let directory = tempfile::tempdir().unwrap();
+        let logs = crate::diagnostics::Diagnostics::start(directory.path());
         let state = DesktopState::new(
             Ok(directory.path().to_owned()),
             Arc::new(MemorySecrets::default()),
-            Arc::new(|_: &mailx_core::CoreEvent| {}),
+            Arc::new(crate::DesktopEvents {
+                ui: Arc::new(|_: &mailx_core::CoreEvent| {}),
+                diagnostics: logs.sink(),
+            }),
         );
         state.start_initialization();
         // This checks readiness ordering, not startup performance. Migrations
@@ -486,6 +500,10 @@ mod tests {
         let accounts = tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
             .expect("ready service should accept business calls");
         assert!(accounts.is_empty());
+        logs.shutdown();
+        let log = std::fs::read_to_string(directory.path().join("logs/diagnostics.jsonl")).unwrap();
+        let record: serde_json::Value = serde_json::from_str(&log).unwrap();
+        assert_eq!(record["event"], "startup_ready");
     }
 
     fn open_and_wait_until_ready(state: &DesktopState) {

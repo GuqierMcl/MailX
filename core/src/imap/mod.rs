@@ -35,6 +35,10 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use tokio::time::timeout;
 
 use crate::accounts::types::TlsMode;
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticEvent, DiagnosticSink, ImapDiagnosticOutcome, ImapFlagsPhase,
+    ImapSearchKind,
+};
 use crate::mail::compatibility::ProviderCompatibility;
 use crate::net::{self, BoxedStream, NetError, NetRoute};
 #[cfg(test)]
@@ -126,6 +130,21 @@ impl ImapError {
             Self::Rejected | Self::Mailbox(_) | Self::FlagsIncomplete(_)
         )
     }
+
+    fn diagnostic_outcome(&self) -> ImapDiagnosticOutcome {
+        match self {
+            Self::Net(NetError::Timeout) | Self::Timeout => ImapDiagnosticOutcome::Timeout,
+            Self::Net(_) => ImapDiagnosticOutcome::Transport,
+            Self::Authentication(_) | Self::SignInRequired => ImapDiagnosticOutcome::Authentication,
+            Self::ProviderPolicy => ImapDiagnosticOutcome::Policy,
+            Self::Unsupported(_) => ImapDiagnosticOutcome::Unsupported,
+            Self::Protocol(_) => ImapDiagnosticOutcome::Protocol,
+            Self::Rejected => ImapDiagnosticOutcome::Rejected,
+            Self::Mailbox(_) => ImapDiagnosticOutcome::Mailbox,
+            Self::FlagsIncomplete(_) => ImapDiagnosticOutcome::Incomplete,
+            Self::TooLarge => ImapDiagnosticOutcome::TooLarge,
+        }
+    }
 }
 
 impl From<NetError> for ImapError {
@@ -191,6 +210,7 @@ pub(crate) struct Session {
     /// Capability atoms the server announced after login, upper-cased.
     capabilities: Vec<String>,
     compatibility: &'static dyn ProviderCompatibility,
+    diagnostics: Option<(DiagnosticSink, DiagnosticContext)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -574,6 +594,7 @@ async fn authenticate(
         completion: None,
         capabilities: Vec::new(),
         compatibility: crate::providers::for_imap_host(&login.host),
+        diagnostics: None,
     };
     // The library collector drops tagged NO/BAD. Use the same checked
     // completion boundary as mailbox commands so policy refusals cannot vanish.
@@ -613,6 +634,10 @@ async fn authenticate(
 }
 
 impl Session {
+    pub(crate) fn set_diagnostics(&mut self, sink: DiagnosticSink, context: DiagnosticContext) {
+        self.diagnostics = Some((sink, context));
+    }
+
     pub(crate) fn compatibility(&self) -> &'static dyn ProviderCompatibility {
         self.compatibility
     }
@@ -777,9 +802,14 @@ impl Session {
         // This is the whole folder, not the fixed header window. EXAMINE's
         // [UNSEEN n] is a sequence number, not an unread count.
         let unseen = u32::try_from(
-            self.search("UID SEARCH UNSEEN", Some(&mut mailbox))
-                .await?
-                .len(),
+            self.search(
+                "UID SEARCH UNSEEN",
+                Some(&mut mailbox),
+                None,
+                ImapSearchKind::Unseen,
+            )
+            .await?
+            .len(),
         )
         .map_err(|_| ImapError::Mailbox("unread count exceeds the supported range".into()))?;
         Ok((
@@ -911,69 +941,108 @@ impl Session {
         // Chrono's default %b is locale-independent English. No external input
         // may be interpolated into async-imap's unescaped SEARCH expression.
         let query = format!("UID SEARCH SINCE {}", date.format("%d-%b-%Y"));
-        self.search(&query, Some(&mut mailbox)).await
+        self.search(&query, Some(&mut mailbox), None, ImapSearchKind::Since)
+            .await
     }
 
     pub(crate) async fn search_uids(&mut self, requested: &[u32]) -> Result<Vec<u32>, ImapError> {
         let query = format!("UID SEARCH UID {}", nonempty_uid_set(requested)?);
-        let found = self.search(&query, None).await?;
-        if found.iter().any(|uid| !requested.contains(uid)) {
-            return Err(ImapError::Mailbox(
-                "SEARCH returned unrequested UIDs".into(),
-            ));
-        }
-        Ok(found)
+        self.search(&query, None, Some(requested), ImapSearchKind::Uids)
+            .await
     }
 
     async fn search(
         &mut self,
         query: &str,
         mailbox: Option<&mut MailboxInfo>,
+        requested: Option<&[u32]>,
+        kind: ImapSearchKind,
     ) -> Result<Vec<u32>, ImapError> {
         // A bare OK is usable only when the selected mailbox was independently
         // confirmed empty and no update since then invalidated that evidence.
-        let empty_generation = mailbox
+        let selected_empty = mailbox
             .as_ref()
-            .filter(|mailbox| mailbox.exists == Some(0))
-            .map(|mailbox| mailbox.uid_validity);
-        let mut confirmed_empty = empty_generation.is_some();
+            .and_then(|mailbox| mailbox.exists)
+            .map(|count| count == 0);
+        let selected_generation = mailbox.as_ref().map(|mailbox| mailbox.uid_validity);
+        let mut exists_changed = false;
+        let mut uid_validity_changed = false;
         let batches = self
             .checked_command(query, |response, _| {
                 Ok(match response {
                     Response::MailboxData(MailboxDatum::Search(uids)) => Some(uids.clone()),
                     Response::MailboxData(MailboxDatum::Exists(count)) => {
-                        confirmed_empty &= *count == 0;
+                        exists_changed |= selected_empty == Some(true) && *count != 0;
                         None
                     }
                     Response::Data { outcome, .. } => {
                         if let Some(ResponseCode::UidValidity(value)) = outcome.code {
-                            confirmed_empty &= empty_generation == Some(value);
+                            uid_validity_changed |=
+                                selected_generation.is_some_and(|known| known != value);
                         }
                         None
                     }
                     _ => None,
                 })
             })
-            .await?;
-        if let Some(ResponseCodeKind::UidValidity(value)) = self.completion {
-            confirmed_empty &= empty_generation == Some(value);
+            .await;
+        if batches.is_ok()
+            && let Some(ResponseCodeKind::UidValidity(value)) = self.completion
+        {
+            uid_validity_changed |= selected_generation.is_some_and(|known| known != value);
         }
+        let emit = |outcome, matches| {
+            if (outcome != ImapDiagnosticOutcome::Complete || kind == ImapSearchKind::Uids)
+                && let Some((sink, context)) = &self.diagnostics
+            {
+                sink(DiagnosticEvent::ImapSearch {
+                    context: *context,
+                    kind,
+                    outcome,
+                    requested: requested.map(<[u32]>::len),
+                    matches,
+                    selected_empty,
+                    exists_changed,
+                    uid_validity_changed,
+                    esearch_advertised: self.supports("ESEARCH"),
+                    imap4rev2_advertised: self.supports("IMAP4rev2"),
+                });
+            }
+        };
+        let batches = batches.inspect_err(|error| emit(error.diagnostic_outcome(), 0))?;
+        let confirmed_empty =
+            selected_empty == Some(true) && !exists_changed && !uid_validity_changed;
         // The STATUS fallback can reuse this selection for a second SEARCH.
         if let Some(mailbox) = mailbox
-            && empty_generation.is_some()
+            && selected_empty == Some(true)
             && (!confirmed_empty || batches.iter().any(|row| !row.is_empty()))
         {
             mailbox.exists = None;
         }
         if batches.is_empty() && !confirmed_empty {
+            emit(ImapDiagnosticOutcome::MissingEnumeration, 0);
             return Err(ImapError::Mailbox(
                 "SEARCH did not return enumeration data".into(),
             ));
         }
+        let empty_from_selection = batches.is_empty();
         let mut uids: Vec<_> = batches.into_iter().flatten().collect();
-        validate_uids(&uids)?;
+        validate_uids(&uids)
+            .inspect_err(|_| emit(ImapDiagnosticOutcome::InvalidEnumeration, uids.len()))?;
         uids.sort_unstable();
         uids.dedup();
+        if requested.is_some_and(|requested| uids.iter().any(|uid| !requested.contains(uid))) {
+            emit(ImapDiagnosticOutcome::UnrequestedUids, uids.len());
+            return Err(ImapError::Mailbox(
+                "SEARCH returned unrequested UIDs".into(),
+            ));
+        }
+        let outcome = if empty_from_selection {
+            ImapDiagnosticOutcome::EmptyFromSelection
+        } else {
+            ImapDiagnosticOutcome::Complete
+        };
+        emit(outcome, uids.len());
         Ok(uids)
     }
 
@@ -1063,6 +1132,23 @@ impl Session {
         &mut self,
         uids: &[u32],
     ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
+        self.fetch_flags_with_phase(uids, ImapFlagsPhase::Initial)
+            .await
+    }
+
+    pub(crate) async fn retry_flags(
+        &mut self,
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
+        self.fetch_flags_with_phase(uids, ImapFlagsPhase::Retry)
+            .await
+    }
+
+    async fn fetch_flags_with_phase(
+        &mut self,
+        uids: &[u32],
+        phase: ImapFlagsPhase,
+    ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
         validate_uids(uids)?;
         let mut flags = Vec::new();
         for chunk in uids.chunks(500) {
@@ -1072,8 +1158,35 @@ impl Session {
                     Response::Fetch(_, attributes) => fetch_identity(attributes, chunk),
                     _ => Ok(None),
                 })
-                .await?;
-            flags.extend(fetched);
+                .await;
+            if let Some((sink, context)) = &self.diagnostics {
+                let (outcome, returned) = match &fetched {
+                    Ok(flags) => {
+                        let returned = flags
+                            .iter()
+                            .map(|(uid, _)| uid)
+                            .collect::<HashSet<_>>()
+                            .len();
+                        let outcome = if returned == chunk.len() {
+                            ImapDiagnosticOutcome::Complete
+                        } else {
+                            ImapDiagnosticOutcome::Incomplete
+                        };
+                        (outcome, returned)
+                    }
+                    Err(error) => (error.diagnostic_outcome(), 0),
+                };
+                if outcome != ImapDiagnosticOutcome::Complete || phase == ImapFlagsPhase::Retry {
+                    sink(DiagnosticEvent::ImapFlags {
+                        context: *context,
+                        phase,
+                        outcome,
+                        requested: chunk.len(),
+                        returned,
+                    });
+                }
+            }
+            flags.extend(fetched?);
         }
         Ok(flags)
     }
@@ -2003,6 +2116,156 @@ mod tests {
                 .is_empty()
         );
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn diagnostics_record_search_and_flag_shapes_without_peer_text() {
+        use crate::diagnostics::DiagnosticBackend;
+        use std::sync::{Arc, Mutex};
+
+        const CONTEXT: DiagnosticContext = DiagnosticContext {
+            account: 3,
+            round: 7,
+            backend: DiagnosticBackend::Imap,
+        };
+        let (mut session, server) = header_session(vec![
+            (
+                "UID SEARCH SINCE".into(),
+                "* SEARCH 19 20\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID FETCH 19 (UID FLAGS)".into(),
+                "* 1 FETCH (UID 19 FLAGS ())\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID SEARCH SINCE".into(),
+                "{tag} OK private reply\r\n".into(),
+            ),
+            (
+                "UID SEARCH SINCE".into(),
+                "{tag} OK private reply\r\n".into(),
+            ),
+            (
+                "UID SEARCH UID 19".into(),
+                "{tag} OK private reply\r\n".into(),
+            ),
+            (
+                "UID SEARCH UID 19:20".into(),
+                "* SEARCH 20\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID FETCH 19:20 (UID FLAGS)".into(),
+                "* 1 FETCH (UID 20 FLAGS (private-keyword))\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID FETCH 19 (UID FLAGS)".into(),
+                "* 1 FETCH (UID 19 FLAGS ())\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID FETCH 19 (UID FLAGS)".into(),
+                "{tag} NO private reply\r\n".into(),
+            ),
+        ])
+        .await;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let observed = events.clone();
+        session.set_diagnostics(
+            Arc::new(move |event| observed.lock().unwrap().push(event)),
+            CONTEXT,
+        );
+
+        let date = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+        let mailbox = MailboxInfo {
+            exists: Some(0),
+            ..UNKNOWN_MAILBOX
+        };
+        assert_eq!(
+            session.search_since(date, UNKNOWN_MAILBOX).await.unwrap(),
+            [19, 20]
+        );
+        assert_eq!(session.fetch_flags(&[19]).await.unwrap().len(), 1);
+        assert!(
+            session
+                .search_since(date, mailbox)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let nonempty = MailboxInfo {
+            exists: Some(1),
+            ..mailbox
+        };
+        assert!(session.search_since(date, nonempty).await.is_err());
+        assert!(session.search_uids(&[19]).await.is_err());
+        assert_eq!(session.search_uids(&[19, 20]).await.unwrap(), [20]);
+        assert_eq!(session.fetch_flags(&[19, 20]).await.unwrap().len(), 1);
+        assert_eq!(session.retry_flags(&[19]).await.unwrap().len(), 1);
+        assert!(session.retry_flags(&[19]).await.is_err());
+        server.await.unwrap();
+
+        let events = events.lock().unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                DiagnosticEvent::ImapSearch {
+                    context: CONTEXT,
+                    kind: ImapSearchKind::Since,
+                    outcome: ImapDiagnosticOutcome::EmptyFromSelection,
+                    selected_empty: Some(true),
+                    requested: None,
+                    matches: 0,
+                    ..
+                },
+                DiagnosticEvent::ImapSearch {
+                    context: CONTEXT,
+                    kind: ImapSearchKind::Since,
+                    outcome: ImapDiagnosticOutcome::MissingEnumeration,
+                    selected_empty: Some(false),
+                    requested: None,
+                    matches: 0,
+                    ..
+                },
+                DiagnosticEvent::ImapSearch {
+                    context: CONTEXT,
+                    kind: ImapSearchKind::Uids,
+                    outcome: ImapDiagnosticOutcome::MissingEnumeration,
+                    selected_empty: None,
+                    requested: Some(1),
+                    matches: 0,
+                    ..
+                },
+                DiagnosticEvent::ImapSearch {
+                    context: CONTEXT,
+                    kind: ImapSearchKind::Uids,
+                    outcome: ImapDiagnosticOutcome::Complete,
+                    requested: Some(2),
+                    matches: 1,
+                    ..
+                },
+                DiagnosticEvent::ImapFlags {
+                    context: CONTEXT,
+                    phase: ImapFlagsPhase::Initial,
+                    outcome: ImapDiagnosticOutcome::Incomplete,
+                    requested: 2,
+                    returned: 1,
+                },
+                DiagnosticEvent::ImapFlags {
+                    context: CONTEXT,
+                    phase: ImapFlagsPhase::Retry,
+                    outcome: ImapDiagnosticOutcome::Complete,
+                    requested: 1,
+                    returned: 1,
+                },
+                DiagnosticEvent::ImapFlags {
+                    context: CONTEXT,
+                    phase: ImapFlagsPhase::Retry,
+                    outcome: ImapDiagnosticOutcome::Rejected,
+                    requested: 1,
+                    returned: 0,
+                },
+            ]
+        ));
+        assert!(!serde_json::to_string(&*events).unwrap().contains("private"));
     }
 
     #[tokio::test]

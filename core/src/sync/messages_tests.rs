@@ -924,6 +924,7 @@ async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers()
             targets.clone(),
             session,
             &mut FolderMemory::new(),
+            None,
             || async { Err(ImapError::Timeout) }
         )
         .await,
@@ -1009,6 +1010,7 @@ async fn every_completed_folder_rejection_continues_on_the_same_connection() {
             targets.clone(),
             session,
             &mut FolderMemory::new(),
+            None,
             || async {
                 panic!("completed rejection must not reconnect");
                 #[allow(unreachable_code)]
@@ -1076,6 +1078,7 @@ async fn broken_first_folder_reconnects_with_backoff_and_resumes_after_it() {
             targets.clone(),
             session,
             &mut FolderMemory::new(),
+            None,
             || {
                 let mut attempts = recorded.lock().unwrap();
                 attempts.push(Instant::now());
@@ -1142,6 +1145,7 @@ async fn no_inbox_nested_and_escaped_names_sync_independently_and_notify_per_fol
             targets.clone(),
             session,
             &mut FolderMemory::new(),
+            None,
             || async { Err(ImapError::Timeout) }
         )
         .await,
@@ -1653,6 +1657,7 @@ async fn inbox_round(
         targets,
         session,
         memory,
+        None,
         || async { Err(ImapError::Timeout) },
     )
     .await;
@@ -1700,13 +1705,27 @@ async fn rounds_that_store_mail_keep_the_background_wait_short_and_quiet_ones_st
 
 #[tokio::test]
 async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
+    use crate::diagnostics::{DiagnosticEvent, DiagnosticSink};
+    use crate::events::EventSink;
+
+    #[derive(Default)]
+    struct Capture(Arc<Mutex<Vec<DiagnosticEvent>>>);
+    impl EventSink for Capture {
+        fn emit(&self, _: &CoreEvent) {}
+        fn diagnostics(&self) -> Option<DiagnosticSink> {
+            let records = self.0.clone();
+            Some(Arc::new(move |event| records.lock().unwrap().push(event)))
+        }
+    }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let mut account_config = config(json!({"kind":"direct"}));
     account_config["imap"]["host"] = json!("127.0.0.1");
     account_config["imap"]["port"] = json!(port);
-    let fixture = fixture_with_config(account_config);
+    let mut fixture = fixture_with_config(account_config);
+    let diagnostics = Arc::new(Capture::default());
+    Arc::get_mut(&mut fixture.shared).unwrap().events = diagnostics.clone();
     let wake = std::sync::Arc::new(tokio::sync::Notify::new());
     let (_activity, activity) = tokio::sync::watch::channel(Activity::Active);
     let worker = tokio::spawn(super::run(
@@ -1743,6 +1762,21 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     .await;
     worker.abort();
     let _ = worker.await;
+    let records = diagnostics.0.lock().unwrap();
+    let [
+        DiagnosticEvent::SyncFailure {
+            context: first,
+            code: SyncFailureCode::Network,
+            ..
+        },
+        DiagnosticEvent::SyncRetry { context: next, .. },
+        ..,
+    ] = records.as_slice()
+    else {
+        panic!("expected a network failure followed by a retry, got {records:?}")
+    };
+    assert_eq!(first.account, next.account);
+    assert_ne!(first.round, next.round);
     assert!(woken.is_ok(), "the worker kept waiting out its backoff");
 }
 
@@ -1765,6 +1799,7 @@ async fn provider_policy_stops_before_reconnect_or_later_folders_and_keeps_cache
         targets,
         session,
         &mut FolderMemory::new(),
+        None,
         || async {
             panic!("policy refusal must not reconnect");
             #[allow(unreachable_code)]

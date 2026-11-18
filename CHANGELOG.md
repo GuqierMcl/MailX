@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- Keep rotating local diagnostic logs for startup and mail sync, including failures, sync retries and recovery, and selected IMAP counts. / 新增本地轮转诊断日志，记录启动和同步故障、同步重试与恢复及部分 IMAP 响应计数。
+
 ### 🩹 Fixed
 
 - Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))

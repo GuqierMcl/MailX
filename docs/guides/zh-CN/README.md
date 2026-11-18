@@ -263,6 +263,12 @@ macOS、Windows 与 AppImage 支持应用内更新。deb / rpm 不提供自动�
 
 反馈问题或提出建议时，按需登录 GitHub，填写模板并在那里提交。MailX 不会自动填写版本或系统信息，请按模板要求补充。
 
+### 本地诊断日志
+
+MailX 将诊断日志保存到数据目录的 `logs/` 子目录。macOS 默认路径为 `~/Library/Application Support/MailX/logs/`。如果设置了 `MAILX_DATA_DIR`，请到该目录的 `logs/` 子目录查看。MailX 保留当前的 `diagnostics.jsonl` 和最多四份历史文件 `diagnostics.1.jsonl` 至 `diagnostics.4.jsonl`，每个文件上限为 1 MiB。
+
+MailX 在运行期间记录应用及邮件核心的启动、同步失败、重试与恢复，以及部分 IMAP 响应计数。日志在重启后仍可查看，只有你主动分享才会离开本机。日志不含凭据、邮箱地址、文件夹名称、邮件内容或服务器原始回复。反馈问题时只需附上相关片段。
+
 ## 升级与数据保留
 
 更新后首次启动时，MailX 会自动准备本地数据。旧版本可能无法打开经新版处理的数据。如需回退，请保留更新前的数据副本。

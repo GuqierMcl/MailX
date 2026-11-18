@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use ts_rs::TS;
 
 use super::cadence::{Activity, Cadence, FRONT_WAKE_MIN_GAP};
+use super::diagnostics::RoundDiagnostics;
 use super::idle::{self, IdleControl, IdleHealth};
 use super::{folders, messages, writeback};
 use crate::accounts::AccountService;
@@ -893,13 +894,41 @@ async fn run(
     let mut last_folder_refresh = None;
     let mut memory = messages::FolderMemory::new();
     let mut cadence = Cadence::default();
+    let sink = shared.events.diagnostics();
+    let mut failed_at: Option<Instant> = None;
     loop {
         if shared.policy_blocked(&token) {
             return;
         }
         shared.begin_round(&token);
         let before = revision_total(&shared, &token);
-        let pause = match sync_once(&shared, &token, &mut last_folder_refresh, &mut memory).await {
+        let diagnostics = sink
+            .as_ref()
+            .map(|sink| RoundDiagnostics::new(sink.clone(), &token));
+        if let (Some(log), Some(previous)) = (&diagnostics, failed_at) {
+            log.retry(previous.elapsed());
+        }
+        let outcome = sync_once(
+            &shared,
+            &token,
+            &mut last_folder_refresh,
+            &mut memory,
+            diagnostics.as_ref(),
+        )
+        .await;
+        if let Some(log) = &diagnostics {
+            match &outcome {
+                Outcome::Synced if failed_at.take().is_some() => log.recovered(),
+                Outcome::Partial(failure)
+                | Outcome::Transient(failure)
+                | Outcome::Blocked(failure) => {
+                    log.failure(failure);
+                    failed_at = Some(Instant::now());
+                }
+                _ => {}
+            }
+        }
+        let pause = match outcome {
             Outcome::Synced => {
                 failures = 0;
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -1079,6 +1108,7 @@ async fn sync_once(
     token: &WorkerToken,
     last_folder_refresh: &mut Option<Instant>,
     memory: &mut messages::FolderMemory,
+    diagnostics: Option<&RoundDiagnostics>,
 ) -> Outcome {
     if token.is_ews {
         return super::ews::sync_once(shared, token).await;
@@ -1152,7 +1182,7 @@ async fn sync_once(
         Err(error) => return from_sync_error(error),
     };
     shared.reconcile_targets(token, &targets, listed);
-    sync_targets(shared, token, targets, session, memory, || {
+    sync_targets(shared, token, targets, session, memory, diagnostics, || {
         imap::open_session(&plan.route, &plan.login)
     })
     .await
@@ -1165,14 +1195,18 @@ async fn sync_targets<F, Fut>(
     shared: &Arc<Shared>,
     token: &WorkerToken,
     targets: Vec<(String, String)>,
-    session: Session,
+    mut session: Session,
     memory: &mut messages::FolderMemory,
+    diagnostics: Option<&RoundDiagnostics>,
     mut connect: F,
 ) -> Outcome
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<Session, ImapError>>,
 {
+    if let Some(log) = diagnostics {
+        log.attach(&mut session);
+    }
     let mut session = Some(session);
     let mut reconnect_failures = 0u32;
     let mut failed = None;
@@ -1184,12 +1218,19 @@ where
             if shared.policy_blocked(token) {
                 return classify(ImapError::ProviderPolicy);
             }
-            tokio::time::sleep(backoff(reconnect_failures.saturating_sub(1))).await;
+            let delay = backoff(reconnect_failures.saturating_sub(1));
+            tokio::time::sleep(delay).await;
             if shared.policy_blocked(token) {
                 return classify(ImapError::ProviderPolicy);
             }
+            if let Some(log) = diagnostics {
+                log.retry(delay);
+            }
             match connect().await {
-                Ok(connected) => {
+                Ok(mut connected) => {
+                    if let Some(log) = diagnostics {
+                        log.attach(&mut connected);
+                    }
                     session = Some(connected);
                     shared.update(token, |state| {
                         state.phase = SyncPhase::Syncing;
@@ -1198,6 +1239,9 @@ where
                 }
                 Err(error) => match classify(error) {
                     Outcome::Transient(failure) => {
+                        if let Some(log) = diagnostics {
+                            log.failure(&failure);
+                        }
                         reconnect_failures = reconnect_failures.saturating_add(1);
                         shared.update(token, |state| {
                             state.phase = SyncPhase::Failed;

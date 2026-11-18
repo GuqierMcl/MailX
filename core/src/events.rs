@@ -95,6 +95,11 @@ pub struct SentCopiesChanged {
 /// Receives every event. Called on the core's worker threads.
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: &CoreEvent);
+
+    /// Optional host diagnostics, kept separate from UI event payloads.
+    fn diagnostics(&self) -> Option<crate::diagnostics::DiagnosticSink> {
+        None
+    }
 }
 
 impl<F: Fn(&CoreEvent) + Send + Sync> EventSink for F {
