@@ -545,7 +545,7 @@ export type VerificationCodeCopyOutcome = { emailId: string, accountId: string, 
 
 export type SyncPhase = "syncing" | "idle" | "failed";
 
-export type SyncFailureCode = "authentication" | "signInRequired" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "storage";
+export type SyncFailureCode = "authentication" | "signInRequired" | "providerPolicy" | "credentialUntrusted" | "credentialMissing" | "network" | "proxy" | "tls" | "timeout" | "unsupported" | "protocol" | "flagsIncomplete" | "storage";
 
 export type SyncFailure = { code: SyncFailureCode, message: string,
 /**

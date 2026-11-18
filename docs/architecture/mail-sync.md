@@ -98,7 +98,7 @@
 3. 每轮重新执行完整 `UID SEARCH SINCE <window_start>`，对所有匹配 UID 排序，选取最大的 1,000 个。超过上限时设置 `window_capped=1`；此上限是每轮选择范围，不是本地总记录上限。
 4. 只抓取选定集合中尚无当前 `present` 记录的 UID，按新到旧每批最多 200 封。每批邮件与 `highest_uid` 在同一事务提交，重复写入保留本地 ID；选定集合头部全部取得，且删除与 flags 对账成功后，才标记 `backfill_done=1`。取消、断线或写库失败保留已提交批次，下一轮按实际缓存继续，最大 UID 不代表其之前都已缓存。
 5. 只有完整 SEARCH 成功后，才把当前代际中 `received_at >= window_start`、却不在**完整搜索结果**中的本地 `present` UID 标记为 `deleted`。不得拿截取后的 1,000 个 UID 判断删除；窗口外缓存不对账、不自动清理。
-6. 对选定集合中已有的 UID 重新读取 FLAGS，每条命令最多 500 个 UID，更新已读、星标和原始 flags；不修改服务器标志。已缓存但后来退出最新 1,000 个集合的邮件仍保留，头部总量可超过 1,000；这些记录不再参与本轮 flags 刷新。
+6. 对选定集合中已有的 UID 重新读取 FLAGS，每条命令最多 500 个 UID，更新已读、星标和原始 flags。该读取保持只读。命令成功却漏回部分 UID 的有效 FLAGS 时，在同一目录重新搜索这些 UID。只对完整搜索确认已消失的 UID 执行删除对账，对仍存在的 UID 分成较小批次作有上限的重试。仍拿不到 FLAGS 时保留对应缓存，继续同步其他邮件，本轮该目录仍标为未完成。已缓存但后来退出最新 1,000 个集合的邮件仍保留，头部总量可超过 1,000。这些记录不再参与本轮 flags 刷新。
 7. 邮件批次、flags、删除与既有游标推进事务核对账号当前 `mailboxSourceId`、文件夹归属与 UIDVALIDITY，任一不匹配就拒绝写入迟到结果。文件夹计数只核对来源与归属，代际初始化事务负责建立或切换 UIDVALIDITY。每目录提交后发布数据版本，整轮全部成功才更新账号成功时间；部分失败保留目录失败信息。worker generation 和账号 revision 在阻塞任务实际取得存储锁后再次校验，已取消任务不能靠排队中的写操作恢复旧结果。
 
 UID 只在文件夹及其 `UIDVALIDITY` 世代内有效，不能拿序号或邮件头 `Message-ID` 当唯一远端主键。[RFC 9051](https://www.rfc-editor.org/rfc/rfc9051.html)。MailX 使用 `(accountId, mailboxSourceId, folderId, uidValidity, uid)` 表达远端位置，本地 `emailId` 是独立 UUID；更换接收来源后建立新来源，即使远端使用相同文件夹名和 UID，也不复用旧映射。

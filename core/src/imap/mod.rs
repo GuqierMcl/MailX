@@ -94,6 +94,8 @@ pub(crate) enum ImapError {
     Rejected,
     /// A completed command whose mailbox data is unusable; connection is healthy.
     Mailbox(String),
+    /// A reconciliation round still lacks flags for some requested messages.
+    FlagsIncomplete(usize),
     /// A declared or received body exceeds the bounded message budget.
     TooLarge,
     Timeout,
@@ -110,6 +112,7 @@ impl fmt::Display for ImapError {
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
             Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
             Self::Mailbox(reason) => write!(formatter, "mailbox response error: {reason}"),
+            Self::FlagsIncomplete(count) => write!(formatter, "missing FLAGS for {count} UID(s)"),
             Self::TooLarge => formatter.write_str("message exceeds size limit"),
             Self::Timeout => formatter.write_str("server stopped responding"),
         }
@@ -118,7 +121,10 @@ impl fmt::Display for ImapError {
 
 impl ImapError {
     pub(crate) fn session_usable(&self) -> bool {
-        matches!(self, Self::Rejected | Self::Mailbox(_))
+        matches!(
+            self,
+            Self::Rejected | Self::Mailbox(_) | Self::FlagsIncomplete(_)
+        )
     }
 }
 
@@ -898,6 +904,17 @@ impl Session {
         // may be interpolated into async-imap's unescaped SEARCH expression.
         let query = format!("UID SEARCH SINCE {}", date.format("%d-%b-%Y"));
         self.search(&query).await
+    }
+
+    pub(crate) async fn search_uids(&mut self, requested: &[u32]) -> Result<Vec<u32>, ImapError> {
+        let query = format!("UID SEARCH UID {}", nonempty_uid_set(requested)?);
+        let found = self.search(&query).await?;
+        if found.iter().any(|uid| !requested.contains(uid)) {
+            return Err(ImapError::Mailbox(
+                "SEARCH returned unrequested UIDs".into(),
+            ));
+        }
+        Ok(found)
     }
 
     async fn search(&mut self, query: &str) -> Result<Vec<u32>, ImapError> {

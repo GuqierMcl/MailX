@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🩹 Fixed
+
+- Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。
+
 ## [0.4.1] - 2026-11-18
 
 ### 🚀 Feature

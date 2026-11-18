@@ -539,6 +539,157 @@ async fn vanished_uid_between_search_and_fetch_keeps_coverage_incomplete() {
     );
 }
 
+#[tokio::test]
+async fn short_flag_fetch_retries_live_uids_and_removes_confirmed_missing_uids() {
+    let fixture = fixture();
+    let mut first = commands(21, &[2, 3, 4]);
+    add_headers(
+        &mut first,
+        &[(2, "Removed"), (3, "Recovered"), (4, "Returned")],
+    );
+    run(&fixture, first, true).await.unwrap();
+
+    let mut second = commands(21, &[2, 3, 4]);
+    second.extend([
+        (
+            "UID FETCH 2:4 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 4 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
+        ),
+        (
+            "UID SEARCH UID 2:3".into(),
+            "* SEARCH 3\r\n{tag} OK searched\r\n".into(),
+        ),
+        (
+            "UID FETCH 3 (UID FLAGS)".into(),
+            "* 2 FETCH (UID 3 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
+        ),
+    ]);
+    run(&fixture, second, true).await.unwrap();
+
+    let page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    assert!(page.coverage.headers_complete);
+    assert_eq!(page.items.len(), 2);
+    assert!(page.items.iter().all(|mail| mail.is_read));
+    assert!(page.items.iter().any(|mail| mail.subject == "Recovered"));
+    assert!(page.items.iter().any(|mail| mail.subject == "Returned"));
+}
+
+#[tokio::test]
+async fn unresolved_flags_keep_coverage_incomplete_and_later_batches_still_update() {
+    let fixture = fixture();
+    let uids: Vec<u32> = (1..=501).rev().collect();
+    let mut first = commands(21, &uids);
+    let now = chrono::Utc::now();
+    for batch in uids.chunks(200) {
+        first.push(fetched(
+            &batch
+                .iter()
+                .map(|&uid| match uid {
+                    1 => header_with(uid, "Later batch", "", now),
+                    501 => header_with(uid, "Unresolved", "\\Seen", now),
+                    _ => header_with(uid, "Other", "", now - chrono::Duration::minutes(1)),
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+    run(&fixture, first, true).await.unwrap();
+
+    let mut second = commands(21, &uids);
+    let live: Vec<_> = (476..=501).map(|uid| uid.to_string()).collect();
+    second.extend([
+        (
+            "UID FETCH 2:501 (UID FLAGS)".into(),
+            flags_of(&(2..=475).collect::<Vec<_>>()).1,
+        ),
+        (
+            "UID SEARCH UID 476:501".into(),
+            format!("* SEARCH {}\r\n{{tag}} OK searched\r\n", live.join(" ")),
+        ),
+        (
+            "UID FETCH 476:500 (UID FLAGS)".into(),
+            flags_of(&(476..=500).collect::<Vec<_>>()).1,
+        ),
+        (
+            "UID FETCH 501 (UID FLAGS)".into(),
+            "{tag} OK omitted\r\n".into(),
+        ),
+        (
+            "UID FETCH 1 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
+        ),
+    ]);
+    let result = run(&fixture, second, false).await.unwrap_err();
+    assert!(matches!(
+        from_sync_error(result),
+        Outcome::Transient(SyncFailure {
+            code: SyncFailureCode::FlagsIncomplete,
+            will_retry: true,
+            ..
+        })
+    ));
+
+    let page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    assert!(!page.coverage.headers_complete);
+    for subject in ["Unresolved", "Later batch"] {
+        let mail = page
+            .items
+            .iter()
+            .find(|mail| mail.subject == subject)
+            .unwrap();
+        assert!(mail.is_read);
+    }
+}
+
+#[tokio::test]
+async fn unsuccessful_targeted_search_preserves_cached_messages_and_flags() {
+    for response in [
+        "{tag} NO search unavailable\r\n",
+        "{tag} OK no enumeration\r\n",
+        "* SEARCH 5\r\n{tag} OK searched\r\n",
+    ] {
+        let fixture = fixture();
+        let mut first = commands(21, &[2]);
+        first.push(fetched(&[header_with(
+            2,
+            "Preserved",
+            "\\Seen",
+            chrono::Utc::now(),
+        )]));
+        run(&fixture, first, true).await.unwrap();
+
+        let mut second = commands(21, &[2]);
+        second.extend([
+            (
+                "UID FETCH 2 (UID FLAGS)".into(),
+                "* 1 FETCH (FLAGS ())\r\n{tag} OK omitted\r\n".into(),
+            ),
+            ("UID SEARCH UID 2".into(), response.into()),
+        ]);
+        assert!(run(&fixture, second, false).await.is_err());
+
+        let page = fixture
+            .service
+            .lock()
+            .unwrap()
+            .list_emails(&EmailListQuery::default())
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].subject, "Preserved");
+        assert!(page.items[0].is_read);
+        assert!(!page.coverage.headers_complete);
+    }
+}
+
 fn replace_targets(fixture: &Fixture, names: &[(&str, bool)]) -> Vec<(String, String)> {
     let mut service = fixture.service.lock().unwrap();
     let records: Vec<_> = names

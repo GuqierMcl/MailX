@@ -65,6 +65,7 @@ pub enum SyncFailureCode {
     /// The server lacks something required, such as STARTTLS.
     Unsupported,
     Protocol,
+    FlagsIncomplete,
     Storage,
 }
 
@@ -1325,6 +1326,9 @@ pub(super) fn classify(error: ImapError) -> Outcome {
         ImapError::Net(NetError::Timeout) | ImapError::Timeout => {
             Outcome::Transient(failure(SyncFailureCode::Timeout, detail, true))
         }
+        ImapError::FlagsIncomplete(_) => {
+            Outcome::Transient(failure(SyncFailureCode::FlagsIncomplete, detail, true))
+        }
         ImapError::Protocol(_)
         | ImapError::Mailbox(_)
         | ImapError::Rejected
@@ -1353,6 +1357,7 @@ pub(super) fn failure(
         SyncFailureCode::Timeout => "邮件服务器响应超时。",
         SyncFailureCode::Unsupported => "邮件服务器不支持所需的功能。",
         SyncFailureCode::Protocol => "邮件服务器返回了无法识别的响应。",
+        SyncFailureCode::FlagsIncomplete => "部分邮件状态暂未更新。",
         SyncFailureCode::Storage => "无法保存同步结果。",
     };
     SyncFailure {

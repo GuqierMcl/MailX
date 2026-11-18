@@ -151,6 +151,7 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 - `core/src/imap/mod.rs`：脚本化 IMAP 会话验证 STATUS → EXAMINE → UID SEARCH SINCE → UID FETCH，使用头部字面量；禁止 SELECT、STORE 与非 PEEK 正文读取；UID 集合压缩、BODYSTRUCTURE 附件判断，以及短 tag 的精确完成匹配。
 - `core/src/sync/headers.rs`：UTF-8 B / Q、GBK / GB2312 等 encoded-word、损坏字段兜底、地址组、收件日期优先级和 UTC 时间规范化；`mail-parser` 必须启用 `full_encoding`。
 - 全目录同步：完整 LIST → 目录解释 → SQLite → 目录调度链路，可选性来自 `\Noselect`；单目录 STATUS / EXAMINE / SEARCH / FETCH 拒绝、不完整 LIST、超时 / 断线后继续后续目录；目录新增、删除、改名、变为不可选；同 UID 跨目录隔离；STATUS 计数未知与真实零值区分。STATUS 完整成功但目录名不可用时的 EXAMINE 兼容路径（如网易企业邮箱返回问号名称）不得把无法匹配的 STATUS 行当作目标目录数据。
+- FLAGS 响应不完整：用脚本化 IMAP 服务让 `UID FETCH` 返回 tagged OK 并漏回部分请求的 UID。分别模拟重新搜索确认消失、仍存在且较小批次重试成功、仍存在且重试后仍缺少 FLAGS。确认只移除完整搜索确认消失的邮件，成功重试后应用新状态，始终缺失时保留旧缓存、继续同步其他邮件并报告可重试的 `flagsIncomplete`。目录和账号的成功时间不因未完成的标志同步推进，后续轮次能继续重试。重新搜索被拒绝或中断时保留漏回邮件的本地记录。
 - `core/src/mail/render/`：真实 HTML 与纯文本区分、字符集解码、alternative / mixed 与嵌套附件、UTF-8 边界截断、MIME 深度、脚本 / URL / CSS 净化、远程图片计数、CID 与 data 图片的真实格式和预算。
 - `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝，累计 payload 与控制数据预算，截断 / 重复 / 错误 UID / 超时拒绝。
 - `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取与净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除保护。

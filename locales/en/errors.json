@@ -27,6 +27,7 @@
   "tls": "Could not establish a secure connection. Check server encryption settings.",
   "timeout": "The connection timed out. Try again later.",
   "protocol": "The mail server returned an unrecognized response.",
+  "flagsIncomplete": "Some message statuses could not be updated yet.",
   "storage": "Cannot access local data. Check available space and permissions.",
   "accountNotFound": "This account no longer exists.",
   "attachmentTooLarge": "Attachments exceed the total size limit.",
