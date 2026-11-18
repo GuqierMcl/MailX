@@ -2,7 +2,7 @@
 
 English | [简体中文](zh-CN/README.md)
 
-This page covers the basics of the desktop app. Published installers are listed in [Releases](https://github.com/GuqierMcl/MailX/releases); tested combinations are in the [validation record](../development/validation.md), and upcoming features in the [roadmap](../roadmap/README.md).
+This page covers the basics of the desktop app. Published installers are listed in [Releases](https://github.com/GuqierMcl/MailX/releases); verification scope is described in the [validation guidance](../development/validation.md), and upcoming features in the [roadmap](../roadmap/README.md).
 
 ## Install and add an account
 
@@ -47,7 +47,7 @@ Discovery may find a server that needs authentication before it can return setti
 
 The account uses polling, downloads message bodies and attachments when needed, and supports read/starred changes, deletion with undo, and the shared sending queue. Existing local mail remains available offline. A successful send means Exchange accepted the message; when acceptance is uncertain, MailX does not automatically resend. The sync window and coverage limits are the same bounded local-cache model described below; incomplete listings never prove a server deletion.
 
-The HTTPS certificate must be trusted by the operating system. Basic, Kerberos-only, shared/delegated mailboxes, EWS OAuth and DNS SRV discovery are not offered. Negotiate is supported when the server accepts NTLM through it; Kerberos-only authentication is not supported. Exchange deployments, extended protection and enterprise proxies require validation; see the [validation record](../development/validation.md#exchange-ews-validation). To use a different mail protocol, add a new account of that type.
+The HTTPS certificate must be trusted by the operating system. Basic, Kerberos-only, shared/delegated mailboxes, EWS OAuth and DNS SRV discovery are not offered. Negotiate is supported when the server accepts NTLM through it; Kerberos-only authentication is not supported. Exchange deployments, extended protection and enterprise proxies require validation; see the [validation guidance](../development/validation.md#exchange-ews-validation). To use a different mail protocol, add a new account of that type.
 
 ## Manage accounts
 
@@ -206,7 +206,7 @@ Setup retains a backup beside an existing client configuration. If MailX stops u
 
 Clients can search exact sender addresses, inspect locally known conversations, find recipient suggestions from cached correspondence and paginate drafts. Received attachments can be exported to MailX's local export directory; each export creates a new file and returns its location for a client on the same computer. Exported files remain on disk until you remove them. Search and conversation results describe local coverage and may omit older or uncached server history.
 
-A client may send the mail it reads to the AI service it uses, so choose clients and models with your privacy in mind. There is no per-client or per-account authorization yet, and MCP cannot delete mail. Compatibility of clients, platforms and tools is recorded in the [validation record](../development/validation.md).
+A client may send the mail it reads to the AI service it uses, so choose clients and models with your privacy in mind. There is no per-client or per-account authorization yet, and MCP cannot delete mail. How compatibility of clients, platforms and tools is verified is described in the [validation guidance](../development/validation.md).
 
 ## Verification codes
 

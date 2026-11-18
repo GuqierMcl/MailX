@@ -4,7 +4,7 @@ MailX 的共享 Rust 核心库，当前 Cargo 包名为 `mailx-core`。桌面端
 
 本包合并原先设想的 core / infra 职责。账号、同步、发送、存储、搜索、网络路由与模型适配在功能落地时按模块加入；暂不预建空模块、空 trait 或独立适配层。SQLite、协议与 HTTP 库可以直接成为本包依赖，Tauri、Axum 和窗口 API 不可以。
 
-当前以 `MailxCore` 为应用服务入口，提供账号管理与连接验证、IMAP 文件夹和邮件头同步、收件箱 IDLE、按需正文与预览、标记写回、删除与本机归档、本地全文搜索、草稿 / 附件 / 内嵌图片、SMTP 发送队列与本机已发送副本。`core/src/tools/` 提供本地 MCP 使用的共享工具层；内置 AI 和服务器宿主尚未实现。能力与验证范围见[架构总览](../docs/architecture/overview.md)及[验证记录](../docs/development/validation.md)。
+当前以 `MailxCore` 为应用服务入口，提供账号管理与连接验证、IMAP 文件夹和邮件头同步、收件箱 IDLE、按需正文与预览、标记写回、删除与本机归档、本地全文搜索、草稿 / 附件 / 内嵌图片、SMTP 发送队列与本机已发送副本。`core/src/tools/` 提供本地 MCP 使用的共享工具层；内置 AI 和服务器宿主尚未实现。能力与验证范围见[架构总览](../docs/architecture/overview.md)及[验证指引](../docs/development/validation.md)。
 
 `AccountService` 与存储使用 `rusqlite` 在宿主提供的用户数据目录持久化数据，启用外键、WAL、FULL 同步、迁移校验与实例锁。凭证通过宿主注入的 `SecretStore` 保存，不能从应用读取接口取得凭证值或内部引用。`SecretValue` 的 Debug 脱敏并在释放时清理内容。
 

@@ -1,6 +1,6 @@
 # 工具层与调用入口
 
-状态：**本地 MCP 工具层已实现 / 内置 Agent 与远程入口为 Planned**。`core/src/tools/` 提供邮件查询与整理、草稿、附件和发送工具；`mcp-server/` 在 `mcp.enabled` 打开时由桌面宿主启动，宿主为每个连接构造 `RequestContext` 并授予 `Grant::mcp_default()`。桌面邮件操作复用 core 应用服务，内置 Agent 尚未接入工具层。工具目录见第 4 节，平台与客户端证据见[验证记录](../development/validation.md)，设计依据见 [ADR 0004](../adr/0004-shared-tool-layer.md)。
+状态：**本地 MCP 工具层已实现 / 内置 Agent 与远程入口为 Planned**。`core/src/tools/` 提供邮件查询与整理、草稿、附件和发送工具；`mcp-server/` 在 `mcp.enabled` 打开时由桌面宿主启动，宿主为每个连接构造 `RequestContext` 并授予 `Grant::mcp_default()`。桌面邮件操作复用 core 应用服务，内置 Agent 尚未接入工具层。工具目录见第 4 节，平台与客户端证据见[验证指引](../development/validation.md)，设计依据见 [ADR 0004](../adr/0004-shared-tool-layer.md)。
 
 ## 1. 分层
 
@@ -139,7 +139,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 本地 MCP 是工具层的首个使用方，内置 AI 的前端另行设计。为避免工具层只为 MCP 服务，工具层测试在进程内分别以 MCP 与内置 Agent 主体调用。
 
 1. 共享工具的应用服务支撑：纯文本读取接口、草稿来源标记。已具备（`DraftOrigin::{User, Mcp, Ai}`、`create_draft_with_origin`、界面标记、HTML-only 邮件的分行纯文本）。本地 MCP 已创建来源为 `mcp` 的草稿，内置 Agent 尚未接入。
-2. 工具层骨架、`RequestContext` 与当前工具目录：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；平台和客户端证据范围见上方状态及验证记录。
+2. 工具层骨架、`RequestContext` 与当前工具目录：**已完成**，core 内以进程内测试验证两个主体，本地 MCP 已由桌面宿主接入；平台和客户端证据范围见上方状态及[验证指引](../development/validation.md)。
 3. M0 原型验证 `rmcp` 与本地 IPC，随后实现 MCP 适配层、桌面 IPC 监听与 stdio bridge。
 4. 设置中的 MCP 页、标题栏运行状态图标、复制客户端配置与 bridge 随应用分发。
 5. 至少两个目标 MCP 客户端联调。

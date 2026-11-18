@@ -1,6 +1,6 @@
 # QQ / Foxmail 调研与接入方案
 
-状态：**预设、官方图标、授权码向导与有界收发诊断已有实现 / 用户真实邮箱手测反馈通过，完整兼容矩阵待补证** · 2026-10-28。调研基线为 `75e43ee`，实现位于本次工作树；外部资料于同日查阅。已完成资料核验、代码实现及受控服务回归；用户随后反馈已手动测试真实邮箱且无异常，未逐项记录域名、平台与收发场景，不能据此外推 VIP 或全部组合已验。开发检查与待验项见[验证策略](../development/validation.md#11-qq--foxmail-预设与收发连接诊断)。
+状态：**预设、官方图标、授权码向导与有界收发诊断已有实现 / 用户真实邮箱手测反馈通过，完整兼容矩阵待补证** · 2026-10-28。调研基线为 `75e43ee`，实现位于本次工作树；外部资料于同日查阅。已完成资料核验、代码实现及受控服务回归；用户随后反馈已手动测试真实邮箱且无异常，未逐项记录域名、平台与收发场景，不能据此外推 VIP 或全部组合已验。开发检查与待验项见[验证指引](../development/validation.md#11-qq--foxmail-预设与收发连接诊断)。
 
 ## 1. 建议
 
@@ -106,7 +106,7 @@ QQ 的“最近 30 天”与 MailX 的固定窗口不同：MailX 在每个目录
 
 ### 已发送副本
 
-本机已发送副本的展示与对账已有实现，当前行为见[写信与发送](../architecture/sending.md#9-已发送副本)。QQ 的服务器副本可能重写 `Message-ID`；其保留的原始标识由独立模块校验，规则以[邮箱服务商兼容层](../architecture/provider-compatibility.md)为准，真实账号类型和别名的验证范围见[验证记录](../development/validation.md)。
+本机已发送副本的展示与对账已有实现，当前行为见[写信与发送](../architecture/sending.md#9-已发送副本)。QQ 的服务器副本可能重写 `Message-ID`；其保留的原始标识由独立模块校验，规则以[邮箱服务商兼容层](../architecture/provider-compatibility.md)为准，真实账号类型和别名的验证范围见[验证指引](../development/validation.md)。
 
 当前不增加 IMAP APPEND；副本未出现或尚未匹配均不能触发再次 SMTP 发送。写信附件的当前行为见[写信与发送](../architecture/sending.md#16-写信附件与内嵌图片)，本调研文档不另行维护功能状态。
 
@@ -155,6 +155,6 @@ A、B 已实现并接受受控服务和前端回归检查；用户已反馈一�
 - **[S7] 腾讯官方：[什么是“vip邮箱地址”](https://service.mail.qq.com/detail/0/360)**：VIP 地址与原地址共用邮箱，邮件客户端用户名须填写完整 `myname@vip.qq.com`；页面含历史开通说明，当前授权码与安全配置以 [S1][S2] 为准。
 - **[S8] 腾讯官方：[QQ 邮箱会员权益介绍](https://help.mail.qq.com/detail/0/1003)**：列出可开通 `@vip.qq.com` 地址的权益。
 - **[S9] 腾讯官方：[什么是个性化邮箱地址？](https://help.mail.qq.com/detail/0/999)**：个人 QQ 邮箱可添加自有域名地址，地址不能独立登录；团队多人需求应使用企业邮箱。
-- **仓库证据**：[验证策略](../development/validation.md)、[账号配置](../architecture/account-configuration.md)、[同步设计](../architecture/mail-sync.md)、[发送设计](../architecture/sending.md)及上述当前源码。部分旧文档状态文字滞后，当前实现以源码为准，真实兼容结论以具体版本的验证记录为准。
+- **仓库证据**：[验证指引](../development/validation.md)、[账号配置](../architecture/account-configuration.md)、[同步设计](../architecture/mail-sync.md)、[发送设计](../architecture/sending.md)及上述当前源码。部分旧文档状态文字滞后，当前实现以源码为准，真实兼容结论以具体版本的验证记录为准。
 
 外部帮助页面会更新，本方案记录查阅日的内容。官方规则、源码已有实现、条件性风险和待验兼容组合分别表达；不以搜索摘要、生成式搜索回答或既有排行文档替代协议证据。

@@ -1,6 +1,6 @@
 # Gmail 接入评估
 
-状态：**应用专用密码预设已有实现；OAuth 登录未开放**。本文记录 Gmail 的三种接入方式、当前选择与后续条件。实现与验证证据见[验证记录](../development/validation.md#gmail-app-password)，用户说明见[添加账号指南](../guides/zh-CN/README.md#gmail)。
+状态：**应用专用密码预设已有实现；OAuth 登录未开放**。本文记录 Gmail 的三种接入方式、当前选择与后续条件。实现与验证证据见[验证指引](../development/validation.md#gmail-app-password)，用户说明见[添加账号指南](../guides/zh-CN/README.md#gmail)。
 
 ## 1. 三种登录方式
 

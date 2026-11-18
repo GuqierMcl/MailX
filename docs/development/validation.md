@@ -1,6 +1,12 @@
-# 验证与质量目标初案
+# 验证与质量目标
 
-状态：**账号、全文件夹邮件头与按需正文已有针对性测试 / 完整服务商验证继续推进** · 2026-10-20。第 5 节区分当前检查方法与实际执行证据，第 1–4 节包含后续能力的验证计划，不是全部已通过结果；阈值可根据实现证据修订。
+状态：**本文是验证指引，不是状态快照**。它说明要验证什么、怎么验证、什么算验证通过。具体结果不在本文积累。
+
+## 记录方式
+
+- 本文只写稳定的验证要求与检查方法。测试数量、通过情况、CI 运行、实际平台 / 客户端 / 服务商组合与现场观察写进当次 PR 描述和 CI 运行记录，发版时由 Release 说明概括。
+- 单个服务商、账号或平台成功只证明该组合，不写成“所有邮箱兼容”或“三平台已验证”。功能存在、自动测试通过、另一平台成功，都不能代替本机的运行验证。
+- 功能或安全边界变化时，同步修订本文的检查方法；若检查项被废弃，删除对应段落而不是追加“已移除”的历史。
 
 ## 1. 分层验证
 
@@ -17,43 +23,43 @@
 
 ## 2. 关键场景矩阵
 
-| 场景 | 期望结果 | 阶段 |
-| --- | --- | --- |
-| IMAP 重复拉同一批、游标写入前崩溃 | 无重复远端位置；可重新开始该批 | M1 |
-| UIDVALIDITY 改变、UID 被复用 | 不把旧缓存 / flags 写到新邮件 | M1 |
-| 增量期间断线、远端 UID 对账不完整 | 不推进未提交游标、不误删整批 | M1 |
-| 无 IDLE / CONDSTORE 的服务端 | 降级轮询与 UID 对账仍正确 | M1 |
-| 代理断开、DNS 探测、双账号同时同步 | 代理账号不直连，直连账号不走代理 | M0–M1 |
-| 无效证书、STARTTLS 被移除 | 拒绝认证，不降级明文 | M0–M1 |
-| OAuth 过期、刷新撤销、并发刷新 | 单次刷新或 needsAuth，无凭证输出 | M1–M4 |
-| 中文 / 多字符集、畸形 MIME、深层 multipart | 可读或结构化错误，不崩溃 / 无界分配 | M1 |
-| 正文 script / CSS URL / SVG / 表单 / 导航 | 无执行、默认无外部请求、无 IPC | M0–M2 |
-| cid 伪造、路径穿越附件名、图片重定向到私网 | 拒绝跨邮件资源与宿主路径访问 | M2 |
-| 双击发送、重复请求、草稿 revision 变化 | 唯一入队或明确冲突 | M2 |
-| SMTP RCPT 部分拒绝 | DATA 前中止，不悄悄只发部分收件人 | M2 |
-| DATA 后断线、提交后应用崩溃 | unknown，不自动重发 | M2 |
-| SMTP 成功后服务器没有已发送副本 | 本地副本仍在；以后加入 APPEND 时，归档失败也不重发 SMTP | M2 |
-| 删除时服务器无 UIDPLUS / MOVE、UIDVALIDITY 改变、撤销与执行赛跑 | 从不发普通 EXPUNGE；无法执行时恢复显示并提示；开始执行后撤销被拒 | M1 |
-| 断网编辑、进程退出、磁盘满 | 草稿可恢复或明确未保存，不伪报成功 | M2 |
-| FTS 删除 / 重建、中文查询、未缓存正文 | 结果不越权，短词与覆盖限制可见 | M1–M2 |
-| AI 邮件提示词注入、模型恶意 HTML | 不增加工具权限，不执行输出 | M3 |
-| AI 中途取消、重连、草稿已改 | 不自动重跑收费请求，不覆盖新草稿 | M3 |
-| MCP 关闭开关后继续调用、token 错误或缺失、发现文件属于其他实例 | 拒绝连接或调用，关闭即时生效 | M3 |
-| MCP 列出或调用未声明对外可见的工具、内置 Agent 调用 MCP 专属工具 | 工具列表不出现，调用被拒 | M3 |
-| 备份缺 WAL / blob、迁移失败、旧版本打开新库 | 拒绝不完整恢复，保留原数据 | M1–M4 |
-| Web CSRF、Session 固定、TOTP 恢复、引导抢占 | 拒绝未授权访问并可控恢复 | M5 |
+| 场景 | 期望结果 |
+| --- | --- |
+| IMAP 重复拉同一批、游标写入前崩溃 | 无重复远端位置；可重新开始该批 |
+| UIDVALIDITY 改变、UID 被复用 | 不把旧缓存 / flags 写到新邮件 |
+| 增量期间断线、远端 UID 对账不完整 | 不推进未提交游标、不误删整批 |
+| 无 IDLE / CONDSTORE 的服务端 | 降级轮询与 UID 对账仍正确 |
+| 代理断开、DNS 探测、双账号同时同步 | 代理账号不直连，直连账号不走代理 |
+| 无效证书、STARTTLS 被移除 | 拒绝认证，不降级明文 |
+| OAuth 过期、刷新撤销、并发刷新 | 单次刷新或 needsAuth，无凭证输出 |
+| 中文 / 多字符集、畸形 MIME、深层 multipart | 可读或结构化错误，不崩溃 / 无界分配 |
+| 正文 script / CSS URL / SVG / 表单 / 导航 | 无执行、默认无外部请求、无 IPC |
+| cid 伪造、路径穿越附件名、图片重定向到私网 | 拒绝跨邮件资源与宿主路径访问 |
+| 双击发送、重复请求、草稿 revision 变化 | 唯一入队或明确冲突 |
+| SMTP RCPT 部分拒绝 | DATA 前中止，不悄悄只发部分收件人 |
+| DATA 后断线、提交后应用崩溃 | unknown，不自动重发 |
+| SMTP 成功后服务器没有已发送副本 | 本地副本仍在；归档失败也不重发 SMTP |
+| 删除时服务器无 UIDPLUS / MOVE、撤销与执行赛跑 | 从不发普通 EXPUNGE；无法执行时恢复显示并提示 |
+| 断网编辑、进程退出、磁盘满 | 草稿可恢复或明确未保存，不伪报成功 |
+| FTS 删除 / 重建、中文查询、未缓存正文 | 结果不越权，短词与覆盖限制可见 |
+| AI 提示词注入、模型恶意 HTML | 不增加工具权限，不执行输出 |
+| AI 中途取消、重连、草稿已改 | 不自动重跑收费请求，不覆盖新草稿 |
+| MCP 关闭开关后继续调用、token 错误、发现文件属于其他实例 | 拒绝连接或调用，关闭即时生效 |
+| MCP 列出未声明对外可见的工具、内置 Agent 调用 MCP 专属工具 | 工具列表不出现，调用被拒 |
+| 备份缺 WAL / blob、迁移失败、旧版本打开新库 | 拒绝不完整恢复，保留原数据 |
+| Web CSRF、Session 固定、TOTP 恢复、引导抢占 | 拒绝未授权访问并可控恢复 |
 
 ## 3. 真实邮箱测试
 
-受控协议服务用于 CI 回归；QQ、163、Gmail、Outlook.com / Microsoft 365 使用维护者专用测试账号做人工或受限集成测试。实时凭证不向 fork PR 注入，发送仅面向测试账户白名单。
+受控协议服务用于 CI 回归；QQ、163、Gmail、Outlook.com / Microsoft 365 等服务商使用维护者专用测试账号做人工或受限集成测试。实时凭证不向 fork PR 注入，发送仅面向测试账户白名单。
 
-记录操作系统、服务商 / 租户类别、认证方式、路由、核验日期、测试清单和脱敏结论。OAuth 公开应用资格与租户策略需独立记录。一个账号成功只能证明该组合，不外推为“全邮箱兼容”。
+每次真实测试记录操作系统、服务商 / 租户类别、认证方式、路由、核验日期、测试清单和脱敏结论，写进 PR 描述。OAuth 公开应用资格与租户策略需独立记录。一个账号成功只能证明该组合。
 
 ## 4. 可重复性能测量
 
-初始基准数据建议：2 个账号、10,000 封头部、1,000 封平均 10 KiB 纯文本正文、100 个合成附件；另用 100,000 封头部做压力组。记录硬件、OS / WebView、构建类型、缓存状态与数据集版本。
+建议基准数据：2 个账号、10,000 封头部、1,000 封平均 10 KiB 纯文本正文、100 个合成附件；另用 100,000 封头部做压力组。记录硬件、OS / WebView、构建类型、缓存状态与数据集版本。
 
-| 项目 | 测量口径 | 初始参考目标 |
+| 项目 | 测量口径 | 参考目标 |
 | --- | --- | --- |
 | 启动可交互 | Release，进程未运行，从启动到缓存列表可操作；OS 冷 / 热缓存分别测 | 普通缓存场景 p95 ≤ 1.5 秒 |
 | 列表查询 | 本地缓存第一页 50 条，不含网络 | p95 ≤ 100ms |
@@ -62,23 +68,23 @@
 | 内存 | 核心 + 所有 WebView 子进程，初次同步稳定后 5 分钟 | 先建立三平台基线，再定发布预算 |
 | 同步恢复 | 受控网络断开 / 恢复后重新获得一致状态 | 记录数据集、退避等待与完成时间 |
 
-启动至少测 20 次并报告分位数，不用一次最快结果；网络服务商与外部模型延迟单列。AI 模型进程资源独立报告，不能把它混入或藏在客户端内存数字中。Web 进程与浏览器总资源分别报告。
-
-原蓝图的冷启动 <300ms、待机 <80MB、容器 <30MB 和镜像 <50MB 保留为探索方向，不作为未经验证的 README 宣传或本轮硬性验收承诺。
+启动至少测 20 次并报告分位数，不用一次最快结果；网络服务商与外部模型延迟单列。AI 模型进程资源、Web 进程与浏览器总资源分别报告。原蓝图的冷启动 <300ms、待机 <80MB、容器 <30MB 和镜像 <50MB 保留为探索方向，不作为 README 宣传或硬性验收承诺。
 
 ## 5. 当前工程检查
 
-根 Cargo workspace 已包含 core 与 desktop，前端工作区位于 `frontend/`，可执行：
+根 Cargo workspace 包含 core、desktop、`mcp-server` 与 `mcp-bridge`，前端工作区位于 `frontend/`。可执行：
 
 ```sh
 bun install --frozen-lockfile
 bun run version:check
+bun run version:test
 bun run i18n:check
 bun run typecheck
 bun run lint
 bun run build
 bun run tauri dev
 bun run tauri build
+bun run desktop:dev:isolated
 bun run check
 cargo check -p mailx-core --locked
 cargo test -p mailx-core --locked
@@ -92,441 +98,151 @@ cargo build -p mailx-desktop --locked
 git diff --check
 ```
 
-`bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`bun run tauri build` 验证前端产物进入桌面 release 构建。它会生成本机平台的安装包；因为 `bundle.createUpdaterArtifacts` 打开，没有 `TAURI_SIGNING_PRIVATE_KEY` 时会在产出 `.app.tar.gz` 之后以退出码 1 结束，本地验证可加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 关闭更新包（签名与 `.sig` 只在 CI 的 `release` 环境里验证）。`cargo check -p mailx-core` 验证核心可脱离 Tauri 构建；desktop 构建验证资源嵌入、权限生成与平台链接。账号核心及前端已有针对性测试，`cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。
+各项能证明什么：
+
+- `bun run check` 串起版本、资源、生成类型、TypeScript、lint、前端测试、生产构建与 `cargo check`；它通过说明这些自动门禁通过，不说明窗口、通知或系统凭据库在某个平台上实测过。
+- `bun run tauri dev` 验证 Vite 开发服务器、Tauri 配置、桌面编译与窗口启动；`desktop:dev:isolated` 用独立数据目录与凭据 service 启动，适合不碰正式用户数据的验收。
+- `bun run tauri build` 验证前端产物进入桌面 release 构建并生成本机平台的安装包。因为 `bundle.createUpdaterArtifacts` 打开，没有 `TAURI_SIGNING_PRIVATE_KEY` 时会在产出 `.app.tar.gz` 之后以退出码 1 结束；本地验证可加 `--config '{"bundle":{"createUpdaterArtifacts":false}}'` 关闭更新包，只在本地临时覆盖，不改仓库发布配置。签名与 `.sig` 只在 CI 的 `release` 环境里验证。
+- `cargo check -p mailx-core` 证明核心可脱离 Tauri 构建；desktop 构建证明资源嵌入、权限生成与平台链接。
+- `types:generate` / `types:check` 检查跨边界 DTO 漂移；修改 DTO 后重新生成，禁止手写第二套字段。秘密输入不应出现在结果类型或异常输出中。
+- `cargo test` 不代表真实邮件收发、OAuth 或全部安全边界已经验证。MCP 后端的 Unix socket 与 bridge 测试在 macOS 与 Linux 运行；Windows 命名管道与 DACL 代码只在 Windows CI 任务里编译并运行测试。
+- `icons:check` 尚未纳入 CI：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
 
 ### 持续集成
 
-发版 PR（只改版本文件与 `CHANGELOG.md`，且与 `version:bump` 的输出一致）只运行版本与日志的轻量检查，全量检查改在合并后的 `main` 上进行，发版工作流在构建前核对该提交的 `CI result` 已通过；规则见[发布流程](release.md#发版-pr-的-ci)。2026-11-12 用判定脚本回放历史 PR：v0.1.1、v0.1.2 的发版 PR 判为发版，同时改了版本脚本测试的 v0.1.0 发版 PR、只改 README 的 #89 与功能 PR #111 分别判为普通改动、文档和普通改动；判定脚本另有 8 项单元测试，实际 CI 结果以对应 PR 为准。
+发版 PR（只改版本文件与 `CHANGELOG.md`，且与 `version:bump` 的输出一致）只运行版本与日志的轻量检查，全量检查在合并后的 `main` 上进行，发版工作流在构建前核对该提交的 `CI result` 已通过；规则见[发布流程](release.md#发版-pr-的-ci)。判定脚本另有单元测试。
 
-CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，更新索引时的临时错误也必须使该次尝试失败。官方镜像在 runner 上无法访问时，步骤会恢复 runner 原有的镜像配置再试一次；仍失败时改用 ubuntu.com 以外的社区镜像（kernel.org 与 OCF Berkeley）。镜像只提供下载，索引仍由 APT 按 Ubuntu 签名密钥校验。每次尝试的更新限 3 分钟、安装限 5 分钟，整个步骤上限 20 分钟。2026-11-11 PR #114 的 CI 在 Ubuntu runner 上连续约一小时无法解析任何 `*.ubuntu.com` 域名（`archive`、`security` 与 `azure.archive` 均报 `Temporary failure resolving`），前两种方式都失败，因此加入第三种。2026-10-28 排查的 [main CI 40540404597](https://github.com/GuqierMcl/MailX/actions/runs/40540404597) 在 Azure Ubuntu 镜像缓慢下载依赖时触发该上限，Linux 的编译和测试尚未开始；同次前端、macOS 与 Windows 检查已通过。修复的工作流已通过本地 `actionlint`（含 ShellCheck）与差异检查，实际 Ubuntu 安装和三平台结果以修复提交对应的 CI 为准。
+CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，更新索引时的临时错误也必须使该次尝试失败。官方镜像在 runner 上无法访问时，步骤会恢复 runner 原有的镜像配置再试一次；仍失败时改用 ubuntu.com 以外的社区镜像（kernel.org 与 OCF Berkeley）。镜像只提供下载，索引仍由 APT 按 Ubuntu 签名密钥校验。每次尝试的更新限 3 分钟、安装限 5 分钟，整个步骤上限 20 分钟。修改镜像策略后用 `actionlint`（含 ShellCheck）与差异检查验证工作流，Ubuntu 安装与三平台结果以对应提交的 CI 为准。
 
-`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行；所有 Linux 任务使用与发布构建一致的 Ubuntu 22.04，Rust 缓存按 runner 版本隔离：
+`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行，所有 Linux 任务使用与发布构建一致的 Ubuntu 22.04：
 
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
-- Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务会安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
+- Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
-`.github/workflows/linux-appimage.yml` 仅通过 GitHub Actions 的 `workflow_dispatch` 手动触发，不随 PR 或 push 自动运行，也不作为合并所需的 CI 检查。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 运行环境验证：所有包内 ELF 与 AppImage runtime 的 glibc 版本需求不高于 2.35；包内五个托盘运行库的 SONAME、依赖解析与实际动态加载；正常 AppImage 和移除 AppIndicator 后的降级启动均须出现可见主窗口、持续存活并建立隔离的空数据库，日志也须符合是否发生降级的预期。运行应用时使用非 root 用户与 `--network none`，保留 WebKit 沙箱；为允许其创建嵌套命名空间，测试容器放开外层 seccomp/AppArmor，同时移除所有 capabilities。日志、依赖与窗口/数据库证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现；这项启动检查不代替真实桌面托盘菜单、GNOME/Wayland 或邮件收发验证。
-
-2026-11-02，[PR #74](https://github.com/GuqierMcl/MailX/pull/74) 的代码提交 `9c501b8` 已通过[三平台 CI](https://github.com/GuqierMcl/MailX/actions/runs/41324929231) 与 [Linux AppImage 启动检查](https://github.com/GuqierMcl/MailX/actions/runs/41324929243)。实际检查 180 个 ELF（含 AppImage runtime），最高 glibc 需求为 2.35；五个托盘库依赖解析与动态加载成功。正常场景无降级日志；删除 AppIndicator 后仅记录一次降级，窗口仍可见且进程存活。两个独立空数据库均通过完整性检查，schema 与迁移版本均为 21。运行环境为 Ubuntu 22.04.5、非 root、无网络；该证据未覆盖 AppImageHub 的 Firejail 环境或真实桌面托盘交互。
+`.github/workflows/linux-appimage.yml` 仅通过 `workflow_dispatch` 手动触发，不随 PR 或 push 自动运行，也不是合并所需的检查。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 环境验证：包内 ELF 与 AppImage runtime 的 glibc 需求不高于 2.35；五个托盘运行库的 SONAME、依赖解析与动态加载；正常启动和移除 AppIndicator 后的降级启动都须出现可见主窗口、持续存活并建立隔离的空数据库，日志符合预期降级行为。运行时使用非 root 用户与 `--network none`，保留 WebKit 沙箱，放开外层 seccomp/AppArmor 以允许嵌套命名空间，同时移除全部 capabilities；证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现。这项启动检查不代替真实桌面托盘菜单、GNOME / Wayland 或邮件收发验证，发布前仍需在有桌面的 Linux 上手动确认托盘交互。
 
 <a id="body-native-validation"></a>
 
-专用 `Body WebView` 工作流及其测试构建、驱动和脚本已移除，不再作为每次发布的检查项。下文保留既有真实引擎验证的历史结果，其结论仍只对应当时的提交、平台与场景。
+### 正文的原生隔离验证
 
-修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证，使用隔离数据目录与合成邮件核对正文 / CID 显示、脚本与应用 IPC 隔离、未授权资源请求，以及打开链接后正文保留。记录实际提交、引擎 / 平台、验证方法、结果与未覆盖范围；验证方法按当次改动确定，不要求恢复原专用脚手架。
+专用 `Body WebView` 工作流及其测试构建、驱动和脚本已移除，不作为每次发布的检查项。常规前端与 Rust 测试覆盖净化、协议、令牌和权限回归，但不能证明真实 WKWebView、WebView2 或 WebKitGTK 的沙箱与 CSP 行为；专用检查移除后没有持续的三平台原生自动回归。
 
-常规前端与 Rust 测试继续覆盖净化、协议、令牌和权限相关回归，但不能证明真实 WKWebView、WebView2 或 WebKitGTK 的沙箱与 CSP 行为。专用检查移除后没有持续的三平台原生自动回归；安装包阅读冒烟和历史绿灯也不能替代本次正文边界变更的专项证据。
+修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排专项原生验证：
 
-`mcp-server` 与 `mcp-bridge` 是工作区成员，已被上述三平台 `rust:clippy` / `rust:test` 覆盖，其中 Windows 命名管道与 DACL 代码只在 `windows-2025` 任务里编译并运行测试；没有为它们另设任务。
+- 使用隔离数据目录与合成邮件，覆盖正文 / CID 显示、脚本与应用 IPC 隔离、未授权资源请求，以及打开链接后正文保留。
+- 确认 WebView2 可能保留冻结的 `__TAURI_INTERNALS__` 底层成员；要证明的是邮件无法执行脚本或获得可调用的应用 IPC，不是该对象完全不存在。Windows 的资源地址与 CSP 使用浏览器实际 origin，不能沿用 Wry 重写后的 scheme。
+- 记录实际提交、引擎 / 平台、验证方法、结果与未覆盖范围，写进 PR 描述。验证方法按当次改动确定，不要求恢复原专用脚手架。
 
-本地 MCP 后端的自动化范围：`mcp-server` 在真实 Unix socket 上用 `rmcp` 客户端做端到端测试（初始化、首批四个带前缀的工具、输入错误、未知与无前缀工具名、错误 token / 超长 / 非 JSON / 无响应握手、文件与目录权限、发现文件按 `instanceId` 删除、token 轮换、停止即断开、连接上限、路径回退）；`mcp-bridge` 启动已构建的 `mailx-mcp-bridge` 二进制，经 stdio 对真实服务端做端到端测试，并覆盖发现文件缺失、过期、token 错误时的 `CORE_UNAVAILABLE` 与退出码 69；桌面侧测试启停决策与设置默认值。上述 Unix 测试在 macOS 与 Linux（本地与 CI）运行。另有无状态（`2026-07-28`，不 initialize、客户端信息在 `_meta`）会话的端到端测试。Windows 命名管道代码有 CI 编译和测试覆盖。已有具体客户端联调记录为 macOS 的 MCP Inspector CLI 与 Claude Code 2.1.316，均成功调用首批四个工具；用户于 2026-11-04 另确认 Windows 上 MCP 使用正常，但未逐项记录客户端、工具与服务商组合。Linux 未手测，新增工具的证据见第 28、29 节。
+### 账号与偏好的可重复检查
 
-设置 → MCP 页、导航分组、标题栏状态图标由前端测试覆盖（开启前确认、取消保持关闭、关闭不确认、状态与各失败原因、复制的 JSON 含 `--discovery`、图标显隐与圆点、点击打开 MCP 页）；`desktop/src/mcp_sidecar.rs` 测试 bridge 解析、`mcp_client_config` 的参数与 AppImage 稳定副本（权限、内容变化时覆盖）；`scripts/mcp-sidecar.test.mjs` 测试 sidecar 命名与参数。sidecar 打包可用 `bun run tauri build --debug --bundles app` 在 macOS 上检查 `MailX.app/Contents/MacOS/mailx-mcp` 存在且可运行（`--discovery` 指向不存在的文件时退出码 69）；这不等于安装包安装后、其他平台或 AppImage 的行为已验证，未做手测；该条未涉及客户端联调（见上段）。
+- `core/tests/accounts.rs` 使用临时目录和 SecretStore 故障替身：检查重开读取、多账号归属、共享 / 独立密码、版本冲突和重复请求、端点信任、来源世代、路由配置、实例锁与 schema 兼容性；在秘密写入、配置提交和清理边界验证恢复，不误把凭据库不可用当作条目缺失。
+- `frontend/src/features/accounts/` 的 Vitest / Testing Library 测试检查表单映射、保存失败与冲突、敏感输入清理；MailxClient 测试检查实际命令和传输失败。
+- 手动运行 `bun run tauri dev` 或 `bun run desktop:dev:isolated`：检查页面加载、创建、编辑和关闭后重启；应保留账号 ID 与非敏感配置，始终显示连接尚未验证。检查共享 / 独立密码、版本冲突、密码不回填、键盘操作和窗口缩放。第二个核心打开相同数据目录应明确被拒绝。
+- 宿主测试检查本地 main 窗口及来源 URL 限制、畸形或越权参数的固定脱敏错误，以及系统凭据错误不透传原始值。
+- 系统凭据库需要显式执行被忽略的原生测试；只使用合成条目，并在结束后清理。
+- 应用偏好：`settings.json` 的损坏恢复应留下 `.bak` 并提示；修改主题、强调色、字体与字号后重启应保持且启动无闪烁；窗口缩到 768px 以下时设置导航仍可用。三平台的字体回退、原生取色器与 WebView 表现需分别在对应系统上确认。
 
-只有对应运行通过时，CI 才能证明该提交在三平台能编译并通过所配置的自动测试；工作流存在不等于本次运行成功，也不代表窗口、标题栏或系统凭据库在该平台上实测过。`icons:check` 暂未纳入：它逐字节比较 zlib 压缩输出，不同 zlib 构建下即使像素相同也会不一致，需先改为比较解码后的内容。
+### 邮件头同步、按需正文与隔离阅读
 
-### 账号配置的可重复检查
+<a id="收件箱邮件头同步的检查与证据"></a>
 
-- `core/tests/accounts.rs` 使用临时目录和 SecretStore 故障替身：检查重开读取、多账号归属、共享/独立密码、版本冲突和重复请求、端点信任、来源世代、路由配置、实例锁与 schema 兼容性；在秘密写入、配置提交和清理边界验证恢复，不误把凭据库不可用当作条目缺失。
-- `frontend/src/features/accounts/` 的 Vitest/Testing Library 测试检查表单映射、保存失败与冲突、敏感输入清理；MailxClient 测试检查实际命令和传输失败。测试替身不作为普通浏览器的生产后端。
-- `bun run types:generate` 调用 Rust 的 `export_types` 入口生成契约，`bun run types:check` 检查产物漂移；修改 DTO 后重新生成，禁止手写第二套跨边界字段。秘密输入不应出现在结果类型或异常输出中。
-- 手动运行 `bun run tauri dev`：检查 shadcn 页面加载、创建、编辑和关闭后重启；应保留账号 ID 与非敏感配置，始终显示连接尚未验证。检查共享/独立密码、版本冲突、密码不回填、键盘操作和窗口缩放。第二个核心打开相同数据目录应明确被拒绝。
-- 宿主测试检查本地 main 窗口及来源 URL 限制、畸形或越权参数的固定脱敏错误，以及系统凭据错误不透传原始值。参数通过受控的原始 IPC 解析进入核心，避免反序列化异常输出秘密。
-- 系统凭据库冒烟必须在实际桌面环境用唯一的合成条目验证写入、读取和清理；同时确认 SQLite/WAL、响应、Debug 与诊断输出不含秘密。自动化 SecretStore 替身不代替系统库验证。
+自动回归覆盖的分层范围（测试文件存在不等于通过）：
 
-真实凭据库测试默认忽略，需要已解锁的原生凭据库并显式执行：
-
-```sh
-cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored
-```
-
-测试创建唯一 service 名下的合成条目并清理，验证读取、写入、删除与重复删除。它不会使用真实邮箱凭证；普通 `cargo test` 不包含这一测试。执行结论需单独记录，不因提供命令而视为通过。
-
-上述是检查范围和复现方法；当前执行结论应以当次命令及实际宿主结果记录，不因测试文件存在就宣称通过。真实邮箱兼容性、HTML、同步退出、OAuth 刷新及 SMTP 结果恢复需分别记录证据，未实现能力先保留为计划；已有 CI 工作流与单次运行结果分别记录。
-
-### 应用偏好的可重复检查
-
-- `core/src/settings/tests.rs`：缺文件不落盘、原子写入后重开读取、目录缺失时创建、字体列表按序拆分与去引号、可能逃逸 CSS 的字体名被拒、无效更新不改变状态、损坏 / 新版本 / 缺版本文件改名为 `.bak`、手改的单个字段回到默认值，以及前端看到的 camelCase 形状。
-- `desktop/src/state.rs` 测试检查核心未 Ready 时偏好仍可读写，数据目录不可用时返回 `storageUnavailable`。
-- `frontend/src/lib/appearance.test.ts` 检查字体栈（空值才用默认、按用户顺序、通用字体不加引号、末尾补 `sans-serif`）、强调色前景对比、CSSOM 变量应用与重置、首帧缓存的容错；`features/settings/` 测试检查设置弹窗标题与导航、外观保存、字体提交与拒绝提示、损坏文件提示，以及旧 `mailx.theme` 的一次性导入。
-- 语言字段、进程内设置 revision、事件订阅与统一缓存的新增范围见下文“2026-10-25 中英文文本适配”；通用设置页和外观等既有设置共用快照接收入口。
-- 手动运行 `bun run tauri dev`：修改主题、强调色、字体与字号后重启，确认保持且启动无闪烁；把 `settings.json` 改坏后启动，确认出现 `.bak` 与提示；把窗口缩到 768px 以下确认设置导航仍可用。三平台的字体回退、原生取色器与 WebView 表现需在对应系统上分别确认。
-
-### 收件箱邮件头同步的检查与证据
-
-以下为实现对应的回归范围，不能仅因测试文件存在就视为通过：
-
-- `core/src/imap/mod.rs`：脚本化 IMAP 会话验证 STATUS → EXAMINE → UID SEARCH SINCE → UID FETCH，使用头部字面量；禁止 SELECT、STORE 与非 PEEK 正文读取，并验证 UID 集合压缩和 BODYSTRUCTURE 附件判断。
+- `core/src/imap/mod.rs`：脚本化 IMAP 会话验证 STATUS → EXAMINE → UID SEARCH SINCE → UID FETCH，使用头部字面量；禁止 SELECT、STORE 与非 PEEK 正文读取；UID 集合压缩、BODYSTRUCTURE 附件判断，以及短 tag 的精确完成匹配。
 - `core/src/sync/headers.rs`：UTF-8 B / Q、GBK / GB2312 等 encoded-word、损坏字段兜底、地址组、收件日期优先级和 UTC 时间规范化；`mail-parser` 必须启用 `full_encoding`。
-- `core/src/sync/messages.rs` 及其测试：固定窗口首次 / 增量计划、1,000 封截取、200 封批次、代际切换、完整 SEARCH 后才删除、部分抓取失败恢复、flags 刷新与来源保护。
-- `core/src/storage/messages/` 及服务测试：v3 迁移、upsert 保留 id、来源 / 文件夹 / 代际写入保护、级联删除、筛选与 LIKE 字面转义、同时间稳定分页、coverage 组合和非法参数。
-- 前端 `workbench-headers.test.tsx`、`sync-state.test.tsx`、`mailx-client.test.ts`、`mock-client.test.ts`：每页 100 条与加载更多、idle 刷新保持有效选中、取消消失的选中并忽略迟到详情、刷新 / 查询变化后的旧响应、分页失败重试、三种空状态、缺主题 / 摘要、正文未下载提示和真实 IPC 参数。
+- 全目录同步：完整 LIST → 目录解释 → SQLite → 目录调度链路，可选性来自 `\Noselect`；单目录 STATUS / EXAMINE / SEARCH / FETCH 拒绝、不完整 LIST、超时 / 断线后继续后续目录；目录新增、删除、改名、变为不可选；同 UID 跨目录隔离；STATUS 计数未知与真实零值区分。STATUS 完整成功但目录名不可用时的 EXAMINE 兼容路径（如网易企业邮箱返回问号名称）不得把无法匹配的 STATUS 行当作目标目录数据。
+- `core/src/mail/render/`：真实 HTML 与纯文本区分、字符集解码、alternative / mixed 与嵌套附件、UTF-8 边界截断、MIME 深度、脚本 / URL / CSS 净化、远程图片计数、CID 与 data 图片的真实格式和预算。
+- `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝，累计 payload 与控制数据预算，截断 / 重复 / 错误 UID / 超时拒绝。
+- `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取与净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除保护。
+- `desktop/src/body_protocol/`：两种平台 URL、响应头、当前邮件资源范围、跨邮件拒绝、文档令牌、一次性链接请求、失效身份重检与远程图片策略。
+- 前端 `workbench-headers`、`use-email-body`、`body-document`、`mailx-client` 等测试：每页 100 条与加载更多、选中保留与取消、迟到响应、分页失败重试、空状态、格式自动选择、外链确认与一次性打开、IPC 不传任意 URL。
 
-2026-10-18 本轮已执行的开发检查（按实施步骤记录，不重复累计为测试总数）：
+真实账号验收只读执行，检查：
 
-- 第 3 步 core 检查：69 项单元测试与 25 项集成测试通过，覆盖当时已接入的存储和查询实现。
-- 随后的 sync 定向检查：31 项通过，包含 4 项 IMAP + SQLite 端到端测试和调度测试。
-- 第 5 步 desktop commands 定向检查：3 项通过，覆盖宿主命令边界；不替代真实 WebView 冒烟。
-- `bun run --cwd frontend test`：12 个测试文件、59 项测试通过；包含上述新增邮件头交互用例。
-- `bun run --cwd frontend typecheck` 与 `bun run --cwd frontend lint` 通过。
-- `git diff --check -- frontend` 通过。
-
-2026-10-18 首轮 Comet Runtime 整合检查：Rust 格式检查、workspace Clippy（`-D warnings`）、Rust 全量测试与 `bun run tauri build` 通过。Rust 测试为 core 79 单元 + 25 集成、desktop 10 通过；1 项真实系统凭据库测试按默认配置跳过。`bun run check` 首轮在 DTO 漂移检查处失败，差异仅为同步状态注释从 folder 更新为 inbox，已运行类型生成同步；最终检查结论以当前候选的 Comet 验收记录为准。
-
-2026-10-18 在 macOS 26.2 arm64 上补充完成以下检查，代码版本为 `ed525836bb90b0e5bd164606c59439c3b2a7f731`：
-
-- 修复类型注释漂移后，Comet Runtime 的依赖安装、`bun run check`、Rust 格式 / Clippy / 测试、桌面 release 构建及差异检查全部通过；前端 59 项、Rust 114 项测试通过。
-- 显式执行原生凭据库测试，1 项通过；通过配置覆盖生成 macOS `.app`，没有修改默认打包配置。
-- `bun run tauri dev --no-watch` 启动成功：Vite 就绪，Rust dev 编译成功并运行桌面进程。自动化工具未能绑定未打包的 dev 窗口，因此交互证据采用下述 release `.app`。
-- [CI 运行 39130608417](https://github.com/GuqierMcl/MailX/actions/runs/39130608417) 的 head SHA 与上述版本一致，前端检查和 Ubuntu 24.04、macOS 15、Windows 2025 三个 Rust 任务全部成功。这证明配置内的构建与自动测试，不代表 Windows / Linux 的窗口或原生凭据库实测。
-
-同日使用已配置且获准测试的 QQ、2925 账号完成 release `.app` 冒烟；操作和数据库观察均未把账号标识、邮件内容或凭证写入仓库：
-
-- 两个收件箱的固定窗口起点均为 `2026-09-18`，首轮已完成且未达到截取上限。统一收件箱首次 100 条，加载更多后共 131 条，与本地聚合计数一致，无重复远端身份；未读筛选显示 24 条。头部搜索、中文显示、账号标签、附件标志、非收件箱提示及正文未下载提示均已观察到；重开应用可读缓存，但未做断网验证。
-- 在 2925 网页版发送一封获准的自发自收测试邮件，MailX 收到后仍为未读；随后刷新网页版，邮件仍未读，支持只读同步没有改变该邮件的已读状态。
-- 网页版打开测试邮件后约 4 秒，本地记录变为已读；将同一邮件移入可恢复的“已删除”文件夹后约 61 秒，本地记录变为 `deleted`，MailX 搜索结果消失并清除详情选中项。测试邮件保留在网页回收站中。
-- 网页星标与本地 flags 出现差异：网页测试邮件已加星，本地 flags 仍仅含 `\Seen`。标准 `\Flagged` 的协议、存储和查询端到端测试通过；后续只读核验结果见下文。
-
-2026-10-19（Asia/Shanghai）继续使用同一 macOS 构建补充真实邮件证据：
-
-- 经单独授权发送一封自发自收的 GBK 测试邮件。临时诊断程序只读既有账号配置，确认直连、TLS 和 SMTP 凭证的端点信任绑定后发送固定 MIME 字节；凭证只在进程内使用，未输出或写入仓库。DATA 前记录唯一尝试标记，未重复发送。
-- SMTP 接受后约 46 秒，本地观察到新的 UID；约 62 秒首次观察到 MailX 列表中的中文主题、中文发件人和未读标记，统一未读数从 24 增至 25。约一分钟的新增同步已获得直接计时证据。
-- 对这封测试邮件执行只读 `EXAMINE` 和限定字段的 `BODY.PEEK`，直接确认服务器保留的 Subject 与 From 显示名均为 GBK encoded-word，解码结果与 MailX 显示一致；没有获取正文。
-- 对先前的星标测试邮件进行同样的只读核验：网页版星标列表仍包含该邮件，而服务器 FETCH 返回的 flags 仅有 `\Seen`，没有 `\Flagged`。因此本次 MailX 与 IMAP 响应一致；该账号组合的网页星标不能据此期待出现在 MailX 中，不外推为其他账号或服务商的保证。
-- 两封获授权的测试邮件最终均移入网页可恢复的“已删除”文件夹，本地记录均为 `deleted`；GBK 测试邮件的列表与详情选中项随同步清除。
-
-仍缺少真实来源切换、不同路由组合及完整服务商矩阵验证；脚本化代际 / 来源 / 失败恢复测试与真实服务商证据分别记录。上述补测没有扩大产品的收件箱头部只读范围。
-
-上述记录对应扩展前的收件箱版本；当前全文件夹范围与增量证据见下一节。真实账号验收仍需区分自动回归与现场观察，不得用一个服务商成功替代兼容矩阵。
-
-### 所有可选文件夹邮件头同步的检查与证据
-
-2026-10-19 扩展到所有可选目录，保持各目录首次同步 / UIDVALIDITY 重置时确定的固定 30 天起点、每轮最新 1,000 UID 和 200 封头部批次。账号之间并发且暂不设全局上限；每账号一条健康连接，目录及批次串行。60 秒是整轮后的等待时间，多目录不承诺严格一分钟上限。
-
-新增自动回归覆盖以下边界：
-
-- 完整 LIST → 目录解释 → SQLite → 目录调度链路；可选性来自 LIST 的 `\Noselect` 属性，不依赖尚未执行的 STATUS。全部角色、自定义 / 中文嵌套目录、空目录和无 INBOX 账号均有合成场景。
-- 单目录 STATUS / EXAMINE / SEARCH / FETCH 拒绝、完整与不完整 LIST、超时 / 断线恢复后继续后续目录；目录新增、删除、改名、变为不可选，以及计数未知与真实零值的区分。
-- 同 UID 跨目录隔离、UIDVALIDITY 仅影响所属目录、外部移动两端对账、旧来源 / 旧任务排队写入保护；同步门禁只读账号身份元数据，不反复访问凭证库。
-- 逐目录数据通知、初始快照补偿遗漏事件、代际间计数重用、下一轮失败状态、搜索 / 分页 / 有效选中保留，以及窗口受限与等待 / 同步 / 失败 / 成功空目录的分别呈现。
-
-开发期前端 13 个文件、74 项测试及 typecheck / lint 已通过；完整最终检查由 Comet Runtime 对候选执行，三平台结果以 [PR #5](https://github.com/GuqierMcl/MailX/pull/5) 对应 head 的 CI 记录为准。
-
-macOS arm64 release `.app` 已完成本轮真实账号只读验收：
-
-- 两账号共 17 个目录，其中 16 个可选目录均完成首轮；1 个不可选容器未建立邮件游标。已有收件箱起点仍为 `2026-09-18`，本轮新增目录起点为 `2026-09-19`，全部未触及 1,000 封上限。目录刷新可自动恢复开发期错误的可选性缓存，未手动改库或清空邮件。
-- 已发送与回收站各显示 2 封此前获授权的测试邮件，GBK 中文主题和发件人正确，按时间倒序；详情显示“正文尚未下载”，写操作不可用。第三个非收件箱目录同步了 7 封既有邮件，未读聚合与缓存一致。
-- 回收站搜索 GBK 仅匹配 1 封，未读筛选为 0 并显示“没有未读邮件”；成功同步的空草稿目录显示“这里还没有邮件”，不再常驻同步中。
-- 统一收件箱仍为 100 条首屏、加载后 131 条、未读 24 条，与只读数据库聚合一致，没有混入其他目录。缓存中没有重复的 `(folder_id, uid_validity, uid)`。退出重开后可再次读取已发送中的两封缓存邮件；未做断网验证。
-- 修复后新增 LIST 完整链路、目录角色和凭证门禁定向回归通过；核心 Clippy 通过，release 应用构建通过。构建仍有既有 Vite 大于 500 KiB chunk 提示，不影响构建成功。
-
-独立验收随后发现继承的 HTTP CONNECT 错误会带出代理原始状态行。修复后仅显示固定原因和已验证的数字状态码，TLS 错误同时去除证书名称和平台原文；证书验证、路由及重试语义保持不变。网络定向测试 7 项与代理错误到同步状态的端到端回归 1 项通过，覆盖敏感标记、畸形响应、TLS 诊断脱敏，并断言代理拒绝不会连接目标地址。本项不依赖真实账号或外部代理操作。
-
-本轮不发送新测试邮件或修改真实邮箱标记；沿用已获授权账号与此前两封可恢复的测试邮件做只读验收。真实来源切换、不同路由组合、完整服务商矩阵，以及 Windows / Linux 窗口和凭据库交互仍未完成。旧 GBK 编码与单收件箱到达计时证据只用于未改变的头部解码 / 轮询基础，不外推为全目录延迟保证。
-
-### 按需正文与隔离阅读的检查与证据
-
-自动回归按层覆盖以下行为，真实服务商证据另列：
-
-- `core/src/mail/render/`：真实 HTML 与纯文本区分、GBK / GB2312 解码、alternative / mixed 与嵌套附件、UTF-8 边界截断、MIME 深度、脚本 / URL / CSS 净化、远程图片计数、CID 与 data 图片的真实格式和预算。
-- `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：追加 v4、blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取 / 净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除 / 任务代际保护。离线单元测试不代替真实断网后的桌面阅读验收。
-- `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝、累计 payload 和控制数据预算、截断 / 重复 / 错误 UID / 超时拒绝。短命令 tag 回归模拟服务器最多回显 15 字节的情况，同时保持精确匹配。
-- `desktop/src/body_protocol/`：两种平台 URL、响应头、当前邮件资源范围、跨邮件拒绝、文档令牌、一次性链接请求、失效身份重检与远程图片策略。启动测试等待 Ready 或明确失败，设置 30 秒诊断上限；这是顺序检查，不是启动性能目标。
-- `use-email-body.test.tsx`、`body-document.test.tsx`、`workbench-headers.test.tsx` 与 `mailx-client.test.ts`：StrictMode 下自动下载一次、手动重试、迟到结果与账号身份变化、HTML / 纯文本切换、空 sandbox、完整外链确认、旧令牌 / 隐藏 / 重载事件、一次性打开、保留分页及有效选择、IPC 不传任意 URL。
-
-三平台前置门槛已在开始正文阅读 UI 之前完成：[PR #8 的运行 39373345400](https://github.com/GuqierMcl/MailX/actions/runs/39373345400)，head `07d1229273c94e620234cb3d7f5a1958b2e62c65`，测试合并提交 `728a741d0dbb8770e2b63609a33d5de67ff59d4f`。全部 7 个任务成功；正文 WebView 报告如下：
-
-| 实际引擎 | 合成检查结果 | 链接路径 |
-| --- | --- | --- |
-| WKWebView（macos-15） | 69/69 | 204 会清空文档，采用可信父界面编号链接 |
-| WebKitGTK（ubuntu-24.04） | 51/51 | 204 会清空文档，采用可信父界面编号链接 |
-| WebView2（windows-2025） | 48/48 | 改写链接请求返回 204，文档保持 |
-
-检查涵盖自定义协议加载、CID 显示、脚本零执行、远程资源零请求、父 DOM 与应用状态隔离、Tauri 命令不可调用，以及各自的链接路径。WebView2 可能保留冻结的 `__TAURI_INTERNALS__` 中 `plugins` / `postMessage` 底层成员；断言的是邮件无法执行脚本或获得可调用的应用 IPC，不能宣称该对象完全不存在。Windows 资源地址和 CSP 使用浏览器实际 origin，不能直接沿用 Wry 重写后的请求 scheme。
-
-当时的复现入口为 `bun run body-webview:build`、`bun run body-webview:test`，外部驱动与平台依赖由 `.github/workflows/body-webview.yml` 配置；这些命令、工作流及 `body-webview-test` feature 现已移除。历史实现可从 [PR #10 合入提交](https://github.com/GuqierMcl/MailX/tree/0430c416f5af89a22a4e1ac6438ceb689326ade2/tests/body-webview) 回溯。macOS 当时使用受限测试驱动，Windows / Linux 使用外部 WebDriver；这些证据针对真实引擎中的合成页面，不等于三平台都完成真实邮箱人工阅读。测试桥当时由该 feature 隔离，正式前端构建另检查不包含开发预览模块。
-
-2026-10-20 正文 UI 与兼容修复的检查：
-
-- 本地 `bun run check` 通过，包括版本、生成类型、TypeScript、ESLint、18 个前端测试文件 / 107 项测试、Vite 构建和 Rust check。IMAP 正文定向 27 项、desktop 启动定向 6 项及 Rust 格式检查通过；debug / release `.app` 构建成功。Vite 仍有既有的超过 500 KiB chunk 提示。
-- [PR #10 运行 39389782260](https://github.com/GuqierMcl/MailX/actions/runs/39389782260) 的 head 为 `b5b766dcc1bf587fd88c4fb678c55e83cce321f9`，前端、三平台 Rust 与三平台正文 WebView 全部 7 个任务成功。此前 Windows 启动测试在约 0.5 秒后仍为 Initializing；修复等待预算后通过，未放宽产品启动准入。
-- 三平台 CI 的通过结论限定上述提交；后续提交以对应 PR 检查为准，不把旧绿灯写成当前任意版本的保证。
-
-同日在 macOS 27.0.1（26A434）arm64 的正式 release `.app` 上，只读使用已获授权的 QQ 和 2925 账号验收。诊断仅观察原因码、阶段和 MIME 类型 / 字符集，不保存账号标识、主题、正文、附件名、私人链接或凭证：
-
-- QQ 正文下载起初遇到协议错误。脱敏阶段诊断确认长 FETCH tag 的完成回显被截短；正文改用独立短连接内唯一的短 tag 后，实际邮件可下载并显示，精确完成校验仍保留。临时诊断代码已移除。
-- 共检查 47 封缓存正文；HTML 部分中 37 个标注 UTF-8、4 个 US-ASCII、4 个 GB2312。GB2312 的中文 HTML 与纯文本显示正常；它属于 GBK 兼容范围，但尚未找到明确标注 GBK 的 HTML 实样，不能将其写成已完成原定 GBK 实样验收。
-- 一封 QQ multipart/related 样本含 3 个 CID 栅格图片部分，已观察到内嵌图片显示和 iframe 内部滚动；另一封 HTML 显示“已阻止 8 张远程图片”。HTML / 纯文本切换可用。非内联附件元数据有自动回归覆盖，现场样本主要验证内联资源。
-- 2925 一封正文缓存就绪的邮件仍为未读；在网页版未读列表建立基线、在 MailX 重开正文后刷新网页版，该邮件仍在未读列表，未读计数保持 1。未通过网页版打开它或主动修改其标记。
-- macOS 编号链接显示完整确认地址，取消后可再次请求；确认一个不含个人参数的公开页面后，系统 Edge 打开相同地址，MailX iframe 保留正文。自动回归另覆盖取消零打开和重复确认只打开一次。
-- 用户指出旧失败邮件后，经 UI 手动重试，原有 4 条 protocol 和 1 条 network 失败均恢复为 ready；本次观察结束时没有 failed 正文。客户端按规格不会自动重试持久化的 failed 状态，因此修复兼容问题或网络恢复后，旧错误仍需点击“重试”。
-- 正常退出重开能读缓存。进程级禁止网络的探针返回 EPERM，但受限应用窗口无法由桌面自动化绑定，未取得该条件下的阅读证据；用户选择将真实断网重开保留待验，未关闭系统 Wi-Fi。
-
-尚未完成：明确标注 GBK 的 QQ / 163 HTML 实样与真实断网重开验收，以及完整服务商 / 路由矩阵。恶意邮件、大小边界和跨平台隔离使用合成样本，未向真实邮箱发送恶意测试邮件。本轮没有新发信、服务器标记写回或删除操作；上述待验项不记为通过。用户确认将 GBK 实样与真实断网重开保留为后续补证，功能与安全要求不变。
-
-2026-10-20 收尾验收按该边界接受 A1–A10：A1–A9 已完成独立核查；A10 的历史提交证据补齐后，按用户要求由主代理直接核验，未再启动独立代理。最终 Runtime 的仓库检查、Rust 格式、Clippy、workspace 测试、差异检查和历史快照补查全部通过；当前实现为 107 项前端测试、249 项 Rust 测试通过，1 项真实凭据库测试按默认配置忽略。历史存储与下载提交的定向补查各实际通过 13 项测试；此前补查脚本错误及零测试记录不计通过。当前实现 `3f9c803` 的 [CI 运行 39391499094](https://github.com/GuqierMcl/MailX/actions/runs/39391499094) 全部 7 项通过，含三平台真实 WebView 的合成样本检查。收尾保留分支和 PR，不合并；本结论不表示完整服务商矩阵或延期实测已通过。
+- 固定窗口起点、首次与增量同步、目录刷新后的恢复、计数与统一收件箱聚合一致、缓存中没有重复的 `(folder_id, uid_validity, uid)`；重开应用可读缓存，另做一次断网重开。
+- 中文与 GBK / GB2312 主题、发件人显示；只读同步不改变服务器已读状态；网页端已读、删除、星标与本地记录的对应关系，差异按服务商解释而不是记作缺陷。
+- 正文下载失败时脱敏诊断只观察原因码、阶段与 MIME 类型 / 字符集，不保存账号、主题、正文、附件名、私人链接或凭证；修复后按 UI 重试恢复。
+- HTML 与纯文本显示、CID 图片、远程图片阻止计数与加载、编号外链显示完整地址且取消零打开；恶意邮件、大小边界与跨平台隔离只用合成样本，不向真实邮箱发送恶意测试邮件。
 
 ### 平台证据边界
 
-2026-10-14 的初始化验证在 Windows x86_64 MSVC、Rust 1.94.0、Bun 1.3.12 上完成：版本同步、前端类型检查、ESLint、Vite 构建、Rust check / 格式 / Clippy / 测试目标和 `bun run tauri dev` 启动通过。该记录只证明当时的工程骨架，不能证明后来新增的账号、系统凭据库或恢复能力。
-
-当前账号能力需分别记录 macOS、Windows 和 Linux 的构建、窗口、IPC 与系统凭据实际存取结果。某平台的适配代码存在、Rust 测试通过或另一个平台成功，均不能代替该平台的运行验证；真实收发和 OAuth 仍未验证。
-
-2026-10-16 在 macOS 26.2 arm64 上完成账号配置开发期冒烟：
-
-- `cargo test -p mailx-desktop --locked native_secret_store_roundtrip -- --ignored` 通过，合成钥匙串条目完成写入、读取、删除和重复删除。
-- 使用独立应用 identifier 的 debug `.app` 实测打包后的页面与四个账号 IPC。创建共享密码账号后，修改为独立 IMAP/SMTP 密码并添加带认证的 SOCKS5 配置；保存后退出并重启，列表和详情恢复，账号 ID 与邮箱来源保持不变，revision 从 1 增至 2。
-- 数据位于该测试 identifier 对应的 `app_data_dir`；SQLite、WAL 与更新记录没有合成密码明文。重启后的系统凭据状态正常，表单只显示保留/替换选项，不回填密码，页面始终说明连接尚未验证。
-- 前端组件检查和普通浏览器预览使用显式测试替身或无宿主状态；这类证据与真实桌面冒烟分别记录。Windows/Linux 的新增账号功能尚未完成平台实测。
-
 隔离冒烟可设置 `MAILX_DATA_DIR`（绝对路径）改用独立的数据目录与凭据 service，也可通过 `bun run tauri build --debug --bundles app --config <测试配置文件>` 覆盖 identifier。根脚本先加载仓库配置，再应用显式覆盖；不要将测试配置和合成账号写入正式用户数据目录。测试完成后清理合成凭据与对应测试目录。
 
-按变更范围运行检查：核心改动跑相关测试，跨宿主契约改动增加两个 adapter 验证，发布前再执行完整平台矩阵。结果以命令输出和可复现实验为准，未执行项明确标注。
+按变更范围运行检查：核心改动跑相关测试，跨宿主契约改动增加两个 adapter 验证，发布前再执行完整平台矩阵。结果以命令输出和可复现实验为准。
 
-### 2026-10-20 图片策略与正文链接改造
+## 6. 本地化与界面手册
 
-本次直接改造未开启 Comet。新增安全性页与 ask / automatic / never 策略，旧配置默认 ask；单行提示的本次授权、关闭、不再提示保存及失败恢复已有前端回归。设置按节原子合并。图片经账号路由、地址校验、有限 HTTP 响应和真实栅格解码后仅在本次阅读的内存中复用，不写入数据库或 blob（schema 保持 v4）；测试覆盖无凭证请求、重定向、私网拒绝、响应大小、缓存身份隔离及授权撤销。GIF / WebP 当前提供静态首帧；CSS URL / srcset / SVG 未开放，代理远端 DNS 无法验证目标 IP 的域名图片保持拒绝。
+<a id="2026-10-25-中英文文本适配"></a>
 
-- 移除远程图片持久化后，`bun run check` 通过，包含 113 项前端测试；覆盖关闭、切换邮件 / 纯文本、隐藏、重新加载、策略改变以及 prepare 迟到结果的释放。
-- `cargo test --workspace --locked`：core 207、账号集成 25、desktop 28 项通过，共 260；1 项真实凭据库测试默认忽略。内存缓存用例覆盖同次复用、重新打开隔离、邮件失效、释放后迟到写入拒绝、无新增图片表与缓存读取不写 SQLite；协议用例覆盖旧令牌撤销、待处理链接清理和不影响新阅读。Rust 格式、Clippy 与差异检查通过。
-- 内存缓存调整前，macOS arm64 实际 WKWebView 合成检查 68/68；本次缓存生命周期调整未重跑 WebView。该记录通过原生鼠标事件点击正文链接；没有编号列表、没有额外 iframe 导航或文档请求，正文文字和 CID 图片保留，脚本 / IPC 隔离及零非授权外部请求保持。使用独立合成数据目录，不连接真实邮箱。首次截图分析超过旧 30 秒上限，单独运行成功后调整为 60 秒并补诊断，再完整通过；失败记录未记为通过。
-- 本机证据位于 `target/body-webview-evidence/image-policy-retry/`，报告记录未提交源码差异与二进制摘要。Windows / Linux 本次未运行，不能沿用上方旧版本三平台结果；远程图片真实服务商页面与代理兼容矩阵也未实测。
-- 当时将 Body WebView 三平台任务移至 `workflow_dispatch` 手动工作流；自动 frontend / Rust 作业与原触发条件逐项比较保持一致。该专用工作流现已移除，当前验证方式见[正文原生验证](#body-native-validation)。
+### 中英文文本适配
 
+范围与边界见[中英文文本适配](../architecture/internationalization.md)。资源门禁（`bun run i18n:check`）检查逻辑消息、复数分支、插值参数及 Rust 共享子集，已加入根 `check` 与 CI。日期 / 时间、数字、文件大小、列表连接与文件夹排序仍沿用现状，“昨天”等独立文案可以翻译。
 
-### 2026-10-20 远程图片 Fake-IP 与 SVG 兼容修复
+需要在对应环境手动确认：
 
-用户反馈点击加载后图片仍为破图。只读排查确认本机 DNS 将多个图片域名映射至 198.18.0.0/15，旧地址校验将其全部拒绝。新加载器仅对 HTTPS 域名的 Fake-IP DNS 结果开放传输映射，仍在请求前校验原始域名 TLS 证书；地址字面量、明文 HTTP、常规私网 / 元数据地址与混合不安全 DNS 结果继续拒绝，自定义账号代理的策略不变。
+- 浏览器 mock 的主窗口与写信窗口：英文长文本、窄窗口与缩放、命令面板、Tooltip、富文本工具栏与读屏名称；切换语言后日期、数字和排序不变。
+- Windows / macOS / Linux 打包版本分别验证：main 与多个已打开写信窗口同步切换、关闭重开与重启恢复、系统语言映射、核心启动失败时的语言、默认窗口标题与权限边界。
+- 写信中切换语言：保留未保存输入、编辑器内容与选区，不改变草稿 revision、dirty、发送确认步骤和撤销发送剩余时间；新建回复 / 转发使用新语言，已有引用头保持原样。
+- 原生通知按当前语言生成测试通知与合成新邮件 / 发送结果；关闭预览后不出现主题和发件人；已有通知不因切换被重发。实际显示、声音、点击见第 9 节。
 
-同封 SQLark 邮件顶部 Logo 为 image/svg+xml，另受旧格式白名单影响。远程 SVG 现经受限 resvg 转为 PNG，仅保留矢量图形；所有图片 / 文件资源解析器关闭，不启用字体、嵌套图片或 SVGZ。单独限制输入、XML 节点 / 深度及输出像素，拒绝 DTD 和滤镜。渲染结果沿用阅读期内存缓存，不增加迁移或落盘。
-
-验证：7 项图片加载器定向测试及全套 Rust 测试通过（core 210、账号集成 25、desktop 28，共 263；1 项真实凭据库测试忽略），Clippy、Rust 格式与差异检查通过。前端生产构建和 macOS release 构建 / app 打包成功。用最新 app 在授权 QQ 测试账号中打开用户截图对应的 SQLark 邮件，现场确认顶部 SVG Logo 与 JPEG 主图均恢复显示；未发送、删除或写回邮件标记。该现场结果只覆盖本机 Fake-IP 网络和本封样本，Windows / Linux 未重跑。
-
-### 2026-10-20 正文阅读控件简化
-
-移除 HTML / 纯文本格式切换与“重新加载正文”按钮；存在 HTML 时自动显示隔离正文，否则显示纯文本。下载失败的“重试”入口保留。现有测试改为通过切换邮件和文档意外重载验证令牌失效与阅读缓存释放，并覆盖自动格式选择、提示与附件元数据保留；不再依赖已移除的控件。
-
-`bun run typecheck`、`bun run lint`、`bun run frontend:test`（18 个文件、113 项测试）、`bun run build` 与差异检查通过。Vite 仍有既有的大 chunk 提示。本次仅调整前端展示，未重跑 Rust 或原生 WebView 验证，未重新打包桌面应用。
-
-### 2026-10-23 SMTP 路由探针
-
-本次未开启 Comet。`core/src/net/smtp_probe.rs` 只在测试中编译，`lettre` 与 `rcgen` 只是 core 的开发依赖，`cargo tree -e normal` 中不出现。用本地假 SMTP 服务和假 SOCKS5 / HTTP CONNECT 代理验证：三种路由都能经 `lettre` 完成 MAIL / RCPT / DATA，代理收到未解析的域名；代理不可达时返回 `NetError::Proxy` 且直连端口 300ms 内没有收到连接；STARTTLS（587）和隐式 TLS（465）在 SOCKS5 路由上完成，证书为测试时生成的自签名证书。
-
-`cargo test -p mailx-core --lib smtp_probe` 6 项通过，`cargo clippy -p mailx-core --all-targets -- -D warnings` 无警告。没有运行完整的 `bun run check` 与 `cargo test --workspace`；没有连接真实服务商，也没有经真实代理发信；生产路径的平台证书验证、AUTH、RCPT 部分拒绝与正文后断线尚未覆盖，留给[写信与发送设计](../architecture/sending.md#12-实施步骤)第 2 步。
-
-### 2026-10-23 发信第 2 步：MIME 与 SMTP 会话
-
-本次未开启 Comet。新增 `core/src/smtp/`（MIME 构造、手写 SMTP 会话、登录计划）并删除 `smtp_probe.rs`，代理与 TLS 假件移到 `core/src/net/test_support.rs`；`lettre` 成为普通依赖（仅 `builder`）。全部使用 127.0.0.1 上的进程内假 SMTP 服务器、假 SOCKS5 / HTTP CONNECT 代理和 rcgen 生成的测试 CA；未连接任何真实服务商或代理。
-
-覆盖：三种路由与未解析主机名、死代理不回退直连、STARTTLS 换流（EHLO 重发、AUTH 在 TLS 之后）、隐式 TLS、错误主机证书（永久失败且服务器没见到 AUTH / MAIL）、缺 STARTTLS、STARTTLS 之后的明文注入、AUTH PLAIN / LOGIN、535 与密码不出现在 Debug / Display、无 AUTH、SIZE 超限与声明、三个 RCPT 一个或两个被拒（RSET、无 DATA、全部列出）、各阶段 4xx / 5xx、各阶段停顿超时、`DataStarted` 钩子先于首个正文字节且恰好调用一次、钩子失败不发正文、最终 250 / 550 / 452、正文后断线与超时与无法解析的回复为 `Unknown`、点填充与换行规范化、MIME 头集合与中文往返解析（`mail-parser`）、Bcc 只入信封、信封去重、回复串联头、头部注入拒绝、登录计划的受信端点检查。
-
-命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 348 项（含新增 43 项 smtp）、账号集成 31 项、desktop 43 项（1 项忽略）全部通过，连续 3 次单独运行 `smtp` 测试均 43 项通过；`cargo tree -p mailx-core -e normal | rg -i 'lettre|native-tls|openssl|aws-lc|rcgen'` 只出现 `lettre`；`git diff --check` 通过。未改 DTO，未运行 `types:check`、`bun run check`。
-
-未验证：生产路径的平台证书验证（测试用注入的测试 CA）、真实服务商兼容性、经真实代理发信、代理认证失败的永久失败区分（`net` 暂无结构化原因）。
-
-### 2026-10-23 发信第 3 步：发送队列
-
-本次未开启 Comet。新增迁移 v8（`outbox`）、`core/src/send/`（worker、调度、清单时钟）、`core/src/storage/outbox.rs`、`core/src/accounts/outbox.rs`，以及 `MailxCore` 的 `queue_send` / `list_outbox` / `get_outbox` / `cancel_outbox` / `retry_outbox_now` / `resolve_unknown`、`CoreEvent::Outbox` / `DraftChanged`、错误码 `draftLocked` / `forbidden` / `alreadySending`。全部用 127.0.0.1 上的进程内假 SMTP 服务器和手动推进的测试时钟（没有使用 tokio 暂停时钟，因为它会连带加速假服务器的套接字超时）；未连接任何真实服务商或代理。
-
-覆盖（`send::tests` 15 项、`accounts::outbox` 8 项、迁移 2 项）：入队幂等与 `idempotencyConflict`、版本冲突、无收件人、非 Composer 调用方被拒；撤销窗口内零连接、撤销后永不发送且草稿可编辑；开始发送后 `alreadySending`；取走与撤销在存储层互斥；瞬时失败的退避间隔 30s / 60s / 120s / 300s / 600s / 1800s / 1800s 及“刚好差 1 秒不重试”、之后服务器恢复即接受；24 小时耗尽 `retryExhausted`；永久失败、认证被拒、RCPT 全部被拒、正文后 5xx 各自记录原因与回复码且不重试；正文后断线为 `unknown`、推进很长时间也只有一次 DATA；两种重启恢复分支（计数不增 / 转 `unknown`）及恢复后 `queued` 项继续发送；账号地址变更使未发送项 `accountChanged`、只改连接则不失败；账号删除级联；接受后删除草稿并保留 MIME / `accepted_at` / 回复；`MarkSent`、`Resend`（Message-ID 与字节一致、重放不产生第三次尝试）；失败项编辑后重新入队得到新的 Message-ID；一个账号的服务器卡在问候语时另一账号照常发送；每次状态变化的事件序列。
-
-命令与结果：`cargo fmt --all -- --check` 通过；`bun run rust:clippy` 无警告；`bun run rust:test` core 单元 372 项、账号集成 31 项、desktop 43 项（1 项忽略）全部通过；`cargo test -p mailx-core --lib outbox` 与 `... send::` 各连续运行 3 次，均为 9 项与 15 项通过；`bun run types:generate` 后 `bun run types:check` 通过；`bun run typecheck` 通过；`bun run frontend:test` 32 个文件 267 项通过（其中一次运行退出码为 1，随后重复两次均通过，未能复现，原因未查明）；`git diff --check` 通过。
-
-未验证：真实服务商与真实代理上的发送、进程在 `DATA` 中途被强杀的真实恢复（用写行模拟 `sending` 状态代替）、系统时钟跳变、桌面事件转发（第 4 步）。
-
-### 2026-10-23 发信第 4a 步：写信窗口宿主与客户端层
-
-未开启 Comet。新增 `desktop/src/window_access.rs`（窗口类别解析、按命令白名单、草稿归属）、`desktop/src/compose.rs`（草稿与发件箱命令、`composer_open` / `composer_close`、事件转发、关闭与退出生命周期）、`desktop/capabilities/composer.json`；`notifications` 增加发送结果通知；核心新增 `Caller::MainWindow`，`resolve_unknown` 对其放行；前端新增 `lib/composer-window.ts`，`MailxClient` 与桌面 / 模拟客户端补全草稿、发件箱、窗口命令与四个事件订阅。未连接任何邮件服务器、代理，未发送任何邮件；模拟客户端的发送只是计时器状态机。
-
-自动测试覆盖：窗口标签解析（拒绝 `composer-x`、大写 UUID、无连字符、花括号、多余后缀）；全部命令的 main / composer 白名单表；两类窗口的页面来源检查一致；composer 只能碰自己的草稿（大小写、空串、缺失均拒绝）；main 的 `outbox_queue_send` 被拒、`outbox_resolve_unknown` 放行；核心 `queue_send` 对 `MainWindow` / `Mcp` / `Model` 为 `forbidden`，`resolve_unknown` 对 `MainWindow` 放行、对 `Mcp` / `Model` 拒绝；事件目标标签；层叠位置的夹取与循环；关闭请求的代次记录；发送结果通知的计划（只通知终态、遵循启用 / 前台 / 预览设置、预览关闭时不含主题、`accepted` 静音）；前端命令参数转发、主体不可由页面指定、composer URL 检测、模拟客户端的草稿修订、排队 → 发送中 → 已接受、撤销与 `alreadySending`。
-
-未验证：真实窗口的创建、聚焦、层叠位置、关闭拦截与 3 秒回退、Cmd+Q / 主窗口关闭等待写信窗口、三平台标题栏、系统通知点击，见下节新增清单（尚未执行）。Tauri capability 对 `composer-*` 的实际匹配也未在运行中的应用里确认。
-
-### 2026-10-24 写信窗口体验修正
-
-核心：草稿的创建、保存、删除都发出 `DraftChanged`（新增 `created` / `updated`）；空白草稿不进草稿列表，启动时清理无活动发送项的空白草稿。宿主：`composer_open` 增加可选 `fresh`，写入页面 URL。前端：关闭提示（空白删除、未改动的已有草稿直接关、否则“要保存这封草稿吗？”）、底栏保存状态在左 / 按钮在右、草稿预览与阅读工具栏改用带提示的图标按钮、所选草稿被删除时清除选择。未连接邮件服务器，未发送邮件。
-
-自动测试覆盖：核心各草稿操作的事件、空白过滤、启动清理；`composer_open` 参数与 URL 的 `fresh`；关闭提示各分支（空白、未改动、取消、保存草稿、新草稿 / 已有草稿的不保存、保存失败）、底栏顺序、草稿预览图标按钮及提示、阅读工具栏提示（含禁用项）、选择清除。
-
-未验证：真实 Tauri 窗口里的关闭提示（红绿灯 / Cmd+W / 退出应用）与三平台底栏观感。
-
-### 2026-10-24 富文本写信（Tiptap）
-
-按[写信与发送设计](../architecture/sending.md#14-富文本写信已实现)接入 Tiptap 开源扩展、自有格式工具栏与链接浮层，编辑器按需加载；核心统一净化 HTML、派生纯文本，新增 v9 草稿迁移，并以 `multipart/alternative` 生成新入队邮件。未连接真实服务商或代理，未发送真实邮件；SMTP 测试使用本地假服务器。
-
-自动测试覆盖：格式与链接白名单、HTML / 纯文本粘贴、Markdown 列表与引用输入、段落与软换行、空段落、连续空格与 Tab、撤销重做、只读切换、IME 与两步发送快捷键、StrictMode / Suspense 挂载、核心规范化回写保留选区和撤销历史、冲突重载清空撤销历史与链接浮层、自动保存回写不取消发送确认；核心净化、危险 URL 与外部资源剔除、嵌套列表 / 引用的纯文本投影、HTML / 文本长度边界、旧草稿迁移及极端实体转义膨胀后的保存与入队、回复转发降级、HTML 回复引用的输出限额；MIME 两种正文的内容和顺序、出站样式、幂等重试复用冻结字节。旧草稿只有在正文与核心当前内容完全一致时才能复用超限的兼容内容；新正文与实际正文修改仍受正常限额约束。
-
-命令与结果：`bun run check` 通过（生成类型一致、TypeScript、ESLint、前端 44 个文件 / 395 项测试、生产构建、Rust workspace check）；`cargo test -p mailx-core --locked` 通过（412 项单元测试、31 项集成测试）；`cargo test -p mailx-desktop --locked` 通过（60 项通过，1 项需要解锁系统凭证库而忽略）；core 与 desktop 的 `cargo clippy --all-targets --locked -- -D warnings`、`bun run rust:fmt`、`git diff --check` 通过。编辑器独立 JS chunk 约 415.49 kB（gzip 131.26 kB），CSS 约 2.03 kB；主应用仍有 Vite 的 500 kB chunk 大小提示，构建成功。
-
-浏览器模拟客户端目测：760×680 的浅色 / 深色写信窗口、520×420 深色窄窗口；工具栏折叠到“更多格式”、正文滚动、底栏、链接浮层、插入安全链接、含粗体 / 空段 / 列表 / 引用的粘贴与自动保存正常。这些结果仅证明浏览器预览，不能替代真实 Tauri 窗口验证。
-
-尚未验证：macOS / Windows / Linux 原生 WebView 中的中文输入法、系统剪贴板与快捷键、窗口关闭和退出时的富文本保存；真实邮件客户端对空段、嵌套列表、引用、链接及空白样式的呈现；真实服务商的 HTML 邮件投递。发布前按下方窗口清单补测，并分别检查旧草稿首次打开 / 保存重开、富文本编辑后撤销发送再打开、跨应用粘贴与长正文滚动。
-
-### 2026-10-24 富文本第二批：标题、对齐与颜色
-
-按写信设计第 15 节增加 h1–h3、段落 / 标题对齐、8 色文字与 5 色高亮。编辑器用固定 `data-` 属性和本地 CSS；核心独立校验属性名与取值，出站时转为固定内联样式。没有新增依赖、DTO 字段或数据库迁移，桌面 CSP 保持不变。
-
-自动测试覆盖：标题快捷键及关闭 `#` 输入规则；列表 / 引用内的段落对齐且无对齐快捷键；两组色板和已有强调格式叠加；色板键盘导航、当前值、Esc 恢复选区；清除格式移除颜色 / 高亮 / 对齐并保留标题；折叠光标的待输入格式在颜色、标题和对齐操作后保留，清除格式后输入不继承旧样式；只读和冲突重载关闭浮层；粘贴剥离外部颜色、CSS 与伪造颜色属性；核心非法属性与无效包装剔除、纯文本投影、草稿保存重开、MIME 固定颜色 / 字号 / 对齐样式、回复转发保留 h1–h3 并将 h4–h6 降为 h3、丢弃原文颜色与对齐。
-
-验证结果：`bun run check` 通过（生成类型、TypeScript、ESLint、前端 46 个文件 / 414 项测试、生产构建、Rust workspace check）；`cargo test -p mailx-core --locked` 通过（416 项单元测试、31 项集成测试）；core Clippy（all-targets、禁止警告）、`bun run rust:fmt` 与 `git diff --check` 通过。独立编辑器 JS chunk 约 424.77 kB（gzip 133.30 kB），CSS 约 5.80 kB；构建仍有既存主应用 chunk 超过 500 kB 的提示。
-
-浏览器模拟客户端目测：760×680 浅色与深色、520×420 深色；标题居中、文字蓝色、黄色高亮、自动保存、色板和“更多格式”正常，最小尺寸保留段落样式 / 粗体组，颜色与对齐等控件可从更多菜单访问。未连接真实服务商、未发送真实邮件。原生 Tauri 三平台输入法、键盘与剪贴板，及真实邮件客户端对标题 / 对齐 / 颜色 / 高亮的呈现仍待验证。
-
-### 2026-10-25 写信编辑器加载优化
-
-针对 `bun run tauri dev` 中“正在打开编辑器…”停留较久的反馈，将编辑器动态导入提前到识别写信入口时，与草稿读取并行；同一 WebView 共享导入请求和已加载组件，加载完成后直接渲染，加载失败可单独重试且保留草稿修改。Vite 开发服务器启动时预热编辑器源码转换。主窗口仍不加载编辑器引擎，生产构建仍保留独立编辑器 chunk。
-
-新增测试覆盖：StrictMode 下草稿请求未完成时即启动编辑器加载；仅导入 loader 不加载引擎、并发预加载复用请求、缓存命中不显示加载提示；加载失败重试不重新读取草稿、不丢失主题修改。`bun run check` 通过（生成类型一致、TypeScript、ESLint、前端 47 个文件 / 417 项测试、生产构建、Rust workspace check）；`git diff --check` 通过。编辑器 JS chunk 仍约 424.77 kB（gzip 133.30 kB），主应用既存的大 chunk 提示仍在。
-
-浏览器开发预览对比：使用两个隔离的 Vite 服务与独立临时依赖缓存，旧版恢复本次修改前的 lazy / Suspense 加载路径并禁用 warmup，新版使用当前实现；其余编辑器代码相同，均用模拟客户端。通过临时 HTML 中的 MutationObserver 记录加载提示和可编辑正文首次出现，每种条件各测一次：
-
-| 条件 | 旧版提示停留 | 新版提示停留 | 旧版页面导航至正文就绪 | 新版页面导航至正文就绪 |
-| --- | --- | --- | --- | --- |
-| 各自服务的首次页面访问 | 321.9 ms | 88.1 ms | 1448.7 ms | 791.3 ms |
-| 已访问后另开一个页面 | 322.7 ms | 81.0 ms | 619.6 ms | 419.4 ms |
-
-上表是 DOM 首现时间的单次观察，不是绘制耗时或稳定性能基准；新版首次访问前已允许服务器完成 warmup，其启动成本不包含在页面导航计时里。结果表明并行加载和开发预热减少了可见等待，但没有复现用户所述的数秒提示。尚未测量真实 Tauri WebView、原生草稿 IPC 和打包版本，不能据此承诺这些环境的耗时。测量代码与缓存只存在于临时目录，未进入产品代码；未发送邮件。
-
-### 2026-10-25 官方 Markdown 扩展试用
-
-使用 `@tiptap/markdown ^3.32.0` 负责 Markdown 解析和序列化，输入自动格式使用现有 Tiptap 扩展。项目不直接依赖 `marked`，不维护自有 lexer / token 转换器。官方扩展不自带粘贴插件，因此只增加剪贴板接入：调用官方解析器，将结果经过现有 HTML 粘贴过滤后放入编辑器；解析后没有可插入内容时回退到原文。`MailLink.parseMarkdown` 复用现有协议白名单。HTML 草稿的初始加载、回写和发送不变。
-
-测试覆盖：官方 `contentType: 'markdown'` 命令及 `getMarkdown()`、HTML 草稿原文不被重新解释；中文输入规则、退格恢复原文和撤销；整段 Markdown 替换选区并一次撤销、嵌套列表 / 引用、转义强调不被二次转换；非法链接不进入编辑器节点、HTML 粘贴优先、原始 HTML 的最终输出剥离外部颜色 / 图片 / 脚本；Shift 纯文本粘贴和 Tiptap 原生 URL-on-selection 行为；只有行内代码或代码块时，解析为空不删除选区。
-
-验证结果：`bun run check` 通过（生成类型一致、TypeScript、ESLint、前端 48 个文件 / 441 项测试、生产构建、Rust workspace check）；`git diff --check` 通过。编辑器独立 JS chunk 约 487 kB（gzip 152 kB），主应用初始 chunk 仍约 867 kB；编辑器按需加载和 Vite 预热保留，既存主应用大 chunk 提示仍在。
-
-浏览器模拟客户端验证：逐字输入标题和整段粘贴中的强调、删除线、嵌套列表、引用、链接均正常，自动保存正常，无控制台错误或警告。段落和空行采用官方 Markdown 语义。真实 Tauri 的中文输入法、系统剪贴板和原生 `Cmd/Ctrl+Shift+V` 仍待手动复测，未发送邮件。
-
-试用边界：当前 schema 未加入代码 / 表格 / 图片扩展，官方解析器可能忽略混合内容中的代码和表格，图片降为替代文字；没有复刻自有的原文降级逻辑。需要原样保留时使用纯文本粘贴。Markdown 内的原始 HTML 先由官方解析器读取，随后检查最终输出；此检查不证明解析期间没有资源请求，原生桌面仍受现有 CSP 约束。
-
-### 2026-10-25 网易企业邮箱 STATUS 目录名兼容
-
-对 Windows 本机已配置的 `imaphz.qiye.163.com` 账号进行只读协议诊断，使用既有账号路由、端点信任校验和系统 SecretStore；配置取自 SQLite 一致性临时快照，诊断输出不包含账号、凭证或邮件内容，临时程序与测试依赖已移除。
-
-- 该账号 LIST 返回 6 个可选目录，收件箱 STATUS 名称匹配；其余 5 个目录的 STATUS 虽以 tagged OK 完成并带有计数，却把原本的中文目录名返回成 `???`、`????`，无法与 LIST 的修改版 UTF-7 名称匹配。6 个目录均能用原始名称完成只读 EXAMINE。这是本次账号组合的现场证据，不外推到全部网易邮箱或租户。
-- `core/src/imap/mod.rs` 增加兼容路径：只在 STATUS 完整成功但数据不可用时，用 EXAMINE 的 EXISTS / UIDVALIDITY / UIDNEXT 与完整 `UID SEARCH UNSEEN` 结果重新取得计数；同步复用已打开的目录。无法匹配的 STATUS 行不会被当作目标目录的数据；缺失 EXISTS、UIDVALIDITY 或完整搜索结果仍失败，不把缺失信息视为空目录。NO/BAD、超时、断线与不完整响应维持原有失败语义。
-- 修复后真实协议复测：6 个目录的计数与固定窗口 UID 搜索全部成功，其中 5 个走兼容路径。本机运行中的开发版自动重载后，只读核对本地数据：6 个目录计数已知，6 个目录均已完成当前同步窗口（`backfill_done=1`）。这证明该账号的后台同步恢复；未人工逐项检查窗口中的显示，也未验证该服务商的完整收发能力。
-- 自动回归覆盖多个目录返回相同问号名称仍各自隔离、全目录未读计数与空目录、无数据或计数缺失的 STATUS、拒绝和中断不降级、EXAMINE / SEARCH 完整性、缓存与旧计数保护，以及兼容路径复用 EXAMINE 并保留未变化目录的快速跳过。
-
-已执行并通过：`cargo test -p mailx-core --locked`（421 项单元测试 + 31 项集成测试）、`cargo clippy -p mailx-core --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`。
-
-### 2026-10-25 Windows 远程图片：双栈 Fake-IP 与 CDN 类型标错
-
-以下为第一轮定位与修复记录；随后对 DNS 候选筛选和实际图片格式识别的扩展见下一节。
-
-- 用户已点击加载图片并保存自动加载。只读检查确认本机设置为 `automatic`、目标账号使用直连路由；已缓存样本是远程图片，无 CID 部分。真实 WebView2 控制台显示 `/remote/…` 返回 404。
-- 本机 DNS 同时返回 IPv4 `198.18.0.0/15` 与 IPv6 `2001:2::/48` Fake-IP 映射，旧校验只兼容 IPv4，因 IPv6 不被接受而拒绝整个答案。修复将 IPv6 基准测试网段纳入现有的 HTTPS 域名映射例外，仍要求原始域名 TLS 校验，IP 字面量、明文 HTTP、其他私网和混合不安全答案继续拒绝。IPv6 网段的用途见 [IANA 注册表](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)，Fake-IP 配置实例见 [sing-box 文档](https://sing-box.sagernet.org/configuration/dns/fakeip/)。
-- 地址修复后，GitHub 图片通过；网易 CDN 的另一张图片返回 HTTP 200、`image/jpeg;charset=UTF-8`，但实际 10,101 字节为 PNG，原解码器因声明不匹配拒绝。远程栅格图片现在要求受支持的图片响应类型，再按真实文件格式完整解码校验，向协议返回正确 MIME；未知响应类型、HTML / SVG 伪装、截断文件与原有预算限制仍拒绝。CID / data 图片的声明类型要求不变。
-- 用生产下载路径重新请求两种图片均成功，返回 PNG（网易 10,101 字节、GitHub 1,707 字节）。在自动重编译后的 Windows 原生开发窗口中分别打开邮件，现场确认网易顶部品牌图片和 GitHub Logo 恢复显示。该证据覆盖本机网络与这两个来源，不代表其他平台或全部邮件格式已验证。
-- 回归覆盖 IPv4 / IPv6 单独和双栈两种顺序、IPv6 前缀边界、不安全混合 DNS 与字面量 / HTTP 拒绝，以及 JPEG / PNG 响应头互相标错、带 charset 的类型、损坏和非栅格内容拒绝。`cargo test --workspace --locked` 通过：core 422、账号集成 31、desktop 59，共 512 项；1 项真实凭据库测试按默认忽略。工作区 Clippy（`-D warnings`）、Rust 格式和差异检查通过。临时本机诊断测试与日志已移除，未将账号、正文或图片地址写入测试夹具。
-
-### 2026-10-25 远程图片 A/B：兼容、代理路径与失败重试
-
-实现与契约见[远程图片调研与优化](../architecture/remote-image-loading.md)、[网络与安全](../architecture/network-security.md)和[应用 API](../contracts/app-api.md)。正文保留单一“不再提示”，没有增加发件人或域名许可列表。
-
-- 图片按实际字节识别，响应类型缺失、通用类型或误标不再单独阻止有效图片。支持 PNG/APNG、JPEG、GIF、WebP、ICO、BMP、TIFF、PNM、QOI、DDS/DXT、Radiance HDR、Farbfeld、TGA v2 与受限 SVG；除验证后的 JPEG 外统一输出静态 PNG。测试覆盖各格式、错误 MIME、截断与损坏、输出和解码预算，SVG 不加载外部资源。CID/data 保留独立规则，AVIF/HEIF/JXL/OpenEXR 尚未支持。
-- 直连 DNS 只解析一次，筛选允许的候选后固定实际连接地址，通过成熟连接器处理同族回退与双栈竞争。自定义 SOCKS5/HTTP CONNECT 代理可在账号设置显式开启 HTTPS 图片域名解析；v10 迁移默认关闭，代理端点或认证身份变化须重新开启。受控本地代理测试覆盖目标域名不在本地解析、原域名 TLS 校验、代理失败不直连、重定向检查和取消后的解码配额。
-- 可信阅读区显示固定失败原因并提供手动重试。状态接口绑定当前邮件、文档令牌及显示许可；失败资源可重取，成功图片即使磁盘缓存已清理也复用内存。关闭正文、收紧策略和保存账号连接后撤销旧授权并取消旧阅读请求。正文与头像缓存按账号、来源及连接版本隔离，不复用旧全局键；头像网络失败不再长期缓存为空。
-- `cargo test --workspace --locked --quiet` 通过：core 448、账号集成 31、desktop 61，共 **540 项通过**，1 项真实系统凭据库测试按默认忽略。`bun run frontend:test --maxWorkers=4` 通过：48 个文件、**446 项测试**；初次高并发运行中的编辑器懒加载测试曾超时，降低 worker 数后全量复跑通过。生成 DTO 一致性、TypeScript、ESLint、生产构建、工作区 Clippy（禁止警告）、Rust 格式和差异检查通过。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
-- Windows 原生合成测试已使用本轮重新构建的 `body-webview-test` 二进制执行（该专用 feature 现已移除），WebView2 / EdgeDriver 均为 155.0.4283.62，**48/48 断言通过、canary 外部请求为 0**。覆盖中文正文、CID 图片、原生链接点击、恶意 HTML 与策略探针；使用临时合成 profile 和独立 WebView 数据目录，不访问真实账号或系统凭证。报告位于 `target/body-webview-evidence/remote-image-ab-windows-final/report.json`（本地生成证据，不提交）。验证中修复了新 profile 尚未创建便初始化图片缓存导致首次启动失败的问题，并补回归；测试 feature 的通知命令当时返回 unsupported，以配合其不装配通知模块的隔离方式。
-
-本轮原生 harness 不覆盖远程代理软件矩阵。Mihomo / sing-box 的 SOCKS、CONNECT、TUN、任意自定义 Fake-IP 网段及 macOS/Linux 本轮行为仍待实机验证；此前 Windows 网易/GitHub 两个来源的现场结果不扩展为全部服务商和代理兼容承诺。未发送真实邮件。
-
-### 2026-10-25 中英文文本适配
-
-首版文本适配已落地，范围与边界见[中英文文本适配](../architecture/internationalization.md)。公共 `locales/{zh-CN,en}/` 覆盖 8 个 namespace；日期 / 时间、数字、文件大小、列表连接与文件夹排序继续沿用现状，“昨天”等独立文案可以翻译。
-
-本次已确认 `bun run i18n:check`、`bun run typecheck`、`bun run lint`、生产构建、Rust workspace 测试、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy` 和 `bun run types:check` 通过。最终全量前端以 `bun run --cwd frontend test --maxWorkers 2` 执行，51 个文件、464 个测试通过，耗时 103.65 秒。资源门禁已加入根 `check` 和 CI，检查逻辑消息、复数分支、插值参数及 Rust 共享子集；测试耗时仅为本次执行记录，不是性能基准。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
-
-浏览器 mock 预览已实测语言切换与持久化：已打开的独立写信预览随设置从英文切换为中文，已输入的合成主题和正文保留，切换后实际执行撤销与重做可恢复正文。这证明浏览器预览路径的基本行为，不是实际 Tauri 多窗口、原生系统通知或三平台打包体验的实测。
-
-新增自动回归范围：
-
-- 设置存储：没有文件默认 `system`；合法旧文件缺字段补 `zh-CN`；非法语言字段回到 `system` 并保留其他设置；无效提交和写盘失败不递增 revision；成功保存后重开可恢复偏好；`effectiveLocale` 派生且不持久化。
-- 前端同步：监听注册完成后首次查询，订阅与查询交错时接收最新值，旧响应晚到不覆盖新 revision；保存与事件交错、跨设置节的待保存更改及失败回滚有独立覆盖；重新聚焦补读、监听失败重试及卸载清理。
-- 文本切换：真实资源参与测试；已有错误、模块级操作标签及附件状态能切换，用户输入和文件名保留；写信编辑器、dirty / revision、两步发送和撤销倒计时不因翻译重置。
-- 共享组件：通知区域和关闭按钮有本地化读屏标签；Windows / Linux 标题栏按钮无需宿主状态事件即可切换提示与读屏名称，并保持原按钮 DOM。
-- Rust 输出：中英文通知与英文单复数、隐藏预览、空主题、发送结果和测试通知；回复 / 转发新模板按有效语言生成、既有草稿不重写；变量不二次解析，引用头特殊字符按现有路径转义。
-
-独立审查补充：发现英文回复 / 转发中的图片替代文字仍使用中文占位标签，已将其接入共享 `composeTemplates.imageAlt` 并沿新建引用路径传入有效语言。新增 3 个 Rust 回归测试覆盖中英文、特殊字符转义、alt 中字面模板参数、512 KiB 引用上限，以及回复 / 全部回复 / 转发通过应用服务创建后跨语言重放保持原草稿。修复后 `cargo test --workspace --locked` 通过：core 459、账号集成 31、desktop 62，共 552 项通过；1 项真实系统凭据库测试按默认忽略。资源检查更新为 653 条逻辑消息，生产构建与其中的 TypeScript 检查通过。独立审查还单独执行了设置同步、缓存竞态及发件箱文本的 3 文件 / 11 用例，以及设置、localization、引用头与英文通知隐私的针对性 Rust 测试。
-
-本次文档核对补齐了架构总览的选型与目录、写信设计的当前语言与图片占位规则、界面规范的文案 / 读屏约定，以及开发指南的资源门禁和维护入口；API、桌面数据流、国际化说明、路线图与索引继续同步维护。独立复核未发现仍未处理的确定问题；以下平台体验待办不因此视为通过。
-
-远程 main 整合复查：基线从 `7786366` 快进至 `8a9a880`，纳入发布 / 版本工具和 SMTP Bcc 测试修正，并恢复本地文本适配。根 `check` 与前端 CI 同时保留 `version:test` 和 `i18n:check`，版本保持上游的 `0.1.0-alpha.1`，更新日志的 `[Unreleased]` 增加中英文功能条目。整合后 frozen install、版本一致性与发布准备检查、25 项版本工具测试、653 条资源检查、前端 51 文件 / 464 用例、Rust 552 项通过（另 1 项默认忽略）、生产构建、TypeScript、lint、Rust 格式、Clippy、生成类型与差异检查通过；发布说明本地预览已包含该功能。独立子代理另跑设置同步、缓存、发送按钮和编辑器的 4 文件 / 42 用例，未发现确定代码回归；发现并修正了上游首次预发布指引和版本命令示例的过时表述。发布工作流与各平台安装包验收仍按[发版流程](release.md)单独记录。
-
-剩余手动验收需要在对应环境记录结果，当前尚未把以下项目标为通过：
-
-- 浏览器 mock 的主窗口与写信窗口：英文长文本、窄窗口与缩放、命令面板、Tooltip、富文本工具栏和读屏名称；中英文切换后日期、数字和排序沿用原行为。
-- Windows / macOS / Linux 打包版本分别验证：main 与多个已打开 composer 同步、关闭重开和重启恢复、系统语言映射、核心启动失败时的语言、默认窗口标题及权限边界。
-- 写信中切换：保留未保存输入、编辑器内容与选区，不改变草稿 revision、dirty、发送确认步骤和撤销发送剩余时间；新建回复 / 转发使用新语言，已有引用头保持原样。
-- 原生通知：测试通知与合成新邮件 / 发送结果按当前语言生成；关闭预览后不出现主题和发件人；已有通知不因切换被重发。实际显示、声音、点击与原生系统文案仍按第 8 节逐平台记录。
-
-此轮没有新增三平台打包桌面或真实通知的实测结论；自动测试与浏览器预览不能替代这些证据。
-
-### 2026-10-27 默认登录用户名与服务商列表
-
-- 添加账号和修改连接时，IMAP / SMTP 用户名分别解析空值为本次有效邮箱地址，前后端统一去除 Unicode `White_Space` 与 `U+FEFF` 首尾空白，保存具体用户名。账号回归覆盖默认值、自定义大小写、特殊空白、幂等等价、同一身份保留凭证信任和来源、实际身份变化后的凭证重新确认；未增加数据库迁移或改变认证方式。
-- 服务商列表改为 Logo、名称和短描述的单行布局，支持本地搜索名称、域名、描述与别名、空状态、键盘单选、双击前进，以及往返步骤保留和重开重置状态。回归使用合成服务商覆盖多项过滤与方向键；实际登记仍只有通用 IMAP/SMTP。
-- 独立上下文审查发现并修正了语言变化造成隐藏选择仍可前进，以及 JS / Rust 空白集合差异；补充直接切语言、在连接步骤切语言后返回及特殊空白回归。
-
-本轮执行通过：前端 57 文件、513 项测试；Rust 工作区 593 项通过、3 项依赖真实系统凭据库的测试按默认忽略；TypeScript、ESLint、中英文资源检查（696 条消息）、生成 DTO 一致性、生产构建、Clippy（禁止警告）、Rust 格式与差异检查。生产构建仍有既存主应用 chunk 超过 500 kB 的提示。
-
-浏览器 mock 预览现场检查了中文深浅色列表、搜索空状态、选中状态与用户名动态占位符；这不等同于三平台原生 WebView 或真实服务商认证验证，本轮未连接真实邮箱或发送邮件。
-
-## 6. 窗口行为的手动验证
+## 7. 窗口、托盘与退出
 
 单例与窗口状态依赖真实窗口，Tauri 的 mock 运行时无法证明（它把所有窗口都报告为可见），自动测试只覆盖状态标志的约束和单例回调在窗口缺失时的容错。每个平台发布前手动确认：
 
 - 已运行时再次启动应用（双击图标或命令行）：不出现第二个窗口，也不出现数据目录被占用的错误页；已有窗口回到前台，最小化的窗口被还原。
-- 调整大小、移动、最大化后退出再启动：恢复到退出时的状态；全屏同理。
-- 退出时窗口在已断开的外接显示器上：启动后窗口出现在可见的显示器上，而不是屏幕外。
+- 调整大小、移动、最大化后退出再启动：恢复退出时的状态；全屏同理。
+- 退出时窗口在已断开的外接显示器上：启动后窗口出现在可见的显示器上。
 - macOS 用 Cmd+H 隐藏应用后直接 Cmd+Q：再次启动窗口正常显示（这是不保存可见性的原因）。
 - Windows / Linux：自绘标题栏的最小化、最大化、关闭仍然可用，重启后标题栏样式不变。
 - 删除配置目录里的 `.window-state.json` 后启动：回到 `tauri.conf.json` 的默认大小。
 
-### 2026-10-23 发信第 4b 步：写信、草稿、发件箱与设置界面
+### 写信窗口与主窗口内写信
 
-未开启 Comet。新增 `frontend/src/features/composer/`（`ComposerApp`、`Composer`、两步发送按钮、收件人标签输入、草稿自动保存）与 `features/outbox/`（草稿 / 发件箱列表与详情、发送 toast 与事件订阅）；主窗口导航加“写邮件”、“草稿”、“发件箱”，`Cmd/Ctrl+N`、命令面板“写邮件”、阅读区回复 / 全部回复 / 转发；账号资料与添加账号第 3 步加“发件人名称”；设置加“发信”页；`toast` 支持动作按钮；`previewPlatformFromUrl` 接受 `?platform=`。模拟客户端用收件人决定发送结果（`fail@` 失败、`unknown@` 未知、`retry@` 首次连接失败后排队重试），仅用于浏览器预览，并有 `?seed=outbox` 预置数据。未改 Rust，没有联系任何邮件服务器，没有发送任何邮件。
+实现见[写信与发送设计](../architecture/sending.md)。macOS、Windows、Linux 各做一遍：
 
-自动测试覆盖（Vitest + Testing Library，假计时器）：两步发送按钮（首次点击校验与确认、防双击 400ms、4 秒退回、编辑 / Esc / 失焦退回、无主题标签、Cmd/Ctrl+Enter 两次、减少动态效果、入队携带保存后的 revision 与新的 mutation id、冲突时退回并重新加载）；收件人标签（Enter / 逗号 / 分号 / 失焦提交、粘贴“Name <a@b>, c@d”拆分、空输入退格删除、无效地址为错误标签并可修改、去重）与地址解析规则；自动保存防抖、串行保存、冲突重载并提示、`draftLocked` 只读、队列事件跟随、保存失败重试；关闭流程（空草稿删除、先写出再关闭、保存失败时的确认与取消、应用退出不询问、被队列锁定的草稿不删除、发送成功立即关闭）；主窗口入口调用的命令（含 `bodyNotCached` 取正文后重试一次且复用同一 mutation id、取正文失败的提示）、草稿 / 发件箱导航的可见性与数量、发件箱各状态的操作与错误详情（被拒收件人、中文原因）、未知状态的重发确认、撤销 toast 取消并重开写信窗口、`alreadySending`、系统通知 `outboxId` 选中；命令面板“写邮件”；发件人名称字段（账号弹窗自动保存、字段级错误、添加账号提交）；设置“发信”页（默认发件账号、撤销发送、失败回滚）；模拟客户端的失败 / 未知 / 重试。
-
-浏览器预览（`bun run --cwd frontend dev`，开发模式模拟客户端）的目测：`/?composer=<uuid>&platform=macos|windows|linux`、深色与浅色、520px 宽度、主窗口草稿与发件箱视图；见本次任务的最终报告。**这不是桌面行为的证据。**
-
-未验证：真实 Tauri 窗口里的写信界面、`composer_open` 后页面是否能调用 composer capability 内的命令、三平台标题栏在写信窗口里的表现、窗口原生标题、IME 输入收件人 / 主题、真实通知点击选中发件箱项，见 §6 新增清单（尚未执行）。转发时原邮件附件数的提示未实现（草稿没有该字段）。
-
-### 写信窗口（发信第 4a 步，尚未执行）
-
-需要先有写信界面（单独任务）才能完整操作；此前可从 `tauri dev` 的开发者工具里用 `invoke` 调 `drafts_create` 与 `composer_open` 辅助检查。macOS、Windows、Linux 各做一遍并记录平台与版本：
-
-- `composer_open` 打开新窗口：标题栏与 main 同样式（macOS 红绿灯位置正确，Windows / Linux 自绘按钮与 `gtk-decoration-layout` 一致）；尺寸约 760×680，不能缩到 520×420 以下；位置在主窗口右下错开，连开多个依次错开、靠近屏幕边缘时仍在显示器内；多显示器与高缩放下位置合理。
-- 对同一草稿再次 `composer_open`：聚焦已有窗口，不出现第二个；窗口最小化时被还原。
-- 写信窗口里 `window_perform` 的最小化 / 最大化 / 双击标题栏遵循系统偏好；`mailx://window-state` 只更新自己的窗口按钮，不影响 main。
-- 点红绿灯 / Alt+F4 / 自绘关闭按钮：收到带 generation 的 `mailx://composer-close-requested`，页面确认保存或明确放弃后关闭；取消允许再次关闭，页面不响应时保留窗口。
-- 关闭 main 默认询问；选择后台只隐藏 main。明确退出（含 Cmd+Q）触发带 generation 的 `mailx://app-closing`，写信窗口保存且发送事务结束后退出；30 秒未完成则取消退出，保留未关闭窗口并提示。重复请求不开始第二轮退出。
-- 写信窗口从开发者工具调用 main 专用命令（如 `emails_list`、`outbox_list`）、他人草稿的 `drafts_get`、`outbox_queue_send`（他人草稿）均被拒；main 调 `outbox_queue_send` 被拒。
-- 写信窗口里的页面导航（修改 `location`）被阻止；窗口不记忆大小位置（退出再开不恢复）。
-- 写信界面（4b，尚未执行；macOS、Windows、Linux 各一遍）：
-  - 从主窗口“写邮件”、`Cmd/Ctrl+N`、回复 / 全部回复 / 转发各开一次：窗口标题栏与主窗口一致，标题随主题变化；浅色、深色下岛、输入行、发送按钮颜色正常；窗口缩到 520×420 时底栏不挤压、收件人标签换行。
-  - 中文输入法在收件人、主题、正文里组字时，Enter 不会误提交标签、不会触发发送；`Cmd/Ctrl+Enter` 在输入法组字期间不发送。
-  - 停止输入约 1 秒后显示“已保存”；关闭窗口（红绿灯 / Alt+F4 / 自绘关闭）后在主窗口“草稿”里能看到内容，空白草稿则不留下；把数据目录设为只读后编辑并关闭，出现“仍要关闭（丢失未保存的修改）”。
-  - 两步发送：第一次点击后按钮变色加宽，快速双击不会直接发送，约 4 秒、切到别的窗口、按 Esc、改字都会退回；撤销发送设为 10 秒时主窗口出现“将在 10 秒后发送”和“撤销”，撤销后写信窗口重新出现并保留内容；只往测试白名单账号发（真实发信需用户另行授权）。
-  - 主窗口：草稿 / 发件箱数量与可见性、失败与未知项的操作、点系统通知选中发件箱项；设置“发信”页的两项在重启后保持。
-- 发送结果通知：把一条用本地假服务器队列的邮件转为 `accepted` / `failed` / `unknown`（真实发信需用户另行授权），主窗口不在前台时出现“已发送” / “发送失败” / “可能已发送，需要确认”，预览关闭时不含主题；点击通知聚焦主窗口。
+- 打开新写信窗口：标题栏与 main 同样式（macOS 红绿灯位置正确，Windows / Linux 自绘按钮与 `gtk-decoration-layout` 一致）；尺寸约 760×680，不能缩到 520×420 以下；位置在主窗口右下错开，连开多个依次错开、靠近屏幕边缘时仍在显示器内；多显示器与高缩放下位置合理。
+- 对同一草稿再次打开：聚焦已有窗口，不出现第二个；最小化时被还原。
+- 窗口内最小化 / 最大化 / 双击标题栏遵循系统偏好；窗口状态事件只更新自己的按钮，不影响 main。
+- 点红绿灯 / Alt+F4 / 自绘关闭按钮：页面确认保存或明确放弃后关闭；取消允许再次关闭，页面不响应时保留窗口。
+- 从写信窗口调用 main 专用命令、他人草稿的读写、他人草稿的入队均被拒；main 调 `outbox_queue_send` 被拒；写信窗口里的页面导航被阻止；窗口不记忆大小位置。
+- 从主窗口“写邮件”、`Cmd/Ctrl+N`、回复 / 全部回复 / 转发、主窗口内写信入口各开一次：标题随主题变化；浅色、深色下岛、输入行、发送按钮颜色正常；缩到 520×420 时底栏不挤压、收件人标签换行。
+- 中文输入法在收件人、主题、正文里组字时，Enter 不会误提交标签、不会触发发送；`Cmd/Ctrl+Enter` 在组字期间不发送。
+- 停止输入约 1 秒后显示“已保存”；关闭窗口后在“草稿”里能看到内容，空白草稿不留；把数据目录设为只读后编辑并关闭，出现“仍要关闭（丢失未保存的修改）”。
+- 两步发送：第一次点击后按钮变色加宽，快速双击不会直接发送，约 4 秒、切到别的窗口、按 Esc、改字都会退回；撤销发送期为 10 秒时主窗口出现倒计时与“撤销”，撤销后写信窗口重新出现并保留内容。只往测试白名单账号发。
+- 附件：点回形针多选添加（含中文文件名）、从 Finder / Explorer 拖入、移除；边输入边增删不丢正文、不出现冲突提示；总和超过 20 MiB 时提示上限；转发带附件的邮件时预填并带标记；带附件发信到测试邮箱，收件端文件名与内容正常。Windows 需单独确认拖放与 WebView2 放置目标。
+- 内嵌图片：从剪贴板粘贴、工具栏插入后图片显示在正文中、不进附件栏；发送后收件端能看到图片，并确认图片是否同时出现在附件列表。WebP 预览转码需单独确认。
+- 补全、收件人标签拖动与右键移动、引用折叠、忘带附件提醒、主窗口内写信的 Shift 反转、离开时保存或删除、弹出到新窗口、发送后关闭和退出前保存：在各输入法与多显示器下检查，并用真实大邮箱观察补全耗时。
+- 主窗口：草稿 / 发件箱数量与可见性、失败与未知项的操作、点系统通知选中发件箱项；设置“发信”页的两项在重启后保持。
+- 发送结果通知：把一条用本地假服务器队列的邮件转为 `accepted` / `failed` / `unknown`，主窗口不在前台时出现对应通知，预览关闭时不含主题；点击通知聚焦主窗口。
 
 ### 浏览器默认行为（仅打包版本）
 
-开发构建保留刷新和检查器，不做这些限制。打包版本中，主界面由前端的 `browser-defaults.ts` 拦截右键菜单（文本输入框保留）和 F5、Ctrl/Cmd+R、打印、保存、查看源码、查找、开发者工具、前进后退等快捷键，只调用 `preventDefault`，复制粘贴、全选、撤销和 Tab 不受影响，应用仍可绑定同样的按键；该部分有自动测试。
+开发构建保留刷新和检查器。打包版本中，前端 `browser-defaults.ts` 拦截主界面右键菜单（文本输入框保留）和 F5、Ctrl/Cmd+R、打印、保存、查看源码、查找、开发者工具、前进后退等快捷键，只调用 `preventDefault`。邮件正文所在的沙箱 iframe **有意不处理**：页面脚本进不去，原生层只能整窗口一刀切，会连带去掉输入框的编辑菜单。macOS、Windows、Linux 的邮件正文里仍可能弹出系统菜单，这是已接受的范围。
 
-**邮件正文所在的沙箱 iframe 有意不处理**：页面脚本进不去，原生层也只能整窗口一刀切，会连带去掉输入框的编辑菜单，而邮件正文里出现浏览器式菜单不影响使用。因此 macOS、Windows、Linux 的邮件正文里右键仍可能弹出系统菜单，这是已接受的范围，不是遗漏。
+Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸板滑动前进后退、双指缩放，以及自动填充和密码保存提示；这部分无自动测试，发布前在 Windows 真机确认：
 
-Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸板滑动前进后退、双指缩放，以及自动填充和密码保存提示（邮件客户端不应提示记住表单数据）；默认右键菜单保持开启，输入框因此保留原生编辑菜单。这部分无自动测试，发布前在 Windows 真机确认：
-
-- 打包版本中，在主界面和文本输入框里右键：主界面空白处、按钮、列表上没有菜单；输入框里有编辑菜单。
+- 打包版本中在主界面和文本输入框里右键：主界面空白处、按钮、列表上没有菜单；输入框里有编辑菜单。
 - 按 F5、Ctrl+R、Ctrl+P、Ctrl+F、F12：没有刷新、打印、查找或开发者工具。
 - 在账号表单的密码框输入后提交：不出现“保存密码”提示，也没有自动填充下拉。
 - 输入框里的复制粘贴、Tab 与 Shift+Tab 照常工作。
 
-## 7. 附件保存的手动验证
+### 关闭行为、后台驻留与登录自启动
+
+<a id="login-autostart"></a>
+<a id="登录自动启动与静默启动2026-11-04"></a>
+
+实现见[桌面生命周期](../architecture/desktop-lifecycle.md)。文件注册测试只使用临时目录，不写实际 LaunchAgents / XDG / 注册表，也不修改真实系统启动项。三平台真机检查：
+
+- 主窗口关闭默认询问，复选框初始未勾选；取消后仍可继续使用并再次询问；记住“后台”后主窗口隐藏、进程存活、再次启动恢复原窗口、`Alt+F4` / `Cmd+W` 不再询问；明确退出（含 `Cmd+Q`）真正结束进程。
+- 托盘：Windows 通知区域溢出区、Explorer 重启、左键恢复、右键各菜单项与多屏恢复；Linux KDE X11 / Wayland、GNOME 有 / 无 AppIndicator、运行中禁用扩展、锁屏期间丢失托盘宿主及解锁恢复、Wayland 请求激活是否被允许；macOS 菜单栏 template 在深浅系统外观下的表现、Dock / Finder 原生重开、全屏 / 多桌面与睡眠恢复。
+- 写信窗口保存失败提示、多窗口取消退出、长时间 SMTP 事务与退出超时、系统关机 / 注销。
+- 登录自启动：新安装与旧配置升级都默认关闭，安装 / 升级 / 普通启动不创建系统启动项；开启后注销再登录正常打开，关闭后不再启动。
+- 静默启动：开启后注销登录，主窗口不闪现；Dock / 托盘、快捷方式与通知可恢复；手动打开和主动更新重启始终显示窗口；关闭自启动后静默开关置灰并保留选择。
+- 在系统设置中禁用或删除启动项后，回到 MailX 开关刷新，应用不擅自重新开启。
+- Windows 安装路径含空格 / 中文、Task Manager 禁用和普通用户无管理员权限；Linux GNOME / KDE、`XDG_CONFIG_HOME`、含特殊字符的 AppImage 路径；macOS 当前 GUI domain 的禁用、系统后台项目审批、未签名安装包与钥匙串授权。
+- 三平台升级后路径仍有效；移动 app bundle / AppImage 后重新开启刷新路径；卸载前关闭能清理注册。
+
+## 8. 附件保存
 
 文件名清洗、取字节的边界与写入逻辑有自动测试（含符号链接、目录、路径分量、设备名和文字方向控制符）。系统对话框与真实文件系统只能在真机确认，每个平台发布前检查：
 
@@ -537,7 +253,9 @@ Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸�
 - 附件名含中文、很长、含 `..\` 或 Windows 设备名（如 `NUL.txt`）：保存出的文件名安全且可用。
 - 邮件正文尚未下载或已被删除时，附件按钮不会放出内容。
 
-## 8. 新邮件通知的手动验证
+## 9. 新邮件通知
+
+<a id="8-新邮件通知的手动验证"></a>
 
 新邮件判定（首次同步、重建、补齐、已读、旧邮件、非收件箱、合并与截断）、设置的保存与校验、预览隐藏后不含发件人和主题、桌面的前台规则与声音二选一、点击后打开邮件都有自动测试。系统通知中心、声音设备与点击回报只能在真机确认，用**打包版本**检查（macOS 开发模式下通知会以“终端”名义发出）：
 
@@ -547,886 +265,176 @@ Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸�
 - MailX 在前台：默认不弹通知，未读数照常增加；打开“正在使用时也通知”后会弹出。
 - 关闭“通知里显示发件人和主题”：通知只显示账号名和数量。
 - 静音某个账号：它的新邮件不通知，其他账号照常。
-- 提示音：系统默认时只有系统提示音；选任一自带音效（清铃、叮、水滴、气泡、木琴、星光、轻叩、和弦）时只有 MailX 的音效（不叠加系统音），试听按钮能播放；无声时安静。没有音频输出设备时不报错。
+- 提示音：系统默认时只有系统提示音；选任一自带音效时只有 MailX 的音效（不叠加系统音），试听按钮能播放；无声时安静。没有音频输出设备时不报错。
 - 在手机上先读掉的新邮件、垃圾邮件文件夹里的新邮件：不通知。
 - macOS 首次发通知时系统会请求权限；拒绝后“发送测试通知”不显示通知，打开系统设置允许后恢复。
 - Windows：通知显示应用名而非 PowerShell（仅安装版本）；通知进入操作中心后点击只唤起应用。Linux：GNOME / KDE 下通知与点击回报正常；不支持声音提示的通知服务器上，选择“系统默认”时可能无声。
 
-## 9. 列表分隔线与阅读区折叠的手动验证
+## 10. 列表分隔线、阅读区折叠与账号显示排序
 
-宽度与折叠状态的保存和校验、抖动写入的合并与退出时的写出、折叠按钮的标签与状态、打开邮件（列表、命令面板、通知）自动展开、折叠时 Esc 不关邮件都有自动测试；jsdom 没有布局，真实的面板尺寸只能在窗口里确认（浏览器 mock 模式已量过拖动、折叠、窄窗口三种情形）。桌面版每个平台检查：
+宽度与折叠状态的保存和校验、抖动写入的合并与退出时的写出、折叠按钮的标签与状态、打开邮件（列表、命令面板、通知）自动展开、折叠时 Esc 不关邮件都有自动测试；jsdom 没有布局，真实的面板尺寸只能在窗口里确认。桌面版每个平台检查：
 
 - 拖动列表与阅读区之间的分隔线后退出再启动：列表恢复到拖动后的宽度；首次启动是默认宽度。
-- 点标题栏右上角、明暗模式按钮右侧的按钮：阅读区收起，列表占满整个岛，图标和提示文字变成“展开邮件内容”；再点一次恢复到收起前的宽度。
+- 点标题栏右上角的折叠按钮：阅读区收起，列表占满整个岛，图标和提示文字变成“展开邮件内容”；再点一次恢复。
 - 收起后点一封邮件、从命令面板打开一封邮件、点新邮件通知：阅读区自动展开并显示该邮件。
-- 收起期间 Tab 不会进入阅读区；已打开邮件时按 Esc，邮件不会被关闭（展开后仍在）。
-- 收起后退出再启动：阅读区仍是收起的；展开并拖动列表宽度后再收起、退出、启动：列表宽度是拖动的值，而不是收起时占满的宽度。
-- 抖动写入：拖动分割线或侧栏拖拽条的过程中不应有磁盘写入（可用活动监视器或 `fs_usage` 观察 `settings.json`），松手约半秒后才写一次；连续按方向键同理。拖动后立刻退出应用：下次启动仍是拖动后的宽度。
-- 把窗口缩到最小：列表和阅读区一起变窄，阅读区不会莫名消失；再放大后恢复。把分隔线往右拖到阅读区小于最小宽度：阅读区折叠，按钮图标同步变化。
+- 收起期间 Tab 不会进入阅读区；已打开邮件时按 Esc，邮件不会被关闭。
+- 收起后退出再启动：阅读区仍是收起的；展开并拖动列表宽度后再收起、退出、启动：列表宽度是拖动的值。
+- 抖动写入：拖动过程中不应有磁盘写入（可用活动监视器或 `fs_usage` 观察 `settings.json`），松手约半秒后才写一次；拖动后立刻退出，下次启动仍是拖动后的宽度。
+- 把窗口缩到最小：列表和阅读区一起变窄；把分隔线往右拖到阅读区小于最小宽度：阅读区折叠，按钮图标同步变化。
+- 账号显示排序：宽窗口用左侧手柄上下排序，窄窗口横排左右排序，账号多时检查边缘滚动、首尾放置和连续拖动；聚焦手柄以空格 / 回车拿起、方向键移动、放进、Esc 取消并检查焦点保留与中英文读屏播报；改名未失焦时调整其他账号顺序；重开弹窗和重启后顺序恢复；同时打开写信窗口时各处顺序一致，排序不改变草稿发件账号与默认发件规则；写入失败回退并提示。规则见[界面设计](../architecture/ui-design.md#账号与设置入口)。
 
-## 10. 自适应同步间隔的手动验证
+## 11. 自适应同步间隔与 IMAP IDLE
 
-间隔的选择、前后台切换、回到前台的最短间隔、失败退避不受影响、判定“这一轮有没有变化”都有自动测试（时钟暂停，不耗真实时间）。真实窗口的焦点、最小化和锁屏只能在机器上确认，每个平台检查：
+间隔的选择、前后台切换、回到前台的最短间隔、失败退避、判定“这一轮有没有变化”都有自动测试（时钟暂停）。IDLE 的封装、防抖、断线重连、服务商拒绝后停用、10 分钟重新 IDLE、睡眠信号与轮询降级由脚本化 IMAP 服务器覆盖。真实窗口的焦点、最小化和锁屏只能在机器上确认，每个平台检查：
 
 - 窗口在前台：从另一个邮箱发一封信，约 20 秒内出现在列表里（需要窗口保持聚焦）。
-- 切到别的应用，让 MailX 留在后台：之后发的信约 3 分钟内到达并弹出通知；连续十几分钟没有新邮件后，间隔逐步拉长到 10 分钟，之后发的信最长约 10 分钟内到达。
-- 在后台等待期间切回 MailX：立即开始一轮，不必等满；快速来回切换几次，不会连续登录服务器（至少相隔 10 秒）。
+- 切到别的应用：之后发的信约 3 分钟内到达并弹出通知；连续十几分钟没有新邮件后，间隔逐步拉长到 10 分钟，之后发的信最长约 10 分钟内到达。
+- 在后台等待期间切回 MailX：立即开始一轮；快速来回切换不会连续登录服务器（至少相隔 10 秒）。
 - 锁屏（macOS Ctrl+Cmd+Q，Windows Win+L）：仍会收到新邮件和通知；解锁后回到前台立即刷新。
-- 合上笔记本盖子或休眠一段时间再唤醒：唤醒后不久就同步一次，没有报错。
-- 最小化窗口算后台；从任务栏或 Dock 还原后立即刷新。
-- 手动刷新（侧栏账号的刷新按钮）在任何状态下都立即开始。
-
-## 11. QQ / Foxmail 预设与收发连接诊断
-
-2026-10-28 已实现 QQ / Foxmail 共用的 `qq` 预设、QQ 邮箱官方图标、授权码引导和保存后的收发连接诊断。实现范围与来源见 [QQ / Foxmail 接入调研](../reference/qq-foxmail-integration.md)。这次没有连接真实邮箱或发送邮件，既有 QQ 收信冒烟记录仍只证明当时记录的场景。
-
-已执行的自动验证：
-
-- `bun run check` 通过：生成的 Rust / TypeScript DTO 一致，前端类型检查、lint、535 项测试、生产构建及 Rust workspace check 通过。
-- `bun run i18n:check` 通过：中英文 9 个命名空间、726 条消息完整。
-- `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` 通过：Rust 共 605 项通过、3 项原有忽略；其中连接诊断针对性测试 11 项通过。
-- macOS 普通应用打包通过：`bun run tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'` 生成 `target/release/bundle/macos/MailX.app`。原始打包命令在应用生成后因本机没有更新签名私钥而退出；本次只临时关闭更新产物生成，没有修改仓库发布配置，也没有验证更新包签名或运行真实账号。
-- 前端回归覆盖 QQ / Foxmail 搜索、邮箱域名、默认 TLS 端点、授权码标签、向导返回、敏感输入清空、高级字段错误展开定位，以及编辑时保留已有端点、独立用户名和代理。连接诊断覆盖两协议独立结果、取消后丢弃迟到结果、连接版本变更失效、卸载取消、账号/版本不匹配报告拒绝和原始错误隐藏。
-- 受控协议测试证明诊断不会执行投递命令或进入发送队列；取消、重复请求、准备与收尾等待均受统一预算约束。诊断成功只说明登录探测通过，不更新持久化的连接状态，也不证明实际投递成功。
-
-浏览器模拟客户端已目测服务商选择与 QQ 配置步骤：官方图标直接出现在列表中，基础表单只要求邮箱和授权码，高级设置可展开。这是浏览器界面验证，不能证明真实桌面 IPC 或服务商兼容性。
-
-后续使用测试账号在 macOS、Windows、Linux 分别记录：
-
-- QQ 数字地址、QQ 英文地址和 Foxmail 地址的登录与实际发件人组合；共享授权码、独立登录用户名、停用服务、错误/撤销授权码的提示。
-- IMAP 目录、中文和 GB2312 正文、CID 图片、已读/星标、附件与增量同步；服务端收取范围切换后旧邮件的可见性是否符合当前镜像语义。
-- 直连、继承默认路由（当前为直连）、自定义 SOCKS5 / HTTP CONNECT 代理，以及代理不可用时是否明确失败；不得回退直连。检查诊断取消、超时、配置更新和系统凭据库失败时的实际行为。
-- 使用测试收件人实际发送，确认收件、发件人地址、中文主题/正文、撤销与失败状态；确认 QQ 服务端是否自动保存已发送副本。尚未实现的已发送副本列表展示不在本次完成范围内。
-- QQ 官方帮助由系统浏览器打开；写信窗口和邮件正文无法调用诊断或帮助命令；主窗口真实界面里的高级字段聚焦与深浅主题显示正常。
-
-## 12. 移除本机邮箱账号
-
-2026-10-28 已实现账号详情中“修改连接”右侧的“移除账号”。确认后清除本机配置、邮件记录、草稿与发件记录，关闭受影响的写信窗口；不删除服务器邮件，不撤回可能已送达的邮件。接口、恢复与缓存边界见[账号配置](../architecture/account-configuration.md#6-操作与后台任务契约)和[应用接口](../contracts/app-api.md#移除本机账号)。
-
-已执行的自动验证：
-
-- `bun run check` 通过；追加并发回归后的前端全套为 60 个文件、557 项通过，最终账号对话框针对性测试 19 项通过，类型与 lint 再次通过。中英文 9 个命名空间、739 条消息完整，Rust / TypeScript DTO 一致。
-- `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` 通过；追加迟到通知保护后 desktop clippy 与全部测试再次通过。最终统计 core 488 项、账号集成 35 项、desktop 101 项通过，共 624 项；3 项环境相关测试忽略（缺少 loopback 地址别名、两项需要解锁原生凭据库）。
-- macOS `.app` 打包通过，沿用第 11 节临时关闭更新产物生成的命令；没有修改发布配置或验证更新包签名。
-- 持久化回归覆盖所有邮箱来源与草稿/队列状态、跨账号隔离、版本冲突与 `sending` 拒绝的零修改、删除与领取发送的竞争、重启后原请求重试、旧创建请求不能复活账号、历史凭据 journal 清除、共享凭据保护及 SecretStore 锁定后的延迟清理。
-- 受控后台测试覆盖移除后同步、正文、写回和空闲发信任务停止，迟到启动不能重建 worker，正文令牌失效；通知 barrier 回归确认设置查询期间移除也不会再显示系统通知，其他账号仍可通知。桌面窗口权限检查覆盖主窗口专用移除命令及实际草稿所属的写信窗口收尾。
-- 前端回归覆盖确认与取消、重复提交、失败与版本冲突恢复、相邻选择和最后账号空态、其他账号事件不能解除操作锁或切走确认框、重复移除事件、迟到查询/正文结果与资料保存、写信自动保存停止及跨账号改发件人的草稿关闭。
-- `git diff --check` 通过。浏览器模拟客户端已目测按钮并排、确认内容与默认取消焦点；只打开并取消确认，没有移除真实账号。
-
-下列真机验收仍待使用测试账号在 macOS、Windows、Linux 分别执行：
-
-- 同步期间移除，主界面、搜索、正文与附件立即失去该账号内容；重启不恢复账号。再次添加同一邮箱获得新账号并正常重新同步，服务器邮件保留。
-- 打开多个写信窗口，包括改过发件账号的草稿；移除后仅受影响窗口关闭，其他草稿仍可保存。确认未保存内容与本地草稿丢失的提示与实际一致。
-- 等待发送的邮件随账号移除；实际 SMTP 已开始时拒绝移除。使用可控测试服务器检查已提交/未知状态提示，不将移除描述为撤回。
-- 系统凭据库锁定时本机移除仍成功并提示待清理，解锁后在重启或后续账号写入时清理完成。确认其他账号凭据仍可用。
-- 原始 MIME 的共享引用立即移除，孤立物理文件由下次启动 GC 回收；图片缓存沿用既有淘汰策略。默认发件账号和通知静音设置中的旧 ID 当前保留，默认发件账号失效时回退至首个可用账号。
-
-本轮未访问真实邮箱、发送真实邮件、删除真实账号或操作原生凭据库；自动测试与浏览器预览不能代替以上三平台验收。
-
-## 13. QQ VIP 域名补漏
-
-2026-10-28 用户反馈已手动测试真实邮箱且无异常，同时指出向导遗漏 `@vip.qq.com`。该反馈没有逐项记录邮箱后缀、平台及收发场景，保留为用户手测反馈，不扩写为完整兼容矩阵通过。
-
-根据腾讯官方[别名分类](https://service.mail.qq.com/detail/0/262)与[VIP 地址说明](https://service.mail.qq.com/detail/0/360)，QQ 预设现接受 `qq.com`、`vip.qq.com`、`foxmail.com`，共用原有 TLS 端点；域名显示、搜索与校验来自同一列表，中英文地址提示同步补齐。个人自有域名和企业邮箱使用手动配置；未将缺少个人邮箱接入证据的其他相似后缀自动加入。资料与边界见[接入调研](../reference/qq-foxmail-integration.md)。
-
-本次针对性回归 4 个文件、68 项通过：VIP 域名及大写域名搜索、保存与完整登录名保留，形似域名/未声明子域拒绝，以及原有 QQ/Foxmail、编辑保留配置与服务商选择行为。`bun run i18n:check`、`bun run typecheck`、`bun run lint`、`bun run build`、`git diff --check` 均通过。改动限于前端预设、文案与文档，本次没有另行连接真实 VIP 邮箱。
-
-## 14. 账号添加入口与服务商图标偏好
-
-2026-10-28 将账号管理的添加入口移至列表标题右侧，使用强调色加号及名称提示；新增每账号独立的 `useProviderIcon`。已选择且有本地 Logo 的服务商默认替换账号首字母，颜色保留于边缘，添加向导最后一步与账号资料均可关闭；通用/未知服务商保持原头像。v12 迁移使旧账号默认开启，旧快照与凭据 journal 缺字段时兼容读取；图标偏好不推进连接版本、不修改凭证、不重启同步，修改连接与恢复旧日志均保留已关闭的偏好。
-
-已执行：`bun run check`（62 个前端文件、577 项测试，741 条中英文消息、DTO 一致性、类型、lint、构建与 Rust check）、workspace fmt / clippy / tests（629 项通过、3 项原有环境忽略）、`git diff --check`；macOS `.app` 打包沿用第 11 节临时关闭更新产物生成的命令并通过。回归覆盖默认与显式关闭、旧创建请求幂等、旧数据库及 journal、重启持久化、跨账号隔离、同步世代保持、图标回退、向导往返和资料自动保存。新增图标按钮重建时，移除中的添加入口仍保持禁用。
-
-浏览器模拟客户端已目测浅色/深色下的列表添加入口、服务商 Logo 和切换后的首字母头像，并确认创建后自动选中、资料保存提示。未操作真实账号或原生凭据库；窄窗口及三平台原生界面仍需真机确认。
-
-
-## 15. 网易 163 / 126 预设与安全策略恢复
-
-2026-10-28 已实现两个独立服务商入口 `netease163` / `netease126`，分别精确接受 `163.com` / `126.com`，使用各自的 993 / 465 隐式 TLS 端点、完整地址登录与客户端授权码。两个入口共用官方本地图标和向导结构，保留各服务商独立文案，沿用每账号默认开启的图标偏好。已有手动配置不迁移、不覆盖端点、用户名、路由、凭证或图标偏好。官方来源、范围和真实验收清单见[网易接入调研](../reference/netease-163-126-integration.md)。
-
-已执行的自动验证：
-
-- `bun run check` 通过：63 个前端文件、631 项测试，755 条中英文消息、生成 DTO 一致性、类型检查、lint、生产构建和 Rust workspace check 通过。
-- `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` 通过：core 500 项、账号集成 39 项、desktop 101 项，共 640 项通过、3 项原有环境相关忽略；没有新增忽略。
-- macOS `.app` 打包通过：`bun run tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'` 生成 `target/release/bundle/macos/MailX.app`；只为本地检查临时关闭更新产物，没有改动发布配置、运行真实账号或验证更新签名。
-- 前端回归覆盖搜索、两种邮箱保存、大小写身份、交叉域名/子域/伪造后缀/VIP/yeah.net 边界、已有配置保留、步骤返回与授权码清理、每账号图标开关、帮助白名单和打开失败恢复。同步、连接诊断和正文的策略提示取自所属已保存账号，混合错误正确优先展示策略引导；未知服务商不展示错误的官方链接。
-- 受控协议回归覆盖 LOGIN（含异步库会吞掉的未标记 BYE）、CAPABILITY、ID、NOOP、目录、正文与写回边界的策略识别。只在负面状态前 4096 字节中识别官方完整信号，普通拒绝、肯定状态、邮件头/字面量和其他解析失败不误判，原始响应不进入公开原因码。
-- 同步及写回策略拒绝停止自动轮次，保留已缓存邮件和待写标记；前后台切换、新增标记及并发成功结果不能解除暂停。手动同步和修改连接可重启新世代，旧结果不能再次阻断；正文持久化固定 `providerPolicy`，用户处理后手动重试。
-- `git diff --check` 通过；独立源码审查未发现实质性问题。
-
-浏览器模拟客户端已检查 720 × 900 窄视口下的深浅主题、两个服务商图标、126 搜索和 163/126 添加流程；126 保存后的摘要为 `imap.126.com:993` / `smtp.126.com:465`，图标偏好可关闭并恢复。模拟账号仅存在内存，不连接服务商或原生凭据库。
-
-仍待真实 163 和 126 测试账号分别验证：服务开通与授权码、ID 后目录访问、中文文件夹/MIME、初次与增量同步、已读/星标、附件、实际投递与已发送副本、范围变更、直连/代理及三平台体验。公开 TLS/能力探测及自动测试通过不能记为真实邮箱收发通过；本轮没有真实登录、发信或删除账号。
-
-## 16. 添加前测试登录、yeah.net 与服务商 SVG
-
-2026-10-28 为所有添加邮箱流程加入可选的“测试登录”，分别显示当前 IMAP / SMTP 配置的登录结果。测试不保存账号、不读写凭据库、不启动同步或发送邮件；输入修改、返回、继续及关闭时取消当前测试并隔离迟到结果。新增独立 `neteaseYeah` 入口，精确接受 `yeah.net`，默认使用 `imap.yeah.net:993` / `smtp.yeah.net:465`、完整地址与客户端授权码。QQ 使用经典企鹅，163 / 126 / yeah 使用各自标识；四个服务商资源均为压缩后的 SVG 路径，来源与衍生处理见[图标说明](../../frontend/src/assets/providers/README.md)。
-
-已执行的验证：
-
-- `bun run check` 通过：64 个前端文件、675 项测试，760 条中英文消息、生成 DTO 一致性、类型、lint、生产构建与 Rust workspace check 通过。最终追加的取消竞态用例所在 11 个相关测试文件共 208 项通过；SVG 替换及尺寸调整后，服务商与头像针对性测试 2 个文件、25 项通过；收尾时 `bun run frontend:test` 再次确认全套 675 项通过。
-- `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings` 与 Rust workspace 测试通过：core 511 项、账号集成 39 项、desktop 102 项，共 652 项通过、3 项原有环境相关忽略。
-- 受控协议测试覆盖双协议独立结果、45 秒统一预算、取消与并发身份隔离、准备与收尾，以及指定代理失败不回退。草稿测试只允许当前输入的 `replace` 凭证；`keep` 在字段验证阶段拒绝。未保存配置的准备过程不取得账号服务锁，也不访问数据库或 SecretStore。
-- 合并前 Windows CI 曾在草稿隔离测试的 2 秒看门狗处超时。SMTP 失败夹具改为监听并接受连接后关闭，避免依赖已关闭端口的连接拒绝时机及端口复用；死锁看门狗放宽到 10 秒，并在断言前释放测试锁。原有双协议结果、账号服务锁隔离、凭据库零访问及无持久化副作用断言保留。修复后本地 8 项草稿测试、workspace fmt / Clippy / tests 再次通过。
-- 前端回归覆盖所有服务商、跳过测试、失败后继续、输入保留、高级字段聚焦、独立 SMTP 凭证、代理及 STARTTLS 参数、编辑/返回/继续/切换/关闭后的迟到结果、精确取消 ID、报告身份校验，以及 mock 无持久化副作用。
-- macOS `.app` 最终打包通过，沿用第 15 节临时关闭更新产物的命令；最终向导标题布局已包含在构建中。没有改动发布配置或验证更新签名。
-- SVG 静态检查确认没有位图、脚本或外部资源；24 / 32 / 40 px 渲染均已目测。浏览器模拟客户端已检查服务商列表、企鹅及三个网易标识，并用模拟输入完成 yeah.net 的测试登录，分别显示 IMAP / SMTP 成功；窄视口下向导标题及底部操作可见。
-- `git diff --check` 通过；独立源码审查未发现实质问题。
-
-本轮 agent 没有登录真实邮箱、发送邮件、保存真实账号或访问原生凭据库；浏览器结果来自模拟客户端。163 / 126 / yeah.net 的真实兼容性及三平台原生体验仍需按实际测试组合补齐记录；测试登录成功只证明协议登录探测，不证明实际投递成功。后续用户手测反馈见第 19 节。
-
-## 17. 添加按钮文字与服务商头像圆环
-
-2026-10-28 将账号管理列表右上角的添加入口改为强调色“加号 + 添加账号”文字按钮。移除该入口的重复 tooltip，弹窗打开后仍可正常聚焦按钮，但不会因自动聚焦显示提示。服务商头像内部保持透明，账号颜色仅作为 1 px 圆环，图标与圆环之间保留 2 px 内边距；没有账号颜色时使用中性描边，字母头像继续使用原有配色。
-
-账号管理、添加向导和头像相关 3 个文件共 65 项测试通过；现有移除期间入口禁用的回归已适配文字按钮，并单独重跑 21 项通过。`bun run lint`、`bun run build`（含 TypeScript 检查）、`git diff --check` 通过。浏览器模拟客户端已目测深浅主题的列表与资料头像，以及关闭后重新打开账号弹窗时的添加按钮默认焦点；无自动 tooltip。检查只使用内存模拟账号，没有改动真实账号、凭据或协议行为。
-
-## 18. 不标识账号颜色
-
-2026-10-28 标识颜色使用叉号表示“不标识”，保留中英文悬停提示和无障碍名称。沿用已有 `color=null` 创建与保存行为；服务商图标在空颜色时清除圆环、边框及内边距，恢复完整大小；有颜色时仍保留 1 px 圆环和 2 px 内边距。字母头像继续使用中性外观。
-
-相关 3 个前端测试文件共 65 项通过；`bun run lint`、`bun run build`（含 TypeScript）、`bun run i18n:check`（760 条消息）及 `git diff --check` 通过。叉号及图标尺寸调整后，65 项测试、lint 和构建再次通过。浏览器模拟客户端确认添加时选择“不标识”并保存后仍选中该项，现有账号从颜色切回叉号时显示已保存、图标恢复完整大小；彩色圆环状态仍有正确留白。仅使用内存模拟账号，没有连接真实邮箱或改动持久化契约。
-
-## 19. 网易接入的用户真实邮箱手测反馈
-
-2026-10-28 用户在 PR #44 上下文中补充“我已经进行真实的邮箱测试，这点可以说明”，此前已确认“OK，可以准备合并该PR”。记录为用户手测反馈与合并确认；反馈未逐项提供邮箱域名、平台及具体收发场景，不能扩写为 163 / 126 / yeah.net 或三平台兼容矩阵全部通过。各组合的待验清单保留在[网易接入调研](../reference/netease-163-126-integration.md#5-本轮证据与实施验收)，前述 agent 使用合成数据、未连接真实账号的历史记录不变。
-
-## 20. 写信附件的 macOS 用户手测
-
-2026-10-29，分支 `feat/compose-attachments`（PR #49）。自动检查：`bun run check`、`bun run rust:clippy`、`bun run rust:test`（551 + 39 + 104 项）、前端 683 项测试与 `git diff --check` 均通过；附件栏改用 `IconButton` 与列表悬停色后，`bun run typecheck`、`bun run lint` 与写信相关 134 项测试再次通过。浏览器模拟客户端确认添加、移除与超限错误显示。
-
-随后 agent 在 macOS 启动 `bun run tauri dev`，编译与启动无报错，本机数据库随之升级到 v15。原生对话框与系统拖放由用户操作，用户反馈以下清单全部正常：
-
-1. 点回形针多选添加（含中文文件名），附件栏显示文件名、大小与移除按钮；
-2. 从 Finder 拖入文件自动添加，拖动经过时无高亮；
-3. 移除附件；边输入边添加或移除，正文不丢失、不出现冲突提示；
-4. 附件总和超过 20 MiB 时提示"附件总大小超过上限"；
-5. 转发带附件的邮件时预填原邮件附件并带"转发"标记；
-6. 带附件发信到用户自己的测试邮箱，收件端附件与中文文件名显示正常。
-
-记录为用户手测反馈：反馈未注明发信所用服务商与收件端客户端，不能扩写为服务商兼容矩阵通过（第 12 节第 6 步仍待补）。Windows（含拖放与 WebView2 放置目标）与 Linux 未验证。v15 数据库无法被 `main` 上的旧版本打开，属预期的迁移行为。
-
-## 21. 写信内嵌图片的 macOS 用户手测
-
-2026-10-30，分支 `feat/compose-inline-images`（PR #62）。自动检查：`bun run check`（含前端 71 个文件 / 770 项测试）、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`（core 621 项、desktop 113 项及其余套件）与 `git diff --check` 均通过，PR CI 五项通过（含 Windows 构建）。浏览器模拟客户端确认粘贴与工具栏插入后图片显示在正文中、不进附件栏。
-
-随后用户在 macOS 的真实桌面窗口中手测，反馈：从剪贴板直接粘贴图片、插入图片均正常，正常发送后收件端可以看到正文中的图片。
-
-记录为用户手测反馈：反馈未注明所用服务商与收件端客户端，不能扩写为 16.11.12 列出的 Gmail、Outlook、QQ、163、Apple Mail 显示均已核对；"图片是否同时出现在附件列表"（sending.md 16.13）仍待确认。WebP 预览转码无单测。Windows 与 Linux 未验证。
-
-## 22. 已发送文件夹中本机副本的 macOS 用户手测
-
-2026-10-30，分支 `feat/sent-copies-display`（PR #65）。自动检查：`bun run check`（含前端 72 个文件 / 782 项测试）、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`（core 631 项、desktop 115 项及其余套件）、`bun run types:check` 与 `git diff --check` 均通过，PR CI 六项通过（含 Windows 构建）。浏览器模拟客户端确认：已发送列表显示“致：收件人”与本机标识，打开后无已读 / 星标按钮，“从本机移除”确认后该行消失且不再弹出“已发送”提示。
-
-随后用户在 macOS 真实桌面窗口中手测，反馈没有问题。
-
-记录为用户手测反馈：反馈未逐项说明所测场景与服务商，不能扩写为各服务商通过 SMTP 发信后是否自动保存已发送、本机副本与服务器副本交接时机均已核对（发信设计第 9 节与第 12 节第 6 步）。发送后约 10 秒的同步唤醒没有自动测试。Windows 与 Linux 未验证。
-
-## 23. 本地全文搜索 F0 探针
-
-2026-10-30，分支 `feat/local-full-text-search`。探针为 `core/tests/fts_probe.rs` 中两个 `#[ignore]` 测试，不进入常规 `cargo test`；重跑：`cargo test -p mailx-core --release --test fts_probe -- --ignored --nocapture --test-threads=1`（`FTS_PROBE_SIZES=10000` 缩短规模，完整规模约 16 分钟）。环境：Apple Silicon（arm64 macOS），仓库打包的 SQLite 3.51.3，文件库 WAL、`synchronous=FULL`，release 构建。语料为固定种子合成数据（约 55% 中文、35% 英文、10% 混排），正文 2–20 KiB、上限 64 KiB。
-
-正确性：`tokenize='trigram case_sensitive 0 remove_diacritics 1'` 可用；英文大小写、变音符号（café / cafe）、邮件地址子串均能匹配；四字中文子串可匹配；少于 3 个字符的词 `MATCH` 无结果（中文与拉丁字母都是），必须退回 LIKE；trigram 不折叠全角与半角；用户输入包成双引号字符串、内部引号加倍后，`"`、`*`、`AND`、`NEAR(`、`-`、`:`、`(((`、`^` 与空串都不报错并按字面量匹配；LIKE 用 `ESCAPE '\'` 后 `%`、`_`、`\` 按字面量处理。
-
-体积与写入：
-
-| 语料 | 文本 | 写入 | 库大小 | FTS 相对文本 |
-| --- | --- | --- | --- | --- |
-| 1 万封，30% 有正文 | 37.7 MiB | 8.1 s | 182 MiB | 4.81 倍 |
-| 1 万封，全部有正文 | 113 MiB | 27 s | 516 MiB | 4.56 倍 |
-| 5 万封，30% 有正文 | 188 MiB | 51 s | 887 MiB | 4.71 倍 |
-| 5 万封，全部有正文 | 565 MiB | 162 s | 2.56 GiB | 4.53 倍 |
-
-查询（中位数 / p95，毫秒，30 次热缓存，经映射表按时间倒序取 100 条）：
-
-| 查询 | 1 万 / 30% | 1 万 / 全部 | 5 万 / 30% | 5 万 / 全部 |
-| --- | --- | --- | --- | --- |
-| 四字中文 MATCH | 1.6 / 1.8 | 3.3 / 3.6 | 9.5 / 10.4 | 18.9 / 22.0 |
-| 英文 MATCH | 3.3 / 3.6 | 9.0 / 9.4 | 18.0 / 19.1 | 45.3 / 48.8 |
-| 两词 AND | 1.1 / 1.3 | 2.7 / 3.1 | 6.7 / 7.2 | 15.6 / 16.4 |
-| 整句 | 3.9 / 4.5 | 11.3 / 13.0 | 19.3 / 20.4 | 55.8 / 56.8 |
-| 两字常见词 LIKE（全部列） | 1.0 / 1.2 | 1.1 / 1.4 | 1.2 / 1.4 | 1.0 / 1.2 |
-| 两字罕见词 LIKE（全部列） | 50 / 52 | 138 / 194 | 250 / 261 | 640 / 649 |
-| MATCH + 两字 LIKE（全部列） | 14.7 / 15.9 | 41.7 / 43.0 | 74 / 77 | 203 / 212 |
-
-`snippet()`：在排序查询内直接计算时，5 万封需 1.3–6 秒；先取一页再对这 100 个 rowid 计算只增加 25–60 ms。无内容表在 5 万 / 30% 时为 685 MiB（3.63 倍），但不能用 `snippet()` 与 LIKE；`detail=column` 拒绝带引号的多 trigram 词。
-
-据此对存储与搜索 5.1 的调整：片段分两步计算、混合查询先 MATCH 再 LIKE、加入全角半角折叠；短词 LIKE 仍包含正文（5 万封、30% 有正文时罕见词约 250 ms）。以上是合成数据与单台机器的结果，不代表真实邮箱或 Windows / Linux 上的表现。
-
-## 2026-10-29：主窗口关闭选择、后台驻留与安全退出
-
-实现见[桌面生命周期](../architecture/desktop-lifecycle.md)。三平台默认每次询问，记住选择与通用设置使用同一持久化偏好；关闭主窗口、普通最小化、关闭写信窗口、明确退出与更新重启分别处理。
-
-本轮最终本地检查：`bun run check`、workspace Clippy（`-D warnings`）、workspace tests 与 `git diff --check` 通过。前端 68 个文件、707 项测试通过；Rust core 517 项、账号集成 39 项、desktop 110 项通过，另有 3 项环境相关测试忽略。macOS debug `.app` 打包通过。
-
-自动验证覆盖旧设置补默认值、损坏字段恢复、原子保存关闭偏好、平台文案、取消不保存、无托盘降级、迟到快照、重复提交、托盘动作就绪、草稿保存失败/取消及 generation 隔离、关闭等待期间的编辑锁定、发送暂停与领取的竞争。主窗口退出确认覆盖防抖布局写入、进行中的 mutation、失败重试，以及设置弹窗已打开时仍可取消退出。独立子代理审查发现的空草稿迟到删除、退出取消入口被设置弹窗覆盖均已修复并补回归。
-
-macOS 用临时 `MAILX_DATA_DIR`、独立测试 bundle identifier 和关闭自动更新的空账号设置运行 debug `.app`，未接入真实邮箱或发送邮件。已确认原生主窗口关闭默认询问、复选框初始不勾选、取消后仍可继续使用和再次询问、记住后台后设置落盘、隐藏后进程仍存活、第二次启动恢复原窗口、记住后 Cmd+W 不再询问，以及 Cmd+Q 绕过后台偏好真正退出（进程退出码 0）。最终构建另确认无账号页面可进入设置，将已记住的后台行为改回“每次询问”后，Cmd+W 再次弹出选择，并能从对话框退出（进程退出码 0）；菜单栏开关可开启和关闭，图标外观仍待专门验收。构建仅临时关闭 updater 产物生成，未修改正式发布配置或验证代码签名。
-
-浏览器合成数据预览检查 Windows 关闭弹窗与通用设置、Linux 无托盘时只提供取消/退出、macOS Dock 文案与菜单栏开关；检查中文深色和英文浅色布局。浏览器预览不作为 Windows/Linux 原生证据。Linux D-Bus helper 另以同版本 zbus/tokio 依赖独立编译、单测及 Clippy 检查；不等于真实桌面可见性验证。
-
-仍需真机执行：
-
-- Windows 通知区域溢出区、Explorer 重启、托盘左键/右键与多屏恢复。
-- Linux KDE X11/Wayland、GNOME 有/无 AppIndicator 支持，运行中禁用扩展，锁屏期间丢失托盘宿主及解锁恢复；Wayland 请求激活是否被桌面允许。
-- 三平台实际写信窗口的保存失败提示、多窗口取消退出、长时间 SMTP 事务与退出超时、系统关机/注销，以及真实通知点击；测试发送只使用受控服务器或另行明确授权的邮箱。
-- macOS Dock/Finder 原生重开、菜单栏 template 在深浅系统外观下的表现、全屏/多桌面与睡眠恢复；本轮第二次启动的恢复证据不代替上述完整矩阵。
-
-### 2026-10-29：PR #48 的本机 Windows 验收
-
-验收对象为 [PR #48](https://github.com/GuqierMcl/MailX/pull/48) 的提交 `3509e969fb999d1b254b2999266690cf3a386653`。本机为 Windows x64，系统报告 DisplayVersion `26H2`、Build `26300.9711`。使用包含实际前端产物的 Tauri debug 构建、独立 identifier `com.mailxapp.desktop.traytest` 和临时 `MAILX_DATA_DIR`；空账号设置仅预置简体中文与关闭自动更新，关闭行为沿用默认值。没有连接真实邮箱或发送邮件。
-
-已实际操作并确认：
-
-- 主窗口的最小化按钮进入 Windows 原生最小化状态；进程保留，恢复后可继续操作。
-- 主窗口关闭按钮及 `Alt+F4` 默认弹出关闭选择，提供取消、最小化到系统托盘、退出应用；“记住我的选择”初始未勾选。取消后仍可继续使用，再次关闭会再次询问，取消不写入关闭偏好。
-- 勾选记住并选择后台后，主窗口从可见窗口列表消失、任务栏中的窗口入口消失，原进程继续运行；临时目录中的 `settings.json` 持久化 `closeBehavior: "background"`。
-- Windows 通知区域的隐藏图标区中能看到 MailX 图标；右键显示打开、写邮件、立即同步、设置与退出五个菜单入口。左键点击图标可恢复原主窗口，任务栏入口随之恢复。
-- 记住后台后再次 `Alt+F4` 直接隐藏主窗口。再次运行同一测试程序恢复原窗口，仍只有原 PID；第二次启动的进程退出码为 0。
-- 无账号页面可打开设置；通用设置显示已保存的后台策略，改回“每次询问”后设置落盘，下一次关闭重新弹出选择。退出再启动后仍会询问，证明此偏好跨进程恢复。
-- 从关闭选择中“退出应用”后测试进程结束。另在通用设置把策略设为后台，再点击设置中的“退出 MailX”，应用直接结束、退出码为 0，没有再次询问；设置弹窗打开时也能完成退出。
-
-本机工程检查：`bun install --frozen-lockfile`、`bun run typecheck`、`bun run lint`、`bun run build`、`cargo build -p mailx-desktop --locked` 与使用上述临时配置的 `bun run tauri build --debug --no-bundle --config <临时配置文件>` 通过。desktop 的 `lifecycle::tests` 两项与 `tray::tests` 一项通过。构建保留现有前端 chunk 大小提示；退出日志出现一次 WebView2 的 `Chrome_WidgetWin_0` 注销错误（Windows error 1412），本轮未观察到它阻止退出。
-
-前端默认并发全套检查两次均为 705 项通过、两项 5000 ms 超时：`App.test.tsx` 的 Settings → About 用例和 `mail-body-editor-loader.test.tsx` 的 StrictMode / pending draft IPC 用例。两文件定向复跑共五项通过；限制并发的 `bun run --cwd frontend test --maxWorkers=2` 全套 68 个文件、707 项通过，未修改测试或超时配置。不能把默认命令记录成全套通过。
-
-本轮未证明托盘各菜单项的触发结果：自动化工具会在向 MailX 菜单发送输入前激活其主窗口、收起原生菜单，不能把这一工具行为误报为产品失效，也不能用被激活的窗口反推“打开 MailX”菜单已通过。托盘右键菜单的展示与左键恢复已有原生证据；菜单项触发、Explorer 重启、多屏、锁屏/睡眠恢复、真实通知点击、写信多窗口与长时间 SMTP 退出仍按前述矩阵保留待验。本轮 debug 可执行文件验证不代替安装包或 release 构建验收。
-
-## 2026-10-29 139 邮箱预设与授权码引导
-
-基于 `c7a6bbb` 在当前工作区分支 `codex/139-mail-integration` 实现个人 139 邮箱入口。`providerId=139` 精确接受 `139.com`，默认 `imap.139.com:993` / `smtp.139.com:465` 隐式 TLS、完整邮箱登录与共享授权码；高级设置保留收发独立用户名、凭证和账号路由。复用 QQ / 网易的添加、修改连接、登录诊断、错误引导及每账号服务商图标偏好；已有手动账号不自动迁移或覆盖配置。本次没有修改核心协议、认证类型或数据库格式。
-
-中英文引导注明先开启 IMAP/SMTP、新生成授权码有效期 90 天且以官方页面日期为准、广电号码暂不能开启授权码；认证失败只引导检查服务开关、到期/撤销、账号安全提示与登录名，不将其精确归因为过期。桌面与浏览器模拟客户端仅为 `139` 打开同一固定官方授权码帮助页，形似 ID 与客户端自传 URL 保持拒绝。品牌图形从官方登录页的精灵图提取 `139` 主体并转为本地 SVG 路径，来源与处理见[图标说明](../../frontend/src/assets/providers/README.md)。
-
-已执行的验证：
-
-- `bun run check` 通过：68 个前端文件、739 项测试，809 条中英文消息、生成 DTO 一致性、类型检查、lint、生产构建和 Rust workspace check 通过。首轮类型检查发现新增说明断言误放在 QQ 测试内，修正到 139 参数化用例后重新执行完整检查通过。
-- `bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 通过：core 557 项、账号集成 39 项、desktop 112 项，共 708 项通过、3 项原有环境相关忽略；无新增忽略。
-- 回归覆盖 139 / 中国移动 / China Mobile 等搜索、精确域名和大小写、形似后缀/子域拒绝、完整地址默认和独立用户名覆盖、非固定长度授权码、编辑已有连接保护、向导往返和秘密清理、认证失败提示、登录测试与图标偏好、中英即时切换，以及官方帮助白名单。
-- macOS `.app` release 打包通过：`bun run tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'`。更新产物只为本次本地构建临时关闭，未修改发布配置或验证签名。
-- SVG 静态检查确认无内嵌位图、字体、脚本或外链；24 / 32 / 40 px 浅深底渲染已对比官方原图。浏览器模拟客户端检查中文浅色与英文深色服务商列表和引导、按中国移动搜索、添加前双协议登录报告、完成添加后的端点与用户名、服务商图标关闭/恢复及编辑时凭证不回填。模拟报告不代表真实登录或投递成功。
-- `git diff --check`、新增文档的 UTF-8 / LF / 空白与本地链接检查通过；独立代码和文案复核未发现待修问题。
-
-公开端点探测使用独立脚本、不带凭证，TLS 与能力结果见[接入评估](../reference/139-mail-integration.md#3-公开端点探测)，不作为 MailX 自身网络栈或账号路由的真实证据。本轮 Agent 未运行真实 139 账号、访问原生凭据或发信。主地址与手机号登录名、别名、目录/中文 MIME、已读/星标映射、附件实际投递、已发送副本、授权码轮换、其他运营商账号，以及代理与三平台原生体验仍按评估矩阵逐项补证。
-
-随后用户反馈已手动测试，并明确同意推送和创建 PR。记录为 2026-10-29 的用户手测反馈；未逐项注明平台、登录名、路由与收发场景，不扩写为所有兼容组合通过。上述 Agent 检查与模拟数据验证的边界不变。
-
-## 2026-10-30 服务商图标改用官方原始素材
-
-QQ 邮箱、网易 163 / 126 / yeah.net 与 139 的本地图标已替换为官方栅格素材并以 PNG 保存；QQ 使用邮箱专属图标，网易使用官方邮箱切换器中的独立圆形图标，139 使用官网下载入口对应的官方应用图标。图形、文字、背景与配色完整保留，替代此前裁剪、描摹的 SVG；前文的 SVG 检查属于当时版本记录。来源、原始格式和文件哈希见[图标说明](../../frontend/src/assets/providers/README.md)。
-
-验证：
-
-- 服务商登记、选择器和账号头像三个现有测试文件共 41 项通过；`bun run lint` 通过。
-- 网易三张 PNG 与官方 CSS 内嵌图片逐字节一致；139 PNG 与官方 JPEG 解码后的全部像素一致。五张本地图片的 SHA-256 与来源说明一致，中英文 README 图片路径有效。
-- 浏览器模拟界面确认五张 PNG 均加载成功，浅深主题下的服务商列表显示正常；14 / 18 / 20 / 24 / 32 / 40 px 浅深底预览已检查。
-- 在基于 `main` 的独立图标分支执行 `bun install --frozen-lockfile`、`bun run build`（含 TypeScript）和 `git diff --check`，均通过；服务商、头像、选择器三个测试文件及 lint 在该分支复验通过。
-
-本轮仅验证本地图片与前端显示，不涉及真实邮箱登录或收发。
-
-## 2026-11-11 139 邮箱图标去除推广信息
-
-将 `mail-139.png` 替换为 139 官方 Android APK 中的 `assets/blue/drawable/ic_mail_139.png` 原始 PNG。新图标为 66 × 66 RGBA，保留蓝色圆底、白色信封和 `139` 标识，不含原应用图标中的“AI+”推广区域；来源、APK 路径与 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md)。
-
-已核对：
-
-- 官方 APK 的 `blue` 与 `black` 图标条目字节一致，本地文件 SHA-256 为 `837435be15ce7c6d53d6fb52f830bbbae9e3b42a9fe51e2a7cdd2a138cf3f2b1`。
-- 现有服务商图标相关测试 69 项通过，类型检查和生产构建覆盖新资源；小尺寸图标仍由现有 `object-contain` 等比显示。本轮 lint 仍受当前分支其他会话功能改动触发的 Fast Refresh 规则报错影响，与图标资源无关。
-
-本轮仅验证本地图片来源与前端显示，不涉及真实邮箱登录或收发。
-
-## 24. 删除邮件（2026-10-31，经 macOS 用户手测）
-
-已实现删除到“已删除”（Trash）与永久删除，带 5 秒撤销窗口；规则见[邮件同步](../architecture/mail-sync.md#已实现删除邮件自动测试覆盖经-macos-用户手测)和[应用接口](../contracts/app-api.md#删除)。
-
-自动测试覆盖：
-
-- 存储层：删除即隐藏并扣未读、重复删除读作不存在、Trash 中或无 Trash 时必须确认、整批拒绝时不隐藏任何邮件、到期前撤销恢复、领取后撤销返回 `alreadyDeleting`、成功变为墓碑、多次失败或 UIDVALIDITY / Trash 变化时恢复显示且未读数不重复加回、撤销窗口内服务器计数不覆盖本地未读数。
-- 写回层（脚本化 IMAP）：有 MOVE 时一条 `UID MOVE`；只有 UIDPLUS 时 `UID COPY` + `\Deleted` + `UID EXPUNGE`；永久删除只 expunge 指定 UID；没有 UIDPLUS 时不发任何删除命令；UIDVALIDITY 变化不执行；服务器拒绝时保留重试。测试服务器对任何普通 `EXPUNGE` 直接失败。
-- 前端：是否永久删除的判断、删除后 Toast 撤销、确认框取消与确认、核心要求确认时补问、撤销过晚的提示、服务器退回时的提示。
-
-用户已在 macOS 上用真实账号手测删除，反馈正常；具体服务商未逐一记录。
-
-尚未验证（需要用户授权的真实账号）：
-
-- 各服务商的 `MOVE` / `UIDPLUS` 支持与实际行为，尤其 Gmail（`[Gmail]/Trash`、标签语义）、Outlook、QQ、网易 163。
-- 删除后在网页版确认邮件进入已删除 / 被永久删除，且没有误删同目录其他邮件。
-- 撤销窗口内退出应用、重启后删除照常执行；断网时删除保持隐藏、恢复网络后执行。
-- Windows / Linux 桌面行为。
-
-## 25. IMAP IDLE（2026-11-01，经 macOS 用户部分手测）
-
-设计与参数见[邮件同步](../architecture/mail-sync.md#已实现imap-idle自动测试覆盖经-macos-用户部分手测)。
-
-自动测试覆盖（脚本化 IMAP 服务器，无真实网络）：
-
-- IDLE 封装：EXISTS / EXPUNGE / FETCH / RECENT / VANISHED 被识别为变化；`* OK Still here` 等推送被忽略且不顺延期限；期限到达后 `DONE` + 新 `IDLE` 正常；手动停止发 `DONE`；`BYE` 与流结束报告为断开而不是手动中断；服务器拒绝 IDLE 返回错误。
-- 监视任务：无 `IDLE` 能力时为 `Unsupported` 且不发 IDLE；连发推送只唤醒同步一次（防抖）；断线后重连并再唤醒同步一次；服务商拒绝或认证失败后停用且不重连；关闭时依次发 `DONE`、`LOGOUT`；每 10 分钟重新 IDLE 且不唤醒同步；推送过频时断开退避；睡眠信号立即重连并唤醒同步。
-- 轮询间隔：`Live` 时前台 3 分钟、后台不变；其他状态与原来完全一致；`Live` 掉线时正在进行的等待被缩短；监视任务结束后等待不被卡住。
-- 睡眠检测：墙钟跳变触发、正常漂移与时钟回拨不触发；定时器注入时钟后只在“睡眠”时报告。
-
-用户已在 macOS 上用真实账号手测：应用在前台、以及关闭窗口驻留后台时，新邮件均及时出现，反馈正常；具体服务商未逐一记录。睡眠唤醒、国内服务商连接限制和代理尚未手测。
-
-尚未验证（需要用户授权的真实账号与环境）：
-
-- 各服务商的 IDLE 支持与实际延迟：2925、QQ、网易 163 / 126、139、Gmail、Outlook；同时多条连接是否被限制或拒绝；10 分钟重新 IDLE 能否稳定跨过 30 分钟的服务器空闲超时。
-- 收到新邮件后，桌面在数秒内出现并弹出通知；前台轮询确实降为 3 分钟、断开后恢复为 20 秒。
-- 合盖睡眠、锁屏、休眠唤醒后 IDLE 立即重连并同步，Windows / Linux 的睡眠检测。
-- 经 HTTP / SOCKS 代理时的 IDLE 保持时间；代理静默切断空闲连接后的恢复。
-- 切换网络（Wi-Fi 到热点、VPN 开关）后的重连与退避。
+- 合上笔记本盖子或休眠一段时间再唤醒：唤醒后不久同步一次，没有报错；Windows / Linux 的睡眠检测分别确认。
+- 最小化窗口算后台；从任务栏或 Dock 还原后立即刷新。手动刷新在任何状态下都立即开始。
+- 各服务商的 IDLE 支持与实际延迟、同时多条连接是否被限制、10 分钟重新 IDLE 能否跨过 30 分钟服务器空闲超时；经 HTTP / SOCKS 代理时的保持时间与代理静默切断空闲连接后的恢复；切换网络（Wi-Fi 到热点、VPN 开关）后的重连与退避。
 - 账号停用、删除、改密码、改代理后 IDLE 连接被关闭，服务商侧不残留空闲会话。
-- Windows / Linux 桌面行为。
 
-## 26. 本地归档（2026-11-01，经 macOS 用户手测）
+## 12. 服务商的验收
 
-规则见[邮件同步](../architecture/mail-sync.md#已实现本地归档仅本机自动测试覆盖经-macos-用户手测)和[应用接口](../contracts/app-api.md#归档仅本机)。
-
-自动测试覆盖：
-
-- 存储层：归档后收件箱与全部收件箱不含该邮件、全部已归档与账号已归档含它；非收件箱、本机副本、墓碑、不存在的 id 整批 `notFound` 且无改动；去重与 1–500 上限；取消归档恢复；UIDVALIDITY 重置后按 `Message-ID` 仍是已归档；无 `Message-ID` 按本地 id 记录、重置后回到收件箱；邮箱来源变化后旧记录失效；新到达邮件不是已归档；收件箱未读数 = 服务器值 − 已归档未读（不低于 0），服务器计数更新后仍扣减，已归档计数；搜索能找到已归档邮件并标记 `archived`。
-- 前端：阅读工具栏的归档 / 移回收件箱 / 非收件箱禁用及提示、归档后的 Toast 撤销与失败提示、侧栏两个“已归档”入口及从收件箱归档到已归档视图的流程、模拟客户端的归档与计数。
-
-用户已在 macOS 上用真实账号手测归档、撤销、移回收件箱与两个已归档入口，反馈正常。
-
-尚未验证：Windows / Linux 桌面行为。
-
-## 27. 账号显示排序（待桌面手测）
-
-账号顺序为 `layout.accountOrder` 本机显示偏好，规则见[界面设计](../architecture/ui-design.md#账号与设置入口)和[应用接口](../contracts/app-api.md#应用偏好设置)。本节列出桌面验收项目，不表示这些项目已经通过。
-
-浏览器 mock 已验证宽窗口纵向和 600px 窄窗口横向鼠标拖动、键盘排序与 Esc 取消、焦点恢复，以及刷新后保留顺序。自动测试覆盖即时写入失败回退、慢保存期间焦点与重复启动保护、多窗口设置事件、默认发件身份保持，以及账号变更和语言切换后的辅助说明；Rust 设置测试覆盖兼容读取、字段校验与并发布局合并。浏览器预览与自动测试不替代下列桌面和真实读屏检查。
-
-- 在宽窗口用左侧手柄上下排序，在窄窗口横排列表左右排序；账号很多时检查边缘滚动、首尾放置和连续拖动。
-- 聚焦手柄，以空格 / 回车拿起、方向键移动、空格 / 回车放下；Esc 取消且管理弹窗仍打开；检查焦点保留及中英文读屏说明与位置播报。
-- 修改当前账号名称而未失焦时调整其他账号的顺序，确认当前详情、输入和选中账号保持；重开弹窗及重启应用后顺序恢复。
-- 同时打开写信窗口，确认管理列表、侧栏、命令面板、发件账号下拉框和通知 / 发信设置列表显示一致；排序不改变既有草稿发件账号与默认发件规则。
-- 添加、移除账号及缺失 / 含过期 id 的偏好按规则显示；宽度调整与排序同时保存时彼此不覆盖；写入失败时回退显示并提示原因。
-- 分别验证 Windows、macOS 和 Linux 桌面，检查减少动态效果设置及触控输入。
-
-
-## 28. MCP 整理工具扩展（2026-11-03）
-
-实现五个新工具（标记已读 / 星标、本机归档 / 恢复、正常同步刷新、打开已有草稿），并增强搜索 / 阅读的星标、归档、状态和本地覆盖信息。本批随现有 MCP 总开关全部开放，没有新增整理开关；禁止删除邮件与自主发信。设计和接口见[整理邮件工具](../architecture/mail-organize-tools.md)。
-
-针对性自动测试覆盖：工具层两个主体、授权与账号范围、1–50 个目标、逐字段部分成功；星标在 SQL 分页前过滤与本机已发送副本；归档整批原子、重复操作、共享 Message-ID 的真实计数；混合原有归档状态的精确撤销、后续操作 / 往返 / no-op / 过期使旧回执失效、持久状态失配时整批拒绝撤销；事件按批发送、500 个 ID 上限但保持真实数量；UI 与 Agent 统一回执撤销、列表 / 详情 / 目录计数刷新；策略停止账号不被刷新工具重启；打开草稿先检查范围且使用已有草稿模式。
-
-本机 `bun run check` 通过，包括版本脚本、911 条中英文资源、Rust DTO 一致性、TypeScript、lint、82 个前端测试文件 / 866 项测试、生产构建与 Rust workspace check。生产构建保留既有 chunk 大小提示。MCP server 与 bridge 自动测试通过，包括真实本地 IPC 的工具列表、默认授权、逐字段错误、只读 / 幂等 / 网络 / 服务器写入注解与关闭连接行为。Rust fmt 和 Clippy（workspace / all-targets / -D warnings）通过；`bun run rust:test` 最终 1,010 项通过、5 项既有环境 / 性能测试忽略。全量回归曾发现单封标记本机已发送副本的错误码从 validation 变为 notFound，已恢复旧接口校验并通过原回归与完整重跑，批量工具语义不变。
-
-独立子代理完成只读审查，未发现需要修复的缺陷。本次没有与真实 MCP 客户端或真实邮箱联调，没有执行三平台桌面手测；不将合成数据、IPC 或自动测试通过视为这些行为已验证。后续手测重点：MCP 批量操作时当前邮件视图和未读数、界面与 Agent 交错操作后的撤销、打开既有草稿及关闭窗口、服务商停止状态和实际服务器标记写回。
-
-同一批次后续精简 MCP 与关于页：删除页面重复的能力 / 生命周期说明和关于页静态隐私说明，保留 MCP 开启确认、状态 / 错误、连接客户端、复制配置与折叠手动配置，以及版本和更新控件。现有 MCP、设置与更新测试共 3 个文件 / 26 项通过；移除了依赖已删“前往通用”链接的旧测试。TypeScript、lint、生产构建及中英文资源校验（888 条）通过；本次界面精简未经桌面手测。
-
-Windows CI 曾在 `expired_receipts_cannot_restore_mail` 失败：测试从 `Instant::now()` 倒推 601 秒，在时钟起点不足该时长时发生下溢。撤销回执改存单调时钟的到期时刻，仍在 10 分钟到期时失效；测试直接把到期时刻设为当前时刻，经过完整撤销入口验证拒绝、所有邮件仍归档且不产生事件，无需倒推时钟或等待。本机整理模块 10 项测试、core all-targets Clippy、Rust fmt 与差异检查通过，独立子代理复核无发现。
-
-
-<a id="mcp-send-attachments"></a>
-<a id="29-mcp-发信与附件工具2026-11-04待用户手测"></a>
-
-## 29. MCP 发信与附件工具（2026-11-04，已有用户手测反馈）
-
-本批直接发送草稿、查询 / 取消发送任务和添加 / 移除普通草稿附件；发送与 queued 重试统一为 `send_email`，无需逐封 UI 确认，仍不能删除邮件。规则见[发送与附件工具](../architecture/mail-send-tools.md)。上一批整理工具已由用户于 2026-11-04 反馈手测正常；同日用户另确认本批直接发信与附件工具在 macOS 上测试正常，并反馈 Windows 上 MCP 使用正常。反馈未逐项记录客户端、工具、服务商与异常场景，不将其扩展为完整矩阵通过；Linux 未手测。
-
-协议验证使用临时账号与本机关闭端口，发送任务配置 30 秒撤销窗口并在尝试前取消：MCP 调用覆盖附件添加 / 读取 ID / 移除、草稿直接入队、相同幂等键重放、分页查询、状态查询、重试保留撤销窗口和取消后草稿解锁；stdio bridge 覆盖新工具目录与直接入队 / 取消。设置测试核对精简开启说明包含直接发信、本机文件附件及不能删除邮件。
-
-本机 macOS 检查通过：`bun run check`（前端 82 个文件 / 865 项测试）、`bun run rust:clippy`、`bun run rust:test`（1030 项通过、5 项忽略）、`bun run rust:fmt` 和 `git diff --check`。新增发送测试覆盖合成 SMTP 接受后草稿已删除的幂等重放及并发重复提交；附件测试覆盖普通文件、大小限制、Unix 符号链接 / 设备 / FIFO 与 v23 迁移的数据、顺序、索引和级联保留。独立子代理审核发现按账号查发件箱多余读取钥匙串，已改为本地存在性检查，并验证钥匙串 Locked / Unavailable 时仍能查询；修复后复核通过。
-
-手测反馈修正：Agent 只报账号 ID，未能说明对应邮箱。账号列表现标明实际默认账号，创建 / 回复 / 列表 / 读取草稿和发送任务均返回发件邮箱；发送任务使用入队时冻结的地址。自动测试覆盖默认设置失效、授权范围与失效账号回退、钥匙串 Locked / Unavailable、账号地址改变后的幂等重放，以及本机副本移除 / 匹配服务器副本后地址仍保留。MCP 协议端到端覆盖账号列表至草稿、发送与查询链路；独立子代理复核通过。修正后再次通过 `bun run check`（前端 865 项）、Rust 全量测试（1032 项通过、5 项忽略）、Clippy、格式与差异检查。
-
-后续补充证据的重点：真实客户端从本机文件添加附件，检查收件人、正文、附件与发送账号；工具发送后用户界面的发件箱 / 草稿 / 已发送列表刷新；查询 accepted 不误称投递成功；离线重试与撤销窗口；unknown 不自动再次发送；Windows / macOS / Linux 的路径与本机文件限制。已有总体手测反馈未逐项覆盖这张清单，自动测试和合成 SMTP 也不替代这些证据。
-
-<a id="login-autostart"></a>
-<a id="登录自动启动与静默启动2026-11-04"></a>
-
-## 30. 登录自动启动与静默启动（2026-11-04）
-
-实现边界见[桌面生命周期](../architecture/desktop-lifecycle.md#登录自动启动与静默启动)。自动化覆盖设置兼容与持久化、固定启动来源标记、主窗口权限、文件注册与删除、路径编码、XDG 禁用标记和配置目录、静默启动等待探测与降级，以及开关默认值、禁用依赖、系统外部变化、保存失败和重试。文件测试只使用临时目录，不写实际 LaunchAgents / XDG / 注册表，也不调用 launchctl 修改真实系统启动项。
-
-2026-11-04，本地 macOS 执行 `bun run check`（含 83 个前端测试文件 / 872 项测试、48 项版本脚本测试、类型 / 翻译 / lint / build / Rust check）、`bun run rust:test`、`bun run rust:clippy` 与 `bun run rust:fmt` 通过；最后的桌面增量重跑为 141 通过、2 项默认忽略。独立子代理审查并复核后无剩余阻塞发现。同日用户确认开机自启动与静默启动在 macOS 上测试正常；未逐项记录安装形态、系统策略与异常场景，Windows / Linux 未手测。
-
-后续平台与场景验证清单（macOS 总体反馈不等于以下每项均已通过）：
-
-- 新安装与旧配置升级均默认关闭，安装 / 升级 / 普通启动不创建系统启动项。
-- 开启自启动、退出并注销登录后正常打开；关闭后再次登录不启动。
-- 开启静默后注销登录，主窗口不闪现；Dock / 托盘、快捷方式与通知可恢复；手动打开和主动更新重启始终显示窗口。
-- 关闭自启动后静默开关置灰并保留选择；重新开启继续生效。
-- 在系统设置中禁用或删除启动项，回到 MailX 后开关刷新，应用不擅自重新开启。
-- Linux 无托盘宿主、AppIndicator 缺失、首轮探测超时及运行中宿主消失时保留或恢复可发现窗口。
-- macOS 当前 GUI domain 的禁用、系统后台项目审批、未签名安装包与钥匙串授权分别确认。
-- Windows 安装路径含空格 / 中文、Task Manager 禁用和普通用户无管理员权限；Linux GNOME / KDE、XDG_CONFIG_HOME、含特殊字符的 AppImage 路径。
-- 三平台升级后路径仍有效；移动 app bundle / AppImage 后重新开启刷新路径，卸载前关闭能清理注册。
-
-## 31. 服务商兼容层与已发送副本对账（2026-11-05）
-
-规则见[邮箱服务商兼容层](../architecture/provider-compatibility.md)。对本机已有的两组 `vip.qq.com` 发送快照与服务器缓存进行了只读比对：解码后的 MIME 部件、主题和日期一致，服务器改写 `Message-ID`，`X-OQ-MSGID` 保留完整原始标识。这是本次问题的现场证据，未将私人邮件、地址或标识写入仓库，也未修改实际邮件数据。普通 `qq.com` 与其他账号别名未做真实发送验收。
-
-自动回归使用临时 SQLite、合成头部和受控 IMAP：覆盖 QQ / 标准默认策略与端点隔离，重复、畸形、超长原始标识及重复 UID 拒绝；新邮件与旧缓存消重，服务器副本先到、SMTP 接受与 `markSent` 后对账；当前账号、来源、代际、目录、待删除状态与发件人约束；原生标识优先；不覆盖正文、旗标和本地 UUID；每文件夹 200 条补抓、重启续做、STATUS 不变时补抓、完成后停止重复抓取、撤销删除与角色变化后的对账，以及 v23 → v24 迁移保留缓存。
-
-本机 macOS 检查通过：core 库增量回归 835 项通过、1 项默认忽略（超大旧草稿 HTML 测试已在上一轮通过，增量重跑未重复该耗时项）；最后新增边界与迁移测试后，`cargo test -p mailx-core --locked sent_identity --quiet` 16 项通过。另通过 core all-targets Clippy（`-D warnings`）、`bun run rust:check`、`cargo fmt --all -- --check` 和 `git diff --check`。独立复核发现的撤销删除 / 角色变化漏对账、跨目录对账时机和重复 UID 歧义已修复并补回归。
-
-尚待安装更新后的桌面实测：现有 QQ 重复项随同步合并、新发送只显示一份、阅读和附件在交接后可用；普通 QQ / VIP / Foxmail 账号与其他服务商分别记录结果。自动化与现场只读诊断不等于更新后真实服务器及三平台验收。
-
-## 32. 侧栏同步反馈降噪（2026-11-05）
-
-规则见[界面设计语言](../architecture/ui-design.md#同步状态反馈)。自动同步不再替换账号未读数或播放动画；手动刷新只反馈对应按钮的进度，悬停或聚焦可查看同步状态及本次运行中的最近整轮成功时间。尚无文件夹时保留静态首次获取文字，已有文件夹缓存启动时不重复显示，异常警示继续保留。
-
-本机 Windows 自动检查通过：前端 84 个测试文件 / 885 项测试、lint、生产构建（含 TypeScript 检查）、中英文资源校验和 `git diff --check`。默认并发及 5 秒单项时限的首次运行有两项测试超时；最终完整运行使用 `bun run frontend:test -- --maxWorkers=4 --testTimeout=15000`，未修改测试断言或仓库默认时限。回归覆盖后台同步静默、手动刷新保留未读数、重复请求阻止、完成事件先于唤醒响应、失败恢复、无 worker 启动的有限等待、来源 / generation 替换、服务商安全策略显式重试及卸载清理。
-
-浏览器预览使用仓库合成数据，核对深色界面中默认 256px 和最窄 220px 侧栏下刷新按钮与未读数并列显示。独立代码复核未发现阻塞问题。本次未进行真实账号同步、原生桌面安装包或 macOS / Linux 界面验收。
-
-<a id="icloud-mail-feasibility"></a>
-
-## 33. iCloud 邮箱接入调研与公开端点探测（2026-11-06）
-
-调研基线为 `5973b4a`。本轮只读审查账号、IMAP / SMTP、服务商表单、同步与已发送副本代码，并阅读 Apple 官方服务器设置、应用专用密码、第三方应用授权、邮箱限制及自定义域说明。结论与来源见[iCloud 接入评估](../reference/icloud-mail-integration.md)；没有实现专用预设或修改应用行为。
-
-本机 macOS 于 2026-11-06 00:26:44（Asia/Shanghai）使用 Python 标准库 `imaplib` / `smtplib` 直接连接 Apple 官方端点，以默认信任链验证证书及主机名；没有 LOGIN / AUTH / MAIL / RCPT / DATA，也未使用凭据或访问真实邮件。
-
-| 端点 | 探测操作与结果 |
-| --- | --- |
-| `imap.mail.me.com:993` | 隐式 TLS 1.2 成功，执行 CAPABILITY / LOGOUT。登录前公告 `XAPPLEPUSHSERVICE IMAP4 IMAP4rev1 SASL-IR AUTH=ATOKEN AUTH=PLAIN AUTH=ATOKEN2 AUTH=XOAUTH2`；未公告 LOGINDISABLED。 |
-| `smtp.mail.me.com:587` | 执行 EHLO → STARTTLS → TLS 后 EHLO → QUIT，TLS 1.2 成功。升级前公告 STARTTLS，未公告 AUTH；升级后公告 `AUTH LOGIN PLAIN ATOKEN ATOKEN2 WSTOKEN WETOKEN XOAUTH2`。两次 EHLO 均公告 `SIZE 28319744`，以及 PIPELINING、ETRN、ENHANCEDSTATUSCODES、8BITMIME、DSN、SMTPUTF8、CHUNKING。 |
-
-本次结果证明公开端点当时可达、证书验证通过、SMTP STARTTLS 可用且公告 MailX 已实现的 PLAIN / LOGIN。IMAP 的 AUTH=PLAIN 不等同于 LOGIN 命令；未公告 LOGINDISABLED 也不能代替真实 LOGIN 验证。登录前未公告 IDLE / MOVE / UIDPLUS 不代表登录后缺失，XOAUTH2 公告不代表 MailX 已获 Apple 授权资格。
-
-本次 SMTP `SIZE 28319744` 约为 27.0 MiB，与官方 20 MB 邮件大小指引是不同层面的证据；不据此扩大可投递上限或推导稳定的原始附件额度。MailX 当前原始附件总量 20 MiB 的本地规则、最终 MIME / SIZE 检查和 Mail Drop 未实现的边界保持不变。
-
-该探测使用 Python 网络栈，不能替代 MailX 的 rustls / 平台证书验证、账号路由、真实认证、代理和收发验证。尚未验证任何真实 iCloud 账号、目录/标记/删除、IDLE、SMTP 投递、服务器已发送副本、密码撤销恢复、别名、历史地址、自定义域或 Windows / Linux 组合。后续按评估文档工作包独立记录证据。
-
-调研文档经独立代码与官方资料复核，修正了删除能力的表述和两处来源标题；UTF-8 / LF、相关本地 Markdown 链接及差异空白检查通过。本轮仅修改文档，没有运行应用自动回归或桌面手测。
-
-### iCloud 预设与应用专用密码引导
-
-实现以 `9e07199` 为主干基线，新增 `icloud` 入口，精确接受 `icloud.com` / `me.com` / `mac.com`，预填 IMAP 993 隐式 TLS 与 SMTP 587 STARTTLS。收发用户名默认完整邮箱地址，高级设置保留独立覆盖；密码复用 shared / separate 的写入型输入并保留原值。凭证种类元数据统一决定表单和故障帮助文案，QQ、网易、139 继续使用授权码文案，通用入口继续使用普通密码文案。
-
-桌面与浏览器 mock 将精确 `icloud` ID 映射到 Apple 官方应用专用密码帮助，拒绝任意 URL、路径、近似 ID 及额外 URL 参数。未新增品牌图形、认证类型、数据库迁移或 iCloud 核心特判；`imap.mail.me.com` 沿用标准兼容策略。双语用户说明、账号配置、兼容层说明、路线图与 CHANGELOG 已同步。
-
-本机 macOS 检查通过：
-
-- `bun install --frozen-lockfile` 无依赖变更；`bun run check` 通过，包括 48 项版本脚本测试、914 条双语资源、Rust DTO 一致性、类型、lint、84 个前端测试文件 / 911 项测试、生产构建与 Rust workspace check。构建保留既有 chunk 大小提示。
-- 前端定向 7 文件 / 211 项回归覆盖三域与近似域拒绝、993 / 587 TLS、默认和独立用户名、共享密码原值、添加前测试与保存、往返步骤、语言切换、已保存连接保护及认证失败帮助；mock 的 24 项现有回归亦通过。
-- `cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments` 1 项通过；`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过。未运行本地 Rust 全 workspace 测试。
-- 相关修改文件 UTF-8 / LF、本地 Markdown 链接及双语标题结构检查通过；独立应用代码审查未发现确定缺陷。
-
-浏览器预览未完成：浏览器控制宿主不可用，原生控制尝试超时；本轮不记录界面目测通过。没有使用真实 iCloud 凭据、登录邮箱、修改邮件标记或发送邮件；真实登录与收读发、已发送服务器副本、IDLE / 删除、凭证撤销恢复、别名与自定义域及三平台桌面行为继续待验。预设存在和上述自动检查不能代替这些验证。
-
-### 官方 iCloud Mail 图标与解耦复核
-
-同日后续将通用图标替换为 iCloud 官网 AppIcon 为 `mail` / `mail2` 引用的 Apple 官方浅色版 PNG，直接本地打包原文件，240 × 240、22,835 字节；来源链和 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md#icloud-mail)。已核对本地文件与官方原件字节一致；离线渲染检查 14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景下的完整图形、比例和辨识度，保留原始背景与细字。该检查只验证素材显示，不替代原生桌面界面验收。
-
-服务商选择器、徽标与账号头像复用现有 `logo` 元数据及账号图标开关。现有 3 个服务商 / 头像 / 添加账号测试文件共 94 项通过，覆盖 iCloud 的本地图片、默认开启与关闭回退、添加并保存图标偏好；`bun run lint`、`bun run build`（含 TypeScript）及 `git diff --check` 通过。生产构建输出 `icloud-mail-CSkDyzeG.png`，与源码图片字节一致，应用运行时无需热链官网；保留既有 chunk 大小提示。
-
-实现完成后委派未参与实现的独立子代理审查整个 PR。复核确认 iCloud 端点、域名、引导与图标集中在前端服务商登记中，公共表单按中立凭证元数据工作；`core/src` 没有本次改动，iCloud 沿用 `StandardCompatibility`，同步、发送和存储没有新增品牌特判；桌面端只扩展官方帮助白名单。审查发现的账号配置文档旧图标描述已修正并通过复核，无剩余阻塞发现。真实 iCloud 认证与收发、服务器副本和三平台桌面验证仍待完成。
-
-### 菜单栏默认值与服务商选择顺序（2026-11-06）
-
-macOS 菜单栏图标默认值由关闭改为开启；配置文件中缺少 `showMenuBarIcon` 的新安装和旧配置使用新默认，已经明确保存为 `false` 的用户偏好保持关闭。macOS 仍保留 Regular 应用身份和 Dock，关闭主窗口后的后台恢复行为没有变化。iCloud 在服务商登记数组中调整到第一项，手动 IMAP/SMTP 保持末项；搜索结果继续保持登记顺序。
-
-自动检查通过：iCloud 首项 / 手动入口末项测试、菜单栏默认开启与关闭切换测试共 35 项前端定向测试通过；core settings 39 项通过；类型检查、lint 和 `git diff --check` 通过。未进行本次变更相关的原生 macOS 菜单栏图标或 Dock 行为验收；既有记录中的菜单栏 template 与 Dock/Finder 真机待验项目仍然有效。
-
-## 34. 邮件卡片焦点与草稿富文本预览（2026-11-07）
-
-- 邮件卡片鼠标点击已读 / 未读后移开会淡出快捷按钮，键盘焦点仍保留操作可见；自动测试覆盖有正文预览和紧凑模式、已读和未读两种状态。
-- 草稿预览的前端回归覆盖隔离 iframe、保存后按 revision 重建会话、切换草稿后释放迟到令牌、当前与过期链接事件、空正文、纯图片正文、普通附件过滤，以及深色跟随 / 固定浅色。原有普通邮件正文回归同时通过。
-- 桌面协议测试覆盖富文本投影、CID 图片与外链绑定、无远程图片、来源 / 账号 / 草稿版本隔离、保存 / 删除 / 连接变更 / 释放后的旧资源拒绝、缺失图片占位、旧纯文本草稿与窗口权限。桌面测试 147 项通过，2 项既有测试忽略；不等同于原生 WebView 实机验证。
-- 本机前端全量测试 86 个文件、962 项通过；Rust 全工作区测试 1,071 项通过、5 项既有忽略；类型检查、Lint、构建、i18n、DTO 一致性、版本一致性检查和 Rust 格式 / workspace 全目标 Clippy 通过。独立子代理只读审查通过，未发现阻塞问题。
-- 浏览器合成草稿核对浅深主题下的标题、粗体、列表、引用、颜色、高亮、对齐与普通附件布局。此浏览器预览使用开发适配，不代替 Rust 渲染器的实际桌面显示验证；本轮未做三平台 Tauri 原生窗口、真实草稿图片与系统外链打开手测。
-
+<a id="11-qq--foxmail-预设与收发连接诊断"></a>
+<a id="15-网易-163--126-预设与安全策略恢复"></a>
 <a id="gmail-app-password"></a>
+<a id="icloud-mail-feasibility"></a>
+<a id="2026-10-25-网易企业邮箱-status-目录名兼容"></a>
+<a id="2026-10-29-139-邮箱预设与授权码引导"></a>
 
-## 35. Gmail 应用专用密码预设（2026-11-08）
+服务商方案与来源见各接入调研：QQ / Foxmail、网易 163 / 126 / yeah.net、139、Gmail、iCloud、Microsoft、Exchange。通用自动检查覆盖搜索别名、精确域名与形似后缀拒绝、默认端点与 TLS、完整地址与独立用户名、授权码 / 应用专用密码 / 普通密码文案、凭证原值保留、向导往返与秘密清理、认证失败引导、官方帮助白名单、每账号图标偏好。连接诊断受控测试证明它不执行投递命令、不进入发送队列、取消后丢弃迟到结果、代理失败不回退直连，且成功后不更新持久化连接状态。
 
-实现以 `851a185` 为主干基线，新增 `gmail` 入口，精确接受 `gmail.com` / `googlemail.com`，预填 `imap.gmail.com:993` 与 `smtp.gmail.com:465` 隐式 TLS，收发共享应用专用密码，用户名默认完整邮箱地址。复用 `appPassword` 凭证文案；桌面与浏览器 mock 只把精确的 `gmail` 映射到 Google 应用专用密码帮助，拒绝近似 ID 与任意 URL。服务商列表调整为 Gmail 第一、iCloud 第二，手动 IMAP/SMTP 仍为末项，README 与用户指南按同一顺序排列。未修改 `core/src`，`imap.gmail.com` 沿用标准兼容策略；没有新增认证类型或数据库迁移。接入方式比较与 OAuth 条件见 [Gmail 接入评估](../reference/gmail-integration.md)。
+每种服务商接入后用测试账号在三平台分别记录：
 
-公开端点探测（2026-11-08 15:37，Asia/Shanghai，本机 macOS，Python 标准库，默认信任链）只执行 CAPABILITY / EHLO / STARTTLS / QUIT，未登录：IMAP 993 与 SMTP 465 隐式 TLS 成功，587 STARTTLS 成功；IMAP 未公告 LOGINDISABLED，SMTP 公告 `AUTH LOGIN PLAIN`。完整公告见评估文档；探测不代替 MailX 网络栈与真实认证。
+- 支持的地址形态（QQ 数字 / 英文 / `vip.qq.com` / Foxmail、`163.com` / `126.com` / `yeah.net`、`139.com`、`gmail.com` / `googlemail.com`、`icloud.com` / `me.com` / `mac.com`、Outlook 个人与 Microsoft 365）与共享 / 独立用户名组合。
+- 服务开通、授权码 / 应用专用密码的生成与有效期、停用服务、错误或撤销的凭证、认证失败的提示；预设入口之外的地址仍走手动配置。
+- IMAP 目录（含中文、嵌套与服务器命名差异）、策略拒绝与安全策略恢复、初次与增量同步、已读 / 星标写回、附件、范围变更后旧邮件可见性。
+- 正文：中文与 GBK / GB2312 编码、CID 图片、远程图片加载与失败重试。
+- 直连、继承默认路由、自定义 SOCKS5 / HTTP CONNECT 代理；代理不可用时明确失败，不得回退直连。
+- 用测试收件人实际发送，确认收件、发件人地址、中文主题 / 正文、撤销与失败状态；确认服务商是否自动保存已发送副本，并与本机副本对账。发送失败、SMTP `RCPT` 部分拒绝、DATA 后断线各测一次。
+- 已发送副本：服务器副本先到、SMTP 接受后到、以及服务器改写 `Message-ID` 的账号都核对一次，确认列表只显示一份且阅读与附件可用。
+- 服务商图标：使用官方原件本地打包，不含脚本、外部资源或字体依赖；14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景下的完整性与辨识度；当前景深主题下小尺寸可读。规则见[服务商图标维护规范](../../frontend/src/assets/providers/README.md)。
+- 预设入口与官方帮助的打开；写信窗口和邮件正文无法调用诊断或帮助命令。
 
-图标为 Gmail 产品页导航引用的官方静态 SVG，本地文件与原件字节一致，来源与 SHA-256 见[图标说明](../../frontend/src/assets/providers/README.md#gmail)。以无头 Chrome 渲染 14 / 18 / 20 / 24 / 32 / 40 px 在白色与深灰背景下的显示，图形完整、比例正确、无裁切。文件小于 Vite 内联阈值，生产构建以 `data:` 图片打包进主脚本，桌面 CSP 的 `img-src` 允许 `data:`，运行时不访问 Google 站点。
+单个服务商或单个账号成功只记该组合。公开端点探测（TLS、能力公告、未登录）只说明网络可达与公告内容，不能代替 MailX 网络栈上的真实认证与收发。
 
-本机 macOS 检查通过：`bun run check`（版本检查与测试、927 条双语资源、Rust DTO 一致性、类型检查、lint、86 个前端测试文件 / 978 项测试、生产构建与 Rust workspace check，保留既有 chunk 大小提示）；`cargo test -p mailx-desktop --locked verification_and_help_reject_arbitrary_targets_and_secret_arguments`、`cargo clippy -p mailx-desktop --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`。新增前端回归覆盖搜索别名、端点与 TLS、近似域拒绝、两种域名的默认用户名、应用专用密码原值保留、添加前测试登录与保存、帮助入口和图标。
+## 13. 账号管理
 
-没有使用真实 Gmail 凭据、登录邮箱或发送邮件；应用专用密码登录（含带空格输入）、收读发、标签导致的多文件夹重复、删除与归档、服务器已发送副本对账、IDLE、密码修改后的恢复及三平台桌面行为仍待验证。预设存在和上述自动检查不能代替这些验证。
+自动回归覆盖创建、编辑、关闭后重启、版本冲突、重复请求、凭据不回填、添加向导的往返与状态重置，以及移除账号时的持久化、后台任务停止、写入竞争与迟到结果。真机使用测试账号在 macOS、Windows、Linux 分别检查：
 
-<a id="batch-mail-actions"></a>
+- 添加流程：服务商列表搜索（名称、域名、别名）、键盘单选、双击前进、空状态；基础表单只问必要字段，高级设置可展开；添加前“测试登录”分别显示 IMAP / SMTP 结果，不保存账号、不读写凭据库；测试登录成功只证明协议登录探测。
+- 修改连接：保留已有端点、独立用户名与代理，密码只显示保留 / 替换；连接版本变化后旧诊断结果失效。
+- 移除账号：确认后清除本机配置、邮件记录、草稿与发件记录，关闭受影响的写信窗口；不删除服务器邮件；同步期间移除后主界面、搜索、正文与附件立即失去该账号内容，重启不恢复；等待发送的邮件随账号移除，SMTP 已开始时拒绝移除；系统凭据库锁定时移除成功并提示待清理，解锁后在重启或后续写入时清理完成。
+- 多写信窗口：包括改过发件账号的草稿，移除后仅受影响窗口关闭，其他草稿仍可保存；确认未保存内容与本地草稿丢失的提示与实际一致。
+- 服务商图标偏好、账号颜色（含“不标识”）、添加按钮文字与位置、默认登录用户名：深浅主题与窄窗口下的显示，创建后自动选中、资料保存提示。
 
-## 36. 邮件列表多选与批量处理（2026-11-08）
+## 14. 写信与发信
 
-实现以 `28cddca` 为基线。界面行为见[界面设计 · 多选](../architecture/ui-design.md#多选已实现实机未验证)，接口见[批量处理](../contracts/app-api.md#批量处理主窗口)。核心删除与归档新增“跳过不可处理邮件并返回 id”的模式，仅主窗口使用；MCP 工具仍为整批校验，输出不变。新增 `emails_set_flags` 与 `emails_select`（与列表同条件、同顺序，最多 500 封）；没有数据库迁移。
+<a id="22-已发送文件夹中本机副本的-macos-用户手测"></a>
 
-自动测试覆盖：部分删除（跳过按输入顺序、全部跳过为 `notFound` 且不改状态、永久删除仍需确认、撤销只恢复实际处理的邮件、严格模式不变）、部分归档与撤销回执、逐封标记结果与数量上限、全选与列表在 12 组查询下结果一致及 501 封时截断；前端覆盖选择状态（切换、Shift 连选、未进入多选时修饰键只选被点的一封、范围变化清空、消失的邮件剔除）、标题栏状态、全选截断提示、部分失败保持选中与单条提示、永久删除数量确认、混合状态按钮文案。
+规则见[写信与发送设计](../architecture/sending.md)、[邮件同步](../architecture/mail-sync.md)与[应用接口](../contracts/app-api.md)。脚本化 SMTP 与存储测试覆盖 MIME 构造、Bcc 只入信封、路由、STARTTLS、认证、RCPT 部分拒绝、各阶段失败与超时、`unknown` 不自动重发、撤销窗口、幂等、重启恢复与账号地址变化的处理。真实环境检查：
 
-本机 macOS 检查通过：`bun run check`（前端 88 个测试文件 / 998 项测试）、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。浏览器 mock 预览以无头 Chrome 截图核对浅深主题下的选中描边、淡底、右上角勾与悬停描边。项目维护者已在 macOS 桌面版手动测试多选与批量操作，未发现问题；Windows / Linux 桌面与其余服务商组合尚未验证。
+- 三平台用测试白名单收件人实际发送：中文主题与正文、纯文本与富文本、附件与内嵌图片、多条收件人、Bcc。
+- 各服务商的 `RCPT` 拒绝、发送后断线、进程在 DATA 中途被强杀后的恢复（受控服务器模拟）与系统时钟跳变。
+- 已发送副本：服务器没有副本时保留本机副本，服务器对上后释放本地快照；列表显示“致：收件人”与本机标识，打开后无已读 / 星标按钮，“从本机移除”确认后该行消失且不再弹出“已发送”提示。
+- 各服务商是否自动保存已发送副本、本机副本与服务器副本的交接时机；发送成功后约 10 秒的同步唤醒单独确认。
+- 富文本在真实邮件客户端中的呈现：空段、嵌套列表、引用、链接、标题、对齐、颜色与高亮；跨应用粘贴与长正文滚动。
+- 写草稿：断网编辑、进程退出、磁盘满时可恢复或明确未保存；`draftLocked` 只读；冲突重载并提示。
 
-<a id="oauth-foundation"></a>
+## 15. 删除、归档与批量处理
 
-## 37. 通用 OAuth 基础的验证边界（2026-11-08）
+删除、撤销、永久删除、归档与本机归档的存储与写回测试覆盖：有 MOVE / UIDPLUS / 两者都没有时的命令选择（从不发普通 EXPUNGE）、整批拒绝时不隐藏任何邮件、领取后撤销返回 `alreadyDeleting`、成功变为墓碑、UIDVALIDITY / Trash 变化时恢复显示、未读数不重复加回、归档后 UIDVALIDITY 重置仍按 `Message-ID` 保持、未读数扣减与搜索标记。真机检查：
 
-当前生产 OAuth 注册及身份适配器表为空，没有真实 OAuth 服务商可供添加。受控 HTTP / IMAP / SMTP 和 SecretStore 测试用于验证通用基础；它们不能证明 Gmail、Outlook、租户策略、公开应用资格、系统浏览器回调或真实原生凭据库轮换已通过。
+- 各服务商的 MOVE / UIDPLUS 支持与实际行为，尤其 Gmail（`[Gmail]/Trash`、标签语义）、Outlook、QQ、网易 163。
+- 删除后在网页版确认邮件进入已删除或被永久删除，且没有误删同目录其他邮件。
+- 撤销窗口内退出应用、重启后删除照常执行；断网时删除保持隐藏，恢复网络后执行。
+- 归档、撤销、移回收件箱与两个“已归档”入口；Windows / Linux 桌面行为。
+- 多选批量：Shift 连选、全选与会话内 500 封上限、部分失败保持选中与单条提示、混合状态按钮文案、永久删除数量确认、部分处理后的撤销。
 
-可重复检查按职责执行：
-
-- `cargo test -p mailx-core --lib xoauth2`：成功握手、错误挑战后的空响应、畸形挑战 / 断线的可重试错误分类，以及后续 SMTP 回复回显 raw / Base64 bearer 时的脱敏。
-- `cargo test -p mailx-core --lib authentication_contract_tests`：旧密码快照兼容读取、显式认证联合类型，以及 OAuth 摘要不含密码 / token 字段。
-- `cargo test -p mailx-core --lib unknown_provider_begin_and_reauthorization`：未知注册在账号访问和授权副作用之前返回 `unsupported`；服务商身份、PKCE、刷新、路由与持久化边界由 `core/src/auth/` 和账号 OAuth 受控测试分别覆盖。
-- `cargo test -p mailx-desktop window_access`：新增授权会话命令只对可信 main 窗口开放，并核对 handler、生成权限与 capability 表一致。
-- 前端账号、连接表单与写信测试检查显式认证类型、OAuth 不出现密码编辑器、已有密码行为与发信凭证判断；DTO 仍通过 `bun run types:generate` / `types:check` 生成与核对。
-
-2026-11-08 本地检查：`bun run typecheck`、`bun run lint`、`bun run i18n:check` 和 DTO 生成通过；连接表单、账号草稿、账号设置和写信四个 Vitest 文件共 143 项通过。`cargo test -p mailx-core --lib oauth` 的 20 项通过，覆盖稳定 / 轮换 refresh token 的受控全链路、重授权身份与版本、移除、关闭阶段、到期清理和 XOAUTH2；`cargo test -p mailx-desktop window_access` 的 9 项通过。`cargo check -p mailx-desktop` 通过。以上证明本机自动检查及受控测试，不代表已启动真实 OAuth 浏览器、完成真实提供商授权或全平台凭据库轮换。
-
-2026-11-08 工作区复验：`bun run check` 通过，包含版本脚本 48 项、前端 86 个文件 / 963 项测试，以及 DTO、类型、lint、i18n、构建与工作区检查；最终前端 typecheck / lint / build / i18n 亦复验通过。工作区 Rust 格式、全部 target 的 Clippy `-D warnings` 通过，`bun run rust:test` 共 1122 项通过、0 项失败、5 项既有忽略项（core 单元 891、账号集成 39、desktop 147、bridge 两组各 6、MCP server 17、端到端 16）。该次完整 Rust 运行在最后的“退出持久化 owner 尚未调度时取消等待者”窄窗补丁前启动，不据此声称补丁后的新完整总数。
-
-通用 OAuth 定向复验还覆盖同 grant 多 resource / scope 缓存、已完成授权被取消的竞态、存储 apply 失败后的同进程 journal 恢复、在途轮换写入与补偿删除失败的持久清理意图、关门后旧 plan、取消退出等待者、退出时有限密钥库重试、客户端及绑定同时被篡改，以及邮件端点与信任记录同时被篡改的缓存 / 重启路径。`cargo test -p mailx-core --lib oauth --locked` 的 27 项通过；发件箱授权等待文案定向测试 2 项通过。上述受控结果不扩展真实服务商或平台验证范围。
-
-最后退出 owner 排队窄窗补丁后，工作区格式、全部 target 的 Clippy `-D warnings` 与 `bun run types:check` 再次通过；`cargo test -p mailx-core --lib auth:: --locked` 的 40 项通过（853 项被过滤）。该复验包含尚未调度的持久化 owner 在等待者取消后仍计入 active、已开始的真实密钥库写入不会提前被视为 drained；独立只读审查最终通过，未留阻断项。完整前端仍为上述 963 项，完整工作区 Rust 仍引用上述实际运行的 1122 项 / 5 项忽略，不将定向结果冒充新增全量运行。
-
-### 服务商中立补充（2026-11-10）
-
-生产服务商列表仍为空；以下用假数据的受控测试（不含任何真实服务商的客户端 ID、端点、主机、租户或 scope）覆盖新增的中立能力：
-
-- `cargo test -p mailx-core --lib auth::`：固定回调路径与逐字节一致的 `redirect_uri`（含空路径无结尾斜杠、根路径请求被接受）、静态授权附加参数与 `login_hint` 的开关、不可覆盖流程自有参数；无脚本的双语回调页及 `error` 分支；`id_token` 的 `aud` / `exp` / `nonce` / `iss` / `sub` 检查及随机 `nonce`；身份来自 `id_token`、issuer 随租户变化；token 端点 `invalid_grant` / `interaction_required` / `consent_required` / `login_required` 归为需要重新登录。
-- 凭据大小：模拟 Windows 凭据管理器 1280 字符上限的 `SecretStore` 替身，验证 2000 字符 access token 不落盘、900 字符 refresh token 可保存并在重启后刷新；2000 字符 refresh token 返回存储错误，旧值保持不变，没有截断。这不是在真实 Windows 凭据管理器上的实测。
-- `cargo test -p mailx-core --lib accounts::oauth`：issuer 不参与注册项匹配、重新授权要求同一已验证 `(issuer, subject)`；服务商拒绝分类钩子在 SMTP（回复码 + 增强状态码）与 IMAP（响应码）上都不触发刷新重试、不标记需要重新授权，且错误中不含服务器文字。
-- `providers::oauth` 测试：生产列表为空，未知标识返回 `unsupported`，列出的条目标识唯一且通过校验。
-- 前端：发件箱 `providerPolicy` 原因的中英文文案。
-
-这些结果只说明中立基础按预期工作，不代表任何服务商、租户策略、真实系统浏览器回调或真实原生凭据库已通过验证。
-
-2026-11-10 本地完整检查：`bun run check` 通过（前端 89 个文件 / 1016 项测试，DTO、类型、lint、i18n、构建与 `cargo check` 均通过）；`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）通过；`bun run rust:test` 共 1163 项通过、0 项失败、5 项既有忽略项（core 单元 931、账号集成 39、desktop 148、bridge 两组各 6、MCP server 17、端到端 16）；`git diff --check` 无输出。仅为本机自动检查，范围见上。
-
-## 38. Microsoft（Outlook / Microsoft 365）浏览器登录
-
-2026-11-10 实现两个入口 `microsoft-personal`（Outlook）与 `microsoft-work`（Microsoft 365 / Exchange）。实现位于 `core/src/providers/microsoft.rs`，规则见[服务商兼容层 4.1](../architecture/provider-compatibility.md#41-microsoftcoresrcprovidersmicrosoftrs)，选型与决定见[接入评估](../reference/microsoft-integration.md)。**没有使用任何真实微软账号，也没有访问微软服务器**；以下全部是受控测试，不代表真实账号、租户策略、系统浏览器回调或原生凭据库通过验证。
-
-受控测试覆盖：
-
-- `cargo test -p mailx-core --lib providers::`：两个注册项通过 `validate()`，客户端 ID、端点、服务器、scope、空回调路径与 `prompt=select_account` / `login_hint` 与已核对的事实一致；身份验证器检查 `iss` 与 `tid` 对应、`tid` / `oid` 为标准 GUID、个人与工作租户互斥（入错入口返回专用错误且不触发 IMAP 登录）、主体为 `{tid}/{oid}`，邮箱取求证结果而非 `email` 声明；`aud` / `nonce` / 缺少 `id_token` 被拒，IMAP 求证的拒绝与网络错误原样透传；SMTP `535 5.7.139` 才归为管理员关闭，其他状态码、IMAP 响应码均不分类。
-- `cargo test -p mailx-core --lib imap::tests::mailbox_proof`：被拒登录映射为“无法打开邮箱”，代理、TLS、超时与连接失败保持各自的 OAuth 网络类别。
-- `cargo test -p mailx-core --lib auth::`：`mail_connections` 由注册项给出服务器与登录名，且通过目标校验；其余通用 OAuth 测试不变。
-- `cargo test -p mailx-core --lib accounts::oauth`：`sign_in_uses_the_same_route_as_saved_accounts` 固定 `inherit` 与直连在授权、同步、发信三处一致，自定义代理原样带入。
-- `cargo test -p mailx-desktop secret_split`：用强制 1280 个 UTF-16 单元上限的内存 `SecretStore` 验证分条目包装：短值保持单条目且旧值可读，长值拆分并还原，不切断字符，缩短或删除时清理旧段，缺段或长度不符返回错误而不是“无凭证”，写段失败不留下头部，形似头部的明文可原样读回。Windows 专用接线（`cfg(target_os = "windows")`）在 macOS 上只做了人工审阅，没有为 Windows 目标编译或运行。
-- 前端：提供商列表顺序与搜索别名；添加流程只问邮箱、不出现服务器 / 密码 / 测试登录；“在浏览器中登录”调用、等待与取消、关闭弹窗放弃等待；邮箱被拒、入错入口、代理问题回到第 2 步，未允许访问留在第 3 步；账号设置的“重新登录”（需要时醒目、取消、失败提示）；浏览器模拟客户端的成功、拒绝、取消与重新登录路径。
-
-浏览器模拟客户端已目测：搜索 “outlook” 只出现 Outlook 条目并显示帮助，第 2 步只有邮箱地址与“高级设置”，创建账号后账号设置里出现“重新登录”。未操作真实账号。
-
-仍待真实账号验证（清单与背景见接入评估第 7 节）：授权页与回调、IMAP / SMTP 收发与 IDLE、Outlook.com 的 `smtp-mail.outlook.com` 与工作账号的 `smtp.office365.com`、管理员批准与关闭 IMAP / SMTP 时的实际表现、`login_hint` / `prompt` 行为、令牌轮换与过期后的“重新登录”、Windows 凭据管理器中分条目存放的真实刷新令牌，以及三个平台的桌面行为。官方 Outlook 图标与 Microsoft 标识已加入，见下文“图标”。
-
-### 图标（2026-11-10）
-
-“Outlook”入口使用 Microsoft 官方 Outlook 产品图标 `outlook.svg`（48 × 48，8,832 字节），“Microsoft 365 / Exchange”入口使用 Microsoft 登录品牌指南提供的 Microsoft 标识 `microsoft.svg`（21 × 21，343 字节）。来源页面、直接 URL、核验日期、SHA-256、许可条款和不使用 Exchange 产品图标的理由见[图标说明](../../frontend/src/assets/providers/README.md#microsoft-outlook)。已核对两个本地文件与下载原件字节一致、哈希与记录相同，且不含脚本、外部资源或字体依赖。
-
-浏览器预览检查：在 14 / 18 / 20 / 24 / 32 / 40 px、浅色（白）与深色（#1b1b1b）背景下，两个图标图形完整、比例正确（`object-contain`，无滤镜），Outlook 在 14 px 仍可辨认信封与 O 形，Microsoft 四色方块在所有尺寸都清楚；添加账号列表中两行的图标与名称显示正常。前端测试覆盖两个条目登记了不同的本地（非远程）图标，并在图标块与徽标中用 `object-contain` 原样显示。该检查只验证素材显示，不替代原生桌面界面验收，也不构成对 Microsoft 许可条款的法律确认。
-
-### 先登录再得到邮箱地址（2026-11-10 追加）
-
-用户手测桌面应用后，新账号流程改为不先问邮箱地址：选择入口后直接在浏览器登录，地址由登录得出，并仍以受信 IMAP 服务器打开该邮箱为唯一证明（`id_token` 声明只是提示）。上文“邮箱取求证结果而非 `email` 声明”等描述是前一版“先填地址”流程的测试，现行规则见[账号配置第 5 节](../architecture/account-configuration.md#5-通用-oauth-基础与开放边界)与[接入评估](../reference/microsoft-integration.md)。仍然**没有使用任何真实微软账号**，以下都是受控测试。
-
-- `cargo test -p mailx-core --lib auth::`：`complete` 对新账号取登录给出的候选地址并用该 token 求证，通过则邮箱已确认；候选被拒或没有时邮箱保持未定，`authorization()` 此时拒绝出具授权；用户键入的地址只有 `prove` 通过才记录，空串、非地址形状和被拒的地址都不被记录，成功的写入前后去掉首尾空白；重新授权传入已知地址时，被拒直接报错；`address_shaped` 的好坏样例（缺少名称或域名、多个 `@`、空白与控制字符、过长）。
-- `cargo test -p mailx-core --lib providers::`：Microsoft 的 `check` 不触发任何邮件连接，候选地址先取 `email` 再取 `preferred_username`、两者都须长得像地址；`prove_mailbox` 只经受信 IMAP 端点（主机与端口来自注册项）；个人 / 工作租户互斥、畸形声明被拒，求证失败原样透传。
-- `cargo test -p mailx-core --lib accounts::oauth`（含会话端到端测试）：新账号会话在浏览器返回后给出 `Verified(地址)`，结果只读一次，已登录的会话剩余时间约 15 分钟（等待浏览器时不超过 5 分钟）；账号由已确认的地址、受信服务器与会话路由生成，创建后会话与 token 被丢弃；候选被拒时给出 `NeedsMailbox(被拒地址)`，在邮箱确认前 `begin_create` 拒绝，错误地址被拒、正确地址确认后才能创建，且 token 端点始终只被访问一次（没有第二次浏览器往返）；创建失败后可用同一会话重试，不能同时创建两次；输错 5 次后会话作废，之后即使地址正确也是 `ExpiredSession`；会话到期或取消后既不能创建也不能确认；重新授权只接受账号自己的地址，被拒返回 `MailboxRefused`，成功结果只可消费一次，且新账号命令对重新授权会话无效；自定义代理、直连与 `inherit` 的授权路由与已保存账号一致，破损代理（空主机、端口 0、缺少代理密码）报错而不回退直连。
-- `cargo test -p mailx-desktop window_access`：新增的 `accounts_oauth_confirm_mailbox`、`accounts_oauth_create`、`accounts_oauth_reauthorize_finish` 只对可信 main 窗口开放，处理器、生成权限与能力表一致。
-- 前端：第 2 步没有地址、服务器、密码和“测试登录”，保留高级网络设置；登录成功后直接进入第 3 步并以该地址命名，`createOAuthAccount` 只带会话、请求标识和资料；候选被拒或没有时出现预填（或为空）的地址框，确认只调用 `confirmOAuthMailbox` 而不再调用 `beginOAuthAccount`；被拒的地址在输入框下以通俗文字提示并可重试；会话超时回到第 2 步并说明；等待与取消、返回上一步与关闭弹窗都丢弃会话；入错入口、未允许访问、网络错误留在第 2 步；创建时资料出错留在第 3 步并保留会话；自定义代理路由、破损代理报错；“重新登录”改用自己的完成命令；浏览器模拟客户端的默认成功、`alias…` / `refused…` 的需要地址与五次上限、`denied…` 的拒绝与取消路径。
-
-浏览器预览（模拟客户端）已目测：第 2 步只有说明、高级设置和“在浏览器中登录”；点击后显示等待与“取消”，随后进入第 3 步，名称默认为得到的地址，创建后账号详情显示 `outlook.office365.com:993` 与 `smtp-mail.outlook.com:587`、没有“修改连接”；`alias` 地址时第 2 步出现说明文字与预填地址框，键入地址后直接进入第 3 步；返回上一步回到干净的第 2 步，等待中取消没有错误、也没有迟到进入第 3 步。预览窗口较矮时对话框内容可滚动。
-
-自动检查（未设置 `CARGO_TARGET_DIR`，使用工作区自己的 `target`）：`bun run check`（前端 90 个文件、1068 项测试，1007 条中英文消息，Rust / TypeScript DTO 一致，类型、lint、构建与 `cargo check` 通过）、`bun run rust:fmt`、`bun run rust:clippy`（`-D warnings`）、`bun run rust:test`（1191 项通过、0 失败、5 项原有忽略）、`git diff --check` 均通过。
-
-仍待真实账号验证：`email` / `preferred_username` 在个人账号与各类租户中实际给出的值、别名与登录名不同的邮箱的表现、IMAP 被管理员关闭时只返回通用失败（此时用户先被请求填写地址，再看到“无法打开邮箱”）、以及上文列出的其余项目。
-
-### Outlook.com 个人账号手测（2026-11-10）
-
-项目维护者在本机 macOS 上用开发版（`bun run tauri dev`，分支 `feat/microsoft-oauth`，提交 `92d9d5e` 之后）以一个 Outlook.com 个人账号手动测试：经“Outlook”入口在系统浏览器完成微软登录，账号添加成功，侧边栏列出服务器文件夹（收件箱、Drafts、已发送、垃圾邮件、已删除、存档、同步问题及其子文件夹、Notes），收件箱显示未读邮件。终端日志中没有应用报错。这说明 Outlook.com 的浏览器登录、回调、IMAP 求证与 XOAUTH2 收信同步在该账号上可用。
-
-本轮没有确认：经 `smtp-mail.outlook.com` 发信、IDLE 推送、重启后刷新令牌与“重新登录”、登录名与邮箱不同时的补填地址流程；Microsoft 365 / Exchange 入口没有可用的工作或学校账号，未测试；Windows 与 Linux 未测试。`Drafts` 与服务器的“存档”文件夹按现有规则显示服务器名称（草稿与归档角色不改名，MailX 另有本机草稿与本机归档），与其他服务商一致。
-
-## 39. 默认自动更新与失败恢复（2026-11-10）
-
-本地主工作区实现固定启动 / 定时检查、`general.autoUpdate` 默认开启及旧设置迁移、静默自动下载、退出安装授权、取消与有限重试、完整更新包缓存及未完成安装恢复。实现与行为见[更新器设计](../architecture/updater.md)及[桌面更新接口](../contracts/app-api.md#桌面应用内更新)。
-
-本机 macOS 自动验证：
-
-- `bun run version:check`、`bun run version:test`（48 项）、`bun run i18n:check`（980 条）、`bun run types:check`、`bun run typecheck`、`bun run lint`、`bun run build`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 与 `git diff --check` 通过。Rust workspace 保留原有系统凭据库与 FTS 探针的显式忽略项；生产构建仍有现有的大 chunk 提示。
-- 前端全量执行 `bun run frontend:test -- --maxWorkers=4 --testTimeout=15000`，89 个文件 / 1,032 项中 1,031 项通过，唯一失败为 `App.test.tsx` 仍使用旧开关名称的断言；更新为新标签后该文件 2 项回归通过，其他通过的文件未重复运行。更新器专项 4 文件 / 38 项覆盖静默下载、就绪去重、手动检查事件交错、重启拒绝反馈、安装失败入口及安装能力限制。
-- Rust 设置专项 39 项通过，覆盖缺字段默认、旧 false 保留、新字段优先、非法值与保存后只输出新字段。更新器定向套件 34 项通过，随后新增“手动取消 / 失败后显式重新开启恢复自动下载”回归也通过。覆盖开关与下载启动交错、手动来源提升、检查中排队的手动请求、过期设置响应、取消代际、重启目标替换、有限退避和安装失败禁止自动重试。
-- 缓存测试使用公开的抛弃式签名测试向量，通过插件实际验签；覆盖复用、篡改、身份不匹配、中断残留、来源保留、安装尝试记录及清理与安装记录写入并发。测试不访问发布网络、不调用平台安装器。
-
-本轮未启动真实更新下载安装，没有发布版本、安装应用或接入真实邮箱。macOS、Windows、Linux AppImage 的端到端升级，deb / rpm 的仅提示界面，系统代理与弱网、真实安装失败、退出时多个写信窗口和发送中的保护仍需分别实测；当前自动检查通过不代表这些组合已验收。缓存跨进程复用仍要求一次成功的新清单检查；不提供部分下载续传或数据库自动回滚。
-
-## 40. 移除 Body WebView 专用检查（2026-11-11）
-
-移除三平台 Body WebView 工作流、原生驱动、测试页面、专用构建命令及桌面测试启动分支，取消每次发布必跑要求。保留正文 CSP、空 sandbox、子框架 Tauri 桥防护及普通前端 / Rust 回归；合成邮件 fixture 改由 core 的 `test-support` 特性提供，仅在桌面开发依赖中启用。锁文件清理 17 个失去依赖的包，没有新增包或依赖版本升级。当前专项验证约定见[正文原生验证](#body-native-validation)。
-
-本机 macOS 检查通过：`bun install --frozen-lockfile`、`bun run check`（版本脚本 48 项、前端 91 个文件 / 1,089 项测试，以及 i18n、DTO、类型、lint、构建与工作区检查）、`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）、`bun run rust:test`（1,211 项通过、0 失败、5 项既有忽略）及 `git diff --check`。Rust 测试包括 core 单元 953、账号集成 39、desktop 174、bridge 两组各 6、MCP server 17、端到端 16 项。生产构建保留既有的大 chunk 提示；文档本地链接及专项验证锚点已核对，独立只读审查未发现阻断项。
-
-本轮未运行真实 WebView 专项验证或 Windows / Linux 本机检查；上述结果仅证明本机常规检查与回归，不扩展三平台原生隔离证据。
-
-<a id="translation-validation"></a>
-
-## 41. 邮件翻译（2026-11-12，仅自动测试）
-
-实现与设计见[邮件翻译](../architecture/translation.md)与[应用 API](../contracts/app-api.md#邮件翻译主窗口)：在隔离阅读之前对缓存的净化正文分段翻译，经用户选定的服务（自带密钥的 DeepL、Microsoft Translator、Google Cloud Translation，或免设置的 Microsoft 翻译、Google 翻译），译文按段缓存到本机。
-
-**已有的自动测试：**
-
-- Rust 单元测试：分段与回写（包括恶意或畸形的服务答案）、语言检测、五个服务客户端（对本机模拟监听器，免设置通道断言了请求行、无任何密钥或认证头、响应解析、各状态码映射与代理路由）、标签名编码及其严格解码器（含畸形与恶意输入）、翻译服务与缓存（含同意检查、取消与失效、免设置服务无需密钥、对它们设置或移除密钥被拒绝、默认服务与显式关闭的设置读取）、代理路由。
-- 翻译代理的用户名与密码（Rust 单元测试）：设置校验与文件修复；密码的写入校验、状态与不外泄；请求只在有用户名时登录，没存密码时使用空密码，凭据库被锁定时失败且不调用服务；对本机 HTTP CONNECT 监听器断言带登录时有 `Proxy-Authorization: Basic …` 头、无登录时没有，代理拒绝登录归入 `translationProxy`。SOCKS5 的登录没有针对翻译请求单独测试。
-- 前端测试：阅读区翻译流程（工具栏、提示行各状态、同意对话框含免设置服务的一句说明、免设置服务失败时的“重试”与“换一种翻译服务”、未设置服务时的引导、默认服务无需设置即可翻译）、设置页“翻译”（含分组下拉、各服务对应的行、默认折叠的“高级”组与代理的用户名和密码），以及 mock 客户端。
-- 阅读区流程在浏览器开发预览里用 mock 数据看过一次（简体中文，浅色与深色）。这只检查了界面本身，没有连接真实后端、翻译服务或桌面应用。
-
-
-**免设置通道的探测（2026-11-12，macOS 开发机，网络环境未受控，只用固定测试句子，不含任何真实邮件或个人信息）：**
-
-- Microsoft（`POST https://edge.microsoft.com/translate/translatetext?from=&to=zh-Hans&isEnterpriseClient=false`，JSON 字符串数组）：
-  - `User-Agent: MailX` 被接受：`["Hello world."]` 返回 200，`[{"detectedLanguage":{"language":"en","score":0.9},"translations":[{"text":"你好，世界。","to":"zh-Hans",…}]}]`。
-  - 标签名占位符（`<g1>` 成对、嵌套的 `<g3>…<g4>…</g4></g3>`、换行 `<n2/>`、对象 `<x5/>`）：200，全部保留、重排并翻译标签内文字。
-  - `&`、`<`、`>`：原样发送与转义为 `&amp; &lt; &gt;` 发送都返回 200；转义形式原样回传 `&lt;`（`&amp;` 常被译成“和”而消失），可无歧义地解码，因此选择转义发送；字面的 `&lt;g1&gt;` 保持为文字。
-  - `/>` 前的空格：答案可能写成 `<n1 />`，解码器容忍一个空格。
-  - 3 项数组：200，每项一个结果；60 条很短的条目：200（不是限额验证）。非 JSON 请求体：400。
-- Google（`POST https://translate.googleapis.com/translate_a/t?client=gtx&sl=auto&tl=zh-CN&format=html`，表单 `q=`）：
-  - `User-Agent: MailX` 被接受：200。
-  - `sl=auto` 下 1 项：`[["<span id=\"1\">你好</span>世界","en"]]`；3 项：`[["一个苹果。","en"],["两个<span id=\"1\">梨</span>。","en"],["三个李子。","en"]]`；`sl=en` 下 1 项：`["你好世界"]`（纯字符串数组），客户端两种形状都读。
-  - 文字里的 `"` 被译成弯引号；原始的 `<` 回传为 `&lt;`；`&amp;` 常被译成“和”，`&lt;b&gt;` 原样保留。
-- 每次请求限额：没有找到公开说明，也没有已知开源客户端的可靠常量。选用保守预算：Edge 50 条 / 20,000 字节，Google 50 条 / 5,000 字节（线文字），**均未验证**。
-- 没有测试：中国大陆网络下的可达性、长期稳定性、限流行为、真实邮件内容。
-
-**维护者报告：** 用一个真实的 Microsoft Translator 资源密钥测试过一次，没有发现问题（范围和平台未记录）。
-
-本记录不写测试数量或通过结果：以实际执行 `bun run check` 与 `bun run rust:test` 的记录为准，目前尚未补入。
-
-**AI 模型作为翻译来源（2026-11-13，自动测试与一次细节未记录的维护者手测）：** 设计与实现见[邮件翻译](../architecture/translation.md#10-ai-模型作为翻译来源已实现仅自动测试)。
-
-- Rust 单元测试：`core/src/translate/provider/ai/tests.rs`（提示与请求体、答案解析含 think 块与代码围栏、条数与类型错误、分批上限、两种协议的 `max_tokens`、AI 错误码到翻译错误码的映射，对本机模拟服务）；`core/src/app/translation/tests.rs`（`ai` 的同意绑定连接、未配置与无模型、经连接自己的路由、缓存与状态）；`core/src/app/ai/tests.rs`（翻译模型的保存、校验、随连接删除清理，翻译用连接的选择）；`core/src/settings/tests.rs`（`consentedAi` 与 `ai` 服务的设置校验与文件修复）。
-- 前端（模拟客户端）：`frontend/src/features/settings/translation-pane.test.tsx` 覆盖 AI 模型选项、跟随默认模型与指定模型、手动输入模型 ID、没有可用模型时“打开 AI 设置”、AI 模式下隐藏密钥与代理；`frontend/src/features/mail/translation/translation.test.tsx` 覆盖同意对话框写明连接名称并保存 `consentedAi`、同一连接不再询问、接口地址改变后在发送前重新询问、其他服务不改动 `consentedAi`、两种 AI 错误码的提示与“换一种翻译服务”。另在浏览器开发预览（模拟客户端）中走过选择 AI 模型、选模型、打开日文邮件、同意并翻译。
-- 维护者手测（2026-11-13）：维护者在桌面端手测 AI 翻译，报告没有问题。报告没有记录平台、服务商与模型、所译邮件的语言与版式，因此不能据此确认下一条中的任何一项。
-- **没有验证：** 除上述手测外，没有可追溯的真实模型调用记录；提示词的效果与占位符（链接、粗体、图片标签）在各真实模型上是否保持完整未逐项确认；120 秒超时与每封邮件 3 批并发没有实测。
-
-**未验证：**
-
-- DeepL 与 Google Cloud Translation **未用真实密钥调用过**，真实响应格式、额度与错误形态没有经过确认；Microsoft Translator 仅有上面那一次维护者报告。
-- 两个免设置通道在中国大陆网络下的可达性、限额、限流和长期稳定性未验证；它们不是官方服务，可能随时失效。
-- DeepL 的 `ZH-HANT`、`NB` 目标代码和每次请求条数上限，以及 Google 对无效密钥的响应，无法从公开文档确认，代码中按已知行为实现并标记为未核实。
-- 语言检测的准确率没有在真实邮件上测量。
-- 版式保真没有用真实营销邮件语料检查。
-- 没有 macOS、Windows、Linux 的桌面手测，包括翻译按钮、提示行、同意对话框与设置页在真实应用里的显示；英文界面也没有看过；代理组合（SOCKS5 / HTTP）也没有用真实代理验证，需要登录的代理（用户名与密码）同样只对本机模拟监听器测过。
-
-自动测试通过不代表上述项目已验收。
-
-<a id="ai-provider-validation"></a>
-
-## 42. AI 服务商与模型配置（2026-11-13，仅自动测试）
-
-实现与设计见 [AI 服务商与模型配置](../architecture/ai-providers.md)与[应用 API](../contracts/app-api.md#ai-服务商与模型主窗口)：连接模型服务商、选默认模型、测试调用、models.dev 目录与服务商图标。邮件翻译可以使用模型（见[翻译验证](#translation-validation)），其他功能不使用。
-
-**已有的自动测试（Rust，对本机模拟监听器）：**
-
-- 客户端（`core/src/ai/client/tests.rs`）：两种协议的模型列表与测试调用的请求行、请求头与请求体（Bearer 与 `x-api-key`，无密钥时不带凭据，Anthropic `max_tokens` 为 16）、`complete` 对两种协议的返回、状态码到固定错误码的映射且不含服务商原文、缺少模型列表接口不算错误、不跟随重定向、错误形状与超大答案按无效响应处理、网络与代理失败的错误码、经代理发送、调试输出不含密钥。
-- 目录（`core/src/ai/catalog/tests.rs`）：models.dev 数据的裁剪（协议归类、模板地址、多凭证、缺地址、非文本模型）、内置服务商表有效且唯一、列表排序、缓存读写与损坏回退、24 小时过期、带 ETag 的条件请求、获取失败的固定错误码。
-- 图标（`core/src/ai/icons/tests.rs`）：纯 SVG 接受与各类不纯 SVG 拒绝、以 base64 data 返回、服务商 id 校验、磁盘缓存过期与重新验证。
-- 应用服务（`core/src/app/ai/tests.rs`）：保存连接时密钥与设置分开存放、`verify` 成功返回模型而失败不保存、编辑时保留旧密钥、输入校验、删除连接清理密钥与默认模型、默认模型需连接存在、代理路由与密码互不干扰且只在连接要求时使用、模型列表标注与无列表接口时退回目录、测试调用的耗时与错误码、目录缓存与失败时保留旧缓存、目录经 AI 代理、图标缓存与失败记忆、密钥不出现在调试输出、错误和状态中。
-- 设置（`core/src/settings/tests.rs`）：只有 AI 更新能改动 `ai` 部分、失败的更新不改变任何内容、损坏的 `ai` 部分只丢弃损坏的字段。
-- 前端：`frontend/src/features/settings/ai-pane.test.tsx`（18 项，使用模拟客户端）覆盖添加流程（选服务商、填密钥、连接、选模型）、连接失败与“仍然保存”、编辑时保留或清除密钥、移除、默认模型选择与手动输入、测试按钮、图标失败退回首字母且不以标记插入 SVG、设置导航中的 AI 入口。另在浏览器开发预览（模拟客户端）中走过添加、连接失败、选模型与测试，并看过浅深主题。
-
-**维护者手测（2026-11-13）：** 维护者在桌面端手测 AI 模型配置，报告没有问题。报告没有记录平台、构建类型、所用服务商、是否经代理以及具体走过的步骤，因此不能据此确认下列任何一项。
-
-**没有验证的：**
-
-- 除上述未记录细节的手测外，没有可追溯的真实服务商调用记录（OpenAI、Anthropic、DeepSeek、OpenRouter、Ollama、LM Studio 等）；内置服务商表的地址与协议、测试调用在各真实服务上的行为没有逐项实测。
-- 没有可追溯的真实 models.dev 目录与图标请求记录，目录裁剪规则只对构造的样本验证过。
-- Windows、Linux 没有手测；经代理的真实路径、系统凭据库中密钥的读写没有单独验证。
-- 没有用真实密钥测过 `aiKeyRejected` 等错误码在真实服务上的对应关系。
-
-自动测试通过不代表上述项目已验收。
+## 16. 搜索与验证码
 
 <a id="verification-code-validation"></a>
-
-## 43. 验证码识别第一阶段（2026-11-13，仅本地合成样本）
-
-实现与边界见[验证码识别](../architecture/verification-codes.md)。环境为 macOS，使用仓库固定的 Rust 工具链；本阶段没有调用真实邮箱、模型或通知服务。
-
-- `cargo test -p mailx-core --locked` 通过，既有显式忽略项保持忽略。审查补充边界修正后，重新运行 `cargo test -p mailx-core --lib mail::verification_code --locked`（7 项表驱动测试）与 `cargo test -p mailx-core --test verification_code_mime --locked`（11 项）均通过。
-- `cargo clippy -p mailx-core --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、`bun run version:check` 与 `git diff --check` 通过。
-- 规则样本覆盖中英文、前导零、混合码大小写、主题 / 正文冲突、重复码、同一关键词的多个候选、引用旧码、普通订单 / 金额 / 电话 / URL、超长或分组数字、不可见字符 / ASCII 控制字符片段、输入和候选数量上限，以及长 token 的扫描行为。Debug 不显示码值，显式探测 JSON 包含码值。
-- MIME 样本覆盖编码主题、Base64、quoted-printable 与字符集解码、HTML 实体和行内文本、纯文本 alternative 优先与空白回退、附件 / 嵌套邮件排除、引用与明显隐藏内容排除、过滤后数字不拼接、无效 MIME 与超限输入拒绝。
-- 执行 `bun run otp:probe --eml tests/fixtures/verification-code/sample.eml`，得到 `found` / `482913`，引用中的旧码未进入候选。另对主题 / stdin 路径模拟了唯一候选、多个候选、普通邮件与 Unicode 片段，分别得到预期状态；无效 MIME、超限 stdin、互斥参数与不存在文件均失败并返回固定错误，不带原文或文件路径。
-
-**未验证：** 脱敏真实模板的识别覆盖率和误识别率；任意 CSS 隐藏与未覆盖的引用格式；Windows / Linux 本地运行。本阶段尚未接入同步获取、系统通知或剪贴板，不能由这些测试推定通知展示、通知中心点击或后台复制已经可用。
-
-
 <a id="verification-code-notification-validation"></a>
-
-## 44. 验证码通知（2026-11-13，自动验证与有限 macOS 开发模式反馈）
-
-实现与边界见[验证码识别](../architecture/verification-codes.md#6-桌面通知接入)。以下自动验证环境为 macOS，使用合成邮件、本机模拟 IMAP 和临时数据目录；自动测试没有访问真实邮箱、写入真实剪贴板或发送原生测试通知。维护者的手测反馈另列。
-
-**自动覆盖：**
-
-- core 应用服务：近期未读 INBOX 与候选主题过滤、缓存读取不触网、不改变已读和正文缓存、有界 `BODY.PEEK[]`、UIDVALIDITY 不匹配、连接版本变化后的迟到结果拒绝、取消关闭网络 future、独立并发闸门与请求超时。底层 IMAP 接收测试验证 1 MiB literal 限额在读取 / 分配前生效。
-- 新邮件事件保留全部候选，并验证顺序和首次同步 / 重建排除；普通摘要仍只描述前 3 封发件人，隐藏预览仍清空详情。
-- 桌面通知规划：第 4 封以后也能成为独立验证码通知、普通摘要剔除验证码邮件、同批只响一次、当前语言、识别失败回退、隐藏预览 / 静音 / 前台规则。动作表测试覆盖随机 token、容量、过期、消费、设置撤销与旧设置查询不能恢复已撤销内容。
-- macOS 适配器单元测试区分复制与正文打开，忽略普通通知和关闭事件。
-- Windows 适配器含协议 / UUID 参数验证、命令路径引用、XML 转义及原生过期时间测试。已在 macOS 上通过 Windows GNU 目标的隔离类型检查与 Clippy（真实 WinRT / winreg 绑定、最小 Tauri 表面替身）；这不是 Windows 运行或完整安装包编译证据。
-- 前端通知设置测试验证预览开关的新名称和既有保存行为；中英文资源、TypeScript 检查与前端 lint/build 已通过。生成 DTO 仅同步 `NewMail.messages` 的语义说明。
-
-**本机执行结果：** 22 项桌面通知专项测试、7 项通知设置测试通过；工作区 Clippy、格式、资源、版本检查和前端类型 / lint / build 通过。`cargo test --workspace --locked --quiet` 全部通过，既有显式忽略项保持忽略。
-
-**维护者反馈（2026-11-13）：** 在 macOS 使用 `bun run desktop:dev:isolated` 测试验证码通知，报告按钮复制成功。通知正文中的码没有局部加粗或颜色高亮，符合当前原生正文样式；这不是开发模式额外关闭高亮。报告未记录 macOS 版本、邮箱服务商、是否从通知中心点击、窗口是否隐藏，不能推定安装包、后台复制或其余平台已通过。
-
-**仍需实测：** Windows 安装包中横幅与通知中心的复制 / 正文打开、按用户协议注册及路径含空格和升级后的分发、关闭窗口驻留后台时不抢焦点、冷启动旧 token 不复制；macOS 安装包的按钮位置、通知中心留存和后台复制；Linux 通知文字和声音；三平台专注模式、系统隐藏预览、锁屏呈现及剪贴板不可用。尚未用脱敏真实服务商模板测量识别覆盖率与误识别率。
-
-
 <a id="verification-code-workbench-validation"></a>
 
-## 45. 验证码工作台与复制后清理（2026-11-14，自动测试与浏览器合成预览）
+- 本地全文搜索：FTS 的删除 / 重建、中文与英文查询、少于 3 字符的词退回 LIKE、通配符与会话符按字面量处理、片段计算、已归档邮件可被找到并标记。大型库的表现按第 4 节口径测量，不从单台机器结果外推。
+- 验证码识别：规则与 MIME 样本覆盖中英文、前导零、大小写、主题 / 正文冲突、重复码、引用旧码、隐藏内容、附件 / 嵌套邮件排除与超限拒绝；探针入口 `bun run otp:probe --eml <文件>` 用于检查单封样本。真实模板的识别覆盖率与误识别率需用脱敏语料测量，尚未有结论。
+- 验证码通知与工作台：通知规划、动作表 token 生命周期、共享剪贴板入口与识别凭据绑定、复制后清理与撤销的失败反馈、设置默认关闭与持久化。真机检查见第 9 节，另需覆盖平台通知按钮、通知中心留存、后台复制与剪贴板不可用。
 
-范围见[共享识别状态](../architecture/verification-codes.md#7-共享识别状态与界面)和[复制后清理](../architecture/verification-codes.md#8-复制后移到已删除与撤销)。识别结果由通知、列表和阅读区共享；清理开关在“邮件 → 增强”，默认关闭。
+## 17. AI 与 MCP
 
-**已有回归覆盖：**
+<a id="ai-provider-validation"></a>
+<a id="translation-validation"></a>
 
-- core 共享服务：已读 / 历史 / 归档邮件可查询，通知仍使用自身的新到达时效；内存结果复用、同封并发读取去重、慢网络不阻塞已有结果、正文哈希或账号身份变化使凭据失效；剪贴板回调失败不安排删除，无 Trash 或已在 Trash 只复制，清理失败保留复制成功结果，已隐藏邮件不重复排队。服务锁等待期间改变清理偏好时，在实际复制处读取当前偏好。
-- 桌面宿主：主窗口 status/copy/undo 命令权限，输入不能携带码值、清理开关或永久删除授权；共享剪贴板入口、通知 token 与识别凭据绑定、撤销通知失败后的取消清理，以及取消失败时保持真实清理状态并提示。Windows 协议 / macOS 原生回调区分 Copy、Open 和 Undo；Windows 撤销通知使用剩余期限及独立通知组。
-- 前端：实际可见行请求及并发限制、离开视口的排队请求取消、列表复制不打开 / 标已读、聚合 / 多选 / 本机副本排除、悬停期间固定按钮目标、卡片固定“复制验证码”名称、阅读区提示条与当前邮件绑定、复制后清理和撤销、复制与清理的部分失败反馈、通知结果的查询失效。
-- 设置：默认关闭、旧文件缺少节时补默认值、非法值处理、保存失败与重开持久化；页面属于“邮件”分组的“增强”，独立于通知开关。
+### AI 服务商与模型
 
-**可重复的自动检查：** `cargo test --workspace --locked --quiet`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`bun run types:check`、`bun run frontend:test`、`bun run typecheck`、`bun run lint`、`bun run i18n:check`、`bun run build`、`git diff --check`。本机工作区 Rust 测试与 Clippy 已通过；设置迁入独立 `mail` 节后，再次通过工作区 Clippy、66 项设置测试及桌面测试。最终界面调整后的前端全量测试为 107 个文件、1,298 项通过；页面最终命名为“增强”并整合主分支后，6 个相关文件的 93 项回归再次通过。类型、lint、资源、构建、版本、生成 DTO 与 diff 检查均通过。CI 与原生实机证据另行记录，不由本机测试推定跨平台交互已通过。
+自动测试只访问本机模拟服务：两种协议的列表与测试调用、`complete`、错误码映射且不含服务商原文、目录裁剪与缓存、图标校验、密钥不出现在调试输出与错误中、删除连接清理密钥与默认模型、代理路由，以及设置节的独立更新。真实环境检查：
 
-**浏览器预览（macOS / Edge，合成客户端）：** 通过 `?seed=showcase` 的固定合成验证码邮件检查卡片与阅读区，观察到模拟复制成功反馈；复制未写入真实系统剪贴板。已查看固定名称“复制验证码”及短成功态“已复制”；提示条标签与等宽码值共用行高、基线对齐并留 8px 间距。已观察清理开关的关闭默认值；“增强”新页面的位置与交互尚未包含在这次预览证据内。
+- 用真实密钥对每个已登记服务商完成添加、连接测试、模型列表与一次 `complete`；记录地址、协议与错误码对应关系。
+- 真实的 models.dev 目录与图标请求；目录裁剪规则对真实数据的表现。
+- 经代理的真实路径、系统凭据库中密钥的读写（尤其 Windows 凭据管理器长度限制）。
+- 思考内容的捕获与回传：Anthropic 协议的 `thinking` / `redacted_thinking` 与 OpenAI 兼容接口的 `reasoning_content` / `reasoning` 在工具调用、追问、读回历史对话后的行为；不同服务商不串用；上下文预算。
+- Windows、Linux 桌面。
 
-**未验证：** 真实邮件服务商的复制后 Trash 写回 / 撤销、通知复制后原生撤销、Windows / Linux 运行、Linux 剪贴板所有权、三平台通知中心 / 后台 / 锁屏 / 专注模式交互。此前维护者确认的 macOS 开发模式通知复制不覆盖本阶段新增清理流程。合成预览不替代原生宿主或真实服务商验证，识别覆盖率和误识别率仍未测量。
+### 邮件翻译
 
-## 46. 写信体验优化与主窗口内写信（2026-11-16，自动测试、浏览器合成预览与 macOS 维护者手测）
+自动测试覆盖分段与回写、语言检测、五个服务客户端的请求形状与状态码映射、免设置通道不带密钥、代理路由（含 CONNECT 登录头）、AI 来源的同意绑定、缓存与失效，以及前端阅读区流程与设置页。真实环境检查：
 
-范围见[写信与发送设计第 17 节](../architecture/sending.md#17-写信体验优化2026-11-16-确认实施中)：发件账号选择、信头收起、收件人标签拖动与右键移动、本机收件人补全（`contacts_suggest`、迁移 v33 索引）、回复引用折叠、忘带附件提醒、`compose.openMode` 与主窗口内写信（主窗口可入队发送、管理附件与内嵌图片，新增 `composer_focus`）。
+- 用真实密钥分别调用 DeepL 与 Google Cloud Translation，确认响应格式、额度与错误形态；Microsoft Translator 用真实资源密钥复测。
+- 两个免设置通道在中国大陆网络下的可达性、限额、限流与长期稳定性；保守请求预算需实测确认。
+- DeepL 的 `ZH-HANT`、`NB` 目标代码与每次请求条数上限，以及 Google 对无效密钥的响应。
+- 真实邮件上的语言检测准确率、版式保真（用真实营销邮件语料）、占位符与标签在真实模型上的保持、120 秒超时与每封 3 批并发。
+- 三平台桌面：翻译按钮、提示行、同意对话框与设置页在真实应用中的显示，英文界面，代理组合（含需要登录的代理）。
 
-**已有回归覆盖：** core 补全的匹配、排除、排序、名称与上限，设置新字段的默认值、旧文件兼容与非法值；桌面命令窗口矩阵（`contacts_suggest` 主窗口与写信窗口可用，`composer_focus` 仅主窗口，正文 iframe 仍不能读内嵌图片）；前端发件选择器、快捷键、空行收起、信头收起条件、标签移动与去重、补全的键盘 / 鼠标 / 输入法 / 过期响应、在 StrictMode 下用真实 Tiptap 编辑器运行的引用折叠（含死循环保护）、附件提醒规则，以及主窗口内写信的打开方式、Shift 反转、离开时保存或删除、弹出到新窗口、聚焦已有窗口、发送后关闭和退出前保存。
+### MCP
 
-**可重复的自动检查：** 合并主分支后本机通过 `bun run types:check`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`（129 个文件、1,663 项）、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` 与 `git diff --check`。补全耗时只在合成的 10 万封邮件库上用忽略的基准测试观察过（单字母约 50–70ms，较长查询约 30–40ms），不代表真实邮箱。
+<a id="mcp-send-attachments"></a>
+<a id="28-mcp-整理工具扩展2026-11-03"></a>
 
-**浏览器预览（合成客户端）：** 浅色与深色下检查了写信窗口 520×420 与主窗口最窄阅读区 360px 的布局、补全列表、附件提醒行、引用折叠与展开。
+契约见 [MCP](../contracts/mcp.md)。自动测试覆盖 Unix socket 与 stdio bridge 的端到端握手、工具目录、默认授权、逐字段错误、超时与权限、发现文件生命周期、关闭即断开，以及整理工具、发送与附件工具的授权范围、账号隔离、幂等键、撤销与草稿版本绑定；Windows 命名管道与 DACL 代码只在 Windows CI 编译并运行。真实环境检查：
 
-**手测：** 2026-11-16 维护者在 macOS 桌面开发版中手动试用本轮功能，确认无问题。
-
-**未验证：** Windows / Linux 实机、各输入法下的补全与拖动、多显示器下的写信窗口、真实大邮箱的补全耗时。
-
-<a id="exchange-ews-validation"></a>
-
-## 47. 自建 Exchange EWS（2026-11-16，自动测试）
-
-独立 Exchange 入口、真实协议配置、HTTPS / NTLMv2（含 Negotiate 下限定 NTLM 的 SPNEGO）、TLS channel binding、自动发现、按需 MIME、共用写回与发件箱已有实现，架构见[自建 Exchange](../architecture/exchange-ews.md)。本节记录该实现自身的证据，不继承其他客户端或其他实现的真实服务器验证结论。
-
-### 自动验证
-
-- 本机 macOS：TypeScript、ESLint、i18n（1505 条文案）、生成类型一致性、前端构建、Rust 格式与全 workspace / all-targets Clippy 检查通过。
-- `bun run rust:test`（`cargo test --workspace --locked`）：合计 1731 passed、0 failed、5 ignored；其中 core 单元测试 1432 项、账号集成 48 项、desktop 195 项通过，其余为 MCP/bridge 与协议集成测试。忽略项未作为通过证据。
-- 前端全量 `bun run frontend:test -- --maxWorkers=2`：117 个文件、1469 项测试通过，测试超时保持原值。首次 `bun run check` 的默认并发前端运行出现 15 项失败（14 项超时及 1 项焦点断言），限制并发后全量通过，未修改断言或增加超时；原 check 后续构建与 Rust 检查单独执行。
-- 账号兼容回归覆盖旧 JSON、canonical 幂等重放、凭据恢复日志、真实 EWS 端点存储、来源隔离及更换端点后的信任。同步回归覆盖原 IMAP 正文、预览、IDLE 和写回，以及 EWS 代理 UID、分页上限、循环父级、标记在途反向修改、软删/永久删除队列、失败后不回退 IMAP。
-- 协议受控服务端实际核对 NTLM MIC、SPNEGO mechListMIC 与 CBT，错误 CBT 被拒绝；覆盖密送与冻结 MIME、发送标记失败无请求、标记前连接关闭与标记后响应丢失的不同结果。SOAP 属性与顺序按 Microsoft EWS schema 核对，DTD/命名空间/分页游标和元数据部分失败有回归。
-- Linux 和 Windows 的 Cargo 依赖树确认不包含 macOS/iOS 专用的 async-dnssd；此检查不等同于实际平台编译或桌面验收。
-
-### 验证边界
-
-- 尚无本次实现对真实 Exchange 的登录、收发、密送投递、已发送副本对账或 EPA 组合实测。自动化使用合成消息和本地受控服务器，未读取真实账号凭据。
-- Windows / Linux 构建与三平台桌面行为需分别核对 CI 和实际安装包。浏览器自动化服务本次不可用，未把组件测试当作视觉或原生桌面验收。
-- EWS 使用固定 30 天起始窗口、每轮最多最新 1000 封和独立分页预算；达到上限时保留不完整覆盖，不能根据缺失项推断删除。未实现 SyncFolderItems 游标增量、服务器推送、共享/代理邮箱、Kerberos、EWS OAuth 或 SRV 发现。
-- 系统信任库中的企业 CA、TLS 终止代理、多前端 Exchange 拓扑和服务器重写 Message-ID 的行为仍待实测；无法确定副本身份时保留本机副本。
-
-### Exchange 官方产品图标（2026-11-16）
-
-独立 Exchange 入口改用 MicrosoftDocs 官方文档仓库发布的 192 × 192 RGBA PNG（9,730 字节），保持原文件字节，来源提交、许可证引用和 SHA-256 记录在[服务商图标说明](../../frontend/src/assets/providers/README.md#microsoft-exchange自建服务器)。添加列表、账号标签及启用服务商图标的头像复用本地素材，中英文 README 同步展示。
-
-- 文件哈希与下载原件一致，生产构建输出的 PNG 也与原件逐字节一致。
-- 已静态渲染并检查 14 / 18 / 20 / 24 / 32 / 40 px 在浅深背景上的完整性和比例；未改色、裁切、去背景或描摹。此项是素材显示检查，不替代原生桌面操作验收。
-- 现有 providers / account-avatar / provider-picker 三个测试文件共 70 项通过；前端 lint、构建（含 TypeScript 检查）与 `git diff --check` 通过。
-
-### App 窗口集成测试的冷导入隔离（2026-11-16）
-
-[CI 运行 43835840783](https://github.com/GuqierMcl/MailX/actions/runs/43835840783) 的三平台 Rust 检查通过，前端 1469 项中仅 `App.test.tsx` 的主窗口「设置 → 关于」测试触发默认 5000ms 超时。本地单独运行也可复现；临时分段计时确认整棵 App 的动态冷导入会耗尽测试时限，超时后未完成的导入还可能继续干扰下一项窗口测试。计时探针已移除。
-
-主窗口与写信窗口的原有两个场景分别放入隔离的测试文件，使用静态 App 导入，并在模块求值前确定实际窗口 URL。测试直接渲染真实 App，沿用真实的更新上下文、点击操作和原有断言，按可访问名称等待设置对话框；不再在测试计时内重置并重新导入整棵模块树。未提高测试超时、禁用隔离或跳过断言。两个专项场景、TypeScript、lint 与 `git diff --check` 已通过；完整 CI 结果由 PR 检查记录提供。
-
-### 接入修正复核与合并主线（2026-11-17）
-
-复核 `d9eea6a` 的自动发现错误分类、登录名保留、SPNEGO 最终 token 兼容、发送上传预算、已缓存邮件元数据跳过、批量预览及限流写回：保留这些修正与对应回归。另收紧 SPNEGO 成功条件：只在已发送认证 token 后允许服务器省略最终 token；有最终 token 时必须完成 SSPI 校验且没有待发 token。新增真实 SSPI 受控服务器场景覆盖提前返回 200、返回未完成挑战和最终 MIC 缺失；正常省略最终 token 的场景仍通过。
-
-合并主线 `8374245`，保留 AI 聊天、历史记录、联系人建议和内联写信；EWS 迁移从分支原编号 32 顺延到 34，主线已提交的 32（助手历史）、33（收件人索引）及其 SQL 字节不变。分别验证从旧版 schema 31 和当前主线 schema 33 升级，原账号、凭据引用、幂等记录、聊天消息及索引保持。历史迁移校验继续有效，未自动修改任何实际用户数据库或迁移历史。
-
-合并后前端类型、lint、构建、i18n（1698 条）、Rust 全 workspace / all-targets Clippy 及差异检查通过；前端全量（两个 worker）131 个文件、1673 项通过。保留 App 主窗口/写信窗口分文件静态导入的修复，同时沿用本次合入主线的测试配置。完整 `bun run rust:test` 共 1782 passed、0 failed、6 ignored；EWS 协议专项 20 项、数据库升级专项 2 项通过。真实 Exchange 与桌面实测边界仍按上文记录。
-
-### 维护者手动验收（2026-11-17）
-
-维护者在本次会话中报告已完成手动测试，并明确允许合并 Exchange 功能。反馈未细分操作系统、Exchange 版本、认证/代理配置或逐项收发场景，因此记录为维护者整体手动验收，不外推为所有部署、EPA 组合和三平台桌面均已验证。合并前最新代码的前端和 Windows / macOS / Linux Rust CI 均通过。
-
+- 各支持的客户端在 macOS、Windows、Linux 上的完整接入：一键写入配置、备份与冲突处理、导入后需要用户确认、bridge 连接诊断、应用移动或数据目录迁移后的修复。
+- 平台、客户端与服务商组合：逐个记录客户端名称与版本、工具与账号，Linux 单独确认。
+- 工具行为：批量操作时当前邮件视图与未读数、界面与 Agent 交错操作后的撤销、打开既有草稿与关闭窗口、服务商策略停止状态下的工具响应。
+- 附件：从本机文件添加、路径与符号链接限制、大小上限；发送后发件箱 / 草稿 / 已发送列表刷新。
+- 查询 `accepted` 不误称投递成功；`unknown` 不自动再次发送；离线重试与撤销窗口。
 
 <a id="mcp-client-setup-validation"></a>
 
-## MCP 客户端接入与工具体验增强（2026-11-18）
+## 18. Microsoft 与 Exchange
 
-本批增加客户端专属接入、bridge 连接诊断和三个工具，契约见 [MCP](../contracts/mcp.md#客户端接入与诊断)。接入后端使用临时目录中的合成客户端配置；工具测试使用合成账号、邮件和本机临时附件，没有读取个人客户端配置、真实邮件或凭据，没有发送真实邮件，也没有替用户接入任何客户端。
+<a id="exchange-ews-validation"></a>
 
-自动检查已通过 `bun install --frozen-lockfile` 与 `bun run check`（66 项脚本测试、131 个前端测试文件 / 1,688 项测试，以及版本、双语资源、DTO 漂移、TypeScript、lint、生产构建与 Rust 工作区检查）。生产构建仍有既有的大 chunk 提示。
+架构见[自建 Exchange](../architecture/exchange-ews.md)与[服务商兼容层](../architecture/provider-compatibility.md)。受控测试覆盖 OAuth 的 `id_token` 校验、租户互斥、以受信 IMAP 求证邮箱、会话生命周期与取消，以及 EWS 的 NTLM MIC、SPNEGO mechListMIC、TLS channel binding、SOAP 属性顺序、分页与循环父级、失败后不回退 IMAP。真实环境检查：
 
-专项覆盖：JSONC / TOML 注释和其他服务保留、同名冲突与显式替换、远程条目切换到 stdio 时清除互斥字段、重复配置、备份、符号链接拒绝、Cursor / Trae 安装链接的中文与空格参数往返；诊断对子进程执行 initialize 与 tools/list、限制输出和超时并回收进程；工具新增字段、账号隔离、会话去重后的 SQL 分页、草稿条件绑定游标、联系人聚合前账号过滤、附件导出权限与不覆盖。MCP / bridge 的单元及协议端到端测试均通过，覆盖有状态与无状态工具目录。
+- Outlook.com 个人账号与 Microsoft 365 租户：授权页与回调、登录得出的地址、IMAP / SMTP 收发与 IDLE、`smtp-mail.outlook.com` 与 `smtp.office365.com`、管理员批准或关闭 IMAP / SMTP 时的表现、`login_hint` / `prompt` 行为。
+- 令牌轮换与过期后的“重新登录”；Windows 凭据管理器中分条目存放的真实刷新令牌。
+- 自建 Exchange：真实服务器登录、收发、密送投递、已发送副本对账、EPA 组合、系统信任库中的企业 CA、TLS 终止代理、多前端拓扑与服务器重写 `Message-ID`。
+- EWS 固定 30 天起始窗口与每轮上限达到时的行为；达到上限时不能根据缺失项推断删除。
 
-浏览器预览（macOS / Microsoft Edge，`?seed=showcase` 合成客户端）已目测中文浅色、英文浅色与英文深色的 MCP 页：六个客户端行可滚动访问，个人配置添加后显示“已添加配置”，Cursor 模拟导入只提示客户端确认，服务器保持关闭；关闭时连接检查提示先开启服务器，手动路径可展开。浏览器的配置与导入都是内存模拟，不证明真实客户端接入或真实 bridge 可用。
+## 19. 应用图标未读角标
 
-按要求委托独立上下文的 `gpt-6-astra` 审查。审查发现配置提交最后检查与替换之间的并发保存窗口；已改为保留实际移走的备份，并以不覆盖目标的硬链接发布和恢复。新增五项确定性竞态 / 失败恢复测试，桌面 MCP 专项合计 20 项通过。该修复保留短暂路径缺失、崩溃后备份恢复及旧文件句柄写入备份的边界，契约与双语指南均已说明。
-
-全量回归另发现两个新共享工具尚未纳入内置助手分类，已补齐只读分类、活动计数文案与收件地址追踪；联系人结果的 `accountIds` 参与历史账号关联和账号删除清理，内置授权排除 MCP 专属的 `files:write`。助手专项 87 项、工具专项 80 项以及新增的中英文活动标签用例通过。独立子代理已复审配置修复与内置接入，未发现仍需修复的新增真实缺陷。`bun run rust:fmt`、`bun run rust:clippy`（全部 target，`-D warnings`）与本地文档链接检查通过。最终重新运行 `bun run check` 与 `bun run rust:test` 均通过；Rust 工作区合计 1,812 项通过、0 项失败、6 项既有忽略，忽略项未计入通过。
-
-尚未验证：六个实际客户端的完整接入、官方链接在安装包中的拉起、应用移动或数据目录迁移后的真实修复，以及 Windows / Linux 桌面行为；这些不继承自动测试和旧客户端联调的结论。DeepSeek Harness 仅提供官方 Cordis 专属配置与手动指引，不宣称一键安装。
-
-
-### MCP 操作反馈样式调整（2026-11-18）
-
-MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态色；客户端错误与连接检查错误分别显示在对应操作处。重试时清除旧结果，刷新配置时清除过期提示。`mcp-pane.test.tsx` 的 20 项测试通过，包括客户端导入失败不串行、重试和刷新清理、诊断异常归属；未为静态 CSS 类单独编写测试。
-
-使用临时开发预览与合成客户端，在 macOS / Microsoft Edge 中目测中文浅色的导入失败及抛出异常的连接检查、英文深色的导入失败，文字与图标可读，没有额外卡片或整片红色。预览仅模拟错误，没有接入或修改真实客户端；临时预览源文件已移除。
-
-本次前端类型检查、lint、i18n、生产构建与 `git diff --check` 均通过；`gpt-6-astra` 独立复审未发现新增真实缺陷。
-
-
-### MCP 智能体 Logo（2026-11-18）
-
-接入列表的六个智能体名称旁加入本地 SVG；Codex 与 Cursor 使用浅深主题变体，OpenCode 单色原件用 CSS mask 跟随前景色，DeepSeek Harness 使用 DeepSeek 标识。资源 XML 解析、活动内容与外部引用检查、48px 栅格渲染通过。macOS / Microsoft Edge 合成预览中目测中文浅色与英文深色的名称 / 图标对齐，六个标识可读；临时预览源文件已移除。现有 MCP 页 20 项测试、TypeScript、lint 与生产构建通过。未新增真实客户端接入或三平台桌面验证。
-
-
-### MCP 标题栏连接指示（2026-11-18）
-
-主界面右上角 MCP 图标开启服务后保持可见，无客户端时不显示绿点；有客户端连接时显示绿点，最后一个客户端断开后移除；失败红点与关闭后隐藏沿用既有行为。MCP 设置与标题栏专项共 28 项测试通过，覆盖连接数 `0 → 2 → 1 → 0` 的事件更新；类型检查、lint 与差异检查通过。独立上下文 `gpt-6-astra` 核对该行为、双语指南以及同步最新 main 后的内置助手代码，未发现需修复缺陷。变更纳入同一 [PR #148](https://github.com/GuqierMcl/MailX/pull/148)。
-
-同步最新 main 后重新执行 `bun run check`、`bun run rust:test`、`bun run rust:fmt` 与 `bun run rust:clippy` 全部通过：前端 131 个文件 / 1,702 项，Rust 合计 1,851 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。
-
-## macOS 开发签名与调试进程生命周期（2026-11-18）
-
-本机 macOS 27.0.1 / Apple Silicon、Bun 1.3.12、Tauri CLI 2.12.2 下，开发入口使用固定本机自签名证书与显式 designated requirement，设计见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
-
-- `bun run version:test`：81 项通过、0 项失败、1 项显式原生测试跳过；覆盖双架构 runner、含空格路径、Tauri / Cargo / 应用参数分隔、release / 自定义 runner 拒绝、初始化残留保留、损坏配置与符号链接拒绝，以及签名失败不启动应用、`exec` 后 PID 连续性和无终端进程组退出。
-- 单独运行 `MAILX_TEST_MACOS_KEYCHAIN=1 bun test ./scripts/macos-dev-signing.test.mjs`：6 项通过。探针在临时钥匙串创建合成凭证，禁止系统交互后，三次内容不同的构建均能读取；CDHash 改变而指定身份要求保持一致。未签名重编译与锁定钥匙串均明确失败，解锁后恢复；临时钥匙串已清理，没有读取真实账号凭证。
-- 实际隔离桌面启动通过，使用空账号临时数据目录与独立测试 Tauri identifier；Cargo 日志确认签名 runner 被调用。触发 Rust 文件的 watch 重编译后，旧应用退出、新应用直接成为 Tauri 子进程，开发会话继续运行；前后 CDHash 不同、指定身份要求一致。
-- 实际开发会话经 Ctrl+C 结束后，测试应用和 Vite 均退出。无终端场景分别向 `tauri.mjs` 与 `dev-isolated.mjs` 外层进程发送 SIGTERM，桌面应用、Cargo、Vite 和中间启动进程均结束，未遗留子进程。测试数据目录已清理；本机持久开发签名身份保留供后续构建复用。
-- `bun run version:check`、shell 语法检查、所有新增脚本的 LF / 空白检查与 `git diff --check` 通过；`tauri dev --help`、`tauri build --help` 正常，`tauri dev --release` 明确拒绝。
-
-本次未读取或修改已有 MailX vault，也未接入真实邮箱；尚未验证旧 vault 首次授权、安装版正式签名、Intel macOS 或 Windows / Linux 实机行为。合成钥匙串结果不能代替这些范围。本次仅改变开发脚本与文档，未重复运行前端及 Rust 全量测试；实际桌面 debug 编译与启动已执行。
-
-## 应用图标未读角标（2026-11-18，仅自动测试）
-
-macOS Dock 与 Linux 启动器显示统一收件箱未读数，Windows 暂不显示；规则见[应用接口](../contracts/app-api.md#应用图标未读角标)。本节只记录自动检查，下列真机项目均尚未执行，不表示已经通过。
-
-自动测试覆盖：核心计数只取可选择收件箱、跳过 `countsKnown = false` 与排除账号、关闭时为 0，并在合成账号上随标为已读、本机归档、删除与撤销删除和侧边栏数字保持一致；`badge` 设置的旧文件默认值、保存时规整与校验、手工编辑字段单独回退；桌面的多次触发合并为一次读取、数字未变不调用系统、核心未就绪时保持原样、系统调用失败后下次重试；设置页在不支持的平台隐藏分组，开关和按账号选择写入 `badge` 设置节。
-
-本机 macOS 上 `bun run check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 与 `git diff --check` 通过：前端 132 个文件 / 1,734 项，Rust 合计 1,858 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。Windows / Linux 目标没有在本机编译检查。
-
-源码核对：Tauri 2.12.3 运行时以 `{productName}.desktop`（即 `MailX.desktop`）发送启动器计数，tauri-bundler 的 freedesktop 模块同样以 `{product_name}.desktop` 命名安装到 `/usr/share/applications` 的文件，两者一致；实际安装包仍待 Linux 真机确认。
-
-尚未验证：
+规则见[应用接口](../contracts/app-api.md#应用图标未读角标)。自动测试覆盖核心计数、`badge` 设置的默认值与校验、桌面多次触发合并、系统调用失败重试与设置页平台可见性。真机检查：
 
 - macOS 打包版本：Dock 数字随新邮件、已读、归档、删除与撤销更新，主窗口隐藏后仍更新；为 0 时角标消失；关闭开关或取消计入某账号后数字随之变化。
-- Linux：系统缺少 `libunity` 时静默不显示；Ubuntu Dock、GNOME + Dash to Dock 与 KDE Plasma 上是否实际显示数字。
+- Linux：系统缺少 `libunity` 时静默不显示；Ubuntu Dock、GNOME + Dash to Dock 与 KDE Plasma 上是否实际显示数字；确认安装包中的 `.desktop` 名称与运行时一致。
 - Windows：设置页不显示该分组，已保存的设置不受影响。
 
+<a id="batch-mail-actions"></a>
+<a id="oauth-foundation"></a>
 
-## 助手思考内容的捕获、回传与展示（2026-11-18）
+## 20. 更新、代码签名与退出恢复
 
-思考内容按协议捕获与原样回传，不按服务商分支：OpenAI 兼容接口按收到时的字段名（`reasoning_content` / `reasoning`）回传，没收到就不发；Anthropic 接口的 `thinking`（含签名）与 `redacted_thinking` 块按原位置回传；只回传给同一协议、连接、地址与模型。原 DeepSeek 专用的关闭思考开关已移除。
+- 更新：用带更新器的旧版验证升级后数据可用；默认自动下载、关闭开关后手动下载、立即重启与退出时安装；取消、断网重试、缓存恢复与安装失败反馈；按相邻版本和跨度升级分别记录。检查方法见[更新器验证计划](../architecture/updater.md#10-验证计划)。
+- macOS、Windows 与 Linux AppImage 的端到端升级；deb / rpm 的仅提示界面；系统代理与弱网；真实安装失败；退出时多个写信窗口与发送中的保护。
+- 代码签名：安装包与更新包的正式签名尚未实现；macOS 开发构建的稳定代码身份只用于开发期钥匙串授权，需确认旧 vault 首次授权与 Intel macOS。
+- 正文与写回策略拒绝后，同步停止自动轮次并保留缓存；手动同步或修改连接可重启新世代。
 
-自动测试：两种协议的解码与请求体回传、来源不一致时不回传、工具调用后与追问时的回传、读回历史对话后继续、旧格式历史记录读取、上下文预算计入；前端思考行（进行中 / 结束 / 展开 / 脱敏 / 减少动态效果）、等待提示只在未收到任何数据时显示、读回对话的位置还原。同步含 #149 的 main 后，`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`（core 1,545 项通过、2 项既有忽略）、`types:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test`（133 个文件 / 1,743 项）、生产构建与 `git diff --check` 通过。浏览器预览（模拟助手）目测思考行与工具行对齐、展开原文的样式。
+## 21. 记录与审查
 
-维护者手动验收（macOS，`bun run desktop:dev:isolated`，真实 DeepSeek）：会调用工具的提问正常回答并显示思考时长；同一对话追问正常；从历史对话重新打开后追问正常；「此刻」概述句完整生成。
-
-尚未验证：Anthropic 协议的思考（默认关闭，仅模拟数据）、其他返回思考内容的服务商（Kimi、Qwen、GLM、OpenRouter、本地 vLLM / Ollama 等），以及 Windows / Linux 桌面。
+- 每次真实验收在 PR 描述里写清平台、系统版本、构建类型、服务商 / 客户端、走过的步骤与观察到的结果；失败与未覆盖项同样写明。
+- 结果不确定时写“未验证”，不写“基本可用”。自动测试通过、浏览器预览与另一平台的证据分别标注。
+- 修改正文边界、发送、权限、同步或持久化行为时，同步更新本文对应章节，使下一位验证者能按同一方法复核。

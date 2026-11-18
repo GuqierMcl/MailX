@@ -1,6 +1,6 @@
 # 开发指南
 
-本文说明开发环境、命令与模块边界。普通浏览器运行 `bun run dev` 时工作台使用合成 mock 数据，仅用于界面开发；真实邮件与凭证经 Tauri 宿主访问共享核心，数据保存在用户数据目录的 SQLite 与 blob 文件中，凭证由系统凭据库保存。能力范围见[产品说明](../product/README.md)与[路线图](../roadmap/README.md)，服务商兼容性及平台体验的实际证据见[验证记录](validation.md)。
+本文说明开发环境、命令与模块边界。普通浏览器运行 `bun run dev` 时工作台使用合成 mock 数据，仅用于界面开发；真实邮件与凭证经 Tauri 宿主访问共享核心，数据保存在用户数据目录的 SQLite 与 blob 文件中，凭证由系统凭据库保存。能力范围见[产品说明](../product/README.md)与[路线图](../roadmap/README.md)，服务商兼容性及平台体验的实际证据见[验证指引](validation.md)。
 
 ## 1. 环境与目录
 
@@ -110,13 +110,13 @@ macOS 的启动入口转发 `SIGINT` / `SIGTERM` 到独立的子进程组；直�
 MAILX_TEST_MACOS_KEYCHAIN=1 bun test ./scripts/macos-dev-signing.test.mjs
 ```
 
-该测试使用临时签名身份与合成凭证，检查不同构建保持相同代码身份且无需交互读取钥匙串，并清理临时钥匙串。实际执行结果与桌面验证范围见[验证记录](validation.md)；设计细节见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
+该测试使用临时签名身份与合成凭证，检查不同构建保持相同代码身份且无需交互读取钥匙串，并清理临时钥匙串。实际执行结果与桌面验证范围见[验证指引](validation.md)；设计细节见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
 
 ### 中英文文本维护
 
 共享译文放在根目录 `locales/{zh-CN,en}/`，前端通过 `i18next + react-i18next` 使用，Rust 编译时嵌入通知与引用模板子集。新增界面文案、Tooltip、读屏标签或错误映射时，同步补齐两种语言；模块配置保存语义 key，React 组件订阅语言变化，避免将译文冻结在模块初始化时。运行 `bun run i18n:check`、类型检查及受影响的行为测试；新增设置 DTO 还需生成并检查类型漂移。根 `check` 与前端 CI 已包含资源门禁。
 
-设置、跨窗口同步和引用模板的改动须同步[应用 API](../contracts/app-api.md)、[桌面与 Web](../architecture/desktop-web.md)及[验证记录](validation.md)；详细规则见[中英文文本适配](../architecture/internationalization.md)。本版只适配文本，不重构日期 / 时间、数字、文件大小、列表连接或排序。浏览器 mock 适合检查文案与基本交互，不能据此宣称真实 Tauri 多窗口、系统通知或三平台验收通过。
+设置、跨窗口同步和引用模板的改动须同步[应用 API](../contracts/app-api.md)、[桌面与 Web](../architecture/desktop-web.md)及[验证指引](validation.md)；详细规则见[中英文文本适配](../architecture/internationalization.md)。本版只适配文本，不重构日期 / 时间、数字、文件大小、列表连接或排序。浏览器 mock 适合检查文案与基本交互，不能据此宣称真实 Tauri 多窗口、系统通知或三平台验收通过。
 
 ## 3. 包边界
 
@@ -134,7 +134,7 @@ MailX 自有 Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执
 ## 4. 开发与发布协作
 
 1. 按[发布前检查](release.md#发布前检查)整理文档、升级说明和候选安装包验收；版本号通过版本脚本统一修改。
-2. 按[验证记录](validation.md)中的检查方法与缺口安排回归和手测，明确平台、客户端、服务商及路由组合；不能用自动回归替代平台体验结论。
+2. 按[验证指引](validation.md)中的检查方法与缺口安排回归和手测，明确平台、客户端、服务商及路由组合；不能用自动回归替代平台体验结论。
 3. 后续能力与优先级依照[路线图](../roadmap/README.md)推进；落地后同步产品范围、接口与相关架构文档。
 
 ## 5. 增加邮箱预设
@@ -145,4 +145,4 @@ MailX 自有 Logo 的唯一设计源文件为 `branding/logo.svg`。更新后执
 
 读取可信内置预设后允许用户查看、修改并测试，不能仅凭邮箱域名自动连接任意远程发现结果。测试覆盖收信与发信两个方向、失败提示和网络路由。连接配置、OAuth 注册信息和账号授权在不同层管理，真实凭证不得放进资源文件。
 
-详细验收方法见[验证策略](validation.md)，任务依赖见[路线图](../roadmap/README.md)。设计、命名和选型均可根据后续验证继续调整。
+详细验收方法见[验证指引](validation.md)，任务依赖见[路线图](../roadmap/README.md)。设计、命名和选型均可根据后续验证继续调整。

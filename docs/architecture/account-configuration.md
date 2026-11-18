@@ -1,6 +1,6 @@
 # 账号配置与凭证生命周期
 
-状态：**账号配置、协议连接与独立收发登录诊断已有实现 / 通用 OAuth 基础已有实现，生产服务商接入仍未开放**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在添加向导测试当前填写的 IMAP / SMTP 登录，也可在账号设置验证已保存配置版本的登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证策略](../development/validation.md)。
+状态：**账号配置、协议连接与独立收发登录诊断已有实现 / 通用 OAuth 基础已有实现，生产服务商接入仍未开放**。当前提供桌面的创建、列表、详情与修改；保存本身不联网，持久化的 `connectionStatus` 仍为 `unverified`。用户可在添加向导测试当前填写的 IMAP / SMTP 登录，也可在账号设置验证已保存配置版本的登录，诊断结果仅在当前界面使用，不代表真实邮件投递。代码位于 `core/src/accounts/`、`core/src/storage/`、`desktop/src/` 和 `frontend/src/features/accounts/`；验证方法见[验证指引](../development/validation.md)。
 
 ## 1. 对象与身份
 
@@ -146,4 +146,4 @@ token 端点的 `invalid_grant`、`interaction_required`、`consent_required`、
 
 ## 7. 接口与验证入口
 
-实际命令、类型和错误见[应用 API](../contracts/app-api.md)。核心故障测试使用独立临时 SQLite 目录和 SecretStore 替身；真实系统凭据库与 Tauri IPC 要单独验证。验证范围与平台证据见[验证策略](../development/validation.md)，邮件同步与发送仍按[同步设计](mail-sync.md)推进。
+实际命令、类型和错误见[应用 API](../contracts/app-api.md)。核心故障测试使用独立临时 SQLite 目录和 SecretStore 替身；真实系统凭据库与 Tauri IPC 要单独验证。验证范围与平台证据见[验证指引](../development/validation.md)，邮件同步与发送仍按[同步设计](mail-sync.md)推进。

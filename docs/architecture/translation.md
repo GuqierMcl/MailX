@@ -1,6 +1,6 @@
 # 邮件翻译
 
-状态：**core、桌面 IPC 与界面均已有实现，仅有自动测试；AI 模型来源（第 10 节）有一次维护者报告的桌面手测（未记录平台与模型），提示词在各模型上的效果未逐项确认；DeepL 与 Google Cloud 未用真实密钥调用，Microsoft Translator 有一次维护者报告的真实密钥测试，两个免设置通道只用固定测试句子在 macOS 开发机上探测过；三平台桌面未手测** · 2026-11-13。本文记录把已打开的邮件翻译成用户阅读语言的设计：范围、数据披露、处理链、安全不变量、服务与限额、网络路由、存储与错误。具体验证范围见[验证记录](../development/validation.md#translation-validation)；接口见[应用 API](../contracts/app-api.md#邮件翻译主窗口)；界面见[界面设计语言](ui-design.md#邮件翻译已实现实机未验证仅自动测试)。设计可随实测与后续需求调整。
+状态：**core、桌面 IPC 与界面均已有实现，仅有自动测试；AI 模型来源（第 10 节）有一次维护者报告的桌面手测（未记录平台与模型），提示词在各模型上的效果未逐项确认；DeepL 与 Google Cloud 未用真实密钥调用，Microsoft Translator 有一次维护者报告的真实密钥测试，两个免设置通道只用固定测试句子在 macOS 开发机上探测过；三平台桌面未手测** · 2026-11-13。本文记录把已打开的邮件翻译成用户阅读语言的设计：范围、数据披露、处理链、安全不变量、服务与限额、网络路由、存储与错误。具体验证范围见[验证指引](../development/validation.md#translation-validation)；接口见[应用 API](../contracts/app-api.md#邮件翻译主窗口)；界面见[界面设计语言](ui-design.md#邮件翻译已实现实机未验证仅自动测试)。设计可随实测与后续需求调整。
 
 ## 1. 范围与非目标
 
@@ -136,7 +136,7 @@ Microsoft 免设置通道不接受这种形式（见 6.1），因此 `wire.rs` �
 - **请求头。** 不带任何密钥或认证头；`User-Agent: MailX` 与其他服务相同，探测表明被接受，不伪装浏览器。
 - **状态码。** 429 为 `translationRateLimited`；401 / 403 / 404 / 410 为 `translationUnavailable`（没有密钥可拒绝，是通道拒绝或已迁移）；5xx 为 `translationUnavailable`；其余、答案形状不符、条数不符为 `translationInvalidResponse`。界面在这三类失败（`translationUnavailable`、`translationRateLimited`、`translationNetwork`，以及超时）时，除“重试”外再给一个“换一种翻译服务”按钮。
 - **可达性。** Google 于 2022 年（据公开报道）结束在中国大陆的翻译服务，不经代理预期不可达，界面说明“在中国大陆通常需要代理”；Microsoft 通道在中国大陆网络下的可达性未验证。两者都走翻译专用路由（第 7 节），代理失败不回退直连。
-- **验证。** 只用固定测试句子探测过，见[验证记录](../development/validation.md#translation-validation)；限额未验证。
+- **验证。** 只用固定测试句子探测过，见[验证指引](../development/validation.md#translation-validation)；限额未验证。
 
 ## 7. 网络路由与密钥
 
@@ -210,4 +210,4 @@ Microsoft 免设置通道不接受这种形式（见 6.1），因此 `wire.rs` �
 
 ## 11. 状态与验证
 
-**Implemented（仅自动测试）**：AI 来源（提示与答案解析、分批、错误映射、同意绑定连接、模型选择与删除连接时清理，对本机模拟服务）；分段与回写（含恶意答案与标签名编码的严格解码）、语言检测、五个服务客户端（对本机模拟监听器）、代理路由（含对本机模拟 HTTP CONNECT 监听器的代理登录头）、翻译服务与缓存有 Rust 单元测试；前端界面测试与之配套。**尚未验证**：AI 来源没有对任何真实模型调用过，提示词质量、占位符保真、120 秒超时与 3 批并发都未实测；DeepL 与 Google Cloud 没有用真实密钥调用过（Microsoft Translator 有一次维护者报告的真实密钥测试，范围与平台未记录）；两个免设置通道只在 macOS 开发机上用固定测试句子探测过，没有在中国大陆网络下验证，限额与长期稳定性未知；DeepL 的 `ZH-HANT`、`NB` 目标代码及每次请求条数上限，以及 Google 对无效密钥的响应形态，无法从公开文档确认；语言检测准确率未在真实邮件上测量；版式保真未用真实营销邮件语料检查；没有 macOS、Windows、Linux 的桌面手测。具体记录见[验证记录](../development/validation.md#translation-validation)。
+**Implemented（仅自动测试）**：AI 来源（提示与答案解析、分批、错误映射、同意绑定连接、模型选择与删除连接时清理，对本机模拟服务）；分段与回写（含恶意答案与标签名编码的严格解码）、语言检测、五个服务客户端（对本机模拟监听器）、代理路由（含对本机模拟 HTTP CONNECT 监听器的代理登录头）、翻译服务与缓存有 Rust 单元测试；前端界面测试与之配套。**尚未验证**：AI 来源没有对任何真实模型调用过，提示词质量、占位符保真、120 秒超时与 3 批并发都未实测；DeepL 与 Google Cloud 没有用真实密钥调用过（Microsoft Translator 有一次维护者报告的真实密钥测试，范围与平台未记录）；两个免设置通道只在 macOS 开发机上用固定测试句子探测过，没有在中国大陆网络下验证，限额与长期稳定性未知；DeepL 的 `ZH-HANT`、`NB` 目标代码及每次请求条数上限，以及 Google 对无效密钥的响应形态，无法从公开文档确认；语言检测准确率未在真实邮件上测量；版式保真未用真实营销邮件语料检查；没有 macOS、Windows、Linux 的桌面手测。具体记录见[验证指引](../development/validation.md#translation-validation)。

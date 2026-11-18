@@ -46,7 +46,7 @@ iCloud 邮箱接受 `@icloud.com`、`@me.com` 和 `@mac.com` 地址，使用 App
 
 Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365（工作或学校邮箱）通过浏览器中的微软登录页登录，不需要在 MailX 中输入密码。Outlook.com 需要先在 Outlook 设置中开启 IMAP；工作或学校账号可能需要管理员批准 MailX，或为邮箱允许 IMAP 和 SMTP。公司自己搭建的服务器请选择独立的「Exchange（自建服务器）」入口，自动查找 EWS 或手动填写 HTTPS 地址。详见[添加账号指南](docs/guides/zh-CN/README.md#microsoftoutlook--microsoft-365)。
 
-自建 Exchange 使用 HTTPS 上的 EWS 与 NTLMv2，支持自动发现和手动配置，复用本地收件箱、草稿与发件箱。部署和平台实测范围见[验证记录](docs/development/validation.md#exchange-ews-validation)。
+自建 Exchange 使用 HTTPS 上的 EWS 与 NTLMv2，支持自动发现和手动配置，复用本地收件箱、草稿与发件箱。部署与平台的验证方式见[验证指引](docs/development/validation.md#exchange-ews-validation)，实测结果记录在对应 PR 中。
 
 其他支持 IMAP / SMTP 密码登录的邮箱，可以手动填写服务器添加。Gmail 的浏览器登录（无需应用专用密码）在规划中；密码或应用专用密码能否使用取决于服务商与账号配置。与真实服务商的兼容性目前只做了部分验证，遇到问题欢迎[提交 issue](https://github.com/GuqierMcl/MailX/issues)。
 
@@ -83,7 +83,7 @@ Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365（工�
 - 当前支持使用密码、授权码或应用专用密码的 IMAP 和 SMTP 账号，以及 Outlook 和 Microsoft 365 的浏览器登录；Gmail 等其他服务商的浏览器登录、内置 AI 助手和自托管 Web 版本尚未提供。
 - 首次同步从固定的最近 30 天窗口开始，每轮补齐各文件夹窗口中最新的一千封邮件头，已缓存的邮件会保留。搜索只覆盖本机内容，未打开过的正文可能不在结果中；附件按名称搜索，不搜索文件内容。
 - 归档只在本机生效；移动到任意服务器文件夹和把本地草稿同步到服务器尚未实现。已发送的本机副本不会上传到服务器。
-- 提供 Windows、macOS 和 Linux 构建，但各功能与服务商的覆盖范围不同。已验证的组合和剩余缺口见[验证记录](docs/development/validation.md)。
+- 提供 Windows、macOS 和 Linux 构建，但各功能与服务商的覆盖范围不同。验证方式见[验证指引](docs/development/validation.md)，实际测过的组合见各版本的 Release 说明。
 
 ## 快速开始
 

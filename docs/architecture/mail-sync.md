@@ -1,6 +1,6 @@
 # 账号、同步与发信
 
-状态：**文件夹与邮件头同步、按需正文、IMAP IDLE、标记 / 删除写回、本机归档和 SMTP 发送已有实现**。IMAP 与 SMTP 均经账号路由；平台与服务商证据见[验证记录](../development/validation.md)。账号配置详见[账号配置](account-configuration.md)，状态与参数可随验证修订。
+状态：**文件夹与邮件头同步、按需正文、IMAP IDLE、标记 / 删除写回、本机归档和 SMTP 发送已有实现**。IMAP 与 SMTP 均经账号路由；平台与服务商证据见[验证指引](../development/validation.md)。账号配置详见[账号配置](account-configuration.md)，状态与参数可随验证修订。
 
 ## 已实现：文件夹同步
 
@@ -72,7 +72,7 @@
 - 每个账号多一条常驻连接，现在是头部同步 1 + 按需正文 1 + 预览 1 + 写回 1 + IDLE 1。QQ、163、139 等服务商的并发连接上限未验证，可能触发拒绝；拒绝会按上文停用该账号的 IDLE。
 - 代理或网关可能静默切断空闲 TCP，此时要等 10 分钟的重新 IDLE 或系统层面的超时才发现；睡眠检测与手动刷新能缓解。
 - 没有用户可见的开关，也没有界面上的 IDLE 状态。
-- 新邮件到达、睡眠唤醒、代理、切网及服务商连接限制的证据见[验证记录](../development/validation.md)第 25 节。
+- 新邮件到达、睡眠唤醒、代理、切网及服务商连接限制的证据见[验证指引](../development/validation.md)。
 
 ## 1. 账号生命周期
 
@@ -181,6 +181,6 @@ draft → queued → sending → accepted
 
 ## 7. 完成证据
 
-当前全目录头部同步还需验证目录级拒绝、断线恢复公平性、完整 LIST、Noselect、改名 / 删除和同 UID 跨目录独立；原头部行为继续验证：重复批次不增加远端位置记录、UIDVALIDITY 切换、来源隔离、固定窗口、稳定分页、flags / 删除对账、SEARCH / FETCH 中断、中文多字符集解码及只读命令。前端自动测试与本轮待补证据见[验证策略](../development/validation.md#收件箱邮件头同步的检查与证据)，真实服务商、三平台 CI 结果不能由代码存在推定。
+当前全目录头部同步还需验证目录级拒绝、断线恢复公平性、完整 LIST、Noselect、改名 / 删除和同 UID 跨目录独立；原头部行为继续验证：重复批次不增加远端位置记录、UIDVALIDITY 切换、来源隔离、固定窗口、稳定分页、flags / 删除对账、SEARCH / FETCH 中断、中文多字符集解码及只读命令。前端自动测试与本轮待补证据见[验证指引](../development/validation.md#收件箱邮件头同步的检查与证据)，真实服务商、三平台 CI 结果不能由代码存在推定。
 
-后续完整收发还必须覆盖：重复同步不增加同一远端位置记录、UIDVALIDITY 变化、远端删除对账中断、中文 MIME、附件取消、离线 flags、SMTP 部分拒绝、DATA 后断线、提交后进程崩溃和 Sent 归档失败。完整矩阵见[验证策略](../development/validation.md)。
+后续完整收发还必须覆盖：重复同步不增加同一远端位置记录、UIDVALIDITY 变化、远端删除对账中断、中文 MIME、附件取消、离线 flags、SMTP 部分拒绝、DATA 后断线、提交后进程崩溃和 Sent 归档失败。完整矩阵见[验证指引](../development/validation.md)。

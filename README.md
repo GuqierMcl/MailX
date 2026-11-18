@@ -46,7 +46,7 @@ iCloud Mail accepts `@icloud.com`, `@me.com` and `@mac.com` addresses with an Ap
 
 Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. For company-hosted servers, choose the separate Exchange (self-hosted) entry to discover an EWS endpoint or enter its HTTPS URL manually. See the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for details.
 
-Self-hosted Exchange uses EWS over HTTPS with NTLMv2, with automatic discovery and manual setup; it uses the same local inbox, drafts and outbox. Deployment and platform validation is tracked in the [validation record](docs/development/validation.md#exchange-ews-validation).
+Self-hosted Exchange uses EWS over HTTPS with NTLMv2, with automatic discovery and manual setup; it uses the same local inbox, drafts and outbox. Deployment and platform validation is described in the [validation guidance](docs/development/validation.md#exchange-ews-validation); results land in the PR that ships them.
 
 Any other mailbox that offers IMAP and SMTP with password sign-in can be added by entering its servers manually. Browser sign-in for Gmail (without an app password) is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
 
@@ -83,7 +83,7 @@ What changed in each release is in the [CHANGELOG](CHANGELOG.md); the detailed r
 - MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, and browser sign-in for Outlook and Microsoft 365. Browser sign-in for Gmail and other providers, a built-in AI assistant, and the self-hosted web version are not available yet.
 - Initial synchronization starts with a fixed 30-day window and fills up to the newest 1,000 messages per folder per round, retaining previously cached messages. Search covers local content; unopened message bodies may be missing from results. Attachments are searched by name, not by their contents.
 - Archive is local to this computer. Moving messages to arbitrary server folders and synchronizing local drafts to the server are not implemented. Sent copies do not upload to the server.
-- Builds are available for Windows, macOS and Linux, but feature and provider coverage differs. See the [validation record](docs/development/validation.md) for tested combinations and remaining gaps.
+- Builds are available for Windows, macOS and Linux, but feature and provider coverage differs. See the [validation guidance](docs/development/validation.md) for what is verified and how, and each release's notes for tested combinations.
 
 ## Getting Started
 

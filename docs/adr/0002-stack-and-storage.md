@@ -6,7 +6,7 @@
 
 Rust / Cargo、Tauri、React + Vite + shadcn、rusqlite 与 ts-rs 已采用。桌面邮件工作台、IMAP 同步 / IDLE、手写 SMTP 会话与发送队列已接通；全文搜索采用 SQLite FTS5 trigram，短词退回 LIKE；正文、草稿附件和待发送 / 已发送快照使用内容寻址 blob。前端已有虚拟列表与隔离正文阅读。Cargo workspace 现包含 `core`、`desktop`、`mcp-server`、`mcp-bridge`，工具层与本地 MCP 已落地，OAuth、内置 AI 与服务器宿主仍规划。
 
-这些是实现状态，不代表完整服务商、性能或三平台验收通过；具体边界见[存储与搜索](../architecture/storage-search.md)、[同步与发信](../architecture/mail-sync.md)和[验证记录](../development/validation.md)。
+这些是实现状态，不代表完整服务商、性能或三平台验收通过；具体边界见[存储与搜索](../architecture/storage-search.md)、[同步与发信](../architecture/mail-sync.md)和[验证指引](../development/validation.md)。
 
 ## 背景
 

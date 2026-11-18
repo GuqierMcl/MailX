@@ -118,4 +118,4 @@ identifier "com.mailxapp.desktop.dev" and certificate leaf = H"<固定证书指�
 
 签名专用钥匙串保存的是签名证书私钥；业务密码仍保存在 `SystemSecretStore` 原来的 vault 中。`SecretStore`、凭证引用、数据库与 journal 的持久化契约均不变。首次切换签名身份读取旧条目可能仍需授权；已保存该身份的授权、钥匙串已解锁且证书不变时，后续构建可复用授权。锁定、拒绝访问及旧逐条目迁移继续遵循原有错误和重试语义。
 
-开发代码签名标识与 Tauri 应用标识是两种用途：签名步骤不会隔离账号或修改 Tauri identifier。普通 `tauri dev` 仍按原规则共享安装版数据，日常开发与智能体调试使用 `desktop:dev:isolated`。命令、首次授权与故障处理见[开发指南](../development/README.md#macos-开发签名与钥匙串授权)，合成测试及实机结果见[验证记录](../development/validation.md)。
+开发代码签名标识与 Tauri 应用标识是两种用途：签名步骤不会隔离账号或修改 Tauri identifier。普通 `tauri dev` 仍按原规则共享安装版数据，日常开发与智能体调试使用 `desktop:dev:isolated`。命令、首次授权与故障处理见[开发指南](../development/README.md#macos-开发签名与钥匙串授权)，合成测试及实机结果见[验证指引](../development/validation.md)。

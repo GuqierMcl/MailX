@@ -1,6 +1,6 @@
 # 邮箱服务商兼容层
 
-本文是服务商差异的模块边界与扩展约定。共享核心提供协议、同步、发送和持久化的主流程；具体服务商对标准行为的偏差，由独立兼容模块解释并通过中立接口交回主流程。新增兼容能力时更新本文对应规则，真实服务商与平台的验证证据统一记录在[验证记录](../development/validation.md)。
+本文是服务商差异的模块边界与扩展约定。共享核心提供协议、同步、发送和持久化的主流程；具体服务商对标准行为的偏差，由独立兼容模块解释并通过中立接口交回主流程。新增兼容能力时更新本文对应规则，真实服务商与平台的验证证据统一记录在[验证指引](../development/validation.md)。
 
 ## 1. 职责与依赖
 
@@ -57,7 +57,7 @@ QQ 模块位于 `core/src/providers/qq.rs`，仅对实际 IMAP 主机名精确�
 
 补充标识匹配还要求服务器邮件的 `from_address` 与 outbox 中冻结的 SMTP 信封发件地址一致。如果服务器原生 `Message-ID` 已对应同账号的任何 outbox 行，就不再用补充标识去匹配另一行；不能让一封服务器邮件的扩展头部覆盖其已有的原生关联。
 
-这项规则解决服务商给已发送副本重新分配 `Message-ID` 的情况。规则按端点启用，不等于所有使用该端点的账号类型和别名均经过真实收发验证；具体范围以[验证记录](../development/validation.md)为准。
+这项规则解决服务商给已发送副本重新分配 `Message-ID` 的情况。规则按端点启用，不等于所有使用该端点的账号类型和别名均经过真实收发验证；具体范围以[验证指引](../development/validation.md)为准。
 
 ### 3.3 存储与恢复
 
@@ -89,13 +89,13 @@ Microsoft 的全部知识（客户端 ID、端点、主机、声明、错误码�
 - **身份验证。** 先用通用 `id_token` 解析（`aud`、`exp`、`nonce`），再要求 `iss` 等于 `https://login.microsoftonline.com/{tid}/v2.0`，`tid` 与 `oid` 为标准写法的 GUID。个人条目要求 `tid` 为消费者租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，工作条目要求其他租户；入错条目返回 `oauthUsePersonalEntry` / `oauthUseOrganizationEntry`，提示改用对应入口。绑定主体为 `{tid}/{oid}`，issuer 取 `iss`。邮箱地址不用先输入：`check` 返回候选地址（先 `email`，没有再 `preferred_username`，须长得像邮箱），它只是可变提示；`prove_mailbox` 以 XOAUTH2 登录本条目受信 IMAP 端点，成功才算邮箱确认。候选地址被拒或不存在时，由用户填写地址再求证一次，失败返回 `oauthMailboxRefused`。
 - **管理员关闭 SMTP AUTH。** 仅 SMTP `535` 且增强状态 `5.7.139` 归为“管理员已关闭此协议”。IMAP 只返回通用的 `NO AUTHENTICATE failed`，无法区分，不猜测，也不分类。
 - **Windows 凭据大小。** Microsoft refresh token 常超过 1000 个字符，Windows 由桌面端与服务商无关的分条目包装存放，见[凭据库](secret-vault.md#7-oauth-凭证的大小限制)。
-- **尚未用真实账号验证。** 以上规则由受控测试和 Microsoft 文档支撑；授权、IMAP / SMTP 收发、IDLE 与各类租户策略下的实际表现仍待真实账号确认，见[验证记录](../development/validation.md)和[接入评估](../reference/microsoft-integration.md)。
+- **尚未用真实账号验证。** 以上规则由受控测试和 Microsoft 文档支撑；授权、IMAP / SMTP 收发、IDLE 与各类租户策略下的实际表现仍待真实账号确认，见[验证指引](../development/validation.md)和[接入评估](../reference/microsoft-integration.md)。
 
 ## 5. 自建 Exchange 与 EWS
 
 EWS 是独立邮件协议后端，实现在 `core/src/ews/`，通过账号的实际连接类型分派；不是依据微软品牌或邮箱后缀激活的 IMAP 兼容规则。独立「Exchange（自建服务器）」入口与 Microsoft 365 的 OAuth / IMAP/SMTP 入口分开。发现结果只是待选端点，不能自动授予密码信任。
 
-EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协议实现提供目录、邮件和 MIME 操作；事务、来源校验、重试、撤销及副本对账由应用服务负责。暂不依赖专有邮件头猜测已发送副本身份，证据不足时保留本机快照。架构和限制见[Exchange EWS 接入](exchange-ews.md)，实测范围见[验证记录](../development/validation.md#exchange-ews-validation)。
+EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协议实现提供目录、邮件和 MIME 操作；事务、来源校验、重试、撤销及副本对账由应用服务负责。暂不依赖专有邮件头猜测已发送副本身份，证据不足时保留本机快照。架构和限制见[Exchange EWS 接入](exchange-ews.md)，实测范围见[验证指引](../development/validation.md#exchange-ews-validation)。
 
 ## 6. AI 服务商：只按协议适配
 
@@ -103,4 +103,4 @@ EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协�
 
 - **思考（推理）按协议处理。** OpenAI 兼容读 `delta.reasoning_content` 或字符串形式的 `delta.reasoning`，Anthropic 读 `thinking` / `redacted_thinking` 块。回传规则是“服务器发来什么就原样发回什么，别的不加”：OpenAI 兼容用收到时的同一字段名放回那条助手消息，从没发过思考的服务器收不到这个字段；Anthropic 的思考块连同签名与 `data` 原样放回原位置。只回传给产生它的同一协议、连接、地址与模型。细节见 [AI Runtime](../ai-runtime/README.md) 第 3 节。
 - **没有服务商专属的思考开关。** 请求不带 `thinking`、`reasoning_effort` 等只有部分服务商认识的参数；「此刻」概述同样不发。需要按服务商调整时，先确认无法在协议层解决，再按本文的模块化约定增加中立扩展点并记录验证。
-- 真实服务商的实测结果写入[验证记录](../development/validation.md)；自动测试只覆盖协议样例。
+- 真实服务商的实测结果写入[验证指引](../development/validation.md)；自动测试只覆盖协议样例。

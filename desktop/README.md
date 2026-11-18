@@ -26,7 +26,7 @@ bun run tauri dev
 - 根目录 `frontend/`：React + TypeScript + Vite + shadcn 邮件工作台、设置与富文本写信界面，经 `MailxClient` 调用宿主。
 - `icons/`：从 `branding/logo.svg` 生成的正式应用图标，包含 Windows ICO、macOS ICNS、Linux PNG 和 Windows 商店尺寸；`tray/` 提供当前托盘使用的黑白与 macOS template 资源。
 
-邮件正文视为不可信输入，经净化、自定义协议、正文 CSP 与空 sandbox iframe 隔离，不获得 Tauri IPC 权限。主窗口 CSP 只允许所需的本地正文来源，远程图片由后端按账号路由和安全策略获取；正文外链经受限入口交给系统打开。隔离与平台证据见[网络与安全](../docs/architecture/network-security.md)和[验证记录](../docs/development/validation.md)。[Tauri capability 说明](https://v2.tauri.app/security/capabilities/)。
+邮件正文视为不可信输入，经净化、自定义协议、正文 CSP 与空 sandbox iframe 隔离，不获得 Tauri IPC 权限。主窗口 CSP 只允许所需的本地正文来源，远程图片由后端按账号路由和安全策略获取；正文外链经受限入口交给系统打开。隔离与平台证据见[网络与安全](../docs/architecture/network-security.md)和[验证指引](../docs/development/validation.md)。[Tauri capability 说明](https://v2.tauri.app/security/capabilities/)。
 
 ## 前端与 Tauri 配置
 

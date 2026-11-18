@@ -1,6 +1,6 @@
 # 应用服务 API
 
-状态：**启动状态、账号、收发连接诊断、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-28。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP 尚未开放，MCP 经共享工具层提供受限接口；收发登录诊断与固定服务商帮助链接仅向主窗口开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证策略](../development/validation.md)。
+状态：**启动状态、账号、收发连接诊断、文件夹、同步状态与邮件读取及按需正文接口已有实现 / 其余 Draft，均未冻结对外兼容承诺** · 2026-10-28。桌面通过受限 Tauri IPC 查询邮件、按需下载正文和打开外链；HTML 仅由隔离协议提供。HTTP 尚未开放，MCP 经共享工具层提供受限接口；收发登录诊断与固定服务商帮助链接仅向主窗口开放。Rust 类型位于 `core/src/accounts/types.rs`、`core/src/mail/mod.rs`、`core/src/error.rs` 和 `core/src/startup.rs`，`ts-rs` 生成 `frontend/src/generated/accounts.ts` 与 `startup.ts`。真实服务商验证另见[验证指引](../development/validation.md)。
 
 ## 1. 通用结构
 
@@ -589,7 +589,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 邮件翻译（主窗口）
 
-把已缓存的邮件正文经用户选定的翻译服务翻译，设计见[邮件翻译](../architecture/translation.md)。状态：已实现，仅有自动测试；DeepL 与 Google Cloud 没有用真实密钥调用过，两个免设置通道只用固定测试句子探测过，见[验证记录](../development/validation.md#translation-validation)。命令只开放给主窗口，参数拒绝未知字段。
+把已缓存的邮件正文经用户选定的翻译服务翻译，设计见[邮件翻译](../architecture/translation.md)。状态：已实现，仅有自动测试；DeepL 与 Google Cloud 没有用真实密钥调用过，两个免设置通道只用固定测试句子探测过，见[验证指引](../development/validation.md#translation-validation)。命令只开放给主窗口，参数拒绝未知字段。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -898,7 +898,7 @@ type ConversationsChanged = { conversationId: string | null; change: "saved" | "
 
 **桌面宿主。** `desktop/src/badge.rs` 在后台按需重算，不依赖前端，主窗口隐藏时照常更新。触发：核心就绪、设置保存（`emit_settings_changed`）、`Sync`、`FlagWriteBack`、`MailStateChanged`（本机与 MCP 的已读、归档、取消归档及其撤销）、`Deletions`、`NewMail`、`AccountRemoved`，以及没有核心事件的本机删除、撤销删除和验证码复制后的清理与撤销。多次触发合并为一次：触发后等待约 300 ms 再在阻塞线程池读取，数字未变时不调用系统接口；核心未就绪或设置读取失败时保持图标原样。计数为 0 时调用 `set_badge_count(None)` 清除，否则传入实际数字，由系统绘制。只在 macOS（Dock）和 Linux 编译系统调用；其他平台模块不做任何事。`app_get_lifecycle` 的 `badgeAvailable` 告诉前端本平台能否显示角标（macOS、Linux 为 true，其余为 false），设置页据此决定是否显示“应用图标角标”分组；浏览器预览没有桌面宿主时显示该分组，带 `?platform=` 的预览按所选平台取值。
 
-Linux 使用 Tauri / tao 的 Unity LauncherEntry 实现：需要系统能加载 `libunity`，且桌面报告 Unity 启动器接口在运行；Tauri 按 `<productName>.desktop`（即 `MailX.desktop`）定位启动器条目。它与安装包生成的 desktop 文件名是否一致、哪些桌面环境实际显示，尚未实机确认，见[验证记录](../development/validation.md)。
+Linux 使用 Tauri / tao 的 Unity LauncherEntry 实现：需要系统能加载 `libunity`，且桌面报告 Unity 启动器接口在运行；Tauri 按 `<productName>.desktop`（即 `MailX.desktop`）定位启动器条目。它与安装包生成的 desktop 文件名是否一致、哪些桌面环境实际显示，尚未实机确认，见[验证指引](../development/validation.md)。
 
 ### 验证码识别与复制（主窗口）
 
@@ -928,7 +928,7 @@ Linux 使用 Tauri / tao 的 Unity LauncherEntry 实现：需要系统能加载 
 
 `Outbox` 事件把某项带入 `accepted`、`failed`、`unknown` 时，若主窗口不在前台（或用户开了“窗口在前台也通知”）且通知总开关为开，宿主发系统通知，标题分别对应“已发送”“发送失败”“可能已发送，需要确认”的当前语言译文。仅当设置 `notifications.showPreview` 为开时才读取并显示主题（无主题使用当前语言的占位文本）；关闭时正文为空，也不读取主题。`accepted` 静音，另两种用所选提示音。点击通知聚焦主窗口，并发送 `mailx://notification-open`，载荷 `{ accountId, emailId: null, outboxId }`（新邮件通知该字段为 `null`），主窗口据此选中发件箱项。
 
-新邮件、发送结果和测试通知都按生成时的有效语言取资源；切换语言不撤回、不重发已显示的系统通知。通知过滤、隐私和声音规则沿用现状。共享文本与预览隐藏有自动测试，三平台真实通知显示和点击仍需按[验证策略](../development/validation.md#8-新邮件通知的手动验证)分别记录。
+新邮件、发送结果和测试通知都按生成时的有效语言取资源；切换语言不撤回、不重发已显示的系统通知。通知过滤、隐私和声音规则沿用现状。共享文本与预览隐藏有自动测试，三平台真实通知显示和点击仍需按[验证指引](../development/validation.md#8-新邮件通知的手动验证)分别记录。
 
 ### 收发连接诊断与服务商帮助
 
@@ -1046,7 +1046,7 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 
 ## 桌面主窗口关闭与后台运行
 
-已实现，平台真机验证范围见验证策略。仅 main 可调用下列命令，仍使用来源校验与 `ApiResult`；不向邮件正文或写信窗口开放应用退出控制。
+已实现，平台真机验证范围见[验证指引](../development/validation.md)。仅 main 可调用下列命令，仍使用来源校验与 `ApiResult`；不向邮件正文或写信窗口开放应用退出控制。
 
 | 命令 | 参数 | 返回数据 |
 | --- | --- | --- |

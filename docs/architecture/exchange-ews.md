@@ -1,6 +1,6 @@
 # 自建 Exchange 邮箱接入
 
-本页定义自建 Exchange 的 EWS 接入边界。它与使用 OAuth 和 IMAP/SMTP 的 Microsoft 365 入口分别配置；自动测试及真实服务器验证范围记录在[验证记录](../development/validation.md)。
+本页定义自建 Exchange 的 EWS 接入边界。它与使用 OAuth 和 IMAP/SMTP 的 Microsoft 365 入口分别配置；自动测试及真实服务器验证范围记录在[验证指引](../development/validation.md)。
 
 感谢 [Arilt](https://github.com/Arilt) 在 [PR #141](https://github.com/GuqierMcl/MailX/pull/141) 提供的初版 EWS 实现、自建服务器使用反馈及 NTLM、自动发现和文件夹兼容性排查。这些前期工作为本功能的接入方向和验证场景提供了依据；后续实现按 MailX 当前账号、路由、同步与发件箱架构整合。原 PR 保留用于继续补充问题和讨论。
 
