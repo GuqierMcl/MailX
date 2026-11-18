@@ -1394,7 +1394,7 @@ MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态
 
 ## macOS 开发签名与调试进程生命周期（2026-11-18）
 
-本机 macOS 27.0.1 / Apple Silicon、Bun 1.3.12、Tauri CLI 2.12.2 下，开发入口使用固定本机自签名证书与显式 designated requirement。签名脚本与测试改编自 dbx 的 Apache-2.0 实现，设计见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
+本机 macOS 27.0.1 / Apple Silicon、Bun 1.3.12、Tauri CLI 2.12.2 下，开发入口使用固定本机自签名证书与显式 designated requirement，设计见[系统凭据库](../architecture/secret-vault.md#8-macos-开发构建的稳定代码身份)。
 
 - `bun run version:test`：81 项通过、0 项失败、1 项显式原生测试跳过；覆盖双架构 runner、含空格路径、Tauri / Cargo / 应用参数分隔、release / 自定义 runner 拒绝、初始化残留保留、损坏配置与符号链接拒绝，以及签名失败不启动应用、`exec` 后 PID 连续性和无终端进程组退出。
 - 单独运行 `MAILX_TEST_MACOS_KEYCHAIN=1 bun test ./scripts/macos-dev-signing.test.mjs`：6 项通过。探针在临时钥匙串创建合成凭证，禁止系统交互后，三次内容不同的构建均能读取；CDHash 改变而指定身份要求保持一致。未签名重编译与锁定钥匙串均明确失败，解锁后恢复；临时钥匙串已清理，没有读取真实账号凭证。

@@ -104,7 +104,7 @@ macOS 单条保险库不受此限，但整体仍随账号数增长。Linux 的 S
 
 ## 8. macOS 开发构建的稳定代码身份
 
-单条目保险库与进程内缓存不能保留 ad-hoc 签名构建之间的访问身份。开发签名脚本改编自 [dbx 的本机开发签名实现](https://github.com/t8y2/dbx/blob/eacef66c4ff6fef5bc9a045211435e69d9561c9c/scripts/macos-dev-signing.mjs)（Apache-2.0），接入 MailX 的 Bun / Tauri 入口，并增加命令超时、配置原子发布和钥匙串搜索顺序保留等处理。
+单条目保险库与进程内缓存不能保留 ad-hoc 签名构建之间的访问身份。开发签名流程接入 MailX 的 Bun / Tauri 入口，复用固定本机身份，并对外部命令设置超时、原子发布配置、保留钥匙串搜索顺序。
 
 `scripts/macos-dev-signing.mjs` 在用户级持久目录 `~/Library/Application Support/MailX/development-signing` 中生成并复用本机自签名代码签名证书、签名钥匙串及其配置。显式 designated requirement 同时绑定开发代码标识与证书指纹：
 
