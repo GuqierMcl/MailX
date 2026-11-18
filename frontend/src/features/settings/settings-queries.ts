@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AppSettings, AssistantSettings, LayoutSettings, SettingsPatch, TranslationSettings } from '@/generated/accounts'
-import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_BADGE, DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { DEFAULT_APPEARANCE, applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
 import type { MailxClient } from '@/lib/mailx-client'
@@ -50,6 +50,7 @@ export const useUpdateAppearance = (client: MailxClient) => useSettingsSection(c
 export const useUpdateSecurity = (client: MailxClient) => useSettingsSection(client, 'security', { remoteImages: 'ask', senderAvatars: false })
 export const useUpdateLayout = (client: MailxClient) => useSettingsSection(client, 'layout', DEFAULT_LAYOUT)
 export const useUpdateNotifications = (client: MailxClient) => useSettingsSection(client, 'notifications', DEFAULT_NOTIFICATIONS)
+export const useUpdateBadge = (client: MailxClient) => useSettingsSection(client, 'badge', DEFAULT_BADGE)
 export const useUpdateCompose = (client: MailxClient) => useSettingsSection(client, 'compose', { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' })
 export const DEFAULT_TRANSLATION: TranslationSettings = {
   provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true,

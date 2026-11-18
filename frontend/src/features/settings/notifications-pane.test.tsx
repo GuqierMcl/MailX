@@ -1,30 +1,44 @@
 import { render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
-import { DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_BADGE, DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { LifecycleContext } from '@/features/lifecycle/lifecycle-context'
+import type { LifecycleClient, LifecycleSnapshot } from '@/features/lifecycle/lifecycle-client'
 import { SettingsDialog } from './settings-dialog'
 
 const work = exampleAccount()
 const home = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人', emailAddress: 'lin@x.io' })
 
-function renderPane(client = testClient([work, home])) {
+function renderPane(client = testClient([work, home]), badgeAvailable?: boolean) {
   client.listFolders.mockResolvedValue([])
-  render(<SettingsDialog client={client} target={{ section: 'notifications' }} onClose={() => undefined} />)
+  const dialog = <SettingsDialog client={client} target={{ section: 'notifications' }} onClose={() => undefined} />
+  if (badgeAvailable === undefined) render(dialog)
+  else {
+    const lifecycle: LifecycleClient = {
+      getSnapshot: vi.fn(), onSnapshot: vi.fn(), resolveClose: vi.fn(), quit: vi.fn(), cancelQuit: vi.fn(),
+      confirmQuit: vi.fn(), onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
+    }
+    const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
+    render(<LifecycleContext.Provider value={{ client: lifecycle, snapshot }}>{dialog}</LifecycleContext.Provider>)
+  }
   return { client, dialog: screen.getByRole('dialog', { name: '设置' }) }
 }
 
 const lastNotifications = (client: ReturnType<typeof testClient>) =>
   client.updateSettings.mock.lastCall?.[0].notifications
+const lastBadge = (client: ReturnType<typeof testClient>) =>
+  client.updateSettings.mock.lastCall?.[0].badge
 
 describe('notification settings', () => {
   it('lists account notification controls in the saved display order', async () => {
     const client = testClient([work, home])
     await client.updateSettings({ layout: { accountOrder: [home.id, work.id] } })
     const { dialog } = renderPane(client)
-    const homeControl = await within(dialog).findByRole('switch', { name: home.displayName })
-    const workControl = within(dialog).getByRole('switch', { name: work.displayName })
-    const switches = within(dialog).getAllByRole('switch').filter((element) => element === homeControl || element === workControl)
+    const group = await within(dialog).findByRole('group', { name: '按账号' })
+    const homeControl = await within(group).findByRole('switch', { name: home.displayName })
+    const workControl = within(group).getByRole('switch', { name: work.displayName })
+    const switches = within(group).getAllByRole('switch').filter((element) => element === homeControl || element === workControl)
     expect(switches).toEqual([homeControl, workControl])
   })
 
@@ -68,15 +82,46 @@ describe('notification settings', () => {
 
   it('mutes and unmutes single accounts by id', async () => {
     const { client, dialog } = renderPane()
-    const personal = await within(dialog).findByRole('switch', { name: '个人' })
+    const group = await within(dialog).findByRole('group', { name: '按账号' })
+    const personal = await within(group).findByRole('switch', { name: '个人' })
     expect(personal).toBeChecked()
     await userEvent.click(personal)
     expect(lastNotifications(client)?.mutedAccounts).toEqual([home.id])
     await waitFor(() => expect(personal).not.toBeChecked())
-    await userEvent.click(within(dialog).getByRole('switch', { name: '工作邮箱' }))
+    await userEvent.click(within(group).getByRole('switch', { name: '工作邮箱' }))
     expect(lastNotifications(client)?.mutedAccounts).toEqual([work.id, home.id].sort())
     await userEvent.click(personal)
     expect(lastNotifications(client)?.mutedAccounts).toEqual([work.id])
+  })
+
+  it('hides the app icon badge where the host cannot show one', async () => {
+    const { dialog } = renderPane(testClient([work, home]), false)
+    await within(dialog).findByRole('switch', { name: '收到新邮件时提醒我' })
+    expect(within(dialog).queryByRole('switch', { name: '显示角标' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: '计入的账号' })).not.toBeInTheDocument()
+  })
+
+  it('turns the app icon badge off and on and saves which accounts it counts', async () => {
+    const { client, dialog } = renderPane(testClient([work, home]), true)
+    const show = await within(dialog).findByRole('switch', { name: '显示角标' })
+    expect(show).toBeChecked()
+    const group = await within(dialog).findByRole('group', { name: '计入的账号' })
+    const personal = await within(group).findByRole('switch', { name: '个人' })
+    expect(personal).toBeChecked()
+
+    await userEvent.click(personal)
+    expect(lastBadge(client)).toEqual({ ...DEFAULT_BADGE, excludedAccounts: [home.id] })
+    // Notification muting is a separate list.
+    expect(lastNotifications(client)).toBeUndefined()
+    await waitFor(() => expect(personal).not.toBeChecked())
+    await userEvent.click(within(group).getByRole('switch', { name: '工作邮箱' }))
+    expect(lastBadge(client)?.excludedAccounts).toEqual([work.id, home.id].sort())
+    await userEvent.click(personal)
+    expect(lastBadge(client)?.excludedAccounts).toEqual([work.id])
+
+    await userEvent.click(show)
+    expect(lastBadge(client)).toEqual({ enabled: false, excludedAccounts: [work.id] })
+    await waitFor(() => expect(personal).toHaveAttribute('aria-disabled', 'true'))
   })
 
   it('sends a test notification and says whether it went out', async () => {

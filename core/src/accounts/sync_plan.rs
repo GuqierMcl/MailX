@@ -264,6 +264,15 @@ impl AccountService {
         self.storage.load(account_id)?;
         self.storage.list_folders(account_id)
     }
+
+    /// The cached folders of every account, read from local data only.
+    pub(crate) fn all_folders(&self) -> Result<Vec<Folder>, AppError> {
+        let mut folders = Vec::new();
+        for account in self.storage.account_identities()? {
+            folders.extend(self.storage.list_folders(&account.id)?);
+        }
+        Ok(folders)
+    }
 }
 
 #[cfg(test)]
