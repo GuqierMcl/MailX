@@ -96,6 +96,9 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [settings, setSettings] = useState<SettingsTarget | null>(null)
   const listPanel = usePanelRef()
   const readerPanel = usePanelRef()
+  const listElement = useRef<HTMLDivElement>(null)
+  const backButton = useRef<HTMLButtonElement>(null)
+  const lastSingleMessage = useRef<string | null>(null)
   // Whether the reader is folded away: what was saved, until the user changes it.
   // The state is the truth and the panel follows it; dragging the handle past the
   // reader's minimum width collapses the panel by itself, and `onResize` below
@@ -164,6 +167,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const mailboxLabel = settingsQuery.data?.settings.appearance.mailboxLabel ?? 'name'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
+  const singleReading = settingsQuery.data?.settings.layout.readingMode === 'single'
+  const singlePane = singleReading && isMailView(mailbox)
   const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
   const readerCollapsed = readerChoice ?? savedCollapsed
   const setReaderCollapsed = setReaderChoice // stable, so effects may use it
@@ -171,10 +176,10 @@ export function Workbench({ client }: { client: MailxClient }) {
   const nowPage = mailbox.kind === 'now'
   useLayoutEffect(() => {
     const reader = readerPanel.current
-    if (!layoutReady || !reader || nowPage) return
+    if (!layoutReady || !reader || nowPage || singlePane) return
     if (readerCollapsed && !reader.isCollapsed()) reader.collapse()
     else if (!readerCollapsed && reader.isCollapsed()) reader.expand()
-  }, [layoutReady, readerCollapsed, readerPanel, nowPage])
+  }, [layoutReady, readerCollapsed, readerPanel, nowPage, singlePane])
   // Each change is handed over as it happens; the debounce keeps only the last. Comparing
   // with the saved value here would let an earlier queued value win after a quick toggle back.
   useEffect(() => {
@@ -197,14 +202,15 @@ export function Workbench({ client }: { client: MailxClient }) {
     setContact(null)
     setSlide(null)
     setRestoreScroll(0)
+    if (singleReading) setOpened(null)
     setMailbox(next)
-  }, [])
+  }, [singleReading])
   // The inline composer sits in the reader (sending.md section 17.7). Opening it unfolds
   // the reader; from the Now page, which has no reader, it goes to the unified inbox.
   const composeActions = useRef<ReturnType<typeof useComposeActions> | null>(null)
   const inline = useInlineComposer(client, {
     onShow: () => {
-      setReaderChoice(false)
+      if (!singleReading || (!nowPage && !singlePane)) setReaderChoice(false)
       setMailbox((current) => current.kind === 'now' ? INITIAL_MAILBOX : current)
     },
     onContinue: (draftId) => void composeActions.current?.openDraft(draftId),
@@ -440,6 +446,24 @@ export function Workbench({ client }: { client: MailxClient }) {
     openedState && body.detail.isError && clientFailureCode(body.detail.error) === 'notFound',
   )
   const opened = openedState && !closedByAccount && !closedByLoss ? openedState : null
+  const listHidden = singlePane && Boolean(opened || inlineShown)
+  const readerHidden = singlePane ? !listHidden : readerCollapsed
+  const singleMessage = singlePane && opened && !inlineShown ? anchorId ?? opened.id : null
+  useLayoutEffect(() => {
+    const previous = lastSingleMessage.current
+    lastSingleMessage.current = singleMessage
+    if (singleMessage && !previous) {
+      if (!document.activeElement?.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')) {
+        backButton.current?.focus({ preventScroll: true })
+      }
+    } else if (previous && singlePane && !listHidden) {
+      const list = listElement.current
+      const row = Array.from(list?.querySelectorAll<HTMLButtonElement>('[data-email-id]') ?? [])
+        .find((button) => button.dataset.emailId === previous)
+      const target = row ?? list
+      target?.focus({ preventScroll: true })
+    }
+  }, [listHidden, singleMessage, singlePane])
   // Translation of the opened message; the toolbar, notice bar, body, consent dialog and palette share it.
   const translation = useEmailTranslation(client, opened ? body.email : null, () => setSettings({ section: 'translation' }))
   // The list only highlights the opened message when it happens to be listed.
@@ -491,13 +515,13 @@ export function Workbench({ client }: { client: MailxClient }) {
       void queryClient.invalidateQueries({ queryKey: mailKeys.emailLists() })
     }).catch((error: unknown) => {
       const message = errorText(error)
-      const readerCanShowError = openedState?.id === email.id && !readerCollapsed
+      const readerCanShowError = openedState?.id === email.id && !readerHidden
       if (readerCanShowError) setRemoveError(message)
       else {
         toast.error(t('mail:removeLocalCopyFailed'), { description: message })
       }
     })
-  }, [client, letGo, openedState, queryClient, readerCollapsed])
+  }, [client, letGo, openedState, queryClient, readerHidden])
   const [removeLocalChoice, setRemoveLocalChoice] = useState<EmailSummary | null>(null)
   const requestRemoveLocal = useCallback((email: EmailSummary) => setRemoveLocalChoice(email), [setRemoveLocalChoice])
   const confirmRemoveLocal = useCallback(() => {
@@ -506,7 +530,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (email) removeLocalCopy(email)
   }, [removeLocalChoice, removeLocalCopy, setRemoveLocalChoice])
   const deleteEmail = useDeleteEmail(client, folders, letGo)
-  const verification = useVerificationCodes(client, opened && !readerCollapsed && !selecting && mailView ? body.email?.summary ?? null : null, sourceIdentity, letGo)
+  const verification = useVerificationCodes(client, opened && !readerHidden && !selecting && mailView ? body.email?.summary ?? null : null, sourceIdentity, letGo)
   const archiveEmail = useArchiveEmail(client, letGo)
   const hideOpened = useCallback((email: { id: string }) => {
     setOpened((current) => current?.id === email.id ? null : current)
@@ -529,9 +553,13 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (!account) return
     if (emailId) {
       leaveInlineFor()
+      if (singleReading) {
+        setMailbox((current) => isMailView(current) ? current : INITIAL_MAILBOX)
+      } else {
+        setReaderChoice(false)
+      }
       setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
       setAnchorId(emailId)
-      setReaderChoice(false)
       exitSelection()
       return
     }
@@ -541,7 +569,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       setFilter('all')
       showMailbox({ kind: 'folder', folder: inbox })
     }
-  }), [client, exitSelection, leaveInlineFor, showMailbox])
+  }), [client, exitSelection, leaveInlineFor, showMailbox, singleReading])
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
@@ -582,7 +610,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   // Esc and the mouse's back button return from the contact view. Esc yields to selection
   // mode, to an open message (the reader closes first) and to anything else that uses it.
   const inContact = contactView !== null
-  const escapeGoesBack = inContact && !selecting && !(opened && !readerCollapsed)
+  const escapeGoesBack = inContact && !selecting && !(opened && !readerHidden) && !(singlePane && inlineShown)
   useEffect(() => {
     if (!escapeGoesBack) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -622,7 +650,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     keepListed(email.id)
     setOpened({ id: email.id, accountId: email.accountId, source: source(email.accountId) })
     setAnchorId(email.id)
-    setReaderCollapsed(false)
+    if (!singleReading) setReaderCollapsed(false)
     // Opening a message (from search or the palette) ends picking, so the reader can show it.
     exitSelection()
   }
@@ -691,12 +719,12 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (id === 'previous') return go(at < 0 ? rows[0] : rows[at - 1])
     if (id === 'open') {
       if (!opened) return go(rows[0])
-      if (!readerCollapsed) return false
+      if (!readerHidden || singlePane) return false
       setReaderCollapsed(false)
       return true
     }
     // The inline composer covers the message, so acting shortcuts have nothing on screen to act on.
-    const summary = opened && !readerCollapsed && !inlineShown && body.email?.summary.id === opened.id ? body.email.summary : null
+    const summary = opened && !readerHidden && !inlineShown && body.email?.summary.id === opened.id ? body.email.summary : null
     if (!summary) return false
     // After archive or delete, the next row opens (the previous one at the end of the list).
     const advance = () => {
@@ -791,7 +819,7 @@ export function Workbench({ client }: { client: MailxClient }) {
   // Only the user's own drags are saved, and not while the reader is folded away
   // (the list then fills the window, which is not the width to come back to).
   const saveListWidth = (_layout: unknown, meta: { isUserInteraction?: boolean } | undefined) => {
-    if (!meta?.isUserInteraction || readerPanel.current?.isCollapsed()) return
+    if (singlePane || !meta?.isUserInteraction || readerPanel.current?.isCollapsed()) return
     const width = listPanel.current?.getSize().inPixels
     if (width === undefined) return
     const next = clampListWidth(width)
@@ -849,6 +877,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           folders={folders}
           onApplySearch={(text) => {
             leaveLocalView()
+            if (singleReading) setOpened(null)
             setSearch(text)
           }}
           onOpenEmail={(email, text) => {
@@ -862,7 +891,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
           onOpenSettings={setSettings}
-          translation={mailView && !selecting && !readerCollapsed && !inlineShown && translation.available ? translation : null}
+          translation={mailView && !selecting && !readerHidden && !inlineShown && translation.available ? translation : null}
         />
         {activeMailbox.kind === 'now' ? (
           <NowPage
@@ -885,8 +914,27 @@ export function Workbench({ client }: { client: MailxClient }) {
           // The saved list width is only read when the group mounts, so it waits for the settings.
           <div className="min-h-0 flex-1 bg-muted/40" />
         ) : (
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0" onLayoutChanged={saveListWidth}>
-          <ResizablePanel panelRef={listPanel} defaultSize={listWidth} minSize={LIST_MIN} className="bg-muted/40">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          disabled={singlePane}
+          className={cn(
+            'min-h-0',
+            // Both panels keep their layout and scroll containers in single-pane mode.
+            singlePane && 'grid! grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] [&>[data-panel]]:col-start-1 [&>[data-panel]]:row-start-1 [&>[aria-hidden=true]]:invisible',
+          )}
+          onLayoutChanged={saveListWidth}
+        >
+          <ResizablePanel
+            data-slot="workbench-list"
+            elementRef={listElement}
+            panelRef={listPanel}
+            defaultSize={listWidth}
+            minSize={LIST_MIN}
+            className="bg-muted/40"
+            tabIndex={singlePane ? -1 : undefined}
+            inert={listHidden || undefined}
+            aria-hidden={listHidden || undefined}
+          >
             {activeMailbox.kind === 'drafts' ? (
               <DraftList
                 drafts={drafts.data}
@@ -957,18 +1005,21 @@ export function Workbench({ client }: { client: MailxClient }) {
             </div>
             )}
           </ResizablePanel>
-          <ResizableHandle disabled={readerCollapsed} className={readerCollapsed ? 'pointer-events-none opacity-0' : undefined} />
+          <ResizableHandle disabled={singlePane || readerCollapsed} className={cn(singlePane && 'hidden!', readerCollapsed && 'pointer-events-none opacity-0')} />
           <ResizablePanel
+            data-slot="workbench-reader"
             panelRef={readerPanel}
             minSize={READER_MIN}
             collapsible
             collapsedSize={0}
             onResize={() => {
+              if (singlePane) return
               const collapsed = readerPanel.current?.isCollapsed() ?? false
               if (collapsed !== readerCollapsed) setReaderCollapsed(collapsed)
             }}
             // Folded away, the reader is out of reach for Tab and screen readers too.
-            inert={readerCollapsed}
+            inert={readerHidden}
+            aria-hidden={(singlePane && readerHidden) || undefined}
           >
             {inlineShown ? (
               <InlineComposerPane client={client} accounts={displayAccounts} inline={inline} />
@@ -996,7 +1047,8 @@ export function Workbench({ client }: { client: MailxClient }) {
             ) : (
             <EmailView
               verification={verification}
-              hidden={readerCollapsed}
+              hidden={readerHidden}
+              backButton={singlePane ? backButton : undefined}
               key={`${opened?.id ?? ''}:${body.identity}`}
               client={client}
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}
@@ -1030,7 +1082,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         </ResizablePanelGroup>
         )}
         {/* The Now page has no reader to fold. */}
-        {accounts.length > 0 && !nowPage && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
+        {accounts.length > 0 && !nowPage && !singlePane && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}

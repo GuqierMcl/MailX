@@ -171,6 +171,27 @@ describe('settings dialog', () => {
     }))
   })
 
+  it('starts with split view and patches only the reading mode', async () => {
+    const { client } = renderDialog()
+    const layout = await screen.findByRole('combobox', { name: '邮件布局' })
+    expect(layout).toHaveTextContent('分屏')
+    await userEvent.click(layout)
+    await userEvent.click(await screen.findByRole('option', { name: '单栏视图' }))
+    await waitFor(() => expect(layout).toHaveTextContent('单栏视图'))
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { readingMode: 'single' } })
+  })
+
+  it('restores the previous reading mode if the save fails', async () => {
+    const client = testClient()
+    client.updateSettings.mockRejectedValue(new Error('io'))
+    renderDialog(client)
+    const layout = await screen.findByRole('combobox', { name: '邮件布局' })
+    await userEvent.click(layout)
+    await userEvent.click(await screen.findByRole('option', { name: '单栏视图' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('未能保存设置')
+    expect(layout).toHaveTextContent('分屏')
+  })
+
   it('keeps a rejected font list in the field with an error', async () => {
     const client = testClient()
     vi.mocked(client.updateSettings).mockRejectedValue(

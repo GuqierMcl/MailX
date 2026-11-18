@@ -15,11 +15,11 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ReadingMode, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
-import { useSettings, useUpdateAppearance } from './settings-queries'
+import { useSettings, useUpdateAppearance, useUpdateLayout } from './settings-queries'
 
 
 
@@ -37,8 +37,10 @@ export function AppearancePane({ client }: { client: MailxClient }) {
   const MAILBOX_LABELS: Record<MailboxLabel, string> = { name: t('settings:mailboxLabelName'), icon: t('settings:mailboxLabelIcon') }
   const FONT_SIZE_LABELS: Record<FontSize, string> = { small: t('settings:fontSmall'), default: t('settings:fontDefault'), large: t('settings:fontLarge') }
   const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: t('settings:mailThemeFollow'), light: t('settings:mailThemeLight') }
+  const READING_MODE_LABELS: Record<ReadingMode, string> = { split: t('settings:readingModeSplit'), single: t('settings:readingModeSingle') }
   const settings = useSettings(client)
   const update = useUpdateAppearance(client)
+  const updateLayout = useUpdateLayout(client)
 
   if (settings.isPending) {
     return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5 text-muted-foreground" /></div></Delayed>
@@ -55,11 +57,12 @@ export function AppearancePane({ client }: { client: MailxClient }) {
     )
   }
 
-  const appearance = settings.data.settings.appearance
+  const { appearance, layout } = settings.data.settings
   const change = (patch: Partial<AppearanceSettings>) => update.mutate({ ...appearance, ...patch })
-  const failure = update.error ? clientFailure(update.error) : null
-  const fontRejected = failure?.field === 'appearance.interfaceFont'
-  const mailFontRejected = failure?.field === 'appearance.mailFont'
+  const appearanceFailure = update.error ? clientFailure(update.error) : null
+  const fontRejected = appearanceFailure?.field === 'appearance.interfaceFont'
+  const mailFontRejected = appearanceFailure?.field === 'appearance.mailFont'
+  const failure = updateLayout.error ?? (fontRejected || mailFontRejected ? null : appearanceFailure)
 
   return (
     <SettingsPage>
@@ -69,7 +72,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
           <AlertDescription>{t('settings:recoveredDescription')}</AlertDescription>
         </Alert>
       )}
-      {failure && !fontRejected && !mailFontRejected && (
+      {failure && (
         <Alert variant="destructive">
           <AlertTitle>{t('settings:saveFailed')}</AlertTitle>
           <AlertDescription>{errorText(failure)}</AlertDescription>
@@ -124,6 +127,15 @@ export function AppearancePane({ client }: { client: MailxClient }) {
       </SettingsGroup>
 
       <SettingsGroup title={t('settings:mailList')}>
+        <SettingsRow label={t('settings:readingMode')} htmlFor="layout.readingMode">
+          <Select value={layout.readingMode} items={READING_MODE_LABELS}
+            onValueChange={(readingMode: ReadingMode | null) => { if (readingMode) updateLayout.mutate({ readingMode }) }}>
+            <SelectTrigger id="layout.readingMode" className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(READING_MODE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
         <SettingsRow label={t('settings:previewLines')} htmlFor="appearance.previewLines">
           <Select value={appearance.previewLines} items={PREVIEW_LINE_LABELS}
             onValueChange={(previewLines: PreviewLines | null) => { if (previewLines) change({ previewLines }) }}>

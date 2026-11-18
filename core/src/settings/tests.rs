@@ -389,7 +389,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailboxLabel": "name"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "accountOrder": [] },
+                "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "readingMode": "split", "accountOrder": [] },
                 "notifications": {
                     "enabled": true,
                     "showPreview": true,
@@ -759,6 +759,7 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
     // Settings from before the options existed start with the reader and the full sidebar shown.
     assert!(!layout.reader_collapsed);
     assert!(!layout.nav_collapsed);
+    assert_eq!(layout.reading_mode, ReadingMode::Split);
     assert!(layout.account_order.is_empty());
 
     fs::write(
@@ -768,6 +769,61 @@ fn settings_saved_before_the_list_width_existed_get_the_default_and_wild_values_
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.list_width, 2000);
+}
+
+#[test]
+fn reading_mode_persists_independently_of_the_split_layout() {
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(
+        store.get().unwrap().settings.layout.reading_mode,
+        ReadingMode::Split
+    );
+
+    for patch in [
+        serde_json::json!({ "layout": { "listWidth": 510, "readerCollapsed": true } }),
+        serde_json::json!({ "layout": { "readingMode": "single" } }),
+        serde_json::json!({ "layout": { "navWidth": 290 } }),
+    ] {
+        store.patch(serde_json::from_value(patch).unwrap()).unwrap();
+    }
+
+    let layout = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .layout;
+    assert_eq!(layout.reading_mode, ReadingMode::Single);
+    assert_eq!((layout.nav_width, layout.list_width), (290, 510));
+    assert!(layout.reader_collapsed);
+}
+
+#[test]
+fn invalid_reading_mode_is_rejected_on_update_and_repaired_on_load() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join(SETTINGS_FILE_NAME);
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"layout":{"readingMode":"other","listWidth":510}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let before = store.get().unwrap();
+    assert_eq!(before.settings.layout.reading_mode, ReadingMode::Split);
+    assert_eq!(before.settings.layout.list_width, 510);
+    assert!(!before.recovered);
+
+    for value in [serde_json::json!("other"), serde_json::json!(null)] {
+        let patch = serde_json::from_value(serde_json::json!({
+            "layout": { "readingMode": value, "listWidth": 530 }
+        }))
+        .unwrap();
+        let error = store.patch(patch).unwrap_err();
+        assert_eq!(error.code, ErrorCode::Validation);
+        assert_eq!(error.field.as_deref(), Some("layout.readingMode"));
+        assert_eq!(store.get().unwrap(), before);
+    }
 }
 
 #[test]

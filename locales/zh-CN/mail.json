@@ -91,6 +91,7 @@
   "unstar": "取消星标",
   "star": "加星标",
   "closeMessage": "关闭邮件",
+  "backToMessageList": "返回邮件列表",
   "closeMessageShortcut": "关闭邮件（Esc）",
   "toLabel": "收件人：",
   "ccLabel": "抄送：",
