@@ -57,12 +57,13 @@ pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
     Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
     ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
-    FlagRestore, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot,
-    RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    FlagRestore, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunReasoning,
+    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 pub use assistant::{
-    ChatTurn, ChatTurnConfirmation, ChatTurnTool, ConfirmOutcome, ConversationChange,
-    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged, TurnState,
+    ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmOutcome,
+    ConversationChange, ConversationDetail, ConversationList, ConversationSummary,
+    ConversationsChanged, TurnState,
 };
 pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,

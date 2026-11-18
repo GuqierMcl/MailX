@@ -212,6 +212,25 @@ pub struct ToolActivity {
     pub summary: ToolActivitySummary,
 }
 
+/// One stretch of the model's thinking in a run. A reply can have several
+/// (one per model turn, e.g. before and after a tool call).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RunReasoning {
+    /// The readable reasoning so far; empty when the server only sent
+    /// redacted thinking.
+    pub text: String,
+    /// RFC 3339 UTC with milliseconds.
+    pub started_at: String,
+    /// `None` while it is still going.
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<u64>,
+    /// Where in `text` of the snapshot it began, in UTF-16 code units.
+    pub text_offset: u32,
+    /// How many of the run's `tools` began before it.
+    pub tools_before: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSnapshot {
@@ -221,6 +240,8 @@ pub struct RunSnapshot {
     /// Everything the model has written so far.
     pub text: String,
     pub tools: Vec<ToolActivity>,
+    /// The model's thinking, in order.
+    pub reasoning: Vec<RunReasoning>,
     /// Whether this run may use tools. `false` for a chat on a model known to
     /// lack tool calling (it can only answer from the conversation) and for
     /// Now summaries; `true` for every other chat.
@@ -403,6 +424,19 @@ pub enum AssistantEventKind {
     Text {
         delta: String,
     },
+    /// Thinking text. The first event of a `segment` (numbered from 0 in the
+    /// run) opens it where the reply stands now; `delta` may be empty.
+    Reasoning {
+        segment: u32,
+        delta: String,
+    },
+    /// The thinking stretch ended (text, a tool call or the end of the model
+    /// turn followed).
+    ReasoningEnd {
+        segment: u32,
+        #[ts(type = "number")]
+        duration_ms: u64,
+    },
     Tool {
         call_id: String,
         name: String,
@@ -496,6 +530,19 @@ pub struct ChatTurnConfirmation {
     pub text_offset: u32,
 }
 
+/// A thinking stretch of a saved reply, placed like [`ChatTurnTool`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTurnReasoning {
+    /// Empty when the server only sent redacted thinking.
+    pub text: String,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub text_offset: u32,
+    /// How many of the reply's `tools` began before it.
+    pub tools_before: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(
     tag = "role",
@@ -512,6 +559,7 @@ pub enum ChatTurn {
     Assistant {
         text: String,
         tools: Vec<ChatTurnTool>,
+        reasoning: Vec<ChatTurnReasoning>,
         confirmations: Vec<ChatTurnConfirmation>,
         state: TurnState,
         /// Set when `state` is `completed`.

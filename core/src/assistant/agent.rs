@@ -3,7 +3,11 @@
 //! `docs/ai-runtime/README.md` section 8. Provider text, prompts and mail
 //! content are never logged and never leave in events: events carry model
 //! output, structured tool summaries and fixed error codes only.
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use serde_json::Value;
 
@@ -29,7 +33,7 @@ use crate::{
                 ToolCallRequest, ToolDefinition, stream_chat,
             },
         },
-        reasoning::Reasoning,
+        reasoning::{AssistantReasoning, ReasoningEcho, ReasoningOrigin, ReasoningSpan, echo_for},
     },
     tools::{Audience, Principal, RequestContext, ToolError, Tools, TrustedOutput},
 };
@@ -85,17 +89,25 @@ fn estimate(text: &str) -> u64 {
     ascii.div_ceil(4) + other
 }
 
-fn estimate_messages(messages: &[ChatMessage]) -> u64 {
+/// What `messages` cost on a request to `origin`: stored reasoning counts
+/// only where it will be sent back.
+fn estimate_messages(messages: &[ChatMessage], origin: &ReasoningOrigin) -> u64 {
     messages
         .iter()
         .map(|message| match message {
             ChatMessage::User(text) => estimate(text),
-            ChatMessage::Assistant { text, tool_calls } => {
+            ChatMessage::Assistant {
+                text,
+                tool_calls,
+                reasoning,
+            } => {
                 estimate(text)
                     + tool_calls
                         .iter()
                         .map(|call| estimate(&call.name) + estimate(&call.arguments.to_string()))
                         .sum::<u64>()
+                    + echo_for(reasoning.as_ref(), origin)
+                        .map_or(0, |echo| estimate(&echo.sent_text()))
             }
             ChatMessage::ToolResult { content, .. } => estimate(content),
         })
@@ -108,22 +120,68 @@ fn budget(target: &crate::ai::AiModelTarget) -> u64 {
 
 // ------------------------------------------------------------------- stream
 
+/// The server and model a request goes to, for keeping reasoning apart.
+fn origin(target: &crate::ai::AiModelTarget) -> ReasoningOrigin {
+    ReasoningOrigin {
+        protocol: target.protocol,
+        connection_id: target.binding.connection_id.clone(),
+        base_url: target.binding.base_url.clone(),
+        model: target.model_id.clone(),
+    }
+}
+
 #[derive(Default)]
 struct Turn {
     text: String,
     calls: Vec<ToolCallRequest>,
     reason: Option<FinishReason>,
+    echo: Option<ReasoningEcho>,
+    spans: Vec<ReasoningSpan>,
+    /// The thinking stretch going on now.
+    thinking: Option<(Instant, ReasoningSpan)>,
 }
 
-/// What a model turn asks beyond the messages.
-struct TurnOptions {
-    /// `None` sends no cap on OpenAI-compatible servers.
-    max_output: Option<u32>,
-    reasoning: Reasoning,
+impl Turn {
+    fn think(&mut self, inner: &Inner, run_id: &str, delta: String) {
+        let (text_at, tools_before) = (self.text.len(), self.calls.len());
+        let (_, span) = self.thinking.get_or_insert_with(|| {
+            (
+                Instant::now(),
+                ReasoningSpan {
+                    bytes: 0,
+                    duration_ms: 0,
+                    text_at,
+                    tools_before,
+                },
+            )
+        });
+        span.bytes += delta.len();
+        inner.runs.reasoning(run_id, delta);
+    }
+
+    /// Ends the thinking stretch, if one is going.
+    fn stop_thinking(&mut self, inner: &Inner, run_id: &str) {
+        if let Some((since, mut span)) = self.thinking.take() {
+            span.duration_ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX);
+            inner.runs.reasoning_end(run_id, span.duration_ms);
+            self.spans.push(span);
+        }
+    }
+
+    /// The reasoning to keep with the assistant message.
+    fn reasoning(&mut self, origin: ReasoningOrigin) -> Option<AssistantReasoning> {
+        let (echo, spans) = (self.echo.take(), std::mem::take(&mut self.spans));
+        (echo.is_some() || !spans.is_empty()).then_some(AssistantReasoning {
+            origin,
+            echo,
+            spans,
+        })
+    }
 }
 
-/// One streaming request. Text goes to the run as it arrives; what the model
-/// said before a failure stays in the run's snapshot.
+/// One streaming request. Text and thinking go to the run as they arrive;
+/// what the model said before a failure stays in the run's snapshot.
+/// `max_output` `None` sends no cap on OpenAI-compatible servers.
 async fn model_turn(
     inner: &Inner,
     run_id: &str,
@@ -131,9 +189,10 @@ async fn model_turn(
     system: &str,
     messages: &[ChatMessage],
     tools: &[ToolDefinition],
-    options: TurnOptions,
+    max_output: Option<u32>,
 ) -> Result<Turn, ErrorCode> {
     let target = &ready.target;
+    let origin = origin(target);
     let endpoint = Endpoint {
         protocol: target.protocol,
         base_url: &target.binding.base_url,
@@ -145,25 +204,35 @@ async fn model_turn(
         system: Some(system),
         messages,
         tools,
-        max_output: options.max_output,
-        provider_id: &target.provider_id,
-        reasoning: options.reasoning,
+        max_output,
+        origin: &origin,
     };
     let mut turn = Turn::default();
-    stream_chat(
+    let result = stream_chat(
         &endpoint,
         &request,
         CHAT_STREAM_LIMITS,
         |event| match event {
+            StreamEvent::Reasoning(delta) => turn.think(inner, run_id, delta),
+            StreamEvent::ReasoningEcho(echo) => turn.echo = Some(echo),
             StreamEvent::Text(delta) => {
+                turn.stop_thinking(inner, run_id);
                 turn.text.push_str(&delta);
                 inner.runs.text(run_id, delta);
             }
-            StreamEvent::ToolCall(call) => turn.calls.push(call),
-            StreamEvent::Finished { reason, .. } => turn.reason = Some(reason),
+            StreamEvent::ToolCall(call) => {
+                turn.stop_thinking(inner, run_id);
+                turn.calls.push(call);
+            }
+            StreamEvent::Finished { reason, .. } => {
+                turn.stop_thinking(inner, run_id);
+                turn.reason = Some(reason);
+            }
         },
     )
-    .await?;
+    .await;
+    turn.stop_thinking(inner, run_id);
+    result?;
     Ok(turn)
 }
 
@@ -247,20 +316,19 @@ async fn chat_loop(
             with_tools,
         );
         let tools_cost = if with_tools { definitions_cost } else { 0 };
-        if estimate(&system) + tools_cost + estimate_messages(messages) > budget(&ready.target) {
+        let cost =
+            estimate(&system) + tools_cost + estimate_messages(messages, &origin(&ready.target));
+        if cost > budget(&ready.target) {
             return Outcome::Failed(ErrorCode::AssistantContextFull);
         }
-        let turn = match model_turn(
+        let mut turn = match model_turn(
             inner,
             run_id,
             &ready,
             &system,
             messages,
             tools,
-            TurnOptions {
-                max_output: ready.target.output_length,
-                reasoning: Reasoning::Default,
-            },
+            ready.target.output_length,
         )
         .await
         {
@@ -268,7 +336,8 @@ async fn chat_loop(
             Err(code) => return Outcome::Failed(code),
         };
         messages.push(ChatMessage::Assistant {
-            text: turn.text,
+            reasoning: turn.reasoning(origin(&ready.target)),
+            text: std::mem::take(&mut turn.text),
             tool_calls: turn.calls.clone(),
         });
         if turn.calls.is_empty() {
@@ -797,10 +866,7 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
         &system,
         &messages,
         &[],
-        TurnOptions {
-            max_output: Some(max_output),
-            reasoning: Reasoning::Off,
-        },
+        Some(max_output),
     )
     .await
     {
@@ -832,6 +898,33 @@ mod tests {
         assert_eq!(estimate("abcdefgh"), 2);
         assert_eq!(estimate("你好"), 2);
         assert_eq!(estimate(""), 0);
+    }
+
+    #[test]
+    fn the_estimate_counts_reasoning_that_will_be_sent() {
+        use crate::ai::{reasoning::ReasoningField, settings::AiProtocol};
+        let here = ReasoningOrigin {
+            protocol: AiProtocol::OpenaiCompatible,
+            connection_id: "c".into(),
+            base_url: "https://x/v1".into(),
+            model: "m".into(),
+        };
+        let messages = [ChatMessage::Assistant {
+            text: "abcd".into(),
+            tool_calls: Vec::new(),
+            reasoning: Some(AssistantReasoning {
+                origin: here.clone(),
+                echo: Some(ReasoningEcho::Field {
+                    field: ReasoningField::ReasoningContent,
+                    text: "想想看".into(),
+                }),
+                spans: Vec::new(),
+            }),
+        }];
+        assert_eq!(estimate_messages(&messages, &here), 1 + 3);
+        let mut elsewhere = here;
+        elsewhere.model = "n".into();
+        assert_eq!(estimate_messages(&messages, &elsewhere), 1);
     }
 
     #[test]

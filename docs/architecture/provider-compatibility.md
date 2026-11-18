@@ -96,3 +96,11 @@ Microsoft 的全部知识（客户端 ID、端点、主机、声明、错误码�
 EWS 是独立邮件协议后端，实现在 `core/src/ews/`，通过账号的实际连接类型分派；不是依据微软品牌或邮箱后缀激活的 IMAP 兼容规则。独立「Exchange（自建服务器）」入口与 Microsoft 365 的 OAuth / IMAP/SMTP 入口分开。发现结果只是待选端点，不能自动授予密码信任。
 
 EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协议实现提供目录、邮件和 MIME 操作；事务、来源校验、重试、撤销及副本对账由应用服务负责。暂不依赖专有邮件头猜测已发送副本身份，证据不足时保留本机快照。架构和限制见[Exchange EWS 接入](exchange-ews.md)，实测范围见[验证记录](../development/validation.md#exchange-ews-validation)。
+
+## 6. AI 服务商：只按协议适配
+
+本文的服务商模块针对邮箱。AI 连接只区分两种协议（OpenAI 兼容、Anthropic 兼容），流式客户端与智能体循环里没有按 AI 服务商品牌分支的判断；目录里的服务商 id 只用于名称、图标和默认地址。
+
+- **思考（推理）按协议处理。** OpenAI 兼容读 `delta.reasoning_content` 或字符串形式的 `delta.reasoning`，Anthropic 读 `thinking` / `redacted_thinking` 块。回传规则是“服务器发来什么就原样发回什么，别的不加”：OpenAI 兼容用收到时的同一字段名放回那条助手消息，从没发过思考的服务器收不到这个字段；Anthropic 的思考块连同签名与 `data` 原样放回原位置。只回传给产生它的同一协议、连接、地址与模型。细节见 [AI Runtime](../ai-runtime/README.md) 第 3 节。
+- **没有服务商专属的思考开关。** 请求不带 `thinking`、`reasoning_effort` 等只有部分服务商认识的参数；「此刻」概述同样不发。需要按服务商调整时，先确认无法在协议层解决，再按本文的模块化约定增加中立扩展点并记录验证。
+- 真实服务商的实测结果写入[验证记录](../development/validation.md)；自动测试只覆盖协议样例。

@@ -22,7 +22,7 @@ const SENTENCE = '今天有 3 封新邮件，银行的那封值得先看。'
 const RETRY = 'AI 这次没写出来，再试一次'
 
 const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
-  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
+  runId: 'r1', kind: 'nowSummary', state: 'running', text: '', tools: [], reasoning: [], toolsAvailable: true, error: null, finishedReason: null, completedAt: null, seq: 1, conversationId: null, pending: null, ...over,
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'r1'): AssistantEvent => ({ runId, seq, kind })
 

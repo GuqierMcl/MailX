@@ -54,10 +54,24 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     switch (kind.type) {
       case 'state':
         snap.state = kind.state
-        if (over(kind.state)) snap.completedAt = new Date().toISOString()
+        if (over(kind.state)) {
+          snap.completedAt = new Date().toISOString()
+          for (const thought of snap.reasoning) thought.durationMs ??= Math.max(0, Date.now() - Date.parse(thought.startedAt))
+        }
         if (kind.state !== 'awaitingConfirmation') snap.pending = null
         break
       case 'text': snap.text += kind.delta; break
+      case 'reasoning': {
+        const open = snap.reasoning[kind.segment]
+        if (open) open.text += kind.delta
+        else snap.reasoning.push({ text: kind.delta, startedAt: new Date().toISOString(), durationMs: null, textOffset: snap.text.length, toolsBefore: snap.tools.length })
+        break
+      }
+      case 'reasoningEnd': {
+        const open = snap.reasoning[kind.segment]
+        if (open) open.durationMs = kind.durationMs
+        break
+      }
       case 'tool': {
         const activity = { callId: kind.callId, name: kind.name, status: kind.status, summary: kind.summary }
         const index = snap.tools.findIndex((tool) => tool.callId === kind.callId)
@@ -85,6 +99,21 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       await sleep()
       emit(run, { type: 'text', delta: letters.slice(at, at + 6).join('') })
     }
+  }
+
+  /** A stretch of thinking before the next words or step: streamed a few words at a time, then closed. */
+  async function think(run: Run, text: string) {
+    const segment = run.snap.reasoning.length
+    const started = Date.now()
+    const words = text.split(/(?<=[\s，。,.])/)
+    emit(run, { type: 'reasoning', segment, delta: '' })
+    for (let at = 0; at < words.length && alive(run); at += 2) {
+      await sleep()
+      emit(run, { type: 'reasoning', segment, delta: words.slice(at, at + 2).join('') })
+    }
+    // Long enough to read "思考了 N 秒" in the preview.
+    await sleep()
+    emit(run, { type: 'reasoningEnd', segment, durationMs: Date.now() - started })
   }
 
   async function ask(run: Run, callId: string, request: Extract<AssistantEventKind, { type: 'confirm' }>['request']) {
@@ -116,6 +145,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       await say(run, markdownShowcase())
     } else if (/归档|archive/i.test(message)) {
       const target = deps.firstUnread()
+      await think(run, zh() ? '用户要归档邮件。先找第一封未读的。' : 'The user wants mail archived. Find the first unread one.')
       await say(run, zh() ? '好的，我来归档。' : 'Sure, archiving.')
       if (!target) { await say(run, zh() ? '没有可归档的邮件。' : 'There is nothing to archive.'); return finish(run) }
       emit(run, { type: 'tool', callId: 'call-1', name: 'archive_emails', status: 'running', summary: { type: 'pending' } })
@@ -154,9 +184,12 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       emit(run, { type: 'tool', callId: 'call-1', name: 'create_draft', status: 'done', summary: { type: 'draft', draftId: draft.id, subject: draft.subject } })
       await say(run, zh() ? '草稿放在草稿箱里了，你可以打开看看，改好再发。' : 'The draft is in your drafts. Open it, edit if you like, then send.')
     } else {
-      // A search, a read, then a reply with a list and a link.
+      // Thinks, searches and reads, thinks again, then a reply with a list and a link.
       const target = deps.firstUnread()
       const { unread } = deps.overview()
+      await think(run, zh()
+        ? '用户想知道邮箱里有什么要处理。先搜索未读邮件，再读最急的那封，看看有没有截止日期。\n\n搜索结果出来后按紧急程度排序。'
+        : 'The user wants to know what needs attention. Search unread mail first, then read the most urgent one and look for a deadline.\n\nOnce the results are in, sort them by urgency.')
       emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'running', summary: { type: 'pending' } })
       await sleep()
       emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'done', summary: { type: 'found', count: Math.max(unread, 3) } })
@@ -165,6 +198,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
         await sleep()
         emit(run, { type: 'tool', callId: 'call-2', name: 'read_email', status: 'done', summary: { type: 'read', emailIds: [target.id] } })
       }
+      await think(run, zh() ? '账单提醒这周到期，放在第一条；其余可以晚点看。' : 'The billing reminder is due this week, so it goes first; the rest can wait.')
       const email = target?.id
       const folder = deps.firstFolder?.()?.id
       // Links to local mail and folders: a card on a line of its own, a chip inside a sentence.
@@ -181,7 +215,7 @@ export function createMockAssistant(deps: MockAssistantDeps) {
   function create(kind: RunSnapshot['kind'], state: RunSnapshot['state'], conversationId: string | null): Run {
     const run: Run = {
       waiting: null,
-      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], toolsAvailable: kind === 'chat', error: null, finishedReason: null, completedAt: null, seq: 0, conversationId, pending: null },
+      snap: { runId: crypto.randomUUID(), kind, state: 'running', text: '', tools: [], reasoning: [], toolsAvailable: kind === 'chat', error: null, finishedReason: null, completedAt: null, seq: 0, conversationId, pending: null },
     }
     runs.set(run.snap.runId, run)
     emit(run, { type: 'state', state })

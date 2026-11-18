@@ -2,7 +2,8 @@
 //! model's history and into turns for the interface, and the save itself.
 //!
 //! Rows (`assistant_messages`) mirror the in-memory history one to one:
-//! `user`, `assistant` (text and tool calls), `tool` (a tool result with the
+//! `user`, `assistant` (text, tool calls and the model's reasoning: the data
+//! to send back plus how long each stretch took), `tool` (a tool result with the
 //! activity the interface showed and, when the user was asked, the outcome),
 //! plus an `end` row after each finished reply (how it ended). Tool results
 //! are stored as they went to the model, so they already carry the loop's
@@ -17,14 +18,17 @@ use super::{
     conversations::{STOPPED_MARKER, ToolRecord},
     runs::now_rfc3339,
     types::{
-        ChatTurn, ChatTurnConfirmation, ChatTurnTool, ConfirmAction, ConfirmOutcome,
-        ConversationChange, ConversationsChanged, FinishedReason, ToolActivity,
+        ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmAction,
+        ConfirmOutcome, ConversationChange, ConversationsChanged, FinishedReason, ToolActivity,
         ToolActivitySummary, TurnState,
     },
 };
 use crate::{
     AppError, CoreEvent, ErrorCode,
-    ai::client::stream::{ChatMessage, ToolCallRequest},
+    ai::{
+        client::stream::{ChatMessage, ToolCallRequest},
+        reasoning::AssistantReasoning,
+    },
     storage::assistant_chats::{Append, NewRow, StoredRow},
 };
 
@@ -45,6 +49,9 @@ enum Content {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<Call>,
+        /// Absent in rows written before reasoning was kept.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning: Option<AssistantReasoning>,
     },
     Tool {
         call_id: String,
@@ -143,9 +150,14 @@ fn row(role: &'static str, content: &Content, at: &str) -> NewRow {
 pub(crate) fn message_row(message: &ChatMessage, record: Option<&ToolRecord>, at: &str) -> NewRow {
     match message {
         ChatMessage::User(text) => row("user", &Content::User { text: text.clone() }, at),
-        ChatMessage::Assistant { text, tool_calls } => row(
+        ChatMessage::Assistant {
+            text,
+            tool_calls,
+            reasoning,
+        } => row(
             "assistant",
             &Content::Assistant {
+                reasoning: reasoning.clone(),
                 text: text.clone(),
                 tool_calls: tool_calls
                     .iter()
@@ -207,7 +219,12 @@ pub(crate) fn load(rows: &[StoredRow]) -> Result<Loaded, AppError> {
             .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
         let message = match content {
             Content::User { text } => ChatMessage::User(text),
-            Content::Assistant { text, tool_calls } => ChatMessage::Assistant {
+            Content::Assistant {
+                text,
+                tool_calls,
+                reasoning,
+            } => ChatMessage::Assistant {
+                reasoning,
                 text,
                 tool_calls: tool_calls
                     .into_iter()
@@ -250,6 +267,7 @@ struct Open {
     units: u32,
     offsets: std::collections::HashMap<String, u32>,
     tools: Vec<ChatTurnTool>,
+    reasoning: Vec<ChatTurnReasoning>,
     confirmations: Vec<ChatTurnConfirmation>,
     end: Option<End>,
     at: String,
@@ -261,6 +279,7 @@ impl Open {
         ChatTurn::Assistant {
             text: self.text,
             tools: self.tools,
+            reasoning: self.reasoning,
             confirmations: self.confirmations,
             state: end.state,
             finished_reason: end.finished_reason,
@@ -289,8 +308,26 @@ pub(crate) fn turns(rows: &[StoredRow]) -> Vec<ChatTurn> {
                     at: stored.created_at.clone(),
                 });
             }
-            Content::Assistant { text, tool_calls } => {
+            Content::Assistant {
+                text,
+                tool_calls,
+                reasoning,
+            } => {
                 let reply = open.get_or_insert_with(Open::default);
+                for (span, shown) in reasoning.as_ref().map(|r| r.shown()).unwrap_or_default() {
+                    let before = text.get(..span.text_at).unwrap_or(&text);
+                    let units = u32::try_from(before.encode_utf16().count()).unwrap_or(0);
+                    let tools = u32::try_from(span.tools_before).unwrap_or(u32::MAX);
+                    reply.reasoning.push(ChatTurnReasoning {
+                        text: shown,
+                        duration_ms: span.duration_ms,
+                        text_offset: reply.units.saturating_add(units),
+                        // The rows of earlier calls came before this one.
+                        tools_before: u32::try_from(reply.tools.len())
+                            .unwrap_or(u32::MAX)
+                            .saturating_add(tools),
+                    });
+                }
                 if text != STOPPED_MARKER {
                     reply.units = reply
                         .units

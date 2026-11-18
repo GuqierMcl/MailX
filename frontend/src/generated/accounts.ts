@@ -1315,11 +1315,38 @@ export type ToolActivitySummary = { "type": "pending" } | { "type": "found", cou
 
 export type ToolActivity = { callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, };
 
+export type RunReasoning = {
+/**
+ * The readable reasoning so far; empty when the server only sent
+ * redacted thinking.
+ */
+text: string,
+/**
+ * RFC 3339 UTC with milliseconds.
+ */
+startedAt: string,
+/**
+ * `None` while it is still going.
+ */
+durationMs: number | null,
+/**
+ * Where in `text` of the snapshot it began, in UTF-16 code units.
+ */
+textOffset: number,
+/**
+ * How many of the run's `tools` began before it.
+ */
+toolsBefore: number, };
+
 export type RunSnapshot = { runId: string, kind: RunKindTag, state: RunState,
 /**
  * Everything the model has written so far.
  */
 text: string, tools: Array<ToolActivity>,
+/**
+ * The model's thinking, in order.
+ */
+reasoning: Array<RunReasoning>,
 /**
  * Whether this run may use tools. `false` for a chat on a model known to
  * lack tool calling (it can only answer from the conversation) and for
@@ -1353,7 +1380,7 @@ export type AssistantEvent = { runId: string,
  */
 seq: number, kind: AssistantEventKind, };
 
-export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "confirm", requestId: string, callId: string, request: ConfirmationRequest, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };
+export type AssistantEventKind = { "type": "state", state: RunState, } | { "type": "text", delta: string, } | { "type": "reasoning", segment: number, delta: string, } | { "type": "reasoningEnd", segment: number, durationMs: number, } | { "type": "tool", callId: string, name: string, status: ToolStatus, summary: ToolActivitySummary, } | { "type": "confirm", requestId: string, callId: string, request: ConfirmationRequest, } | { "type": "finished", reason: FinishedReason, } | { "type": "failed", code: ErrorCode, };
 
 export type ConversationSummary = { id: string,
 /**
@@ -1389,13 +1416,23 @@ export type ChatTurnTool = { callId: string, name: string, status: ToolStatus,
  */
 summary: ToolActivitySummary, textOffset: number, };
 
+export type ChatTurnReasoning = {
+/**
+ * Empty when the server only sent redacted thinking.
+ */
+text: string, durationMs: number, textOffset: number,
+/**
+ * How many of the reply's `tools` began before it.
+ */
+toolsBefore: number, };
+
 export type ChatTurnConfirmation = { callId: string, tool: string, action: ConfirmAction, outcome: ConfirmOutcome, textOffset: number, };
 
 export type ChatTurn = { "role": "user", text: string,
 /**
  * RFC 3339 UTC with milliseconds.
  */
-at: string, } | { "role": "assistant", text: string, tools: Array<ChatTurnTool>, confirmations: Array<ChatTurnConfirmation>, state: TurnState,
+at: string, } | { "role": "assistant", text: string, tools: Array<ChatTurnTool>, reasoning: Array<ChatTurnReasoning>, confirmations: Array<ChatTurnConfirmation>, state: TurnState,
 /**
  * Set when `state` is `completed`.
  */

@@ -16,11 +16,12 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Add client-specific MCP setup and connection diagnostics for external agents, with guided import where automatic setup is unavailable. / 新增外部智能体的 MCP 专属接入与连接诊断，无法自动接入时提供导入指引。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 - Let MCP clients inspect mail conversations, find local correspondents and export received attachments. / MCP 客户端可查看邮件会话、查找本机往来联系人并导出收到的附件。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 - Show the unread count of the unified inbox on the app icon on macOS and Linux, with a switch and a choice of accounts under Settings → Notifications. / 在 macOS 和 Linux 的应用图标上显示统一收件箱的未读邮件数，可在“设置 → 通知”中关闭或选择计入的账号。 ([#152](https://github.com/GuqierMcl/MailX/pull/152))
+- The assistant chat shows when the model is thinking and for how long; click "Thought for N seconds" to read its thinking, collapsed by default and also in saved chats. / 助手对话会显示模型正在思考及思考时长，点击“思考了 N 秒”可查看思考过程，默认收起，已保存的对话同样如此。 ([#151](https://github.com/GuqierMcl/MailX/pull/151))
 
 ### ✨ Optimization
 
 - Reuse a fixed local signing identity for macOS development builds so saved Keychain authorization can survive recompilation. / macOS 开发构建复用固定本机签名身份，让已保存的钥匙串授权在重新编译后继续有效。 ([#150](https://github.com/GuqierMcl/MailX/pull/150))
-- Assistant replies now show headings, numbered lists with paragraphs and nested items, task lists, tables, strikethrough and code blocks with their language and a copy button, a small sparkle marks where the reply is still being written, and mail and folder cards in replies have a soft background so each reads as one item. / 助手回复现在可以显示标题、带段落和嵌套项的编号列表、任务清单、表格、删除线，以及标明语言并带复制按钮的代码块；正在生成的回复末尾会有一个小星芒标记，回复中的邮件和文件夹卡片带淡底色，一眼能看出是一个整体。
+- Assistant replies now show headings, numbered lists with paragraphs and nested items, task lists, tables, strikethrough and code blocks with their language and a copy button, a small sparkle marks where the reply is still being written, and mail and folder cards in replies have a soft background so each reads as one item. / 助手回复现在可以显示标题、带段落和嵌套项的编号列表、任务清单、表格、删除线，以及标明语言并带复制按钮的代码块；正在生成的回复末尾会有一个小星芒标记，回复中的邮件和文件夹卡片带淡底色，一眼能看出是一个整体。 ([#149](https://github.com/GuqierMcl/MailX/pull/149))
 - The Now page AI line now picks one thing worth noticing (a quiet inbox, a busy day, mail piled up while you were away, the time of day or a festival) instead of reciting numbers. / 「此刻」页 AI 问候语改为挑一件值得一提的事来说（安静的收件箱、忙碌的一天、离开期间攒下的邮件、时间或节日），不再罗列数字。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
 
 - Show the title-bar MCP green dot only while a client is connected. / 标题栏 MCP 仅在有客户端连接时显示绿点。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
@@ -33,7 +34,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🩹 Fixed
 
-- Fixed the Now page AI line often not appearing with models that think before answering (such as DeepSeek); a failed line can now be retried. / 修复了「此刻」页 AI 问候语在先思考再回答的模型（如 DeepSeek）上经常出不来的问题，生成失败时可以重试。
+- The assistant now sends a thinking model's reasoning back with later requests in the same chat, as some servers require when thinking is combined with tool calls, and long thinking is no longer cut off after three minutes. / 助手在同一对话的后续请求中会回传思考模型的推理内容（部分服务器在思考配合工具调用时要求如此），较长的思考也不再在三分钟时被截断。 ([#151](https://github.com/GuqierMcl/MailX/pull/151))
+- Fixed the Now page AI line often not appearing with models that think before answering (such as DeepSeek); a failed line can now be retried. / 修复了「此刻」页 AI 问候语在先思考再回答的模型（如 DeepSeek）上经常出不来的问题，生成失败时可以重试。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
 - Selecting a provider near the bottom of the add-account list no longer scrolls the entire dialog upward. / 添加邮箱时，选择服务商列表下方的选项不再导致整个弹窗内容上移。 ([#146](https://github.com/GuqierMcl/MailX/pull/146))
 
 ## [0.4.0] - 2026-11-17

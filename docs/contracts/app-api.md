@@ -756,6 +756,7 @@ type RunSnapshot = {
   runId: string; kind: "nowSummary" | "chat"; state: RunState;
   text: string;                     // 模型到目前为止写的全部文字
   tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
+  reasoning: RunReasoning[];        // 模型的思考，一段一段按顺序（每轮模型请求可有一段，例如工具调用前后各一段）
   toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述恒为 false
   error: ErrorCode | null;          // failed 时的固定错误码
   finishedReason: "stop" | "limit" | "length" | null;
@@ -763,6 +764,13 @@ type RunSnapshot = {
   conversationId: string | null;    // 对话才有
   pending: PendingConfirmation | null; // 仅在 awaitingConfirmation 时非空
   completedAt: string | null;       // 结束（completed / failed / canceled）的时间，RFC 3339 UTC；缓存的「此刻」概述为原始生成时间
+};
+type RunReasoning = {
+  text: string;                     // 可读的思考文字；服务商只给了加密 / 脱敏思考时为空
+  startedAt: string;                // RFC 3339 UTC
+  durationMs: number | null;        // 进行中为 null；运行结束时仍未结束的一段按结束时刻补上
+  textOffset: number;               // 开始时 text 的长度（UTF-16 码元）
+  toolsBefore: number;              // 开始前已经开始的工具调用数（tools 里的前几项）
 };
 type ToolActivity = { callId: string; name: string; status: "running" | "done" | "failed" | "denied"; summary: ToolActivitySummary };
 type ToolActivitySummary =
@@ -774,6 +782,8 @@ type AssistantEvent = { runId: string; seq: number; kind: AssistantEventKind }; 
 type AssistantEventKind =
   | { type: "state"; state: RunState }
   | { type: "text"; delta: string }
+  | { type: "reasoning"; segment: number; delta: string }      // 思考文字；某个 segment（运行内从 0 起）的第一条事件即开启这一段，delta 可为空
+  | { type: "reasoningEnd"; segment: number; durationMs: number } // 这一段结束（随后是文字、工具调用或本轮结束）
   | { type: "tool"; callId: string; name: string; status: ToolStatus; summary: ToolActivitySummary }
   | { type: "confirm"; requestId: string; callId: string; request: ConfirmationRequest }
   | { type: "finished"; reason: "stop" | "limit" | "length" }
@@ -784,7 +794,7 @@ type AssistantEventKind =
 
 **无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 
-**事件与快照。** 事件按 `seq` 顺序到达；前端可以随时用 `assistantSnapshot` 重新取得状态（包括待确认的请求），再接收 `seq` 更大的事件，忽略小于等于快照 `seq` 的。事件只含模型输出的文字、结构化的工具摘要和固定错误码；提示词、邮件正文与服务商原文不会出现。
+**事件与快照。** 事件按 `seq` 顺序到达；前端可以随时用 `assistantSnapshot` 重新取得状态（包括待确认的请求），再接收 `seq` 更大的事件，忽略小于等于快照 `seq` 的。事件只含模型输出的文字与思考、结构化的工具摘要和固定错误码；提示词、邮件正文与服务商原文不会出现。思考文字按段（`reasoning` / `reasoningEnd`）到达，界面据 `textOffset` 与 `toolsBefore`（实时则按到达时的文字长度与工具数）把每一段放在文字和工具行之间；快照的 `reasoning` 含全部段落，恢复时据此重建。签名、加密思考等回传数据只在核心里，不出现在事件与快照中（见 [AI Runtime](../ai-runtime/README.md) 的“思考的捕获与回传”）。「此刻」概述的运行也可能带思考事件，界面不显示。
 
 **确认。** 工具的处理方式取自助手设置（见 [ai-permissions](../architecture/ai-permissions.md#2-操作类别)）。需要询问时运行进入 `awaitingConfirmation`，依次发出 `state` 事件与 `confirm` 事件，`RunSnapshot.pending` 同时有值；循环此时不执行该调用，也不再请求模型。一次只有一个待确认请求；同一轮里的多个工具调用按顺序处理，各自暂停。
 
@@ -836,17 +846,19 @@ type ChatTurn =
   | { role: "user"; text: string; at: string }
   | { role: "assistant"; text: string;                 // 这条回复里模型写的全部文字（多步拼接，与实时的 RunSnapshot.text 相同）
       tools: ChatTurnTool[];                           // 按调用顺序；摘要里的 changed.undo 恒为 null
+      reasoning: ChatTurnReasoning[];                  // 思考的各段，按顺序；旧记录为空
       confirmations: ChatTurnConfirmation[];           // 用户答过的确认，只有一行结果
       state: "completed" | "failed" | "canceled";      // 应用在回复中途退出的，读回来是 canceled
       finishedReason: FinishedReason | null;           // completed 时
       error: ErrorCode | null;                         // failed 时
       at: string };
 type ChatTurnTool = { callId: string; name: string; status: ToolStatus; summary: ToolActivitySummary; textOffset: number };
+type ChatTurnReasoning = { text: string; durationMs: number; textOffset: number; toolsBefore: number }; // text 为空：只有脱敏思考
 type ChatTurnConfirmation = { callId: string; tool: string; action: ConfirmAction; outcome: "approved" | "denied" | "expired"; textOffset: number };
 type ConversationsChanged = { conversationId: string | null; change: "saved" | "deleted" | "cleared" };
 ```
 
-- `textOffset` 是该调用开始时回复文字已有的长度，按 UTF-16 码元计（与 `String.length` 一致），界面据此把工具行和确认行放回与实时相同的位置；同一调用的确认与工具共用 `callId`，实时界面里带确认卡的工具不单独成行，读回来的做法相同。
+- `textOffset` 是该调用开始时回复文字已有的长度，按 UTF-16 码元计（与 `String.length` 一致），界面据此把工具行、思考行和确认行放回与实时相同的位置；思考段同一位置上的先后由 `toolsBefore` 决定（它之前已经开始的 `tools` 项数）；同一调用的确认与工具共用 `callId`，实时界面里带确认卡的工具不单独成行，读回来的做法相同。
 - 保存的内容见 AI Runtime 第 4 节：不含撤销数据与待确认的请求；撤销令牌与旧标志在重启后失效，读回来的整理活动没有撤销按钮。回复里的邮件与文件夹引用（`mailx://email/<id>`、`mailx://folder/<id>`）就在 `text` 里，邮件或文件夹之后被删除时界面按普通文字处理。
 - 保存发生在一轮完整的工具往返之后和回复结束时；运行报告 `completed` / `failed` / `canceled`（被取消的在保存完成后释放对话）之前，正常结束的回复已经写入，所以界面收到结束事件后立刻查询列表就能看到它。
 - `AssistantConversationsChanged` 是与 `AssistantEvent` 无关的核心事件，只表示“列表可能变了，请重新查询”：保存一轮（`saved`，带对话 id）、删除（`deleted`）、清除全部（`cleared`，`conversationId` 为 `null`）；移除账号后也发一条 `cleared`（涉及该账号的对话已在同一事务里删除）。事件可以丢，列表以查询为准。

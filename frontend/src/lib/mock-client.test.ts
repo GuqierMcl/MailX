@@ -816,6 +816,29 @@ describe('mock assistant', () => {
     expect(changes.slice(-2)).toEqual(['deleted', 'cleared'])
   })
 
+  it('streams a thinking stretch before the reply and another after its tool calls, and saves them', async () => {
+    const client = mock()
+    const events = record(client)
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('look at my mail'))
+    const snapshot = await finished(client, started.runId)
+    const mine = events.filter((event) => event.runId === started.runId).map((event) => event.kind)
+    const order = mine.map((kind) => kind.type).filter((type) => type !== 'state').filter((type, at, all) => type !== all[at - 1])
+    expect(order.slice(0, 4)).toEqual(['reasoning', 'reasoningEnd', 'tool', 'reasoning'])
+    expect(order).toContain('text')
+    // Each stretch opens with segment n and ends once, in order; seq has no gaps.
+    expect(mine.filter((kind) => kind.type === 'reasoningEnd').map((kind) => kind.type === 'reasoningEnd' && kind.segment)).toEqual([0, 1])
+    expect(snapshot.reasoning).toHaveLength(2)
+    expect(snapshot.reasoning[0]).toMatchObject({ textOffset: 0, toolsBefore: 0 })
+    expect(snapshot.reasoning[1].toolsBefore).toBe(snapshot.tools.length)
+    expect(snapshot.reasoning.every((thought) => thought.text.length > 0 && thought.durationMs !== null)).toBe(true)
+    await vi.waitFor(async () => {
+      const saved = await client.assistantGetConversation(started.conversationId!)
+      const reply = saved.turns[saved.turns.length - 1]
+      expect(reply.role === 'assistant' && reply.reasoning.map((thought) => thought.toolsBefore)).toEqual([0, snapshot.tools.length])
+    })
+  })
+
   it('does not save a chat while history is off', async () => {
     const client = mock()
     await client.assistantGrantConsent()

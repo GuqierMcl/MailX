@@ -1419,3 +1419,14 @@ macOS Dock 与 Linux 启动器显示统一收件箱未读数，Windows 暂不显
 - macOS 打包版本：Dock 数字随新邮件、已读、归档、删除与撤销更新，主窗口隐藏后仍更新；为 0 时角标消失；关闭开关或取消计入某账号后数字随之变化。
 - Linux：系统缺少 `libunity` 时静默不显示；Ubuntu Dock、GNOME + Dash to Dock 与 KDE Plasma 上是否实际显示数字。
 - Windows：设置页不显示该分组，已保存的设置不受影响。
+
+
+## 助手思考内容的捕获、回传与展示（2026-11-18）
+
+思考内容按协议捕获与原样回传，不按服务商分支：OpenAI 兼容接口按收到时的字段名（`reasoning_content` / `reasoning`）回传，没收到就不发；Anthropic 接口的 `thinking`（含签名）与 `redacted_thinking` 块按原位置回传；只回传给同一协议、连接、地址与模型。原 DeepSeek 专用的关闭思考开关已移除。
+
+自动测试：两种协议的解码与请求体回传、来源不一致时不回传、工具调用后与追问时的回传、读回历史对话后继续、旧格式历史记录读取、上下文预算计入；前端思考行（进行中 / 结束 / 展开 / 脱敏 / 减少动态效果）、等待提示只在未收到任何数据时显示、读回对话的位置还原。同步含 #149 的 main 后，`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`（core 1,545 项通过、2 项既有忽略）、`types:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test`（133 个文件 / 1,743 项）、生产构建与 `git diff --check` 通过。浏览器预览（模拟助手）目测思考行与工具行对齐、展开原文的样式。
+
+维护者手动验收（macOS，`bun run desktop:dev:isolated`，真实 DeepSeek）：会调用工具的提问正常回答并显示思考时长；同一对话追问正常；从历史对话重新打开后追问正常；「此刻」概述句完整生成。
+
+尚未验证：Anthropic 协议的思考（默认关闭，仅模拟数据）、其他返回思考内容的服务商（Kimi、Qwen、GLM、OpenRouter、本地 vLLM / Ollama 等），以及 Windows / Linux 桌面。

@@ -50,13 +50,14 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, ChatTurn, ChatTurnConfirmation, ChatTurnTool,
-    ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
-    ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
-    ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
-    FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion,
-    OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunSnapshot, RunState, StartRun,
-    ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    AssistantEvent, AssistantEventKind, ChatTurn, ChatTurnConfirmation, ChatTurnReasoning,
+    ChatTurnTool, ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome,
+    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
+    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged,
+    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE,
+    MAX_MESSAGE_CHARS, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag,
+    RunReasoning, RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus,
+    ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.

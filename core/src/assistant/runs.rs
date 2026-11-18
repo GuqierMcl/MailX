@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::types::{
     AssistantEvent, AssistantEventKind, ConfirmationRequest, FinishedReason, PendingConfirmation,
-    RunKindTag, RunSnapshot, RunState, ToolActivity, ToolActivitySummary, ToolStatus,
+    RunKindTag, RunReasoning, RunSnapshot, RunState, ToolActivity, ToolActivitySummary, ToolStatus,
 };
 use crate::{
     AppError, ErrorCode,
@@ -43,6 +43,12 @@ struct Entry {
     abort: Option<AbortHandle>,
     finished_at: Option<Instant>,
     created: u64,
+    /// When the open thinking stretch (the last one) began.
+    thinking_since: Option<Instant>,
+}
+
+fn utf16_len(text: &str) -> u32 {
+    u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
 #[derive(Default)]
@@ -98,9 +104,41 @@ impl Runs {
                 if state.finished() {
                     snapshot.completed_at = Some(now_rfc3339());
                     entry.finished_at = Some(Instant::now());
+                    // A stretch still open when the run ended lasted until now.
+                    if let (Some(since), Some(last)) =
+                        (entry.thinking_since.take(), snapshot.reasoning.last_mut())
+                    {
+                        last.duration_ms.get_or_insert_with(|| {
+                            u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
+                        });
+                    }
                 }
             }
             AssistantEventKind::Text { delta } => snapshot.text.push_str(delta),
+            AssistantEventKind::Reasoning { segment, delta } => {
+                match snapshot.reasoning.get_mut(*segment as usize) {
+                    Some(open) => open.text.push_str(delta),
+                    None => {
+                        entry.thinking_since = Some(Instant::now());
+                        snapshot.reasoning.push(RunReasoning {
+                            text: delta.clone(),
+                            started_at: now_rfc3339(),
+                            duration_ms: None,
+                            text_offset: utf16_len(&snapshot.text),
+                            tools_before: u32::try_from(snapshot.tools.len()).unwrap_or(u32::MAX),
+                        });
+                    }
+                }
+            }
+            AssistantEventKind::ReasoningEnd {
+                segment,
+                duration_ms,
+            } => {
+                if let Some(done) = snapshot.reasoning.get_mut(*segment as usize) {
+                    done.duration_ms = Some(*duration_ms);
+                }
+                entry.thinking_since = None;
+            }
             AssistantEventKind::Tool {
                 call_id,
                 name,
@@ -170,6 +208,7 @@ impl Runs {
                 state: RunState::Running,
                 text: String::new(),
                 tools: Vec::new(),
+                reasoning: Vec::new(),
                 tools_available: kind == RunKindTag::Chat,
                 error: None,
                 finished_reason: None,
@@ -182,6 +221,7 @@ impl Runs {
             abort: None,
             finished_at: None,
             created,
+            thinking_since: None,
         };
         Self::record(
             &self.events,
@@ -210,6 +250,7 @@ impl Runs {
             state: RunState::Completed,
             text,
             tools: Vec::new(),
+            reasoning: Vec::new(),
             tools_available: false,
             error: None,
             finished_reason: Some(FinishedReason::Stop),
@@ -227,6 +268,7 @@ impl Runs {
                 abort: None,
                 finished_at: Some(Instant::now()),
                 created,
+                thinking_since: None,
             },
         );
         snapshot
@@ -256,6 +298,50 @@ impl Runs {
     pub(crate) fn text(&self, run_id: &str, delta: String) -> bool {
         let mut table = self.lock();
         self.apply(&mut table, run_id, AssistantEventKind::Text { delta })
+    }
+
+    /// Thinking text; opens a new stretch when none is open.
+    pub(crate) fn reasoning(&self, run_id: &str, delta: String) -> bool {
+        let mut table = self.lock();
+        let Some(entry) = table.runs.get(run_id) else {
+            return false;
+        };
+        let reasoning = &entry.snapshot.reasoning;
+        let segment = match reasoning.last() {
+            Some(last) if last.duration_ms.is_none() => reasoning.len() - 1,
+            _ => reasoning.len(),
+        };
+        let segment = u32::try_from(segment).unwrap_or(u32::MAX);
+        self.apply(
+            &mut table,
+            run_id,
+            AssistantEventKind::Reasoning { segment, delta },
+        )
+    }
+
+    /// Closes the open thinking stretch, if there is one.
+    pub(crate) fn reasoning_end(&self, run_id: &str, duration_ms: u64) -> bool {
+        let mut table = self.lock();
+        let Some(entry) = table.runs.get(run_id) else {
+            return false;
+        };
+        let reasoning = &entry.snapshot.reasoning;
+        let Some(segment) = reasoning
+            .last()
+            .filter(|last| last.duration_ms.is_none())
+            .map(|_| reasoning.len() - 1)
+        else {
+            return false;
+        };
+        let segment = u32::try_from(segment).unwrap_or(u32::MAX);
+        self.apply(
+            &mut table,
+            run_id,
+            AssistantEventKind::ReasoningEnd {
+                segment,
+                duration_ms,
+            },
+        )
     }
 
     pub(crate) fn tool(

@@ -8,7 +8,87 @@ use super::{
     ANTHROPIC_STREAM_DEFAULT_MAX_TOKENS, ChatMessage, ChatRequest, Decoder, FinishReason,
     StreamEvent, ToolCallRequest, Usage, parse_arguments, sse::SseEvent, token_count,
 };
-use crate::ErrorCode;
+use crate::{
+    ErrorCode,
+    ai::reasoning::{AnthropicPart, ReasoningEcho, echo_for},
+};
+
+fn text_block(text: &str) -> Value {
+    json!({"type": "text", "text": text})
+}
+
+fn tool_block(call: &ToolCallRequest) -> Value {
+    json!({
+        "type": "tool_use",
+        "id": call.id,
+        "name": call.name,
+        "input": call.arguments,
+    })
+}
+
+fn thinking_block(part: &AnthropicPart) -> Option<Value> {
+    match part {
+        AnthropicPart::Thinking {
+            thinking,
+            signature,
+        } => {
+            let mut block = json!({"type": "thinking", "thinking": thinking});
+            if let Some(signature) = signature {
+                block["signature"] = json!(signature);
+            }
+            Some(block)
+        }
+        AnthropicPart::RedactedThinking { data } => {
+            Some(json!({"type": "redacted_thinking", "data": data}))
+        }
+        AnthropicPart::Text { .. } | AnthropicPart::ToolUse { .. } => None,
+    }
+}
+
+/// The content of an assistant message. With reasoning from this server the
+/// blocks follow the order they arrived in, thinking blocks unchanged;
+/// anything the recorded order does not account for goes after it.
+fn assistant_blocks(
+    text: &str,
+    tool_calls: &[ToolCallRequest],
+    parts: Option<&[AnthropicPart]>,
+) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    let mut at = 0usize;
+    let mut used = vec![false; tool_calls.len()];
+    for part in parts.unwrap_or_default() {
+        match part {
+            AnthropicPart::Text { bytes } => {
+                let end = at.saturating_add(*bytes);
+                match text.get(at..end) {
+                    Some(slice) if !slice.is_empty() => {
+                        blocks.push(text_block(slice));
+                        at = end;
+                    }
+                    _ => {}
+                }
+            }
+            AnthropicPart::ToolUse { id } => {
+                if let Some(index) = tool_calls
+                    .iter()
+                    .enumerate()
+                    .position(|(i, call)| !used[i] && call.id == *id)
+                {
+                    used[index] = true;
+                    blocks.push(tool_block(&tool_calls[index]));
+                }
+            }
+            thinking => blocks.extend(thinking_block(thinking)),
+        }
+    }
+    if let Some(rest) = text.get(at..).filter(|rest| !rest.is_empty()) {
+        blocks.push(text_block(rest));
+    }
+    for (call, _) in tool_calls.iter().zip(&used).filter(|(_, used)| !**used) {
+        blocks.push(tool_block(call));
+    }
+    blocks
+}
 
 pub(super) fn body(request: &ChatRequest<'_>) -> Value {
     let mut messages: Vec<Value> = Vec::new();
@@ -35,20 +115,17 @@ pub(super) fn body(request: &ChatRequest<'_>) -> Value {
                 flush(&mut messages, &mut results);
                 messages.push(json!({"role": "user", "content": text}));
             }
-            ChatMessage::Assistant { text, tool_calls } => {
+            ChatMessage::Assistant {
+                text,
+                tool_calls,
+                reasoning,
+            } => {
                 flush(&mut messages, &mut results);
-                let mut blocks = Vec::new();
-                if !text.is_empty() {
-                    blocks.push(json!({"type": "text", "text": text}));
-                }
-                for call in tool_calls {
-                    blocks.push(json!({
-                        "type": "tool_use",
-                        "id": call.id,
-                        "name": call.name,
-                        "input": call.arguments,
-                    }));
-                }
+                let parts = match echo_for(reasoning.as_ref(), request.origin) {
+                    Some(ReasoningEcho::Blocks { parts }) => Some(parts.as_slice()),
+                    _ => None,
+                };
+                let blocks = assistant_blocks(text, tool_calls, parts);
                 messages.push(json!({"role": "assistant", "content": blocks}));
             }
         }
@@ -80,13 +157,23 @@ pub(super) fn body(request: &ChatRequest<'_>) -> Value {
 }
 
 enum Block {
-    Text,
+    /// `bytes` of text so far.
+    Text {
+        bytes: usize,
+    },
     Tool {
         id: String,
         name: String,
         input: String,
     },
-    /// Thinking and anything unknown.
+    Thinking {
+        thinking: String,
+        signature: Option<String>,
+    },
+    Redacted {
+        data: String,
+    },
+    /// Anything unknown.
     Ignored,
 }
 
@@ -96,6 +183,9 @@ pub(super) struct AnthropicDecoder {
     reason: Option<FinishReason>,
     usage: Usage,
     any_output: bool,
+    /// Finished blocks in order, kept for sending reasoning back.
+    parts: Vec<AnthropicPart>,
+    any_thinking: bool,
 }
 
 impl AnthropicDecoder {
@@ -110,6 +200,15 @@ impl AnthropicDecoder {
     }
 
     fn finished(&mut self, out: &mut Vec<StreamEvent>) {
+        // Blocks the stream never closed still count, in index order.
+        for (_, block) in std::mem::take(&mut self.blocks) {
+            self.close(block);
+        }
+        if self.any_thinking {
+            out.push(StreamEvent::ReasoningEcho(ReasoningEcho::Blocks {
+                parts: std::mem::take(&mut self.parts),
+            }));
+        }
         let usage = &self.usage;
         let usage =
             (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then(|| usage.clone());
@@ -117,6 +216,30 @@ impl AnthropicDecoder {
             reason: self.reason.take().unwrap_or(FinishReason::Other),
             usage,
         });
+    }
+}
+
+impl AnthropicDecoder {
+    /// Records a finished block's place (and a thinking block's content).
+    fn close(&mut self, block: Block) {
+        let part = match block {
+            Block::Text { bytes } if bytes > 0 => AnthropicPart::Text { bytes },
+            Block::Tool { id, .. } => AnthropicPart::ToolUse { id },
+            Block::Thinking {
+                thinking,
+                signature,
+            } => AnthropicPart::Thinking {
+                thinking,
+                signature,
+            },
+            Block::Redacted { data } => AnthropicPart::RedactedThinking { data },
+            Block::Text { .. } | Block::Ignored => return,
+        };
+        self.any_thinking |= matches!(
+            part,
+            AnthropicPart::Thinking { .. } | AnthropicPart::RedactedThinking { .. }
+        );
+        self.parts.push(part);
     }
 }
 
@@ -151,11 +274,31 @@ impl Decoder for AnthropicDecoder {
                 let entry = match kind {
                     Some("text") => {
                         let text = text_of("text");
+                        let bytes = text.len();
                         if !text.is_empty() {
                             self.any_output = true;
                             out.push(StreamEvent::Text(text));
                         }
-                        Block::Text
+                        Block::Text { bytes }
+                    }
+                    Some("thinking") => {
+                        let thinking = text_of("thinking");
+                        out.push(StreamEvent::Reasoning(thinking.clone()));
+                        let signature = block
+                            .and_then(|b| b.get("signature"))
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned);
+                        Block::Thinking {
+                            thinking,
+                            signature,
+                        }
+                    }
+                    Some("redacted_thinking") => {
+                        out.push(StreamEvent::Reasoning(String::new()));
+                        Block::Redacted {
+                            data: text_of("data"),
+                        }
                     }
                     Some("tool_use") => {
                         self.any_output = true;
@@ -173,14 +316,33 @@ impl Decoder for AnthropicDecoder {
                 let delta = value.get("delta");
                 let kind = delta.and_then(|d| d.get("type")).and_then(Value::as_str);
                 match (kind, self.blocks.get_mut(&index(&value))) {
-                    (Some("text_delta"), Some(Block::Text)) => {
+                    (Some("text_delta"), Some(Block::Text { bytes })) => {
                         if let Some(text) = delta
                             .and_then(|d| d.get("text"))
                             .and_then(Value::as_str)
                             .filter(|t| !t.is_empty())
                         {
+                            *bytes += text.len();
                             self.any_output = true;
                             out.push(StreamEvent::Text(text.to_owned()));
+                        }
+                    }
+                    (Some("thinking_delta"), Some(Block::Thinking { thinking, .. })) => {
+                        if let Some(text) = delta
+                            .and_then(|d| d.get("thinking"))
+                            .and_then(Value::as_str)
+                            .filter(|t| !t.is_empty())
+                        {
+                            thinking.push_str(text);
+                            out.push(StreamEvent::Reasoning(text.to_owned()));
+                        }
+                    }
+                    (Some("signature_delta"), Some(Block::Thinking { signature, .. })) => {
+                        if let Some(part) = delta
+                            .and_then(|d| d.get("signature"))
+                            .and_then(Value::as_str)
+                        {
+                            signature.get_or_insert_with(String::new).push_str(part);
                         }
                     }
                     (Some("input_json_delta"), Some(Block::Tool { input, .. })) => {
@@ -194,18 +356,21 @@ impl Decoder for AnthropicDecoder {
                     _ => {}
                 }
             }
-            "content_block_stop" => {
-                if let Some(Block::Tool { id, name, input }) = self.blocks.remove(&index(&value)) {
+            "content_block_stop" => match self.blocks.remove(&index(&value)) {
+                Some(Block::Tool { id, name, input }) => {
                     if name.is_empty() || id.is_empty() {
                         return Err(ErrorCode::AiInvalidResponse);
                     }
                     out.push(StreamEvent::ToolCall(ToolCallRequest {
-                        id,
+                        id: id.clone(),
                         name,
                         arguments: parse_arguments(&input)?,
                     }));
+                    self.parts.push(AnthropicPart::ToolUse { id });
                 }
-            }
+                Some(block) => self.close(block),
+                None => {}
+            },
             "message_delta" => {
                 if let Some(reason) = value
                     .get("delta")

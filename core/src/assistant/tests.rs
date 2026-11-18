@@ -50,6 +50,10 @@ fn oa_call(index: u64, id: &str, name: &str, args: &Value) -> Vec<u8> {
     }]}}]}))
 }
 
+fn oa_think(text: &str) -> Vec<u8> {
+    data(json!({"choices":[{"index":0,"delta":{"reasoning_content":text}}]}))
+}
+
 /// A reply that only says `text`.
 fn say(text: &str) -> Vec<Vec<u8>> {
     vec![oa_text(text), oa_finish("stop"), done()]
@@ -2114,7 +2118,7 @@ async fn a_summary_cut_off_by_the_output_cap_fails_and_is_not_cached() {
 }
 
 #[tokio::test]
-async fn the_summary_turns_thinking_off_for_deepseek_and_the_chat_does_not() {
+async fn no_provider_gets_a_thinking_switch_and_the_summary_keeps_its_cap() {
     let fx = Fx::new().await;
     fx.ai
         .save_connection(SaveAiConnection {
@@ -2129,15 +2133,18 @@ async fn the_summary_turns_thinking_off_for_deepseek_and_the_chat_does_not() {
         })
         .await
         .unwrap();
-    fx.model(vec![say("Hi.")]);
+    // A thinking model: the summary's reasoning is not part of the line.
+    fx.model(vec![vec![
+        oa_think("hmm"),
+        oa_text("Hi."),
+        oa_finish("stop"),
+        done(),
+    ]]);
     let started = fx.assistant.start(summary_request()).await.unwrap();
-    fx.finished(&started.run_id).await;
-    assert_eq!(
-        fx.request(0)["thinking"],
-        json!({"type": "disabled"}),
-        "{}",
-        fx.request(0)
-    );
+    assert_eq!(fx.finished(&started.run_id).await.text, "Hi.");
+    let summary = fx.request(0);
+    assert!(summary.get("thinking").is_none(), "{summary}");
+    assert_eq!(summary["max_tokens"], 4096);
 
     assert_eq!(fx.chat_and_wait("hello").await.state, RunState::Completed);
     let chat = fx.request(1);
@@ -2542,6 +2549,7 @@ async fn a_reply_cut_off_by_a_restart_reads_back_as_stopped_and_can_be_continued
                     name: "search_emails".into(),
                     arguments: json!({}),
                 }],
+                reasoning: None,
             },
             None,
             "2030-01-01T00:00:01.000Z",
@@ -2916,6 +2924,7 @@ fn a_conversation_with_four_hundred_messages_is_full() {
                 ChatMessage::Assistant {
                     text: "a".into(),
                     tool_calls: Vec::new(),
+                    reasoning: None,
                 }
             }
         })
@@ -3037,4 +3046,242 @@ async fn contact_lookup_tracks_every_queried_account_for_saved_history_cleanup()
         .unwrap();
     assert!(fx.list().await.iter().all(|item| item.id != id));
     assert!(fx.stored_contents(&id).is_empty());
+}
+
+// ------------------------------------------------------------------ thinking
+
+/// A reply that thinks (`thought`, in pieces) before its tool calls.
+fn think_then_call(thought: &[&str], list: &[(&str, &str, Value)]) -> Vec<Vec<u8>> {
+    let mut chunks: Vec<Vec<u8>> = thought.iter().map(|t| oa_think(t)).collect();
+    chunks.extend(calls(list));
+    chunks
+}
+
+fn think_then_say(thought: &str, text: &str) -> Vec<Vec<u8>> {
+    vec![oa_think(thought), oa_text(text), oa_finish("stop"), done()]
+}
+
+#[tokio::test]
+async fn reasoning_streams_as_stretches_and_goes_back_after_a_tool_call() {
+    let fx = Fx::new().await;
+    fx.model(vec![
+        think_then_call(
+            &["look", " first"],
+            &[("s1", "search_emails", json!({"query": "hello"}))],
+        ),
+        think_then_say("now answer", "One mail."),
+        say("ok"),
+    ]);
+    let snapshot = fx.chat_and_wait("what is new?").await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.text, "One mail.");
+
+    // The second request carries the first turn's reasoning, as received.
+    let second = fx.request(1);
+    let assistant = &second["messages"][2];
+    assert_eq!(assistant["role"], "assistant");
+    assert_eq!(assistant["reasoning_content"], "look first");
+    assert!(assistant.get("reasoning").is_none());
+
+    // Two stretches: before the tool call and after it.
+    let stretches: Vec<(&str, u32, u32, bool)> = snapshot
+        .reasoning
+        .iter()
+        .map(|r| {
+            (
+                r.text.as_str(),
+                r.text_offset,
+                r.tools_before,
+                r.duration_ms.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        stretches,
+        [("look first", 0, 0, true), ("now answer", 0, 1, true)]
+    );
+
+    // Events: each stretch opens, grows and ends before what follows it.
+    let kinds: Vec<String> = fx
+        .run_events(&snapshot.run_id)
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            AssistantEventKind::Reasoning { segment, delta } => Some(format!("r{segment}:{delta}")),
+            AssistantEventKind::ReasoningEnd { segment, .. } => Some(format!("end{segment}")),
+            AssistantEventKind::Text { delta } => Some(format!("t:{delta}")),
+            AssistantEventKind::Tool { status, .. } => Some(format!("tool:{status:?}")),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "r0:look",
+            "r0: first",
+            "end0",
+            "tool:Running",
+            "tool:Done",
+            "r1:now answer",
+            "end1",
+            "t:One mail."
+        ]
+    );
+
+    // A follow-up in the same conversation sends both back.
+    let id = snapshot.conversation_id.clone().unwrap();
+    let next = fx
+        .assistant
+        .start(chat_request(Some(&id), "thanks"))
+        .await
+        .unwrap();
+    fx.finished(&next.run_id).await;
+    let third = fx.request(2);
+    let messages = third["messages"].as_array().unwrap();
+    assert_eq!(messages[2]["reasoning_content"], "look first");
+    assert_eq!(messages[4]["reasoning_content"], "now answer");
+    assert_eq!(messages[4]["content"], "One mail.");
+
+    // The saved conversation shows the stretches where they were.
+    fx.idle(&id).await;
+    let turns = fx.turns(&id).await;
+    let ChatTurn::Assistant { reasoning, .. } = &turns[1] else {
+        panic!("{turns:?}");
+    };
+    let saved: Vec<(&str, u32, u32)> = reasoning
+        .iter()
+        .map(|r| (r.text.as_str(), r.text_offset, r.tools_before))
+        .collect();
+    assert_eq!(saved, [("look first", 0, 0), ("now answer", 0, 1)]);
+
+    // After a restart the stored reasoning still goes back.
+    fx.model(vec![say("again")]);
+    let again = fx.reopened();
+    let resumed = again.start(chat_request(Some(&id), "and?")).await.unwrap();
+    finished(&again, &resumed.run_id).await;
+    let fourth = fx.request(3);
+    assert_eq!(fourth["messages"][2]["reasoning_content"], "look first");
+    // The follow-up reply had no reasoning: no field.
+    let plain = &fourth["messages"][6];
+    assert_eq!(plain["content"], "ok");
+    assert!(plain.get("reasoning_content").is_none(), "{plain}");
+}
+
+#[tokio::test]
+async fn reasoning_from_another_model_is_not_sent() {
+    let fx = Fx::new().await;
+    fx.model(vec![think_then_say("hmm", "one"), say("two")]);
+    let first = fx.chat_and_wait("first").await;
+    let id = first.conversation_id.unwrap();
+    fx.configure(|a| a.model = Some(model_ref(&fx.connection_id, "other-model", None)));
+    let second = fx
+        .assistant
+        .start(chat_request(Some(&id), "second"))
+        .await
+        .unwrap();
+    fx.finished(&second.run_id).await;
+    let request = fx.request(1);
+    assert_eq!(request["model"], "other-model");
+    assert_eq!(request["messages"][2]["content"], "one");
+    assert!(
+        request["messages"][2].get("reasoning_content").is_none(),
+        "{request}"
+    );
+}
+
+#[tokio::test]
+async fn the_anthropic_protocol_sends_signed_thinking_back() {
+    let fx = Fx::build(AiProtocol::Anthropic, true).await;
+    let block = |index: u64, block: Value| {
+        named(
+            "content_block_start",
+            json!({"type":"content_block_start","index":index,"content_block":block}),
+        )
+    };
+    let delta = |index: u64, delta: Value| {
+        named(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":index,"delta":delta}),
+        )
+    };
+    let stop = |index: u64| {
+        named(
+            "content_block_stop",
+            json!({"type":"content_block_stop","index":index}),
+        )
+    };
+    let mut first = an_text_reply("x")[..1].to_vec();
+    first.extend([
+        block(0, json!({"type":"thinking","thinking":""})),
+        delta(0, json!({"type":"thinking_delta","thinking":"plan"})),
+        delta(0, json!({"type":"signature_delta","signature":"SIG"})),
+        stop(0),
+        block(
+            1,
+            json!({"type":"tool_use","id":"tu1","name":"search_emails","input":{}}),
+        ),
+        delta(
+            1,
+            json!({"type":"input_json_delta","partial_json":"{\"query\":\"hello\"}"}),
+        ),
+        stop(1),
+        named(
+            "message_delta",
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}),
+        ),
+        named("message_stop", json!({"type":"message_stop"})),
+    ]);
+    fx.model(vec![first, an_text_reply("Found it.")]);
+    let snapshot = fx.chat_and_wait("look").await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.reasoning.len(), 1);
+    assert_eq!(snapshot.reasoning[0].text, "plan");
+    let request = fx.request(1);
+    assert_eq!(
+        request["messages"][1]["content"],
+        json!([
+            {"type":"thinking","thinking":"plan","signature":"SIG"},
+            {"type":"tool_use","id":"tu1","name":"search_emails","input":{"query":"hello"}}
+        ])
+    );
+}
+
+#[test]
+fn thinking_stretches_open_grow_end_and_close_with_the_run() {
+    let runs = quiet_runs();
+    let id = runs
+        .create(RunKindTag::Chat, None, RunState::Running)
+        .unwrap();
+    // Nothing open: ending does nothing.
+    assert!(!runs.reasoning_end(&id, 5));
+    runs.reasoning(&id, String::new());
+    runs.reasoning(&id, "ab".into());
+    assert!(runs.reasoning_end(&id, 1200));
+    runs.text(&id, "你好".into());
+    runs.tool(
+        &id,
+        "c",
+        "search_emails",
+        ToolStatus::Running,
+        ToolActivitySummary::Pending,
+    );
+    runs.reasoning(&id, "more".into());
+    let open = runs.snapshot(&id).unwrap().reasoning;
+    assert_eq!(open.len(), 2);
+    assert_eq!(
+        (open[0].text.as_str(), open[0].duration_ms),
+        ("ab", Some(1200))
+    );
+    assert_eq!(
+        (
+            open[1].text.as_str(),
+            open[1].text_offset,
+            open[1].tools_before,
+            open[1].duration_ms
+        ),
+        ("more", 2, 1, None)
+    );
+    // Canceled mid-thought: the stretch gets a length anyway.
+    runs.state(&id, RunState::Canceled);
+    let closed = runs.snapshot(&id).unwrap().reasoning;
+    assert!(closed[1].duration_ms.is_some());
 }

@@ -8,6 +8,11 @@ export type AssistantRunState = 'idle' | 'starting' | RunState
 /** A tool call with where in the text it began, so a view can show the reply's parts in the order they came. */
 /** `settledAt` is when this window first saw the call finish (a clock for undo windows), null while it runs. */
 export type RunTool = ToolActivity & { at: number; settledAt: number | null }
+/**
+ * One stretch of the model's thinking. `at` (text offset) and `toolsBefore` (tools that began before it)
+ * place it among the reply's parts; `startedAt` is a `Date.now()` time; `durationMs` is null while it goes.
+ */
+export type RunThought = { segment: number; text: string; at: number; toolsBefore: number; startedAt: number; durationMs: number | null }
 /** A confirmation the run asked for, kept after it is answered; `at` as for `RunTool`. */
 export type RunConfirm = { requestId: string; callId: string; request: ConfirmationRequest; at: number }
 
@@ -22,6 +27,8 @@ export type AssistantRun = {
   finishedAt: Date | null
   /** Tool calls in the order they began; the latest state of each. Chat runs only. */
   tools: RunTool[]
+  /** The model's thinking, stretch by stretch. Its text is committed at most once per frame, like `text`. */
+  reasoning: RunThought[]
   /** Every confirmation this run asked for, in order. */
   confirms: RunConfirm[]
   /** The confirmation the run is waiting on now. */
@@ -43,12 +50,12 @@ export type AssistantRun = {
 
 type View = {
   runId: string | null; state: AssistantRunState; text: string; error: ErrorCode | null; finishedReason: FinishedReason | null; finishedAt: Date | null
-  tools: RunTool[]; confirms: RunConfirm[]; pending: PendingConfirmation | null; conversationId: string | null; toolsAvailable: boolean
+  tools: RunTool[]; reasoning: RunThought[]; confirms: RunConfirm[]; pending: PendingConfirmation | null; conversationId: string | null; toolsAvailable: boolean
 }
 
 const IDLE: View = {
   runId: null, state: 'idle', text: '', error: null, finishedReason: null, finishedAt: null,
-  tools: [], confirms: [], pending: null, conversationId: null, toolsAvailable: true,
+  tools: [], reasoning: [], confirms: [], pending: null, conversationId: null, toolsAvailable: true,
 }
 const ENDED: ReadonlySet<AssistantRunState> = new Set(['completed', 'failed', 'canceled', 'awaitingConsent'])
 /** Events seen before `assistantStart` answered are kept briefly, so none is lost to the race. */
@@ -57,6 +64,11 @@ const EARLY_LIMIT = 200
 export const runIsActive = (state: AssistantRunState) => state === 'starting' || state === 'running' || state === 'awaitingConfirmation'
 
 /** Host-side codes (`hostUnavailable`, `transport`) are not core error codes; they read as internal. */
+/** Stretches still open when the run ends lasted until now. */
+const closeThoughts = (thoughts: RunThought[]) => thoughts.some((thought) => thought.durationMs === null)
+  ? thoughts.map((thought) => thought.durationMs === null ? { ...thought, durationMs: Math.max(0, Date.now() - thought.startedAt) } : thought)
+  : thoughts
+
 const failureCode = (error: unknown): ErrorCode => {
   const code = error instanceof MailxClientError ? error.failure.code : null
   return code && code !== 'hostUnavailable' && code !== 'transport' ? code : 'internal'
@@ -112,11 +124,20 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
       at: known.get(tool.callId) ?? snapshot.text.length,
       settledAt: tool.status === 'running' ? null : seen.get(tool.callId) ?? Date.now(),
     }))
+    // This window's start time wins for a stretch it already follows, so its clock does not jump.
+    const started = new Map(live.current.reasoning.map((thought) => [thought.segment, thought.startedAt]))
+    const reasoning = snapshot.reasoning.map((thought, segment): RunThought => {
+      const hostStart = Date.parse(thought.startedAt)
+      return {
+        segment, text: thought.text, at: thought.textOffset, toolsBefore: thought.toolsBefore, durationMs: thought.durationMs,
+        startedAt: started.get(segment) ?? (Number.isNaN(hostStart) ? Date.now() : hostStart),
+      }
+    })
     const confirms = live.current.confirms.slice()
     if (snapshot.pending && !confirms.some((item) => item.requestId === snapshot.pending!.requestId)) confirms.push({ ...snapshot.pending, at: snapshot.text.length })
     update({
       runId: snapshot.runId, state: snapshot.state, text: snapshot.text, error: snapshot.error, finishedReason: snapshot.finishedReason, finishedAt,
-      tools, confirms, pending: snapshot.pending, conversationId: snapshot.conversationId ?? live.current.conversationId,
+      tools, reasoning: ENDED.has(snapshot.state) ? closeThoughts(reasoning) : reasoning, confirms, pending: snapshot.pending, conversationId: snapshot.conversationId ?? live.current.conversationId,
       toolsAvailable: snapshot.toolsAvailable,
     }, true)
   }, [update])
@@ -126,8 +147,26 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     const { kind } = event
     switch (kind.type) {
       case 'text': update({ text: live.current.text + kind.delta }, false); break
+      case 'reasoning': {
+        const { reasoning } = live.current
+        const open = reasoning.find((thought) => thought.segment === kind.segment)
+        if (open) {
+          // More words for a stretch already on screen: they wait for the frame, like text.
+          if (kind.delta) update({ reasoning: reasoning.map((thought) => thought === open ? { ...thought, text: thought.text + kind.delta } : thought) }, false)
+        } else {
+          const next: RunThought = {
+            segment: kind.segment, text: kind.delta, at: live.current.text.length, toolsBefore: live.current.tools.length, startedAt: Date.now(), durationMs: null,
+          }
+          update({ reasoning: [...reasoning, next] }, true)
+        }
+        break
+      }
+      case 'reasoningEnd': update({
+        reasoning: live.current.reasoning.map((thought) => thought.segment === kind.segment ? { ...thought, durationMs: kind.durationMs } : thought),
+      }, true); break
       case 'state': update({
         state: kind.state,
+        reasoning: ENDED.has(kind.state) ? closeThoughts(live.current.reasoning) : live.current.reasoning,
         pending: kind.state === 'awaitingConfirmation' ? live.current.pending : null,
         finishedAt: kind.state === 'completed' ? new Date() : live.current.finishedAt,
       }, true); break
