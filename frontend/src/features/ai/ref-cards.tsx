@@ -9,7 +9,7 @@ import { folderLabel } from '@/features/mail/mailbox'
 import { SenderAvatar } from '@/features/mail/sender-avatar'
 import { ROLE_ICONS } from '@/features/mail/sidebar-shared'
 import { useMinuteClock } from '@/features/now/visit'
-import { MailRowCard, rowClass } from '@/features/now/mail-row-card'
+import { MailRowCard, cardClass } from '@/features/now/mail-row-card'
 import { cn } from '@/lib/utils'
 import type { RefKind } from './markdown'
 import { ChatEnvContext, type ChatEnv } from './chat-env'
@@ -30,14 +30,14 @@ function EmailRef({ env, id, label, block }: RefProps & { env: ChatEnv }) {
   const minute = useMinuteClock()
   const summary: EmailSummary | undefined = email.data?.summary
   if (!summary) {
-    // Still loading: a block holds its place so the reply does not jump; a chip is just its words.
-    if (email.isPending && block) return <div aria-hidden className="h-11 rounded-lg bg-muted/40" />
+    // Still loading: a block holds its place with the card's own fill and height, so the reply neither jumps nor flashes; a chip is just its words.
+    if (email.isPending && block) return <div aria-hidden data-slot="ref-card-placeholder" className="h-10 rounded-lg bg-muted/50" />
     return <Plain label={label} block={block} />
   }
   const open = () => env.onOpenEmail({ id: summary.id, accountId: summary.accountId })
   const name = t('ai:chat.openEmailNamed', { subject: summary.subject || t('mail:noSubject') })
   if (block) {
-    return <MailRowCard email={summary} language={i18n.language} now={minute} unread={!summary.isRead} onOpen={open} label={name} />
+    return <MailRowCard email={summary} language={i18n.language} now={minute} unread={!summary.isRead} card onOpen={open} label={name} />
   }
   return (
     <button type="button" aria-label={name} onClick={open} className={chipClass}>
@@ -58,7 +58,7 @@ function FolderRef({ env, id, label, block }: RefProps & { env: ChatEnv }) {
   const aria = t('ai:chat.openFolderNamed', { name })
   if (block) {
     return (
-      <button type="button" aria-label={aria} onClick={open} className={rowClass}>
+      <button type="button" aria-label={aria} onClick={open} className={cardClass}>
         <HugeiconsIcon icon={ROLE_ICONS[folder.role]} aria-hidden strokeWidth={2} className="size-5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
         {account && (

@@ -18,7 +18,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- Reuse a fixed local signing identity for macOS development builds so saved Keychain authorization can survive recompilation. / macOS 开发构建复用固定本机签名身份，让已保存的钥匙串授权在重新编译后继续有效。
+- Reuse a fixed local signing identity for macOS development builds so saved Keychain authorization can survive recompilation. / macOS 开发构建复用固定本机签名身份，让已保存的钥匙串授权在重新编译后继续有效。 ([#150](https://github.com/GuqierMcl/MailX/pull/150))
+- Assistant replies now show headings, numbered lists with paragraphs and nested items, task lists, tables, strikethrough and code blocks with their language and a copy button, a small sparkle marks where the reply is still being written, and mail and folder cards in replies have a soft background so each reads as one item. / 助手回复现在可以显示标题、带段落和嵌套项的编号列表、任务清单、表格、删除线，以及标明语言并带复制按钮的代码块；正在生成的回复末尾会有一个小星芒标记，回复中的邮件和文件夹卡片带淡底色，一眼能看出是一个整体。
 - The Now page AI line now picks one thing worth noticing (a quiet inbox, a busy day, mail piled up while you were away, the time of day or a festival) instead of reciting numbers. / 「此刻」页 AI 问候语改为挑一件值得一提的事来说（安静的收件箱、忙碌的一天、离开期间攒下的邮件、时间或节日），不再罗列数字。 ([#147](https://github.com/GuqierMcl/MailX/pull/147))
 
 - Show the title-bar MCP green dot only while a client is connected. / 标题栏 MCP 仅在有客户端连接时显示绿点。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
