@@ -5,7 +5,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings exactly as written, emoji included: `### 🚀 Feature`, `### ✨ Optimization`, `### 🩹 Fixed`, `### 🔐 Security`, `### 🔄 Changed`.
 - Write entries for users, one sentence per line. Do not list tests, CI, refactors or documentation. End with the PR link, for example `- 修复远程图片加载失败后无法重试 ([#25](https://github.com/GuqierMcl/MailX/pull/25))`.
 - Write every entry in both languages on one line, separated by ` / `: English first, then Chinese, then the link or reference. Match the wording the app itself uses. Keep the two halves saying the same thing.
-- `Changed` holds only incompatible behaviour, data formats, configuration changes and removed features (including data migrations). Improvements that keep behaviour the same go under `Optimization`.
+- `Changed` covers incompatible behaviour, user-facing data formats, configuration changes and removed features. Improvements that keep behaviour the same go under `Optimization`.
+- Document database upgrades, migration numbers and internal schema changes in the [database migration documentation](docs/architecture/database-migrations.md). Put upgrade and rollback steps for users in the [user guide](docs/guides/README.md#upgrading-and-keeping-your-data).
 - Prereleases (alpha / beta / rc) never get a section of their own; their release notes come from `[Unreleased]`. A stable release folds all of it into one dated section via `bun run version:bump`.
 - Release steps are in [docs/development/release.md](docs/development/release.md).
 
@@ -87,7 +88,6 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🔄 Changed
 
 - MailX opens on the Now page by default, including after upgrading; choose Inbox under Settings → General → Open at startup to keep the old behaviour. / MailX 默认打开“此刻”页面，升级后也是如此；想保持原来的习惯，可在“设置 → 通用 → 启动时打开”中选择收件箱。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
-- The local database upgrades to v31 for the Now page's statistics; older versions cannot open the upgraded database. / 本地数据库升级到 v31 以支持“此刻”页面的统计，旧版本无法打开升级后的数据库。 ([#135](https://github.com/GuqierMcl/MailX/pull/135))
 
 ## [0.2.1] - 2026-11-12
 
@@ -100,16 +100,13 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - In the Unread view, a message you open stays in the list after it is marked read, until you switch mailbox, filter or search. / 在“未读”视图中打开的邮件标为已读后仍留在列表中，直到切换邮箱、筛选或搜索。 ([#122](https://github.com/GuqierMcl/MailX/pull/122))
 - Account names in the sidebar get more room: the unread count, refresh button and refresh spinner share one spot at the end of the row again. / 侧栏账号名称可显示得更完整：未读数、刷新按钮和刷新进度重新共用行尾的同一位置。 ([#122](https://github.com/GuqierMcl/MailX/pull/122))
 
-### 🔄 Changed
-
-- The local database upgrades to v29 to keep saved translations; older versions cannot open the upgraded database. / 本地数据库升级到 v29 以保存译文，旧版本无法打开升级后的数据库。 ([#118](https://github.com/GuqierMcl/MailX/pull/118))
-
 ## [0.2.0] - 2026-11-12
 
 ### 🚀 Feature
 
 - Quoted earlier messages at the end of a reply are folded behind Show quoted text when MailX recognizes the quoting style; anything else is shown in full as before. / 回复末尾引用的原邮件在 MailX 能识别其引用格式时会收进“显示引用内容”，其余情况仍完整显示。 ([#114](https://github.com/GuqierMcl/MailX/pull/114))
 - Messages that are part of a back-and-forth open as a conversation, with your replies included and a switch back to single messages. / 属于多次往来的邮件会以对话形式打开，包含你自己的回复，并可切换回逐封阅读。 ([#113](https://github.com/GuqierMcl/MailX/pull/113))
+- After updating, MailX fetches reply information for cached mail and groups it into conversations in the background. / 更新后，MailX 会在后台为已缓存的邮件补取回复信息并整理成对话。
 - Right-click a message and choose Show mail from this contact to list that contact's mail, then go back with the back button, Esc or the mouse's back button. / 右键邮件并选择“查看此联系人的邮件”可列出该联系人的邮件，再用返回按钮、Esc 或鼠标后退键返回。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Group a contact's mail into a single row in your inboxes from the right-click menu, and manage grouped contacts under Settings → Contacts. / 可通过右键菜单将联系人的邮件在收件箱中聚合为一行，并在“设置 → 联系人”中管理已聚合的联系人。 ([#111](https://github.com/GuqierMcl/MailX/pull/111))
 - Add Outlook.com, Hotmail, Live and Microsoft 365 mailboxes by signing in in your browser, without a password. / 通过浏览器登录即可添加 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，无需密码。 ([#107](https://github.com/GuqierMcl/MailX/pull/107))
@@ -123,7 +120,6 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🔄 Changed
 
-- The local database upgrades from v24 to v28 for browser sign-in, grouped contacts and conversations; after the upgrade MailX fetches reply information for cached mail and groups it into conversations in the background, and older versions cannot open the upgraded database, so keep a full backup from before the upgrade if you may downgrade. / 本地数据库从 v24 升级到 v28，以支持浏览器登录、联系人聚合和对话；升级后 MailX 会在后台为已缓存的邮件补取回复信息并整理成对话，旧版无法直接打开升级后的数据库，降级前需保留升级前的完整数据备份。
 - Update checks now stay on, with default-enabled Automatic updates downloading in the background and prompting for a restart or installing on quit; turning it off keeps manual downloads, and previous disabled preferences are preserved. / 更新检查现固定开启，默认打开的“自动更新”会在后台下载并提醒重启或在退出时安装；关闭后保留手动下载，升级时保留原有关闭偏好。
 - Account summaries now distinguish password and OAuth credentials while preserving existing password accounts. / 账号摘要现明确区分密码与 OAuth 凭证，并兼容已有的密码账号。
 
@@ -162,10 +158,6 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🩹 Fixed
 
 - Fixed duplicate local and server copies in Sent when QQ Mail rewrites message identifiers or the server copy syncs before sending finishes; existing duplicates are reconciled during sync without sending again. / 修复 QQ 邮箱重写邮件标识或服务器副本先于发送完成同步时，“已发送”中同时出现本机与服务器副本的问题；已有重复项会在同步时重新对账，无需再次发送。
-
-### 🔄 Changed
-
-- The local database upgrades to v24 to track sent-copy identities; older versions cannot open the upgraded database. / 本地数据库升级至 v24，以记录已发送副本的身份；旧版无法直接打开升级后的数据库。
 
 ## [0.1.0] - 2026-11-04
 
@@ -210,6 +202,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Provider icons now use the official original artwork, keeping the full mark and its colours, and QQ Mail uses its mailbox-specific logo. / 邮箱服务商图标改用官方原始素材，保留完整图形与原有配色，QQ 邮箱使用专属邮箱图标。 ([#64](https://github.com/GuqierMcl/MailX/pull/64))
 - Avatars use the local cache first after a restart instead of looking online first, and senders confirmed to have no avatar are not looked up again for 24 hours. / 重启后头像优先使用本地缓存，不再先联网查询；确认没有头像的发件人 24 小时内不再重复查找。 ([#60](https://github.com/GuqierMcl/MailX/pull/60))
 - The message list uses virtual scrolling and scrolls more smoothly with many messages; reaching the end of the list loads more and Load more still works after a failure. The preview area reserves a fixed height from the message preview lines setting, so every row has the same height and the list no longer jumps while scrolling. / 邮件列表改用虚拟滚动，邮件很多时滚动更流畅；滚动到接近列表末尾时自动加载更多，加载失败仍可点击“加载更多”重试；列表按“预览行数”设置为预览区预留固定高度，每行等高，滚动时不再跳动。 ([#58](https://github.com/GuqierMcl/MailX/pull/58))
+- Full-text search indexes existing mail in the background while search remains available. The index grows on disk as more message bodies are cached. / 全文搜索在后台为已有邮件建立索引，期间搜索仍可使用。缓存的正文越多，索引占用的磁盘空间也越多。 ([#67](https://github.com/GuqierMcl/MailX/pull/67))
+- MailX releases its local copy of a sent message once the same message appears in the server's Sent folder. / 同一封邮件出现在服务器的“已发送”文件夹后，MailX 会释放本机副本。 ([#49](https://github.com/GuqierMcl/MailX/pull/49))
 - The settings dialog shows MailX and the current version in its bottom-left corner, visible on every settings page. / 设置弹窗左下角显示 MailX 与当前版本号，切换设置页时始终可见。 ([#47](https://github.com/GuqierMcl/MailX/pull/47))
 - The identity colour picker has a None option with a cross that hides the colour ring and restores the provider icon to full size. / 标识颜色提供叉号“不标识”选项，选择后隐藏颜色圆环，服务商图标恢复完整大小。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
 - The accent Add account button in account settings is labelled Add account instead of appearing as a hint whenever the dialog opens; accounts using a provider icon keep a transparent avatar background with the colour as a thin ring and more space between icon and ring. / 账号管理的强调色添加按钮显示“添加账号”，不再因打开弹窗自动出现提示；使用服务商图标的账号头像保留透明背景，账号颜色仅显示为细圆环，并增加图标与圆环之间的留白。 ([#44](https://github.com/GuqierMcl/MailX/pull/44))
@@ -236,11 +230,6 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🔄 Changed
 
-- The local database upgrades to v23, recording the origin of MCP drafts and attachments; older versions cannot open the upgraded database, so keep a full backup from before the upgrade if you may downgrade. / 本地数据库升级至 v23，记录 MCP 草稿与附件的来源；旧版无法直接打开升级后的数据库，降级前需保留升级前的完整数据备份。 ([#86](https://github.com/GuqierMcl/MailX/pull/86))
-- Upgrading from 0.1.0-rc.3 moves the local database from v19 to v21 for delete undo and local archive; older versions cannot open the upgraded database. / 从 0.1.0-rc.3 升级时，本地数据库自动从 v19 升级到 v21，以支持删除撤销和本地归档；旧版本无法打开升级后的数据库。 ([#69](https://github.com/GuqierMcl/MailX/pull/69), [#71](https://github.com/GuqierMcl/MailX/pull/71))
-- The local database upgrades to v19 with a full-text search index: on first launch existing mail is indexed in the background, search keeps working meanwhile, and the index grows on disk with the cached bodies. Older versions cannot open the upgraded database. / 本地数据库升级到 v19，新增全文搜索索引：首次启动后会在后台为已有邮件建立索引，期间搜索照常可用，索引会随已缓存的正文增长而占用更多磁盘空间；旧版本无法打开升级后的数据库。 ([#67](https://github.com/GuqierMcl/MailX/pull/67))
-- The local database upgrades to a new version: queued and sent messages move to separate files, migrated on first launch, after which older versions cannot open the database; a sent message releases its local copy once the same message appears in the server's Sent folder. / 本地数据库升级到新版本：待发送与已发送邮件改存为独立文件，首次启动时自动迁移，迁移后旧版本无法再打开该数据库；已发送邮件在服务器的已发送文件夹出现同一封后会释放本地副本。 ([#49](https://github.com/GuqierMcl/MailX/pull/49))
-- Upgrading from 0.1.0-alpha.4 moves the local database from v10 to v12 for account removal and provider icon preferences; older versions cannot open the upgraded data, so downgrade only from a backup taken before the upgrade. / 从 0.1.0-alpha.4 升级时，本地数据库自动从 v10 升级到 v12，以支持移除账号和服务商图标偏好；旧版无法直接打开升级后的数据，如需降级，请使用升级前的数据备份。 ([#42](https://github.com/GuqierMcl/MailX/pull/42))
 - Installer names follow the system (`MailX_<版本>_macos-arm64.dmg`, `MailX_<版本>_windows-x64-setup.exe`) so you can pick the right download by operating system. / 下载页的安装包文件名改为按系统命名（如 `MailX_<版本>_macos-arm64.dmg`、`MailX_<版本>_windows-x64-setup.exe`），便于直接按操作系统选择。
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
