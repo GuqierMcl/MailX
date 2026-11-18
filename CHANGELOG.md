@@ -17,7 +17,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Let MCP clients inspect mail conversations, find local correspondents and export received attachments. / MCP 客户端可查看邮件会话、查找本机往来联系人并导出收到的附件。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 - Show the unread count of the unified inbox on the app icon on macOS and Linux, with a switch and a choice of accounts under Settings → Notifications. / 在 macOS 和 Linux 的应用图标上显示统一收件箱的未读邮件数，可在“设置 → 通知”中关闭或选择计入的账号。 ([#152](https://github.com/GuqierMcl/MailX/pull/152))
 - The assistant chat shows when the model is thinking and for how long; click "Thought for N seconds" to read its thinking, collapsed by default and also in saved chats. / 助手对话会显示模型正在思考及思考时长，点击“思考了 N 秒”可查看思考过程，默认收起，已保存的对话同样如此。 ([#151](https://github.com/GuqierMcl/MailX/pull/151))
-- Choose Split view or Single pane under Settings → Appearance → Message list to see the list and reader side by side or one at a time. / 在“设置 → 外观 → 邮件列表”中选择“分屏视图”或“单栏视图”，让列表和阅读区并排或轮流显示。
+- Choose Split view or Single pane under Settings → Appearance → Message list to see the list and reader side by side or one at a time. / 在“设置 → 外观 → 邮件列表”中选择“分屏视图”或“单栏视图”，让列表和阅读区并排或轮流显示。 ([#153](https://github.com/GuqierMcl/MailX/pull/153))
 
 ### ✨ Optimization
 
