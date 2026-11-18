@@ -176,7 +176,7 @@ pub(super) async fn sync_folder(
     *changed |= cursor.created;
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
         .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
-    let remote = session.search_since(since).await?;
+    let remote = session.search_since(since, mailbox).await?;
     let guard = target.clone();
     let cached = with_store(shared, token, move |service| service.cached_uids(&guard)).await?;
     let plan = plan_messages(&cursor, &cached, &remote);

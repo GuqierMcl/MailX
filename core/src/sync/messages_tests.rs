@@ -478,6 +478,59 @@ async fn search_failure_does_not_delete_cached_messages() {
 }
 
 #[tokio::test]
+async fn search_without_enumeration_completes_for_an_explicitly_empty_folder() {
+    let fixture = fixture();
+    let mut script = commands(21, &[]);
+    script.last_mut().unwrap().1 = "{tag} OK searched\r\n".into();
+    run(&fixture, script, true).await.unwrap();
+
+    let page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    assert!(page.items.is_empty());
+    assert!(page.coverage.headers_complete);
+}
+
+#[tokio::test]
+async fn search_without_enumeration_preserves_cache_without_a_confirmed_empty_folder() {
+    let fixture = fixture();
+    let mut first = commands(21, &[2]);
+    add_headers(&mut first, &[(2, "Preserved")]);
+    run(&fixture, first, true).await.unwrap();
+
+    for (examine_count, search_response) in [
+        ("", "{tag} OK searched\r\n"),
+        ("* 1 EXISTS\r\n", "{tag} OK searched\r\n"),
+        ("* 0 EXISTS\r\n", "* 1 EXISTS\r\n{tag} OK searched\r\n"),
+        (
+            "* 0 EXISTS\r\n",
+            "* OK [UIDVALIDITY 22] generation\r\n{tag} OK searched\r\n",
+        ),
+        ("* 0 EXISTS\r\n", "{tag} OK [UIDVALIDITY 22] searched\r\n"),
+    ] {
+        // A STATUS count of zero is insufficient without the current selection.
+        let mut script = commands(21, &[]);
+        script[3].1 = format!(
+            "{examine_count}* OK [UIDVALIDITY 21] generation\r\n* OK [UIDNEXT 100] next\r\n{{tag}} OK [READ-ONLY] examined\r\n"
+        );
+        script.last_mut().unwrap().1 = search_response.into();
+        assert!(run(&fixture, script, false).await.is_err());
+
+        let page = fixture
+            .service
+            .lock()
+            .unwrap()
+            .list_emails(&EmailListQuery::default())
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].subject, "Preserved");
+    }
+}
+
+#[tokio::test]
 async fn rejected_partial_fetch_is_not_committed_and_retries_cleanly() {
     let fixture = fixture();
     let mut failed = commands(21, &[2, 3]);
@@ -1385,7 +1438,10 @@ async fn failed_status_fallback_preserves_counts_and_cached_headers() {
     let mut failed = commands(21, &[]);
     failed[2].1 = "{tag} OK\r\n".into();
     failed.truncate(4);
-    failed.push(("UID SEARCH UNSEEN".into(), "{tag} OK\r\n".into()));
+    failed.push((
+        "UID SEARCH UNSEEN".into(),
+        "{tag} NO search rejected\r\n".into(),
+    ));
     assert!(run(&fixture, failed, false).await.is_err());
     let service = fixture.service.lock().unwrap();
     let folders = service.list_folders(&fixture.account_id).unwrap();
