@@ -98,7 +98,7 @@ describe('mail and folder references in a reply', () => {
   })
 
   it('does not look up an id that is not well formed', () => {
-    const { client } = setup('[坏的](mailx://email/a b)和[另一个](mailx://email/../x)')
+    const { client } = setup('[坏的](mailx://email/a/b)和[另一个](mailx://email/../x)')
     expect(client.getEmail).not.toHaveBeenCalled()
     expect(screen.getByText('坏的和另一个')).toBeInTheDocument()
   })

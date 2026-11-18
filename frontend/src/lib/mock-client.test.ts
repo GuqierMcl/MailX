@@ -843,6 +843,15 @@ describe('mock assistant', () => {
     expect(done.seq).toBe(events.length)
   })
 
+  it('answers a request about formatting with a reply that uses the wider Markdown', async () => {
+    const client = mock()
+    await client.assistantGrantConsent()
+    const started = await client.assistantStart(chat('show me some markdown'))
+    const done = await finished(client, started.runId)
+    expect(done.state).toBe('completed')
+    for (const part of ['## ', '|:--|:-:|--:|', '```sieve', '~~', '- [x] ', '\n---\n', '   - ', 'mailx://email/']) expect(done.text).toContain(part)
+  })
+
   it('archives on request with a running then done tool activity that carries the undo token', async () => {
     const client = mock()
     await client.assistantGrantConsent()

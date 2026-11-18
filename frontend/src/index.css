@@ -427,3 +427,37 @@ html[data-translucent].dark .app-canvas {
     -webkit-background-clip: text;}
   .ai-border[data-flow="true"] {
     animation: none;}}
+
+/* Markdown in an AI reply (ai-chat-ui.md 6.2): a block that arrives while the reply streams fades in from 0.4, no displacement. */
+@theme {
+  --animate-md-block-in: md-block-in var(--motion-medium) var(--ease-out-soft) both;
+  @keyframes md-block-in {
+    from {
+      opacity: 0.4;}}}
+/* The streaming caret: the AI sparkle at the end of the text being written, breathing in opacity only.
+   It pauses while the window is hidden and fades out when the reply ends; static under reduced motion. */
+.ai-caret {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-inline-start: 0.25em;
+  vertical-align: -0.05em;
+  animation: ai-caret-breathe 1.2s ease-in-out infinite alternate;}
+.ai-caret[data-paused="true"] {
+  animation-play-state: paused;}
+.ai-caret[data-state="leaving"] {
+  animation: ai-caret-out var(--motion-medium) var(--ease-out-soft) forwards;}
+@keyframes ai-caret-breathe {
+  from {
+    opacity: 0.35;}
+  to {
+    opacity: 1;}}
+@keyframes ai-caret-out {
+  to {
+    opacity: 0;}}
+@media (prefers-reduced-motion: reduce) {
+  .ai-caret {
+    animation: none;
+    opacity: 0.7;}
+  .ai-caret[data-state="leaving"] {
+    animation: ai-caret-out 100ms linear forwards;}}
