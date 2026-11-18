@@ -230,6 +230,12 @@ The email moves to the account's Trash only after copying succeeds, with a short
 
 This option never permanently deletes an email. If the message is already in Trash, or the account has no Trash folder, it is copied and kept. If a background Undo notice cannot be prepared, MailX tries to cancel cleanup; if cleanup has already started or cancellation fails, it tells you to check the email's state in MailX.
 
+## App icon badge
+
+On macOS and Linux, MailX shows the unread count of the unified inbox on its app icon: in the Dock on macOS, in the launcher or dock on Linux. It is the same number the sidebar shows for the unified inbox, and it keeps updating while MailX runs in the background. Accounts whose unread count is not known yet are left out until it is. Turn it off, or choose which accounts are counted, under **Settings → Notifications → App icon badge**.
+
+On Linux the badge appears only where the desktop shows launcher counts, for example KDE Plasma, or GNOME with Dash to Dock or Ubuntu Dock. Windows does not show the badge yet.
+
 ## Background operation, launch at login and updates
 
 Closing the main window can keep MailX in the background or quit; it asks each time by default, and you can change that in General settings. On macOS, the MailX menu bar icon is on by default and can be turned off; the Dock remains a recovery entry when the main window is hidden. Launch at login and start silently are both off by default; start silently only applies when the app starts automatically at login. When the system or desktop environment has no usable background entry, the main window appears instead of running with no way to get back.

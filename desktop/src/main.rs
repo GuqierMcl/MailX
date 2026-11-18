@@ -3,6 +3,7 @@
 mod assistant;
 mod attachment_save;
 mod autostart;
+mod badge;
 mod body_protocol;
 mod commands;
 mod compose;
@@ -111,7 +112,10 @@ fn main() {
             let data_dir = storage.map(|storage| storage.data_dir);
             let secrets = secret_store::system_store(secret_service);
             // Sync and write-back events only hint the UI to refetch or
-            // tell the user something; a lost one is harmless.
+            // tell the user something; a lost one is harmless. The events
+            // that can change an inbox's unread count also refresh the app
+            // icon badge (local deletions and their undo have no core event;
+            // their commands refresh it themselves).
             let handle = app.handle().clone();
             let settings_handle = app.handle().clone();
             let notification_accounts = Arc::new(notifications::AccountNotifications::default());
@@ -119,6 +123,7 @@ fn main() {
             let events: mailx_core::Events =
                 Arc::new(move |event: &mailx_core::CoreEvent| match event {
                     mailx_core::CoreEvent::Sync(sync_state) => {
+                        badge::refresh(&handle);
                         let _ = handle.emit_to(
                             EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                             SYNC_STATE_EVENT,
@@ -126,6 +131,7 @@ fn main() {
                         );
                     }
                     mailx_core::CoreEvent::FlagWriteBack(written) => {
+                        badge::refresh(&handle);
                         let _ = handle.emit_to(
                             EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                             FLAG_EVENT,
@@ -133,6 +139,7 @@ fn main() {
                         );
                     }
                     mailx_core::CoreEvent::MailStateChanged(change) => {
+                        badge::refresh(&handle);
                         let _ = handle.emit_to(
                             EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                             MAIL_STATE_EVENT,
@@ -140,6 +147,7 @@ fn main() {
                         );
                     }
                     mailx_core::CoreEvent::Deletions(deleted) => {
+                        badge::refresh(&handle);
                         let _ = handle.emit_to(
                             EventTarget::webview_window(window_chrome::MAIN_WINDOW),
                             DELETIONS_EVENT,
@@ -183,6 +191,7 @@ fn main() {
                         );
                     }
                     mailx_core::CoreEvent::AccountRemoved(removed) => {
+                        badge::refresh(&handle);
                         notification_accounts.retire(&removed.account_id);
                         notifications::retire_codes(&handle, &removed.account_id);
                         verification_codes::retire(&handle, &removed.account_id);
@@ -197,6 +206,7 @@ fn main() {
                         compose::emit_draft(&handle, change);
                     }
                     mailx_core::CoreEvent::NewMail(mail) => {
+                        badge::refresh(&handle);
                         notifications::new_mail(
                             &handle,
                             mail.clone(),
@@ -235,6 +245,7 @@ fn main() {
             // Registered before initialization so the ready hook fires; the
             // single-instance plugin has already let this process live.
             mcp::setup(app.handle(), &state);
+            badge::setup(app.handle());
             state.start_initialization();
             notifications::on_click(app.handle());
             let login_launch = autostart::is_login_launch(std::env::args());

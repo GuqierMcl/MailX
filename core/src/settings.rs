@@ -184,24 +184,66 @@ impl Default for NotificationSettings {
 }
 
 impl NotificationSettings {
-    /// Sorted, unique, bounded account ids; `None` for input that is not.
     fn normalized_muted(&self) -> Option<Vec<String>> {
-        let mut ids: Vec<String> = self
-            .muted_accounts
-            .iter()
-            .map(|id| id.trim().to_owned())
-            .collect();
-        if ids.iter().any(|id| {
-            id.is_empty()
-                || id.chars().count() > MAX_ACCOUNT_ID_CHARS
-                || id.chars().any(char::is_control)
-        }) {
-            return None;
-        }
-        ids.sort();
-        ids.dedup();
-        (ids.len() <= MAX_MUTED_ACCOUNTS).then_some(ids)
+        normalize_account_ids(&self.muted_accounts)
     }
+}
+
+/// Sorted, unique, bounded account ids; `None` for input that is not. Ids of
+/// accounts that no longer exist are kept and simply match nothing.
+fn normalize_account_ids(accounts: &[String]) -> Option<Vec<String>> {
+    let mut ids: Vec<String> = accounts.iter().map(|id| id.trim().to_owned()).collect();
+    if ids.iter().any(|id| {
+        id.is_empty()
+            || id.chars().count() > MAX_ACCOUNT_ID_CHARS
+            || id.chars().any(char::is_control)
+    }) {
+        return None;
+    }
+    ids.sort();
+    ids.dedup();
+    (ids.len() <= MAX_MUTED_ACCOUNTS).then_some(ids)
+}
+
+/// The unread number on the app icon: the unified inbox's unread count, the
+/// one the sidebar shows, over the accounts not excluded here. Stored on
+/// every platform; each host decides whether it can show a badge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BadgeSettings {
+    pub enabled: bool,
+    /// Accounts whose unread mail is left out of the number.
+    pub excluded_accounts: Vec<String>,
+}
+
+impl Default for BadgeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            excluded_accounts: Vec::new(),
+        }
+    }
+}
+
+impl BadgeSettings {
+    fn normalized_excluded(&self) -> Option<Vec<String>> {
+        normalize_account_ids(&self.excluded_accounts)
+    }
+}
+
+/// Drops badge fields of the wrong type, so a hand-edited file loses only
+/// that field.
+fn repair_badge(value: &mut serde_json::Value) {
+    let Some(section) = value.as_object_mut() else {
+        return;
+    };
+    section.retain(|key, v| match key.as_str() {
+        "enabled" => v.is_boolean(),
+        "excludedAccounts" => v
+            .as_array()
+            .is_some_and(|a| a.iter().all(serde_json::Value::is_string)),
+        _ => true,
+    });
 }
 
 /// Window layout and account display preferences.
@@ -827,6 +869,8 @@ pub struct SettingsPatch {
     #[ts(optional)]
     pub notifications: Option<NotificationSettings>,
     #[ts(optional)]
+    pub badge: Option<BadgeSettings>,
+    #[ts(optional)]
     pub compose: Option<ComposeSettings>,
     #[ts(optional)]
     pub translation: Option<TranslationSettings>,
@@ -843,6 +887,7 @@ pub struct AppSettings {
     pub security: SecuritySettings,
     pub layout: LayoutSettings,
     pub notifications: NotificationSettings,
+    pub badge: BadgeSettings,
     pub compose: ComposeSettings,
     pub mcp: McpSettings,
     pub translation: TranslationSettings,
@@ -915,6 +960,13 @@ impl AppSettings {
                 .ok_or_else(|| AppError::validation("notifications.mutedAccounts"))?,
             ..self.notifications
         };
+        let badge = BadgeSettings {
+            excluded_accounts: self
+                .badge
+                .normalized_excluded()
+                .ok_or_else(|| AppError::validation("badge.excludedAccounts"))?,
+            ..self.badge
+        };
         if !UNDO_SEND_SECONDS.contains(&self.compose.undo_send_seconds) {
             return Err(AppError::validation("compose.undoSendSeconds"));
         }
@@ -934,6 +986,7 @@ impl AppSettings {
             security: self.security,
             layout,
             notifications,
+            badge,
             compose,
             mcp: self.mcp,
             translation: self.translation.normalized()?,
@@ -959,6 +1012,10 @@ impl AppSettings {
             muted_accounts: self.notifications.normalized_muted().unwrap_or_default(),
             ..self.notifications
         };
+        let badge = BadgeSettings {
+            excluded_accounts: self.badge.normalized_excluded().unwrap_or_default(),
+            ..self.badge
+        };
         let compose = ComposeSettings {
             default_account_id: self.compose.normalized_account().unwrap_or_default(),
             undo_send_seconds: if UNDO_SEND_SECONDS.contains(&self.compose.undo_send_seconds) {
@@ -983,6 +1040,7 @@ impl AppSettings {
             },
             security: self.security,
             notifications,
+            badge,
             compose,
             mcp: self.mcp,
             translation: self.translation.sanitized(),
@@ -1223,6 +1281,7 @@ impl SettingsStore {
             notifications: patch
                 .notifications
                 .unwrap_or_else(|| state.settings.notifications.clone()),
+            badge: patch.badge.unwrap_or_else(|| state.settings.badge.clone()),
             compose: patch
                 .compose
                 .unwrap_or_else(|| state.settings.compose.clone()),
@@ -1397,6 +1456,13 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 repair_translation(translation);
             } else {
                 settings.remove("translation");
+            }
+        }
+        if let Some(badge) = settings.get_mut("badge") {
+            if badge.is_object() {
+                repair_badge(badge);
+            } else {
+                settings.remove("badge");
             }
         }
         if let Some(assistant) = settings.get_mut("assistant") {

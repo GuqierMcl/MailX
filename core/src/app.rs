@@ -41,6 +41,7 @@ use crate::sync::previews::PreviewManager;
 mod ai;
 mod attachments;
 mod avatars;
+mod badge;
 mod bodies;
 #[cfg(any(test, feature = "test-support"))]
 mod body_fixture;

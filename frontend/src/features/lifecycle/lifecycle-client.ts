@@ -8,6 +8,8 @@ export type LifecycleSnapshot = {
   revision: number
   platform: WindowPlatform
   backgroundAvailable: boolean
+  /** The host can show the unread number on the app icon. */
+  badgeAvailable: boolean
   closeRequestId: number | null
   quitRequestId: number | null
   quitting: boolean
@@ -52,7 +54,8 @@ export function createDesktopLifecycleClient(): LifecycleClient | null {
 
 /** Browser previews simulate a close without closing the browser tab. */
 export function createPreviewLifecycleClient(platform: WindowPlatform, settings: Pick<MailxClient, 'getSettings' | 'updateSettings'>, backgroundAvailable = true) {
-  let snapshot: LifecycleSnapshot = { revision: 0, platform, backgroundAvailable, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
+  // Like the desktop host: macOS and Linux show an app icon badge, Windows does not.
+  let snapshot: LifecycleSnapshot = { revision: 0, platform, backgroundAvailable, badgeAvailable: platform !== 'windows', closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
   let requestId = 0
   const listeners = new Set<(snapshot: LifecycleSnapshot) => void>()
   const publish = (patch: Partial<LifecycleSnapshot>) => {

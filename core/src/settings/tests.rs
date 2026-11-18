@@ -8,6 +8,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         security: SecuritySettings::default(),
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
+        badge: BadgeSettings::default(),
         mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
         translation: TranslationSettings::default(),
@@ -396,6 +397,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "sound": "system",
                     "mutedAccounts": []
                 },
+                "badge": { "enabled": true, "excludedAccounts": [] },
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0, "openMode": "window" },
                 "mcp": { "enabled": false },
                 "assistant": {
@@ -609,6 +611,87 @@ fn notifications_default_on_and_muted_accounts_are_cleaned_or_rejected() {
         store.get().unwrap().settings.notifications.muted_accounts,
         ["a", "b"]
     );
+}
+
+#[test]
+fn badge_defaults_on_for_old_files_and_excluded_accounts_are_cleaned_or_rejected() {
+    let directory = TempDir::new().unwrap();
+    // A file from before the badge setting existed.
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"notifications":{"enabled":false}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(
+        store.get().unwrap().settings.badge,
+        BadgeSettings::default()
+    );
+    assert!(store.get().unwrap().settings.badge.enabled);
+
+    let saved = store
+        .patch(SettingsPatch {
+            badge: Some(BadgeSettings {
+                enabled: false,
+                excluded_accounts: vec!["b".into(), " a ".into(), "b".into()],
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert!(!saved.settings.badge.enabled);
+    assert_eq!(saved.settings.badge.excluded_accounts, ["a", "b"]);
+    // Other sections keep their values.
+    assert!(!saved.settings.notifications.enabled);
+
+    let error = store
+        .patch(SettingsPatch {
+            badge: Some(BadgeSettings {
+                excluded_accounts: vec!["".into()],
+                ..BadgeSettings::default()
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("badge.excludedAccounts"));
+    assert_eq!(
+        store.get().unwrap().settings.badge.excluded_accounts,
+        ["a", "b"]
+    );
+}
+
+#[test]
+fn malformed_badge_fields_fall_back_alone() {
+    for (text, enabled, excluded) in [
+        (
+            r#"{"version":1,"settings":{"badge":{"enabled":"no","excludedAccounts":["x"]},"layout":{"navWidth":300}}}"#,
+            true,
+            vec!["x".to_owned()],
+        ),
+        (
+            r#"{"version":1,"settings":{"badge":{"enabled":false,"excludedAccounts":[1]},"layout":{"navWidth":300}}}"#,
+            false,
+            vec![],
+        ),
+        (
+            r#"{"version":1,"settings":{"badge":true,"layout":{"navWidth":300}}}"#,
+            true,
+            vec![],
+        ),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), text).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.recovered, "{text}");
+        assert_eq!(snapshot.settings.layout.nav_width, 300, "{text}");
+        assert_eq!(snapshot.settings.badge.enabled, enabled, "{text}");
+        assert_eq!(
+            snapshot.settings.badge.excluded_accounts, excluded,
+            "{text}"
+        );
+    }
 }
 
 #[test]

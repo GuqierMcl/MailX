@@ -254,7 +254,7 @@ pub(crate) fn setup(app: &tauri::AppHandle, state: &DesktopState) {
     let manager = McpManager::new();
     app.manage(manager.clone());
     let hook_app = app.clone();
-    state.set_ready_hook(move || {
+    state.add_ready_hook(move || {
         let manager = hook_app.state::<McpManager>().inner().clone();
         let app = hook_app.clone();
         tauri::async_runtime::spawn(async move { manager.reconcile(&app).await });

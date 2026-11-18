@@ -12,7 +12,7 @@ function show(patch: Partial<LifecycleSnapshot> = {}) {
     getSnapshot: vi.fn(), onSnapshot: vi.fn(), resolveClose: vi.fn(),
     quit: vi.fn().mockResolvedValue(undefined), cancelQuit: vi.fn(), confirmQuit: vi.fn(), onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
   }
-  const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
+  const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
   render(<LifecycleContext.Provider value={{ client: lifecycle, snapshot }}><GeneralPane client={client} /></LifecycleContext.Provider>)
   return { client, lifecycle }
 }

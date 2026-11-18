@@ -660,6 +660,12 @@ whenFocused: boolean, sound: NotificationSound,
  */
 mutedAccounts: Array<string>, };
 
+export type BadgeSettings = { enabled: boolean,
+/**
+ * Accounts whose unread mail is left out of the number.
+ */
+excludedAccounts: Array<string>, };
+
 export type ComposeOpenMode = "window" | "inline";
 
 export type ComposeSettings = {
@@ -732,9 +738,9 @@ export type MailSettings = {
  */
 trashVerificationMailAfterCopy: boolean, };
 
-export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, badge: BadgeSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, };
 
-export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, };
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, badge?: BadgeSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**

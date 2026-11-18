@@ -26,6 +26,12 @@ Linux 的 AppIndicator 对象创建成功不证明有可用宿主。后台操作
 
 缺少运行库或宿主、创建失败或不可确定时，不允许隐藏最后一个恢复入口；已记住后台偏好则本次重新询问，不静默退出或覆盖偏好。宿主探测不证明图标没有被用户藏入溢出区，应用快捷方式始终是另一恢复入口。Windows 的托盘溢出区、Explorer 重启、Linux 的 GNOME 扩展变化与 Wayland 激活规则需真机验证。
 
+## 应用图标未读角标
+
+macOS 在 Dock 图标、Linux 在启动器图标上显示统一收件箱的未读数；数字和设置在核心，桌面在后台按事件重算并合并短时间内的多次变化，主窗口隐藏时照常更新，规则见[应用接口](../contracts/app-api.md#应用图标未读角标)。Windows 的 `set_badge_count` 不生效，暂不显示角标，设置仍保存，以后可改用任务栏叠加图标；`badgeAvailable` 让设置页只在 macOS 与 Linux 显示该分组。
+
+Linux 依赖 tao 运行时加载的 `libunity`（Unity LauncherEntry），安装包不携带它；系统缺少该库或桌面不提供 Unity 启动器接口时静默不显示。Tauri 以 `MailX.desktop` 定位启动器条目，与 deb / rpm / AppImage 实际安装的 desktop 文件名是否一致尚待实机核对。
+
 ## 安全退出
 
 关窗策略属于 desktop；同步、写回和发送任务仍属于同一个 Rust 核心。隐藏不暂停撤销发送倒计时或已经确认的发送。核心不依赖 Tauri。

@@ -124,6 +124,7 @@ fn main() {
         MailboxLabel,
         NotificationSound,
         NotificationSettings,
+        BadgeSettings,
         ComposeOpenMode,
         ComposeSettings,
         McpSettings,
