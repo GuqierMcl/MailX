@@ -14,7 +14,9 @@ use crate::{
 const LIMITS: StreamLimits = StreamLimits {
     first_byte: Duration::from_secs(5),
     idle: Duration::from_secs(5),
-    total: Duration::from_secs(20),
+    // Generous: a stream cut into single bytes is still fast locally, but a
+    // slow CI machine should not turn this into a timeout.
+    total: Duration::from_secs(90),
     max_bytes: 1024 * 1024,
 };
 

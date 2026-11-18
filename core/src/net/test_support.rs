@@ -258,6 +258,10 @@ pub(crate) async fn mock_http(
             };
             let (record, responder) = (record.clone(), responder.clone());
             tokio::spawn(async move {
+                // Chunked replies may write a byte at a time; without this, a
+                // small write plus the peer's delayed ACK costs ~200 ms per
+                // piece on Windows, far past the test limits.
+                let _ = stream.set_nodelay(true);
                 let mut stream = BufReader::new(stream);
                 let request = read_request(&mut stream).await;
                 let reply = responder(&request);
@@ -340,6 +344,10 @@ pub(crate) async fn mock_stream(
             };
             let (record, flag, responder) = (record.clone(), flag.clone(), responder.clone());
             tokio::spawn(async move {
+                // Chunked replies may write a byte at a time; without this, a
+                // small write plus the peer's delayed ACK costs ~200 ms per
+                // piece on Windows, far past the test limits.
+                let _ = stream.set_nodelay(true);
                 let mut stream = BufReader::new(stream);
                 let request = read_request(&mut stream).await;
                 let reply = responder(&request);
