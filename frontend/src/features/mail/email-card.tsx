@@ -248,6 +248,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
       )}
       <button
         type="button"
+        data-email-id={group ? undefined : email.id}
         role={selectionMode && !group ? 'checkbox' : undefined}
         aria-checked={selectionMode && !group ? picked : undefined}
         aria-label={group ? t(group.unread > 0 ? 'mail:senderGroupLabelUnread' : 'mail:senderGroupLabel', { name: displayName(email.from), total: group.total, unread: group.unread }) : undefined}

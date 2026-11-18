@@ -246,6 +246,36 @@ fn repair_badge(value: &mut serde_json::Value) {
     });
 }
 
+/// How the message list and reader share the workbench.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ReadingMode {
+    #[default]
+    Split,
+    Single,
+    /// Retained until field validation or recovery runs.
+    #[doc(hidden)]
+    #[ts(skip)]
+    #[serde(skip_serializing)]
+    Invalid,
+}
+
+impl<'de> Deserialize<'de> for ReadingMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(value) if value == "split" => Self::Split,
+            serde_json::Value::String(value) if value == "single" => Self::Single,
+            _ => Self::Invalid,
+        })
+    }
+}
+
+fn deserialize_reading_mode_patch<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ReadingMode>, D::Error> {
+    ReadingMode::deserialize(deserializer).map(Some)
+}
+
 /// Window layout and account display preferences.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
@@ -262,6 +292,8 @@ pub struct LayoutSettings {
     /// The reader beside the message list is folded away. Like the sidebar's
     /// rail, this survives a restart: the window comes back as it was left.
     pub reader_collapsed: bool,
+    /// Whether to show the list and reader side by side or one at a time.
+    pub reading_mode: ReadingMode,
     /// Display order only; unknown account ids are ignored by the UI.
     #[serde(deserialize_with = "deserialize_account_order")]
     pub account_order: Vec<String>,
@@ -274,6 +306,7 @@ impl Default for LayoutSettings {
             nav_collapsed: false,
             list_width: LIST_WIDTH_DEFAULT,
             reader_collapsed: false,
+            reading_mode: ReadingMode::default(),
             account_order: Vec::new(),
         }
     }
@@ -324,6 +357,9 @@ pub struct LayoutSettingsPatch {
     pub list_width: Option<u32>,
     #[ts(optional)]
     pub reader_collapsed: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_reading_mode_patch")]
+    #[ts(optional)]
+    pub reading_mode: Option<ReadingMode>,
     #[serde(default, deserialize_with = "deserialize_order_patch")]
     #[ts(optional)]
     pub account_order: Option<Vec<String>>,
@@ -336,6 +372,7 @@ impl LayoutSettingsPatch {
             nav_collapsed: self.nav_collapsed.unwrap_or(current.nav_collapsed),
             list_width: self.list_width.unwrap_or(current.list_width),
             reader_collapsed: self.reader_collapsed.unwrap_or(current.reader_collapsed),
+            reading_mode: self.reading_mode.unwrap_or(current.reading_mode),
             account_order: self
                 .account_order
                 .unwrap_or_else(|| current.account_order.clone()),
@@ -350,6 +387,7 @@ impl From<LayoutSettings> for LayoutSettingsPatch {
             nav_collapsed: Some(settings.nav_collapsed),
             list_width: Some(settings.list_width),
             reader_collapsed: Some(settings.reader_collapsed),
+            reading_mode: Some(settings.reading_mode),
             account_order: Some(settings.account_order),
         }
     }
@@ -946,6 +984,9 @@ impl AppSettings {
         if !(LIST_WIDTH_MIN..=LIST_WIDTH_MAX).contains(&self.layout.list_width) {
             return Err(AppError::validation("layout.listWidth"));
         }
+        if self.layout.reading_mode == ReadingMode::Invalid {
+            return Err(AppError::validation("layout.readingMode"));
+        }
         let layout = LayoutSettings {
             account_order: self
                 .layout
@@ -1051,6 +1092,10 @@ impl AppSettings {
                 nav_collapsed: self.layout.nav_collapsed,
                 list_width: self.layout.list_width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX),
                 reader_collapsed: self.layout.reader_collapsed,
+                reading_mode: match self.layout.reading_mode {
+                    ReadingMode::Invalid => ReadingMode::default(),
+                    mode => mode,
+                },
                 account_order: self.layout.normalized_order().unwrap_or_default(),
             },
             appearance: AppearanceSettings {

@@ -14,7 +14,7 @@ export const READER_MIN = 360
  */
 export const NAV_RAIL_WINDOW = NAV_MIN + LIST_MIN + READER_MIN + 16
 
-export const DEFAULT_LAYOUT: LayoutSettings = { navWidth: NAV_DEFAULT, navCollapsed: false, listWidth: LIST_DEFAULT, readerCollapsed: false, accountOrder: [] }
+export const DEFAULT_LAYOUT: LayoutSettings = { navWidth: NAV_DEFAULT, navCollapsed: false, listWidth: LIST_DEFAULT, readerCollapsed: false, readingMode: 'split', accountOrder: [] }
 
 export function clampListWidth(width: number) {
   return Math.min(LIST_MAX, Math.max(LIST_MIN, Math.round(width)))

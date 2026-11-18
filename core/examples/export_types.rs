@@ -118,6 +118,7 @@ fn main() {
         ImageFetchError,
         RemoteImageStatus,
         SecuritySettings,
+        ReadingMode,
         LayoutSettings,
         LayoutSettingsPatch,
         PreviewLines,

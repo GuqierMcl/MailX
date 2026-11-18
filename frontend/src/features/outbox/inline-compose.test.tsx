@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/toast'
 import { exampleAccount, exampleFolderSyncState, exampleSyncState, testClient } from '@/features/accounts/test-fixtures'
 import { Workbench } from '@/features/mail/workbench'
-import type { ComposeOpenMode, Draft, DraftSummary, EmailDetail, EmailSummary, Folder, OutboxItem } from '@/generated/accounts'
+import type { ComposeOpenMode, Draft, DraftSummary, EmailDetail, EmailSummary, Folder, OutboxItem, ReadingMode } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { withTitleBar } from '@/test/title-bar'
 
@@ -40,7 +40,7 @@ function draft(id: string, overrides: Partial<Draft> = {}): Draft {
 }
 const summary = (d: Draft): DraftSummary => ({ id: d.id, accountId: d.accountId, kind: d.kind, origin: d.origin, sourceEmailId: null, to: d.to, subject: d.subject, preview: d.bodyText, updatedAt: d.updatedAt, revision: d.revision })
 
-async function setup({ mode = 'inline', saved = [] }: { mode?: ComposeOpenMode; saved?: Draft[] } = {}) {
+async function setup({ mode = 'inline', saved = [], readingMode = 'split' }: { mode?: ComposeOpenMode; saved?: Draft[]; readingMode?: ReadingMode } = {}) {
   const client = testClient([account])
   client.listFolders.mockResolvedValue([inbox])
   client.listSyncStates.mockResolvedValue([exampleSyncState({ folders: [exampleFolderSyncState('inbox')] })])
@@ -65,7 +65,7 @@ async function setup({ mode = 'inline', saved = [] }: { mode?: ComposeOpenMode; 
     return structuredClone(next)
   })
   client.deleteDraft.mockImplementation(async (id) => { drafts.delete(id) })
-  await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: mode } })
+  await client.updateSettings({ compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: mode }, layout: { readingMode } })
   client.updateSettings.mockClear()
   const user = userEvent.setup()
   render(withTitleBar(<><Toaster /><Workbench client={client} /></>))
@@ -173,6 +173,28 @@ describe('leaving the inline composer', () => {
     expect(screen.getByRole('region', { name: '写邮件' })).toBeInTheDocument()
     await user.click(within(region).getByRole('button', { name: '关闭' }))
     await waitFor(noComposer)
+    expect(drafts.get(NEW_ID)?.subject).toBe('预算')
+  })
+
+  it('keeps the single-pane composer on screen until the draft can be saved', async () => {
+    const { client, user, drafts } = await setup({ readingMode: 'single' })
+    await user.click(composeButton())
+    const region = await composer()
+    const subject = within(region).getByRole('textbox', { name: '主题' })
+    const close = within(region).getByRole('button', { name: '关闭' })
+    expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+    await typeInto(subject, '预算')
+    client.updateDraft.mockRejectedValueOnce(new MailxClientError({ code: 'storageUnavailable', message: 'x', field: null }))
+
+    await user.click(close)
+    expect((await screen.findAllByText('草稿没有保存')).length).toBeGreaterThan(0)
+    expect(subject).toHaveValue('预算')
+    expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+
+    await waitFor(() => expect(close).toBeEnabled())
+    await user.click(close)
+    expect(await screen.findByRole('list', { name: '邮件列表' })).toBeInTheDocument()
+    noComposer()
     expect(drafts.get(NEW_ID)?.subject).toBe('预算')
   })
 

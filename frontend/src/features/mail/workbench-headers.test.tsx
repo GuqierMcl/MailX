@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { AccountSyncState, EmailDetail, EmailPage, EmailSummary, FlagWriteBack, Folder } from '@/generated/accounts'
@@ -741,5 +741,89 @@ describe('the folded reader survives a restart', () => {
     await userEvent.click(rows()[0])
     await waitFor(() => expect(toggle()).toHaveAttribute('aria-label', '收起邮件内容'))
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ layout: { readerCollapsed: false } }), { timeout: 2000 })
+  })
+})
+
+describe('single-pane reading', () => {
+  async function singlePane(client: ReturnType<typeof setup>['client'], startupView: 'inbox' | 'now' = 'inbox') {
+    const snapshot = await client.getSettings()
+    client.getSettings.mockResolvedValue({
+      ...snapshot,
+      settings: {
+        ...snapshot.settings,
+        general: { ...snapshot.settings.general, startupView },
+        layout: { ...snapshot.settings.layout, readingMode: 'single', readerCollapsed: true },
+      },
+    })
+    render(withTitleBar(<Workbench client={client} />))
+  }
+
+  it('returns to the same filtered list with its scroll position and row focus', async () => {
+    const item = email('one', { bodyState: 'ready' })
+    const { client } = setup([item])
+    const user = userEvent.setup()
+    await singlePane(client)
+    const list = await screen.findByRole('list', { name: '邮件列表' })
+    expect(screen.queryByRole('button', { name: /^(收起|展开)邮件内容$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '未选择邮件' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '未读' }))
+    const row = within(list).getByRole('button', { name: /邮件 one/ })
+    const viewport = list.closest('[data-slot="scroll-area-viewport"]')!
+    viewport.scrollTop = 80
+    await user.click(row)
+    expect(await screen.findByRole('heading', { name: item.subject })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+    expect(list.closest('[inert]')).toBeInTheDocument()
+    const back = screen.getByRole('button', { name: '返回邮件列表' })
+    expect(back).toHaveFocus()
+
+    await user.click(back)
+    expect(screen.getByRole('list', { name: '邮件列表' })).toBe(list)
+    expect(screen.getByRole('tab', { name: '未读' })).toHaveAttribute('aria-selected', 'true')
+    expect(viewport.scrollTop).toBe(80)
+    await waitFor(() => expect(row).toHaveFocus())
+
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('heading', { name: item.subject })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(await screen.findByRole('list', { name: '邮件列表' })).toBe(list)
+    expect(screen.queryByRole('heading', { name: item.subject })).not.toBeInTheDocument()
+    // Writing immediately when the window closes would expose any queued layout change.
+    await act(async () => { fireEvent(window, new Event('pagehide')) })
+    expect(client.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('opens a search result in the reader and returns to the search results', async () => {
+    const item = email('one', { subject: '季度周报', bodyState: 'ready' })
+    const { client } = setup([item])
+    const user = userEvent.setup()
+    await singlePane(client)
+    await screen.findByRole('list', { name: '邮件列表' })
+    await user.click(screen.getByRole('button', { name: '搜索邮件' }))
+    await user.type(await screen.findByRole('combobox'), '季度周报')
+    await user.click(await screen.findByRole('option', { name: /发件人\s*季度周报/ }))
+
+    expect(await screen.findByRole('heading', { name: item.subject })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '返回邮件列表' }))
+    expect(await screen.findByRole('list', { name: '邮件列表' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '搜索邮件' })).toHaveTextContent('季度周报')
+  })
+
+  it('opens a single-message notification even when Now is the startup page', async () => {
+    const item = email('one', { bodyState: 'ready' })
+    const { client } = setup([item])
+    let open: (request: { accountId: string; emailId: string | null }) => void = () => undefined
+    client.onNotificationOpen.mockImplementation((listener) => { open = listener; return () => undefined })
+    await singlePane(client, 'now')
+    const now = await screen.findByRole('button', { name: '此刻' })
+    await waitFor(() => expect(now).toHaveAttribute('data-active'))
+
+    act(() => open({ accountId: account.id, emailId: item.id }))
+    expect(await screen.findByRole('heading', { name: item.subject })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '邮件列表' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '返回邮件列表' }))
+    expect(await screen.findByRole('list', { name: '邮件列表' })).toBeInTheDocument()
   })
 })

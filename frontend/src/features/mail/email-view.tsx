@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Archive02Icon,
   ArchiveRestoreIcon,
+  ArrowLeft01Icon,
   Cancel01Icon,
   Delete02Icon,
   Forward01Icon,
@@ -70,6 +71,8 @@ type EmailViewProps = {
   onFlag: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
   /** Closes the reader. Nothing else closes it except opening another message. */
   onClose: () => void
+  /** Single-pane readers return to the list, which restores focus to the message row. */
+  backButton?: Ref<HTMLButtonElement>
   downloading: boolean
   onDownload: () => void
   email: EmailDetail | null
@@ -95,7 +98,7 @@ type EmailViewProps = {
   frame?: (content: ReactNode) => ReactNode
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -132,7 +135,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   )
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} backButton={backButton} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} />}
       {frame ? frame(content) : content}
     </div>
   )
@@ -145,13 +148,25 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete, onArchive, translation }: { translation?: EmailTranslation; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
+function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, translation }: { translation?: EmailTranslation; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; backButton?: EmailViewProps['backButton']; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
   const localOnly = summary?.localOnly === true
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-3" role="toolbar" aria-label={t('mail:messageActions')}>
+      {backButton && (
+        <Button
+          ref={backButton}
+          variant="ghost"
+          size="icon"
+          aria-label={t('mail:backToMessageList')}
+          title={t('mail:backToMessageList')}
+          onClick={onClose}
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} />
+        </Button>
+      )}
       <div className="flex items-center gap-1 not-first:ml-3">
         {localOnly ? (
           onRemoveLocal && (
@@ -200,9 +215,9 @@ function Toolbar({ summary, onFlag, onClose, onRespond, onRemoveLocal, onDelete,
         </IconButton>
       </div>}
       {translation?.available && !localOnly && <TranslationToolbarGroup translation={translation} />}
-      <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
+      {!backButton && <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
-      </IconButton>
+      </IconButton>}
       {summary && onRemoveLocal && (
         <RemoveLocalCopyDialog
           open={confirmingRemove}

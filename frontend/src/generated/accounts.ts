@@ -612,6 +612,8 @@ export type SecuritySettings = { remoteImages: RemoteImagePolicy,
  */
 senderAvatars: boolean, };
 
+export type ReadingMode = "split" | "single";
+
 export type LayoutSettings = {
 /**
  * Width of the navigation sidebar, `220..=420`.
@@ -634,11 +636,15 @@ listWidth: number,
  */
 readerCollapsed: boolean,
 /**
+ * Whether to show the list and reader side by side or one at a time.
+ */
+readingMode: ReadingMode,
+/**
  * Display order only; unknown account ids are ignored by the UI.
  */
 accountOrder: Array<string>, };
 
-export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, accountOrder?: Array<string>, };
+export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, readingMode?: ReadingMode, accountOrder?: Array<string>, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 

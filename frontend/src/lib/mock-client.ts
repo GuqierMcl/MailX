@@ -102,6 +102,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation,
           assistant: { ...settings.settings.assistant, ...value.settings.assistant },
           layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
+          readingMode: value.settings.layout.readingMode === 'single' ? 'single' : 'split',
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
       }
     } catch { /* The browser preview cache is optional. */ }
@@ -1268,6 +1269,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const mailFont = parseFontFamilies(appearance.mailFont).join(', ')
       const general = next.general ?? settings.settings.general
       const layout = { ...settings.settings.layout, ...next.layout }
+      if (layout.readingMode !== 'split' && layout.readingMode !== 'single') {
+        throw new MailxClientError({ code: 'validation', field: 'layout.readingMode', message: '配置参数无效。' })
+      }
       const order = normalizedAccountOrder(layout.accountOrder)
       if (!order) throw new MailxClientError({ code: 'validation', field: 'layout.accountOrder', message: '配置参数无效。' })
       layout.accountOrder = order

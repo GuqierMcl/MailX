@@ -91,6 +91,7 @@
   "unstar": "Remove star",
   "star": "Add star",
   "closeMessage": "Close message",
+  "backToMessageList": "Back to message list",
   "closeMessageShortcut": "Close message (Esc)",
   "toLabel": "To:",
   "ccLabel": "Cc:",
