@@ -256,7 +256,7 @@ To report a problem or suggest a feature, sign in to GitHub if needed, fill in t
 
 ## Upgrading and keeping your data
 
-The app runs any database migrations it needs at launch; see the release notes of each version for what changes. Older versions usually cannot open a migrated database, so reinstalling an older build is not a way to roll data back.
+MailX prepares your local data automatically when you first launch it after an update. Older versions may be unable to open data prepared by a newer version. To roll back, keep a copy of the data from before the update.
 
 To keep a rollback copy before upgrading, **quit MailX completely** first, then copy the entire MailX data directory, including the database, any SQLite side files, settings and blob files — do not copy only `mailx.sqlite3`:
 

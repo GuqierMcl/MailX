@@ -1,12 +1,12 @@
 # MailX 架构总览
 
-状态：**桌面邮件核心与本地 MCP 已实现 / 内置 AI 和 Web 为 Planned**。core、Tauri 宿主和 React 工作台提供账号与凭据管理、按账号路由的 IMAP / SMTP、本地缓存和搜索、隔离阅读、邮件整理、富文本草稿与发送队列，以及本地 MCP 工具入口。下文区分实现边界与后续设想；具体平台、服务商和客户端的测试结果见[验证指引](../development/validation.md)。
+状态：**桌面邮件核心、本地 MCP 与「此刻」助手已实现 / Web 为 Planned**。core、Tauri 宿主和 React 工作台提供账号与凭据管理、按账号路由的 IMAP / SMTP、本地缓存和搜索、隔离阅读、邮件整理、富文本草稿与发送队列，以及内置 AI 和本地 MCP 工具入口。验证方式见[验证指引](../development/validation.md)。
 
 ## 1. 总体结构
 
 采用模块化单体与轻量宿主。每个数据目录只有一个 Rust 核心实例拥有数据库、同步任务和发件队列。当前桌面使用共享核心，后续 Web 宿主复用核心库；独立部署时不共享数据目录。
 
-下图同时包含当前实现与目标结构；HTTP / Web、远程 MCP、内置 Agent、AI Run 和模型端点尚未实现。
+下图包含当前桌面实现及规划中的 HTTP / Web 和远程 MCP。
 
 ```text
 前端工作台（React + TypeScript + Vite + shadcn；账号设置、收信阅读、富文本写信与语言设置）
@@ -33,7 +33,7 @@
                 账号级路由 / 用户选择的模型端点
 ```
 
-MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启动第二套同步器；本地 MCP 服务与工具层驻留桌面核心所在进程。后续服务端将复用同一份 MCP 实现，内置 AI 将在进程内直接调用工具层，不依赖 MCP 回环，也不实现通用 Agent 插件执行器。当前工具层、本地 MCP 适配与 bridge 已实现，内置 Agent 与远程传输仍为规划，见[工具层与调用入口](agent-tools.md)与 [ADR 0004](../adr/0004-shared-tool-layer.md)。
+MCP bridge 完成 token 握手后只转发 MCP 消息，本地 MCP 服务与工具层驻留桌面核心所在进程。「此刻」的内置助手在进程内直接调用工具层。后续服务端将复用同一份 MCP 实现。见[工具层与调用入口](agent-tools.md)与 [ADR 0004](../adr/0004-shared-tool-layer.md)。
 
 ## 2. 技术选型
 
@@ -47,7 +47,7 @@ MCP bridge 完成 token 握手后只转发 MCP 消息，不打开数据库或启
 | 接收 / 发送 | `async-imap` 用于同步与标记写回；`lettre` 构建发送 MIME，SMTP 会话在 core 实现 | IMAP 与 SMTP 连接统一经过账号路由；已有受控服务器测试，通用 OAuth / XOAUTH2 已实现但生产注册为空，完整真实服务商组合仍待验证，详见[写信与发送](sending.md) |
 | MIME / HTML | `mail-parser` + `full_encoding` 与 `ammonia` 已采用 | 多字符集头部与 MIME 正文解码、HTML / CSS 净化、内嵌图片验证及 iframe + CSP 隔离已有实现 |
 | 存储 | SQLite + `rusqlite`，已采用 | 单连接、WAL、FULL 同步、外键、迁移校验与目录锁；FTS5 trigram 索引头部、预览、已缓存正文、附件名和本机已发送副本，短词退回 LIKE；覆盖边界见[存储与搜索](storage-search.md) |
-| AI | 规划采用 Rust 流式适配器 | OpenAI 兼容与 Ollama 为后续方案，尚未接入模型；不同协议不伪装成同一种接口 |
+| AI | Rust 流式适配器，支持 OpenAI 与 Anthropic 兼容接口 | Ollama 使用 OpenAI 兼容接口。模型和专用代理由用户配置，见[模型服务商配置](ai-providers.md) |
 | MCP | [官方 Rust SDK `rmcp`](https://github.com/modelcontextprotocol/rust-sdk)（仅 `server` 功能，独立 MCP 适配 crate） | 本地 IPC、stdio bridge、桌面开关与邮件工具已有实现；能力与授权边界见 [MCP 契约](../contracts/mcp.md) |
 | Web | 规划采用 Axum + 同源静态 SPA + SSE | 后续单用户宿主、服务端 Session、TOTP；当前 `server/` 仅占位 |
 | 工具链 | Rust / Cargo、Bun | 工具链版本以根 `rust-toolchain.toml` 和 `package.json` 为准；`bun.lock`、`Cargo.lock` 锁定依赖 |
@@ -74,7 +74,7 @@ core/                       # mailx-core，共享核心；业务与通用实现�
   src/secrets.rs            # 宿主注入的 SecretStore
   src/settings.rs           # 应用偏好、语言兼容与设置快照版本
   src/localization.rs       # 通知与引用模板的纯文本生成
-  src/tools/                # 共享工具层（MCP 与未来 Agent 共用）
+  src/tools/                # 共享工具层（MCP 与内置助手共用）
 mcp-server/                 # mailx-mcp-server（候选名），本地 MCP 服务端库：rmcp 适配、socket / 命名管道、握手、发现文件
 mcp-bridge/                 # mailx-mcp-bridge，cargo 二进制 mailx-mcp-bridge，随包 sidecar 名 mailx-mcp（候选名）：stdio 到本地 IPC 的转发，不链接 core
 desktop/                    # mailx-desktop，Tauri 宿主
@@ -128,16 +128,16 @@ branding/                   # 主 Logo 源稿、品牌变体、分享素材与�
 
 ## 5. 关键数据流
 
-当前账号配置链路为：shadcn 表单 → MailxClient → 受限 Tauri IPC → AccountService → SecretStore 与 SQLite 更新恢复。保存配置的短事务不连接邮箱，成功后宿主启动或重启该账号的后台同步任务；完整模型与操作边界见[账号配置](account-configuration.md)。下列同步、阅读、发送和外部 Agent 链路已有实现，内置 AI 链路仍为规划。
+当前账号配置链路为：shadcn 表单 → MailxClient → 受限 Tauri IPC → AccountService → SecretStore 与 SQLite 更新恢复。保存配置的短事务不连接邮箱，成功后宿主启动或重启该账号的后台同步任务；完整模型与操作边界见[账号配置](account-configuration.md)。
 
 1. **同步（当前）**：账号配置 → 路由与认证 → `STATUS` / `EXAMINE` / `UID SEARCH` → 每批最多 200 封头部 → 短事务写入与游标推进 → 逐目录数据版本事件 → UI 重新查询。账号之间并发且暂不设全局上限，账号内顺序对账所有可选文件夹；前台轮询每 20 秒一轮，IDLE 在线时改为 3 分钟，后台为 3–10 分钟，目录每 10 分钟到期刷新。独立 IDLE 连接监视收件箱并唤醒同步；头部同步不下载正文。
 2. **阅读（当前）**：缓存查询 → 缺失时按账号路由经独立连接 BODY.PEEK 下载 → 有界 MIME 解码与 HTML 净化 → 本地缓存 → 空 sandbox 隔离渲染。远程图片按安全性设置询问 / 自动加载 / 永不加载，经 Rust 识别实际格式并验证，在本次阅读内存与按账号、来源及连接版本隔离的磁盘缓存中复用；失败有固定原因和手动重试。自定义代理可显式启用 HTTPS 图片域名解析，具体限制见[网络与安全](network-security.md)。点击正文外链由 Rust 交给系统打开；附件可经系统另存为对话框保存。
 3. **发送**：写信窗口检查完整收件人与附件并两次点击发送，或授权的 MCP / Agent 调用发送工具 → 核心校验账号范围、权限、草稿版本和幂等键 → 固化版本与 MIME → 单个队列项 → SMTP → 记录 accepted / failed / unknown。网络不确定时不自动重发。细节见[写信与发送设计](sending.md)。
-4. **AI（规划）**：用户选定内容与模型 → 披露策略检查 → 工具层（内置 Agent 可见的工具） → 后端请求模型 → 流式展示 → 保存建议或新草稿。内置 AI 的交互与发送策略在接入时单独验证。
+4. **内置助手**：用户配置模型和可读账号 → 「此刻」概述或对话请求 → 内容披露与权限检查 → core 中流式调用模型并按需执行该入口获准的工具 → Tauri 事件驱动界面更新。发信默认逐封确认，对话可保存在本机。见[内置 AI 工具权限](ai-permissions.md)。
 5. **外部 Agent**：用户开启 MCP → token 握手 → 统一授权（邮件整理、草稿与本机文件附件管理、直接发送、发件箱查询与取消） → MCP 适配层 → 工具层（显式对外可见的工具） → 应用权限 → 与 UI 相同服务 → 返回限量文本和元数据，不返回密钥和宿主路径；不能删除邮件。
 
 详细状态与恢复语义分别见[同步](mail-sync.md)、[应用契约](../contracts/app-api.md)、[AI Runtime](../ai-runtime/README.md)。
 
 ## 6. 验证边界
 
-自动测试、受控协议探针和实际安装包验证承担不同职责。公开支持的平台与服务商组合，应有收读发、网络路由、正文隔离、MCP、升级与恢复等对应证据；功能实现不能替代这些验证。OAuth、内置 AI 与 Web 在接入时分别补齐其授权、路由和生命周期验证。检查项见[路线图](../roadmap/README.md)，执行结果统一记录在[验证指引](../development/validation.md)。
+自动测试、受控协议探针和实际安装包验证承担不同职责。公开支持的平台与服务商组合，应有收读发、网络路由、正文隔离、MCP、内置助手、升级与恢复等对应证据。检查方法见[验证指引](../development/validation.md)，执行结果记录在当次 PR、CI 与 Release 说明。

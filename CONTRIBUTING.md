@@ -20,7 +20,7 @@ MailX has a Rust mail core, a React + TypeScript + Vite + shadcn frontend, a Tau
 - Changes to sync, sending, HTML, permissions or migrations need failure-path verification; ordinary documentation edits do not need new tests.
 - `README.md` and `README.zh-CN.md` are updated together and keep the same section structure. `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and the user guide follow the same rule, with English as the primary language.
 - Commit messages follow Conventional Commits, for example `docs(architecture): define mailbox sync lifecycle`.
-- User-facing changes add one line to `[Unreleased]` in `CHANGELOG.md` in the PR, written in English and Chinese; bump versions only through `bun run version:bump` / `version:set`. Release steps are in the [release process](docs/development/release.md).
+- Add one line in English and Chinese to `[Unreleased]` in `CHANGELOG.md` for each user-facing change. Keep database upgrades and schema details in the [database migration documentation](docs/architecture/database-migrations.md). Put any steps users need to take when upgrading or rolling back in the user guide. Bump versions only through `bun run version:bump` or `bun run version:set`. See the [release process](docs/development/release.md).
 
 A PR description explains the behaviour change, the verification results and any open limitations. To adjust an earlier plan, update the matching documentation; major choices can record their trade-offs in an [ADR](docs/adr/README.md), and changing a starting sketch does not need an extra approval step.
 
