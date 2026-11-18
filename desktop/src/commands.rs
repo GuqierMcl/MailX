@@ -944,17 +944,12 @@ pub(crate) async fn emails_delete(
     let args =
         authorize(&window, "emails_delete").and_then(|_| parse::<DeleteEmailsArgs>(request.body()));
     Ok(respond(match args {
-        Ok(args) => {
-            state
-                .run(move |core| {
-                    core.delete_emails_partial(
-                        &args.email_ids,
-                        args.confirmed_permanent,
-                        args.partial,
-                    )
-                })
-                .await
-        }
+        Ok(args) => state
+            .run(move |core| {
+                core.delete_emails_partial(&args.email_ids, args.confirmed_permanent, args.partial)
+            })
+            .await
+            .inspect(|_| crate::badge::refresh(window.app_handle())),
         Err(error) => Err(error),
     }))
 }
@@ -975,11 +970,10 @@ pub(crate) async fn emails_undo_delete(
     let args = authorize(&window, "emails_undo_delete")
         .and_then(|_| parse::<UndoDeleteArgs>(request.body()));
     Ok(respond(match args {
-        Ok(args) => {
-            state
-                .run(move |core| core.undo_delete(&args.batch_id))
-                .await
-        }
+        Ok(args) => state
+            .run(move |core| core.undo_delete(&args.batch_id))
+            .await
+            .inspect(|_| crate::badge::refresh(window.app_handle())),
         Err(error) => Err(error),
     }))
 }
@@ -1338,6 +1332,7 @@ pub(crate) async fn settings_update(
 
 pub(crate) fn emit_settings_changed(app: &tauri::AppHandle, snapshot: &SettingsSnapshot) {
     crate::notifications::settings_changed(app, snapshot);
+    crate::badge::refresh(app);
     let change = mailx_core::SettingsChanged {
         revision: snapshot.revision,
     };

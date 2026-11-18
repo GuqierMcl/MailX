@@ -29,7 +29,7 @@ English | [简体中文](README.zh-CN.md)
 - **Composing in its own window** — A rich-text editor for new mail, replies and forwards, with attachments and pasted screenshots. Drafts are saved locally as you type.
 - **Sending you can trust** — Every message goes through a send queue, with an optional undo delay and retries for eligible failures. A message the server may already have accepted is never sent twice on its own. Local sent copies appear in the Sent folder while waiting for a matching server copy.
 - **Per-account network routing** — Each account can connect directly or through its own SOCKS5 or HTTP proxy. If the proxy fails, MailX stops rather than quietly connecting without it.
-- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications, optional background operation and launch at login, in-app updates, light and dark themes, English and Chinese.
+- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications, an unread badge on the app icon (macOS and Linux), optional background operation and launch at login, in-app updates, light and dark themes, English and Chinese.
 - **Connect your AI tools** — An optional local MCP server lets compatible clients search and read mail, organize messages, manage drafts and attachments, and send mail. Connect a supported client or copy its configuration from Settings → MCP; MailX must be running.
 
 ## Supported Mailboxes

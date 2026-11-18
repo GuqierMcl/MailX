@@ -13,14 +13,13 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { sortAccountsForDisplay } from '@/features/accounts/account-order'
-import type { NotificationSound } from '@/generated/accounts'
+import type { Account, NotificationSound } from '@/generated/accounts'
+import { useLifecycle } from '@/features/lifecycle/lifecycle-context'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { loadMailTree } from '@/features/mail/mail-tree'
 import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
-import { useSettings, useUpdateNotifications } from './settings-queries'
-
-
+import { useSettings, useUpdateBadge, useUpdateNotifications } from './settings-queries'
 
 /** MailX plays these itself; the others belong to the system or are silent. */
 const OWN_SOUNDS: NotificationSound[] = ['chime', 'ding', 'droplet', 'bubble', 'marimba', 'sparkle', 'knock', 'chord']
@@ -41,6 +40,9 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   }
   const settings = useSettings(client)
   const update = useUpdateNotifications(client)
+  const lifecycle = useLifecycle()
+  // The desktop host says whether it can show a badge; a browser preview without one shows the group.
+  const badgeAvailable = lifecycle ? lifecycle.snapshot?.badgeAvailable === true : true
   // The mail tree already holds the accounts and refreshes when they change.
   const accounts = useQuery({ queryKey: mailKeys.tree(), queryFn: () => loadMailTree(client), select: (tree) => tree.accounts })
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
@@ -101,10 +103,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
       <SettingsGroup title={t('settings:byAccount')}>
         {orderedAccounts.map((account) => (
           <SettingsRow key={account.id} htmlFor={`notifications.account.${account.id}`}
-            label={<span className="flex min-w-0 items-center gap-2">
-              <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
-              <span className="truncate">{account.displayName}</span>
-            </span>}
+            label={<AccountLabel account={account} />}
             description={account.emailAddress}>
             <Switch id={`notifications.account.${account.id}`} checked={!muted.has(account.id)} disabled={off}
               onCheckedChange={(on) => setMuted(account.id, !on)} />
@@ -112,7 +111,49 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
         ))}
       </SettingsGroup>
     )}
+    {badgeAvailable && <BadgeSettingsGroups client={client} accounts={orderedAccounts} />}
   </SettingsPage>
+}
+
+function AccountLabel({ account }: { account: Account }) {
+  return <span className="flex min-w-0 items-center gap-2">
+    <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />
+    <span className="truncate">{account.displayName}</span>
+  </span>
+}
+
+/** The unread number on the app icon, and which accounts it counts. */
+function BadgeSettingsGroups({ client, accounts }: { client: MailxClient; accounts: Account[] }) {
+  useTranslation()
+  const settings = useSettings(client)
+  const update = useUpdateBadge(client)
+  if (!settings.data) return null
+  const badge = settings.data.settings.badge
+  const excluded = new Set(badge.excludedAccounts)
+  const setCounted = (accountId: string, counted: boolean) => {
+    const next = new Set(excluded)
+    if (counted) next.delete(accountId)
+    else next.add(accountId)
+    update.mutate({ excludedAccounts: [...next].sort() })
+  }
+  return <>
+    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
+    <SettingsGroup title={t('settings:appBadge')}>
+      <SettingsRow label={t('settings:appBadgeShow')} description={t('settings:appBadgeHint')} htmlFor="badge.enabled">
+        <Switch id="badge.enabled" checked={badge.enabled} onCheckedChange={(enabled) => update.mutate({ enabled })} />
+      </SettingsRow>
+    </SettingsGroup>
+    {accounts.length > 0 && (
+      <SettingsGroup title={t('settings:appBadgeAccounts')}>
+        {accounts.map((account) => (
+          <SettingsRow key={account.id} htmlFor={`badge.account.${account.id}`} label={<AccountLabel account={account} />} description={account.emailAddress}>
+            <Switch id={`badge.account.${account.id}`} checked={!excluded.has(account.id)} disabled={!badge.enabled}
+              onCheckedChange={(on) => setCounted(account.id, on)} />
+          </SettingsRow>
+        ))}
+      </SettingsGroup>
+    )}
+  </>
 }
 
 function TestNotification({ client, disabled }: { client: MailxClient; disabled: boolean }) {

@@ -112,6 +112,8 @@ pub(crate) fn finish_copy(
     locale: SupportedLocale,
 ) -> VerificationCodeCopyOutcome {
     if let Some(deletion) = &outcome.deletion {
+        // The mail is hidden at once; a restoration below shows it again.
+        crate::badge::refresh(app);
         let ttl = undo_remaining(&deletion.undo_until);
         let state = app.state::<VerificationCodes>();
         let token = uuid::Uuid::new_v4().to_string();
@@ -221,6 +223,7 @@ pub(crate) fn undo_native(app: &AppHandle, token: &str) -> Result<(), AppError> 
 
 fn undo_entry(app: &AppHandle, core: &MailxCore, entry: &UndoEntry) -> Result<(), AppError> {
     core.undo_delete(&entry.batch_id)?;
+    crate::badge::refresh(app);
     app.state::<VerificationCodes>()
         .undo
         .lock()

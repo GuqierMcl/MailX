@@ -13,7 +13,7 @@ import { LifecycleProvider } from './lifecycle-provider'
 import { InlineDraftUnsaved, registerQuitSave } from './prepare-quit'
 
 function fixture(patch: Partial<LifecycleSnapshot> = {}) {
-  let snapshot: LifecycleSnapshot = { revision: 1, platform: 'windows', backgroundAvailable: true, closeRequestId: 1, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
+  let snapshot: LifecycleSnapshot = { revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: 1, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
   let listener: ((snapshot: LifecycleSnapshot) => void) | undefined
   const client = {
     getSnapshot: vi.fn<LifecycleClient['getSnapshot']>().mockImplementation(async () => snapshot),
@@ -100,7 +100,7 @@ describe('main window close choice', () => {
     render(<LifecycleProvider client={client}><p>Main window</p></LifecycleProvider>)
     await waitFor(() => expect(client.getSnapshot).toHaveBeenCalled())
     publish({ closeRequestId: 9 })
-    await act(async () => complete({ revision: 1, platform: 'windows', backgroundAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }))
+    await act(async () => complete({ revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }))
     await userEvent.click(await screen.findByRole('button', { name: '取消' }))
     expect(client.resolveClose).toHaveBeenCalledWith({ requestId: 9, action: 'cancel', remember: false })
   })

@@ -29,7 +29,7 @@ struct Inner {
     startup: Mutex<StartupStatus>,
     initialization_in_flight: AtomicBool,
     /// Called each time the core becomes ready (also after a retry).
-    ready_hook: Mutex<Option<ReadyHook>>,
+    ready_hooks: Mutex<Vec<ReadyHook>>,
 }
 
 type ReadyHook = Arc<dyn Fn() + Send + Sync>;
@@ -56,15 +56,15 @@ impl DesktopState {
             // the state initializing during the short scheduling window.
             startup: Mutex::new(StartupStatus::Initializing { revision: 1 }),
             initialization_in_flight: AtomicBool::new(false),
-            ready_hook: Mutex::new(None),
+            ready_hooks: Mutex::new(Vec::new()),
         }))
     }
 
     /// Registers work to run whenever the core becomes ready, for services
-    /// that need the core (the local MCP server). Replaces an earlier hook.
-    pub(crate) fn set_ready_hook(&self, hook: impl Fn() + Send + Sync + 'static) {
-        if let Ok(mut slot) = self.0.ready_hook.lock() {
-            *slot = Some(Arc::new(hook));
+    /// that need the core (the local MCP server, the app icon badge).
+    pub(crate) fn add_ready_hook(&self, hook: impl Fn() + Send + Sync + 'static) {
+        if let Ok(mut hooks) = self.0.ready_hooks.lock() {
+            hooks.push(Arc::new(hook));
         }
     }
 
@@ -230,6 +230,13 @@ impl DesktopState {
         Some((snapshot.settings.notifications, snapshot.effective_locale))
     }
 
+    /// The app icon badge preferences, for code already off the async
+    /// runtime. `None` when settings cannot be read.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn badge_settings(&self) -> Option<mailx_core::BadgeSettings> {
+        Some(self.settings_store().ok()?.get().ok()?.settings.badge)
+    }
+
     pub(crate) fn notification_snapshot(&self) -> Option<mailx_core::SettingsSnapshot> {
         self.settings_store().ok()?.get().ok()
     }
@@ -357,8 +364,13 @@ impl DesktopState {
             *current = status;
         }
         if ready {
-            let hook = self.0.ready_hook.lock().ok().and_then(|slot| slot.clone());
-            if let Some(hook) = hook {
+            let hooks = self
+                .0
+                .ready_hooks
+                .lock()
+                .map(|hooks| hooks.clone())
+                .unwrap_or_default();
+            for hook in hooks {
                 hook();
             }
         }

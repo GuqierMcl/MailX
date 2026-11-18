@@ -15,6 +15,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 - Add client-specific MCP setup and connection diagnostics for external agents, with guided import where automatic setup is unavailable. / 新增外部智能体的 MCP 专属接入与连接诊断，无法自动接入时提供导入指引。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
 - Let MCP clients inspect mail conversations, find local correspondents and export received attachments. / MCP 客户端可查看邮件会话、查找本机往来联系人并导出收到的附件。 ([#148](https://github.com/GuqierMcl/MailX/pull/148))
+- Show the unread count of the unified inbox on the app icon on macOS and Linux, with a switch and a choice of accounts under Settings → Notifications. / 在 macOS 和 Linux 的应用图标上显示统一收件箱的未读邮件数，可在“设置 → 通知”中关闭或选择计入的账号。 ([#152](https://github.com/GuqierMcl/MailX/pull/152))
 
 ### ✨ Optimization
 

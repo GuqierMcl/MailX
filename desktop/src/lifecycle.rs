@@ -71,6 +71,8 @@ impl LifecycleState {
 pub(crate) struct Snapshot {
     platform: Platform,
     background_available: bool,
+    /// This platform can show the unread number on the app icon.
+    badge_available: bool,
     close_request_id: Option<u64>,
     quitting: bool,
     quit_request_id: Option<u64>,
@@ -83,6 +85,7 @@ fn snapshot(app: &AppHandle, state: &LifecycleState) -> Snapshot {
     Snapshot {
         platform: window_chrome::current_platform(),
         background_available: inner.background_available,
+        badge_available: crate::badge::SUPPORTED,
         close_request_id: inner.pending,
         quitting: crate::compose::is_quitting(app),
         quit_request_id: crate::compose::quit_generation(app),

@@ -1403,3 +1403,19 @@ MCP 页使用无边框的小字号反馈，沿用全局 toast 的图标和状态
 - `bun run version:check`、shell 语法检查、所有新增脚本的 LF / 空白检查与 `git diff --check` 通过；`tauri dev --help`、`tauri build --help` 正常，`tauri dev --release` 明确拒绝。
 
 本次未读取或修改已有 MailX vault，也未接入真实邮箱；尚未验证旧 vault 首次授权、安装版正式签名、Intel macOS 或 Windows / Linux 实机行为。合成钥匙串结果不能代替这些范围。本次仅改变开发脚本与文档，未重复运行前端及 Rust 全量测试；实际桌面 debug 编译与启动已执行。
+
+## 应用图标未读角标（2026-11-18，仅自动测试）
+
+macOS Dock 与 Linux 启动器显示统一收件箱未读数，Windows 暂不显示；规则见[应用接口](../contracts/app-api.md#应用图标未读角标)。本节只记录自动检查，下列真机项目均尚未执行，不表示已经通过。
+
+自动测试覆盖：核心计数只取可选择收件箱、跳过 `countsKnown = false` 与排除账号、关闭时为 0，并在合成账号上随标为已读、本机归档、删除与撤销删除和侧边栏数字保持一致；`badge` 设置的旧文件默认值、保存时规整与校验、手工编辑字段单独回退；桌面的多次触发合并为一次读取、数字未变不调用系统、核心未就绪时保持原样、系统调用失败后下次重试；设置页在不支持的平台隐藏分组，开关和按账号选择写入 `badge` 设置节。
+
+本机 macOS 上 `bun run check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test` 与 `git diff --check` 通过：前端 132 个文件 / 1,734 项，Rust 合计 1,858 项通过、0 项失败、6 项既有忽略；生产构建保留既有的大 chunk 提示。Windows / Linux 目标没有在本机编译检查。
+
+源码核对：Tauri 2.12.3 运行时以 `{productName}.desktop`（即 `MailX.desktop`）发送启动器计数，tauri-bundler 的 freedesktop 模块同样以 `{product_name}.desktop` 命名安装到 `/usr/share/applications` 的文件，两者一致；实际安装包仍待 Linux 真机确认。
+
+尚未验证：
+
+- macOS 打包版本：Dock 数字随新邮件、已读、归档、删除与撤销更新，主窗口隐藏后仍更新；为 0 时角标消失；关闭开关或取消计入某账号后数字随之变化。
+- Linux：系统缺少 `libunity` 时静默不显示；Ubuntu Dock、GNOME + Dash to Dock 与 KDE Plasma 上是否实际显示数字。
+- Windows：设置页不显示该分组，已保存的设置不受影响。
