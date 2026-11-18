@@ -71,7 +71,7 @@ Any other mailbox that offers IMAP and SMTP with password sign-in can be added b
 | Full-text search of local content | ✅ Implemented |
 | Browser sign-in: Outlook, Microsoft 365 | ✅ Implemented |
 | Browser sign-in: Gmail | 🗓️ Planned |
-| Built-in AI assistant | 🗓️ Planned |
+| Built-in AI assistant: Now summary and chat | ✅ Implemented |
 | Message translation, with no setup or with a key of your own | ✅ Implemented (automated tests only) |
 | Local MCP server for external AI clients | ✅ Implemented |
 | Server: self-hosted web version | 🗓️ Planned |
@@ -80,7 +80,7 @@ What changed in each release is in the [CHANGELOG](CHANGELOG.md); the detailed r
 
 ## Known Limitations
 
-- MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, and browser sign-in for Outlook and Microsoft 365. Browser sign-in for Gmail and other providers, a built-in AI assistant, and the self-hosted web version are not available yet.
+- MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, and browser sign-in for Outlook and Microsoft 365. Browser sign-in for Gmail and other providers and the self-hosted web version are planned.
 - Initial synchronization starts with a fixed 30-day window and fills up to the newest 1,000 messages per folder per round, retaining previously cached messages. Search covers local content; unopened message bodies may be missing from results. Attachments are searched by name, not by their contents.
 - Archive is local to this computer. Moving messages to arbitrary server folders and synchronizing local drafts to the server are not implemented. Sent copies do not upload to the server.
 - Builds are available for Windows, macOS and Linux, but feature and provider coverage differs. See the [validation guidance](docs/development/validation.md) for what is verified and how, and each release's notes for tested combinations.
