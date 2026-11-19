@@ -10,6 +10,9 @@ import { toast } from '@/components/ui/toast'
 
 vi.mock('@/components/ui/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), close: vi.fn() } }))
 
+/** Old enough to be past the quiet window for retryable failures. */
+const FAILING_SINCE = '2026-10-18T08:00:00.000Z'
+
 const second = exampleAccount({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', displayName: '个人邮箱', emailAddress: 'me@example.com', color: '#16a34a' })
 
 function renderDialog(rows: Account[] = [exampleAccount()], target: { accountId?: string } = {}, client = testClient(rows), syncStates = {}) {
@@ -270,7 +273,7 @@ describe('accounts dialog', () => {
 
   it('tells a failure that will retry from one that stopped, in the header', async () => {
     const account = exampleAccount()
-    const failure = (willRetry: boolean) => ({ [account.id]: exampleSyncState({ phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry } }) })
+    const failure = (willRetry: boolean) => ({ [account.id]: exampleSyncState({ phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry }, failureSince: FAILING_SINCE }) })
     const retrying = renderDialog([account], {}, testClient([account]), failure(true))
     expect(await within(retrying.dialog).findByText(/^同步遇到问题，会自动重试：/)).not.toHaveClass('text-destructive')
     expect(within(retrying.dialog).queryByText('同步已停止')).not.toBeInTheDocument()
@@ -286,7 +289,7 @@ describe('accounts dialog', () => {
   })
 
   it('lists each account with its address and marks the ones that have a problem', async () => {
-    const failing = (willRetry: boolean) => exampleSyncState({ accountId: second.id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry } })
+    const failing = (willRetry: boolean) => exampleSyncState({ accountId: second.id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry }, failureSince: FAILING_SINCE })
     const { dialog, view } = renderDialog([exampleAccount(), second], {}, testClient([exampleAccount(), second]), { [second.id]: failing(true) })
     const row = within(dialog).getByTitle('me@example.com · IMAP/SMTP')
     expect(within(row).getByText('me@example.com')).toHaveClass('opacity-70')
@@ -299,16 +302,16 @@ describe('accounts dialog', () => {
     expect(within(within(stopped.dialog).getByTitle('me@example.com · IMAP/SMTP')).getByRole('img', { name: '同步已停止' })).toHaveClass('text-destructive')
   })
 
-  it('opens on the first account with a problem, stopped before retrying, unless a target is given', async () => {
+  it('opens on the first account unless a target is given, never one with a sync failure', async () => {
     const third = exampleAccount({ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', displayName: '备用邮箱', emailAddress: 'backup@example.com' })
     const rows = [exampleAccount(), second, third]
     const states = {
-      [exampleAccount().id]: exampleSyncState({ accountId: exampleAccount().id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry: true } }),
-      [third.id]: exampleSyncState({ accountId: third.id, phase: 'failed', failure: { code: 'authentication', message: '', detail: null, willRetry: false } }),
+      [exampleAccount().id]: exampleSyncState({ accountId: exampleAccount().id, phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry: true }, failureSince: FAILING_SINCE }),
+      [third.id]: exampleSyncState({ accountId: third.id, phase: 'failed', failure: { code: 'authentication', message: '', detail: null, willRetry: false }, failureSince: FAILING_SINCE }),
     }
     const first = renderDialog(rows, {}, testClient(rows), states)
-    await waitFor(() => expect(within(first.dialog).getByLabelText('账号名称')).toHaveValue('备用邮箱'))
-    expect(first.client.getAccount).not.toHaveBeenCalledWith(exampleAccount().id)
+    await waitFor(() => expect(within(first.dialog).getByLabelText('账号名称')).toHaveValue('工作邮箱'))
+    expect(first.client.getAccount).not.toHaveBeenCalledWith(third.id)
     first.view.unmount()
 
     const explicit = renderDialog(rows, { accountId: second.id }, testClient(rows), states)

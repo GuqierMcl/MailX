@@ -2,6 +2,7 @@ import type { Account, AccountSyncState } from '@/generated/accounts'
 import { t } from '@/i18n'
 import { providerOf } from './providers'
 import { signInNeeded } from './sign-in-state'
+import { visibleSyncFailure } from './sync-quiet'
 
 /** Whether a saved credential or the route must be confirmed again before MailX uses it. */
 export function needsTrust(account: Account): boolean {
@@ -14,15 +15,14 @@ export function needsTrust(account: Account): boolean {
 /** `stopped` needs the user; `retrying` is a failure the worker will try again on its own. */
 export type AccountProblem = 'stopped' | 'retrying'
 
+/**
+ * The problem the ambient interface should mark. A retryable failure only
+ * counts once it has lasted long enough to be more than a blip; a stopped one
+ * always does.
+ */
 export function accountProblem(account: Account, sync: AccountSyncState | undefined): AccountProblem | null {
   if (needsTrust(account) || signInNeeded(account) || (sync?.failure && !sync.failure.willRetry)) return 'stopped'
-  return sync?.failure ? 'retrying' : null
-}
-
-/** The first account in the given order that has a problem, a stopped one before one that is retrying. */
-export function firstProblemAccountId(accounts: Account[], syncStates: Record<string, AccountSyncState>): string | null {
-  const problems = accounts.map((account) => ({ id: account.id, problem: accountProblem(account, syncStates[account.id]) }))
-  return (problems.find((entry) => entry.problem === 'stopped') ?? problems.find((entry) => entry.problem === 'retrying'))?.id ?? null
+  return visibleSyncFailure(sync) ? 'retrying' : null
 }
 
 /** What keeps this account from syncing, as the page needs to present it. */
@@ -35,7 +35,10 @@ export function accountIssues(account: Account, sync: AccountSyncState | undefin
   const stoppedForSignIn = oauth && (stopped?.code === 'signInRequired' || stopped?.code === 'credentialMissing')
   // Only a sign-in the account can't sync without is an issue; otherwise it is a connection action.
   const signInFirst = oauth && signInNeeded(account, stoppedForSignIn)
-  return { needsTrust: trust, stopped, oauth, stoppedForSignIn, signInFirst, retrying: sync?.failure && sync.failure.willRetry ? sync.failure : null }
+  // The header says a retry is in progress even while the rest of the interface stays
+  // quiet: a person who opened the settings is asking what is going on.
+  const retrying = sync?.failure && sync.failure.willRetry ? sync.failure : null
+  return { needsTrust: trust, stopped, oauth, stoppedForSignIn, signInFirst, retrying }
 }
 
 /** How the account connects: the plain protocol pair, or the provider's browser sign-in. */
