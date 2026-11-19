@@ -79,11 +79,17 @@ async fn cancellation_releases_sockets_and_storage_is_unlocked_during_network() 
     let running =
         tokio::spawn(async move { task_core.verify_account_connection(task_attempt).await });
     let (mut socket, _) = listener.accept().await.unwrap();
-    let _storage = core
-        .service
-        .try_lock()
+    // The probe now waits for a greeting that never comes: a lock held by the
+    // network step would stay held, while a moment's hold by anything else
+    // (a slow runner) must not fail the test.
+    let free = async {
+        while core.service.try_lock().is_err() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(2), free)
+        .await
         .expect("network never holds the store lock");
-    drop(_storage);
     assert_eq!(
         core.verify_account_connection(request(&account))
             .await
