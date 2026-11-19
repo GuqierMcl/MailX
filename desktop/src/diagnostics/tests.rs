@@ -5,6 +5,19 @@ use serde_json::{Value, json};
 
 use super::*;
 
+impl Diagnostics {
+    pub(crate) fn stop_and_wait_for_writer(&self) {
+        assert!(self.stop());
+        // The writer signals after releasing its files. The sender may still
+        // be alive when that signal is received.
+        self.done
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(10))
+            .expect("diagnostic writer did not finish");
+    }
+}
+
 fn read_records(path: &Path) -> Vec<Value> {
     fs::read_to_string(path)
         .unwrap()
@@ -21,7 +34,7 @@ fn shutdown_drains_records_and_next_session_appends() {
         let diagnostics = Diagnostics::start(profile.path());
         let sink = diagnostics.sink();
         sink(DiagnosticEvent::Startup);
-        diagnostics.shutdown();
+        diagnostics.stop_and_wait_for_writer();
         sink(DiagnosticEvent::Startup);
     }
     let records = read_records(&logs);
@@ -106,11 +119,7 @@ fn idle_writer_stops_even_when_a_sink_is_retained() {
     let profile = tempfile::tempdir().unwrap();
     let diagnostics = Diagnostics::start(profile.path());
     let sink = diagnostics.sink();
-    diagnostics.shutdown();
-    assert!(matches!(
-        diagnostics.done.lock().unwrap().try_recv(),
-        Err(mpsc::TryRecvError::Disconnected)
-    ));
+    diagnostics.stop_and_wait_for_writer();
     sink(DiagnosticEvent::Startup);
     assert!(!profile.path().join("logs").exists());
 }

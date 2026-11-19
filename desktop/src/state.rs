@@ -500,7 +500,7 @@ mod tests {
         let accounts = tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
             .expect("ready service should accept business calls");
         assert!(accounts.is_empty());
-        logs.shutdown();
+        logs.stop_and_wait_for_writer();
         let log = std::fs::read_to_string(directory.path().join("logs/diagnostics.jsonl")).unwrap();
         let record: serde_json::Value = serde_json::from_str(&log).unwrap();
         assert_eq!(record["event"], "startup_ready");
