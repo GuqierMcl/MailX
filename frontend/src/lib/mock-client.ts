@@ -1178,6 +1178,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     // The preview's composer tabs cannot be brought forward, so none counts as open.
     async focusComposer() { return false },
+    // The preview has no agent tools to keep away from the inline draft.
+    setInlineComposer: async () => undefined,
     closeComposer: async () => undefined,
     cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),

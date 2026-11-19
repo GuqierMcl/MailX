@@ -160,6 +160,8 @@ describe('drafts and sending commands', () => {
     await client.resolveUnknown({ id: 'o', resolution: 'markSent', clientMutationId: 'c' })
     await client.openComposer('d')
     await client.focusComposer('d')
+    await client.setInlineComposer('d')
+    await client.setInlineComposer(null)
     await client.closeComposer()
     const calls = vi.mocked(invoke).mock.calls
     expect(calls.map(([command, args]) => [command, args])).toEqual([
@@ -179,6 +181,8 @@ describe('drafts and sending commands', () => {
       ['outbox_resolve_unknown', { id: 'o', choice: 'markSent', clientMutationId: 'c' }],
       ['composer_open', { draftId: 'd' }],
       ['composer_focus', { draftId: 'd' }],
+      ['composer_set_inline', { draftId: 'd' }],
+      ['composer_set_inline', { draftId: null }],
       ['composer_close', { force: false, generation: null }],
     ])
   })
