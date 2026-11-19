@@ -175,6 +175,10 @@ With a model set up, the Now page offers "Summarize with AI" next to its summary
 
 With the assistant on and a model set up, the bottom of the Now page has a box: "Ask about your mail". Ask it to find, sum up or sort mail, write a draft or send one. Enter sends; Shift+Enter starts a new line; the same button stops a reply. The page switches to the conversation; "Back" returns to the overview and keeps the conversation while MailX runs, and "New chat" starts over. The clock button next to it opens History: past chats, newest first, to reopen and continue or delete one. Chats are saved on this computer; Settings → Integrations → AI → Assistant can turn saving off and clear them all. You can also choose "Ask AI" in the command palette.
 
+### Ask about what you are reading
+
+With the assistant on, mail pages show a small "Ask about your mail" button at the bottom right. It follows what you have on screen: open a message and it says "Ask about this email", pick several in the list and it says "Ask about the selected emails", write or preview a draft and it says "Ask about this draft". Choose it (or press Cmd/Ctrl+J) and the assistant opens in its own panel beside the mail; the list and the message share the space as in single-column reading until you close it. The panel can be widened by dragging its left edge, and on a narrow window it floats over the mail. A label above the box shows what your next message will be about; choose "Leave this out" to ask without it. The conversation is the same one as on the Now page: opening the Now page keeps it, and "Ask AI" in the command palette opens the panel too. Cmd/Ctrl+J closes it again. Esc inside the panel stops a reply but never closes the mail beside it.
+
 What the assistant does shows in the conversation: when the model thinks before it answers, a line shows "Thinking" and the seconds so far, then "Thought for 12 seconds"; click it to read what it thought (it starts collapsed, and some providers send no readable thinking, in which case only the time shows); searches and reads as short lines, archiving or marking with an Undo, drafts as cards you can open. Mail and folders it mentions show as cards or small labels; click one to open it. Replies can contain headings, lists, task lists, tables and code blocks; a code block has a copy button, and links open in your browser. It cannot delete mail. Under Settings → Integrations → AI → Assistant you choose whether sorting mail and its own drafts happen directly or ask first, and whether sending asks every time (the default) or sends directly; you can also add custom instructions such as how to address you. When it wants to send, a card shows the sender, recipients, subject, the start of the text and attachments, with a note when a recipient is new or did not come up in the conversation; nothing is sent until you choose Send, and the usual undo-send delay still applies. Models that cannot use tools only answer questions.
 
 ## Composing and sending
@@ -193,7 +197,7 @@ The Sent folder shows a local copy until MailX matches it to the provider's save
 
 ## Connecting external AI clients (MCP)
 
-MailX includes a local MCP server. A built-in AI assistant is not available yet. MCP is off by default.
+MailX includes a local MCP server, separate from its built-in AI assistant. MCP is off by default.
 
 1. Open Settings → MCP, turn it on and read the authorization confirmation. The master switch gives connected local clients reading, mail organizing, draft and local file attachment management, attachment export, and direct sending for all accounts, **with no per-message send confirmation**.
 2. Under Connect an agent, choose your client. Claude Code, Codex and OpenCode use personal configurations; Cursor and Trae open their official import flow, which you finish in the client. Existing unrelated settings are preserved. A conflicting MailX entry requires an explicit replacement.

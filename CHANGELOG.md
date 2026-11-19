@@ -19,13 +19,21 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🚀 Feature
 
 - Choose AI models from the connection’s API or from presets, and distinguish same-name models on gateways such as Magpie by upstream and full ID. / AI 模型可从接口或预设目录选择，Magpie 等网关的同名模型可按上游和完整 ID 区分。 ([#163](https://github.com/GuqierMcl/MailX/pull/163))
+- Forwards now carry the pictures inside the original message, not just its files; replies keep a written note of them instead of a broken image. / 转发现在会带上原邮件正文里的图片，而不只是附件；回复里保留图片的说明文字，不再留空。
+- Ask the AI assistant about the email you are reading, the emails you selected or the draft you are writing, from a capsule on mail pages and a panel of its own beside the mail. / 邮件页面右下角新增 AI 胶囊，可就正在阅读的邮件、选中的邮件或正在写的草稿向 AI 助手提问，对话在邮件旁单独的对话岛里展开。
+- Add a mail_help tool so MCP clients and the AI assistant can ask how a tool works; reading a mail now says whether its text came from the plain-text part or from HTML, the assistant can optionally read the HTML structure (Settings, off by default), a reply draft reports when the quoted original was cut short, and drafts can take inline pictures. / 新增 mail_help 工具，MCP 客户端与 AI 助手可查询各工具的用法；读取邮件会说明文字来自纯文本还是 HTML，AI 助手可选择读取 HTML 结构（设置项，默认关闭），回复草稿会提示引用的原文是否被截断，草稿可添加内嵌图片。
 - Keep rotating local diagnostic logs for startup and mail sync, including failures, sync retries and recovery, and selected IMAP counts. / 新增本地轮转诊断日志，记录启动和同步故障、同步重试与恢复及部分 IMAP 响应计数。 ([#158](https://github.com/GuqierMcl/MailX/pull/158))
 
 ### 🩹 Fixed
 
 - Stop MCP clients and the AI assistant from changing, deleting or sending a draft that is open in the main window's composer, as for a composer window. / 修复 MCP 客户端与 AI 助手可以修改、删除或发送正在主窗口内写信区编辑的草稿的问题，现与写信窗口一致。 ([#159](https://github.com/GuqierMcl/MailX/pull/159))
+- Stop a mailbox whose server never returns message flags (2925) from failing every sync round and eventually being rejected at sign-in; such mails keep their last known read and starred state. / 修复服务器始终不返回邮件标记的邮箱（2925）每轮同步都失败、最终被服务器拒绝登录的问题；这些邮件保留上次已知的已读和星标状态。
 - Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 - Fix sync errors for empty folders on IMAP servers that omit empty search results. / 修复部分 IMAP 服务器省略空搜索结果时，空文件夹同步报错的问题。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
+
+### 🔄 Changed
+
+- MCP and AI assistant tools were renamed and some merged (for example search_emails is now mail_search, archive and unarchive are one mail_archive, and the outbox and draft attachment tools are one each); MCP clients must list the tools again and update any saved tool names. / MCP 与 AI 助手的工具已改名，部分工具合并（例如 search_emails 改为 mail_search，归档与取消归档合并为 mail_archive，发件箱与草稿附件工具各合并为一个）；MCP 客户端需重新获取工具列表，并更新已保存的工具名称。
 
 ## [0.4.1] - 2026-11-18
 

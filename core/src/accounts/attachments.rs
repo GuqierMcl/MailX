@@ -47,15 +47,19 @@ impl AccountService {
         request: AddAttachmentRequest,
         bytes: &[u8],
     ) -> Result<Draft, AppError> {
-        self.add_attachment_with_origin(request, bytes, AttachmentOrigin::User)
+        self.add_attachment_with_origin(request, bytes, AttachmentOrigin::User, false)
     }
 
     /// The trusted caller supplies provenance; it is never part of tool input.
+    /// A regular attachment, or with `inline` an image the body references by
+    /// `cid:` (sending.md 16.11.4), under a fresh Content-ID at the sender's
+    /// domain. Inline images pass the same checks as a pasted one.
     pub fn add_attachment_with_origin(
         &mut self,
         request: AddAttachmentRequest,
         bytes: &[u8],
         origin: AttachmentOrigin,
+        inline: bool,
     ) -> Result<Draft, AppError> {
         validate_uuid(&request.draft_id, "draftId")?;
         let file_name = sanitize_file_name(&request.file_name)
@@ -72,7 +76,15 @@ impl AccountService {
         if draft.revision != request.expected_revision {
             return Err(AppError::new(ErrorCode::Conflict));
         }
-        let media_type = sniff_media_type(bytes, &file_name);
+        let (media_type, content_id) = if inline {
+            let media_type = sniff_image_type(bytes)?;
+            validate_image(bytes, media_type)
+                .map_err(|_| AppError::new(ErrorCode::UnsupportedImage))?;
+            let (sender, _) = self.storage.account_sender(&draft.account_id)?;
+            (media_type.to_owned(), Some(new_content_id(&sender)?))
+        } else {
+            (sniff_media_type(bytes, &file_name), None)
+        };
         let blob = self.storage.blobs.put(bytes)?;
         let id = new_id();
         self.storage.add_attachment(
@@ -80,7 +92,7 @@ impl AccountService {
             request.expected_revision,
             &NewAttachment {
                 id: &id,
-                content_id: None,
+                content_id: content_id.as_deref(),
                 file_name: &file_name,
                 media_type: &media_type,
                 blob: &blob,

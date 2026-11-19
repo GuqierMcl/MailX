@@ -19,9 +19,10 @@ use super::{
     prompt,
     summary::{self, SUMMARY_OUTPUT_CAP},
     types::{
-        ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason, FlagRestore,
-        ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+        ChatContext, ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason,
+        FlagRestore, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
     },
+    view,
 };
 use crate::{
     ErrorCode,
@@ -47,7 +48,7 @@ pub(crate) const DEFAULT_CONTEXT_TOKENS: u32 = 32_000;
 /// A conversation stops growing at this share of the window.
 const CONTEXT_SHARE_PERCENT: u64 = 80;
 /// Longest tool result handed to the model, in characters.
-const MAX_RESULT_CHARS: usize = 64_000;
+pub(super) const MAX_RESULT_CHARS: usize = 64_000;
 const MAX_SUMMARY_ITEMS: usize = 50;
 
 enum Outcome {
@@ -243,6 +244,7 @@ pub(crate) async fn chat(
     run_id: String,
     conversation: ActiveConversation,
     mut messages: Vec<ChatMessage>,
+    context: Option<ChatContext>,
 ) {
     let _end = EndGuard {
         inner: inner.clone(),
@@ -253,7 +255,7 @@ pub(crate) async fn chat(
     let mut save = SaveGuard::new(inner.clone(), conversation);
     let id = save.id();
     let mut extras = RunExtras::default();
-    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras).await;
+    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras, context).await;
     save.finish(match &outcome {
         Outcome::Finished(reason) => End::finished(*reason),
         Outcome::Failed(code) => End::failed(*code),
@@ -285,6 +287,7 @@ async fn chat_loop(
     conversation_id: &str,
     messages: &mut Vec<ChatMessage>,
     extras: &mut RunExtras,
+    context: Option<ChatContext>,
 ) -> Outcome {
     let definitions = definitions(&inner.tools);
     let definitions_cost = estimate(
@@ -298,6 +301,8 @@ async fn chat_loop(
     );
     // What this run has shown the model, and what the user turned down.
     let mut memory = Memory::default();
+    // What the user is looking at, read once on the first turn.
+    let mut view_note: Option<String> = None;
     for turn_number in 1..=MAX_TURNS {
         // Settings are read again every turn: a switched-off assistant, a
         // revoked consent or another model applies at once.
@@ -309,12 +314,27 @@ async fn chat_loop(
         // `None` (unknown) tries with tools; only a known "no" leaves them out.
         let with_tools = ready.target.tool_call != Some(false);
         let tools: &[ToolDefinition] = if with_tools { &definitions } else { &[] };
-        let system = prompt::chat_system(
+        if view_note.is_none() {
+            let described = match &context {
+                Some(context) => view::describe(inner, run_id, context.clone(), with_tools).await,
+                None => None,
+            };
+            view_note = Some(match described {
+                Some(described) => {
+                    extras.accounts.extend(described.accounts);
+                    memory.seen.extend(described.addresses);
+                    described.note
+                }
+                None => String::new(),
+            });
+        }
+        let mut system = prompt::chat_system(
             ready.locale,
             &utc_now(),
             &ready.settings.instructions,
             with_tools,
         );
+        system.push_str(view_note.as_deref().unwrap_or_default());
         let tools_cost = if with_tools { definitions_cost } else { 0 };
         let cost =
             estimate(&system) + tools_cost + estimate_messages(messages, &origin(&ready.target));
@@ -578,21 +598,12 @@ fn execute(
             "The assistant is turned off.",
         ));
     }
-    // The ids only matter when some account is left out.
-    let ids: Vec<String> = if settings.excluded_accounts.is_empty() {
-        Vec::new()
-    } else {
-        match inner.core.account_identities() {
-            Ok(identities) => identities.into_iter().map(|a| a.id).collect(),
-            Err(_) => {
-                return Step::Done(Executed::failed(
-                    "unavailable",
-                    "MailX is temporarily unavailable.",
-                ));
-            }
-        }
+    let Some(grant) = grant_for(inner, &settings) else {
+        return Step::Done(Executed::failed(
+            "unavailable",
+            "MailX is temporarily unavailable.",
+        ));
     };
-    let grant = policy::grant(&settings, &ids);
     if !approved {
         if !policy::is_known(&call.name) {
             // Nothing meaningful to show the user; never run.
@@ -638,7 +649,7 @@ fn execute(
             let mut addresses = Vec::new();
             if matches!(
                 call.name.as_str(),
-                "read_email" | "search_emails" | "get_conversation" | "suggest_contacts"
+                "mail_read" | "mail_search" | "mail_conversation" | "mail_contacts"
             ) {
                 collect_addresses(&output, &mut addresses);
             }
@@ -666,8 +677,28 @@ fn execute(
     })
 }
 
+/// The grant a call gets under `settings`; `None` when the accounts cannot be
+/// read. The ids only matter when some account is left out.
+pub(super) fn grant_for(
+    inner: &Inner,
+    settings: &crate::settings::AssistantSettings,
+) -> Option<crate::tools::Grant> {
+    let ids: Vec<String> = if settings.excluded_accounts.is_empty() {
+        Vec::new()
+    } else {
+        inner
+            .core
+            .account_identities()
+            .ok()?
+            .into_iter()
+            .map(|a| a.id)
+            .collect()
+    };
+    Some(policy::grant(settings, &ids))
+}
+
 /// Every `address` string in a tool result, lowercased.
-fn collect_addresses(value: &Value, out: &mut Vec<String>) {
+pub(super) fn collect_addresses(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
             for (key, inner) in map {
@@ -753,32 +784,36 @@ fn summarize(
     trusted: &TrustedOutput,
 ) -> ToolActivitySummary {
     match name {
-        "search_emails" | "get_conversation" => ToolActivitySummary::Found {
+        "mail_search" | "mail_conversation" => ToolActivitySummary::Found {
             count: count(output.get("emails")),
         },
-        "suggest_contacts" => ToolActivitySummary::Found {
+        "mail_contacts" => ToolActivitySummary::Found {
             count: count(output.get("contacts")),
         },
-        "list_accounts" => ToolActivitySummary::Found {
+        "accounts_list" => ToolActivitySummary::Found {
             count: count(output.get("accounts")),
         },
-        "list_folders" => ToolActivitySummary::Found {
+        "mail_folders" => ToolActivitySummary::Found {
             count: count(output.get("folders")),
         },
-        "list_drafts" => ToolActivitySummary::Found {
+        "draft_list" => ToolActivitySummary::Found {
             count: count(output.get("drafts")),
         },
-        "list_outbox" => ToolActivitySummary::Found {
+        // A single task reads like its own result; a page counts items.
+        "outbox_read" if output.get("item").is_some() => ToolActivitySummary::Outbox {
+            outbox_id: text(output.get("item").unwrap_or(&Value::Null), "id", 64),
+        },
+        "outbox_read" => ToolActivitySummary::Found {
             count: count(output.get("items")),
         },
-        "read_email" => ToolActivitySummary::Read {
+        "mail_read" => ToolActivitySummary::Read {
             email_ids: input
                 .get("emailId")
                 .and_then(Value::as_str)
                 .map(|id| vec![id.chars().take(64).collect()])
                 .unwrap_or_default(),
         },
-        "set_email_flags" => {
+        "mail_flags" => {
             let changed: Vec<String> = output
                 .get("results")
                 .and_then(Value::as_array)
@@ -807,7 +842,7 @@ fn summarize(
                 undo: (!restore.is_empty()).then_some(ToolUndo::Flags { restore }),
             }
         }
-        "archive_emails" | "unarchive_emails" => ToolActivitySummary::Changed {
+        "mail_archive" => ToolActivitySummary::Changed {
             count: output
                 .get("changedCount")
                 .and_then(Value::as_u64)
@@ -818,15 +853,15 @@ fn summarize(
                 .clone()
                 .map(|token| ToolUndo::Archive { token }),
         },
-        "create_draft" | "create_reply_draft" => ToolActivitySummary::Draft {
+        "draft_create" | "draft_reply" => ToolActivitySummary::Draft {
             draft_id: text(output, "draftId", 64),
             subject: text(output, "subject", 200),
         },
-        "update_draft" => ToolActivitySummary::Draft {
+        "draft_update" => ToolActivitySummary::Draft {
             draft_id: text(output, "draftId", 64),
             subject: text(output, "subject", 200),
         },
-        "send_email" | "get_outbox" | "cancel_outbox" => ToolActivitySummary::Outbox {
+        "outbox_send" | "outbox_cancel" => ToolActivitySummary::Outbox {
             outbox_id: text(output, "id", 64),
         },
         _ => ToolActivitySummary::Done,
@@ -930,14 +965,14 @@ mod tests {
     #[test]
     fn summaries_are_structured_and_bounded() {
         let found = summarize(
-            "search_emails",
+            "mail_search",
             &json!({}),
             &json!({"emails": [{"id": "a"}, {"id": "b"}]}),
             &TrustedOutput::default(),
         );
         assert_eq!(found, ToolActivitySummary::Found { count: 2 });
         let changed = summarize(
-            "archive_emails",
+            "mail_archive",
             &json!({"emailIds": ["a", "b"]}),
             &json!({"processedCount": 2, "changedCount": 1}),
             &TrustedOutput::default(),
@@ -951,7 +986,7 @@ mod tests {
             }
         );
         let flags = summarize(
-            "set_email_flags",
+            "mail_flags",
             &json!({"emailIds": ["a", "b", "c"], "isRead": true, "isStarred": true}),
             &json!({"results": [
                 {"emailId": "a", "isRead": {"status": "queued"}},
@@ -989,7 +1024,7 @@ mod tests {
             }
         );
         let draft = summarize(
-            "create_draft",
+            "draft_create",
             &json!({}),
             &json!({"draftId": "d1", "subject": "Hi", "accountId": "x"}),
             &TrustedOutput::default(),
@@ -1003,7 +1038,7 @@ mod tests {
         );
         assert_eq!(
             summarize(
-                "refresh_sync",
+                "accounts_refresh_sync",
                 &json!({}),
                 &json!({"accepted": true}),
                 &TrustedOutput::default()

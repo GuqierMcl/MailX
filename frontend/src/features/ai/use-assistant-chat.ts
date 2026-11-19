@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PendingConfirmation } from '@/generated/accounts'
+import type { ChatContext, PendingConfirmation } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { savedMessages, type ChatMessage, type ChatTurn } from './chat-model'
 import { useAssistantRun, type AssistantRun } from './use-assistant-run'
@@ -19,7 +19,8 @@ export type AssistantChat = {
   pending: PendingConfirmation | null
   /** False once the host said the model cannot use tools; true until then. */
   toolsAvailable: boolean
-  send: (message: string) => Promise<SendResult>
+  /** `context` is what the user is looking at (an email, a selection, a draft); the core reads it for this reply only. */
+  send: (message: string, context?: ChatContext | null) => Promise<SendResult>
   /** Stops the reply; what was written stays. */
   stop: () => void
   /** Answers the pending confirmation. */
@@ -67,6 +68,7 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
   const [viewKey, setViewKey] = useState(0)
   const opening = useRef(0)
   const lastMessage = useRef<string | null>(null)
+  const lastContext = useRef<ChatContext | null>(null)
   const counter = useRef(0)
   const sending = useRef(false)
   const [turnNo, setTurnNo] = useState(0)
@@ -91,8 +93,13 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     }
   }), [client])
 
-  const begin = useCallback(async (message: string): Promise<SendResult> => {
-    const snapshot = await latest.current.run.start({ type: 'chat', ...(conversation.current ? { conversationId: conversation.current } : {}), message })
+  const begin = useCallback(async (message: string, context: ChatContext | null): Promise<SendResult> => {
+    const snapshot = await latest.current.run.start({
+      type: 'chat',
+      ...(conversation.current ? { conversationId: conversation.current } : {}),
+      message,
+      ...(context ? { context } : {}),
+    })
     if (snapshot?.state === 'awaitingConsent') return 'consent'
     if (!snapshot) return 'failed'
     // The conversation exists in the host only once a run really started.
@@ -101,7 +108,7 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     return 'sent'
   }, [])
 
-  const send = useCallback(async (text: string): Promise<SendResult> => {
+  const send = useCallback(async (text: string, context: ChatContext | null = null): Promise<SendResult> => {
     const message = text.trim()
     if (message === '') return 'empty'
     // A run left over from a conversation that was cleared does not count: starting replaces it.
@@ -115,12 +122,14 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     setHistory((list) => [...list, ...settled, { id: userId, role: 'user', text: message }])
     setOpen(true)
     lastMessage.current = message
-    const result = await begin(message).finally(() => { sending.current = false })
+    lastContext.current = context
+    const result = await begin(message, context).finally(() => { sending.current = false })
     if (result === 'consent') {
       // Nothing went out: the message is not part of the conversation yet.
       setHistory((list) => list.filter((entry) => entry.id !== userId))
       setOpen(false)
       lastMessage.current = null
+      lastContext.current = null
     }
     return result
   }, [begin])
@@ -129,7 +138,8 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     const message = lastMessage.current
     if (!message || (latest.current.run.active && latest.current.open) || sending.current) return 'busy'
     sending.current = true
-    const result = await begin(message).finally(() => { sending.current = false })
+    // Asked again about what it was asked about then, even if the screen moved on.
+    const result = await begin(message, lastContext.current).finally(() => { sending.current = false })
     return result === 'consent' ? 'failed' : result
   }, [begin])
 

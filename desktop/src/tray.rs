@@ -240,8 +240,8 @@ fn refresh_mail(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let _ = state
             .run(|core| {
-                for account in core.list_accounts()? {
-                    core.refresh_sync(&account.id)?;
+                for account in core.accounts_list()? {
+                    core.accounts_refresh_sync(&account.id)?;
                 }
                 Ok(())
             })

@@ -171,11 +171,13 @@ impl Storage {
         for attachment in attachments {
             let size = i64::try_from(attachment.blob.size)
                 .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+            // An inline row is addressed by its Content-ID; the drafts the core
+            // creates from a source (a forward's images) arrive this way.
             tx.execute(
                 "INSERT INTO draft_attachments
                     (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
                      origin, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     draft.id,
                     attachment.id,
@@ -183,6 +185,8 @@ impl Storage {
                     attachment.media_type,
                     size,
                     attachment.blob.sha256,
+                    attachment.content_id.is_some(),
+                    attachment.content_id,
                     attachment.origin.as_str(),
                     draft.now,
                 ],
@@ -226,7 +230,7 @@ impl Storage {
         self.with_attachments(draft)
     }
 
-    pub(crate) fn list_drafts(
+    pub(crate) fn draft_list(
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<DraftSummary>, AppError> {
@@ -333,7 +337,7 @@ impl Storage {
     }
 
     /// Compare-and-swap on `revision`, in one transaction.
-    pub(crate) fn update_draft(
+    pub(crate) fn draft_update(
         &mut self,
         id: &str,
         expected_revision: u32,
@@ -376,7 +380,7 @@ impl Storage {
         self.get_draft(id)
     }
 
-    pub(crate) fn delete_draft(&self, id: &str) -> Result<(), AppError> {
+    pub(crate) fn draft_delete(&self, id: &str) -> Result<(), AppError> {
         if self.db.execute("DELETE FROM drafts WHERE id = ?1", [id])? == 0 {
             return Err(AppError::new(ErrorCode::NotFound));
         }

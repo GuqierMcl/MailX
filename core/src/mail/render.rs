@@ -203,11 +203,39 @@ pub fn attachment_content(raw: &[u8], part_index: usize) -> Result<AttachmentCon
     let entity = entities
         .into_iter()
         .find(|entity| entity.index == part_index)
-        .filter(listed_attachment)
+        // An inline image is exportable too: a caller that saw its id in the
+        // message's parts can save it like any other file.
+        .filter(|entity| listed_attachment(entity) || (!entity.is_body && is_inline(entity.part)))
         .ok_or(RenderError::MissingPart)?;
     Ok(AttachmentContent {
         bytes: part_bytes(entity.part).to_vec(),
     })
+}
+
+/// One inline resource of a message: the bytes a `cid:` reference points at,
+/// with the Content-ID as `render` normalizes it.
+pub struct DecodedInline {
+    pub content_id: String,
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Every inline resource of a message, in pre-order, for a forward that carries
+/// the images over (sending.md 16.11.11).
+pub fn inline_contents(raw: &[u8]) -> Result<Vec<DecodedInline>, RenderError> {
+    let message = parse(raw)?;
+    Ok(entities(&message)?
+        .into_iter()
+        .filter(|entity| !entity.is_body && is_inline(entity.part))
+        .filter_map(|entity| {
+            let content_id = entity.part.content_id().map(normalize_cid)?;
+            (!content_id.is_empty()).then(|| DecodedInline {
+                content_id,
+                mime_type: mime_type(entity.part),
+                bytes: part_bytes(entity.part).to_vec(),
+            })
+        })
+        .collect())
 }
 
 /// The parts `render` lists as attachments: not a body, inline resource or container.

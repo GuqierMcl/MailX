@@ -15,7 +15,7 @@ pub struct TrustedOutput {
     /// One-use token of `undo_archive` for an archive or unarchive call that
     /// changed something.
     pub archive_undo_token: Option<String>,
-    /// For `set_email_flags`: the flags of each checked message before the
+    /// For `mail_flags`: the flags of each checked message before the
     /// call (messages that were not changed are included).
     pub previous_flags: Vec<PreviousFlags>,
 }

@@ -264,7 +264,7 @@ function EmailContent({ email, ...props }: ContentProps) {
           <VerificationCodeBar emailId={summary.id} verification={summary.localOnly ? undefined : props.verification} />
           <Body email={email} {...props} />
         </div>
-        {attachments.length > 0 && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
+        {attachments.some((attachment) => !attachment.isInline) && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
     </article>
   )
 }

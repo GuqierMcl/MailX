@@ -789,7 +789,13 @@ async fn attachments_are_read_from_the_local_copy_with_a_safe_name() {
     let (_directory, core, ids, _db) = fixture(&[&raw, &raw]);
     // The detail lists only real attachments, with ids this API accepts.
     let detail = core.get_email(&ids[0]).unwrap();
-    let listed: Vec<_> = detail.attachments.iter().map(|a| a.id.clone()).collect();
+    // The inline logo is listed and flagged; the rest are real attachments.
+    let listed: Vec<_> = detail
+        .attachments
+        .iter()
+        .filter(|a| !a.is_inline)
+        .map(|a| a.id.clone())
+        .collect();
     assert_eq!(listed.len(), 2, "{listed:?}");
     assert!(
         listed
@@ -826,12 +832,11 @@ async fn only_listed_attachments_of_the_named_message_can_be_read() {
     let listed = core.get_email(&ids[0]).unwrap().attachments;
     let id = listed[0].id.clone();
     let other = listed[0].id.replace(&ids[0], &ids[1]);
-    let index: usize = id.rsplit(':').next().unwrap().parse().unwrap();
     for bad in [
         // Another message's id with this message's attachment.
         (ids[1].clone(), id.clone()),
-        // The inline image and the body part are not attachments.
-        (ids[0].clone(), format!("{}:{}", ids[0], index + 1)),
+        // The inline image is listed now, so saving it is a success; a body
+        // part is not an attachment and stays out of reach.
         (ids[0].clone(), format!("{}:1", ids[0])),
         // Malformed or out-of-range ids.
         (ids[0].clone(), format!("{}:{}", ids[0], 999)),

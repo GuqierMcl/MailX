@@ -56,7 +56,7 @@ pub use app::{
 };
 pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
-    Assistant, AssistantEvent, AssistantEventKind, ConfirmAction, ConfirmAttachment,
+    Assistant, AssistantEvent, AssistantEventKind, ChatContext, ConfirmAction, ConfirmAttachment,
     ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
     FlagRestore, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag, RunReasoning,
     RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,

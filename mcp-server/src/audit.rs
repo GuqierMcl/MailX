@@ -63,12 +63,12 @@ mod tests {
             principal_kind: "localMcp",
             principal_id: "conn".into(),
             client_name: Some("evil\nclient".into()),
-            tool_id: "search_emails".into(),
+            tool_id: "mail_search".into(),
             resource_ids: vec!["a".into(), "b".into()],
             error: None,
         });
         assert!(!line.contains('\n'));
-        assert!(line.contains("tool=search_emails"));
+        assert!(line.contains("tool=mail_search"));
         assert!(line.contains("resources=2"));
         assert!(line.contains("outcome=ok"));
     }

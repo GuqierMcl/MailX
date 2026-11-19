@@ -400,6 +400,8 @@
   "assistantInstructions": "自定义指令",
   "assistantInstructionsDescription": "称呼、语气、签名习惯等，会附在每次请求里。",
   "assistantInstructionsCount": "{{length}} / {{max}}",
+  "assistantReadHtml": "让 AI 读取邮件排版",
+  "assistantReadHtmlDescription": "关闭时只读取正文文字，表格和图片位置会丢失；打开后会读取邮件的 HTML 结构，发送给模型的内容会更多。",
   "assistantSaveHistory": "保存对话记录",
   "assistantSaveHistoryDescription": "保存在这台电脑上，可在历史对话中查看。",
   "assistantClearHistory": "清除全部对话",

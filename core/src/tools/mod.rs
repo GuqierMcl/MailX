@@ -13,6 +13,7 @@ mod context;
 mod discovery;
 mod drafts;
 mod error;
+mod help;
 mod mail;
 mod organize;
 mod paging;
@@ -36,6 +37,7 @@ pub use drafts::{
     ListDraftsInput, ListDraftsOutput, ReadDraftOutput, UpdateDraftInput, UpdateDraftOutput,
 };
 pub use error::{ToolError, ToolErrorCode};
+pub use help::{HelpEntry, HelpInput, HelpOutput};
 pub use mail::{
     Address, AttachmentInfo, EmailHit, HitSegment, ReadEmailInput, ReadEmailOutput, Recipients,
     SearchEmailsInput, SearchEmailsOutput,

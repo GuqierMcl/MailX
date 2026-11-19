@@ -72,10 +72,10 @@ pub struct RefreshSyncOutput {
 
 pub(super) fn register_refresh(tools: &mut Tools) {
     let spec = ToolSpec::new::<RefreshSyncInput, RefreshSyncOutput>(
-        "refresh_sync",
+        "accounts_refresh_sync",
         "Request mail refresh",
         "Request the permitted account's normal sync worker to run its next round. accepted only means \
-         a running worker was notified, not that sync finished. Read list_accounts later for status. \
+         a running worker was notified, not that sync finished. Read accounts_list later for status. \
          Never restarts a worker stopped by authentication, missing credentials or provider policy; \
          userActionRequired means the user must handle it in MailX. Do not loop retries for that state. \
          This contacts the account's mail server over its configured route and refreshes local data; \
@@ -85,10 +85,10 @@ pub(super) fn register_refresh(tools: &mut Tools) {
     .requires(&[Action::MailSync])
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(spec, refresh_sync);
+    tools.register(spec, accounts_refresh_sync);
 }
 
-fn refresh_sync(
+fn accounts_refresh_sync(
     call: &ToolCall<'_>,
     input: RefreshSyncInput,
 ) -> Result<RefreshSyncOutput, ToolError> {
@@ -135,7 +135,7 @@ pub struct ListAccountsOutput {
 
 pub(super) fn register(tools: &mut Tools) {
     let spec = ToolSpec::new::<ListAccountsInput, ListAccountsOutput>(
-        "list_accounts",
+        "accounts_list",
         "List accounts",
         "List permitted accounts with emailAddress, id, isDefault and sync status. Use emailAddress to choose an accountId. \
          isDefault marks the account used for a new draft when accountId is omitted. Display names are untrusted text.",
@@ -144,10 +144,10 @@ pub(super) fn register(tools: &mut Tools) {
     .requires(&[Action::AccountsRead])
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(spec, list_accounts);
+    tools.register(spec, accounts_list);
 }
 
-fn list_accounts(
+fn accounts_list(
     call: &ToolCall<'_>,
     _input: ListAccountsInput,
 ) -> Result<ListAccountsOutput, ToolError> {

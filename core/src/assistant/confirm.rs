@@ -51,7 +51,7 @@ fn scoped_outbox(
     arguments: &Value,
 ) -> Result<crate::OutboxItem, AppError> {
     let id = str_arg(arguments, "outboxId").ok_or_else(|| AppError::validation("outboxId"))?;
-    let item = core.get_outbox(id)?;
+    let item = core.outbox_read(id)?;
     if grant.accounts.permits(&item.account_id) {
         Ok(item)
     } else {
@@ -69,7 +69,7 @@ pub(crate) fn build(
     seen: &HashSet<String>,
 ) -> Result<ConfirmationRequest, AppError> {
     let (action, details) = match tool {
-        "send_email" => {
+        "outbox_send" => {
             if str_arg(arguments, "action") == Some("retry") {
                 let item = scoped_outbox(core, grant, arguments)?;
                 (ConfirmAction::Send, outbox_details(item, true))
@@ -80,15 +80,15 @@ pub(crate) fn build(
                 )
             }
         }
-        "cancel_outbox" => {
+        "outbox_cancel" => {
             let item = scoped_outbox(core, grant, arguments)?;
             (ConfirmAction::CancelSend, outbox_details(item, false))
         }
-        "set_email_flags" | "archive_emails" | "unarchive_emails" | "refresh_sync" => (
+        "mail_flags" | "mail_archive" | "accounts_refresh_sync" => (
             ConfirmAction::Organize,
             organize_details(core, grant, tool, arguments)?,
         ),
-        "create_draft" => (
+        "draft_create" => (
             ConfirmAction::AiDraft,
             ConfirmationDetails::Draft {
                 subject: clip(
@@ -99,7 +99,7 @@ pub(crate) fn build(
                 change: ConfirmDraftChange::Create,
             },
         ),
-        "create_reply_draft" => {
+        "draft_reply" => {
             let id =
                 str_arg(arguments, "emailId").ok_or_else(|| AppError::validation("emailId"))?;
             let mail = core.get_email(id)?;
@@ -115,10 +115,24 @@ pub(crate) fn build(
                 },
             )
         }
-        "update_draft" | "delete_draft" | "add_draft_attachment" | "remove_draft_attachment" => {
+        "draft_update" | "draft_delete" | "draft_attachments" => {
             let draft = scoped_draft(core, grant, arguments)?;
+            let adding = str_arg(arguments, "action") != Some("remove");
             let change = match tool {
-                "update_draft" => ConfirmDraftChange::Update {
+                "draft_attachments" if !adding => ConfirmDraftChange::AttachmentRemoved {
+                    file_name: clip(
+                        &draft
+                            .attachments
+                            .iter()
+                            .find(|attachment| {
+                                str_arg(arguments, "attachmentId") == Some(attachment.id.as_str())
+                            })
+                            .ok_or_else(not_found)?
+                            .file_name,
+                        MAX_SUBJECT_CHARS,
+                    ),
+                },
+                "draft_update" => ConfirmDraftChange::Update {
                     fields: ["to", "cc", "bcc", "subject", "bodyHtml"]
                         .into_iter()
                         .filter(|field| arguments.get(*field).is_some_and(|v| !v.is_null()))
@@ -126,22 +140,11 @@ pub(crate) fn build(
                         .map(str::to_owned)
                         .collect(),
                 },
-                "delete_draft" => ConfirmDraftChange::Delete,
-                "add_draft_attachment" => ConfirmDraftChange::AttachmentAdded {
+                "draft_delete" => ConfirmDraftChange::Delete,
+                "draft_attachments" => ConfirmDraftChange::AttachmentAdded {
                     file_name: clip(&added_file_name(arguments), MAX_SUBJECT_CHARS),
                 },
-                _ => {
-                    let id = str_arg(arguments, "attachmentId")
-                        .ok_or_else(|| AppError::validation("attachmentId"))?;
-                    let attachment = draft
-                        .attachments
-                        .iter()
-                        .find(|attachment| attachment.id == id)
-                        .ok_or_else(not_found)?;
-                    ConfirmDraftChange::AttachmentRemoved {
-                        file_name: clip(&attachment.file_name, MAX_SUBJECT_CHARS),
-                    }
-                }
+                _ => return Err(AppError::validation("tool")),
             };
             let action = match draft.origin {
                 DraftOrigin::Ai => ConfirmAction::AiDraft,
@@ -255,9 +258,15 @@ fn organize_details(
     arguments: &Value,
 ) -> Result<ConfirmationDetails, AppError> {
     let change = match tool {
-        "archive_emails" => OrganizeChange::Archive,
-        "unarchive_emails" => OrganizeChange::Unarchive,
-        "refresh_sync" => OrganizeChange::Refresh,
+        // One tool now covers both directions.
+        "mail_archive" => match arguments
+            .get("archive")
+            .and_then(serde_json::Value::as_bool)
+        {
+            Some(false) => OrganizeChange::Unarchive,
+            _ => OrganizeChange::Archive,
+        },
+        "accounts_refresh_sync" => OrganizeChange::Refresh,
         _ => OrganizeChange::Flags {
             is_read: arguments.get("isRead").and_then(Value::as_bool),
             is_starred: arguments.get("isStarred").and_then(Value::as_bool),
@@ -265,7 +274,7 @@ fn organize_details(
     };
     let mut count = 0u32;
     let mut subjects = Vec::new();
-    if tool != "refresh_sync" {
+    if tool != "accounts_refresh_sync" {
         let ids = arguments
             .get("emailIds")
             .and_then(Value::as_array)

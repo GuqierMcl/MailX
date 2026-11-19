@@ -22,7 +22,7 @@ const summary = (id: string, over: Partial<EmailSummary> = {}): EmailSummary => 
 const detail = (id: string): EmailDetail => ({ summary: summary(id), to: [], cc: [], replyTo: [], body: null, bodyFailure: null, attachments: [] })
 
 const tool = (over: Partial<ToolActivity> & { settledAt?: number | null; at?: number }): RunTool => ({
-  callId: 'k1', name: 'archive_emails', status: 'done', summary: { type: 'done' }, at: 0, settledAt: Date.now(), ...over,
+  callId: 'k1', name: 'mail_archive', status: 'done', summary: { type: 'done' }, at: 0, settledAt: Date.now(), ...over,
 })
 
 function setup(env: Partial<ChatEnv> = {}) {
@@ -37,8 +37,8 @@ afterEach(() => { vi.useRealTimers() })
 
 describe('ToolRow', () => {
   it.each([
-    ['get_conversation', '正在查看往来邮件…', '找到了 3 封往来邮件'],
-    ['suggest_contacts', '正在查找联系人…', '找到了 3 位联系人'],
+    ['mail_conversation', '正在查看往来邮件…', '找到了 3 封往来邮件'],
+    ['mail_contacts', '正在查找联系人…', '找到了 3 位联系人'],
   ])('describes %s with its found count', (name, running, done) => {
     const { view } = setup()
     const { rerender } = render(view(<ToolRow tool={tool({ name, status: 'running', summary: { type: 'pending' } })} />))
@@ -49,8 +49,8 @@ describe('ToolRow', () => {
   })
 
   it.each([
-    ['get_conversation', 'Found 1 email in the conversation', 'Found 2 emails in the conversation'],
-    ['suggest_contacts', 'Found 1 contact', 'Found 2 contacts'],
+    ['mail_conversation', 'Found 1 email in the conversation', 'Found 2 emails in the conversation'],
+    ['mail_contacts', 'Found 1 contact', 'Found 2 contacts'],
   ])('uses English singular and plural counts for %s', async (name, singular, plural) => {
     await i18n.changeLanguage('en')
     try {
@@ -63,21 +63,21 @@ describe('ToolRow', () => {
 
   it('says what it is doing, then what it did, without raw tool names', () => {
     const { view } = setup()
-    const { rerender } = render(view(<ToolRow tool={tool({ name: 'search_emails', status: 'running', summary: { type: 'pending' } })} />))
+    const { rerender } = render(view(<ToolRow tool={tool({ name: 'mail_search', status: 'running', summary: { type: 'pending' } })} />))
     expect(screen.getByText('正在搜索邮件…')).toBeInTheDocument()
-    rerender(view(<ToolRow tool={tool({ name: 'search_emails', summary: { type: 'found', count: 12 } })} />))
+    rerender(view(<ToolRow tool={tool({ name: 'mail_search', summary: { type: 'found', count: 12 } })} />))
     expect(screen.getByText('搜索了 12 封邮件')).toBeInTheDocument()
-    expect(screen.queryByText(/search_emails/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/mail_search/)).not.toBeInTheDocument()
     rerender(view(<ToolRow tool={tool({ name: 'mystery_tool', summary: { type: 'done' } })} />))
     expect(screen.getByText('完成了一步')).toBeInTheDocument()
-    rerender(view(<ToolRow tool={tool({ name: 'search_emails', status: 'failed', summary: { type: 'error', code: 'x' } })} />))
+    rerender(view(<ToolRow tool={tool({ name: 'mail_search', status: 'failed', summary: { type: 'error', code: 'x' } })} />))
     expect(screen.getByText('这一步没有成功')).toBeInTheDocument()
   })
 
   it('expands a read step to the emails it touched and opens one', async () => {
     const { client, view, onOpenEmail } = setup()
     client.getEmail.mockImplementation(async (id) => detail(id))
-    render(view(<ToolRow tool={tool({ name: 'read_email', summary: { type: 'read', emailIds: ['m1'] } })} />))
+    render(view(<ToolRow tool={tool({ name: 'mail_read', summary: { type: 'read', emailIds: ['m1'] } })} />))
     expect(screen.getByText('阅读了 1 封邮件')).toBeInTheDocument()
     expect(client.getEmail).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: '展开详情' }))
@@ -98,7 +98,7 @@ describe('ToolRow', () => {
   it('writes flags back to their old values, grouped', async () => {
     const { client, view } = setup()
     render(view(<ToolRow tool={tool({
-      name: 'set_email_flags',
+      name: 'mail_flags',
       summary: {
         type: 'changed', count: 3, emailIds: [],
         undo: { type: 'flags', restore: [
@@ -138,7 +138,7 @@ describe('ToolRow', () => {
   it('shows a written draft as a card that opens it', async () => {
     const { client, view, onOpenDraft } = setup()
     client.getDraft.mockResolvedValue({ to: [{ name: '赵六', address: 'zhao@example.com' }] } as Draft)
-    render(view(<ToolRow tool={tool({ name: 'create_draft', summary: { type: 'draft', draftId: 'd1', subject: '会议纪要' } })} />))
+    render(view(<ToolRow tool={tool({ name: 'draft_create', summary: { type: 'draft', draftId: 'd1', subject: '会议纪要' } })} />))
     expect(screen.getByText('会议纪要')).toBeInTheDocument()
     expect(await screen.findByText('赵六')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '打开草稿' }))
@@ -188,7 +188,7 @@ describe('ChatMessages', () => {
 
   it('answers a confirmation through the host and folds the card', async () => {
     const { view, respond } = setup()
-    const request = { action: 'send' as const, tool: 'send_email', details: { type: 'outbox' as const, retry: false, senderAddress: 'me@example.com', subject: '周报', recipients: ['a@example.com'], recipientCount: 1 } }
+    const request = { action: 'send' as const, tool: 'outbox_send', details: { type: 'outbox' as const, retry: false, senderAddress: 'me@example.com', subject: '周报', recipients: ['a@example.com'], recipientCount: 1 } }
     const waiting = reply({ state: 'awaitingConfirmation', confirms: [{ requestId: 'q', callId: 'k', request, at: 0 }], pendingId: 'q', finishedReason: null })
     const { rerender } = render(view(<ChatMessages messages={[waiting]} />))
     expect(screen.getByRole('group', { name: '取消发送？' })).toBeInTheDocument()

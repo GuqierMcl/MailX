@@ -21,7 +21,7 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| 标识 | 工具层内部稳定 ID，例如 `search_emails`；MCP 适配层对外加 `mailx_` 前缀 |
+| 标识 | 工具层内部稳定 ID，例如 `mail_search`；MCP 适配层对外加 `mailx_` 前缀 |
 | 输入 / 输出 schema | 拒绝未知字段，ID 与字符串有长度上限，字段采用 camelCase，与应用 DTO 一致 |
 | 可见入口 | `builtinAgent`、`mcp` 的组合；未声明即不可见，MCP 必须显式声明 |
 | 所需动作 | 例如 `accounts:read`、`mail:read`、`draft:create`、`draft:write`，授权检查依据 |
@@ -38,7 +38,7 @@ let tools = Tools::new(core, || default_account_id()) // 宿主读取 compose.de
     .with_audit(Arc::new(my_sink));                    // 可选，见第 3 节
 tools.list(Audience::Mcp)            // -> Vec<ToolDescriptor>，只含该入口可见的工具
 tools.list_for(&ctx)                 // 同上，并隐藏授权不含所需动作的工具
-tools.call(&ctx, "read_email", json) // -> Result<serde_json::Value, ToolError>
+tools.call(&ctx, "mail_read", json) // -> Result<serde_json::Value, ToolError>
 tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&ToolCall, I) -> Result<O, ToolError>
 ```
 
@@ -64,9 +64,9 @@ tools.register(spec, handler)        // 注册 / 替换工具，handler: Fn(&Too
 
 发送路径中的 `send::Caller` 由宿主提供：`LocalMcp` → `Caller::Mcp`，`BuiltinAgent` → `Caller::Model`。两者在工具层检查 `mail:send` 与账号范围后走正常队列，不能通过输入伪造为 `Composer`。`MainWindow` 只因主窗口内写信可以入队（见[发信设计 17.7](sending.md#177-写信打开方式)），处理 `unknown` 仍限用户 UI。宿主通过 `with_undo_send_seconds` 注入撤销窗口，读取失败会阻止发送。
 
-账号范围：`list_accounts` 只返回范围内账号；`search_emails` 把请求的 `accountIds` 与范围取交集（范围外 id 被忽略，与不存在的账号表现相同）；`read_email` 先读出邮件所属账号，范围外与不存在的 `emailId` 返回同样的 `notFound`；`create_draft` 的账号不在范围内同样返回 `notFound`。
+账号范围：`accounts_list` 只返回范围内账号；`mail_search` 把请求的 `accountIds` 与范围取交集（范围外 id 被忽略，与不存在的账号表现相同）；`mail_read` 先读出邮件所属账号，范围外与不存在的 `emailId` 返回同样的 `notFound`；`draft_create` 的账号不在范围内同样返回 `notFound`。
 
-账号识别使用本地元数据，不读取凭据。`list_accounts` 的 `isDefault` 与当前范围内新草稿省略账号时的选择一致；草稿结果给出当前 `senderEmailAddress`，发送任务给出冻结的 SMTP 发件地址。Agent 通过邮箱选择账号并回报发件人，无需再猜测 UUID 对应的身份。
+账号识别使用本地元数据，不读取凭据。`accounts_list` 的 `isDefault` 与当前范围内新草稿省略账号时的选择一致；草稿结果给出当前 `senderEmailAddress`，发送任务给出冻结的 SMTP 发件地址。Agent 通过邮箱选择账号并回报发件人，无需再猜测 UUID 对应的身份。
 
 每次调用都重新检查授权状态，关闭 MCP 或撤销后后续调用立即拒绝。已知 `emailId` 也要先确认其账号在范围内，不能绕过账号授权。调用记录主体、工具、资源 ID、结果与 requestId，不记录完整工具结果。
 
@@ -78,34 +78,34 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 | 工具 | 内置 Agent | MCP | 说明 |
 | --- | --- | --- | --- |
-| `list_accounts` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、实际默认标记 `isDefault`、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
-| `search_emails` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；可选 `folderId`（取自 `list_folders`）只搜某个文件夹且不再默认排除 trash / junk |
-| `read_email` | ✓ | ✓ | 纯文本片段、发件方、附件元信息，按字符分页；可选 `download` 在正文未缓存时按需下载（不标已读、60 秒上限） |
-| `list_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |
-| `create_reply_draft` | ✓ | ✓ | 回复 / 全部回复 / 转发草稿，调用方文字放在引用之上，来源标记随主体；原邮件正文须已缓存，永不发送 |
-| `create_draft` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |
-| `list_drafts` | ✓ | ✓ | 范围内全部草稿（不限来源）的摘要，按账号 / 来源 / 主题筛选，每页最多 100 条，支持游标，含 `revision`、`origin`、`locked`、`open`，无正文；`mail:read`；已实现 |
-| `read_draft` | ✓ | ✓ | 单个草稿的收件人、`bodyHtml`、`bodyText`、附件元信息与 `revision`；`mail:read`；已实现 |
-| `update_draft` | ✓ | ✓ | 按 `expectedRevision` 修改给出的字段，不改 `origin` 与附件；`conflict` / `draftLocked` / `draftOpen`；`draft:write`；已实现 |
-| `delete_draft` | ✓ | ✓ | 按 `expectedRevision` 删除草稿（破坏性注解）；`draft:write`；已实现 |
+| `accounts_list` | ✓ | ✓ | 范围内账号 id、显示名、邮箱地址、实际默认标记 `isDefault`、同步状态 `syncStatus`（`ok` / `syncing` / `authError` / `connectionError` / `unknown`，取自同步管理器，不含服务器原文）与 `lastSyncedAt?` |
+| `mail_search` | ✓ | ✓ | 本地检索，限量摘要与游标；默认排除 trash / junk 文件夹，可选 `folderRole` 只搜某一角色（含 trash / junk）；可选 `folderId`（取自 `mail_folders`）只搜某个文件夹且不再默认排除 trash / junk |
+| `mail_read` | ✓ | ✓ | 纯文本片段（带 `textSource`：`plain` 或由 HTML 展平的 `html`）、发件方、附件元信息（含内嵌图片 `isInline`，报告被拦截的远程图片 `remoteImagesBlocked`），按字符分页；仅内置 Agent 且设置 `assistant.readHtml` 开启时另带净化后的 `html`；可选 `download` 在正文未缓存时按需下载（不标已读、60 秒上限） |
+| `mail_folders` | ✓ | ✓ | 范围内账号的已同步文件夹：`id`、`accountId`、`name`、`role`，计数已知时带未读 / 总数；只读本地，需要 `mail:read` |
+| `draft_reply` | ✓ | ✓ | 回复 / 全部回复 / 转发草稿，调用方文字放在引用之上，原邮件超出引用预算被截断时 `quoteTruncated` 为 true，来源标记随主体；原邮件正文须已缓存，永不发送 |
+| `draft_create` | ✓ | ✓ | 只建本地草稿，不代表发送；UI 标出创建来源：MCP 主体写 `mcp`，内置 Agent 主体写 `ai`（`Draft.origin` 与界面标记已有） |
+| `draft_list` | ✓ | ✓ | 范围内全部草稿（不限来源）的摘要，按账号 / 来源 / 主题筛选，每页最多 100 条，支持游标，含 `revision`、`origin`、`locked`、`open`，无正文；`mail:read`；已实现 |
+| `draft_read` | ✓ | ✓ | 单个草稿的收件人、`bodyHtml`、`bodyText`、附件元信息与 `revision`；`mail:read`；已实现 |
+| `draft_update` | ✓ | ✓ | 按 `expectedRevision` 修改给出的字段，不改 `origin` 与附件；`conflict` / `draftLocked` / `draftOpen`；`draft:write`；已实现 |
+| `draft_delete` | ✓ | ✓ | 按 `expectedRevision` 删除草稿（破坏性注解）；`draft:write`；已实现 |
 | `get_ui_context` | ✓ | | 当前选中的邮件或正在编辑的草稿引用 |
 | `propose_draft_edit` | ✓ | | 对编辑器中的草稿提出修改，带 revision，由用户接受 |
 | `present_suggestions` | ✓ | | 摘要、待办等结构化建议展示到界面 |
 | `request_user_confirmation` | ✓ | | 请求用户在界面中确认高风险动作；只能请求，不能批准 |
-| `show_email_in_app` | | ✓ | 先检查范围，再让宿主把 MailX 带到前台并打开某封邮件（只读，但会移动用户焦点）；`mail:read`；已实现 |
-| `set_email_flags` | ✓ | ✓ | 1–50 封、已读与星标分别报告 queued / unchanged / localOnly / failed，允许部分成功 |
-| `archive_emails` / `unarchive_emails` | ✓ | ✓ | 1–50 个目标，本机归档 / 恢复，整批原子；真实计数与 UI 精确撤销 |
-| `refresh_sync` | ✓ | ✓ | 按账号唤醒正常同步任务，不自动恢复服务商策略停止状态 |
-| `show_draft_in_app` | | ✓ | 检查账号范围后打开已有草稿窗口，不发送 |
-| `send_email` | ✓ | ✓ | action 区分直接发送草稿 / 唤醒 queued 任务；版本与幂等保护 |
-| `list_outbox` / `get_outbox` | ✓ | ✓ | 有界查询范围内发送任务，返回稳定状态与错误类别 |
-| `cancel_outbox` | ✓ | ✓ | 仅取消 queued，发送开始后拒绝 |
-| `add_draft_attachment` / `remove_draft_attachment` | ✓ | ✓ | 按 revision 添加本机普通文件 / 移除普通附件，保留草稿打开保护 |
-| `get_conversation` | ✓ | ✓ | 按种子邮件所属账号查询本机已知会话，摘要有界分页，返回完整性说明；正文由 `read_email` 读取 |
-| `suggest_contacts` | ✓ | ✓ | 本机往来地址建议，在候选和统计阶段限制授权账号，不访问远程通讯录 |
-| `save_email_attachment` | | ✓ | 将指定收到的附件写入宿主提供的导出目录，创建唯一文件，不覆盖，不暴露内部 blob 路径；需要 `mail:read` 与 `files:write` |
+| `show_in_app` | | ✓ | `emailId` 或 `draftId` 二选一：邮件先检查范围，再让宿主把 MailX 带到前台并打开（只读，但会移动用户焦点）；草稿检查账号范围后打开已有草稿窗口，不发送；`mail:read`；已实现 |
+| `mail_flags` | ✓ | ✓ | 1–50 封、已读与星标分别报告 queued / unchanged / localOnly / failed，允许部分成功 |
+| `mail_archive` | ✓ | ✓ | 1–50 个目标，必填布尔 `archive`：true 本机归档、false 恢复，整批原子；真实计数与 UI 精确撤销 |
+| `accounts_refresh_sync` | ✓ | ✓ | 按账号唤醒正常同步任务，不自动恢复服务商策略停止状态 |
+| `outbox_send` | ✓ | ✓ | action 区分直接发送草稿 / 唤醒 queued 任务；版本与幂等保护 |
+| `outbox_read` | ✓ | ✓ | 带 `outboxId` 返回单个任务 `item`，不带则返回 `items[]` 与 `nextCursor`（可按账号、状态筛选）；有界查询范围内发送任务，返回稳定状态与错误类别 |
+| `outbox_cancel` | ✓ | ✓ | 仅取消 queued，发送开始后拒绝 |
+| `draft_attachments` | ✓ | ✓ | `action: add \| remove`：按 revision 添加本机文件 / 移除附件，保留草稿打开保护；`inline: true` 添加内嵌图片并返回 `contentId`，非图片报 `unsupportedImage` |
+| `mail_conversation` | ✓ | ✓ | 按种子邮件所属账号查询本机已知会话，摘要有界分页，返回完整性说明；正文由 `mail_read` 读取 |
+| `mail_contacts` | ✓ | ✓ | 本机往来地址建议，在候选和统计阶段限制授权账号，不访问远程通讯录 |
+| `mail_save_attachment` | | ✓ | 将指定收到的附件写入宿主提供的导出目录，创建唯一文件，不覆盖，不暴露内部 blob 路径；需要 `mail:read` 与 `files:write` |
+| `mail_help` | ✓ | ✓ | `tool?`：返回调用方可用的工具目录，给出 `tool` 时附该工具的长说明（长说明在 `core/src/tools/help.rs`，工具列表里的描述保持简短）；`mail:read` |
 
-二十五个 MCP 工具（二十二个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
+二十二个 MCP 工具（其中二十个也对内置 Agent 可见）已实现，输入输出与限制见 [MCP 草案](../contracts/mcp.md#3-工具草案)（schema 以 `ToolDescriptor` 为准）。其余为候选，进入实现前单独补齐 schema。MCP 的 resources / prompts 等协议特有能力若后续提供，只存在于 MCP 适配层。
 
 发送工具随本地 MCP 总开关授权，直接发信无需逐封确认。首次发送核对草稿版本和幂等键，复用现有快照、发送队列与事件；规则见[发送与附件工具](mail-send-tools.md)。
 
@@ -116,7 +116,7 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 | 策略 | 内置 Agent | MCP |
 | --- | --- | --- |
 | 账号范围 | 本次 Run 的选定内容；需要检索更大范围时须先取得该提供商对相应账号的披露授权 | 首版为全部账号；引入逐客户端授权后可再收窄 |
-| `read_email` 输出上限 | 默认 8,000、单次上限 32,000 字符（`AudiencePolicy`，与 MCP 分开存放；Run 输入预算约束待内置 Agent 接入时再定） | 默认 8,000、单次上限 32,000 字符 |
+| `mail_read` 输出上限 | 默认 8,000、单次上限 32,000 字符（`AudiencePolicy`，与 MCP 分开存放；Run 输入预算约束待内置 Agent 接入时再定） | 默认 8,000、单次上限 32,000 字符 |
 | 正文未缓存 | 返回 `bodyNotCached`，界面可提示用户获取 | 默认返回 `bodyNotCached`，不隐式下载；调用方显式传 `download: true` 才下载 |
 | 结果去向 | 发送给所选模型提供商，属于内容披露 | 返回给外部客户端，MailX 无法约束其后续处理 |
 
@@ -156,4 +156,4 @@ core 目前没有日志后端，存储中也没有审计表；工具层因此把
 
 ## 9. 发送与附件工具（2026-11-04）
 
-本批新增六个工具，不增加额外设置页说明或逐封确认。发送 / 重试统一为 `send_email`；发件箱查询和取消复用核心，分页在存储层按授权范围与状态过滤。附件工具只接收本机普通文件，来源按主体记录，结果不带路径。设计与验证边界见[发送与附件工具](mail-send-tools.md)。
+本批新增六个工具，不增加额外设置页说明或逐封确认。发送 / 重试统一为 `outbox_send`；发件箱查询和取消复用核心，分页在存储层按授权范围与状态过滤。附件工具只接收本机普通文件，来源按主体记录，结果不带路径。设计与验证边界见[发送与附件工具](mail-send-tools.md)。

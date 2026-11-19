@@ -109,6 +109,9 @@ pub(super) struct FolderRound {
     pub changed: bool,
     /// New unread inbox mail stored in this round.
     pub arrivals: Vec<NewMailMessage>,
+    /// Cached mails whose flags the server would not confirm; they keep their
+    /// last known state. Reported as a retryable warning, not a failure.
+    pub unresolved_flags: usize,
 }
 
 /// Syncs one folder.
@@ -284,7 +287,11 @@ pub(super) async fn sync_folder(
             );
         }
     }
-    refresh_cached_flags(
+    // Best effort: a server that answers a flags fetch with no data at all (2925)
+    // must not fail the folder every round and keep the account reconnecting.
+    // Those mails keep their last known state; the round still completes and the
+    // next one tries again.
+    round.unresolved_flags = refresh_cached_flags(
         shared,
         token,
         session,
@@ -320,7 +327,7 @@ async fn refresh_cached_flags(
     target: &SyncTarget,
     uids: &[u32],
     changed: &mut bool,
-) -> Result<(), SyncError> {
+) -> Result<usize, SyncError> {
     let mut unresolved = 0;
     for batch in uids.chunks(FLAGS_BATCH_SIZE) {
         let flags = session.fetch_flags(batch).await?;
@@ -359,10 +366,7 @@ async fn refresh_cached_flags(
             store_flags(shared, token, target, flags, changed).await?;
         }
     }
-    if unresolved > 0 {
-        return Err(ImapError::FlagsIncomplete(unresolved).into());
-    }
-    Ok(())
+    Ok(unresolved)
 }
 
 async fn store_flags(

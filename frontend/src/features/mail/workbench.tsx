@@ -68,6 +68,9 @@ import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
 import { NowPage } from '@/features/now/now-page'
 import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
+import { AssistantCapsule, AssistantIsland, type AssistantView } from '@/features/ai/assistant-island'
+import { useAssistantUsable } from '@/features/ai/use-assistant-usable'
+import { ASSISTANT_DEFAULT, clampAssistantWidth } from '@/features/shell/layout-defaults'
 
 const SEARCH_DELAY_MS = 200
 const TREE_RELOAD_DELAY_MS = 250
@@ -116,6 +119,11 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Bumped by the palette's "问 AI": the Now page focuses its input when it changes.
   const [askToken, setAskToken] = useState(0)
+  // The assistant's island beside the mail (ai-chat-ui.md 5.1); not kept across launches.
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantFocus, setAssistantFocus] = useState(0)
+  // Set when the island gave its conversation to the Now page, so that page opens on it.
+  const [nowHandoff, setNowHandoff] = useState(false)
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const removedAccounts = useRef(new Set<string>())
@@ -167,8 +175,20 @@ export function Workbench({ client }: { client: MailxClient }) {
   const mailboxLabel = settingsQuery.data?.settings.appearance.mailboxLabel ?? 'name'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
+  const assistant = useAssistantUsable(client)
+  // Going to the Now page takes the conversation along: the island closes and the page shows it.
+  if (mailbox.kind === 'now' && assistantOpen) {
+    setAssistantOpen(false)
+    setNowHandoff(true)
+  } else if (mailbox.kind !== 'now' && nowHandoff) {
+    setNowHandoff(false)
+  }
+  const assistantShown = assistantOpen && assistant.usable && mailbox.kind !== 'now'
+  const assistantWidth = clampAssistantWidth(settingsQuery.data?.settings.layout.assistantWidth ?? ASSISTANT_DEFAULT)
   const singleReading = settingsQuery.data?.settings.layout.readingMode === 'single'
-  const singlePane = singleReading && isMailView(mailbox)
+  // With the island open, list and reader take turns as in single-pane mode, without touching the saved choice.
+  const oneAtATime = singleReading || assistantShown
+  const singlePane = oneAtATime && isMailView(mailbox)
   const savedCollapsed = settingsQuery.data?.settings.layout.readerCollapsed ?? false
   const readerCollapsed = readerChoice ?? savedCollapsed
   const setReaderCollapsed = setReaderChoice // stable, so effects may use it
@@ -202,9 +222,9 @@ export function Workbench({ client }: { client: MailxClient }) {
     setContact(null)
     setSlide(null)
     setRestoreScroll(0)
-    if (singleReading) setOpened(null)
+    if (oneAtATime) setOpened(null)
     setMailbox(next)
-  }, [singleReading])
+  }, [oneAtATime])
   // The inline composer sits in the reader (sending.md section 17.7). Opening it unfolds
   // the reader; from the Now page, which has no reader, it goes to the unified inbox.
   const composeActions = useRef<ReturnType<typeof useComposeActions> | null>(null)
@@ -636,6 +656,38 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
 
+  // The assistant: the capsule and Cmd/Ctrl+J open its island beside the mail; on the Now page they
+  // go to the page's own input, where the same conversation lives.
+  const nowPageShown = mailbox.kind === 'now'
+  const openAssistant = useCallback(() => {
+    if (nowPageShown) {
+      setAskToken((token) => token + 1)
+      return
+    }
+    setAssistantOpen(true)
+    setAssistantFocus((token) => token + 1)
+  }, [nowPageShown])
+  const askAi = useCallback(() => {
+    if (nowPageShown || accounts.length === 0) {
+      showMailbox({ kind: 'now' })
+      setAskToken((token) => token + 1)
+    } else {
+      openAssistant()
+    }
+  }, [accounts.length, nowPageShown, openAssistant, showMailbox])
+  const assistantUsable = assistant.usable
+  useEffect(() => {
+    if (!assistantUsable) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'KeyJ' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.isComposing) return
+      event.preventDefault()
+      if (assistantShown) setAssistantOpen(false)
+      else openAssistant()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [assistantShown, assistantUsable, openAssistant])
+
   // A listed message opened in the Unread view stays in it once read; see `keptIds`.
   const keepListed = (id: string) => {
     if (filter !== 'unread' || !emails.some((email) => email.id === id)) return
@@ -809,6 +861,20 @@ export function Workbench({ client }: { client: MailxClient }) {
   const selectedDraft = drafts.data?.some((draft) => draft.id === draftChoice) ? draftChoice : null
   const selectedOutbox = outbox.data?.find((item) => item.id === outboxChoice) ?? null
 
+  // What the next message to the assistant is about: the draft being written, the emails picked in
+  // the list, the draft previewed, or the email open in the reader (ai-chat-ui.md 5.1).
+  const draftSubject = (id: string) => drafts.data?.find((draft) => draft.id === id)?.subject.trim() || t('mail:noSubject')
+  const assistantView: AssistantView | null = inlineShown && inline.current
+    ? { context: { type: 'draft', draftId: inline.current.draftId }, label: draftSubject(inline.current.draftId) }
+    : selecting && selection.items.length > 0
+      ? { context: { type: 'emails', emailIds: selection.items.slice(0, 20).map((item) => item.id) }, label: t('ai:island.selected', { count: selection.items.length }) }
+      : activeMailbox.kind === 'drafts'
+        ? selectedDraft ? { context: { type: 'draft', draftId: selectedDraft }, label: draftSubject(selectedDraft) } : null
+        : mailView && opened && !readerHidden
+          ? { context: { type: 'email', emailId: opened.id }, label: body.email?.summary.subject.trim() || t('mail:noSubject') }
+          : null
+  const capsuleShown = assistant.usable && !nowPage && !assistantShown && layoutReady
+
   // Expanding a message inside the thread opens it like any other (read mark, toolbar,
   // body) but keeps the anchor, so the same conversation stays on screen.
   const expandInThread = (email: EmailSummary) => {
@@ -853,6 +919,24 @@ export function Workbench({ client }: { client: MailxClient }) {
         onNavChange={saveLayout}
         nav={<MailSidebar {...sidebarProps} loading={treeLoading} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         rail={<MailRail {...sidebarProps} />}
+        asideRoom={assistantShown ? { aside: assistantWidth, content: mailView ? READER_MIN : LIST_MIN + READER_MIN } : undefined}
+        aside={assistantShown ? (overlay) => (
+          <AssistantIsland
+            client={client}
+            service={assistant.service}
+            view={assistantView}
+            width={assistantWidth}
+            overlay={overlay}
+            onWidthCommit={(width) => saveLayout({ assistantWidth: width })}
+            onClose={() => setAssistantOpen(false)}
+            onOpenEmail={openEmail}
+            onOpenDraft={(id) => void compose.openDraft(id)}
+            accounts={displayAccounts}
+            folders={folders}
+            onSelectMailbox={selectMailbox}
+            focusToken={assistantFocus}
+          />
+        ) : undefined}
       >
         <TitleBarActions side="center">
           <MailSearch value={mailView ? search : ''} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
@@ -877,7 +961,7 @@ export function Workbench({ client }: { client: MailxClient }) {
           folders={folders}
           onApplySearch={(text) => {
             leaveLocalView()
-            if (singleReading) setOpened(null)
+            if (oneAtATime) setOpened(null)
             setSearch(text)
           }}
           onOpenEmail={(email, text) => {
@@ -886,7 +970,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             openEmail(email)
           }}
           onCompose={() => void compose.compose()}
-          onAskAi={() => { selectMailbox({ kind: 'now' }); setAskToken((token) => token + 1) }}
+          onAskAi={askAi}
           onSelectMailbox={selectMailbox}
           onOpenAccounts={() => setAccountsTarget({})}
           onAddAccount={() => setAddingAccount(true)}
@@ -908,6 +992,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             onOpenEmail={openFromNow}
             onOpenDraft={(id) => void compose.openDraft(id)}
             focusInputToken={askToken}
+            openConversation={nowHandoff}
             verification={verification}
           />
         ) : !layoutReady ? (
@@ -1083,6 +1168,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         )}
         {/* The Now page has no reader to fold. */}
         {accounts.length > 0 && !nowPage && !singlePane && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
+        {capsuleShown && <AssistantCapsule view={assistantView} raised={inlineShown} onOpen={openAssistant} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}

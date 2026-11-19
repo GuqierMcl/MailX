@@ -290,7 +290,7 @@ impl MailxCore {
         f(&mut self.accounts().unwrap())
     }
 
-    pub fn list_accounts(&self) -> Result<Vec<Account>, AppError> {
+    pub fn accounts_list(&self) -> Result<Vec<Account>, AppError> {
         self.accounts()?.list()
     }
 
@@ -393,8 +393,8 @@ impl MailxCore {
         self.accounts()?.update_profile(request)
     }
 
-    pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
-        self.accounts()?.list_folders(account_id)
+    pub fn mail_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
+        self.accounts()?.mail_folders(account_id)
     }
 
     pub fn list_emails(&self, query: &EmailListQuery) -> Result<EmailPage, AppError> {
@@ -414,12 +414,12 @@ impl MailxCore {
 
     /// Recipient suggestions for a composer address field, from mail
     /// already on this device. `limit` defaults to 8, at most 20.
-    pub fn suggest_contacts(
+    pub fn mail_contacts(
         &self,
         query: &str,
         limit: Option<u32>,
     ) -> Result<Vec<ContactSuggestion>, AppError> {
-        self.accounts()?.suggest_contacts(query, limit)
+        self.accounts()?.mail_contacts(query, limit)
     }
 
     /// Starts or stops aggregating a sender address (case-insensitive,
@@ -429,13 +429,23 @@ impl MailxCore {
             .set_contact_aggregation(address, aggregated)
     }
 
+    /// The sanitized HTML the reader shows for a message whose body is cached,
+    /// for the built-in agent when the user allows it (`mail_read`).
+    pub(crate) fn body_cache_for(&self, email_id: &str) -> Result<Option<String>, AppError> {
+        let service = self.accounts()?;
+        let identity = service.body_identity(email_id)?;
+        Ok(service
+            .body_cache(&identity)?
+            .and_then(|body| body.rendered.sanitized_html))
+    }
+
     pub fn get_email(&self, email_id: &str) -> Result<EmailDetail, AppError> {
         self.accounts()?.get_email(email_id)
     }
 
     /// The locally known messages of the email's conversation, oldest first.
-    pub fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
-        self.accounts()?.get_conversation(email_id)
+    pub fn mail_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+        self.accounts()?.mail_conversation(email_id)
     }
 
     pub(crate) fn conversation_page(
@@ -508,7 +518,7 @@ impl MailxCore {
             MessageFlag::Starred => (None, Some(wanted)),
         };
         let result = self
-            .set_email_flags(
+            .mail_flags(
                 &[email_id.to_owned()],
                 read,
                 starred,
@@ -571,13 +581,13 @@ impl MailxCore {
     /// Archives inbox emails on this device only; nothing is sent to the
     /// server. Every id must be a visible inbox message, or none is archived
     /// (`notFound`); 1 to 500 distinct ids (`validation`).
-    pub fn archive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
+    pub fn mail_archive(&self, email_ids: &[String]) -> Result<(), AppError> {
         self.change_email_archive(email_ids, true, crate::MailChangeSource::User)
             .map(|_| ())
     }
 
     /// Takes emails back into the inbox; the same rules as
-    /// [`MailxCore::archive_emails`].
+    /// [`MailxCore::mail_archive`].
     pub fn unarchive_emails(&self, email_ids: &[String]) -> Result<(), AppError> {
         self.change_email_archive(email_ids, false, crate::MailChangeSource::User)
             .map(|_| ())
@@ -596,7 +606,7 @@ impl MailxCore {
     /// Creates a blank or pre-filled draft. `default_account_id` is the
     /// `compose.defaultAccountId` setting, which the host reads from its
     /// settings store; it only applies when the request names no account.
-    pub fn create_draft(
+    pub fn draft_create(
         &self,
         request: CreateDraftRequest,
         default_account_id: &str,
@@ -604,7 +614,7 @@ impl MailxCore {
         self.create_draft_with_origin(request, default_account_id, DraftOrigin::User)
     }
 
-    /// Like [`Self::create_draft`], recording who created the draft. Only host
+    /// Like [`Self::draft_create`], recording who created the draft. Only host
     /// code (such as the MCP tool layer) can choose the origin: requests carry
     /// none, so the IPC cannot claim `Mcp`.
     pub fn create_draft_with_origin(
@@ -615,7 +625,7 @@ impl MailxCore {
     ) -> Result<Draft, AppError> {
         let draft = self
             .accounts()?
-            .create_draft(request, default_account_id, origin)?;
+            .draft_create(request, default_account_id, origin)?;
         self.announce_draft(&draft, DraftChange::Created);
         Ok(draft)
     }
@@ -655,9 +665,23 @@ impl MailxCore {
         origin: DraftOrigin,
         intro_html: Option<&str>,
     ) -> Result<Draft, AppError> {
+        Ok(self
+            .create_draft_from_reporting(request, locale, origin, intro_html)?
+            .0)
+    }
+
+    /// `create_draft_from_with_origin`, also saying whether the original had to
+    /// be cut short to fit the quote budget, so a caller can tell the user.
+    pub fn create_draft_from_reporting(
+        &self,
+        request: CreateDraftFromRequest,
+        locale: crate::SupportedLocale,
+        origin: DraftOrigin,
+        intro_html: Option<&str>,
+    ) -> Result<(Draft, bool), AppError> {
         let source = self.accounts()?.draft_source(&request)?;
         let (detail, account_address, message_id, raw) = match source {
-            crate::accounts::DraftSource::Existing(draft) => return Ok(draft),
+            crate::accounts::DraftSource::Existing(draft) => return Ok((draft, false)),
             crate::accounts::DraftSource::Fresh {
                 detail,
                 account_address,
@@ -676,11 +700,20 @@ impl MailxCore {
         let forwarded = match request.kind {
             crate::DraftKind::Forward => {
                 let blobs = self.accounts()?.body_blobs();
-                crate::drafts::attachments::forwarded_files(&raw, &blobs)?
+                let mut files = crate::drafts::attachments::forwarded_files(&raw, &blobs)?;
+                // The images it referenced come along too, under new IDs
+                // (sending.md 16.11.11).
+                let address = account_address.clone();
+                files.extend(crate::drafts::attachments::forwarded_inline_files(
+                    &raw,
+                    &blobs,
+                    || crate::smtp::message::new_content_id(&address),
+                )?);
+                files
             }
             _ => Vec::new(),
         };
-        let draft = self.accounts()?.create_draft_from_source(
+        let (draft, truncated) = self.accounts()?.create_draft_from_source(
             &request,
             &crate::accounts::SourceMessage {
                 detail: &detail,
@@ -694,7 +727,7 @@ impl MailxCore {
             intro_html,
         )?;
         self.announce_draft(&draft, DraftChange::Created);
-        Ok(draft)
+        Ok((draft, truncated))
     }
 
     pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
@@ -702,12 +735,12 @@ impl MailxCore {
     }
 
     /// Newest first; optionally only one account's drafts.
-    pub fn list_drafts(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
-        self.accounts()?.list_drafts(account_id)
+    pub fn draft_list(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
+        self.accounts()?.draft_list(account_id)
     }
 
-    pub fn update_draft(&self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
-        let draft = self.accounts()?.update_draft(request)?;
+    pub fn draft_update(&self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.draft_update(request)?;
         self.announce_draft(&draft, DraftChange::Updated);
         Ok(draft)
     }
@@ -718,7 +751,7 @@ impl MailxCore {
         request: AddAttachmentRequest,
         bytes: &[u8],
     ) -> Result<Draft, AppError> {
-        self.add_attachment_with_origin(request, bytes, AttachmentOrigin::User)
+        self.add_attachment_with_origin(request, bytes, false, AttachmentOrigin::User)
     }
 
     /// The trusted host supplies the attachment's origin.
@@ -726,11 +759,12 @@ impl MailxCore {
         &self,
         request: AddAttachmentRequest,
         bytes: &[u8],
+        inline: bool,
         origin: AttachmentOrigin,
     ) -> Result<Draft, AppError> {
         let draft = self
             .accounts()?
-            .add_attachment_with_origin(request, bytes, origin)?;
+            .add_attachment_with_origin(request, bytes, origin, inline)?;
         self.announce_draft(&draft, DraftChange::Updated);
         Ok(draft)
     }
@@ -794,16 +828,16 @@ impl MailxCore {
             if draft.revision != expected_revision {
                 return Err(AppError::new(ErrorCode::Conflict));
             }
-            service.delete_draft(id)?;
+            service.draft_delete(id)?;
             draft
         };
         self.announce_draft(&draft, DraftChange::Deleted);
         Ok(())
     }
 
-    pub fn delete_draft(&self, id: &str) -> Result<(), AppError> {
+    pub fn draft_delete(&self, id: &str) -> Result<(), AppError> {
         let draft = self.accounts()?.get_draft(id)?;
-        self.accounts()?.delete_draft(id)?;
+        self.accounts()?.draft_delete(id)?;
         self.announce_draft(&draft, DraftChange::Deleted);
         Ok(())
     }
@@ -894,14 +928,14 @@ impl MailxCore {
         self.accounts()?.list_outbox(account_id, include_all)
     }
 
-    pub fn get_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
-        self.accounts()?.get_outbox(id)
+    pub fn outbox_read(&self, id: &str) -> Result<OutboxItem, AppError> {
+        self.accounts()?.outbox_read(id)
     }
 
     /// Undo send. Succeeds only while the item is still `queued`; once the
     /// worker has started it the answer is `AlreadySending`.
-    pub fn cancel_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
-        let changed = self.accounts()?.cancel_outbox(id, self.outbox.now())?;
+    pub fn outbox_cancel(&self, id: &str) -> Result<OutboxItem, AppError> {
+        let changed = self.accounts()?.outbox_cancel(id, self.outbox.now())?;
         let item = changed.item.clone();
         self.outbox.shared.announce(vec![changed]);
         self.outbox.wake(&item.account_id);
@@ -952,7 +986,7 @@ impl MailxCore {
             match service.resolve_unknown(&request, self.outbox.now())? {
                 None => return service.resolved_item(&request),
                 Some(changed) => {
-                    let old = service.get_outbox(&request.id)?;
+                    let old = service.outbox_read(&request.id)?;
                     (changed, old)
                 }
             }
@@ -1001,7 +1035,7 @@ impl MailxCore {
     }
 
     /// Asks an account's sync worker to run its next round now.
-    pub fn refresh_sync(&self, account_id: &str) -> Result<(), AppError> {
+    pub fn accounts_refresh_sync(&self, account_id: &str) -> Result<(), AppError> {
         self.accounts()?.get(account_id)?;
         self.sync.refresh(account_id);
         Ok(())
@@ -1099,7 +1133,7 @@ mod tests {
         .unwrap();
         let account = create(&core, closed_port());
         let draft = core
-            .create_draft(
+            .draft_create(
                 CreateDraftRequest {
                     account_id: Some(account.id.clone()),
                     to: vec![],
@@ -1141,7 +1175,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(removed.draft_ids, vec![draft.id.clone()]);
-        assert!(core.list_accounts().unwrap().is_empty());
+        assert!(core.accounts_list().unwrap().is_empty());
         assert!(core.sync_states().is_empty());
         assert_eq!(
             core.get_draft(&draft.id).unwrap_err().code,
@@ -1271,7 +1305,7 @@ mod tests {
             Arc::new(|_: &crate::events::CoreEvent| {}),
         )
         .unwrap();
-        assert!(core.list_accounts().unwrap().is_empty());
+        assert!(core.accounts_list().unwrap().is_empty());
         assert!(profile.join("image-cache").is_dir());
         assert!(profile.join("mailx.sqlite3").is_file());
     }

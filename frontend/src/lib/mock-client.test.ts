@@ -15,7 +15,7 @@ describe('mock account display preferences', () => {
     await main.updateSettings({ layout: { navWidth: 310, listWidth: 550, readerCollapsed: true } })
     await otherWindow.updateSettings({ layout: { readingMode: 'single', accountOrder: [ids[1].toUpperCase(), ` ${ids[0]} `, ids[1]] } })
     const snapshot = await main.updateSettings({ layout: { listWidth: 600 } })
-    expect(snapshot.settings.layout).toEqual({ navWidth: 310, navCollapsed: false, listWidth: 600, readerCollapsed: true, readingMode: 'single', accountOrder: [ids[1], ids[0]] })
+    expect(snapshot.settings.layout).toEqual({ navWidth: 310, navCollapsed: false, listWidth: 600, readerCollapsed: true, readingMode: 'single', assistantWidth: 380, accountOrder: [ids[1], ids[0]] })
     expect(await main.listAccounts()).toEqual(accounts)
 
     const content = { to: [], cc: [], bcc: [], subject: '', bodyHtml: '' }
@@ -39,7 +39,7 @@ describe('mock account display preferences', () => {
     const snapshot = await createMockClient().getSettings()
     localStorage.setItem('mailx.mock.settings', JSON.stringify({ ...snapshot, settings: { ...snapshot.settings,
       layout: { navWidth: 330, listWidth: 560, readerCollapsed: true } } }))
-    expect((await createMockClient().getSettings()).settings.layout).toEqual({ navWidth: 330, navCollapsed: false, listWidth: 560, readerCollapsed: true, readingMode: 'split', accountOrder: [] })
+    expect((await createMockClient().getSettings()).settings.layout).toEqual({ navWidth: 330, navCollapsed: false, listWidth: 560, readerCollapsed: true, readingMode: 'split', assistantWidth: 380, accountOrder: [] })
   })
 })
 
@@ -894,7 +894,7 @@ describe('mock assistant', () => {
     await client.assistantGrantConsent()
     const started = await client.assistantStart(chat('what is new'))
     const done = await finished(client, started.runId)
-    expect(done.tools.map((tool) => [tool.name, tool.status])).toEqual([['search_emails', 'done'], ['read_email', 'done']])
+    expect(done.tools.map((tool) => [tool.name, tool.status])).toEqual([['mail_search', 'done'], ['mail_read', 'done']])
     expect(done.tools[0].summary).toMatchObject({ type: 'found' })
     expect(done.tools[1].summary).toMatchObject({ type: 'read' })
     expect(done.text).toMatch(/\n- /)
@@ -906,7 +906,7 @@ describe('mock assistant', () => {
     await client.assistantGrantConsent()
     const started = await client.assistantStart(chat('write me a draft'))
     const done = await finished(client, started.runId)
-    expect(done.tools[0]).toMatchObject({ name: 'create_draft', status: 'done', summary: { type: 'draft' } })
+    expect(done.tools[0]).toMatchObject({ name: 'draft_create', status: 'done', summary: { type: 'draft' } })
     const summary = done.tools[0].summary
     if (summary.type !== 'draft') throw new Error('no draft')
     expect((await client.getDraft(summary.draftId)).id).toBe(summary.draftId)
@@ -918,7 +918,7 @@ describe('mock assistant', () => {
     const started = await client.assistantStart(chat('send the notes'))
     const asked = await asking(client, started.runId)
     expect(asked.state).toBe('awaitingConfirmation')
-    expect(asked.pending?.request).toMatchObject({ action: 'send', tool: 'send_email', details: { type: 'send', subject: 'Meeting notes' } })
+    expect(asked.pending?.request).toMatchObject({ action: 'send', tool: 'outbox_send', details: { type: 'send', subject: 'Meeting notes' } })
     await expect(client.assistantRespond(started.runId, 'wrong', true)).rejects.toMatchObject({ failure: { code: 'conflict' } })
     await expect(client.assistantRespond('missing', asked.pending!.requestId, true)).rejects.toMatchObject({ failure: { code: 'notFound' } })
     await client.assistantRespond(started.runId, asked.pending!.requestId, true)

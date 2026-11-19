@@ -95,7 +95,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
 
     let list = bridge.request(2, "tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 25);
+    assert_eq!(tools.len(), 22);
     assert!(
         tools
             .iter()
@@ -103,9 +103,9 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
     );
 
     for name in [
-        "mailx_get_conversation",
-        "mailx_suggest_contacts",
-        "mailx_save_email_attachment",
+        "mailx_mail_conversation",
+        "mailx_mail_contacts",
+        "mailx_mail_save_attachment",
     ] {
         assert!(tools.iter().any(|tool| tool["name"] == name));
     }
@@ -114,7 +114,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         .request(
             3,
             "tools/call",
-            json!({"name": "mailx_list_accounts", "arguments": {}}),
+            json!({"name": "mailx_accounts_list", "arguments": {}}),
         )
         .await;
     assert_ne!(accounts["result"]["isError"], json!(true));
@@ -128,7 +128,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         .request(
             4,
             "tools/call",
-            json!({"name": "mailx_create_draft", "arguments": {
+            json!({"name": "mailx_draft_create", "arguments": {
                 "to": [{"address": "recipient@example.test"}],
                 "subject": "Bridge send test", "bodyHtml": "<p>Local fixture only</p>"
             }}),
@@ -141,14 +141,14 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         .request(
             5,
             "tools/call",
-            json!({"name": "mailx_read_draft", "arguments": {"draftId": draft_id}}),
+            json!({"name": "mailx_draft_read", "arguments": {"draftId": draft_id}}),
         )
         .await;
     let queued = bridge
         .request(
             6,
             "tools/call",
-            json!({"name": "mailx_send_email", "arguments": {
+            json!({"name": "mailx_outbox_send", "arguments": {
                 "action": "send", "draftId": draft_id,
                 "expectedRevision": read["result"]["structuredContent"]["revision"],
                 "clientMutationId": "00000000-0000-4000-8000-000000000058"
@@ -161,7 +161,7 @@ async fn bridge_relays_mcp_between_stdio_and_the_server() {
         .request(
             7,
             "tools/call",
-            json!({"name": "mailx_cancel_outbox", "arguments": {
+            json!({"name": "mailx_outbox_cancel", "arguments": {
                 "outboxId": queued["result"]["structuredContent"]["id"]
             }}),
         )

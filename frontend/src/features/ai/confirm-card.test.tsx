@@ -5,7 +5,7 @@ import type { ConfirmationRequest } from '@/generated/accounts'
 import { ConfirmCard } from './confirm-card'
 
 const SEND: ConfirmationRequest = {
-  action: 'send', tool: 'send_email',
+  action: 'send', tool: 'outbox_send',
   details: {
     type: 'send', accountName: '工作邮箱', accountAddress: 'me@example.com',
     to: [{ name: '王五', address: 'wang@example.com' }], cc: [{ name: null, address: 'cc@example.com' }], bcc: [],
@@ -14,7 +14,7 @@ const SEND: ConfirmationRequest = {
   },
 }
 const ORGANIZE: ConfirmationRequest = {
-  action: 'organize', tool: 'archive_emails',
+  action: 'organize', tool: 'mail_archive',
   details: { type: 'organize', change: { type: 'archive' }, count: 7, subjects: ['账单', '通知'] },
 }
 
@@ -42,7 +42,7 @@ describe('ConfirmCard', () => {
   })
 
   it('describes a draft change from the host data', () => {
-    render(<ConfirmCard request={{ action: 'userDraft', tool: 'update_draft', details: { type: 'draft', subject: '计划', origin: 'user', change: { type: 'update', fields: ['subject', 'bodyHtml'] } } }} status="waiting" onRespond={vi.fn()} />)
+    render(<ConfirmCard request={{ action: 'userDraft', tool: 'draft_update', details: { type: 'draft', subject: '计划', origin: 'user', change: { type: 'update', fields: ['subject', 'bodyHtml'] } } }} status="waiting" onRespond={vi.fn()} />)
     expect(screen.getByRole('group', { name: '修改这份草稿？' })).toHaveTextContent('修改主题、正文')
   })
 

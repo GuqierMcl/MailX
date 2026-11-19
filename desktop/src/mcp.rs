@@ -71,6 +71,11 @@ pub(crate) fn shared_tools(
                     .unwrap_or_else(crate::locale::system_locale)
             }
         })
+        // The user's switch for letting the assistant read HTML; read per call.
+        .with_read_mail_html({
+            let read_state = state.clone();
+            move || read_state.read_mail_html()
+        })
         .with_draft_open_check({
             let handle = app.clone();
             move |draft_id| {

@@ -20,7 +20,7 @@
 
 SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 回退；密码凭证继续使用原有认证机制。OAuth token 在连接前经账号内刷新协调器取得，认证和后续回复均避免持久化服务端回显的 bearer 内容；现有 TLS、路由、信任和 DATA 后不自动重发规则保持适用。生产 OAuth 注册表为空，当前添加账号流程仍只开放密码类认证，不能据此宣称任何 OAuth 服务商可用。
 
-转发包含正文和原邮件的普通附件，附件在创建草稿时预填，可自行移除；原邮件的内嵌图片仍不保留。超限时保留草稿与附件并阻止发送，用户删减后可发送，详见第 16.8 节。
+转发包含正文、原邮件的普通附件和正文里引用的内嵌图片：附件在创建草稿时预填，内嵌图片复制为草稿自己的内嵌记录并换用新的 Content-ID，两者都可自行移除。回复与回复全部不重新发送图片，引用里保留替代文字。超限时保留草稿与附件并阻止发送，用户删减后可发送，详见第 16.8 节。
 
 ## 2. 写信窗口：独立窗口
 
@@ -220,7 +220,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
   - **主题**：加 `Re:` / `Fwd:`，已有 `Re:`、`RE:`、`回复：` 等前缀时不重复添加。
   - **引用**：回复在空段落、日期和发件人之后接引用块；转发在空段落和头部块之后接原文。优先使用已缓存 HTML，经发信白名单降级；没有 HTML 时按行转义为段落。规则见第 14 节“回复与转发”。
   - **会话串联**：`In-Reply-To` 取原 `Message-ID`，`References` 取原 `References` 再接上原 `Message-ID`。头部同步不读 `References`，所以从缓存的原始 MIME 中取；尚未下载时，核心不在创建草稿的调用里下载，而是返回 `bodyNotCached`，由调用方先下载正文再重试（实现与本节原文的差异，原因是创建草稿保持纯本地、无网络）。
-- 空白草稿不出现在草稿列表（`list_drafts` 过滤），核心启动时删除没有活动发送项的空白草稿（崩溃遗留）。
+- 空白草稿不出现在草稿列表（`draft_list` 过滤），核心启动时删除没有活动发送项的空白草稿（崩溃遗留）。
 - 核心对每次草稿变更发出 `DraftChanged`：`created`、`updated`、`deleted`，以及队列的 `locked` / `unlocked`；主窗口据此刷新草稿列表，并在所选草稿被删除时清除选择。
 - 已被 `accepted` 的草稿从草稿列表移除；`failed` 后回到可编辑；`unknown` 期间锁定。
 - 导航新增本地"草稿"，以及仅在有未完成队列项（`queued`、`sending`、`failed`、`unknown`）时出现的"发件箱"。草稿在岛内列出，阅读区显示预览和"继续编辑"；发件箱的项目在阅读区显示状态和可用操作。**已实现（4b）**：两个视图的行与阅读区见[界面设计](ui-design.md#主窗口的写信入口草稿与发件箱)；发件箱操作为 `queued` → 撤销（成功后重新打开写信窗口）/ 立即重试（仅在已安排下次重试时）、`failed` → 编辑并重新发送（打开草稿）、`unknown` → 标记为已发出 / 确认未发出，重新发送（确认对话框）；失败项若同一草稿已有更新的非失败项（已重新发送），不再列出。`mailx://outbox` / `mailx://drafts` 事件使对应查询失效；系统通知点击携带的 `outboxId` 会选中发件箱项。
@@ -339,7 +339,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 
 - `drafts` 的收件人为 `{ name, address }` 的 JSON 数组；`source_email_id` 指向 `messages(id)` 并 `ON DELETE SET NULL`，原邮件消失时草稿保留（引用文字与串联头在创建时已复制进草稿），账号删除则级联删除草稿；`(account_id, client_mutation_id)` 唯一。
 - 额外的 `create_canonical` 列保存创建请求的规范形式，使同一 `clientMutationId` 的重试返回同一草稿（即使之后已被编辑），内容不同则报 `idempotencyConflict`。
-- 默认发件账号由宿主从设置读出后传给 `create_draft(request, default_account_id)`，核心的设置存储与数据库互不依赖。
+- 默认发件账号由宿主从设置读出后传给 `draft_create(request, default_account_id)`，核心的设置存储与数据库互不依赖。
 - 地址校验使用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址）；步骤 2 决定保留它并额外要求 lettre 接受（见第 8 节）。
 - `senderName` 上限 128 个字符，拒绝所有控制字符。
 
@@ -348,7 +348,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - `outbox` 为 STRICT 表，带 CHECK：`state` 六种取值、`accepted` 必有 `accepted_at`、`queued` / `canceled` 不能有 `data_started_at`、`resolution` 只能是 `unknown` 行的 `resent` 或 `accepted` 行的 `markedSent`；`(account_id, client_mutation_id)` 唯一。`draft_id` 为 `ON DELETE SET NULL`，账号删除时级联删除。
 - 列在设计表之外另有：`queue_canonical`（入队请求的规范形式，用于 `clientMutationId` 重放与 `idempotencyConflict`）、`recipients_preview`（最多 3 个信封收件人）与 `recipient_count`（列表不解析 MIME）、`resolution` / `resolution_mutation_id` / `superseded_by`（`unknown` 的处理，取代 `resolved` 布尔值）。`envelope` 为 `{ from, recipients }`，`last_error` 为 `{ reason, smtpCode, text, rejected[] }`，`server_reply` 为 `{ code, text }`，均只含脱敏文本。
 - 索引：`outbox_due`（`queued` 项的下一个到期项，部分索引）、`outbox_by_account`（列表）、`outbox_by_draft`、`outbox_by_message_id`、`outbox_sent`（本地已发送副本，按接受时间倒序，部分索引）。
-- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`update_draft` 与 `delete_draft` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
+- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`draft_update` 与 `draft_delete` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
 - `accepted` 行保留 `mime`、`envelope`、`accepted_at`、`server_reply`，即本地已发送副本；`server_copy_message_id` 与 `deleted_locally_at` 已建列，由第 5 步使用，本步不读写。
 
 快照已改为内容寻址的 blob 文件（第 16.6 节，迁移 v14）：`outbox` 行只记 `snapshot_hash`、`snapshot_size` 与释放时间 `snapshot_released_at`，`mime` 列可空、新行不再写入，旧行由启动外迁搬进 blob 后清空。草稿附件在 `draft_attachments`（迁移 v13）。
@@ -664,7 +664,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - 转发本来就要求原邮件的原始 MIME 已在本地。创建转发草稿时，核心从中取出非内嵌附件（复用附件保存取字节的路径），解码写入 blob，作为来源为"转发预填"的草稿附件。默认全部带上，用户可像普通附件一样移除。
 - 只在首次创建时预填；`create_canonical` 的幂等不变，重复点击转发不会重复添加。
 - 超过上限时照常创建草稿，附件栏标出超限并阻止发送，用户移除后可发。
-- 原邮件里被 `cid:` 引用的内嵌图片第一批不带；内嵌图片首批（16.11）也不带，留到后续（16.11.11）作为内嵌图片带上。
+- 原邮件里被 `cid:` 引用的内嵌图片随转发带上（16.11.11 已实现），见下方“转发的内嵌图片”。
 - 原方案的"原邮件的 N 个附件不会随转发发出"提示已由附件预填与附件栏取代。
 
 **A7 的落地（2026-10-29，核心）**：`create_draft_from_localized` 在读完原始 MIME、不持锁时调用 `drafts::attachments::forwarded_files`，用新增的 `mail::render::attachment_contents` 一次解析取出全部非内嵌、非正文、非容器的段（与 `attachment_content` 的判定相同），逐段清洗文件名、嗅探类型后写入 blob；`create_draft_from_source` 接收 `SourceMessage`（正文详情、账号地址、头部、预填文件）并在 `storage::drafts::insert_draft_with` 的一个事务里插入草稿与 `origin = 'forwarded'` 的附件行，失败则两者都不留。预填不提升 `revision`，草稿仍是创建请求产生的那一份；重放同一个 `clientMutationId` 在第一步就返回已有草稿，不会再写附件。回复与回复全部不预填。
@@ -773,9 +773,11 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - webview 只解码经核心校验、转码后的预览图；原始字节只进 blob 与 MIME。
 - 白名单只认 16.11.2 格式的 Content-ID，粘贴进来的别处 `cid:` 引用在清洗时去掉，不会指向本草稿以外的内容。
 
-#### 16.11.11 后续（规划）
+#### 16.11.11 转发保留内嵌图片（已实现，转发部分）
 
-- **回复与转发保留原邮件的内嵌图片**：把引用正文里被 `cid:` 引用的段复制为新草稿的内嵌记录（`origin = 'forwarded'`），换用新的 Content-ID 并改写引用，计入上限。原邮件里的远程图片地址仍不保留。
+- **转发保留原邮件的内嵌图片**：引用正文时，被原邮件引用的图片留在引用里；创建草稿时把这些段复制为新草稿的内嵌记录（`origin = 'forwarded'`），换用发送域名下的新 Content-ID 并改写引用，计入上限。原邮件里的远程图片地址仍不保留，远程图片照旧按阅读区规则处理，不进草稿。
+- **实现要点**：`mail::render::inline_contents` 一次解析取出全部内嵌段；`drafts::attachments::forwarded_inline_files` 逐个按内嵌图片规则校验（PNG / JPEG / GIF / WebP、尺寸与像素上限），不合格的跳过、由引用的替代文字代替；`drafts::body::quote` 在转发模式下读出缓存正文里的 `data-mailx-cid` 或 `cid:`，按“原 Content-ID → 新 Content-ID”的映射改写成新引用。草稿表里内嵌行由 `insert_draft_with` 写入 `inline = 1` 与 `content_id`。
+- **未做的部分**：回复与回复全部仍不保留图片（引用只留替代文字）；拖到正文区直接内嵌、缩放手柄、按服务商上限的裁剪按原计划另行实施。
 - **拖到正文区的图片直接内嵌**：按 Tauri `DragDrop` 事件给出的落点坐标判断，落在编辑区且全是可接受的图片时内嵌，否则仍作为附件。
 - **缩放手柄**：只写 `width` / `height`，不重新编码图片。
 - **按服务商上限动态调整**：与普通附件共用 16.4、16.10 的计划。

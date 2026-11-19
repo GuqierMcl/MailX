@@ -23,7 +23,7 @@ pub struct SendEmailInput {
     /// Required only for send.
     #[serde(default, deserialize_with = "non_null")]
     pub draft_id: Option<String>,
-    /// Required only for send; use the revision from read_draft.
+    /// Required only for send; use the revision from draft_read.
     #[serde(default, deserialize_with = "non_null")]
     pub expected_revision: Option<u32>,
     /// Required UUID for send. Reuse it for the same request after a timeout.
@@ -38,6 +38,31 @@ pub struct SendEmailInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutboxIdInput {
     pub outbox_id: String,
+}
+
+/// One task or a page of them; the fields the chosen one allows must be the
+/// only ones given.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetOutboxInput {
+    /// Omit to list tasks.
+    pub outbox_id: Option<String>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub account_id: Option<String>,
+    pub states: Option<Vec<OutboxState>>,
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxLookup {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<OutboxInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<OutboxInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -164,7 +189,7 @@ impl From<OutboxItem> for OutboxInfo {
 
 pub(super) fn register(tools: &mut Tools) {
     let send = ToolSpec::new::<SendEmailInput, OutboxInfo>(
-        "send_email", "Send email",
+        "outbox_send", "Send email",
         "Send a saved draft automatically, or retry a queued item without bypassing its undo window. \
          Reuse clientMutationId when repeating the same send request. Failed or unknown items cannot be retried.",
         Annotations {
@@ -177,35 +202,23 @@ pub(super) fn register(tools: &mut Tools) {
     .requires(&[Action::MailSend])
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(send, send_email);
+    tools.register(send, outbox_send);
 
-    let list = ToolSpec::new::<ListOutboxInput, ListOutboxOutput>(
-        "list_outbox", "List outbox",
-        "List sending tasks newest first. Omit states for tasks still pending or needing attention.",
+    let read = ToolSpec::new::<GetOutboxInput, OutboxLookup>(
+        "outbox_read",
+        "Read the outbox",
+        "One sending task when outboxId is given, otherwise a page of them newest first. accepted \
+         is not delivery confirmation, and unknown may already have been sent, so never resend it \
+         automatically. Details: help.",
         Annotations::READ_ONLY,
     )
     .requires(&[Action::OutboxRead])
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(list, list_outbox);
-
-    let get = ToolSpec::new::<OutboxIdInput, OutboxInfo>(
-        "get_outbox", "Read sending status",
-        "Read a sending task. accepted is not delivery confirmation; unknown may already have been sent and must not be resent automatically.",
-        Annotations::READ_ONLY,
-    )
-    .requires(&[Action::OutboxRead])
-    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
-    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(
-        get,
-        |call, input: OutboxIdInput| -> Result<OutboxInfo, ToolError> {
-            Ok(outbox(call, &input.outbox_id)?.into())
-        },
-    );
+    tools.register(read, outbox_read);
 
     let cancel = ToolSpec::new::<OutboxIdInput, OutboxInfo>(
-        "cancel_outbox", "Cancel queued email",
+        "outbox_cancel", "Cancel queued email",
         "Cancel a queued sending task and keep its draft. An item already sending cannot be canceled.",
         Annotations::WRITES_LOCAL,
     )
@@ -216,7 +229,7 @@ pub(super) fn register(tools: &mut Tools) {
         cancel,
         |call, input: OutboxIdInput| -> Result<OutboxInfo, ToolError> {
             outbox(call, &input.outbox_id)?;
-            Ok(call.core.cancel_outbox(&input.outbox_id)?.into())
+            Ok(call.core.outbox_cancel(&input.outbox_id)?.into())
         },
     );
 }
@@ -246,13 +259,13 @@ fn scope<'a>(call: &'a ToolCall<'_>) -> Option<&'a [String]> {
 fn outbox(call: &ToolCall<'_>, id: &str) -> Result<OutboxItem, ToolError> {
     uuid("outboxId", id)?;
     call.note_resource(id);
-    let item = call.core.get_outbox(id)?;
+    let item = call.core.outbox_read(id)?;
     call.require_account(&item.account_id)?;
     call.note_resource(&item.account_id);
     Ok(item)
 }
 
-fn send_email(call: &ToolCall<'_>, input: SendEmailInput) -> Result<OutboxInfo, ToolError> {
+fn outbox_send(call: &ToolCall<'_>, input: SendEmailInput) -> Result<OutboxInfo, ToolError> {
     match input.action {
         SendAction::Send => {
             if input.outbox_id.is_some() {
@@ -323,6 +336,40 @@ struct Cursor {
     created_at: String,
     id: String,
     filter: String,
+}
+
+fn outbox_read(call: &ToolCall<'_>, input: GetOutboxInput) -> Result<OutboxLookup, ToolError> {
+    let Some(outbox_id) = input.outbox_id else {
+        let page = list_outbox(
+            call,
+            ListOutboxInput {
+                account_id: input.account_id,
+                states: input.states,
+                limit: input.limit,
+                cursor: input.cursor,
+            },
+        )?;
+        return Ok(OutboxLookup {
+            item: None,
+            items: Some(page.items),
+            next_cursor: page.next_cursor,
+        });
+    };
+    if input.account_id.is_some()
+        || input.states.is_some()
+        || input.limit.is_some()
+        || input.cursor.is_some()
+    {
+        return Err(ToolError::invalid(
+            "outboxId",
+            "listing filters cannot be combined with outboxId",
+        ));
+    }
+    Ok(OutboxLookup {
+        item: Some(outbox(call, &outbox_id)?.into()),
+        items: None,
+        next_cursor: None,
+    })
 }
 
 fn list_outbox(call: &ToolCall<'_>, input: ListOutboxInput) -> Result<ListOutboxOutput, ToolError> {

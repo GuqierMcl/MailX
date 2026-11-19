@@ -214,9 +214,9 @@ impl AccountService {
         self.storage.get_email(email_id)
     }
 
-    pub fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+    pub fn mail_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
         validate_email_id(email_id)?;
-        self.storage.get_conversation(email_id)
+        self.storage.mail_conversation(email_id)
     }
 
     pub(crate) fn conversation_page(

@@ -33,7 +33,7 @@ type BodyState = "missing" | "fetching" | "ready" | "failed";
 | --- | --- | --- | --- |
 | `listEmails(query)` | `emails_list`，`{ query }` | `MailxCore::list_emails` → `AccountService::list_emails` | `EmailPage` |
 | `getEmail(emailId)` | `emails_get`，`{ emailId }` | `MailxCore::get_email` → `AccountService::get_email` | `EmailDetail` |
-| `getConversation(emailId)` | `emails_get_conversation`，`{ emailId }` | `MailxCore::get_conversation` → `AccountService::get_conversation` | `ConversationPage { messages, possiblyIncomplete }`，按接收时间升序；无会话的邮件只返回自身；会话只在同一账号内，按 `References` / `In-Reply-To`（含引用同一未缓存根邮件的兄弟邮件）归并，无线索头部时仅对 30 天内同一对象之间的双向往来（己方与对方各至少一封，≤20 封）按主题兜底，单向通知不成会话；规则变化由 `threading_version` 触发后台重建；同一 `Message-ID` 的多份副本只列一份（优先打开的那份，其次非已发送文件夹的副本，再次最早的）；排除垃圾邮件与回收站副本（打开的邮件本身除外）；邮件不存在或不可见返回 `notFound` |
+| `getConversation(emailId)` | `emails_get_conversation`，`{ emailId }` | `MailxCore::mail_conversation` → `AccountService::mail_conversation` | `ConversationPage { messages, possiblyIncomplete }`，按接收时间升序；无会话的邮件只返回自身；会话只在同一账号内，按 `References` / `In-Reply-To`（含引用同一未缓存根邮件的兄弟邮件）归并，无线索头部时仅对 30 天内同一对象之间的双向往来（己方与对方各至少一封，≤20 封）按主题兜底，单向通知不成会话；规则变化由 `threading_version` 触发后台重建；同一 `Message-ID` 的多份副本只列一份（优先打开的那份，其次非已发送文件夹的副本，再次最早的）；排除垃圾邮件与回收站副本（打开的邮件本身除外）；邮件不存在或不可见返回 `notFound` |
 
 两个命令与账号、文件夹读取使用同一主窗口来源与启动 Ready 准入，参数结构拒绝未知顶层字段。不访问网络，不下载正文，也不改变已读或星标。宿主没有通用 SQL、路径或读凭证参数。
 
@@ -220,7 +220,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `outbox_resolve_unknown { id, choice, clientMutationId }` | 是 | 否 | `choice` 为 `markSent` / `resend`；核心接受 `Composer` 与 `MainWindow`，MCP / 模型仍为 `forbidden` |
 | `composer_open { draftId, fresh? }` | 是 | 否 | 草稿必须存在；创建或聚焦 `composer-{draftId}`。`fresh: true`（草稿刚为这个窗口创建）使页面 URL 带 `&fresh=1`，关闭时选择“不保存”会删除草稿；省略即 false |
 | `composer_focus { draftId }` | 是 | 否 | 返回 `bool`：已有 `composer-{draftId}` 窗口时取消最小化并聚焦，返回 `true`；没有则返回 `false`，不创建窗口、不检查草稿是否存在。主窗口内写信打开草稿前用它保证一份草稿只在一处编辑（[发信设计 17.7](../architecture/sending.md#177-写信打开方式)）。非规范 id 为 `validation`（字段 `draftId`） |
-| `composer_set_inline { draftId: string \| null }` | 是 | 否 | 同步命令，按调用顺序生效。报告主窗口内嵌写信区当前显示的草稿（`null` 为没有）；宿主只保存最近一次报告。工具层（MCP 与内置助手）把它与有写信窗口的草稿同样视为正在编辑：修改、删除、发送和增删附件返回 `draftOpen`，`list_drafts` 的 `open` 为 `true`。主窗口每次加载时先报告 `null`，清除上一次页面遗留的值。非规范 id 为 `validation`（字段 `draftId`） |
+| `composer_set_inline { draftId: string \| null }` | 是 | 否 | 同步命令，按调用顺序生效。报告主窗口内嵌写信区当前显示的草稿（`null` 为没有）；宿主只保存最近一次报告。工具层（MCP 与内置助手）把它与有写信窗口的草稿同样视为正在编辑：修改、删除、发送和增删附件返回 `draftOpen`，`draft_list` 的 `open` 为 `true`。主窗口每次加载时先报告 `null`，清除上一次页面遗留的值。非规范 id 为 `validation`（字段 `draftId`） |
 | `composer_close { force }` | 否 | 是 | 销毁调用窗口；草稿由前端先写出，宿主只负责关闭 |
 | 其余全部命令（账号修改、邮件 / 正文 / 链接 / 图片 / 附件、同步、设置修改、通知） | 是 | 否 | 与此前一致 |
 
@@ -261,7 +261,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 - 每个 `FolderSyncState` 包含 `folderId`、`phase`（waiting / syncing / idle / failed）、`lastSyncedAt`、`failure` 和 `dataRevision`。只有可见数据实际变化（新增、恢复、删除或标志变化的邮件，目录计数，代际切换与覆盖状态）时才递增版本，未变化的轮次不递增；某步失败前已提交的变化同样会递增版本。前端仅刷新相关查询及目录计数，并把短时间内多个目录的变化合并为一次目录树重载；统一收件箱只响应 inbox，消息内容仍从本地缓存查询。
 - 目录状态与数据 coverage 各有职责：同步失败保留已有缓存；`windowCapped` 说明窗口超限；尚未获得有效服务器计数时用 `countsKnown=false` 表示。计数优先来自 STATUS；STATUS 完整成功但目录名无法匹配或计数缺失时，核心可用原始目录名的只读 EXAMINE + 完整 UID SEARCH UNSEEN 取得计数，成功后同样标为已知，失败保留上次计数。
 - IMAP 的窗口搜索或未读搜索在缺少显式 SEARCH 响应时，只有匹配的 tagged OK、同一目录的只读 EXAMINE 明确报告 `0 EXISTS`，并且搜索期间的 EXISTS 和 UIDVALIDITY 信息与该选择一致，才视为空结果。在未读计数路径中，该结果可令 `countsKnown=true` 并提交零计数。其他缺失结果保留既有同步失败语义，不能作为删除本地记录或覆盖计数的依据。
-- IMAP 的 FLAGS 抓取成功却漏回部分邮件时，核心在同一目录重新核对漏回的 UID，确认已消失才将它从本地目录移除。这项定向核对要求显式的 SEARCH 结果。仍存在的 UID 在较小批次内有限重试。若仍有邮件缺少 FLAGS，保留这些邮件上次已知的状态并继续同步其他邮件。该目录仍视为未完成，用可重试的 `failure.code = "flagsIncomplete"` 提示“部分邮件状态暂未更新”。
+- IMAP 的 FLAGS 抓取成功却漏回部分邮件时，核心在同一目录重新核对漏回的 UID，确认已消失才将它从本地目录移除。这项定向核对要求显式的 SEARCH 结果。仍存在的 UID 在较小批次内有限重试。若仍有邮件缺少 FLAGS，保留这些邮件上次已知的状态并继续同步其他邮件；该目录照常视为同步完成，下一轮再核对，同时在 `failure` 中带可重试的 `failure.code = "flagsIncomplete"` 与“部分邮件状态暂未更新”，不因此整轮失败或重连（2925 对只含 UID 与 FLAGS 的 `UID FETCH` 可能整条不回）。
 - 账号 `lastSyncedAt` 仅在整轮全部成功时推进；局部目录失败不得宣称账号整轮成功。目录状态为运行态，重启后重建；窗口、邮件和最后已知计数仍持久化。
 
 `failure.willRetry=false`（登录被拒、凭证需重新确认或缺失、服务器不支持所需连接能力）停止账号自动重试，直到配置修改。新增 `providerPolicy` 同样停止自动同步与标记写回，但在用户处理服务商安全策略后，允许显式手动同步重启对应账号任务；修改连接也可恢复。缓存及待写标记保留，新标记和窗口前后台切换不自动解除停止状态。普通单目录的完整命令拒绝仍会在后续轮次重试，不使其他目录停摆。账号修改后启动新 generation，旧来源、旧配置 revision 或旧 generation 的排队写操作和状态通知会被拒绝。事件和查询继续遵循 main 窗口来源与启动 Ready 准入，没有新增写操作或读取凭证接口。
@@ -292,6 +292,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 偏好只需要数据目录，由宿主单独打开并复用 `SettingsStore`，不受 Ready 检查影响；核心启动失败时语言、外观仍可读取和修改。打开失败（目录不可用等）不缓存，下次调用重试。`settings_get` 和设置变更事件对本地可信 main 与合法 `composer-<uuid>` 窗口开放，`settings_update` 仍只允许 main；邮件正文 iframe 和其他窗口无权访问。
 
 `AppSettings` 另含 `translation`（见“邮件翻译”）。`AppSettings` 包含 `general`、`mail`、`appearance`、`security`、`layout`、`notifications`（见文末“新邮件通知”）、`badge`（见文末“应用图标未读角标”）与 `compose`。`mail.trashVerificationMailAfterCopy` 为布尔值，默认 false，旧文件缺少 `mail` 时补默认值；由“设置 → 邮件 → 增强”修改，开启后仅在专用验证码复制成功时安排可撤销的移到 Trash，不授权永久删除（见“验证码识别与复制”）。`compose.defaultAccountId`（字符串，空表示未设置）是统一收件箱等无账号上下文时新建邮件的默认发件账号，设置存储没有数据库，不校验该账号是否存在，草稿创建时再解析（账号不存在则退回核心原始顺序的第一个账号，即创建时间与 id 顺序；显示排序不参与此选择）；`compose.undoSendSeconds` 只能取 0 / 5 / 10 / 20 / 30（默认 0，立即发送），其他值提交返回 `validation`，`field` 为 `compose.undoSendSeconds`，手工编辑文件中的非法值加载时回到 0，旧文件缺少该节时补默认值。`compose.openMode`（`ComposeOpenMode`）为 `window`（新窗口，默认）或 `inline`（主窗口内写信），设计见[写信与发送 17.7](../architecture/sending.md#177-写信打开方式)；其他值提交返回 `validation`，`field` 为 `compose.openMode`，手工编辑文件中的非法值加载时回到 `window`，旧文件缺少该字段时按 `window` 处理。`compose` 节按整节替换，提交时须带上 `openMode`，省略即回到 `window`。`layout.navWidth` 是左侧导航栏宽度（CSS 像素，默认 256，范围 220–420）；越界提交返回 `validation`，`field` 为 `layout.navWidth`，手工编辑文件中的越界值加载时钳制到范围内，旧文件缺少该节时补默认值。前端在拖动或键盘调整结束后才保存，不随每个像素写盘。`layout.navCollapsed`（默认 false）记录侧栏是否收成图标栏，下次启动恢复；窄窗口自动收成图标栏不修改该值。`layout.listWidth` 是邮件列表（阅读区左侧）的宽度，同样是 CSS 像素，默认 420，范围 300–2000，越界提交返回 `validation`，`field` 为 `layout.listWidth`，手工编辑的越界值加载时钳制，旧文件缺该项时补默认值；它只在启动时作为列表的初始宽度使用，窗口过窄时列表与阅读区按比例缩小。前端的 `layout` 更新只提交变化的字段；`LayoutSettingsPatch` 的每个字段均可选，核心在设置锁内逐字段与当前值合并，因此侧栏宽度、列表宽度与账号显示顺序在不同窗口先后保存也不会相互覆盖。`layout.readerCollapsed`（默认 false）记录阅读区是否折叠，下次启动恢复，旧文件缺该项时按展开处理。宽度与折叠类布局变化由前端抖动写入（停止 500ms 后一次提交），账号顺序在放下时提交一次，核心不需要为此提供额外接口。`security.remoteImages` 为 `ask | automatic | never`，默认 ask；`security.senderAvatars` 默认 false，开启后才允许 `getAvatar` 访问 Gravatar（见文末）；旧文件缺少该节时自动补默认值。`appearance` 包含 `theme`（`system` / `light` / `dark`）、`accentColor`（空字符串或 `#rrggbb`）、`interfaceFont` 与 `mailFont`（均为空字符串或逗号分隔的字体名；后者只用于邮件正文文档的基础字体，由桌面宿主在生成正文文档时读取，邮件自带样式优先）和 `mailTheme`（`follow` / `light`，默认 `follow`：应用为深色时邮件正文反色显示，图片保持原色；`light` 始终白底）和 `fontSize`（`small` / `default` / `large`，同时缩放邮件正文基础字号），以及 `previewLines`（`none` / `one` / `two` / `three`，默认 `one`：邮件列表每行显示的正文预览行数，`none` 不显示预览，其余取值始终按行数预留固定高度（每行 1rem），没有预览的邮件也留出同样的空白，使列表每行等高；旧文件缺少该项时取默认值），以及 `mailboxLabel`（`name` / `icon`，默认 `name`：跨账号视图里邮件行用账号名称还是头像上的小徽标标出所属邮箱；旧文件缺少该项时取默认值）。纯文本正文由核心转义后生成 HTML，识别 http(s) 链接并把 `>` 引用渲染为嵌套引用块，与 HTML 正文走同一净化与隔离路径。空字符串表示内置默认值；字体列表按用户顺序回退，前端末尾补 `sans-serif`。更新在核心锁内合并，`layout` 按提交的字段更新，其他设置节按提交的整节替换；返回完整规范形式：颜色转小写，字体名去首尾空白和成对引号并丢弃空项。非法字体字符、超过 16 个字体或单个超过 64 个字符返回 `validation`，`field` 为 `appearance.accentColor` / `appearance.interfaceFont` / `appearance.mailFont`。
+
+`layout.assistantWidth` 是 AI 对话岛的宽度，320–560（默认 380）；越界返回 `validation`，加载时钳制到范围内，旧文件缺少该字段时补默认值。
 
 `layout.readingMode` 取 `split`（分屏视图，默认）或 `single`（单栏视图）。设置文件缺少该字段或其值无效时，加载为 `split`。通过现有 `LayoutSettingsPatch` 提交该字段，非法值返回 `validation`，`field` 为 `layout.readingMode`。`layout.listWidth` 与 `layout.readerCollapsed` 独立保存，用于恢复分屏视图。
 
@@ -369,9 +371,9 @@ Web OAuth、附件上传和后续设置细分接口在对应实现任务中补�
 
 ## 4. 邮件写操作一致性
 
-**草稿核心、桌面 IPC 与写信界面已实现；MCP 已由共享工具层开放，HTTP 未开放**（发信步骤 1，`core/src/drafts/`、`MailxCore::create_draft` / `create_draft_from` / `get_draft` / `list_drafts` 等）。`create_draft(request, default_account_id)`、`create_draft_from`、`get_draft`、`list_drafts(account_id?)`（按 `updatedAt`、`id` 倒序）、`update_draft`、`delete_draft` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyHtml` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，输入 HTML 不超过 2 MiB，核心派生纯文本不超过 1 MiB。发件箱的 core 层见下。
+**草稿核心、桌面 IPC 与写信界面已实现；MCP 已由共享工具层开放，HTTP 未开放**（发信步骤 1，`core/src/drafts/`、`MailxCore::draft_create` / `create_draft_from` / `get_draft` / `draft_list` 等）。`draft_create(request, default_account_id)`、`create_draft_from`、`get_draft`、`draft_list(account_id?)`（按 `updatedAt`、`id` 倒序）、`draft_update`、`draft_delete` 均已有单元测试；DTO 为 `Draft`、`DraftSummary`、`CreateDraftRequest`、`CreateDraftFromRequest`、`UpdateDraftRequest`，已生成到 `frontend/src/generated/accounts.ts`。版本冲突复用 `conflict`（尚未单设 `REVISION_CONFLICT`）；`clientMutationId` 重放返回同一草稿，同键不同内容为 `idempotencyConflict`。`create_draft_from` 不下载正文：正文未缓存时返回新增的错误码 `bodyNotCached`，调用方先 `fetchBody` 再重试。校验失败的 `field` 为 `draft.to` / `draft.cc` / `draft.bcc` / `draft.subject` / `draft.bodyHtml` / `draft.bodyText` / `draft.recipients`。收件人总数不超过 100，主题不超过 998 字节，输入 HTML 不超过 2 MiB，核心派生纯文本不超过 1 MiB。发件箱的 core 层见下。
 
-`CreateDraftRequest` 与 `UpdateDraftRequest` 的正文只有 `bodyHtml: string`，不接受 `bodyText`（未知字段被拒绝）。`Draft` 返回核心净化后的 `bodyHtml` 与只读派生的 `bodyText`。`Draft` 与 `DraftSummary` 带 `origin`（`user` / `mcp` / `ai`，创建者标记；`ai` 预留给 MailX 内置 AI）：只由宿主在创建时写入，`CreateDraftRequest` / `CreateDraftFromRequest` 没有该字段（带上会因未知字段被拒绝），更新不改变它，回复与转发草稿恒为 `user`，旧数据库行迁移后为 `user`；核心内部另有带来源参数的创建入口供工具层使用，目前没有任何调用方会创建 `mcp` 或 `ai` 草稿。前端对 `mcp` / `ai` 草稿在草稿列表行与写信窗口顶部分别显示淡色“由 MCP 创建”“由 AI 创建”；目前没有任何入口创建 `ai` 草稿。`Draft.attachments` 为必有数组，元素是 `DraftAttachmentSummary { id, fileName, mediaType, size, origin }`（`origin` 为 `user` / `forwarded` / `mcp` / `ai`；不含路径或字节），`update_draft` 不修改它，只能经上面的附件命令增删；附件命令各使 `revision` 加 1。转发预填的附件可能让草稿超限，草稿照常保存，发送时入队返回 `attachmentTooLarge` / `tooManyAttachments`。核心使用独立于阅读端的 HTML 白名单，删除样式、事件属性、图片与非 http/https/mailto 链接；支持 h1–h3；段落和标题仅接受 `data-align="center|right"`，`span.data-color` 与 `mark.data-highlight` 仅接受第 15 节的固定色板名，非法颜色包装去掉标签保留文字。纯文本保留标题文字、段落、嵌套列表、引用和链接地址，忽略对齐与颜色；出站 HTML 由核心把受限属性转换为固定内联样式。详见[富文本设计](../architecture/sending.md#14-富文本写信已实现)。HTML 不超过 2 MiB，派生纯文本不超过 1 MiB，超限分别返回 `draft.bodyHtml` / `draft.bodyText` 校验错误。
+`CreateDraftRequest` 与 `UpdateDraftRequest` 的正文只有 `bodyHtml: string`，不接受 `bodyText`（未知字段被拒绝）。`Draft` 返回核心净化后的 `bodyHtml` 与只读派生的 `bodyText`。`Draft` 与 `DraftSummary` 带 `origin`（`user` / `mcp` / `ai`，创建者标记；`ai` 预留给 MailX 内置 AI）：只由宿主在创建时写入，`CreateDraftRequest` / `CreateDraftFromRequest` 没有该字段（带上会因未知字段被拒绝），更新不改变它，回复与转发草稿恒为 `user`，旧数据库行迁移后为 `user`；核心内部另有带来源参数的创建入口供工具层使用，目前没有任何调用方会创建 `mcp` 或 `ai` 草稿。前端对 `mcp` / `ai` 草稿在草稿列表行与写信窗口顶部分别显示淡色“由 MCP 创建”“由 AI 创建”；目前没有任何入口创建 `ai` 草稿。`Draft.attachments` 为必有数组，元素是 `DraftAttachmentSummary { id, fileName, mediaType, size, origin }`（`origin` 为 `user` / `forwarded` / `mcp` / `ai`；不含路径或字节），`draft_update` 不修改它，只能经上面的附件命令增删；附件命令各使 `revision` 加 1。转发预填的附件可能让草稿超限，草稿照常保存，发送时入队返回 `attachmentTooLarge` / `tooManyAttachments`。核心使用独立于阅读端的 HTML 白名单，删除样式、事件属性、图片与非 http/https/mailto 链接；支持 h1–h3；段落和标题仅接受 `data-align="center|right"`，`span.data-color` 与 `mark.data-highlight` 仅接受第 15 节的固定色板名，非法颜色包装去掉标签保留文字。纯文本保留标题文字、段落、嵌套列表、引用和链接地址，忽略对齐与颜色；出站 HTML 由核心把受限属性转换为固定内联样式。详见[富文本设计](../architecture/sending.md#14-富文本写信已实现)。HTML 不超过 2 MiB，派生纯文本不超过 1 MiB，超限分别返回 `draft.bodyHtml` / `draft.bodyText` 校验错误。
 
 v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文本按行转义为段落，下次保存落盘。回复 / 转发使用缓存原文并降级复杂格式，不加载外部资源。新入队邮件固定为 `multipart/alternative`（纯文本在前、HTML 在后）；迁移不重建已入队的 MIME 快照。
 
@@ -384,8 +386,8 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 **发件箱核心、桌面 IPC 与界面已实现；MCP 工具见[发送与附件工具](../architecture/mail-send-tools.md)，HTTP 未开放**（`core/src/send/`）。`MailxCore` 方法：
 
 - `queue_send(caller, QueueSendRequest { draftId, expectedRevision, clientMutationId }, undo_send_seconds) -> OutboxItem`：`caller` 由宿主提供，`Caller::Composer` / `MainWindow`（主窗口内写信）/ `Mcp` / `Model` 都可入队；工具发送经 `queue_send_scoped` 同时检查首次请求和幂等重放的账号范围；`undo_send_seconds` 只能是 0 / 5 / 10 / 20 / 30（`validation`，字段 `undoSendSeconds`）。版本不符 `conflict`，没有收件人 `validation`（字段 `draft.recipients`），草稿已被队列占用 `draftLocked`。同一 `clientMutationId` 且同草稿同版本返回同一项；其他内容 `idempotencyConflict`。发件人地址与名称取入队时账号的当前值，Message-ID 此时生成。
-- `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`get_outbox(id)`。条目 `OutboxItem` 不含 MIME、正文，只有 `senderEmailAddress`（入队时冻结的 SMTP 发件地址，不随账号设置变化）、主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`serverCopyMessageId`（已对上的服务器副本，按 Message-ID 匹配后写入；尚未对上的 `accepted` 项作为本机副本出现在已发送文件夹列表中，见发信设计第 9 节）、`resolution`、`supersededBy`。
-- `cancel_outbox(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：接受 `Caller::Composer` 与 `Caller::MainWindow`（两者都是交互 UI；`Mcp` / `Model` 为 `forbidden`），只对未处理的 `unknown` 生效，`resend` 返回新项。
+- `list_outbox(account_id?, include_all)`：默认只含 `queued` / `sending` / `failed` / 未处理的 `unknown`；`include_all` 加上 `accepted`、`canceled` 与已处理的 `unknown`。新到旧。`outbox_read(id)`。条目 `OutboxItem` 不含 MIME、正文，只有 `senderEmailAddress`（入队时冻结的 SMTP 发件地址，不随账号设置变化）、主题、最多 3 个收件人与总数、状态、时间、尝试次数、`error { reason, smtpCode, text, rejected[] }`、`serverReply`、`serverCopyMessageId`（已对上的服务器副本，按 Message-ID 匹配后写入；尚未对上的 `accepted` 项作为本机副本出现在已发送文件夹列表中，见发信设计第 9 节）、`resolution`、`supersededBy`。
+- `outbox_cancel(id)`：仅 `queued`；`sending` 返回 `alreadySending`，其他状态 `conflict`。`retry_outbox_now(id)`：仅 `queued`，清除退避等待并唤醒（等待期内的 `notBefore` 不跳过，要提前发请用撤销后重新入队）。`resolve_unknown(caller, { id, resolution: markSent | resend, clientMutationId })`：接受 `Caller::Composer` 与 `Caller::MainWindow`（两者都是交互 UI；`Mcp` / `Model` 为 `forbidden`），只对未处理的 `unknown` 生效，`resend` 返回新项。
 - 新错误码：`draftLocked`、`forbidden`、`alreadySending`（均已生成到 `ErrorCode`）。`unknown` 永不自动重发。
 - `error.reason` 中 `messageTooLarge` 表示服务器明确以 `5.3.4` / `5.2.3` 拒绝（`MAIL FROM` 或正文之后的最终回复）；只有 `552`、没有增强状态码时仍是 `server`（正文前）或 `rejectedAfterData`（正文后）。后两者以及 `messageTooLarge` 都是确定失败（`failed`），不会变成 `unknown`。服务器最近一次在 `EHLO` 声明的 `SIZE` 记在账号上，经附件的 `AttachmentPolicy.serverLimitMb` 提供撰写提示。
 - 新事件：`CoreEvent::Outbox(OutboxChanged { accountId, outboxId, draftId, state, attempts, nextAttemptAt, errorReason })` 在每次状态变化（含入队、取走、重试排队、恢复）后发出；`CoreEvent::DraftChanged { draftId, accountId, change: created | updated | deleted | locked | unlocked }` 在草稿创建、保存、删除以及队列锁定、释放、接受后删除时发出。载荷不含地址、主题和正文。桌面宿主已转发为 `mailx://outbox` / `mailx://drafts`（见“写信窗口与发送命令”）。
@@ -581,7 +583,7 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 
 ### 收件人补全（主窗口与写信窗口）
 
-写信时收件人、抄送、密送输入框的候选，设计见[写信与发送 17.4](../architecture/sending.md#174-收件人自动补全)。候选全部来自本机已缓存的邮件，不新建需要同步维护的联系人表。MCP 的 `suggest_contacts` 复用同一规则，并在候选、统计与排序之前限制授权账号，见 [MCP 契约](mcp.md)。
+写信时收件人、抄送、密送输入框的候选，设计见[写信与发送 17.4](../architecture/sending.md#174-收件人自动补全)。候选全部来自本机已缓存的邮件，不新建需要同步维护的联系人表。MCP 的 `mail_contacts` 复用同一规则，并在候选、统计与排序之前限制授权账号，见 [MCP 契约](mcp.md)。
 
 - **命令。** `suggestContacts(query, limit?)` 对应 `contacts_suggest { query: string, limit?: number }`，返回按相关度排序的 `ContactSuggestion[]`，`ContactSuggestion { name: string | null, address }`：`address` 为 ASCII 小写；`name` 取该地址最近一次出现的非空显示名（去首尾空白，不可信文本）。`limit` 默认 8，取值 1–20，否则 `validation`（字段 `limit`）；`query` 去首尾空白后为空时返回空列表，超过 320 个字符返回 `validation`（字段 `query`）。主窗口与写信窗口都可调用，参数拒绝未知字段。
 - **来源。** 收到的邮件的发件人：所有账号的可见邮件，垃圾邮件和已删除邮件除外（与联系人视图一致，本机归档的仍计入）；本人发出的邮件的收件人：已发送角色文件夹中邮件的收件人与抄送，以及尚未匹配到服务器副本的本机已发送副本的 SMTP 收件人（含密送）。排除本人所有账号的地址，以及本地部分含 `noreply`、`no-reply`、`donotreply`、`do-not-reply`、`mailer-daemon`、`postmaster`（不区分大小写）的地址。
@@ -751,7 +753,11 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 type StartRun = { kind: RunKind };
 type RunKind =
   | { type: "nowSummary"; since: string | null; dayStarts?: string[]; fresh?: boolean; occasion?: Occasion }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容。fresh 为 true（「重新生成」）时跳过 30 分钟缓存、重新请求模型，新答案替换缓存项；省略为 false。occasion 是今天的节日或节气（可省略），界面按预设句的同一规则算出：节日按界面语言，节气只在中文界面发送；核心把它变成一行事实，缓存键随之不同
-  | { type: "chat"; conversationId?: string; message: string };         // 不带 conversationId 即新对话；message 1–20000 字符
+  | { type: "chat"; conversationId?: string; message: string;          // 不带 conversationId 即新对话；message 1–20000 字符
+      context?: ChatContext };                                         // 用户正在看的内容，只用于本次运行
+                                                                       // ChatContext = { type: "email"; emailId } | { type: "emails"; emailIds }（1–20 个）
+                                                                       //             | { type: "draft"; draftId }；格式不对为 validation（field 为 context）。
+                                                                       // 邮件或草稿在助手可用账号之外或不存在时按“没有上下文”处理，不报错。
 // 封闭列表，与前端 calendar.ts 的 id 一致，不是自由文本；其他值在反序列化时就被拒绝（validation）
 type Occasion =
   | "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn"
@@ -821,7 +827,7 @@ type ConfirmDraftChange = { type: "create" } | { type: "update"; fields: string[
   | { type: "attachmentAdded"; fileName: string } | { type: "attachmentRemoved"; fileName: string };
 ```
 
-- 请求由核心根据**当前数据**生成（草稿、发件箱项、邮件的现状），不使用模型对自己操作的描述；模型参数只决定查哪条记录。新建草稿时没有记录可查，`create_draft` 显示模型给出的主题，`create_reply_draft` 显示被回复邮件的主题。目标记录不存在或不在可用账号内时不弹确认，模型直接得到 `notFound` 类错误结果。
+- 请求由核心根据**当前数据**生成（草稿、发件箱项、邮件的现状），不使用模型对自己操作的描述；模型参数只决定查哪条记录。新建草稿时没有记录可查，`draft_create` 显示模型给出的主题，`draft_reply` 显示被回复邮件的主题。目标记录不存在或不在可用账号内时不弹确认，模型直接得到 `notFound` 类错误结果。
 - 发信的 `warnings`：`newRecipient`——某个收件人（含抄送、密送）在该账号的本地缓存里从未出现在任何邮件的发件人、收件人、抄送，或本机已发送副本的收件人中；`notInConversation`——某个收件人不在本次运行中已读取或搜索到的邮件地址里；`hasAttachments`——有非内嵌附件。
 - `assistantRespond` 只对该运行当前的 `requestId` 有效，且只能答一次。`approved: true` 时核心按**原参数**执行该调用（设置开关与账号范围会重新检查；草稿在这期间被改过时，工具自己返回 `conflict`，发信不会发出）；`false` 时模型收到“用户拒绝”的结果，该调用的活动状态为 `denied`。
 - 10 分钟没有回应按拒绝处理（活动 `denied`，模型被告知用户没有及时回应）。取消运行或撤销同意时，等待中的请求随运行结束，运行为 `canceled`。
@@ -1074,4 +1080,4 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 
 UI、MCP / AI 的归档或取消归档都使用精确撤销回执；Agent 变更经事件显示提示，UI 自己的调用使用返回回执避免重复提示。可选 undoToken 经主窗口 `emails_undo_archive` 命令（`{ undoToken }`，返回空）调用核心 `undo_archive`，只恢复该批次真实改变的归档键。已有状态不反转；后续对同一键的操作、账号来源改变、回执过期或重复使用使撤销失败。内存回执最多 100 条，有效 10 分钟，重启失效；token 不出现在 MCP 结果中。正常归档数据仍持久化。
 
-共享工具层已提供 `show_draft_in_app`：先检查账号范围，再经宿主打开 / 聚焦已有草稿，固定 fresh=false，保留退出与异步建窗检查。该工具不发送或删除草稿。
+共享工具层已提供 `show_in_app`（给 `draftId`）：先检查账号范围，再经宿主打开 / 聚焦已有草稿，固定 fresh=false，保留退出与异步建窗检查。该工具不发送或删除草稿。

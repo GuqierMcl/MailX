@@ -139,7 +139,7 @@ async fn origin_defaults_to_user_and_the_host_can_record_mcp() {
         subject: subject.into(),
         ..f.blank(None)
     };
-    let user = f.core.create_draft(request("Mine"), NONE).unwrap();
+    let user = f.core.draft_create(request("Mine"), NONE).unwrap();
     assert_eq!(user.origin, DraftOrigin::User);
 
     let mcp = f
@@ -154,7 +154,7 @@ async fn origin_defaults_to_user_and_the_host_can_record_mcp() {
         .unwrap();
     assert_eq!(stored, "mcp");
     assert_eq!(f.core.get_draft(&mcp.id).unwrap().origin, DraftOrigin::Mcp);
-    let listed = f.core.list_drafts(None).unwrap();
+    let listed = f.core.draft_list(None).unwrap();
     assert_eq!(
         listed.iter().find(|d| d.id == mcp.id).unwrap().origin,
         DraftOrigin::Mcp
@@ -174,7 +174,7 @@ async fn origin_survives_updates_and_reply_drafts_are_the_users() {
         .unwrap();
     let updated = f
         .core
-        .update_draft(UpdateDraftRequest {
+        .draft_update(UpdateDraftRequest {
             id: mcp.id.clone(),
             expected_revision: mcp.revision,
             account_id: None,
@@ -237,7 +237,7 @@ async fn create_is_idempotent_for_the_same_content_and_conflicts_otherwise() {
     let mut request = f.blank(None);
     request.to = vec![who(Some(" Lin "), " lin@example.com ")];
     request.subject = "Hello".into();
-    let first = f.core.create_draft(request.clone(), NONE).unwrap();
+    let first = f.core.draft_create(request.clone(), NONE).unwrap();
     assert_eq!(first.revision, 1);
     assert_eq!(first.kind, DraftKind::New);
     assert_eq!(first.account_id, f.account);
@@ -245,7 +245,7 @@ async fn create_is_idempotent_for_the_same_content_and_conflicts_otherwise() {
 
     // A retry returns the draft, even after the user edited it meanwhile.
     f.core
-        .update_draft(UpdateDraftRequest {
+        .draft_update(UpdateDraftRequest {
             id: first.id.clone(),
             expected_revision: 1,
             account_id: None,
@@ -256,20 +256,20 @@ async fn create_is_idempotent_for_the_same_content_and_conflicts_otherwise() {
             body_html: "text".into(),
         })
         .unwrap();
-    let again = f.core.create_draft(request.clone(), NONE).unwrap();
+    let again = f.core.draft_create(request.clone(), NONE).unwrap();
     assert_eq!(again.id, first.id);
     assert_eq!(again.revision, 2);
-    assert_eq!(f.core.list_drafts(None).unwrap().len(), 1);
+    assert_eq!(f.core.draft_list(None).unwrap().len(), 1);
 
     request.subject = "Different".into();
     assert_eq!(
-        code(f.core.create_draft(request, NONE)).0,
+        code(f.core.draft_create(request, NONE)).0,
         ErrorCode::IdempotencyConflict
     );
     let mut bad = f.blank(None);
     bad.client_mutation_id = "nope".into();
     assert_eq!(
-        code(f.core.create_draft(bad, NONE)),
+        code(f.core.draft_create(bad, NONE)),
         (ErrorCode::Validation, Some("clientMutationId".into()))
     );
 }
@@ -280,13 +280,13 @@ async fn default_account_resolution() {
     let second = f.add_account("second@example.com", "2030-01-01T00:00:00.000Z");
     // No setting: the first account in list order.
     assert_eq!(
-        f.core.create_draft(f.blank(None), NONE).unwrap().account_id,
+        f.core.draft_create(f.blank(None), NONE).unwrap().account_id,
         f.account
     );
     // The setting names an existing account.
     assert_eq!(
         f.core
-            .create_draft(f.blank(None), &second)
+            .draft_create(f.blank(None), &second)
             .unwrap()
             .account_id,
         second
@@ -294,7 +294,7 @@ async fn default_account_resolution() {
     // An explicit account wins over the setting.
     assert_eq!(
         f.core
-            .create_draft(f.blank(Some(&f.account)), &second)
+            .draft_create(f.blank(Some(&f.account)), &second)
             .unwrap()
             .account_id,
         f.account
@@ -303,7 +303,7 @@ async fn default_account_resolution() {
     for stale in [id(), "garbage".to_owned()] {
         assert_eq!(
             f.core
-                .create_draft(f.blank(None), &stale)
+                .draft_create(f.blank(None), &stale)
                 .unwrap()
                 .account_id,
             f.account
@@ -311,7 +311,7 @@ async fn default_account_resolution() {
     }
     // An unknown explicit account is an error, not a fallback.
     assert_eq!(
-        code(f.core.create_draft(f.blank(Some(&id())), NONE)).0,
+        code(f.core.draft_create(f.blank(Some(&id())), NONE)).0,
         ErrorCode::NotFound
     );
     // No accounts at all.
@@ -322,7 +322,7 @@ async fn default_account_resolution() {
     f.db.execute("DELETE FROM folders", []).unwrap();
     f.db.execute("DELETE FROM accounts", []).unwrap();
     assert_eq!(
-        code(f.core.create_draft(f.blank(None), NONE)).0,
+        code(f.core.draft_create(f.blank(None), NONE)).0,
         ErrorCode::NotFound
     );
 }
@@ -331,7 +331,7 @@ async fn default_account_resolution() {
 async fn update_checks_the_revision_and_may_move_the_draft_to_another_account() {
     let f = fixture(&[plain("x")]);
     let second = f.add_account("second@example.com", "2030-01-01T00:00:00.000Z");
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let update = |expected: u32, account: Option<&str>, body: &str| UpdateDraftRequest {
         id: draft.id.clone(),
         expected_revision: expected,
@@ -342,7 +342,7 @@ async fn update_checks_the_revision_and_may_move_the_draft_to_another_account() 
         subject: "S".into(),
         body_html: body.into(),
     };
-    let saved = f.core.update_draft(update(1, None, "one")).unwrap();
+    let saved = f.core.draft_update(update(1, None, "one")).unwrap();
     assert_eq!(saved.revision, 2);
     assert_eq!(saved.body_text, "one");
     assert!(saved.updated_at >= draft.updated_at);
@@ -350,26 +350,26 @@ async fn update_checks_the_revision_and_may_move_the_draft_to_another_account() 
 
     // A stale revision never overwrites.
     assert_eq!(
-        code(f.core.update_draft(update(1, None, "stale"))).0,
+        code(f.core.draft_update(update(1, None, "stale"))).0,
         ErrorCode::Conflict
     );
     assert_eq!(f.core.get_draft(&draft.id).unwrap().body_text, "one");
 
     let moved = f
         .core
-        .update_draft(update(2, Some(&second), "two"))
+        .draft_update(update(2, Some(&second), "two"))
         .unwrap();
     assert_eq!(
         (moved.account_id.as_str(), moved.revision),
         (second.as_str(), 3)
     );
     assert_eq!(
-        code(f.core.update_draft(update(3, Some(&id()), "x"))).0,
+        code(f.core.draft_update(update(3, Some(&id()), "x"))).0,
         ErrorCode::NotFound
     );
     let mut missing = update(1, None, "x");
     missing.id = id();
-    assert_eq!(code(f.core.update_draft(missing)).0, ErrorCode::NotFound);
+    assert_eq!(code(f.core.draft_update(missing)).0, ErrorCode::NotFound);
 }
 
 #[tokio::test]
@@ -380,7 +380,7 @@ async fn list_is_newest_first_filterable_and_delete_removes() {
         let mut request = f.blank(Some(account));
         request.subject = subject.into();
         request.body_html = super::body::plain_text_to_html(body);
-        f.core.create_draft(request, NONE).unwrap()
+        f.core.draft_create(request, NONE).unwrap()
     };
     let a = make(&f.account, "a", "  first \n line  ");
     let b = make(&second, "b", "");
@@ -403,7 +403,7 @@ async fn list_is_newest_first_filterable_and_delete_removes() {
     expected.extend(tied);
     let listed: Vec<String> = f
         .core
-        .list_drafts(None)
+        .draft_list(None)
         .unwrap()
         .into_iter()
         .map(|draft| draft.id)
@@ -411,18 +411,18 @@ async fn list_is_newest_first_filterable_and_delete_removes() {
     assert_eq!(listed, expected);
     let only: Vec<String> = f
         .core
-        .list_drafts(Some(&f.account))
+        .draft_list(Some(&f.account))
         .unwrap()
         .into_iter()
         .map(|draft| draft.subject)
         .collect();
     assert_eq!(only.len(), 2);
-    assert_eq!(f.core.list_drafts(None).unwrap()[0].preview, "first line");
+    assert_eq!(f.core.draft_list(None).unwrap()[0].preview, "first line");
 
-    f.core.delete_draft(&a.id).unwrap();
+    f.core.draft_delete(&a.id).unwrap();
     assert_eq!(code(f.core.get_draft(&a.id)).0, ErrorCode::NotFound);
-    assert_eq!(code(f.core.delete_draft(&a.id)).0, ErrorCode::NotFound);
-    assert_eq!(f.core.list_drafts(None).unwrap().len(), 2);
+    assert_eq!(code(f.core.draft_delete(&a.id)).0, ErrorCode::NotFound);
+    assert_eq!(f.core.draft_list(None).unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -432,7 +432,7 @@ async fn content_limits_and_header_injection_are_rejected() {
         let mut request = f.blank(None);
         change(&mut request);
         assert_eq!(
-            code(f.core.create_draft(request, NONE)),
+            code(f.core.draft_create(request, NONE)),
             (ErrorCode::Validation, Some(field.to_owned())),
             "{field}"
         );
@@ -497,7 +497,7 @@ async fn content_limits_and_header_injection_are_rejected() {
     ok.bcc = many(20);
     ok.subject = "s".repeat(998);
     ok.body_html = format!("line\r\nline\n{}", "b".repeat(1024 * 1024 - 11));
-    let saved = f.core.create_draft(ok, NONE).unwrap();
+    let saved = f.core.draft_create(ok, NONE).unwrap();
     assert_eq!(saved.to.len() + saved.cc.len() + saved.bcc.len(), 100);
 
     // Updates are validated the same way and leave the revision alone.
@@ -512,7 +512,7 @@ async fn content_limits_and_header_injection_are_rejected() {
         body_html: String::new(),
     };
     assert_eq!(
-        code(f.core.update_draft(update)),
+        code(f.core.draft_update(update)),
         (ErrorCode::Validation, Some("draft.to".into()))
     );
     assert_eq!(f.core.get_draft(&saved.id).unwrap().revision, 1);
@@ -522,10 +522,10 @@ async fn content_limits_and_header_injection_are_rejected() {
 async fn deleting_an_account_deletes_its_drafts_but_a_vanished_source_keeps_the_draft() {
     let f = fixture(&[plain("body")]);
     let extra = f.add_account("second@example.com", "2030-01-01T00:00:00.000Z");
-    let kept = f.core.create_draft(f.blank(Some(&extra)), NONE).unwrap();
+    let kept = f.core.draft_create(f.blank(Some(&extra)), NONE).unwrap();
     let other = f
         .core
-        .create_draft(f.blank(Some(&f.account)), NONE)
+        .draft_create(f.blank(Some(&f.account)), NONE)
         .unwrap();
     f.db.execute("DELETE FROM accounts WHERE id = ?1", [&extra])
         .unwrap();
@@ -743,7 +743,7 @@ async fn from_requests_are_idempotent_and_reject_new() {
         code(f.core.create_draft_from(other_kind)).0,
         ErrorCode::IdempotencyConflict
     );
-    assert_eq!(f.core.list_drafts(None).unwrap().len(), 1);
+    assert_eq!(f.core.draft_list(None).unwrap().len(), 1);
     let new_kind = CreateDraftFromRequest {
         kind: DraftKind::New,
         client_mutation_id: id(),
@@ -858,7 +858,7 @@ async fn uncached_bodies_and_invisible_messages_are_distinct_errors() {
         code(malformed),
         (ErrorCode::Validation, Some("emailId".into()))
     );
-    assert!(f.core.list_drafts(None).unwrap().is_empty());
+    assert!(f.core.draft_list(None).unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -903,7 +903,7 @@ fn callers_cannot_submit_the_derived_plain_text_projection() {
 #[tokio::test]
 async fn legacy_plain_text_drafts_upgrade_on_read_and_persist_on_save() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let text = "<script>alert('&')</script>\n\n第二行\n";
     f.db.execute(
         "UPDATE drafts SET body_html = NULL, body_text = ?2 WHERE id = ?1",
@@ -927,7 +927,7 @@ async fn legacy_plain_text_drafts_upgrade_on_read_and_persist_on_save() {
 
     let saved = f
         .core
-        .update_draft(UpdateDraftRequest {
+        .draft_update(UpdateDraftRequest {
             id: legacy.id.clone(),
             expected_revision: legacy.revision,
             account_id: None,
@@ -959,7 +959,7 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     // test exercises the byte limit without pathological HTML parser runtime.
     let text = format!("{}\n", "&".repeat(255)).repeat(4096);
     assert_eq!(text.len(), MIB);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     f.db.execute(
         "UPDATE drafts SET body_html = NULL, body_text = ?2, to_addresses = ?3 WHERE id = ?1",
         params![
@@ -1000,7 +1000,7 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     service
         .lock()
         .unwrap()
-        .cancel_outbox(&queued.id, chrono::Utc::now())
+        .outbox_cancel(&queued.id, chrono::Utc::now())
         .unwrap();
 
     let update = |draft: &Draft, html: String| UpdateDraftRequest {
@@ -1015,7 +1015,7 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     };
     let saved = f
         .core
-        .update_draft(update(&legacy, legacy.body_html.clone()))
+        .draft_update(update(&legacy, legacy.body_html.clone()))
         .unwrap();
     assert_eq!(saved.body_html, legacy.body_html);
     assert_eq!(saved.body_text, text);
@@ -1031,14 +1031,14 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     // Once persisted, unchanged core-owned content still stays editable.
     let again = f
         .core
-        .update_draft(update(&saved, saved.body_html.clone()))
+        .draft_update(update(&saved, saved.body_html.clone()))
         .unwrap();
     assert_eq!(again.body_text, text);
     // An actual body change uses the ordinary new-input sanitizer and limit.
     assert_eq!(
         code(
             f.core
-                .update_draft(update(&again, format!("{}<p>new</p>", again.body_html)))
+                .draft_update(update(&again, format!("{}<p>new</p>", again.body_html)))
         ),
         (ErrorCode::Validation, Some("draft.bodyHtml".into()))
     );
@@ -1050,7 +1050,7 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     // Even a valid legacy body made entirely of line breaks may exceed the
     // HTML limit. A header-only save must not truncate those lines either.
     let blank_lines = "\n".repeat(MIB);
-    let other = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let other = f.core.draft_create(f.blank(None), NONE).unwrap();
     f.db.execute(
         "UPDATE drafts SET body_html = NULL, body_text = ?2 WHERE id = ?1",
         params![other.id, blank_lines],
@@ -1059,7 +1059,7 @@ async fn oversized_legacy_html_keeps_all_text_when_only_headers_change_or_it_is_
     let legacy = f.core.get_draft(&other.id).unwrap();
     let saved = f
         .core
-        .update_draft(update(&legacy, legacy.body_html.clone()))
+        .draft_update(update(&legacy, legacy.body_html.clone()))
         .unwrap();
     assert_eq!(saved.body_text, blank_lines);
     assert_eq!(saved.body_html.matches("<p>").count(), MIB + 1);
@@ -1071,7 +1071,7 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
     let mut request = f.blank(None);
     request.to = vec![who(None, "reader@example.com")];
     request.body_html = "<h2 data-align='center'>标题</h2><p data-align='right' onclick='steal()'>你好<span data-color='red'><mark data-highlight='yellow'><strong>朋友</strong></mark></span></p><ol start='3'><li><p>三个</p></li><li><p><a href='https://example.com' style='color:red'>链接</a></p></li></ol><blockquote><p>引用</p></blockquote><script>secret()</script><img src='https://tracker.example'>".into();
-    let saved = f.core.create_draft(request, NONE).unwrap();
+    let saved = f.core.draft_create(request, NONE).unwrap();
     assert_eq!(
         saved.body_text,
         "标题\n你好朋友\n3. 三个\n4. 链接 <https://example.com>\n> 引用"
@@ -1092,7 +1092,7 @@ async fn saved_rich_content_is_sanitized_and_generates_the_mime_alternatives() {
     }
     assert_eq!(f.core.get_draft(&saved.id).unwrap(), saved);
     assert!(
-        f.core.list_drafts(None).unwrap()[0]
+        f.core.draft_list(None).unwrap()[0]
             .preview
             .contains("3. 三个")
     );
@@ -1225,7 +1225,7 @@ fn blob_files(directory: &std::path::Path) -> usize {
 #[tokio::test]
 async fn attachments_add_list_and_remove_with_revisions() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     assert!(draft.attachments.is_empty());
 
     let one = add(&f, &draft, "../dir/报告\n终稿.pdf", b"%PDF-1.7 hello").unwrap();
@@ -1285,7 +1285,7 @@ async fn attachments_add_list_and_remove_with_revisions() {
     assert_eq!(names, ["unknown.zzz", "empty.txt", "empty.txt"]);
 
     // Deleting the draft takes its attachment rows along.
-    f.core.delete_draft(&draft.id).unwrap();
+    f.core.draft_delete(&draft.id).unwrap();
     let rows: i64 =
         f.db.query_row("SELECT COUNT(*) FROM draft_attachments", [], |row| {
             row.get(0)
@@ -1297,7 +1297,7 @@ async fn attachments_add_list_and_remove_with_revisions() {
 #[tokio::test]
 async fn attachments_respect_the_count_and_size_limits() {
     let f = fixture(&[plain("x")]);
-    let mut draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let mut draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let policy = f.core.attachment_policy(&draft.account_id).unwrap();
     assert_eq!(policy.max_total_bytes, 20 * 1024 * 1024);
     assert_eq!(policy.max_count, 20);
@@ -1315,7 +1315,7 @@ async fn attachments_respect_the_count_and_size_limits() {
         ErrorCode::TooManyAttachments
     );
 
-    let big = f.core.create_draft(f.blank(None), &id()).unwrap();
+    let big = f.core.draft_create(f.blank(None), &id()).unwrap();
     let mib = vec![7_u8; 2 * 1024 * 1024];
     let mut big = big;
     for index in 0..5 {
@@ -1343,7 +1343,7 @@ async fn a_locked_draft_refuses_attachment_changes_before_the_blob_is_written() 
     let mut request = f.blank(None);
     request.to = vec![who(None, "li@example.org")];
     request.subject = "queued".into();
-    let draft = f.core.create_draft(request, NONE).unwrap();
+    let draft = f.core.draft_create(request, NONE).unwrap();
     let service = f.core.service_for_tests();
     let queued = {
         let mut service = service.lock().unwrap();
@@ -1373,7 +1373,7 @@ async fn a_locked_draft_refuses_attachment_changes_before_the_blob_is_written() 
     service
         .lock()
         .unwrap()
-        .cancel_outbox(&queued.id, chrono::Utc::now())
+        .outbox_cancel(&queued.id, chrono::Utc::now())
         .unwrap();
     let added = add(&f, &draft, "a.txt", b"bytes").unwrap();
     assert_eq!(added.attachments.len(), 1);
@@ -1382,17 +1382,17 @@ async fn a_locked_draft_refuses_attachment_changes_before_the_blob_is_written() 
 #[tokio::test]
 async fn identical_content_shares_one_blob_and_cleanup_keeps_referenced_ones() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let before = blob_files(f._directory.path());
     let draft = add(&f, &draft, "a.txt", b"same bytes").unwrap();
     let draft = add(&f, &draft, "b.txt", b"same bytes").unwrap();
     assert_eq!(draft.attachments.len(), 2);
     assert_eq!(blob_files(f._directory.path()), before + 1);
 
-    let orphan = f.core.create_draft(f.blank(None), &id()).unwrap();
+    let orphan = f.core.draft_create(f.blank(None), &id()).unwrap();
     let orphan = add(&f, &orphan, "o.txt", b"orphan bytes").unwrap();
     assert_eq!(blob_files(f._directory.path()), before + 2);
-    f.core.delete_draft(&orphan.id).unwrap();
+    f.core.draft_delete(&orphan.id).unwrap();
 
     // Startup cleanup frees the unreferenced blob only.
     let Fixture {
@@ -1532,7 +1532,7 @@ fn inline_of(draft: &Draft) -> Vec<&crate::DraftAttachmentSummary> {
 
 fn set_body(f: &Fixture, draft: &Draft, body_html: String) -> Draft {
     f.core
-        .update_draft(UpdateDraftRequest {
+        .draft_update(UpdateDraftRequest {
             id: draft.id.clone(),
             expected_revision: draft.revision,
             account_id: None,
@@ -1552,7 +1552,7 @@ fn img(cid: &str) -> String {
 #[tokio::test]
 async fn inline_images_are_stored_with_a_content_id_and_a_sniffed_type() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     // The name says jpg; the bytes say PNG, and the bytes win.
     let png = picture(image::ImageFormat::Png, 4, 3);
     let draft = add_inline(&f, &draft, "photo.jpg", &png).unwrap();
@@ -1591,7 +1591,7 @@ async fn inline_images_are_stored_with_a_content_id_and_a_sniffed_type() {
 #[tokio::test]
 async fn inline_images_outside_the_whitelist_are_refused() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let mut apng = picture(image::ImageFormat::Png, 2, 2);
     // An animation control chunk right after IHDR makes it an APNG.
     let mut chunk = 8u32.to_be_bytes().to_vec();
@@ -1634,7 +1634,7 @@ async fn inline_images_outside_the_whitelist_are_refused() {
 #[tokio::test]
 async fn inline_images_share_the_attachment_limits() {
     let f = fixture(&[plain("x")]);
-    let mut draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let mut draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let png = picture(image::ImageFormat::Png, 2, 2);
     for _ in 0..19 {
         draft = add_inline(&f, &draft, "p.png", &png).unwrap();
@@ -1664,7 +1664,7 @@ async fn inline_images_share_the_attachment_limits() {
 async fn adding_a_file_drops_only_inline_rows_the_saved_body_does_not_show() {
     let f = fixture(&[plain("x")]);
     let png = picture(image::ImageFormat::Png, 2, 2);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let draft = add_inline(&f, &draft, "kept.png", &png).unwrap();
     let kept = inline_of(&draft)[0].content_id.clone().unwrap();
     let draft = set_body(&f, &draft, img(&kept));
@@ -1698,7 +1698,7 @@ async fn a_locked_draft_refuses_inline_images_and_stale_revisions() {
     let mut request = f.blank(None);
     request.to = vec![who(None, "li@example.org")];
     request.subject = "queued".into();
-    let draft = f.core.create_draft(request, NONE).unwrap();
+    let draft = f.core.draft_create(request, NONE).unwrap();
     let stale = draft.clone();
     let draft = add_inline(&f, &draft, "p.png", &png).unwrap();
     assert_eq!(
@@ -1729,7 +1729,7 @@ async fn a_locked_draft_refuses_inline_images_and_stale_revisions() {
 #[tokio::test]
 async fn inline_previews_are_the_validated_transcode_never_the_raw_bytes() {
     let f = fixture(&[plain("x")]);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let gif = picture(image::ImageFormat::Gif, 5, 4);
     let draft = add_inline(&f, &draft, "anim.gif", &gif).unwrap();
     let id = inline_of(&draft)[0].id.clone();
@@ -1753,7 +1753,7 @@ async fn migration_17_adds_the_partial_unique_content_id_index() {
         f.db.query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
     assert!(version >= 17);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let insert = |_: &str, inline: bool, cid: Option<&str>| {
         f.db.execute(
             "INSERT INTO draft_attachments
@@ -1809,7 +1809,7 @@ async fn queueing_matches_frozen_ids_when_inline_rows_interleave_with_files() {
     request.subject = "order".into();
 
     // Referenced inline image inserted before a regular attachment.
-    let draft = f.core.create_draft(request.clone(), NONE).unwrap();
+    let draft = f.core.draft_create(request.clone(), NONE).unwrap();
     let (draft, images) = f
         .core
         .add_inline_images(
@@ -1825,7 +1825,7 @@ async fn queueing_matches_frozen_ids_when_inline_rows_interleave_with_files() {
 
     // An unreferenced inline row between two regular rows.
     request.client_mutation_id = id();
-    let draft = f.core.create_draft(request, NONE).unwrap();
+    let draft = f.core.draft_create(request, NONE).unwrap();
     let draft = add(&f, &draft, "a.txt", b"x").unwrap();
     let first = draft.attachments[0].id.clone();
     let (draft, _) = f
@@ -1846,7 +1846,7 @@ async fn queue_time_limits_count_only_what_will_be_sent() {
     let mut request = f.blank(None);
     request.to = vec![who(None, "li@example.org")];
     request.subject = "limit".into();
-    let mut draft = f.core.create_draft(request, NONE).unwrap();
+    let mut draft = f.core.draft_create(request, NONE).unwrap();
     for n in 0..20 {
         draft = add(&f, &draft, &format!("{n}.txt"), b"x").unwrap();
     }
@@ -1870,7 +1870,7 @@ async fn queue_time_limits_count_only_what_will_be_sent() {
 async fn inline_batches_are_all_or_nothing_and_keep_their_own_members() {
     let f = fixture(&[plain("x")]);
     let png = picture(image::ImageFormat::Png, 2, 2);
-    let draft = f.core.create_draft(f.blank(None), NONE).unwrap();
+    let draft = f.core.draft_create(f.blank(None), NONE).unwrap();
     let (draft, images) = f
         .core
         .add_inline_images(
@@ -2064,7 +2064,7 @@ async fn local_sent_copy_rejects_flags_and_is_removed_idempotently() {
         .unwrap();
     assert!(released.is_some() && deleted.is_some() && hash.is_none());
     assert_eq!(
-        f.core.get_outbox(&outbox).unwrap().sender_email_address,
+        f.core.outbox_read(&outbox).unwrap().sender_email_address,
         "own@example.com"
     );
     assert_eq!(code(f.core.get_email(&email)).0, ErrorCode::NotFound);
@@ -2137,4 +2137,88 @@ fn walk(path: &std::path::Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
+}
+
+/// An HTML mail with one referenced inline image, the shape a forward meets.
+fn html_with_image(cid: &str) -> Vec<u8> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let image = picture(image::ImageFormat::Png, 4, 3);
+    format!(
+        "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=fixture\r\n\r\n\
+         --fixture\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
+         <p>Look at this</p><p><img src=\"cid:{cid}\" alt=\"chart\"></p>\r\n\
+         --fixture\r\nContent-Type: image/png\r\nContent-Disposition: inline\r\n\
+         Content-ID: <{cid}>\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --fixture--\r\n",
+        STANDARD.encode(&image),
+    )
+    .into_bytes()
+}
+
+#[tokio::test]
+async fn a_forward_carries_the_originals_inline_images_under_its_own_content_ids() {
+    let cid = "logo@example.test";
+    let f = fixture(&[html_with_image(cid)]);
+    let forward = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: DraftKind::Forward,
+                client_mutation_id: id(),
+            },
+            crate::SupportedLocale::En,
+        )
+        .unwrap();
+    let [image] = inline_of(&forward)[..] else {
+        panic!(
+            "the forward carries one inline image, got {:?}",
+            forward.attachments
+        );
+    };
+    let new_cid = image
+        .content_id
+        .clone()
+        .expect("an inline Copy has its own id");
+    assert_ne!(new_cid, cid);
+    assert_eq!(
+        super::body::cid_of(&format!("cid:{new_cid}")),
+        Some(new_cid.as_str())
+    );
+    assert!(
+        forward.body_html.contains(&format!("cid:{new_cid}")),
+        "{}",
+        forward.body_html
+    );
+    assert!(
+        !forward.body_html.contains(cid),
+        "the original id does not survive"
+    );
+    // Ordinary attachments are not invented for it.
+    assert!(
+        forward
+            .attachments
+            .iter()
+            .all(|a| a.inline || a.file_name != "image.png")
+    );
+
+    // A reply keeps the alt text and no image: a reply never re-sends pictures.
+    let reply = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: DraftKind::Reply,
+                client_mutation_id: id(),
+            },
+            crate::SupportedLocale::En,
+        )
+        .unwrap();
+    assert!(inline_of(&reply).is_empty());
+    assert!(!reply.body_html.contains("cid:"));
+    assert!(
+        reply.body_text.contains("[Image: chart]"),
+        "{}",
+        reply.body_text
+    );
 }

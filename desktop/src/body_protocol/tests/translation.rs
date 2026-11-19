@@ -180,7 +180,7 @@ async fn drafts_never_carry_a_variant() {
     let (_directory, core, _ids, _db) = fixture();
     let protocol = BodyProtocol::default();
     let draft = core
-        .create_draft(
+        .draft_create(
             mailx_core::CreateDraftRequest {
                 account_id: None,
                 to: vec![],

@@ -79,7 +79,7 @@ describe('useAssistantRun', () => {
     expect(result.current.reasoning[0].durationMs).toBe(4200)
     // A later stretch after a tool call is placed after it.
     await emit(
-      event(7, { type: 'tool', callId: 'c', name: 'search_emails', status: 'running', summary: { type: 'pending' } }),
+      event(7, { type: 'tool', callId: 'c', name: 'mail_search', status: 'running', summary: { type: 'pending' } }),
       event(8, { type: 'reasoning', segment: 1, delta: 'again' }),
       event(9, { type: 'state', state: 'canceled' }),
     )

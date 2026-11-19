@@ -289,7 +289,7 @@ impl Fx {
 
     fn user_draft(&self) -> crate::Draft {
         self.core
-            .create_draft(
+            .draft_create(
                 serde_json::from_value(json!({
                     "accountId": self.account, "to": [{"address":"recipient@example.test"}],
                     "cc": [], "bcc": [], "subject": "User draft", "bodyHtml": "<p>Mine</p>",
@@ -334,6 +334,7 @@ fn chat_request(conversation_id: Option<&str>, message: &str) -> StartRun {
         kind: RunKind::Chat {
             conversation_id: conversation_id.map(str::to_owned),
             message: message.into(),
+            context: None,
         },
     }
 }
@@ -466,7 +467,7 @@ async fn a_plain_run_streams_events_in_order_with_increasing_seq() {
         .iter()
         .map(|t| t["function"]["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"search_emails") && names.contains(&"send_email"));
+    assert!(names.contains(&"mail_search") && names.contains(&"outbox_send"));
     assert!(
         !names.contains(&"show_email_in_app"),
         "MCP-only tools stay hidden"
@@ -551,7 +552,7 @@ async fn bad_requests_are_rejected_before_anything_runs() {
 async fn a_tool_call_runs_against_the_core_and_its_result_goes_back_wrapped() {
     let fx = Fx::new().await;
     fx.model(vec![
-        calls(&[("c1", "search_emails", json!({"query": "hello"}))]),
+        calls(&[("c1", "mail_search", json!({"query": "hello"}))]),
         say("Found it."),
     ]);
     let snapshot = fx.chat_and_wait("find hello").await;
@@ -561,7 +562,7 @@ async fn a_tool_call_runs_against_the_core_and_its_result_goes_back_wrapped() {
     let tool = &snapshot.tools[0];
     assert_eq!(
         (tool.call_id.as_str(), tool.name.as_str()),
-        ("c1", "search_emails")
+        ("c1", "mail_search")
     );
     assert_eq!(tool.status, ToolStatus::Done);
     assert_eq!(tool.summary, ToolActivitySummary::Found { count: 1 });
@@ -569,7 +570,7 @@ async fn a_tool_call_runs_against_the_core_and_its_result_goes_back_wrapped() {
     let second = fx.request(1);
     let results = tool_messages(&second);
     assert_eq!(results.len(), 1);
-    assert!(results[0].starts_with("<tool_result name=\"search_emails\" trust=\"untrusted\">"));
+    assert!(results[0].starts_with("<tool_result name=\"mail_search\" trust=\"untrusted\">"));
     assert!(results[0].contains(&fx.emails[0]));
     // The assistant message before it carries the call with its arguments.
     let assistant = second["messages"]
@@ -580,7 +581,7 @@ async fn a_tool_call_runs_against_the_core_and_its_result_goes_back_wrapped() {
         .unwrap();
     assert_eq!(
         assistant["tool_calls"][0]["function"]["name"],
-        "search_emails"
+        "mail_search"
     );
 
     let events = fx.run_events(&snapshot.run_id);
@@ -632,7 +633,7 @@ impl Fx {
 
     fn draft_to(&self, address: &str) -> crate::Draft {
         self.core
-            .create_draft(
+            .draft_create(
                 serde_json::from_value(json!({
                     "accountId": self.account, "to": [{"address": address}],
                     "cc": [], "bcc": [], "subject": "Plans", "bodyHtml": "<p>Hello there</p>",
@@ -650,15 +651,12 @@ async fn organize_in_ask_mode_pauses_and_approval_runs_the_original_call() {
     let fx = Fx::new().await;
     fx.configure(|a| a.organize = AssistantMode::Ask);
     let args = json!({"emailIds": [fx.emails[0]], "isRead": true});
-    fx.model(vec![
-        calls(&[("c1", "set_email_flags", args)]),
-        say("Marked."),
-    ]);
+    fx.model(vec![calls(&[("c1", "mail_flags", args)]), say("Marked.")]);
     let started = fx.chat("mark it read").await;
     let asked = pending(&fx.assistant, &started.run_id).await;
     assert_eq!(asked.call_id, "c1");
     assert_eq!(asked.request.action, ConfirmAction::Organize);
-    assert_eq!(asked.request.tool, "set_email_flags");
+    assert_eq!(asked.request.tool, "mail_flags");
     assert_eq!(
         asked.request.details,
         ConfirmationDetails::Organize {
@@ -713,7 +711,7 @@ async fn denying_tells_the_model_and_changes_nothing() {
     fx.model(vec![
         calls(&[(
             "c1",
-            "set_email_flags",
+            "mail_flags",
             json!({"emailIds": [fx.emails[0]], "isRead": true}),
         )]),
         say("I could not."),
@@ -740,10 +738,14 @@ async fn direct_organize_carries_undo_data_for_the_ui_and_never_for_the_model() 
         calls(&[
             (
                 "f",
-                "set_email_flags",
+                "mail_flags",
                 json!({"emailIds": [fx.emails[0]], "isRead": true}),
             ),
-            ("a", "archive_emails", json!({"emailIds": [fx.emails[1]]})),
+            (
+                "a",
+                "mail_archive",
+                json!({"emailIds": [fx.emails[1]], "archive": true}),
+            ),
         ]),
         say("Done."),
     ]);
@@ -799,13 +801,13 @@ async fn sending_in_confirm_mode_pauses_and_approval_queues_the_mail() {
         .unwrap();
     let draft = fx.core.get_draft(&draft.id).unwrap();
     fx.model(vec![
-        calls(&[("c1", "send_email", send_args(&draft))]),
+        calls(&[("c1", "outbox_send", send_args(&draft))]),
         say("Queued."),
     ]);
     let started = fx.chat("send my draft").await;
     let asked = pending(&fx.assistant, &started.run_id).await;
     assert_eq!(asked.request.action, ConfirmAction::Send);
-    assert_eq!(asked.request.tool, "send_email");
+    assert_eq!(asked.request.tool, "outbox_send");
     let identity = fx
         .core
         .account_identities()
@@ -847,7 +849,7 @@ async fn sending_in_confirm_mode_pauses_and_approval_queues_the_mail() {
     let ToolActivitySummary::Outbox { outbox_id } = &snapshot.tools[0].summary else {
         panic!("{:?}", snapshot.tools[0].summary);
     };
-    let item = fx.core.get_outbox(outbox_id).unwrap();
+    let item = fx.core.outbox_read(outbox_id).unwrap();
     assert_eq!(item.draft_id.as_deref(), Some(draft.id.as_str()));
 }
 
@@ -856,7 +858,7 @@ async fn denying_a_send_queues_nothing_and_direct_mode_never_asks() {
     let fx = Fx::new().await;
     let draft = fx.user_draft();
     fx.model(vec![
-        calls(&[("c1", "send_email", send_args(&draft))]),
+        calls(&[("c1", "outbox_send", send_args(&draft))]),
         say("Not sent."),
     ]);
     let started = fx.chat("send my draft").await;
@@ -873,7 +875,7 @@ async fn denying_a_send_queues_nothing_and_direct_mode_never_asks() {
     fx.configure(|a| a.send = AssistantSendMode::Direct);
     let draft = fx.user_draft();
     fx.model(vec![
-        calls(&[("c1", "send_email", send_args(&draft))]),
+        calls(&[("c1", "outbox_send", send_args(&draft))]),
         say("Queued."),
     ]);
     let snapshot = fx.chat_and_wait("send my draft").await;
@@ -900,8 +902,8 @@ async fn send_warnings_come_from_the_cache_and_from_what_this_run_read() {
     // Read the friend's mail first in the same turn: known and in conversation.
     fx.model(vec![
         calls(&[
-            ("r", "read_email", json!({"emailId": fx.emails[0]})),
-            ("s", "send_email", send_args(&friend)),
+            ("r", "mail_read", json!({"emailId": fx.emails[0]})),
+            ("s", "outbox_send", send_args(&friend)),
         ]),
         say("Done."),
     ]);
@@ -920,7 +922,7 @@ async fn send_warnings_come_from_the_cache_and_from_what_this_run_read() {
     // Known in the cache but not read in this run: only notInConversation.
     let again = fx.draft_to("friend@example.test");
     fx.model(vec![
-        calls(&[("s", "send_email", send_args(&again))]),
+        calls(&[("s", "outbox_send", send_args(&again))]),
         say("Done."),
     ]);
     let started = fx.chat("answer my friend").await;
@@ -939,7 +941,7 @@ async fn the_request_shows_the_draft_as_it_is_not_as_the_model_describes_it() {
     let mut args = send_args(&draft);
     // Model text that disagrees with the record is ignored.
     args["subject"] = json!("Harmless");
-    fx.model(vec![calls(&[("c1", "send_email", args)]), say("x")]);
+    fx.model(vec![calls(&[("c1", "outbox_send", args)]), say("x")]);
     let started = fx.chat("send").await;
     let asked = pending(&fx.assistant, &started.run_id).await;
     // Extra fields make the tool reject the call, but the card comes first
@@ -961,13 +963,13 @@ async fn a_draft_changed_after_the_question_makes_the_approved_send_fail() {
     let fx = Fx::new().await;
     let draft = fx.draft_to("someone@example.test");
     fx.model(vec![
-        calls(&[("c1", "send_email", send_args(&draft))]),
+        calls(&[("c1", "outbox_send", send_args(&draft))]),
         say("x"),
     ]);
     let started = fx.chat("send").await;
     let asked = pending(&fx.assistant, &started.run_id).await;
     fx.core
-        .update_draft(crate::UpdateDraftRequest {
+        .draft_update(crate::UpdateDraftRequest {
             id: draft.id.clone(),
             expected_revision: draft.revision,
             account_id: None,
@@ -995,7 +997,7 @@ async fn retry_and_cancel_of_queued_sends_summarise_the_queue_item() {
     fx.configure(|a| a.send = AssistantSendMode::Direct);
     let draft = fx.draft_to("someone@example.test");
     fx.model(vec![
-        calls(&[("s", "send_email", send_args(&draft))]),
+        calls(&[("s", "outbox_send", send_args(&draft))]),
         say("Queued."),
     ]);
     let snapshot = fx.chat_and_wait("send").await;
@@ -1010,10 +1012,10 @@ async fn retry_and_cancel_of_queued_sends_summarise_the_queue_item() {
         calls(&[
             (
                 "r",
-                "send_email",
+                "outbox_send",
                 json!({"action": "retry", "outboxId": outbox_id}),
             ),
-            ("c", "cancel_outbox", json!({"outboxId": outbox_id})),
+            ("c", "outbox_cancel", json!({"outboxId": outbox_id})),
         ]),
         say("Done."),
     ]);
@@ -1023,7 +1025,11 @@ async fn retry_and_cancel_of_queued_sends_summarise_the_queue_item() {
     assert_eq!(first.request.action, ConfirmAction::Send);
     let expected = |retry| ConfirmationDetails::Outbox {
         retry,
-        sender_address: fx.core.get_outbox(&outbox_id).unwrap().sender_email_address,
+        sender_address: fx
+            .core
+            .outbox_read(&outbox_id)
+            .unwrap()
+            .sender_email_address,
         subject: "Plans".into(),
         recipients: vec!["someone@example.test".into()],
         recipient_count: 1,
@@ -1049,7 +1055,7 @@ async fn retry_and_cancel_of_queued_sends_summarise_the_queue_item() {
     assert_eq!(snapshot.tools[0].status, ToolStatus::Denied);
     assert_eq!(snapshot.tools[1].status, ToolStatus::Done);
     assert_eq!(
-        fx.core.get_outbox(&outbox_id).unwrap().state,
+        fx.core.outbox_read(&outbox_id).unwrap().state,
         crate::OutboxState::Canceled
     );
 }
@@ -1061,7 +1067,7 @@ async fn draft_tools_ask_by_whose_draft_it_is_and_describe_the_change() {
     fx.model(vec![
         calls(&[(
             "u",
-            "update_draft",
+            "draft_update",
             json!({"draftId": user.id, "expectedRevision": user.revision,
                    "subject": "New", "to": [{"address": "x@example.test"}]}),
         )]),
@@ -1092,7 +1098,7 @@ async fn draft_tools_ask_by_whose_draft_it_is_and_describe_the_change() {
     fx.model(vec![
         calls(&[(
             "n",
-            "create_draft",
+            "draft_create",
             json!({"accountId": fx.account, "to": [{"address": "a@example.test"}],
                    "subject": "From AI", "bodyHtml": "<p>x</p>"}),
         )]),
@@ -1121,13 +1127,13 @@ async fn draft_tools_ask_by_whose_draft_it_is_and_describe_the_change() {
         calls(&[
             (
                 "a",
-                "add_draft_attachment",
-                json!({"draftId": ai.id, "expectedRevision": ai.revision,
+                "draft_attachments",
+                json!({"action": "add", "draftId": ai.id, "expectedRevision": ai.revision,
                        "filePath": "/tmp/some/notes.txt"}),
             ),
             (
                 "d",
-                "delete_draft",
+                "draft_delete",
                 json!({"draftId": ai.id, "expectedRevision": ai.revision}),
             ),
         ]),
@@ -1176,7 +1182,7 @@ async fn an_unanswered_question_times_out_as_declined() {
     fx.model(vec![
         calls(&[(
             "c1",
-            "set_email_flags",
+            "mail_flags",
             json!({"emailIds": [fx.emails[0]], "isRead": true}),
         )]),
         say("Not done."),
@@ -1204,7 +1210,7 @@ async fn canceling_while_waiting_ends_the_run_canceled() {
     fx.model(vec![
         calls(&[(
             "c1",
-            "set_email_flags",
+            "mail_flags",
             json!({"emailIds": [fx.emails[0]], "isRead": true}),
         )]),
         say("x"),
@@ -1243,7 +1249,7 @@ async fn only_the_pending_request_of_that_run_can_be_answered_once() {
     fx.model(vec![
         calls(&[(
             "c1",
-            "set_email_flags",
+            "mail_flags",
             json!({"emailIds": [fx.emails[0]], "isRead": true}),
         )]),
         say("ok"),
@@ -1299,8 +1305,8 @@ async fn the_same_call_is_not_asked_again_after_a_denial_in_that_run() {
     fx.configure(|a| a.organize = AssistantMode::Ask);
     let args = json!({"emailIds": [fx.emails[0]], "isRead": true});
     fx.model(vec![
-        calls(&[("c1", "set_email_flags", args.clone())]),
-        calls(&[("c2", "set_email_flags", args)]),
+        calls(&[("c1", "mail_flags", args.clone())]),
+        calls(&[("c2", "mail_flags", args)]),
         say("Fine, I stop."),
     ]);
     let started = fx.chat("mark it read").await;
@@ -1335,9 +1341,9 @@ async fn an_excluded_account_is_invisible_to_the_tools() {
     fx.configure(|a| a.excluded_accounts = vec![fx.account.clone()]);
     fx.model(vec![
         calls(&[
-            ("a", "list_accounts", json!({})),
-            ("b", "read_email", json!({"emailId": fx.emails[0]})),
-            ("c", "search_emails", json!({"query": "hello"})),
+            ("a", "accounts_list", json!({})),
+            ("b", "mail_read", json!({"emailId": fx.emails[0]})),
+            ("c", "mail_search", json!({"query": "hello"})),
         ]),
         say("Only the other account."),
     ]);
@@ -1378,7 +1384,7 @@ async fn tool_errors_reach_the_model_as_error_results_with_the_stable_code() {
         calls(&[
             (
                 "a",
-                "read_email",
+                "mail_read",
                 json!({"emailId": uuid::Uuid::new_v4().to_string()}),
             ),
             ("b", "no_such_tool", json!({})),
@@ -1421,7 +1427,7 @@ async fn every_tool_the_agent_can_see_is_classified() {
 #[tokio::test]
 async fn the_turn_limit_stops_a_model_that_keeps_calling_tools() {
     let fx = Fx::new().await;
-    fx.model(vec![calls(&[("c", "list_accounts", json!({}))])]);
+    fx.model(vec![calls(&[("c", "accounts_list", json!({}))])]);
     let snapshot = fx.chat_and_wait("loop forever").await;
     assert_eq!(snapshot.state, RunState::Completed);
     assert_eq!(snapshot.finished_reason, Some(FinishedReason::Limit));
@@ -1444,7 +1450,7 @@ async fn the_turn_limit_stops_a_model_that_keeps_calling_tools() {
 async fn only_eight_tool_calls_run_per_turn() {
     let fx = Fx::new().await;
     let many: Vec<(String, &str, Value)> = (0..9)
-        .map(|i| (format!("c{i}"), "list_accounts", json!({})))
+        .map(|i| (format!("c{i}"), "accounts_list", json!({})))
         .collect();
     let borrowed: Vec<(&str, &str, Value)> = many
         .iter()
@@ -2312,7 +2318,7 @@ impl Fx {
     }
 
     async fn turns(&self, id: &str) -> Vec<ChatTurn> {
-        self.assistant.get_conversation(id).await.unwrap().turns
+        self.assistant.mail_conversation(id).await.unwrap().turns
     }
 }
 
@@ -2335,13 +2341,13 @@ async fn a_conversation_is_saved_and_reads_back_with_tools_and_the_answer_to_a_q
     let mut first = vec![oa_text("Let me do that. ")];
     first.extend(calls(&[(
         "c1",
-        "set_email_flags",
+        "mail_flags",
         json!({"emailIds": [fx.emails[0]], "isRead": true}),
     )]));
     fx.model(vec![
         first,
         say("Marked."),
-        calls(&[("s1", "search_emails", json!({"query": "hello"}))]),
+        calls(&[("s1", "mail_search", json!({"query": "hello"}))]),
         say("Found it."),
     ]);
     let started = fx.chat("  Please\n mark   the first mail read  ").await;
@@ -2364,7 +2370,7 @@ async fn a_conversation_is_saved_and_reads_back_with_tools_and_the_answer_to_a_q
         .await
         .unwrap();
     fx.finished(&second.run_id).await;
-    let detail = fx.assistant.get_conversation(&id).await.unwrap();
+    let detail = fx.assistant.mail_conversation(&id).await.unwrap();
     assert_eq!(detail.id, id);
     assert_eq!(detail.title, "Please mark the first mail read");
     assert_eq!(detail.turns.len(), 4);
@@ -2395,7 +2401,7 @@ async fn a_conversation_is_saved_and_reads_back_with_tools_and_the_answer_to_a_q
         confirmations,
         [ChatTurnConfirmation {
             call_id: "c1".into(),
-            tool: "set_email_flags".into(),
+            tool: "mail_flags".into(),
             action: ConfirmAction::Organize,
             outcome: ConfirmOutcome::Approved,
             text_offset: 16,
@@ -2438,8 +2444,16 @@ async fn a_denied_or_unanswered_question_is_saved_as_its_outcome() {
     fx.assistant
         .set_confirmation_timeout(Duration::from_millis(400));
     fx.model(vec![
-        calls(&[("a", "archive_emails", json!({"emailIds": [fx.emails[0]]}))]),
-        calls(&[("b", "archive_emails", json!({"emailIds": [fx.emails[1]]}))]),
+        calls(&[(
+            "a",
+            "mail_archive",
+            json!({"emailIds": [fx.emails[0]], "archive": true}),
+        )]),
+        calls(&[(
+            "b",
+            "mail_archive",
+            json!({"emailIds": [fx.emails[1]], "archive": true}),
+        )]),
         say("Done."),
     ]);
     let started = fx.chat("archive two").await;
@@ -2469,7 +2483,7 @@ async fn a_denied_or_unanswered_question_is_saved_as_its_outcome() {
 async fn a_reopened_assistant_continues_a_saved_conversation_with_its_stored_history() {
     let fx = Fx::new().await;
     fx.model(vec![
-        calls(&[("s1", "search_emails", json!({"query": "hello"}))]),
+        calls(&[("s1", "mail_search", json!({"query": "hello"}))]),
         say("One mail."),
         say("Only if you ask."),
     ]);
@@ -2498,7 +2512,7 @@ async fn a_reopened_assistant_continues_a_saved_conversation_with_its_stored_his
     assert_eq!(messages[1]["content"], "what is in my box?");
     assert_eq!(
         messages[2]["tool_calls"][0]["function"]["name"],
-        "search_emails"
+        "mail_search"
     );
     assert!(
         messages[3]["content"]
@@ -2529,7 +2543,7 @@ async fn a_reply_cut_off_by_a_restart_reads_back_as_stopped_and_can_be_continued
     let record = ToolRecord {
         activity: ToolActivity {
             call_id: "t".into(),
-            name: "search_emails".into(),
+            name: "mail_search".into(),
             status: ToolStatus::Done,
             summary: ToolActivitySummary::Found { count: 3 },
         },
@@ -2546,7 +2560,7 @@ async fn a_reply_cut_off_by_a_restart_reads_back_as_stopped_and_can_be_continued
                 text: "Looking. ".into(),
                 tool_calls: vec![crate::ai::client::stream::ToolCallRequest {
                     id: "t".into(),
-                    name: "search_emails".into(),
+                    name: "mail_search".into(),
                     arguments: json!({}),
                 }],
                 reasoning: None,
@@ -2734,7 +2748,7 @@ async fn deleting_and_clearing_remove_saved_and_memory_copies_and_say_so() {
     let b = fx.chat_and_wait("b").await.conversation_id.unwrap();
     fx.assistant.delete_conversation(&a).await.unwrap();
     assert_eq!(
-        fx.assistant.get_conversation(&a).await.unwrap_err().code,
+        fx.assistant.mail_conversation(&a).await.unwrap_err().code,
         ErrorCode::NotFound
     );
     assert_eq!(
@@ -2854,9 +2868,9 @@ async fn removing_an_account_deletes_the_conversations_that_touched_it_and_only_
     let fx = Fx::new().await;
     let other = fx.other_account();
     fx.model(vec![
-        calls(&[("s", "search_emails", json!({"query": "hello"}))]),
+        calls(&[("s", "mail_search", json!({"query": "hello"}))]),
         say("Here."),
-        calls(&[("f", "list_folders", json!({"accountId": other}))]),
+        calls(&[("f", "mail_folders", json!({"accountId": other}))]),
         say("No folders."),
         say("Just chatting."),
     ]);
@@ -2942,7 +2956,7 @@ fn a_conversation_with_four_hundred_messages_is_full() {
 
 #[tokio::test]
 async fn conversation_and_contact_tools_run_as_reads_and_register_seen_recipients() {
-    for name in ["get_conversation", "suggest_contacts"] {
+    for name in ["mail_conversation", "mail_contacts"] {
         let fx = Fx::new().await;
         fx.configure(|a| {
             a.organize = AssistantMode::Ask;
@@ -2955,14 +2969,14 @@ async fn conversation_and_contact_tools_run_as_reads_and_register_seen_recipient
             )
             .unwrap();
         let draft = fx.user_draft();
-        let args = if name == "get_conversation" {
+        let args = if name == "mail_conversation" {
             json!({"emailId":fx.emails[0]})
         } else {
             json!({"query":"recipient"})
         };
         fx.model(vec![
             calls(&[("read", name, args)]),
-            calls(&[("send", "send_email", json!({"action":"send","draftId":draft.id,"expectedRevision":draft.revision,"clientMutationId":uuid::Uuid::new_v4().to_string()}))]),
+            calls(&[("send", "outbox_send", json!({"action":"send","draftId":draft.id,"expectedRevision":draft.revision,"clientMutationId":uuid::Uuid::new_v4().to_string()}))]),
             say("Not sent."),
         ]);
         let started = fx.chat("Find the recipient and prepare to send").await;
@@ -3006,7 +3020,7 @@ async fn contact_lookup_tracks_every_queried_account_for_saved_history_cleanup()
         )
         .unwrap();
     fx.model(vec![
-        calls(&[("contacts", "suggest_contacts", json!({"query":"recipient"}))]),
+        calls(&[("contacts", "mail_contacts", json!({"query":"recipient"}))]),
         say("Found recipient."),
     ]);
     let snapshot = fx.chat_and_wait("Find the recipient").await;
@@ -3067,7 +3081,7 @@ async fn reasoning_streams_as_stretches_and_goes_back_after_a_tool_call() {
     fx.model(vec![
         think_then_call(
             &["look", " first"],
-            &[("s1", "search_emails", json!({"query": "hello"}))],
+            &[("s1", "mail_search", json!({"query": "hello"}))],
         ),
         think_then_say("now answer", "One mail."),
         say("ok"),
@@ -3217,7 +3231,7 @@ async fn the_anthropic_protocol_sends_signed_thinking_back() {
         stop(0),
         block(
             1,
-            json!({"type":"tool_use","id":"tu1","name":"search_emails","input":{}}),
+            json!({"type":"tool_use","id":"tu1","name":"mail_search","input":{}}),
         ),
         delta(
             1,
@@ -3240,7 +3254,7 @@ async fn the_anthropic_protocol_sends_signed_thinking_back() {
         request["messages"][1]["content"],
         json!([
             {"type":"thinking","thinking":"plan","signature":"SIG"},
-            {"type":"tool_use","id":"tu1","name":"search_emails","input":{"query":"hello"}}
+            {"type":"tool_use","id":"tu1","name":"mail_search","input":{"query":"hello"}}
         ])
     );
 }
@@ -3260,7 +3274,7 @@ fn thinking_stretches_open_grow_end_and_close_with_the_run() {
     runs.tool(
         &id,
         "c",
-        "search_emails",
+        "mail_search",
         ToolStatus::Running,
         ToolActivitySummary::Pending,
     );
@@ -3284,4 +3298,179 @@ fn thinking_stretches_open_grow_end_and_close_with_the_run() {
     runs.state(&id, RunState::Canceled);
     let closed = runs.snapshot(&id).unwrap().reasoning;
     assert!(closed[1].duration_ms.is_some());
+}
+
+// ------------------------------------------------------------ current view
+
+fn chat_about(message: &str, context: crate::ChatContext) -> StartRun {
+    StartRun {
+        kind: RunKind::Chat {
+            conversation_id: None,
+            message: message.into(),
+            context: Some(context),
+        },
+    }
+}
+
+fn system_of(request: &Value) -> String {
+    request["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn the_open_email_reaches_the_model_as_untrusted_view_data_and_links_its_account() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("It says hello.")]);
+    let started = fx
+        .assistant
+        .start(chat_about(
+            "what does this say",
+            crate::ChatContext::Email {
+                email_id: fx.emails[0].clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let done = fx.finished(&started.run_id).await;
+    assert_eq!(done.state, RunState::Completed);
+    // No tool call is shown: the view is part of the request, not of the reply.
+    assert!(done.tools.is_empty());
+    let system = system_of(&fx.request(0));
+    assert!(system.contains("Current view"), "{system}");
+    assert!(system.contains("<tool_result name=\"current_view\" trust=\"untrusted\">"));
+    assert!(system.contains("hello world") && system.contains(&fx.emails[0]));
+    // The user's message is stored as written.
+    let messages = fx.request(0)["messages"].as_array().unwrap().clone();
+    assert_eq!(messages.last().unwrap()["content"], "what does this say");
+    // The conversation goes with the account the view belonged to.
+    let conversation = done.conversation_id.unwrap();
+    let linked: Vec<String> = fx
+        .db
+        .prepare(
+            "SELECT account_id FROM assistant_conversation_accounts WHERE conversation_id = ?1",
+        )
+        .unwrap()
+        .query_map([&conversation], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(linked, std::slice::from_ref(&fx.account));
+}
+
+#[tokio::test]
+async fn a_view_outside_the_assistants_accounts_or_unknown_is_left_out() {
+    let fx = Fx::new().await;
+    fx.other_account();
+    fx.configure(|a| a.excluded_accounts = vec![fx.account.clone()]);
+    fx.model(vec![say("ok")]);
+    for context in [
+        crate::ChatContext::Email {
+            email_id: fx.emails[0].clone(),
+        },
+        crate::ChatContext::Email {
+            email_id: "missing".into(),
+        },
+    ] {
+        let started = fx
+            .assistant
+            .start(chat_about("this?", context))
+            .await
+            .unwrap();
+        assert_eq!(
+            fx.finished(&started.run_id).await.state,
+            RunState::Completed
+        );
+    }
+    for index in 0..2 {
+        let body = fx.request(index).to_string();
+        assert!(!body.contains("Current view") && !body.contains("hello world"));
+    }
+}
+
+#[tokio::test]
+async fn selected_emails_show_their_start_and_headers_when_the_body_is_not_here() {
+    let fx = Fx::new().await;
+    fx.db
+        .execute(
+            "DELETE FROM message_bodies WHERE message_id = ?1",
+            [&fx.emails[1]],
+        )
+        .unwrap();
+    fx.db
+        .execute(
+            "UPDATE messages SET body_state = 'missing' WHERE id = ?1",
+            [&fx.emails[1]],
+        )
+        .unwrap();
+    fx.model(vec![say("Two emails.")]);
+    let started = fx
+        .assistant
+        .start(chat_about(
+            "these?",
+            crate::ChatContext::Emails {
+                email_ids: vec![
+                    fx.emails[0].clone(),
+                    fx.emails[1].clone(),
+                    fx.emails[0].clone(),
+                ],
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        fx.finished(&started.run_id).await.state,
+        RunState::Completed
+    );
+    let system = system_of(&fx.request(0));
+    assert!(system.contains("selected in the list"));
+    assert!(system.contains("hello world"));
+    assert!(!system.contains("second mail"));
+    assert!(
+        system.contains(&fx.emails[1]) && system.contains("\"bodyCached\":false"),
+        "{system}"
+    );
+    assert_eq!(
+        system.matches(&fx.emails[0]).count(),
+        1,
+        "duplicates are read once"
+    );
+}
+
+#[tokio::test]
+async fn a_draft_view_says_it_may_be_open_and_bad_contexts_are_rejected() {
+    let fx = Fx::new().await;
+    let draft = fx.user_draft();
+    fx.model(vec![say("ok")]);
+    let started = fx
+        .assistant
+        .start(chat_about(
+            "improve the draft",
+            crate::ChatContext::Draft {
+                draft_id: draft.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        fx.finished(&started.run_id).await.state,
+        RunState::Completed
+    );
+    let system = system_of(&fx.request(0));
+    assert!(system.contains("User draft") && system.contains("draftOpen"));
+
+    for context in [
+        crate::ChatContext::Emails { email_ids: vec![] },
+        crate::ChatContext::Email {
+            email_id: String::new(),
+        },
+    ] {
+        let error = fx
+            .assistant
+            .start(chat_about("x", context))
+            .await
+            .unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("context"));
+    }
 }

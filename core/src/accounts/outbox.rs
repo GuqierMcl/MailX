@@ -348,9 +348,9 @@ impl AccountService {
         Ok((item, Some(locked)))
     }
 
-    pub(crate) fn get_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+    pub(crate) fn outbox_read(&self, id: &str) -> Result<OutboxItem, AppError> {
         validate_uuid(id, "outboxId")?;
-        self.storage.get_outbox(id)
+        self.storage.outbox_read(id)
     }
 
     pub(crate) fn list_outbox(
@@ -378,7 +378,7 @@ impl AccountService {
             .list_outbox_page(account_ids, states, before, limit)
     }
 
-    pub(crate) fn cancel_outbox(&self, id: &str, now: DateTime<Utc>) -> Result<Changed, AppError> {
+    pub(crate) fn outbox_cancel(&self, id: &str, now: DateTime<Utc>) -> Result<Changed, AppError> {
         validate_uuid(id, "outboxId")?;
         self.storage.cancel_queued(id, now)
     }
@@ -418,7 +418,7 @@ impl AccountService {
             UnknownResolution::MarkSent => OutboxResolution::MarkedSent,
             UnknownResolution::Resend => OutboxResolution::Resent,
         };
-        let current = self.storage.get_outbox(&request.id)?;
+        let current = self.storage.outbox_read(&request.id)?;
         if let Some(settled) = current.resolution {
             return match self
                 .storage
@@ -730,7 +730,7 @@ mod tests {
 
     fn draft(service: &mut AccountService, account_id: &str) -> Draft {
         service
-            .create_draft(
+            .draft_create(
                 serde_json::from_value(json!({
                     "accountId": account_id,
                     "to": [{"name": null, "address": "li@example.org"}],
@@ -767,11 +767,11 @@ mod tests {
         let (item, _) = service.queue_send(&request(&first), 0, t0()).unwrap();
         assert!(is_job(&service.outbox_step(&account_id, t0()).unwrap()));
         assert_eq!(
-            service.cancel_outbox(&item.id, t0()).unwrap_err().code,
+            service.outbox_cancel(&item.id, t0()).unwrap_err().code,
             ErrorCode::AlreadySending
         );
         assert_eq!(
-            service.get_outbox(&item.id).unwrap().state,
+            service.outbox_read(&item.id).unwrap().state,
             OutboxState::Sending
         );
         assert_eq!(
@@ -787,7 +787,7 @@ mod tests {
         let account_id = account(&mut service, "lin@example.com");
         let draft = draft(&mut service, &account_id);
         let (item, _) = service.queue_send(&request(&draft), 0, t0()).unwrap();
-        let changed = service.cancel_outbox(&item.id, t0()).unwrap();
+        let changed = service.outbox_cancel(&item.id, t0()).unwrap();
         assert_eq!(changed.item.state, OutboxState::Canceled);
         assert!(matches!(
             service.outbox_step(&account_id, t0()).unwrap().next,
@@ -795,7 +795,7 @@ mod tests {
         ));
         // Canceling again, or retrying a canceled item, is a conflict.
         assert_eq!(
-            service.cancel_outbox(&item.id, t0()).unwrap_err().code,
+            service.outbox_cancel(&item.id, t0()).unwrap_err().code,
             ErrorCode::Conflict
         );
     }
@@ -816,11 +816,11 @@ mod tests {
             .unwrap()
         };
         assert_eq!(
-            service.update_draft(edit()).unwrap_err().code,
+            service.draft_update(edit()).unwrap_err().code,
             ErrorCode::DraftLocked
         );
         assert_eq!(
-            service.delete_draft(&draft.id).unwrap_err().code,
+            service.draft_delete(&draft.id).unwrap_err().code,
             ErrorCode::DraftLocked
         );
         // A second queue item for the same draft is refused as well.
@@ -831,9 +831,9 @@ mod tests {
                 .code,
             ErrorCode::DraftLocked
         );
-        let changed = service.cancel_outbox(&item.id, t0()).unwrap();
+        let changed = service.outbox_cancel(&item.id, t0()).unwrap();
         assert_eq!(changed.draft.unwrap().change, DraftChange::Unlocked);
-        assert_eq!(service.update_draft(edit()).unwrap().revision, 2);
+        assert_eq!(service.draft_update(edit()).unwrap().revision, 2);
     }
 
     #[test]
@@ -858,11 +858,11 @@ mod tests {
 
         let changed = service.recover_outbox(t0() + secs(10)).unwrap();
         assert_eq!(changed.len(), 2);
-        let queued = service.get_outbox(&not_started.id).unwrap();
+        let queued = service.outbox_read(&not_started.id).unwrap();
         assert_eq!(queued.state, OutboxState::Queued);
         assert_eq!(queued.attempts, 0, "the interrupted try is not counted");
         assert_eq!(queued.data_started_at, None);
-        let unknown = service.get_outbox(&started.id).unwrap();
+        let unknown = service.outbox_read(&started.id).unwrap();
         assert_eq!(unknown.state, OutboxState::Unknown);
         assert_eq!(unknown.attempts, 1);
         assert!(unknown.data_started_at.is_some());
@@ -927,7 +927,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(changed.draft.unwrap().change, DraftChange::Deleted);
-        let kept = service.get_outbox(&item.id).unwrap();
+        let kept = service.outbox_read(&item.id).unwrap();
         assert_eq!(kept.state, OutboxState::Accepted);
         assert_eq!(kept.draft_id, None, "the draft pointer is cleared with it");
         assert!(kept.accepted_at.is_some());
@@ -1000,7 +1000,7 @@ mod tests {
         let mut service = service(&directory);
         let account_id = account(&mut service, "lin@example.com");
         let empty = service
-            .create_draft(
+            .draft_create(
                 serde_json::from_value(json!({
                     "accountId": account_id, "to": [], "cc": [], "bcc": [],
                     "subject": "", "bodyHtml": "", "clientMutationId": id(),

@@ -148,21 +148,21 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       await think(run, zh() ? '用户要归档邮件。先找第一封未读的。' : 'The user wants mail archived. Find the first unread one.')
       await say(run, zh() ? '好的，我来归档。' : 'Sure, archiving.')
       if (!target) { await say(run, zh() ? '没有可归档的邮件。' : 'There is nothing to archive.'); return finish(run) }
-      emit(run, { type: 'tool', callId: 'call-1', name: 'archive_emails', status: 'running', summary: { type: 'pending' } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'mail_archive', status: 'running', summary: { type: 'pending' } })
       await sleep()
       const token = await deps.archive([target.id])
       emit(run, {
-        type: 'tool', callId: 'call-1', name: 'archive_emails', status: 'done',
+        type: 'tool', callId: 'call-1', name: 'mail_archive', status: 'done',
         summary: { type: 'changed', count: 1, emailIds: [target.id], undo: token ? { type: 'archive', token } : null },
       })
       await say(run, zh() ? '归档了 1 封。' : 'Archived 1 email.')
     } else if (/发|send/i.test(message)) {
       const { draft, accountName, accountAddress } = await deps.draftToSend()
       await say(run, zh() ? '草稿写好了，现在发送。' : 'The draft is ready, sending it now.')
-      emit(run, { type: 'tool', callId: 'call-1', name: 'send_email', status: 'running', summary: { type: 'pending' } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'outbox_send', status: 'running', summary: { type: 'pending' } })
       const approved = await ask(run, 'call-1', {
         action: 'send',
-        tool: 'send_email',
+        tool: 'outbox_send',
         details: {
           type: 'send', accountName, accountAddress, to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject,
           bodyPreview: draft.bodyText.slice(0, 300), attachments: [], warnings: ['newRecipient', 'notInConversation'],
@@ -171,17 +171,17 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       if (!alive(run)) return
       if (approved) {
         const item = await deps.send(draft)
-        emit(run, { type: 'tool', callId: 'call-1', name: 'send_email', status: 'done', summary: { type: 'outbox', outboxId: item.id } })
+        emit(run, { type: 'tool', callId: 'call-1', name: 'outbox_send', status: 'done', summary: { type: 'outbox', outboxId: item.id } })
         await say(run, zh() ? '已加入发送队列。' : 'It is in the send queue.')
       } else {
-        emit(run, { type: 'tool', callId: 'call-1', name: 'send_email', status: 'denied', summary: { type: 'denied' } })
+        emit(run, { type: 'tool', callId: 'call-1', name: 'outbox_send', status: 'denied', summary: { type: 'denied' } })
         await say(run, zh() ? '好的，没有发送。' : 'Okay, I did not send it.')
       }
     } else if (/草稿|draft/i.test(message) && !/发|send/i.test(message)) {
       const { draft } = await deps.draftToSend()
-      emit(run, { type: 'tool', callId: 'call-1', name: 'create_draft', status: 'running', summary: { type: 'pending' } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'draft_create', status: 'running', summary: { type: 'pending' } })
       await sleep()
-      emit(run, { type: 'tool', callId: 'call-1', name: 'create_draft', status: 'done', summary: { type: 'draft', draftId: draft.id, subject: draft.subject } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'draft_create', status: 'done', summary: { type: 'draft', draftId: draft.id, subject: draft.subject } })
       await say(run, zh() ? '草稿放在草稿箱里了，你可以打开看看，改好再发。' : 'The draft is in your drafts. Open it, edit if you like, then send.')
     } else {
       // Thinks, searches and reads, thinks again, then a reply with a list and a link.
@@ -190,13 +190,13 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       await think(run, zh()
         ? '用户想知道邮箱里有什么要处理。先搜索未读邮件，再读最急的那封，看看有没有截止日期。\n\n搜索结果出来后按紧急程度排序。'
         : 'The user wants to know what needs attention. Search unread mail first, then read the most urgent one and look for a deadline.\n\nOnce the results are in, sort them by urgency.')
-      emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'running', summary: { type: 'pending' } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'mail_search', status: 'running', summary: { type: 'pending' } })
       await sleep()
-      emit(run, { type: 'tool', callId: 'call-1', name: 'search_emails', status: 'done', summary: { type: 'found', count: Math.max(unread, 3) } })
+      emit(run, { type: 'tool', callId: 'call-1', name: 'mail_search', status: 'done', summary: { type: 'found', count: Math.max(unread, 3) } })
       if (target) {
-        emit(run, { type: 'tool', callId: 'call-2', name: 'read_email', status: 'running', summary: { type: 'pending' } })
+        emit(run, { type: 'tool', callId: 'call-2', name: 'mail_read', status: 'running', summary: { type: 'pending' } })
         await sleep()
-        emit(run, { type: 'tool', callId: 'call-2', name: 'read_email', status: 'done', summary: { type: 'read', emailIds: [target.id] } })
+        emit(run, { type: 'tool', callId: 'call-2', name: 'mail_read', status: 'done', summary: { type: 'read', emailIds: [target.id] } })
       }
       await think(run, zh() ? '账单提醒这周到期，放在第一条；其余可以晚点看。' : 'The billing reminder is due this week, so it goes first; the rest can wait.')
       const email = target?.id

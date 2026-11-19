@@ -167,7 +167,7 @@ fn list(f: &Fixture, role: FolderRole, archive: Option<ArchiveScope>) -> Vec<Str
 
 fn inbox_folder(f: &Fixture) -> crate::mail::Folder {
     f.service
-        .list_folders(&f.account_id)
+        .mail_folders(&f.account_id)
         .unwrap()
         .into_iter()
         .find(|folder| folder.role == FolderRole::Inbox)

@@ -3,7 +3,7 @@ use mailx_core::{CreateDraftRequest, Draft, UpdateDraftRequest};
 use super::*;
 
 fn create(core: &MailxCore, html: &str) -> Draft {
-    core.create_draft(
+    core.draft_create(
         CreateDraftRequest {
             account_id: None,
             to: vec![],
@@ -19,7 +19,7 @@ fn create(core: &MailxCore, html: &str) -> Draft {
 }
 
 fn update(core: &MailxCore, draft: &Draft, html: &str) -> Draft {
-    core.update_draft(UpdateDraftRequest {
+    core.draft_update(UpdateDraftRequest {
         id: draft.id.clone(),
         expected_revision: draft.revision,
         account_id: None,
@@ -223,7 +223,7 @@ async fn draft_link_confirmations_are_one_shot_and_release_is_per_reading() {
         .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert!(html(&protocol, &core, &new_url).await.contains("Write"));
-    core.delete_draft(&draft.id).unwrap();
+    core.draft_delete(&draft.id).unwrap();
     let (response, _) = protocol
         .serve(&core, request(Method::GET, &new_url), APP_ORIGIN)
         .await;

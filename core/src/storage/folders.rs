@@ -141,7 +141,7 @@ impl Storage {
     }
 
     /// Folders cached for the account's current server, in no particular order.
-    pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
+    pub fn mail_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
         let mut query = self.db.prepare(
             "SELECT f.id, f.parent_id, f.name, f.role, f.selectable, f.unread_count, f.total_count,
              (f.selectable = 1 AND f.synced_at <> ''),

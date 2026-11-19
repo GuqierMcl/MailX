@@ -8,6 +8,8 @@ use crate::{DraftOrigin, ErrorCode, MailAddress};
 
 /// Longest chat message accepted, in characters.
 pub const MAX_MESSAGE_CHARS: usize = 20_000;
+/// Most selected emails a chat message can be about.
+pub const MAX_CONTEXT_EMAILS: usize = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,7 +51,31 @@ pub enum RunKind {
         #[ts(optional)]
         conversation_id: Option<String>,
         message: String,
+        /// What the user is looking at as they write. The core reads it
+        /// itself, within the assistant's accounts, for this run only.
+        #[serde(default)]
+        #[ts(optional)]
+        context: Option<ChatContext>,
     },
+}
+
+/// What a chat message is about: the mail or draft on screen. Only ids travel;
+/// the core reads the content through the tool layer, so the account scope
+/// applies and the interface cannot put text into the prompt.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ChatContext {
+    /// The email open in the reader.
+    Email { email_id: String },
+    /// Emails selected in the list, 1 to [`MAX_CONTEXT_EMAILS`].
+    Emails { email_ids: Vec<String> },
+    /// The draft being written or previewed.
+    Draft { draft_id: String },
 }
 
 /// A holiday or solar term the Now page knows (`frontend/src/features/now/calendar.ts`);
@@ -277,7 +303,7 @@ pub struct PendingConfirmation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ConfirmAction {
-    /// `send_email`, including a retry.
+    /// `outbox_send`, including a retry.
     Send,
     CancelSend,
     Organize,
@@ -396,7 +422,7 @@ pub enum ConfirmationDetails {
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmationRequest {
     pub action: ConfirmAction,
-    /// The tool id, e.g. `send_email`.
+    /// The tool id, e.g. `outbox_send`.
     pub tool: String,
     pub details: ConfirmationDetails,
 }

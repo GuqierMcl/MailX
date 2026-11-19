@@ -211,7 +211,11 @@ function HistoryRow({ client, assistant, off, update }: { client: MailxClient; a
       (error: unknown) => { setPhase('idle'); setFailure(errorText(error)) },
     )
   }
-  return <SettingsRow label={t('settings:assistantSaveHistory')} description={t('settings:assistantSaveHistoryDescription')} htmlFor="assistant.saveHistory">
+  return <>
+  <SettingsRow label={t('settings:assistantReadHtml')} description={t('settings:assistantReadHtmlDescription')} htmlFor="assistant.readHtml">
+    <Switch id="assistant.readHtml" checked={assistant.readHtml} disabled={off} onCheckedChange={(readHtml) => update.mutate({ readHtml })} />
+  </SettingsRow>
+  <SettingsRow label={t('settings:assistantSaveHistory')} description={t('settings:assistantSaveHistoryDescription')} htmlFor="assistant.saveHistory">
     <div className="flex flex-col items-end gap-2">
       <Switch id="assistant.saveHistory" checked={assistant.saveHistory} disabled={off} onCheckedChange={(saveHistory) => update.mutate({ saveHistory })} />
       {phase === 'asking' ? (
@@ -228,4 +232,5 @@ function HistoryRow({ client, assistant, off, update }: { client: MailxClient; a
       {failure && <span role="alert" className="max-w-72 text-right text-xs text-destructive">{failure}</span>}
     </div>
   </SettingsRow>
+  </>
 }

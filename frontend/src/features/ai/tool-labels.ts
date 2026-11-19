@@ -5,14 +5,14 @@ import type { RunTool } from './use-assistant-run'
 export const UNDO_WINDOW_MS = 60_000
 /** Most email chips listed under one step. */
 export const CHIP_LIMIT = 5
-type CountedTool = 'search_emails' | 'read_email' | 'get_conversation' | 'suggest_contacts' | 'archive_emails' | 'unarchive_emails' | 'set_email_flags'
-type PlainTool = 'list_accounts' | 'list_folders' | 'list_drafts' | 'read_draft' | 'list_outbox' | 'get_outbox' | 'refresh_sync'
-  | 'create_draft' | 'create_reply_draft' | 'update_draft' | 'delete_draft' | 'add_draft_attachment' | 'remove_draft_attachment'
-  | 'send_email' | 'cancel_outbox' | 'other'
-const COUNTED: ReadonlySet<string> = new Set<CountedTool>(['search_emails', 'read_email', 'get_conversation', 'suggest_contacts', 'archive_emails', 'unarchive_emails', 'set_email_flags'])
+type CountedTool = 'mail_search' | 'mail_read' | 'mail_conversation' | 'mail_contacts' | 'mail_archive' | 'mail_flags'
+type PlainTool = 'accounts_list' | 'mail_folders' | 'draft_list' | 'draft_read' | 'outbox_read' | 'accounts_refresh_sync'
+  | 'draft_create' | 'draft_reply' | 'draft_update' | 'draft_delete' | 'draft_attachments'
+  | 'outbox_send' | 'outbox_cancel' | 'show_in_app' | 'mail_save_attachment' | 'mail_help' | 'other'
+const COUNTED: ReadonlySet<string> = new Set<CountedTool>(['mail_search', 'mail_read', 'mail_conversation', 'mail_contacts', 'mail_archive', 'mail_flags'])
 const PLAIN: ReadonlySet<string> = new Set<PlainTool>([
-  'list_accounts', 'list_folders', 'list_drafts', 'read_draft', 'list_outbox', 'get_outbox', 'refresh_sync', 'create_draft', 'create_reply_draft',
-  'update_draft', 'delete_draft', 'add_draft_attachment', 'remove_draft_attachment', 'send_email', 'cancel_outbox',
+  'accounts_list', 'mail_folders', 'draft_list', 'draft_read', 'outbox_read', 'accounts_refresh_sync', 'draft_create', 'draft_reply',
+  'draft_update', 'draft_delete', 'draft_attachments', 'outbox_send', 'outbox_cancel', 'show_in_app', 'mail_save_attachment', 'mail_help',
 ])
 
 /** The step in words: "正在搜索邮件…" while it runs, "搜索了 12 封邮件" after. */

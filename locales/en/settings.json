@@ -404,6 +404,8 @@
   "assistantInstructions": "Custom instructions",
   "assistantInstructionsDescription": "How to address you, tone, signature habits. Added to every request.",
   "assistantInstructionsCount": "{{length}} / {{max}}",
+  "assistantReadHtml": "Let the assistant read mail formatting",
+  "assistantReadHtmlDescription": "Off, it reads the text only, losing tables and where pictures sat; on, it reads the message's HTML structure, which sends much more of it.",
   "assistantSaveHistory": "Save chat history",
   "assistantSaveHistoryDescription": "Kept on this computer and shown in History.",
   "assistantClearHistory": "Clear all chats",

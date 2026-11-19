@@ -1172,7 +1172,7 @@ async fn sync_once(
     let listed = folders_due(*last_folder_refresh);
     if listed {
         let result = async {
-            let remote = session.list_folders().await?;
+            let remote = session.mail_folders().await?;
             let records = folders::interpret(&remote);
             let id = token.account_id.clone();
             let source = token.source.clone();
@@ -1295,13 +1295,33 @@ where
         match result {
             Ok(()) => {
                 reconnect_failures = 0;
+                // The folder is synced; some mails just kept their last known flags.
+                // Say so quietly and without retrying the connection: 2925 answers a
+                // flags fetch with no data, and reconnecting every round would only
+                // annoy it further.
+                let warning = (round.unresolved_flags > 0).then(|| {
+                    failure(
+                        SyncFailureCode::FlagsIncomplete,
+                        Some(format!(
+                            "{} mails kept their last known flags",
+                            round.unresolved_flags
+                        )),
+                        true,
+                    )
+                });
                 shared.folder_update(token, &folder_id, |folder| {
                     folder.phase = FolderSyncPhase::Idle;
                     folder.last_synced_at = Some(
                         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                     );
-                    folder.failure = None;
-                    folder.failure_since = None;
+                    // Some mails kept their last known flags: a retryable
+                    // warning, not a failure of the round.
+                    folder.failure = warning.clone();
+                    if warning.is_some() {
+                        folder.failure_since.get_or_insert_with(now_rfc3339);
+                    } else {
+                        folder.failure_since = None;
+                    }
                     // Readers refetch on a new revision, so it only moves when data did.
                     if changed {
                         folder.data_revision = folder.data_revision.saturating_add(1);
@@ -1393,9 +1413,6 @@ pub(super) fn classify(error: ImapError) -> Outcome {
         }
         ImapError::Net(NetError::Timeout) | ImapError::Timeout => {
             Outcome::Transient(failure(SyncFailureCode::Timeout, detail, true))
-        }
-        ImapError::FlagsIncomplete(_) => {
-            Outcome::Transient(failure(SyncFailureCode::FlagsIncomplete, detail, true))
         }
         ImapError::Protocol(_)
         | ImapError::Mailbox(_)

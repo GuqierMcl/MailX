@@ -124,7 +124,7 @@ impl Fx {
 
     fn draft(&self, account: &Account) -> Draft {
         self.core
-            .create_draft(
+            .draft_create(
                 serde_json::from_value(json!({
                     "accountId": account.id,
                     "to": [{"name": null, "address": "li@example.org"}],
@@ -158,7 +158,7 @@ impl Fx {
         done: impl Fn(&OutboxItem) -> bool,
     ) -> OutboxItem {
         for _ in 0..1000 {
-            let current = self.core.get_outbox(item).unwrap();
+            let current = self.core.outbox_read(item).unwrap();
             if done(&current) {
                 return current;
             }
@@ -166,7 +166,7 @@ impl Fx {
         }
         panic!(
             "timed out waiting for {what}: {:?}",
-            self.core.get_outbox(item)
+            self.core.outbox_read(item)
         );
     }
 
@@ -306,17 +306,17 @@ async fn nothing_is_sent_during_the_undo_window_and_canceling_keeps_it_unsent() 
     fx.settle().await;
     assert_eq!(connections(&seen), 0);
     assert_eq!(
-        fx.core.get_outbox(&item.id).unwrap().state,
+        fx.core.outbox_read(&item.id).unwrap().state,
         OutboxState::Queued
     );
 
-    let canceled = fx.core.cancel_outbox(&item.id).unwrap();
+    let canceled = fx.core.outbox_cancel(&item.id).unwrap();
     assert_eq!(canceled.state, OutboxState::Canceled);
     fx.clock.advance(Duration::from_secs(3600));
     fx.settle().await;
     assert_eq!(connections(&seen), 0, "a canceled item is never sent");
     assert_eq!(
-        fx.core.cancel_outbox(&item.id).unwrap_err().code,
+        fx.core.outbox_cancel(&item.id).unwrap_err().code,
         ErrorCode::Conflict
     );
 
@@ -327,7 +327,7 @@ async fn nothing_is_sent_during_the_undo_window_and_canceling_keeps_it_unsent() 
         "subject": "edited", "bodyHtml": "x",
     }))
     .unwrap();
-    assert_eq!(fx.core.update_draft(update).unwrap().subject, "edited");
+    assert_eq!(fx.core.draft_update(update).unwrap().subject, "edited");
     assert_eq!(
         fx.states(&item.id),
         [OutboxState::Queued, OutboxState::Canceled]
@@ -347,7 +347,7 @@ async fn the_item_is_sent_when_the_undo_window_ends_and_then_cannot_be_canceled(
     fx.until(&item.id, "body start mark", |i| i.data_started_at.is_some())
         .await;
     assert_eq!(
-        fx.core.cancel_outbox(&item.id).unwrap_err().code,
+        fx.core.outbox_cancel(&item.id).unwrap_err().code,
         ErrorCode::AlreadySending
     );
     assert_eq!(
@@ -529,7 +529,7 @@ async fn definite_failures_are_recorded_and_never_retried() {
         fx.clock.advance(Duration::from_secs(48 * 3600));
         fx.settle().await;
         assert_eq!(connections(&seen), 1, "{name}");
-        assert_eq!(fx.core.get_outbox(&item.id).unwrap().attempts, 1);
+        assert_eq!(fx.core.outbox_read(&item.id).unwrap().attempts, 1);
         assert!(fx.core.get_draft(&draft.id).is_ok(), "{name}");
         fx.states_become(
             &item.id,
@@ -561,7 +561,7 @@ async fn a_failed_item_can_be_edited_and_sent_again_with_a_new_message_id() {
         .unwrap();
     let edited = fx
         .core
-        .update_draft(
+        .draft_update(
             serde_json::from_value(json!({
                 "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
                 "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],
@@ -576,7 +576,7 @@ async fn a_failed_item_can_be_edited_and_sent_again_with_a_new_message_id() {
     fx.reaches(&second.id, OutboxState::Accepted).await;
     assert_eq!(connections(&seen), 1);
     assert_eq!(
-        fx.core.get_outbox(&item.id).unwrap().state,
+        fx.core.outbox_read(&item.id).unwrap().state,
         OutboxState::Failed
     );
 }
@@ -610,7 +610,7 @@ async fn transient_failures_back_off_on_schedule_and_then_succeed() {
         // Just before it is due nothing happens.
         fx.clock.advance(Duration::from_secs(expected - 1));
         fx.settle().await;
-        assert_eq!(fx.core.get_outbox(&item.id).unwrap().attempts, attempts);
+        assert_eq!(fx.core.outbox_read(&item.id).unwrap().attempts, attempts);
         if index + 1 < waits.len() {
             fx.clock.advance(Duration::from_secs(1));
         }
@@ -678,7 +678,7 @@ async fn no_final_reply_is_unknown_and_is_never_retried_automatically() {
     assert_eq!(connections(&seen), 1);
     assert_eq!(data_count(&seen), 1);
     assert_eq!(
-        fx.core.get_outbox(&item.id).unwrap().state,
+        fx.core.outbox_read(&item.id).unwrap().state,
         OutboxState::Unknown
     );
     // The draft stays locked while the outcome is unknown.
@@ -688,7 +688,7 @@ async fn no_final_reply_is_unknown_and_is_never_retried_automatically() {
     }))
     .unwrap();
     assert_eq!(
-        fx.core.update_draft(locked).unwrap_err().code,
+        fx.core.draft_update(locked).unwrap_err().code,
         ErrorCode::DraftLocked
     );
     assert_eq!(fx.core.list_outbox(None, false).unwrap().len(), 1);
@@ -785,7 +785,7 @@ async fn resending_an_unknown_item_keeps_the_message_id_and_the_bytes() {
         first_seen.lock().unwrap().body,
         second_seen.lock().unwrap().body
     );
-    let old = fx.core.get_outbox(&item.id).unwrap();
+    let old = fx.core.outbox_read(&item.id).unwrap();
     assert_eq!(old.state, OutboxState::Unknown);
     assert_eq!(old.resolution, Some(OutboxResolution::Resent));
     assert_eq!(old.superseded_by.as_deref(), Some(next.id.as_str()));
@@ -817,7 +817,7 @@ async fn changing_the_account_address_fails_unsent_items_but_a_new_route_does_no
         .unwrap();
     fx.settle().await;
     assert_eq!(
-        fx.core.get_outbox(&first.id).unwrap().state,
+        fx.core.outbox_read(&first.id).unwrap().state,
         OutboxState::Queued
     );
 
@@ -850,7 +850,7 @@ async fn one_accounts_stuck_server_does_not_block_another() {
     let second = fx.queue(&b, 0);
     fx.reaches(&second.id, OutboxState::Accepted).await;
     assert_eq!(
-        fx.core.get_outbox(&first.id).unwrap().state,
+        fx.core.outbox_read(&first.id).unwrap().state,
         OutboxState::Sending,
         "still waiting for its greeting"
     );
@@ -889,16 +889,16 @@ async fn startup_recovers_interrupted_and_waiting_items() {
         Timeouts::for_tests(Duration::from_millis(500)),
     );
     assert_eq!(
-        core.get_outbox(&interrupted.id).unwrap().state,
+        core.outbox_read(&interrupted.id).unwrap().state,
         OutboxState::Queued
     );
-    assert_eq!(core.get_outbox(&interrupted.id).unwrap().attempts, 0);
+    assert_eq!(core.outbox_read(&interrupted.id).unwrap().attempts, 0);
     assert_eq!(
-        core.get_outbox(&started.id).unwrap().state,
+        core.outbox_read(&started.id).unwrap().state,
         OutboxState::Unknown
     );
     assert_eq!(
-        core.get_outbox(&waiting.id).unwrap().state,
+        core.outbox_read(&waiting.id).unwrap().state,
         OutboxState::Queued
     );
     assert!(events.lock().unwrap().iter().any(|event| matches!(
@@ -910,16 +910,16 @@ async fn startup_recovers_interrupted_and_waiting_items() {
     clock.advance(Duration::from_secs(30));
     for id in [&waiting.id, &interrupted.id] {
         for _ in 0..500 {
-            if core.get_outbox(id).unwrap().state == OutboxState::Accepted {
+            if core.outbox_read(id).unwrap().state == OutboxState::Accepted {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(core.get_outbox(id).unwrap().state, OutboxState::Accepted);
+        assert_eq!(core.outbox_read(id).unwrap().state, OutboxState::Accepted);
     }
     assert_eq!(data_count(&seen), 2);
     assert_eq!(
-        core.get_outbox(&started.id).unwrap().state,
+        core.outbox_read(&started.id).unwrap().state,
         OutboxState::Unknown
     );
 }
@@ -936,8 +936,8 @@ fn blank_request(account: &Account) -> crate::CreateDraftRequest {
 async fn draft_operations_emit_events_and_blank_drafts_are_hidden() {
     let fx = fixture();
     let account = fx.account("lin@example.com", 1);
-    let blank = fx.core.create_draft(blank_request(&account), "").unwrap();
-    assert!(fx.core.list_drafts(None).unwrap().is_empty());
+    let blank = fx.core.draft_create(blank_request(&account), "").unwrap();
+    assert!(fx.core.draft_list(None).unwrap().is_empty());
     assert!(blank.is_blank());
 
     let update = |draft: &Draft, subject: &str| crate::UpdateDraftRequest {
@@ -950,11 +950,11 @@ async fn draft_operations_emit_events_and_blank_drafts_are_hidden() {
         subject: subject.into(),
         body_html: String::new(),
     };
-    let edited = fx.core.update_draft(update(&blank, "hi")).unwrap();
-    assert_eq!(fx.core.list_drafts(None).unwrap().len(), 1);
-    let cleared = fx.core.update_draft(update(&edited, "")).unwrap();
-    assert!(fx.core.list_drafts(None).unwrap().is_empty());
-    fx.core.delete_draft(&cleared.id).unwrap();
+    let edited = fx.core.draft_update(update(&blank, "hi")).unwrap();
+    assert_eq!(fx.core.draft_list(None).unwrap().len(), 1);
+    let cleared = fx.core.draft_update(update(&edited, "")).unwrap();
+    assert!(fx.core.draft_list(None).unwrap().is_empty());
+    fx.core.draft_delete(&cleared.id).unwrap();
 
     let changes: Vec<DraftChange> = fx
         .events
@@ -984,7 +984,7 @@ async fn draft_operations_emit_events_and_blank_drafts_are_hidden() {
 async fn opening_the_core_purges_blank_drafts_only() {
     let fx = fixture();
     let account = fx.account("lin@example.com", 1);
-    let blank = fx.core.create_draft(blank_request(&account), "").unwrap();
+    let blank = fx.core.draft_create(blank_request(&account), "").unwrap();
     let kept = fx.draft(&account);
     let Fx {
         dir,
@@ -1096,7 +1096,7 @@ fn inline_attached(fx: &Fx, draft: &Draft, name: &str) -> (Draft, String) {
 
 fn with_body(fx: &Fx, draft: &Draft, body_html: String) -> Draft {
     fx.core
-        .update_draft(crate::UpdateDraftRequest {
+        .draft_update(crate::UpdateDraftRequest {
             id: draft.id.clone(),
             expected_revision: draft.revision,
             account_id: None,
@@ -1210,7 +1210,7 @@ async fn a_missing_or_corrupt_snapshot_fails_before_any_data_is_sent() {
             "no body may reach the server, corrupt: {corrupt}"
         );
         assert_eq!(
-            fx.core.get_outbox(&item.id).unwrap().state,
+            fx.core.outbox_read(&item.id).unwrap().state,
             OutboxState::Failed,
             "a lost snapshot is never retried or rebuilt"
         );
@@ -1238,7 +1238,7 @@ async fn a_changed_draft_aborts_the_freeze_and_leaves_no_queue_row() {
 
     // A body edit between the two phases moves the revision on.
     fx.core
-        .update_draft(
+        .draft_update(
             serde_json::from_value(json!({
                 "id": draft.id, "expectedRevision": draft.revision, "accountId": null,
                 "to": [{"name": null, "address": "li@example.org"}], "cc": [], "bcc": [],

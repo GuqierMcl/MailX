@@ -18,7 +18,7 @@ export type SingleKeyShortcutId =
   | 'reply' | 'replyAll' | 'forward'
 
 /** Shortcuts with a modifier, or Esc: listed only, each is handled by its own component. */
-type FixedShortcutId = 'searchModifier' | 'close' | 'sidebar' | 'selectAll' | 'compose'
+type FixedShortcutId = 'searchModifier' | 'close' | 'sidebar' | 'assistant' | 'selectAll' | 'compose'
 
 export type ShortcutDefinition = {
   id: SingleKeyShortcutId | FixedShortcutId
@@ -44,6 +44,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'search', keys: [['/']], group: 'browse', labelKey: 'mail:shortcutSearch', singleKey: true, match: ['/'] },
   { id: 'searchModifier', keys: [[MOD_KEY, 'K']], group: 'browse', labelKey: 'mail:shortcutPalette', singleKey: false },
   { id: 'sidebar', keys: [[MOD_KEY, 'B']], group: 'browse', labelKey: 'mail:shortcutSidebar', singleKey: false },
+  { id: 'assistant', keys: [[MOD_KEY, 'J']], group: 'browse', labelKey: 'mail:shortcutAssistant', singleKey: false },
   { id: 'help', keys: [['?']], group: 'browse', labelKey: 'mail:shortcutHelp', singleKey: true, match: ['?'] },
   { id: 'archive', keys: [['E']], group: 'act', labelKey: 'mail:shortcutArchive', singleKey: true, match: ['e'] },
   {
@@ -76,8 +77,9 @@ const TEXT_ENTRY = [
 /**
  * A composer owns its keys even off a text field (a toolbar button, a recipient
  * chip): the main window's inline composer must never archive or reply instead.
+ * So does the assistant's island beside the mail.
  */
-const COMPOSER = '[data-slot="composer"], [data-slot="inline-composer"]'
+const COMPOSER = '[data-slot="composer"], [data-slot="inline-composer"], [data-slot="assistant-island"]'
 
 /** An open dialog, menu or popup owns the keyboard while it is up. */
 const OPEN_LAYER = '[role="dialog"][data-open], [role="alertdialog"][data-open], [role="dialog"][open], [role="menu"], [role="listbox"]'

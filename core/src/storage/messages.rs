@@ -628,7 +628,7 @@ impl Storage {
     /// oldest first. An email without a conversation (or a local Sent copy,
     /// which carries no threading data) is returned alone. Junk and Trash
     /// copies are left out unless they are the opened email itself.
-    pub(crate) fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+    pub(crate) fn mail_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
         if email_id.starts_with(LOCAL_SENT_PREFIX) {
             return Ok(ConversationPage {
                 messages: vec![self.get_email(email_id)?.summary],
@@ -788,8 +788,8 @@ impl Storage {
                 },
             ).optional()?.ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
             let mut statement = self.db.prepare(
-                "SELECT part_index, filename, mime_type, size FROM message_parts
-                 WHERE message_id = ?1 AND is_inline = 0 ORDER BY part_index",
+                "SELECT part_index, filename, mime_type, size, is_inline FROM message_parts
+                 WHERE message_id = ?1 ORDER BY part_index",
             )?;
             let attachments = statement
                 .query_map([id], |row| {
@@ -802,7 +802,7 @@ impl Storage {
                         filename: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         mime_type: row.get(2)?,
                         size,
-                        is_inline: false,
+                        is_inline: row.get(4)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -862,13 +862,12 @@ impl Storage {
         let attachments = rendered
             .parts
             .iter()
-            .filter(|part| !part.is_inline)
             .map(|part| AttachmentSummary {
                 id: format!("{id}:{}", part.part_index),
                 filename: part.filename.clone().unwrap_or_default(),
                 mime_type: part.mime_type.clone(),
                 size: part.size,
-                is_inline: false,
+                is_inline: part.is_inline,
             })
             .collect();
         Ok(EmailDetail {

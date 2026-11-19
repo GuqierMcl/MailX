@@ -235,14 +235,36 @@ fn ready_queries_return_safe_body_metadata_preview_and_non_inline_attachments() 
     assert!(body.has_html && body.truncated);
     assert_eq!(body.remote_images_blocked, 3);
     assert!(detail.body_failure.is_none());
-    assert_eq!(detail.attachments.len(), 2);
+    // The inline image is listed too, flagged, so a tool reading the mail
+    // knows the picture is there; the reader's attachment bar leaves it out.
+    assert_eq!(detail.attachments.len(), 3);
+    assert_eq!(
+        detail
+            .attachments
+            .iter()
+            .filter(|part| part.is_inline)
+            .count(),
+        1
+    );
     assert_eq!(detail.attachments[0].filename, "报告.pdf");
     assert_eq!(detail.attachments[0].mime_type, "application/pdf");
     assert_eq!(detail.attachments[0].size, 123);
     assert_eq!(detail.attachments[0].id, format!("{id}:1"));
     // A missing name stays empty; the UI supplies the localized placeholder.
-    assert_eq!(detail.attachments[1].filename, "");
-    assert!(detail.attachments.iter().all(|part| !part.is_inline));
+    assert!(
+        detail
+            .attachments
+            .iter()
+            .filter(|part| !part.is_inline)
+            .any(|part| part.filename.is_empty())
+    );
+    // The referenced inline image keeps the name its part carries.
+    let inline = detail
+        .attachments
+        .iter()
+        .find(|part| part.is_inline)
+        .unwrap();
+    assert_eq!(inline.filename, "logo.png");
     let wire = serde_json::to_value(&detail).unwrap();
     assert!(wire["body"].get("html").is_none());
     let wire = wire.to_string();
@@ -692,7 +714,7 @@ fn folder_counts_update_only_the_current_identity() {
             .unwrap()
             .is_some()
     );
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -710,7 +732,7 @@ fn folder_counts_update_only_the_current_identity() {
             .unwrap()
             .is_none()
     );
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -1113,7 +1135,7 @@ fn list_only_refresh_keeps_known_counts_and_persists_unknown_until_status_succee
         .unwrap();
     drop(f.service);
     f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.role == FolderRole::Inbox)
@@ -1141,7 +1163,7 @@ fn list_only_refresh_keeps_known_counts_and_persists_unknown_until_status_succee
         .unwrap();
     drop(f.service);
     f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
-    let after = f.service.list_folders(&f.account.id).unwrap();
+    let after = f.service.mail_folders(&f.account.id).unwrap();
     assert!(
         after
             .iter()
@@ -1341,7 +1363,7 @@ fn noselect_hides_cached_mail_rejects_late_writes_and_excludes_coverage() {
         .store_message_batch(&child_target, &[record(1)], 1)
         .unwrap();
     f.service.finish_backfill(&child_target, false).unwrap();
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let container = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -1834,7 +1856,7 @@ fn pending_changes_carry_everything_needed_to_address_the_message() {
 // ---- unread counts follow local read changes ----------------------------
 
 fn folder_counts(f: &Fixture) -> (u32, bool) {
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)

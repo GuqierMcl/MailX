@@ -59,7 +59,7 @@ impl AccountService {
     /// Recipient suggestions for a composer address field (sending.md
     /// section 17.4): people written to first, then by weighted count, the
     /// newest exchange and the address. Reads only mail already cached.
-    pub fn suggest_contacts(
+    pub fn mail_contacts(
         &self,
         query: &str,
         limit: Option<u32>,

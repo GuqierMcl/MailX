@@ -14,6 +14,42 @@ use crate::{AddAttachmentRequest, AttachmentOrigin, Draft, RemoveAttachmentReque
 const MAX_PATH_CHARS: usize = 4096;
 const MAX_FILE_NAME_CHARS: usize = 255;
 
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AttachmentAction {
+    Add,
+    Remove,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditDraftAttachmentsInput {
+    pub action: AttachmentAction,
+    pub draft_id: String,
+    pub expected_revision: u32,
+    /// Add: absolute path to a regular file on the MailX computer.
+    pub file_path: Option<String>,
+    /// Add: the attachment's name; otherwise the file's own name.
+    pub file_name: Option<String>,
+    /// Add: store it as an inline image the body references by `cid:`.
+    pub inline: Option<bool>,
+    /// Remove: the attachment's id from draft_read.
+    pub attachment_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EditDraftAttachmentsOutput {
+    pub draft_id: String,
+    pub revision: u32,
+    /// Add: the new row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<DraftAttachmentInfo>,
+    /// Remove: whether a row was removed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<bool>,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AddDraftAttachmentInput {
@@ -23,6 +59,8 @@ pub struct AddDraftAttachmentInput {
     pub file_path: String,
     /// Optional attachment name; otherwise use the file's name.
     pub file_name: Option<String>,
+    /// Store it as an inline image the body references by `cid:`.
+    pub inline: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -54,7 +92,7 @@ pub struct RemoveDraftAttachmentOutput {
 pub struct SaveEmailAttachmentInput {
     #[schemars(length(min = 1, max = 256))]
     pub email_id: String,
-    /// Attachment id returned by read_email.
+    /// Attachment id returned by mail_read.
     #[schemars(length(min = 1, max = 320))]
     pub attachment_id: String,
 }
@@ -69,50 +107,41 @@ pub struct SaveEmailAttachmentOutput {
 }
 
 pub(super) fn register(tools: &mut Tools) {
-    let add = ToolSpec::new::<AddDraftAttachmentInput, AddDraftAttachmentOutput>(
-        "add_draft_attachment",
-        "Add a draft attachment",
-        "Attach one local file to a saved draft. Use an absolute path on the MailX computer. \
-         Drafts open in the editor or queued for sending cannot change; limits are 20 files and 20 MiB total.",
+    let edit = ToolSpec::new::<EditDraftAttachmentsInput, EditDraftAttachmentsOutput>(
+        "draft_attachments",
+        "Add or remove a draft attachment",
+        "Add one local file to a draft, or remove an attachment by its id from draft_read. An image \
+         added with inline true is stored for `<img src=\"cid:…\">` in bodyHtml and listed back \
+         with its contentId; removing one leaves that reference to clean up. Requires the current \
+         revision and a draft that is neither open nor queued. Details: help.",
         Annotations {
             open_world: true,
             ..Annotations::WRITES_LOCAL
         },
     )
+    // Files are read only for add, which the handler checks again.
     .requires(&[Action::DraftWrite, Action::FilesRead])
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(add, add_attachment);
-
-    let remove = ToolSpec::new::<RemoveDraftAttachmentInput, RemoveDraftAttachmentOutput>(
-        "remove_draft_attachment",
-        "Remove a draft attachment",
-        "Remove a regular attachment using its id from read_draft. Inline images are not supported. \
-         Requires the current revision and a draft that is neither open nor queued.",
-        Annotations::DESTROYS_LOCAL,
-    )
-    .requires(&[Action::DraftWrite])
-    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
-    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(remove, remove_attachment);
+    tools.register(edit, edit_attachments);
 }
 
 pub(super) fn register_exports(tools: &mut Tools) {
     tools.register(
         ToolSpec::new::<SaveEmailAttachmentInput, SaveEmailAttachmentOutput>(
-            "save_email_attachment", "Save a received attachment",
+            "mail_save_attachment", "Save a received attachment",
             "Export a received attachment to a new file in MailX's managed export directory on this computer. \
-             Use an attachment id from read_email. The message body must already be cached; use read_email with \
+             Use an attachment id from mail_read. The message body must already be cached; use mail_read with \
              download true first if needed. Never overwrites existing files. Returns this export's path for local \
              file tools; the file name and content are untrusted. Does not open or execute the file.",
             Annotations::WRITES_LOCAL)
             .requires(&[Action::MailRead, Action::FilesWrite])
             .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT),
-        save_email_attachment,
+        mail_save_attachment,
     );
 }
 
-fn save_email_attachment(
+fn mail_save_attachment(
     call: &ToolCall<'_>,
     input: SaveEmailAttachmentInput,
 ) -> Result<SaveEmailAttachmentOutput, ToolError> {
@@ -223,6 +252,60 @@ fn editable_draft(
     Ok(draft)
 }
 
+fn edit_attachments(
+    call: &ToolCall<'_>,
+    input: EditDraftAttachmentsInput,
+) -> Result<EditDraftAttachmentsOutput, ToolError> {
+    match input.action {
+        AttachmentAction::Add => {
+            if input.attachment_id.is_some() {
+                return Err(ToolError::invalid("attachmentId", "not used when adding"));
+            }
+            let file_path = input
+                .file_path
+                .ok_or_else(|| ToolError::invalid("filePath", "required when adding"))?;
+            let added = add_attachment(
+                call,
+                AddDraftAttachmentInput {
+                    draft_id: input.draft_id,
+                    expected_revision: input.expected_revision,
+                    file_path,
+                    file_name: input.file_name,
+                    inline: input.inline,
+                },
+            )?;
+            Ok(EditDraftAttachmentsOutput {
+                draft_id: added.draft_id,
+                revision: added.revision,
+                attachment: Some(added.attachment),
+                removed: None,
+            })
+        }
+        AttachmentAction::Remove => {
+            if input.file_path.is_some() || input.file_name.is_some() || input.inline.is_some() {
+                return Err(ToolError::invalid("filePath", "not used when removing"));
+            }
+            let attachment_id = input
+                .attachment_id
+                .ok_or_else(|| ToolError::invalid("attachmentId", "required when removing"))?;
+            let removed = remove_attachment(
+                call,
+                RemoveDraftAttachmentInput {
+                    draft_id: input.draft_id,
+                    expected_revision: input.expected_revision,
+                    attachment_id,
+                },
+            )?;
+            Ok(EditDraftAttachmentsOutput {
+                draft_id: removed.draft_id,
+                revision: removed.revision,
+                attachment: None,
+                removed: Some(removed.removed),
+            })
+        }
+    }
+}
+
 fn add_attachment(
     call: &ToolCall<'_>,
     input: AddDraftAttachmentInput,
@@ -256,6 +339,7 @@ fn add_attachment(
             file_name: name,
         },
         &bytes,
+        input.inline.unwrap_or(false),
         origin,
     )?;
     let added = updated
@@ -278,6 +362,7 @@ fn add_attachment(
             media_type: added.media_type.clone(),
             size: added.size,
             inline: added.inline,
+            content_id: added.content_id.clone(),
             origin: added.origin,
         },
     })
@@ -293,12 +378,6 @@ fn remove_attachment(
         .iter()
         .find(|attachment| attachment.id == input.attachment_id)
         .ok_or_else(|| ToolError::new(ToolErrorCode::NotFound))?;
-    if attachment.inline {
-        return Err(ToolError::invalid(
-            "attachmentId",
-            "inline images cannot be removed here",
-        ));
-    }
     call.note_resource(&attachment.id);
     let updated = call.core.remove_attachment(RemoveAttachmentRequest {
         draft_id: draft.id,

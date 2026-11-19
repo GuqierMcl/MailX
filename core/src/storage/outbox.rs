@@ -453,7 +453,7 @@ impl Storage {
         Ok(item)
     }
 
-    pub(crate) fn get_outbox(&self, id: &str) -> Result<OutboxItem, AppError> {
+    pub(crate) fn outbox_read(&self, id: &str) -> Result<OutboxItem, AppError> {
         item_in(&self.db, id)
     }
 

@@ -4,7 +4,7 @@
 
 ## 1. 范围与授权
 
-新增 `set_email_flags`、`archive_emails`、`unarchive_emails`、`refresh_sync` 和仅 MCP 可见的 `show_draft_in_app`。不增加 `get_grant_scope`。内部新增 `mail:organize`、`mail:archive`、`mail:sync` 动作并纳入 `Grant::mcp_default()`；账号范围、每次执行检查与入口可见性保持。未来内置 Agent 使用自己的 Run 授权，不自动继承 MCP 默认授权。
+新增 `mail_flags`、`mail_archive`（带 `archive` 布尔值，同时负责取消归档）、`accounts_refresh_sync` 和仅 MCP 可见的 `show_in_app`（给 `draftId` 时打开草稿）。不增加 `get_grant_scope`。内部新增 `mail:organize`、`mail:archive`、`mail:sync` 动作并纳入 `Grant::mcp_default()`；账号范围、每次执行检查与入口可见性保持。未来内置 Agent 使用自己的 Run 授权，不自动继承 MCP 默认授权。
 
 MCP 开启时全部本机连接获得相同默认授权，客户端自报名称仅用于显示和审计。现有已开启的 MCP 升级后也获得本批能力。开启说明与服务端 instructions 明确说明已读 / 星标可能写回服务器、归档仅本机生效。关闭总开关后拒绝新调用并断开连接；已提交的操作不自动撤销。
 
@@ -16,7 +16,7 @@ MCP 开启时全部本机连接获得相同默认授权，客户端自报名称�
 
 ### 批量已读与星标
 
-`set_email_flags({ emailIds, isRead?, isStarred? })`：1–50 个不同 ID，至少指定一个标志；先验证完整输入，再执行。两个字段都是设置目标值，不使用 toggle。
+`mail_flags({ emailIds, isRead?, isStarred? })`：1–50 个不同 ID，至少指定一个标志；先验证完整输入，再执行。两个字段都是设置目标值，不使用 toggle。
 
 返回 `results[]`，每项包含 `emailId`，以及本次请求的 `isRead` / `isStarred` 结果。各字段分别返回 `status: queued | unchanged | localOnly | failed`；失败带稳定 `errorCode`。范围外与不存在的资源都为 `notFound`，不含服务器诊断或路径。允许逐封、逐字段部分成功；已读入队、星标仅本机时不能合并成一个含糊的 ok。queued 表示本地状态已提交、等待后台写回，不表示服务器已确认。
 
@@ -24,7 +24,7 @@ core 批量入口复用标记存储与后台写回队列，聚合本次状态事
 
 ### 本机归档与取消归档
 
-`archive_emails({ emailIds })` / `unarchive_emails({ emailIds })`：1–50 个不同 ID；工具上限独立于 core 的 500 个目标上限。先检查所有资源的账号范围，存储在同一事务中验证全部目标；任一目标不可操作时整批不执行。只支持当前可见 INBOX 邮件，不支持本机已发送副本、其他目录、删除墓碑或旧服务器世代。
+`mail_archive({ emailIds, archive })`：`archive` 必填，true 归档、false 恢复；1–50 个不同 ID；工具上限独立于 core 的 500 个目标上限。先检查所有资源的账号范围，存储在同一事务中验证全部目标；任一目标不可操作时整批不执行。只支持当前可见 INBOX 邮件，不支持本机已发送副本、其他目录、删除墓碑或旧服务器世代。
 
 返回 `processedCount`（有效请求目标数，包含已经处于目标状态的目标）与 `changedCount`（本次实际改变状态的可见邮件数）。同一账号 / 邮箱来源下相同 Message-ID 的 INBOX 副本共享归档状态，因此后者可能超过输入 ID 数；重复操作的 changedCount 为零。归档只改变本机收件箱视图，不移动服务器邮件。
 
@@ -32,17 +32,17 @@ core 返回真实变更回执；MCP 结果不包含界面撤销凭据。可信�
 
 ### 刷新同步
 
-`refresh_sync({ accountId })`：先检查账号范围，再请求该账号正常同步任务刷新，返回 `accountId, accepted, syncStatus, userActionRequired`；不等候整轮完成。同步状态继续通过 `list_accounts` 查询，不增加重复的状态工具。
+`accounts_refresh_sync({ accountId })`：先检查账号范围，再请求该账号正常同步任务刷新，返回 `accountId, accepted, syncStatus, userActionRequired`；不等候整轮完成。同步状态继续通过 `accounts_list` 查询，不增加重复的状态工具。
 
-core 既有 `refresh_sync` 是人工恢复入口，可能重启因服务商策略而停止的任务，不能直接用在工具中。自动化入口只唤醒正常任务，遇到服务商策略、认证或凭据问题停止状态不重启，不涉及 SMTP 或发送重试。网络访问继续使用账号路由，自定义代理失败不回退直连。
+core 既有 `accounts_refresh_sync` 是人工恢复入口，可能重启因服务商策略而停止的任务，不能直接用在工具中。自动化入口只唤醒正常任务，遇到服务商策略、认证或凭据问题停止状态不重启，不涉及 SMTP 或发送重试。网络访问继续使用账号路由，自定义代理失败不回退直连。
 
 ### 在应用中打开草稿
 
-`show_draft_in_app({ draftId })`：仅 MCP，`mail:read`。检查草稿所属账号和存在性，再交宿主打开或聚焦已有写信窗口；不修改或发送草稿。宿主固定 `fresh=false`，保留退出检查和 Windows 异步建窗要求。缺少宿主支持时返回 unavailable。
+`show_in_app({ draftId })`（`emailId` 与 `draftId` 恰好给一个）：仅 MCP，`mail:read`。检查草稿所属账号和存在性，再交宿主打开或聚焦已有写信窗口；不修改或发送草稿。宿主固定 `fresh=false`，保留退出检查和 Windows 异步建窗要求。缺少宿主支持时返回 unavailable。
 
 ## 3. 搜索与阅读
 
-`search_emails` 增加 `starred?: boolean` 和 `archive?: exclude | only | include`。归档筛选复用 `EmailListQuery.archive`；省略时普通列表排除本机归档，有效文本搜索包含归档。`folderRole: archive` 始终表示服务器目录，不表示本机归档。
+`mail_search` 增加 `starred?: boolean` 和 `archive?: exclude | only | include`。归档筛选复用 `EmailListQuery.archive`；省略时普通列表排除本机归档，有效文本搜索包含归档。`folderRole: archive` 始终表示服务器目录，不表示本机归档。
 
 星标筛选进入 core SQL，在排序和分页前生效；本机已发送副本不带星标，合并查询分支使用一致语义，不能对已经分页的结果再过滤。
 
@@ -58,7 +58,7 @@ MCP / AI 归档与取消归档通过事件显示本机操作提示和精确撤�
 
 ## 5. 本批之外
 
-会话读取、附件文字提取、服务器文件夹移动、发件箱操作和发送确认不在本批。文件夹未读 / 总数已经由 list_folders 提供，无需重复新增统计工具；附件信息与字节读取已有 core 支撑，另存为对话框属于桌面宿主，进一步的 MCP 附件传输另行设计。
+会话读取、附件文字提取、服务器文件夹移动、发件箱操作和发送确认不在本批。文件夹未读 / 总数已经由 mail_folders 提供，无需重复新增统计工具；附件信息与字节读取已有 core 支撑，另存为对话框属于桌面宿主，进一步的 MCP 附件传输另行设计。
 
 ## 6. 验证
 

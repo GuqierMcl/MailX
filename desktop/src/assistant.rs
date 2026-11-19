@@ -215,7 +215,7 @@ pub(crate) async fn assistant_get_conversation(
             let args = args?;
             state
                 .assistant(&app)?
-                .get_conversation(&args.conversation_id)
+                .mail_conversation(&args.conversation_id)
                 .await
         }
         .await,

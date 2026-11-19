@@ -347,7 +347,7 @@ pub(crate) async fn drafts_create(
             .compose
             .default_account_id;
         state
-            .run(move |core| core.create_draft(args.request, &default_account))
+            .run(move |core| core.draft_create(args.request, &default_account))
             .await
     }
     .await;
@@ -388,7 +388,7 @@ pub(crate) async fn drafts_list(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.list_drafts(args.account_id.as_deref()))
+                .run(move |core| core.draft_list(args.account_id.as_deref()))
                 .await
         }
         Err(error) => Err(error),
@@ -450,7 +450,7 @@ pub(crate) async fn drafts_update(
         Ok(args)
     });
     Ok(respond(match args {
-        Ok(args) => state.run(move |core| core.update_draft(args.request)).await,
+        Ok(args) => state.run(move |core| core.draft_update(args.request)).await,
         Err(error) => Err(error),
     }))
 }
@@ -467,7 +467,7 @@ pub(crate) async fn drafts_delete(
         Ok(args)
     });
     Ok(respond(match args {
-        Ok(args) => state.run(move |core| core.delete_draft(&args.id)).await,
+        Ok(args) => state.run(move |core| core.draft_delete(&args.id)).await,
         Err(error) => Err(error),
     }))
 }
@@ -527,7 +527,7 @@ pub(crate) async fn outbox_get(
 ) -> Result<ApiResult<OutboxItem>, ()> {
     let args = authorize(&window, "outbox_get").and_then(|_| parse::<IdArgs>(request.body()));
     Ok(respond(match args {
-        Ok(args) => state.run(move |core| core.get_outbox(&args.id)).await,
+        Ok(args) => state.run(move |core| core.outbox_read(&args.id)).await,
         Err(error) => Err(error),
     }))
 }
@@ -540,7 +540,7 @@ pub(crate) async fn outbox_cancel(
 ) -> Result<ApiResult<OutboxItem>, ()> {
     let args = authorize(&window, "outbox_cancel").and_then(|_| parse::<IdArgs>(request.body()));
     Ok(respond(match args {
-        Ok(args) => state.run(move |core| core.cancel_outbox(&args.id)).await,
+        Ok(args) => state.run(move |core| core.outbox_cancel(&args.id)).await,
         Err(error) => Err(error),
     }))
 }

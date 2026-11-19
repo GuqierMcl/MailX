@@ -36,6 +36,10 @@ pub const LIST_WIDTH_MIN: u32 = 300;
 pub const LIST_WIDTH_MAX: u32 = 2000;
 const LIST_WIDTH_DEFAULT: u32 = 420;
 
+pub const ASSISTANT_WIDTH_MIN: u32 = 320;
+pub const ASSISTANT_WIDTH_MAX: u32 = 560;
+const ASSISTANT_WIDTH_DEFAULT: u32 = 380;
+
 const MAX_FONT_FAMILIES: usize = 16;
 const MAX_FONT_FAMILY_CHARS: usize = 64;
 
@@ -294,6 +298,8 @@ pub struct LayoutSettings {
     pub reader_collapsed: bool,
     /// Whether to show the list and reader side by side or one at a time.
     pub reading_mode: ReadingMode,
+    /// Width of the assistant's own island beside the mail, `320..=560`.
+    pub assistant_width: u32,
     /// Display order only; unknown account ids are ignored by the UI.
     #[serde(deserialize_with = "deserialize_account_order")]
     pub account_order: Vec<String>,
@@ -307,6 +313,7 @@ impl Default for LayoutSettings {
             list_width: LIST_WIDTH_DEFAULT,
             reader_collapsed: false,
             reading_mode: ReadingMode::default(),
+            assistant_width: ASSISTANT_WIDTH_DEFAULT,
             account_order: Vec::new(),
         }
     }
@@ -360,6 +367,8 @@ pub struct LayoutSettingsPatch {
     #[serde(default, deserialize_with = "deserialize_reading_mode_patch")]
     #[ts(optional)]
     pub reading_mode: Option<ReadingMode>,
+    #[ts(optional)]
+    pub assistant_width: Option<u32>,
     #[serde(default, deserialize_with = "deserialize_order_patch")]
     #[ts(optional)]
     pub account_order: Option<Vec<String>>,
@@ -373,6 +382,7 @@ impl LayoutSettingsPatch {
             list_width: self.list_width.unwrap_or(current.list_width),
             reader_collapsed: self.reader_collapsed.unwrap_or(current.reader_collapsed),
             reading_mode: self.reading_mode.unwrap_or(current.reading_mode),
+            assistant_width: self.assistant_width.unwrap_or(current.assistant_width),
             account_order: self
                 .account_order
                 .unwrap_or_else(|| current.account_order.clone()),
@@ -388,6 +398,7 @@ impl From<LayoutSettings> for LayoutSettingsPatch {
             list_width: Some(settings.list_width),
             reader_collapsed: Some(settings.reader_collapsed),
             reading_mode: Some(settings.reading_mode),
+            assistant_width: Some(settings.assistant_width),
             account_order: Some(settings.account_order),
         }
     }
@@ -987,6 +998,9 @@ impl AppSettings {
         if self.layout.reading_mode == ReadingMode::Invalid {
             return Err(AppError::validation("layout.readingMode"));
         }
+        if !(ASSISTANT_WIDTH_MIN..=ASSISTANT_WIDTH_MAX).contains(&self.layout.assistant_width) {
+            return Err(AppError::validation("layout.assistantWidth"));
+        }
         let layout = LayoutSettings {
             account_order: self
                 .layout
@@ -1096,6 +1110,10 @@ impl AppSettings {
                     ReadingMode::Invalid => ReadingMode::default(),
                     mode => mode,
                 },
+                assistant_width: self
+                    .layout
+                    .assistant_width
+                    .clamp(ASSISTANT_WIDTH_MIN, ASSISTANT_WIDTH_MAX),
                 account_order: self.layout.normalized_order().unwrap_or_default(),
             },
             appearance: AppearanceSettings {

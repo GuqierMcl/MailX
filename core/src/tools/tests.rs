@@ -119,7 +119,7 @@ impl Fx {
             .as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
-        self.call(ctx, "read_email", input)
+        self.call(ctx, "mail_read", input)
     }
 }
 
@@ -164,40 +164,37 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
         let list = f.tools.list(audience);
         let ids: Vec<_> = list.iter().map(|t| t.id).collect();
         let mut expected = vec![
-            "list_accounts",
-            "search_emails",
-            "read_email",
-            "list_folders",
-            "create_draft",
-            "create_reply_draft",
-            "list_drafts",
-            "read_draft",
-            "update_draft",
-            "delete_draft",
-            "set_email_flags",
-            "archive_emails",
-            "unarchive_emails",
-            "refresh_sync",
-            "send_email",
-            "list_outbox",
-            "get_outbox",
-            "cancel_outbox",
-            "add_draft_attachment",
-            "remove_draft_attachment",
+            "accounts_list",
+            "mail_search",
+            "mail_read",
+            "mail_folders",
+            "draft_create",
+            "draft_reply",
+            "draft_list",
+            "draft_read",
+            "draft_update",
+            "draft_delete",
+            "mail_flags",
+            "mail_archive",
+            "accounts_refresh_sync",
+            "outbox_send",
+            "outbox_read",
+            "outbox_cancel",
+            "draft_attachments",
         ];
         if audience == Audience::Mcp {
-            expected.push("show_email_in_app");
-            expected.push("show_draft_in_app");
+            expected.push("show_in_app");
         }
-        expected.extend(["get_conversation", "suggest_contacts"]);
+        expected.extend(["mail_conversation", "mail_contacts"]);
         if audience == Audience::Mcp {
-            expected.push("save_email_attachment");
+            expected.push("mail_save_attachment");
         }
-        assert_eq!(ids.len(), if audience == Audience::Mcp { 25 } else { 22 });
-        assert_eq!(ids, expected);
-        let delete = list.iter().find(|t| t.id == "delete_draft").unwrap();
+        expected.push("mail_help");
+        assert_eq!(ids, expected, "{audience:?}: {ids:?}");
+        assert_eq!(ids.len(), expected.len());
+        let delete = list.iter().find(|t| t.id == "draft_delete").unwrap();
         assert!(delete.annotations.destructive && !delete.annotations.read_only);
-        let update = list.iter().find(|t| t.id == "update_draft").unwrap();
+        let update = list.iter().find(|t| t.id == "draft_update").unwrap();
         assert!(!update.annotations.destructive && !update.annotations.read_only);
         for tool in &list {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.id);
@@ -255,16 +252,16 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
     assert_eq!(
         ids,
         [
-            "list_accounts",
-            "search_emails",
-            "read_email",
-            "list_folders",
-            "list_drafts",
-            "read_draft",
-            "show_email_in_app",
-            "show_draft_in_app",
-            "get_conversation",
-            "suggest_contacts"
+            "accounts_list",
+            "mail_search",
+            "mail_read",
+            "mail_folders",
+            "draft_list",
+            "draft_read",
+            "show_in_app",
+            "mail_conversation",
+            "mail_contacts",
+            "mail_help"
         ]
     );
 }
@@ -331,7 +328,7 @@ async fn a_missing_action_is_not_permitted_and_is_checked_on_every_call() {
             ctx.clone(),
             Grant::new(AccountScope::All, [Action::AccountsRead]),
         );
-        for tool in ["search_emails", "read_email", "create_draft"] {
+        for tool in ["mail_search", "mail_read", "draft_create"] {
             assert_eq!(
                 code(f.call(&accounts_only, tool, json!({}))),
                 ToolErrorCode::NotPermitted,
@@ -339,8 +336,8 @@ async fn a_missing_action_is_not_permitted_and_is_checked_on_every_call() {
             );
         }
         // Not cached: the same tool works again under a wider grant.
-        assert!(f.call(&ctx, "search_emails", json!({})).is_ok());
-        assert!(f.call(&accounts_only, "search_emails", json!({})).is_err());
+        assert!(f.call(&ctx, "mail_search", json!({})).is_ok());
+        assert!(f.call(&accounts_only, "mail_search", json!({})).is_err());
     }
 }
 
@@ -366,7 +363,7 @@ async fn list_accounts_reports_only_scoped_accounts_without_secrets() {
     }
     let tools = Tools::new(core, String::new);
     for ctx in both() {
-        let out = tools.call(&ctx, "list_accounts", Value::Null).unwrap();
+        let out = tools.call(&ctx, "accounts_list", Value::Null).unwrap();
         let accounts = out["accounts"].as_array().unwrap();
         assert_eq!(accounts.len(), 2);
         let first = accounts[0].as_object().unwrap();
@@ -399,7 +396,7 @@ async fn list_accounts_reports_only_scoped_accounts_without_secrets() {
                 [Action::AccountsRead],
             ),
         );
-        let out = tools.call(&scoped, "list_accounts", json!({})).unwrap();
+        let out = tools.call(&scoped, "accounts_list", json!({})).unwrap();
         assert_eq!(out["accounts"].as_array().unwrap().len(), 1);
         assert_eq!(out["accounts"][0]["id"], ids[1]);
         assert_eq!(out["accounts"][0]["isDefault"], true);
@@ -425,7 +422,7 @@ async fn reported_default_matches_draft_sender_for_settings_and_scopes() {
             *f.default_account.lock().unwrap() = configured;
             let mut scoped = ctx.clone();
             scoped.grant.accounts = scope;
-            let listed = f.call(&scoped, "list_accounts", json!({})).unwrap();
+            let listed = f.call(&scoped, "accounts_list", json!({})).unwrap();
             let defaults: Vec<_> = listed["accounts"]
                 .as_array()
                 .unwrap()
@@ -434,16 +431,16 @@ async fn reported_default_matches_draft_sender_for_settings_and_scopes() {
                 .collect();
             assert_eq!(defaults.len(), 1);
             let draft = f
-                .call(&scoped, "create_draft", draft_input(json!({})))
+                .call(&scoped, "draft_create", draft_input(json!({})))
                 .unwrap();
             assert_eq!(draft["accountId"], defaults[0]["id"]);
             assert_eq!(draft["senderEmailAddress"], defaults[0]["emailAddress"]);
             assert!(draft["senderEmailAddress"].as_str().unwrap().contains('@'));
             let read = f
-                .call(&scoped, "read_draft", json!({"draftId": draft["draftId"]}))
+                .call(&scoped, "draft_read", json!({"draftId": draft["draftId"]}))
                 .unwrap();
             assert_eq!(read["senderEmailAddress"], draft["senderEmailAddress"]);
-            let drafts = f.call(&scoped, "list_drafts", json!({})).unwrap();
+            let drafts = f.call(&scoped, "draft_list", json!({})).unwrap();
             let item = drafts["drafts"]
                 .as_array()
                 .unwrap()
@@ -455,11 +452,11 @@ async fn reported_default_matches_draft_sender_for_settings_and_scopes() {
         let mut empty = ctx.clone();
         empty.grant.accounts = AccountScope::Only(vec![missing.clone()]);
         assert_eq!(
-            f.call(&empty, "list_accounts", json!({})).unwrap()["accounts"],
+            f.call(&empty, "accounts_list", json!({})).unwrap()["accounts"],
             json!([])
         );
         assert_eq!(
-            code(f.call(&empty, "create_draft", draft_input(json!({})))),
+            code(f.call(&empty, "draft_create", draft_input(json!({})))),
             ToolErrorCode::NotFound
         );
     }
@@ -469,7 +466,7 @@ async fn reported_default_matches_draft_sender_for_settings_and_scopes() {
 async fn search_lists_mail_with_cursor_and_filters() {
     let f = fx();
     for ctx in both() {
-        let out = f.call(&ctx, "search_emails", json!({})).unwrap();
+        let out = f.call(&ctx, "mail_search", json!({})).unwrap();
         let emails = out["emails"].as_array().unwrap();
         assert_eq!(emails.len(), 3);
         let hit = emails[0].as_object().unwrap();
@@ -498,17 +495,11 @@ async fn search_lists_mail_with_cursor_and_filters() {
         assert_eq!(hit["bodyCached"], true);
         assert_eq!(hit["accountId"], f.account);
 
-        let page = f
-            .call(&ctx, "search_emails", json!({ "limit": 2 }))
-            .unwrap();
+        let page = f.call(&ctx, "mail_search", json!({ "limit": 2 })).unwrap();
         assert_eq!(page["emails"].as_array().unwrap().len(), 2);
         let cursor = page["nextCursor"].as_str().unwrap();
         let rest = f
-            .call(
-                &ctx,
-                "search_emails",
-                json!({ "limit": 2, "cursor": cursor }),
-            )
+            .call(&ctx, "mail_search", json!({ "limit": 2, "cursor": cursor }))
             .unwrap();
         assert_eq!(rest["emails"].as_array().unwrap().len(), 1);
         assert!(rest.get("nextCursor").is_none());
@@ -516,13 +507,13 @@ async fn search_lists_mail_with_cursor_and_filters() {
         let none = f
             .call(
                 &ctx,
-                "search_emails",
+                "mail_search",
                 json!({ "receivedAfter": "2999-01-01T00:00:00Z" }),
             )
             .unwrap();
         assert!(none["emails"].as_array().unwrap().is_empty());
         let attachments = f
-            .call(&ctx, "search_emails", json!({ "hasAttachment": true }))
+            .call(&ctx, "mail_search", json!({ "hasAttachment": true }))
             .unwrap();
         assert!(attachments["emails"].as_array().unwrap().is_empty());
     }
@@ -537,18 +528,14 @@ async fn search_ignores_out_of_scope_accounts_exactly_like_unknown_ones() {
             ctx.clone(),
             Grant::new(AccountScope::Only(vec![other.clone()]), [Action::MailRead]),
         );
-        let ask_in_scope_less = f.call(&scoped, "search_emails", json!({})).unwrap();
+        let ask_in_scope_less = f.call(&scoped, "mail_search", json!({})).unwrap();
         let ask_forbidden = f
-            .call(
-                &scoped,
-                "search_emails",
-                json!({ "accountIds": [f.account] }),
-            )
+            .call(&scoped, "mail_search", json!({ "accountIds": [f.account] }))
             .unwrap();
         let ask_unknown = f
             .call(
                 &scoped,
-                "search_emails",
+                "mail_search",
                 json!({ "accountIds": [Uuid::new_v4().to_string()] }),
             )
             .unwrap();
@@ -557,7 +544,7 @@ async fn search_ignores_out_of_scope_accounts_exactly_like_unknown_ones() {
         assert_eq!(ask_in_scope_less["emails"], json!([]));
         // A full grant still sees the account's mail.
         let all = f
-            .call(&ctx, "search_emails", json!({ "accountIds": [f.account] }))
+            .call(&ctx, "mail_search", json!({ "accountIds": [f.account] }))
             .unwrap();
         assert_eq!(all["emails"].as_array().unwrap().len(), 3);
     }
@@ -576,7 +563,7 @@ async fn read_email_out_of_scope_and_nonexistent_ids_are_indistinguishable() {
         let missing = f
             .call(
                 &scoped,
-                "read_email",
+                "mail_read",
                 json!({ "emailId": Uuid::new_v4().to_string() }),
             )
             .unwrap_err();
@@ -590,20 +577,20 @@ async fn read_email_out_of_scope_and_nonexistent_ids_are_indistinguishable() {
 async fn unknown_fields_and_wrong_types_are_rejected() {
     let f = fx();
     let cases = [
-        ("list_accounts", json!({ "extra": 1 })),
-        ("search_emails", json!({ "queryy": "x" })),
-        ("search_emails", json!({ "limit": "ten" })),
+        ("accounts_list", json!({ "extra": 1 })),
+        ("mail_search", json!({ "queryy": "x" })),
+        ("mail_search", json!({ "limit": "ten" })),
         (
-            "read_email",
+            "mail_read",
             json!({ "emailId": f.emails[0], "role": "admin" }),
         ),
-        ("read_email", json!({})),
+        ("mail_read", json!({})),
         (
-            "create_draft",
+            "draft_create",
             json!({ "to": [], "subject": "s", "bodyHtml": "b", "send": true }),
         ),
         (
-            "create_draft",
+            "draft_create",
             json!({ "to": [{ "address": "a@b.c", "x": 1 }], "subject": "s", "bodyHtml": "b" }),
         ),
     ];
@@ -626,50 +613,44 @@ async fn length_and_count_limits_are_enforced() {
             error.field.unwrap()
         };
         assert_eq!(
-            invalid("search_emails", json!({ "query": "x".repeat(257) })),
+            invalid("mail_search", json!({ "query": "x".repeat(257) })),
             "query"
         );
         assert!(
-            f.call(&ctx, "search_emails", json!({ "query": "字".repeat(256) }))
+            f.call(&ctx, "mail_search", json!({ "query": "字".repeat(256) }))
                 .is_ok()
         );
-        assert_eq!(invalid("search_emails", json!({ "limit": 0 })), "limit");
-        assert_eq!(invalid("search_emails", json!({ "limit": 101 })), "limit");
-        assert!(
-            f.call(&ctx, "search_emails", json!({ "limit": 100 }))
-                .is_ok()
-        );
+        assert_eq!(invalid("mail_search", json!({ "limit": 0 })), "limit");
+        assert_eq!(invalid("mail_search", json!({ "limit": 101 })), "limit");
+        assert!(f.call(&ctx, "mail_search", json!({ "limit": 100 })).is_ok());
         assert_eq!(
-            invalid("search_emails", json!({ "receivedAfter": "yesterday" })),
+            invalid("mail_search", json!({ "receivedAfter": "yesterday" })),
             "receivedAfter"
         );
         assert_eq!(
-            invalid("search_emails", json!({ "accountIds": vec!["a"; 21] })),
+            invalid("mail_search", json!({ "accountIds": vec!["a"; 21] })),
             "accountIds"
         );
         assert_eq!(
             invalid(
-                "read_email",
+                "mail_read",
                 json!({ "emailId": f.emails[0], "maxChars": 0 })
             ),
             "maxChars"
         );
         assert_eq!(
             invalid(
-                "read_email",
+                "mail_read",
                 json!({ "emailId": f.emails[0], "maxChars": 32_001 })
             ),
             "maxChars"
         );
         assert_eq!(
-            invalid(
-                "read_email",
-                json!({ "emailId": f.emails[0], "offset": 99 })
-            ),
+            invalid("mail_read", json!({ "emailId": f.emails[0], "offset": 99 })),
             "offset"
         );
         assert_eq!(
-            invalid("read_email", json!({ "emailId": "not-an-id" })),
+            invalid("mail_read", json!({ "emailId": "not-an-id" })),
             "emailId"
         );
         let draft = |patch: Value| {
@@ -681,31 +662,31 @@ async fn length_and_count_limits_are_enforced() {
             input
         };
         assert_eq!(
-            invalid("create_draft", draft(json!({ "subject": "s".repeat(999) }))),
+            invalid("draft_create", draft(json!({ "subject": "s".repeat(999) }))),
             "subject"
         );
         assert_eq!(
             invalid(
-                "create_draft",
+                "draft_create",
                 draft(json!({ "bodyHtml": "x".repeat(200_001) }))
             ),
             "bodyHtml"
         );
         let many: Vec<_> = (0..51).map(addr).collect();
-        assert_eq!(invalid("create_draft", draft(json!({ "to": many }))), "to");
+        assert_eq!(invalid("draft_create", draft(json!({ "to": many }))), "to");
         assert_eq!(
             invalid(
-                "create_draft",
+                "draft_create",
                 draft(json!({ "cc": (0..51).map(addr).collect::<Vec<_>>() }))
             ),
             "cc"
         );
         assert_eq!(
-            invalid("create_draft", draft(json!({ "bcc": [{ "address": "" }] }))),
+            invalid("draft_create", draft(json!({ "bcc": [{ "address": "" }] }))),
             "bcc"
         );
     }
-    assert!(f.core.list_drafts(None).unwrap().is_empty());
+    assert!(f.core.draft_list(None).unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -789,8 +770,10 @@ async fn read_email_returns_headers_and_attachment_shape() {
             "localOnly",
             "pendingChanges",
             "receivedAt",
+            "remoteImagesBlocked",
             "subject",
             "text",
+            "textSource",
             "to",
             "totalChars"
         ]
@@ -818,7 +801,7 @@ async fn an_uncached_body_is_body_not_cached_and_nothing_is_downloaded() {
             code(f.read(&ctx, 0, json!({}))),
             ToolErrorCode::BodyNotCached
         );
-        let hits = f.call(&ctx, "search_emails", json!({})).unwrap();
+        let hits = f.call(&ctx, "mail_search", json!({})).unwrap();
         let missing = hits["emails"]
             .as_array()
             .unwrap()
@@ -835,7 +818,7 @@ async fn reading_does_not_mark_the_message_read() {
     f.db.execute("UPDATE messages SET is_read = 0", []).unwrap();
     for ctx in both() {
         f.read(&ctx, 0, json!({})).unwrap();
-        f.call(&ctx, "search_emails", json!({})).unwrap();
+        f.call(&ctx, "mail_search", json!({})).unwrap();
     }
     let unread: i64 =
         f.db.query_row("SELECT COUNT(*) FROM messages WHERE is_read = 0", [], |r| {
@@ -844,7 +827,7 @@ async fn reading_does_not_mark_the_message_read() {
         .unwrap();
     assert_eq!(unread, 3);
     let hits = f
-        .call(&mcp(), "search_emails", json!({ "unread": true }))
+        .call(&mcp(), "mail_search", json!({ "unread": true }))
         .unwrap();
     assert_eq!(hits["emails"].as_array().unwrap().len(), 3);
     assert_eq!(hits["emails"][0]["isRead"], false);
@@ -867,7 +850,7 @@ fn draft_input(patch: Value) -> Value {
 async fn create_draft_records_the_origin_of_each_principal_and_never_sends() {
     let f = fx();
     let out = f
-        .call(&mcp(), "create_draft", draft_input(json!({})))
+        .call(&mcp(), "draft_create", draft_input(json!({})))
         .unwrap();
     let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
     assert_eq!(draft.origin, DraftOrigin::Mcp);
@@ -876,7 +859,7 @@ async fn create_draft_records_the_origin_of_each_principal_and_never_sends() {
     assert!(!draft.body_html.contains("script"));
 
     let out = f
-        .call(&agent(), "create_draft", draft_input(json!({})))
+        .call(&agent(), "draft_create", draft_input(json!({})))
         .unwrap();
     let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
     assert_eq!(draft.origin, DraftOrigin::Ai);
@@ -887,14 +870,14 @@ async fn create_draft_records_the_origin_of_each_principal_and_never_sends() {
     let a = f
         .call(
             &mcp(),
-            "create_draft",
+            "draft_create",
             draft_input(json!({ "clientMutationId": id })),
         )
         .unwrap();
     let b = f
         .call(
             &mcp(),
-            "create_draft",
+            "draft_create",
             draft_input(json!({ "clientMutationId": id })),
         )
         .unwrap();
@@ -902,7 +885,7 @@ async fn create_draft_records_the_origin_of_each_principal_and_never_sends() {
     assert_eq!(
         code(f.call(
             &mcp(),
-            "create_draft",
+            "draft_create",
             draft_input(json!({ "clientMutationId": "x" }))
         )),
         ToolErrorCode::InvalidInput
@@ -917,21 +900,21 @@ async fn create_draft_resolves_the_account_within_the_grant() {
         // Host default is used when no account is given.
         *f.default_account.lock().unwrap() = other.clone();
         let out = f
-            .call(&ctx, "create_draft", draft_input(json!({})))
+            .call(&ctx, "draft_create", draft_input(json!({})))
             .unwrap();
         assert_eq!(out["accountId"], other);
         // A stale default (a removed account) falls back like the composer
         // does instead of failing with notFound.
         *f.default_account.lock().unwrap() = Uuid::new_v4().to_string();
         let out = f
-            .call(&ctx, "create_draft", draft_input(json!({})))
+            .call(&ctx, "draft_create", draft_input(json!({})))
             .unwrap();
         assert!(out["accountId"] == f.account || out["accountId"] == other);
         // An explicit account wins.
         let out = f
             .call(
                 &ctx,
-                "create_draft",
+                "draft_create",
                 draft_input(json!({ "accountId": f.account })),
             )
             .unwrap();
@@ -947,14 +930,14 @@ async fn create_draft_resolves_the_account_within_the_grant() {
         let forbidden = f
             .call(
                 &scoped,
-                "create_draft",
+                "draft_create",
                 draft_input(json!({ "accountId": f.account })),
             )
             .unwrap_err();
         let missing = f
             .call(
                 &scoped,
-                "create_draft",
+                "draft_create",
                 draft_input(json!({ "accountId": Uuid::new_v4().to_string() })),
             )
             .unwrap_err();
@@ -964,7 +947,7 @@ async fn create_draft_resolves_the_account_within_the_grant() {
         // A default outside the grant is ignored in favour of an account in scope.
         *f.default_account.lock().unwrap() = f.account.clone();
         let out = f
-            .call(&scoped, "create_draft", draft_input(json!({})))
+            .call(&scoped, "draft_create", draft_input(json!({})))
             .unwrap();
         assert_eq!(out["accountId"], other);
     }
@@ -980,7 +963,7 @@ async fn principals_keep_their_identity_and_need_a_send_grant() {
 
     let f = fx();
     let out = f
-        .call(&agent(), "create_draft", draft_input(json!({})))
+        .call(&agent(), "draft_create", draft_input(json!({})))
         .unwrap();
     let draft = f.core.get_draft(out["draftId"].as_str().unwrap()).unwrap();
     for ctx in both() {
@@ -988,7 +971,7 @@ async fn principals_keep_their_identity_and_need_a_send_grant() {
         assert_eq!(
             code(f.call(
                 &scoped,
-                "send_email",
+                "outbox_send",
                 json!({
                     "action": "send", "draftId": draft.id,
                     "expectedRevision": draft.revision,
@@ -1004,18 +987,18 @@ async fn principals_keep_their_identity_and_need_a_send_grant() {
 #[tokio::test]
 async fn every_call_is_audited_without_content() {
     let f = fx();
-    f.call(&mcp(), "read_email", json!({ "emailId": f.emails[1] }))
+    f.call(&mcp(), "mail_read", json!({ "emailId": f.emails[1] }))
         .unwrap();
     f.call(
         &agent(),
-        "create_draft",
+        "draft_create",
         draft_input(json!({ "subject": "SECRET-SUBJECT" })),
     )
     .unwrap();
     let _ = f.call(&mcp(), "nope", json!({}));
     let _ = f.call(
         &with_grant(mcp(), Grant::new(AccountScope::All, [])),
-        "search_emails",
+        "mail_search",
         json!({}),
     );
     let records = f.audit.0.lock().unwrap().clone();
@@ -1024,7 +1007,7 @@ async fn every_call_is_audited_without_content() {
     assert_eq!(records[0].principal_id, "conn-1");
     assert_eq!(records[0].client_name.as_deref(), Some("Test Client"));
     assert_eq!(records[0].request_id, "req-mcp");
-    assert_eq!(records[0].tool_id, "read_email");
+    assert_eq!(records[0].tool_id, "mail_read");
     assert_eq!(records[0].resource_ids, [f.emails[1].clone()]);
     assert_eq!(records[0].error, None);
     assert_eq!(records[1].principal_kind, "builtinAgent");
@@ -1106,7 +1089,7 @@ async fn search_excludes_trash_and_junk_unless_a_folder_role_is_given() {
         ids
     };
     for ctx in both() {
-        let search = |input: Value| hit_ids(&f.call(&ctx, "search_emails", input).unwrap());
+        let search = |input: Value| hit_ids(&f.call(&ctx, "mail_search", input).unwrap());
         assert_eq!(search(json!({})), sorted(&[&f.emails[0]]));
         assert_eq!(search(json!({ "query": "hello" })), sorted(&[&f.emails[0]]));
         assert!(search(json!({ "query": "abcdefghij" })).is_empty());
@@ -1140,7 +1123,7 @@ async fn search_rejects_unknown_folder_roles() {
     for ctx in both() {
         for role in [json!("Trash"), json!("spam"), json!(""), json!(3)] {
             assert_eq!(
-                code(f.call(&ctx, "search_emails", json!({ "folderRole": role }))),
+                code(f.call(&ctx, "mail_search", json!({ "folderRole": role }))),
                 ToolErrorCode::InvalidInput
             );
         }
@@ -1201,7 +1184,7 @@ async fn tool_schemas_are_portable_and_still_resolve() {
 async fn optional_fields_are_omittable_not_nullable() {
     let f = fx();
     let list = f.tools.list(Audience::Mcp);
-    let search = list.iter().find(|t| t.id == "search_emails").unwrap();
+    let search = list.iter().find(|t| t.id == "mail_search").unwrap();
     let props = &search.input_schema["properties"];
     assert_eq!(props["query"]["type"], "string");
     assert!(props["folderRole"].is_object());
@@ -1341,7 +1324,7 @@ async fn download_true_fetches_an_uncached_body_without_marking_it_read() {
         let out = f
             .call_blocking(
                 &ctx,
-                "read_email",
+                "mail_read",
                 json!({ "emailId": f.emails[0], "download": true }),
             )
             .unwrap();
@@ -1381,14 +1364,14 @@ async fn download_for_an_out_of_scope_or_unknown_id_makes_no_network_attempt() {
         let forbidden = f
             .call_blocking(
                 &scoped,
-                "read_email",
+                "mail_read",
                 json!({ "emailId": f.emails[0], "download": true }),
             )
             .unwrap_err();
         let missing = f
             .call_blocking(
                 &scoped,
-                "read_email",
+                "mail_read",
                 json!({ "emailId": Uuid::new_v4().to_string(), "download": true }),
             )
             .unwrap_err();
@@ -1406,7 +1389,7 @@ async fn a_stalled_download_ends_in_download_timeout() {
     super::mail::DOWNLOAD_TIMEOUT_OVERRIDE.with(|t| t.set(Some(Duration::from_millis(300))));
     let result = f.call_blocking(
         &mcp(),
-        "read_email",
+        "mail_read",
         json!({ "emailId": f.emails[0], "download": true }),
     );
     super::mail::DOWNLOAD_TIMEOUT_OVERRIDE.with(|t| t.set(None));
@@ -1442,7 +1425,7 @@ async fn a_failed_download_maps_to_a_stable_code_without_server_text() {
     let error = f
         .call_blocking(
             &mcp(),
-            "read_email",
+            "mail_read",
             json!({ "emailId": f.emails[0], "download": true }),
         )
         .unwrap_err();
@@ -1467,7 +1450,7 @@ async fn a_message_gone_from_the_server_becomes_not_found() {
     let error = f
         .call_blocking(
             &mcp(),
-            "read_email",
+            "mail_read",
             json!({ "emailId": f.emails[0], "download": true }),
         )
         .unwrap_err();
@@ -1497,11 +1480,7 @@ async fn reply_drafts_follow_the_composer_rules_for_each_mode() {
         ("forward", "Fwd: "),
     ] {
         let out = f
-            .call(
-                &mcp(),
-                "create_reply_draft",
-                reply_input(&f, mode, json!({})),
-            )
+            .call(&mcp(), "draft_reply", reply_input(&f, mode, json!({})))
             .unwrap();
         assert_eq!(out["mode"], mode);
         assert_eq!(out["accountId"], f.account);
@@ -1530,11 +1509,7 @@ async fn reply_drafts_follow_the_composer_rules_for_each_mode() {
 async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_quote() {
     let f = fx();
     let quoted = f
-        .call(
-            &mcp(),
-            "create_reply_draft",
-            reply_input(&f, "reply", json!({})),
-        )
+        .call(&mcp(), "draft_reply", reply_input(&f, "reply", json!({})))
         .unwrap();
     let plain = f
         .core
@@ -1544,7 +1519,7 @@ async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_qu
         let out = f
             .call(
                 &ctx,
-                "create_reply_draft",
+                "draft_reply",
                 reply_input(
                     &f,
                     "reply",
@@ -1577,17 +1552,13 @@ async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_qu
 async fn reply_draft_errors_are_stable_and_nothing_is_created() {
     let f = fx();
     let other = f.add_account();
-    let drafts = |f: &Fx| f.core.list_drafts(None).map(|d| d.len()).unwrap_or(0);
+    let drafts = |f: &Fx| f.core.draft_list(None).map(|d| d.len()).unwrap_or(0);
     let before = drafts(&f);
     // Uncached original: no implicit download.
     uncache_body(&f, 0);
     for ctx in both() {
         assert_eq!(
-            code(f.call(
-                &ctx,
-                "create_reply_draft",
-                reply_input(&f, "reply", json!({}))
-            )),
+            code(f.call(&ctx, "draft_reply", reply_input(&f, "reply", json!({})))),
             ToolErrorCode::BodyNotCached
         );
         let scoped = with_grant(
@@ -1598,16 +1569,12 @@ async fn reply_draft_errors_are_stable_and_nothing_is_created() {
             ),
         );
         let forbidden = f
-            .call(
-                &scoped,
-                "create_reply_draft",
-                reply_input(&f, "reply", json!({})),
-            )
+            .call(&scoped, "draft_reply", reply_input(&f, "reply", json!({})))
             .unwrap_err();
         let missing = f
             .call(
                 &scoped,
-                "create_reply_draft",
+                "draft_reply",
                 json!({ "emailId": Uuid::new_v4().to_string(), "mode": "reply" }),
             )
             .unwrap_err();
@@ -1616,20 +1583,12 @@ async fn reply_draft_errors_are_stable_and_nothing_is_created() {
         for actions in [vec![Action::DraftCreate], vec![Action::MailRead]] {
             let weak = with_grant(ctx.clone(), Grant::new(AccountScope::All, actions));
             assert_eq!(
-                code(f.call(
-                    &weak,
-                    "create_reply_draft",
-                    reply_input(&f, "reply", json!({}))
-                )),
+                code(f.call(&weak, "draft_reply", reply_input(&f, "reply", json!({})))),
                 ToolErrorCode::NotPermitted
             );
         }
         assert_eq!(
-            code(f.call(
-                &ctx,
-                "create_reply_draft",
-                reply_input(&f, "bogus", json!({}))
-            )),
+            code(f.call(&ctx, "draft_reply", reply_input(&f, "bogus", json!({})))),
             ToolErrorCode::InvalidInput
         );
     }
@@ -1663,10 +1622,10 @@ async fn list_folders_without_an_account_lists_only_permitted_accounts() {
     let tools = Tools::new(core, String::new);
     for ctx in both() {
         // A new account has no synced folders yet.
-        let all = tools.call(&ctx, "list_folders", json!({})).unwrap();
+        let all = tools.call(&ctx, "mail_folders", json!({})).unwrap();
         assert_eq!(all["folders"], json!([]));
         let own = tools
-            .call(&ctx, "list_folders", json!({ "accountId": id }))
+            .call(&ctx, "mail_folders", json!({ "accountId": id }))
             .unwrap();
         assert_eq!(own["folders"], json!([]));
         let scoped = with_grant(
@@ -1677,11 +1636,11 @@ async fn list_folders_without_an_account_lists_only_permitted_accounts() {
             ),
         );
         assert_eq!(
-            tools.call(&scoped, "list_folders", json!({})).unwrap()["folders"],
+            tools.call(&scoped, "mail_folders", json!({})).unwrap()["folders"],
             json!([])
         );
         assert_eq!(
-            code(tools.call(&scoped, "list_folders", json!({ "accountId": id }))),
+            code(tools.call(&scoped, "mail_folders", json!({ "accountId": id }))),
             ToolErrorCode::NotFound
         );
     }
@@ -1694,7 +1653,7 @@ async fn list_folders_is_scoped_and_reports_roles() {
     let other = Uuid::new_v4().to_string();
     for ctx in both() {
         let all = f
-            .call(&ctx, "list_folders", json!({ "accountId": f.account }))
+            .call(&ctx, "mail_folders", json!({ "accountId": f.account }))
             .unwrap();
         let folders = all["folders"].as_array().unwrap();
         let roles: Vec<_> = folders.iter().filter_map(|x| x["role"].as_str()).collect();
@@ -1702,7 +1661,7 @@ async fn list_folders_is_scoped_and_reports_roles() {
             assert!(roles.contains(&role), "{roles:?}");
         }
         let one = f
-            .call(&ctx, "list_folders", json!({ "accountId": f.account }))
+            .call(&ctx, "mail_folders", json!({ "accountId": f.account }))
             .unwrap();
         assert!(
             one["folders"]
@@ -1716,12 +1675,12 @@ async fn list_folders_is_scoped_and_reports_roles() {
             Grant::new(AccountScope::Only(vec![other.clone()]), [Action::MailRead]),
         );
         let forbidden = f
-            .call(&scoped, "list_folders", json!({ "accountId": f.account }))
+            .call(&scoped, "mail_folders", json!({ "accountId": f.account }))
             .unwrap_err();
         let missing = f
             .call(
                 &scoped,
-                "list_folders",
+                "mail_folders",
                 json!({ "accountId": Uuid::new_v4().to_string() }),
             )
             .unwrap_err();
@@ -1732,7 +1691,7 @@ async fn list_folders_is_scoped_and_reports_roles() {
             Grant::new(AccountScope::All, [Action::AccountsRead]),
         );
         assert_eq!(
-            code(f.call(&weak, "list_folders", json!({}))),
+            code(f.call(&weak, "mail_folders", json!({}))),
             ToolErrorCode::NotPermitted
         );
     }
@@ -1752,7 +1711,7 @@ async fn search_by_folder_id_includes_trash_and_validates_the_filter() {
         .unwrap()
     };
     for ctx in both() {
-        let search = |input: Value| f.call(&ctx, "search_emails", input);
+        let search = |input: Value| f.call(&ctx, "mail_search", input);
         assert_eq!(
             hit_ids(&search(json!({ "folderId": folder_of("trash") })).unwrap()),
             vec![f.emails[1].clone()]
@@ -1775,14 +1734,14 @@ async fn search_by_folder_id_includes_trash_and_validates_the_filter() {
         let forbidden = f
             .call(
                 &scoped,
-                "search_emails",
+                "mail_search",
                 json!({ "folderId": folder_of("trash") }),
             )
             .unwrap();
         let unknown = f
             .call(
                 &scoped,
-                "search_emails",
+                "mail_search",
                 json!({ "folderId": Uuid::new_v4().to_string() }),
             )
             .unwrap();
@@ -1800,11 +1759,7 @@ async fn reply_draft_text_follows_the_host_locale_read_per_call() {
         Tools::new(f.core.clone(), String::new).with_locale(move || *shared.lock().unwrap());
     let forward = |tools: &Tools| {
         let out = tools
-            .call(
-                &mcp(),
-                "create_reply_draft",
-                reply_input(&f, "forward", json!({})),
-            )
+            .call(&mcp(), "draft_reply", reply_input(&f, "forward", json!({})))
             .unwrap();
         f.core
             .get_draft(out["draftId"].as_str().unwrap())
@@ -1820,7 +1775,7 @@ async fn reply_draft_text_follows_the_host_locale_read_per_call() {
 
 fn user_draft(f: &Fx, account: &str, subject: &str) -> Draft {
     f.core
-        .create_draft(
+        .draft_create(
             CreateDraftRequest {
                 account_id: Some(account.to_string()),
                 to: vec![MailAddress {
@@ -1853,20 +1808,20 @@ async fn list_and_read_drafts_cover_all_origins_and_respect_scope() {
     let other = f.add_account();
     let mine = user_draft(&f, &f.account, "From user");
     let by_mcp = f
-        .call(&mcp(), "create_draft", draft_input(json!({})))
+        .call(&mcp(), "draft_create", draft_input(json!({})))
         .unwrap();
     let by_ai = f
-        .call(&agent(), "create_draft", draft_input(json!({})))
+        .call(&agent(), "draft_create", draft_input(json!({})))
         .unwrap();
     let elsewhere = f
         .call(
             &mcp(),
-            "create_draft",
+            "draft_create",
             draft_input(json!({ "accountId": other })),
         )
         .unwrap();
     for ctx in both() {
-        let out = f.call(&ctx, "list_drafts", json!({})).unwrap();
+        let out = f.call(&ctx, "draft_list", json!({})).unwrap();
         let ids = draft_ids(&out);
         assert_eq!(ids.len(), 4);
         assert_eq!(out["truncated"], false);
@@ -1891,15 +1846,15 @@ async fn list_and_read_drafts_cover_all_origins_and_respect_scope() {
                 [Action::MailRead],
             ),
         );
-        let out = f.call(&scoped, "list_drafts", json!({})).unwrap();
+        let out = f.call(&scoped, "draft_list", json!({})).unwrap();
         assert_eq!(draft_ids(&out).len(), 3);
         assert!(!draft_ids(&out).contains(&elsewhere["draftId"].as_str().unwrap().to_string()));
         assert_eq!(
-            code(f.call(&scoped, "list_drafts", json!({ "accountId": other }))),
+            code(f.call(&scoped, "draft_list", json!({ "accountId": other }))),
             ToolErrorCode::NotFound
         );
         let filtered = f
-            .call(&ctx, "list_drafts", json!({ "accountId": other }))
+            .call(&ctx, "draft_list", json!({ "accountId": other }))
             .unwrap();
         assert_eq!(draft_ids(&filtered).len(), 1);
 
@@ -1909,7 +1864,7 @@ async fn list_and_read_drafts_cover_all_origins_and_respect_scope() {
             by_ai["draftId"].as_str().unwrap(),
         ] {
             let read = f
-                .call(&ctx, "read_draft", json!({ "draftId": id }))
+                .call(&ctx, "draft_read", json!({ "draftId": id }))
                 .unwrap();
             assert_eq!(read["id"], id);
             assert!(read["bodyHtml"].as_str().unwrap().contains("<p>"));
@@ -1918,15 +1873,15 @@ async fn list_and_read_drafts_cover_all_origins_and_respect_scope() {
         }
         let hidden = code(f.call(
             &scoped,
-            "read_draft",
+            "draft_read",
             json!({ "draftId": elsewhere["draftId"] }),
         ));
         let missing = code(f.call(
             &scoped,
-            "read_draft",
+            "draft_read",
             json!({ "draftId": Uuid::new_v4().to_string() }),
         ));
-        let malformed = code(f.call(&scoped, "read_draft", json!({ "draftId": "x" })));
+        let malformed = code(f.call(&scoped, "draft_read", json!({ "draftId": "x" })));
         assert_eq!(hidden, ToolErrorCode::NotFound);
         assert_eq!(missing, hidden);
         assert_eq!(malformed, hidden);
@@ -1942,7 +1897,7 @@ async fn update_draft_changes_only_given_fields_keeps_origin_and_sanitizes() {
         let out = f
             .call(
                 &ctx,
-                "update_draft",
+                "draft_update",
                 json!({
                     "draftId": mine.id,
                     "expectedRevision": current.revision,
@@ -1963,7 +1918,7 @@ async fn update_draft_changes_only_given_fields_keeps_origin_and_sanitizes() {
         let only_to = f
             .call(
                 &ctx,
-                "update_draft",
+                "draft_update",
                 json!({
                     "draftId": mine.id,
                     "expectedRevision": after.revision,
@@ -1989,7 +1944,7 @@ async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
         let current = f.core.get_draft(&mine.id).unwrap();
         let stale = code(f.call(
             &ctx,
-            "update_draft",
+            "draft_update",
             json!({ "draftId": mine.id, "expectedRevision": current.revision + 7, "subject": "x" }),
         ));
         assert_eq!(stale, ToolErrorCode::Conflict);
@@ -1997,7 +1952,7 @@ async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
         assert_eq!(
             code(f.call(
                 &ctx,
-                "update_draft",
+                "draft_update",
                 json!({ "draftId": mine.id, "subject": "x" }),
             )),
             ToolErrorCode::InvalidInput
@@ -2005,7 +1960,7 @@ async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
         assert_eq!(
             code(f.call(
                 &ctx,
-                "update_draft",
+                "draft_update",
                 json!({ "draftId": mine.id, "expectedRevision": current.revision, "subject": "s".repeat(999) }),
             )),
             ToolErrorCode::InvalidInput
@@ -2016,11 +1971,11 @@ async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
         );
         for (tool, input) in [
             (
-                "update_draft",
+                "draft_update",
                 json!({ "draftId": mine.id, "expectedRevision": current.revision, "subject": "x" }),
             ),
             (
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": mine.id, "expectedRevision": current.revision }),
             ),
         ] {
@@ -2036,7 +1991,7 @@ async fn update_draft_rejects_stale_revisions_bad_input_and_missing_grant() {
                 [Action::MailRead, Action::DraftWrite],
             ),
         );
-        for tool in ["update_draft", "delete_draft"] {
+        for tool in ["draft_update", "draft_delete"] {
             assert_eq!(
                 code(f.call(
                     &scoped,
@@ -2067,18 +2022,18 @@ async fn locked_drafts_refuse_update_and_delete_and_show_locked() {
         .unwrap();
     for ctx in both() {
         let read = f
-            .call(&ctx, "read_draft", json!({ "draftId": draft.id }))
+            .call(&ctx, "draft_read", json!({ "draftId": draft.id }))
             .unwrap();
         assert_eq!(read["locked"], true);
-        let list = f.call(&ctx, "list_drafts", json!({})).unwrap();
+        let list = f.call(&ctx, "draft_list", json!({})).unwrap();
         assert_eq!(list["drafts"][0]["locked"], true);
         for (tool, input) in [
             (
-                "update_draft",
+                "draft_update",
                 json!({ "draftId": draft.id, "expectedRevision": read["revision"], "subject": "x" }),
             ),
             (
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": draft.id, "expectedRevision": read["revision"] }),
             ),
         ] {
@@ -2098,18 +2053,18 @@ async fn open_drafts_are_reported_and_refuse_update_and_delete() {
         .with_draft_open_check(move |id| shared.lock().unwrap().as_deref() == Some(id));
     for ctx in both() {
         let read = tools
-            .call(&ctx, "read_draft", json!({ "draftId": draft.id }))
+            .call(&ctx, "draft_read", json!({ "draftId": draft.id }))
             .unwrap();
         assert_eq!(read["open"], true);
-        let list = tools.call(&ctx, "list_drafts", json!({})).unwrap();
+        let list = tools.call(&ctx, "draft_list", json!({})).unwrap();
         assert_eq!(list["drafts"][0]["open"], true);
         for (tool, input) in [
             (
-                "update_draft",
+                "draft_update",
                 json!({ "draftId": draft.id, "expectedRevision": draft.revision, "subject": "x" }),
             ),
             (
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
             ),
         ] {
@@ -2123,7 +2078,7 @@ async fn open_drafts_are_reported_and_refuse_update_and_delete() {
     tools
         .call(
             &agent(),
-            "update_draft",
+            "draft_update",
             json!({ "draftId": draft.id, "expectedRevision": draft.revision, "subject": "Closed" }),
         )
         .unwrap();
@@ -2137,7 +2092,7 @@ async fn delete_draft_needs_the_current_revision() {
         assert_eq!(
             code(f.call(
                 &ctx,
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": draft.id, "expectedRevision": draft.revision + 1 }),
             )),
             ToolErrorCode::Conflict
@@ -2146,7 +2101,7 @@ async fn delete_draft_needs_the_current_revision() {
         let out = f
             .call(
                 &ctx,
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
             )
             .unwrap();
@@ -2155,7 +2110,7 @@ async fn delete_draft_needs_the_current_revision() {
         assert_eq!(
             code(f.call(
                 &ctx,
-                "delete_draft",
+                "draft_delete",
                 json!({ "draftId": draft.id, "expectedRevision": draft.revision }),
             )),
             ToolErrorCode::NotFound
@@ -2177,7 +2132,7 @@ async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
 
     assert_eq!(
         tools
-            .call(&agent(), "show_email_in_app", input.clone())
+            .call(&agent(), "show_in_app", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::UnknownTool
@@ -2190,13 +2145,13 @@ async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
         Grant::new(AccountScope::Only(vec![other]), [Action::MailRead]),
     );
     let hidden = tools
-        .call(&scoped, "show_email_in_app", input.clone())
+        .call(&scoped, "show_in_app", input.clone())
         .unwrap_err()
         .code;
     let missing = tools
         .call(
             &scoped,
-            "show_email_in_app",
+            "show_in_app",
             json!({ "emailId": Uuid::new_v4().to_string() }),
         )
         .unwrap_err()
@@ -2208,15 +2163,13 @@ async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
     let no_read = with_grant(mcp(), Grant::new(AccountScope::All, [Action::AccountsRead]));
     assert_eq!(
         tools
-            .call(&no_read, "show_email_in_app", input.clone())
+            .call(&no_read, "show_in_app", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::NotPermitted
     );
 
-    let out = tools
-        .call(&mcp(), "show_email_in_app", input.clone())
-        .unwrap();
+    let out = tools.call(&mcp(), "show_in_app", input.clone()).unwrap();
     assert_eq!(out, json!({ "opened": true }));
     assert_eq!(
         *calls.lock().unwrap(),
@@ -2225,7 +2178,7 @@ async fn show_email_in_app_is_mcp_only_scoped_and_calls_the_host_hook() {
 
     // Without a host the default hook says so.
     assert_eq!(
-        f.call(&mcp(), "show_email_in_app", input).unwrap_err().code,
+        f.call(&mcp(), "show_in_app", input).unwrap_err().code,
         ToolErrorCode::Unavailable
     );
 }
@@ -2247,7 +2200,7 @@ async fn organization_reports_each_field_without_leaking_or_modifying_out_of_sco
                 [Action::MailOrganize],
             ),
         );
-        let hidden = f.call(&denied, "set_email_flags", input.clone()).unwrap();
+        let hidden = f.call(&denied, "mail_flags", input.clone()).unwrap();
         for item in hidden["results"].as_array().unwrap() {
             assert_eq!(
                 item["isRead"],
@@ -2256,7 +2209,7 @@ async fn organization_reports_each_field_without_leaking_or_modifying_out_of_sco
             assert_eq!(item["isStarred"], item["isRead"]);
         }
         assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.is_read);
-        let output = f.call(&ctx, "set_email_flags", input.clone()).unwrap();
+        let output = f.call(&ctx, "mail_flags", input.clone()).unwrap();
         assert_eq!(output["results"][0]["isRead"], json!({"status":"queued"}));
         assert_eq!(
             output["results"][0]["isStarred"],
@@ -2266,7 +2219,7 @@ async fn organization_reports_each_field_without_leaking_or_modifying_out_of_sco
             output["results"][1]["isRead"],
             json!({"status":"failed","errorCode":"notFound"})
         );
-        let repeat = f.call(&ctx, "set_email_flags", input).unwrap();
+        let repeat = f.call(&ctx, "mail_flags", input).unwrap();
         assert_eq!(repeat["results"][0]["isRead"]["status"], "unchanged");
         assert_eq!(repeat["results"][0]["isStarred"]["status"], "unchanged");
         let read = f.read(&ctx, 0, json!({})).unwrap();
@@ -2290,18 +2243,14 @@ async fn organization_validates_batch_before_any_change_and_audits_all_fifty_tar
         json!({"emailIds": (0..51).map(|_| Uuid::new_v4().to_string()).collect::<Vec<_>>(), "isRead":true}),
     ] {
         assert_eq!(
-            code(f.call(&mcp(), "set_email_flags", input)),
+            code(f.call(&mcp(), "mail_flags", input)),
             ToolErrorCode::InvalidInput
         );
     }
     assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.is_read);
     let ids: Vec<_> = (0..50).map(|_| Uuid::new_v4().to_string()).collect();
     let out = f
-        .call(
-            &mcp(),
-            "set_email_flags",
-            json!({"emailIds":ids,"isRead":true}),
-        )
+        .call(&mcp(), "mail_flags", json!({"emailIds":ids,"isRead":true}))
         .unwrap();
     assert_eq!(out["results"].as_array().unwrap().len(), 50);
     assert!(out["results"][0].get("isStarred").is_none());
@@ -2314,12 +2263,18 @@ async fn organization_actions_are_independently_required() {
     let f = fx();
     for (tool, input) in [
         (
-            "set_email_flags",
+            "mail_flags",
             json!({"emailIds":[f.emails[0]],"isRead":true}),
         ),
-        ("archive_emails", json!({"emailIds":[f.emails[0]]})),
-        ("unarchive_emails", json!({"emailIds":[f.emails[0]]})),
-        ("refresh_sync", json!({"accountId":f.account})),
+        (
+            "mail_archive",
+            json!({"emailIds":[f.emails[0]],"archive":true}),
+        ),
+        (
+            "mail_archive",
+            json!({"emailIds":[f.emails[0]],"archive":false}),
+        ),
+        ("accounts_refresh_sync", json!({"accountId":f.account})),
     ] {
         let reader = with_grant(mcp(), Grant::new(AccountScope::All, [Action::MailRead]));
         assert_eq!(
@@ -2331,7 +2286,7 @@ async fn organization_actions_are_independently_required() {
     let descriptors = f.tools.list(Audience::Mcp);
     let flags = descriptors
         .iter()
-        .find(|item| item.id == "set_email_flags")
+        .find(|item| item.id == "mail_flags")
         .unwrap();
     assert!(
         flags.annotations.writes_server_data
@@ -2340,7 +2295,7 @@ async fn organization_actions_are_independently_required() {
     );
     let archive = descriptors
         .iter()
-        .find(|item| item.id == "archive_emails")
+        .find(|item| item.id == "mail_archive")
         .unwrap();
     assert!(
         !archive.annotations.writes_server_data
@@ -2357,8 +2312,8 @@ async fn archive_tools_preserve_atomic_scope_checks_and_search_restore_round_tri
         assert_eq!(
             code(f.call(
                 &ctx,
-                "archive_emails",
-                json!({"emailIds":[f.emails[0],missing]})
+                "mail_archive",
+                json!({"emailIds":[f.emails[0],missing],"archive":true})
             )),
             ToolErrorCode::NotFound
         );
@@ -2371,22 +2326,34 @@ async fn archive_tools_preserve_atomic_scope_checks_and_search_restore_round_tri
             ),
         );
         assert_eq!(
-            code(f.call(&denied, "archive_emails", json!({"emailIds":[f.emails[0]]}))),
+            code(f.call(
+                &denied,
+                "mail_archive",
+                json!({"emailIds":[f.emails[0]],"archive":true})
+            )),
             ToolErrorCode::NotFound
         );
         assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.archived);
         let out = f
-            .call(&ctx, "archive_emails", json!({"emailIds":[f.emails[0]]}))
+            .call(
+                &ctx,
+                "mail_archive",
+                json!({"emailIds":[f.emails[0]],"archive":true}),
+            )
             .unwrap();
         assert_eq!(out["processedCount"], 1);
         assert_eq!(out["changedCount"], 1);
         assert!(out.get("undoToken").is_none());
         let repeat = f
-            .call(&ctx, "archive_emails", json!({"emailIds":[f.emails[0]]}))
+            .call(
+                &ctx,
+                "mail_archive",
+                json!({"emailIds":[f.emails[0]],"archive":true}),
+            )
             .unwrap();
         assert_eq!(repeat["changedCount"], 0);
         let archived = f
-            .call(&ctx, "search_emails", json!({"archive":"only"}))
+            .call(&ctx, "mail_search", json!({"archive":"only"}))
             .unwrap();
         assert_eq!(archived["emails"].as_array().unwrap().len(), 1);
         assert_eq!(archived["emails"][0]["id"], f.emails[0]);
@@ -2396,7 +2363,11 @@ async fn archive_tools_preserve_atomic_scope_checks_and_search_restore_round_tri
         assert!(archived["coverage"]["indexedBodies"].is_number());
         assert_eq!(f.read(&ctx, 0, json!({})).unwrap()["archived"], true);
         let restored = f
-            .call(&ctx, "unarchive_emails", json!({"emailIds":[f.emails[0]]}))
+            .call(
+                &ctx,
+                "mail_archive",
+                json!({"emailIds":[f.emails[0]],"archive":false}),
+            )
             .unwrap();
         assert_eq!(restored["changedCount"], 1);
         assert!(!f.core.get_email(&f.emails[0]).unwrap().summary.archived);
@@ -2415,7 +2386,7 @@ async fn search_accepts_starred_and_archive_filters_and_scope_coverage_is_safe()
         let hits = f
             .call(
                 &ctx,
-                "search_emails",
+                "mail_search",
                 json!({"starred":true,"archive":"include"}),
             )
             .unwrap();
@@ -2423,18 +2394,18 @@ async fn search_accepts_starred_and_archive_filters_and_scope_coverage_is_safe()
         assert_eq!(hits["emails"][0]["id"], f.emails[1]);
         assert_eq!(hits["emails"][0]["isStarred"], true);
         assert_eq!(
-            code(f.call(&ctx, "search_emails", json!({"archive":true}))),
+            code(f.call(&ctx, "mail_search", json!({"archive":true}))),
             ToolErrorCode::InvalidInput
         );
         assert_eq!(
-            code(f.call(&ctx, "search_emails", json!({"archive":"invalid"}))),
+            code(f.call(&ctx, "mail_search", json!({"archive":"invalid"}))),
             ToolErrorCode::InvalidInput
         );
         let empty = with_grant(
             ctx,
             Grant::new(AccountScope::Only(vec![]), [Action::MailRead]),
         );
-        let output = f.call(&empty, "search_emails", json!({})).unwrap();
+        let output = f.call(&empty, "mail_search", json!({})).unwrap();
         assert_eq!(output["emails"], json!([]));
         assert_eq!(output["coverage"]["indexedBodies"], 0);
         assert!(output["coverage"].get("syncedAfter").is_none());
@@ -2456,7 +2427,7 @@ async fn show_draft_is_scoped_mcp_only_and_uses_existing_draft_hook() {
     let input = json!({"draftId":draft.id});
     assert_eq!(
         tools
-            .call(&agent(), "show_draft_in_app", input.clone())
+            .call(&agent(), "show_in_app", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::UnknownTool
@@ -2470,16 +2441,14 @@ async fn show_draft_is_scoped_mcp_only_and_uses_existing_draft_hook() {
     );
     assert_eq!(
         tools
-            .call(&denied, "show_draft_in_app", input.clone())
+            .call(&denied, "show_in_app", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::NotFound
     );
     assert!(calls.lock().unwrap().is_empty());
     assert_eq!(
-        tools
-            .call(&mcp(), "show_draft_in_app", input.clone())
-            .unwrap(),
+        tools.call(&mcp(), "show_in_app", input.clone()).unwrap(),
         json!({"opened":true})
     );
     assert_eq!(
@@ -2488,7 +2457,7 @@ async fn show_draft_is_scoped_mcp_only_and_uses_existing_draft_hook() {
     );
     assert_eq!(f.core.get_draft(&draft.id).unwrap(), draft);
     assert_eq!(
-        code(f.call(&mcp(), "show_draft_in_app", input)),
+        code(f.call(&mcp(), "show_in_app", input)),
         ToolErrorCode::Unavailable
     );
 }
@@ -2505,19 +2474,27 @@ async fn refresh_sync_is_scoped_and_reports_an_idle_worker_without_claiming_comp
             ),
         );
         assert_eq!(
-            code(f.call(&denied, "refresh_sync", json!({"accountId":f.account}))),
+            code(f.call(
+                &denied,
+                "accounts_refresh_sync",
+                json!({"accountId":f.account})
+            )),
             ToolErrorCode::NotFound
         );
         assert_eq!(
             code(f.call(
                 &ctx,
-                "refresh_sync",
+                "accounts_refresh_sync",
                 json!({"accountId":Uuid::new_v4().to_string()})
             )),
             ToolErrorCode::NotFound
         );
         let output = f
-            .call(&ctx, "refresh_sync", json!({"accountId":f.account}))
+            .call(
+                &ctx,
+                "accounts_refresh_sync",
+                json!({"accountId":f.account}),
+            )
             .unwrap();
         assert_eq!(output["accountId"], f.account);
         assert_eq!(output["accepted"], false);

@@ -110,7 +110,7 @@ impl MailxCore {
     /// Each field is committed independently, with bounded per-item results.
     /// The account service lock is held for the batch; notifications and
     /// background write-back wakeups occur only after it is released.
-    pub fn set_email_flags(
+    pub fn mail_flags(
         &self,
         email_ids: &[String],
         is_read: Option<bool>,
@@ -206,7 +206,7 @@ impl MailxCore {
             MessageFlag::Starred => (None, Some(wanted)),
         };
         let results = self
-            .set_email_flags(&ids, read, starred, MailChangeSource::User)?
+            .mail_flags(&ids, read, starred, MailChangeSource::User)?
             .into_iter()
             .map(|result| {
                 let (outcome, code) = match result.is_read.or(result.is_starred) {
