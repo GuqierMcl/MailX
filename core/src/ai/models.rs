@@ -1,7 +1,7 @@
-//! Model lists as the interface shows them: what the provider reports, labelled
-//! with names and limits from the cached catalog.
+//! The models a provider reports, enriched from the cached catalog, and the
+//! catalog's own list of presets.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
@@ -9,12 +9,12 @@ use super::{
     client::ProviderModel,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AiModelSource {
     /// The provider's own model list.
     Provider,
-    /// The provider has no list; this model comes from the catalog.
+    /// Preset from the catalog, not a listing from the connection.
     Catalog,
 }
 
@@ -27,6 +27,10 @@ pub struct AiModel {
     pub output_length: Option<u32>,
     /// `None` when nobody says.
     pub tool_call: Option<bool>,
+    /// Display-only attribution reported by the list endpoint, never a route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owned_by: Option<String>,
     pub source: AiModelSource,
 }
 
@@ -62,6 +66,7 @@ pub(crate) fn enrich(
                 context_length: extra.and_then(|extra| extra.context),
                 output_length: extra.and_then(|extra| extra.output),
                 tool_call: extra.and_then(|extra| extra.tool_call),
+                owned_by: model.owned_by,
                 source: AiModelSource::Provider,
                 id: model.id,
             })
@@ -69,7 +74,7 @@ pub(crate) fn enrich(
         .collect()
 }
 
-/// For a provider without a model list: its catalog models, or nothing.
+/// Text-capable presets for this provider, if there are any in the catalog.
 pub(crate) fn from_catalog(catalog: Option<&CatalogProvider>) -> Vec<AiModel> {
     catalog
         .into_iter()
@@ -81,6 +86,7 @@ pub(crate) fn from_catalog(catalog: Option<&CatalogProvider>) -> Vec<AiModel> {
             context_length: model.context,
             output_length: model.output,
             tool_call: model.tool_call,
+            owned_by: None,
             source: AiModelSource::Catalog,
         })
         .collect()

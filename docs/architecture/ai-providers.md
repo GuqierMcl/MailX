@@ -6,7 +6,7 @@
 
 - **服务商连接**（`AiConnection`）：一个服务商 + 一把密钥 + 接口地址。可以有多个，同一服务商也可以连多次（例如两把不同的密钥）。
 - **默认模型**（`AiModelRef`）：某个连接下的一个模型。各用途默认跟随它，也可以单独指定；目前只有翻译可以单独指定（`translationModel`），助手尚未实现。
-- **目录**：服务商的候选列表，来自应用内置的常用服务商和 [models.dev](https://models.dev) 目录。目录只用来填表和标注模型信息，**保存后的连接不随目录变化**。
+- **目录**：应用内置常用服务商配置，[models.dev](https://models.dev) 提供更多服务商配置和模型预设。目录用于填表、标注模型信息和选择预设，**保存后的连接不随目录变化**。
 
 ## 2. 数据
 
@@ -63,12 +63,13 @@ AiModelRef {
 
 ## 5. 模型列表
 
-1. 请求服务商的模型列表接口（同时验证密钥）。
-2. 用 models.dev 中该服务商的模型补充名称、上下文长度、输出长度；不输出文本的模型（嵌入、图像、语音）去掉，判断依据是 models.dev 的 `type` 与输出模态，两者任一表明非文本即丢弃。
-3. 服务商没有列表接口（404 / 405）时，退回 models.dev 中该服务商的模型；都没有时返回空列表。
-4. 界面始终允许手动输入模型 ID。
+首次添加连接、默认模型、助手与翻译使用同一个选择器。在搜索框上方切换来源，不更改连接、协议或密钥：
 
-模型列表不持久化，每次打开选择器时实时获取；只保存选中模型的快照（`AiModelRef`）。
+- **接口模型（默认）**：请求当前连接的列表接口。使用目录中该服务商的同 ID 条目补充名称、上下文长度、输出长度和工具能力；已知不输出文本的模型不展示，判断依据是 models.dev 的 `type` 与输出模态。网关返回 `owned_by` 时，显示在连接名称旁并用于分组与搜索；同名但 ID 不同的条目保留，行内显示完整 ID。`owned_by` 只用于展示，不改写 ID，也不会用于路由。
+- **预设目录**：单独浏览连接所属服务商的本机目录副本，不请求连接的接口或读取其密钥；接口不支持模型列表、列表为空或请求失败都不影响浏览。目录预设不代表当前密钥或服务地址可用，自定义连接没有已匹配的目录。目录刷新仍走 AI 目录路由，不附带模型服务密钥。
+- 两个来源都支持手动输入模型 ID。选择后保存原连接 ID 与完整模型 ID，不补前缀、不改路由；用“测试”验证实际调用。
+
+接口列表不持久化，每次打开选择器实时获取，首次连接时复用连接检查的结果。`404` / `405` 表示没有列表接口，允许保存连接但未验证密钥；其他错误保留错误提示，不用目录结果代替。只保存选中模型的快照（`AiModelRef`）。
 
 ## 6. 目录
 
@@ -89,7 +90,7 @@ AiModelRef {
 | `ollama` | Ollama（本机，无需密钥） | `openaiCompatible` | `http://127.0.0.1:11434/v1` |
 | `lmstudio` | LM Studio（本机，无需密钥） | `openaiCompatible` | `http://127.0.0.1:1234/v1` |
 
-  Ollama 通过它的 OpenAI 兼容接口接入，没有单独的原生协议适配。
+  这张表只内置服务商配置，不内置模型列表。Ollama 通过它的 OpenAI 兼容接口接入，没有单独的原生协议适配。
 - **models.dev**：按需获取 `https://models.dev/api.json`（打开 AI 设置时，缓存超过 24 小时才在后台刷新；带 ETag）。只保留可用的服务商并裁剪字段后缓存到本机：
   - `npm` 为 `@ai-sdk/openai-compatible`、`@ai-sdk/openai` 的归为 `openaiCompatible`，`@ai-sdk/anthropic` 的归为 `anthropic`；其余协议不显示；非内置的 `@ai-sdk/openai` 服务商没有给出地址的丢弃；
   - 地址含模板变量（`${…}`）、需要多项凭证（`env` 多于一项）或缺少地址且不是内置服务商的不显示；
@@ -108,14 +109,14 @@ AiModelRef {
 | 命令 | 作用 |
 | --- | --- |
 | `ai_state()` → `AiState` | 连接（各带 `hasKey`）、默认模型、代理路由、代理密码是否已设置 |
-| `ai_save_connection(SaveAiConnection)` → `SavedAiConnection` | 新建（`id` 为 null）或修改连接，返回 `{ state, connectionId, models }`；`apiKey` 为 null 表示不改密钥，空串表示清除。`verify` 为真时先用这些参数获取模型列表，失败则返回错误且不保存；成功时 `models` 为模型列表，否则为 null |
+| `ai_save_connection(SaveAiConnection)` → `SavedAiConnection` | 新建（`id` 为 null）或修改连接，返回 `{ state, connectionId, models }`；`apiKey` 为 null 表示不改密钥，空串表示清除。`verify` 为真时先用这些参数获取模型列表，失败则返回错误且不保存（接口返回 `404` / `405` 除外）；未检查或不支持列表时 `models` 为 null |
 | `ai_remove_connection({ id })` → `AiState` | 删除连接与密钥 |
 | `ai_set_default_model({ model })` → `AiState` | 设置或清空默认模型；连接必须存在 |
 | `ai_set_translation_model({ model })` → `AiState` | 设置或清空翻译模型（清空即跟随默认模型）；连接必须存在 |
 | `ai_set_route({ route })` → `AiState` | 设置 AI 代理 |
 | `ai_set_proxy_password({ password })` / `ai_remove_proxy_password()` → `AiState` | 代理密码 |
 | `ai_catalog({ refresh })` → `AiCatalog` | 服务商目录（不含模型）、更新时间、是否过期与 `refreshError`；`refresh` 为真时联网刷新 |
-| `ai_list_models({ connectionId })` → `AiModel[]` | 见第 5 节 |
+| `ai_list_models({ connectionId, source })` → `AiModel[] \| null` | `source` 为 `provider` 时实时获取，接口返回 `404` / `405` 时结果为 null；为 `catalog` 时读取本机目录，无预设时返回空数组。见第 5 节 |
 | `ai_test({ connectionId, modelId })` → `AiTestResult` | 测试调用，返回耗时 |
 | `ai_provider_icon({ providerId })` → `AiProviderIcon \| null` | 见第 7 节 |
 

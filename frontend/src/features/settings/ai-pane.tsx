@@ -20,7 +20,7 @@ import { aiKeys } from '@/lib/query-client'
 import { AiProviderIcon } from './ai-provider-icon'
 import { AiProviderDialog } from './ai-provider-dialog'
 import { AssistantGroup } from './assistant-group'
-import { useAiCatalog, useAiState, useModelGroups } from './ai-queries'
+import { useAiCatalog, useAiState } from './ai-queries'
 import { ModelList } from './ai-model-picker'
 import { ProxyPasswordFields, ProxyRows } from './proxy-rows'
 import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
@@ -116,7 +116,6 @@ function DefaultModelRow({ client, ai, onPick }: { client: MailxClient; ai: AiSt
   const [test, setTest] = useState<TestState>({ kind: 'idle' })
   const current = ai.defaultModel
   const currentConnection = ai.connections.find((connection) => connection.id === current?.connectionId)
-  const groups = useModelGroups(client, ai, open)
   const run = () => {
     if (!current) return
     setTest({ kind: 'running' })
@@ -131,11 +130,11 @@ function DefaultModelRow({ client, ai, onPick }: { client: MailxClient; ai: AiSt
       <div className="flex items-center gap-2">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger render={<Button id="ai.model" role="combobox" aria-label={t('settings:aiDefaultModel')} aria-expanded={open} variant="outline" className="w-56 justify-between font-normal" disabled={none} />}>
-            <span className="truncate">{current ? current.name : t('settings:aiModelPlaceholder')}</span>
+            <span className="truncate" title={current?.modelId}>{current ? current.name : t('settings:aiModelPlaceholder')}</span>
             <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="size-4 shrink-0 text-muted-foreground" />
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 gap-0 p-0">
-            <ModelList client={client} groups={groups} onPick={(model) => { setOpen(false); setTest({ kind: 'idle' }); void onPick(model) }} />
+          <PopoverContent align="end" className="max-h-(--available-height) w-80 max-w-(--available-width) gap-0 overflow-hidden p-0">
+            <ModelList client={client} connections={ai.connections} onPick={(model) => { setOpen(false); setTest({ kind: 'idle' }); void onPick(model) }} />
           </PopoverContent>
         </Popover>
         <Button variant="outline" size="sm" disabled={!current || !currentConnection || test.kind === 'running'} onClick={run}>

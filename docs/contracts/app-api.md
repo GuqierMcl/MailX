@@ -688,7 +688,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
 | `aiState()` | `ai_state`，`{}` | `AiState` |
-| `aiSaveConnection(input)` | `ai_save_connection`，`SaveAiConnection`（`id` 为 null 表示新建；`providerId`、`name`、`protocol`、`baseUrl`、`useProxy`、`apiKey`、`verify`） | `SavedAiConnection { state, connectionId, models }`；`apiKey` 为 null 不改密钥、空串清除；`verify` 为真时先获取模型列表，失败不保存，成功时 `models` 有值 |
+| `aiSaveConnection(input)` | `ai_save_connection`，`SaveAiConnection`（`id` 为 null 表示新建；`providerId`、`name`、`protocol`、`baseUrl`、`useProxy`、`apiKey`、`verify`） | `SavedAiConnection { state, connectionId, models }`；`apiKey` 为 null 不改密钥、空串清除；`verify` 为真时先获取接口模型列表，失败不保存（`404` / `405` 除外）；未检查或接口不支持列表时 `models` 为 null |
 | `aiRemoveConnection(id)` | `ai_remove_connection`，`{ id }` | `AiState`；同时删除该连接的密钥，默认模型与翻译模型指向它时分别清空 |
 | `aiSetDefaultModel(model)` | `ai_set_default_model`，`{ model: AiModelRef \| null }` | `AiState`；连接必须存在 |
 | `aiSetTranslationModel(model)` | `ai_set_translation_model`，`{ model: AiModelRef \| null }` | `AiState`；`null` 表示翻译跟随默认模型；连接必须存在（否则 `aiNotConfigured`） |
@@ -696,7 +696,7 @@ type TranslationTest = { translated: string }; // 固定英文句子的译文，
 | `aiSetProxyPassword(password)` | `ai_set_proxy_password`，`{ password }` | `AiState` |
 | `aiRemoveProxyPassword()` | `ai_remove_proxy_password`，`{}` | `AiState` |
 | `aiCatalog(refresh)` | `ai_catalog`，`{ refresh }` | `AiCatalog`；`refresh` 为真时联网刷新 models.dev 目录 |
-| `aiListModels(connectionId)` | `ai_list_models`，`{ connectionId }` | `AiModel[]`，实时获取，不持久化 |
+| `aiListModels(connectionId, source)` | `ai_list_models`，`{ connectionId, source }` | `AiModel[] \| null`；`provider` 实时获取，`404` / `405` 返回 null；`catalog` 仅查询本机目录，无匹配预设时返回空数组，不读取连接密钥、不请求连接地址 |
 | `aiTest(connectionId, modelId)` | `ai_test`，`{ connectionId, modelId }` | `AiTestResult { latencyMs }`；发送固定英文句子 |
 | `aiProviderIcon(providerId)` | `ai_provider_icon`，`{ providerId }` | `AiProviderIcon \| null` |
 
@@ -714,7 +714,8 @@ type AiState = {
   proxyPasswordSet: boolean;
 };
 type AiModelRef = { connectionId: string; modelId: string; name: string; contextLength: number | null; outputLength: number | null; toolCall?: boolean | null };  // toolCall：模型是否支持工具调用，选择时取自目录；缺省或 null 为未知（按支持处理）
-type AiModel = { id: string; name: string; contextLength: number | null; outputLength: number | null; toolCall: boolean | null; source: "provider" | "catalog" };
+type AiModelSource = "provider" | "catalog";
+type AiModel = { id: string; name: string; contextLength: number | null; outputLength: number | null; toolCall: boolean | null; ownedBy?: string; source: AiModelSource };  // ownedBy 来自接口的 owned_by，仅用于展示与搜索，不影响请求路由
 type AiCatalog = { providers: AiCatalogProvider[]; updatedAt: string | null; stale: boolean; refreshError: ErrorCode | null };
 type AiCatalogProvider = { id: string; name: string; protocol: AiProtocol; baseUrl: string; builtIn: boolean; local?: boolean };
 type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 SVG 文本的 base64

@@ -19,7 +19,7 @@ import { AI_PROVIDER, COMMON_LANGUAGES, KEYED_PROVIDERS, KEYLESS_PROVIDERS, lang
 import type { MailxClient } from '@/lib/mailx-client'
 import { aiKeys, translationKeys } from '@/lib/query-client'
 import { ModelList } from './ai-model-picker'
-import { translationTarget, useAiState, useModelGroups } from './ai-queries'
+import { translationTarget, useAiState } from './ai-queries'
 import { ProxyPasswordFields, ProxyRows, StoredSecretRow } from './proxy-rows'
 import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateTranslation } from './settings-queries'
@@ -101,7 +101,6 @@ function ModelRow({ client, ai, onNavigate }: { client: MailxClient; ai: AiState
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  const groups = useModelGroups(client, ai, open)
   const resolved = translationTarget(ai)
   const choose = (model: AiModelRef | null) => {
     setOpen(false)
@@ -120,11 +119,11 @@ function ModelRow({ client, ai, onNavigate }: { client: MailxClient; ai: AiState
       <div className="flex items-center gap-2">
         {connected && <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger render={<Button id="translation.model" role="combobox" aria-label={t('settings:translationModel')} aria-expanded={open} variant="outline" className="w-56 justify-between font-normal" />}>
-            <span className="truncate">{chosen ? chosen.name : follow}</span>
+            <span className="truncate" title={resolved?.model.modelId}>{chosen ? chosen.name : follow}</span>
             <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="size-4 shrink-0 text-muted-foreground" />
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 gap-0 p-0">
-            <ModelList client={client} groups={groups} onPick={choose} leading={
+          <PopoverContent align="end" className="max-h-(--available-height) w-80 max-w-(--available-width) gap-0 overflow-hidden p-0">
+            <ModelList client={client} connections={ai.connections} onPick={choose} leading={
               <CommandGroup>
                 <CommandItem value="follow-default" onSelect={() => choose(null)}>{follow}</CommandItem>
               </CommandGroup>

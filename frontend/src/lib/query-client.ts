@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query'
-import type { EmailListQuery } from '@/generated/accounts'
+import type { AiModelSource, EmailListQuery } from '@/generated/accounts'
 
 /**
  * Data comes from the local core over IPC, and sync events say when it changed,
@@ -75,6 +75,7 @@ export const aiKeys = {
   all: ['ai'] as const,
   state: () => [...aiKeys.all, 'state'] as const,
   catalog: () => [...aiKeys.all, 'catalog'] as const,
-  models: (connectionId: string) => [...aiKeys.all, 'models', connectionId] as const,
+  catalogRefresh: () => [...aiKeys.catalog(), 'refresh'] as const,
+  models: (connectionId: string, source: AiModelSource, catalogVersion: string | null) => [...aiKeys.all, 'models', connectionId, source, catalogVersion] as const,
   icon: (providerId: string) => [...aiKeys.all, 'icon', providerId] as const,
 }

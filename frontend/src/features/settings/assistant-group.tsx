@@ -20,7 +20,6 @@ import type { AiModelRef, AiState, AssistantMode, AssistantSendMode, AssistantSe
 import type { MailxClient } from '@/lib/mailx-client'
 import { assistantKeys, mailKeys, settingsKeys } from '@/lib/query-client'
 import { ModelList } from './ai-model-picker'
-import { useModelGroups } from './ai-queries'
 import { SettingsGroup, SettingsRow } from './settings-layout'
 import { useSettings, useUpdateAssistant } from './settings-queries'
 
@@ -73,7 +72,6 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
 function ModelRow({ client, ai, assistant, off, update }: { client: MailxClient; ai: AiState; assistant: AssistantSettings; off: boolean; update: Update }) {
   useTranslation()
   const [open, setOpen] = useState(false)
-  const groups = useModelGroups(client, ai, open)
   const follow = ai.defaultModel ? t('settings:assistantModelFollow', { name: ai.defaultModel.name }) : t('settings:assistantModelFollowBare')
   const choose = (model: AiModelRef | null) => {
     setOpen(false)
@@ -83,11 +81,11 @@ function ModelRow({ client, ai, assistant, off, update }: { client: MailxClient;
   return <SettingsRow label={t('settings:assistantModel')} htmlFor="assistant.model" description={t('settings:assistantModelDescription')}>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button id="assistant.model" role="combobox" aria-label={t('settings:assistantModel')} aria-expanded={open} variant="outline" className="w-56 justify-between font-normal" disabled={off || !connected} />}>
-        <span className="truncate">{assistant.model ? assistant.model.name : follow}</span>
+        <span className="truncate" title={(assistant.model ?? ai.defaultModel)?.modelId}>{assistant.model ? assistant.model.name : follow}</span>
         <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="size-4 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 gap-0 p-0">
-        <ModelList client={client} groups={groups} onPick={choose} leading={
+      <PopoverContent align="end" className="max-h-(--available-height) w-80 max-w-(--available-width) gap-0 overflow-hidden p-0">
+        <ModelList client={client} connections={ai.connections} onPick={choose} leading={
           <CommandGroup>
             <CommandItem value="follow-default" onSelect={() => choose(null)}>{follow}</CommandItem>
           </CommandGroup>

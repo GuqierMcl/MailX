@@ -457,10 +457,12 @@ describe('translation settings: AI model', () => {
 
   it('follows the default model, and saves a specific one for translation', async () => {
     const client = await setupAi({ connections: [conn()], defaultModel: ref('big', 'Big Model') })
+    client.aiListModels.mockImplementation(async (_id, source) => source === 'provider' ? MODELS : [{ ...MODELS[1], source: 'catalog' }])
     const picker = await screen.findByRole('combobox', { name: '模型' })
     expect(picker).toHaveTextContent('跟随默认模型（Big Model）')
     expect(screen.queryByRole('button', { name: '打开 AI 设置' })).not.toBeInTheDocument()
     await userEvent.click(picker)
+    await userEvent.click(await screen.findByRole('tab', { name: '预设目录' }))
     await userEvent.click(await screen.findByText('Small Model'))
     await waitFor(() => expect(client.aiSetTranslationModel).toHaveBeenCalledExactlyOnceWith(
       { connectionId: 'c1', modelId: 'small', name: 'Small Model', contextLength: null, outputLength: null }))

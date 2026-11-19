@@ -14,7 +14,7 @@ use hyper::{
 use serde_json::{Value, json};
 use url::Url;
 
-use super::settings::AiProtocol;
+use super::{settings::AiProtocol, validation::clean_model_name};
 use crate::{
     ErrorCode,
     net::{
@@ -57,6 +57,7 @@ impl fmt::Debug for Endpoint<'_> {
 pub(crate) struct ProviderModel {
     pub id: String,
     pub name: Option<String>,
+    pub owned_by: Option<String>,
 }
 
 pub(crate) fn http_error(error: HttpError) -> ErrorCode {
@@ -132,8 +133,7 @@ async fn request(
     .map_err(http_error)
 }
 
-/// `Ok(None)` when the provider has no model list (404 or 405): the caller
-/// falls back to the catalog.
+/// `Ok(None)` when the provider has no model list (404 or 405).
 pub(crate) async fn list_models(
     endpoint: &Endpoint<'_>,
 ) -> Result<Option<Vec<ProviderModel>>, ErrorCode> {
@@ -158,8 +158,8 @@ fn text_field(value: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// `{"data":[{"id", "name"? | "display_name"?}]}` for both protocols. Sorted
-/// by id, one entry per id; entries without a usable id are skipped.
+/// Reads ids, optional names and `owned_by`. Sorted by id, one entry per id;
+/// entries without a usable id are skipped.
 fn parse_models(body: &[u8]) -> Result<Vec<ProviderModel>, ErrorCode> {
     let value: Value = serde_json::from_slice(body).map_err(|_| ErrorCode::AiInvalidResponse)?;
     let data = value
@@ -177,7 +177,11 @@ fn parse_models(body: &[u8]) -> Result<Vec<ProviderModel>, ErrorCode> {
         let name = text_field(entry, "display_name")
             .or_else(|| text_field(entry, "name"))
             .filter(|name| name != &id);
-        models.push(ProviderModel { id, name });
+        let owned_by = entry
+            .get("owned_by")
+            .and_then(Value::as_str)
+            .and_then(clean_model_name);
+        models.push(ProviderModel { id, name, owned_by });
     }
     models.sort_by(|a, b| a.id.cmp(&b.id));
     models.dedup_by(|later, first| later.id == first.id);
