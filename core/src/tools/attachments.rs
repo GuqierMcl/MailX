@@ -278,6 +278,7 @@ fn add_attachment(
             media_type: added.media_type.clone(),
             size: added.size,
             inline: added.inline,
+            content_id: added.content_id.clone(),
             origin: added.origin,
         },
     })

@@ -658,7 +658,7 @@ impl Storage {
             return Ok(rendered
                 .parts
                 .into_iter()
-                .find(|part| part.part_index == part_index && !part.is_inline)
+                .find(|part| part.part_index == part_index)
                 .map(|part| (raw, part)));
         }
         let Some(raw) = self.body_raw(identity)? else {
@@ -668,7 +668,7 @@ impl Storage {
             .db
             .query_row(
                 "SELECT part_index, content_id, filename, mime_type, size, is_inline
-                 FROM message_parts WHERE message_id = ?1 AND part_index = ?2 AND is_inline = 0",
+                 FROM message_parts WHERE message_id = ?1 AND part_index = ?2",
                 params![identity.message_id, part_index as i64],
                 |row| {
                     Ok(RenderedPart {
@@ -677,7 +677,7 @@ impl Storage {
                         filename: row.get(2)?,
                         mime_type: row.get(3)?,
                         size: row.get::<_, i64>(4)?.max(0) as u64,
-                        is_inline: false,
+                        is_inline: row.get(5)?,
                     })
                 },
             )

@@ -235,14 +235,36 @@ fn ready_queries_return_safe_body_metadata_preview_and_non_inline_attachments() 
     assert!(body.has_html && body.truncated);
     assert_eq!(body.remote_images_blocked, 3);
     assert!(detail.body_failure.is_none());
-    assert_eq!(detail.attachments.len(), 2);
+    // The inline image is listed too, flagged, so a tool reading the mail
+    // knows the picture is there; the reader's attachment bar leaves it out.
+    assert_eq!(detail.attachments.len(), 3);
+    assert_eq!(
+        detail
+            .attachments
+            .iter()
+            .filter(|part| part.is_inline)
+            .count(),
+        1
+    );
     assert_eq!(detail.attachments[0].filename, "报告.pdf");
     assert_eq!(detail.attachments[0].mime_type, "application/pdf");
     assert_eq!(detail.attachments[0].size, 123);
     assert_eq!(detail.attachments[0].id, format!("{id}:1"));
     // A missing name stays empty; the UI supplies the localized placeholder.
-    assert_eq!(detail.attachments[1].filename, "");
-    assert!(detail.attachments.iter().all(|part| !part.is_inline));
+    assert!(
+        detail
+            .attachments
+            .iter()
+            .filter(|part| !part.is_inline)
+            .any(|part| part.filename.is_empty())
+    );
+    // The referenced inline image keeps the name its part carries.
+    let inline = detail
+        .attachments
+        .iter()
+        .find(|part| part.is_inline)
+        .unwrap();
+    assert_eq!(inline.filename, "logo.png");
     let wire = serde_json::to_value(&detail).unwrap();
     assert!(wire["body"].get("html").is_none());
     let wire = wire.to_string();

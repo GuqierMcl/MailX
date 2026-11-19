@@ -171,11 +171,13 @@ impl Storage {
         for attachment in attachments {
             let size = i64::try_from(attachment.blob.size)
                 .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+            // An inline row is addressed by its Content-ID; the drafts the core
+            // creates from a source (a forward's images) arrive this way.
             tx.execute(
                 "INSERT INTO draft_attachments
                     (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
                      origin, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     draft.id,
                     attachment.id,
@@ -183,6 +185,8 @@ impl Storage {
                     attachment.media_type,
                     size,
                     attachment.blob.sha256,
+                    attachment.content_id.is_some(),
+                    attachment.content_id,
                     attachment.origin.as_str(),
                     draft.now,
                 ],

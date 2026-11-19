@@ -789,6 +789,7 @@ async fn read_email_returns_headers_and_attachment_shape() {
             "localOnly",
             "pendingChanges",
             "receivedAt",
+            "remoteImagesBlocked",
             "subject",
             "text",
             "to",

@@ -122,6 +122,10 @@ pub(crate) struct ForwardedFile {
     pub file_name: String,
     pub media_type: String,
     pub blob: StoredBlob,
+    /// `Some` for an image the original referenced by Content-ID: (the id the
+    /// original used, the draft's own copy's new id). `None` for a listed
+    /// attachment.
+    pub content_id: Option<(String, String)>,
 }
 
 /// Decodes the source message's attachments and writes them to the blob store,
@@ -154,9 +158,53 @@ pub(crate) fn forwarded_files(
                 file_name,
                 media_type,
                 blob: blobs.put(&part.bytes)?,
+                content_id: None,
             })
         })
         .collect()
+}
+
+/// The original's inline resources a forward keeps (sending.md 16.11.11):
+/// each referenced Content-ID's image, validated like one pasted into the
+/// composer, under a fresh Content-ID at the sending domain. Images that fail
+/// the check are left out; the quote then keeps their alt text. Limits are not
+/// applied here, as for [`forwarded_files`].
+pub(crate) fn forwarded_inline_files(
+    raw: &[u8],
+    blobs: &BlobStore,
+    new_content_id: impl Fn() -> Result<String, AppError>,
+) -> Result<Vec<ForwardedFile>, AppError> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let decoded = crate::mail::render::inline_contents(raw);
+    let Ok(decoded) = decoded else {
+        // A message the reader already refused: the quote alone is the forward.
+        return Ok(Vec::new());
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    for part in decoded {
+        if !seen.insert(part.content_id.clone()) {
+            continue;
+        }
+        let Ok(image) = crate::mail::render::validate_image(&part.bytes, &part.mime_type) else {
+            continue;
+        };
+        let extension = match image.mime_type.as_str() {
+            "image/jpeg" => "jpg",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            _ => "png",
+        };
+        files.push(ForwardedFile {
+            file_name: format!("image.{extension}"),
+            media_type: image.mime_type.clone(),
+            blob: blobs.put(&image.bytes)?,
+            content_id: Some((part.content_id.clone(), new_content_id()?)),
+        });
+    }
+    Ok(files)
 }
 
 /// Adds a file to a draft; the bytes travel beside the request, not in it.

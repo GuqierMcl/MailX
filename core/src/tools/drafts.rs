@@ -425,6 +425,10 @@ pub struct DraftAttachmentInfo {
     pub size: u64,
     /// An image shown inside the body rather than listed as a file.
     pub inline: bool,
+    /// The Content-ID an inline image is referenced by in `bodyHtml`
+    /// (`<img src="cid:…">`), so one can be matched to its place in the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_id: Option<String>,
     pub origin: crate::AttachmentOrigin,
 }
 
@@ -619,6 +623,7 @@ fn read_draft(call: &ToolCall<'_>, input: DraftIdInput) -> Result<ReadDraftOutpu
                 media_type: a.media_type,
                 size: a.size,
                 inline: a.inline,
+                content_id: a.content_id.clone(),
                 origin: a.origin,
             })
             .collect(),

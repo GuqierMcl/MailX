@@ -1,4 +1,6 @@
 //! Draft operations on the account store: validation, idempotency, revisions.
+use std::collections::HashMap;
+
 use chrono::{FixedOffset, Local, Offset};
 use uuid::Uuid;
 
@@ -204,18 +206,41 @@ impl AccountService {
             .unwrap_or_default();
         let identity = self.storage.body_identity(&request.email_id)?;
         let cached = self.storage.body_cache(&identity)?;
-        let original = crate::drafts::body::quote_cached_source(
-            cached
-                .as_ref()
-                .filter(|_| headers.has_html)
-                .and_then(|body| body.rendered.sanitized_html.as_deref()),
-            cached
-                .as_ref()
-                .map(|body| body.rendered.links.as_slice())
-                .unwrap_or_default(),
-            text,
-            locale,
-        );
+        // A forward keeps the original's inline images: the quote writes each
+        // kept one with the draft's own Content-ID, so it resolves in the
+        // composer and on the way out.
+        let images: HashMap<String, String> = forwarded
+            .iter()
+            .filter_map(|file| file.content_id.clone())
+            .collect();
+        let original = if request.kind == crate::DraftKind::Forward {
+            crate::drafts::body::quote_cached_source_for_forward(
+                cached
+                    .as_ref()
+                    .filter(|_| headers.has_html)
+                    .and_then(|body| body.rendered.sanitized_html.as_deref()),
+                cached
+                    .as_ref()
+                    .map(|body| body.rendered.links.as_slice())
+                    .unwrap_or_default(),
+                text,
+                locale,
+                &images,
+            )
+        } else {
+            crate::drafts::body::quote_cached_source(
+                cached
+                    .as_ref()
+                    .filter(|_| headers.has_html)
+                    .and_then(|body| body.rendered.sanitized_html.as_deref()),
+                cached
+                    .as_ref()
+                    .map(|body| body.rendered.links.as_slice())
+                    .unwrap_or_default(),
+                text,
+                locale,
+            )
+        };
         let Composed {
             content,
             in_reply_to,
@@ -252,7 +277,7 @@ impl AccountService {
             .zip(&ids)
             .map(|(file, id)| NewAttachment {
                 id,
-                content_id: None,
+                content_id: file.content_id.as_ref().map(|(_, new)| new.as_str()),
                 file_name: &file.file_name,
                 media_type: &file.media_type,
                 blob: &file.blob,

@@ -1,7 +1,10 @@
 //! The composer's HTML boundary is deliberately smaller than the mail reader's.
 //! Only this module derives the plain-text body and adds outgoing email styles.
 
-use std::{borrow::Cow, collections::HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use ammonia::{Builder, UrlRelative};
 use scraper::{ElementRef, Html, Node};
@@ -143,7 +146,7 @@ pub(crate) fn outgoing_body(
 ) -> Result<NormalizedBody, AppError> {
     let known: HashSet<&str> = images.iter().map(|(cid, _)| cid.as_str()).collect();
     let document = Html::parse_fragment(html);
-    let html = serialize(&document, Mode::Draft, None, usize::MAX, Some(&known));
+    let html = serialize(&document, Mode::Draft, None, usize::MAX, Some(&known), None);
     let document = Html::parse_fragment(&html);
     let names = |cid: &str| {
         images
@@ -167,7 +170,7 @@ pub(crate) fn normalize(html: &str) -> Result<NormalizedBody, AppError> {
     let clean = sanitize(html);
     // Canonical aliases keep a save/reopen cycle stable with the editor schema.
     let document = Html::parse_fragment(&clean);
-    let html = serialize(&document, Mode::Draft, None, usize::MAX, None);
+    let html = serialize(&document, Mode::Draft, None, usize::MAX, None, None);
     if html.len() > MAX_HTML_BYTES {
         return Err(AppError::validation("draft.bodyHtml"));
     }
@@ -263,12 +266,24 @@ pub(crate) fn quote_cached_source(
     text: &str,
     locale: SupportedLocale,
 ) -> String {
-    quote(html, Some(links), text, locale)
+    quote(html, Some(links), text, locale, false, None)
+}
+
+/// The quote a forward carries: the same as a reply's, except that images the
+/// original brings along stay, for the draft's own inline copies to resolve.
+pub(crate) fn quote_cached_source_for_forward(
+    html: Option<&str>,
+    links: &[String],
+    text: &str,
+    locale: SupportedLocale,
+    images: &HashMap<String, String>,
+) -> String {
+    quote(html, Some(links), text, locale, true, Some(images))
 }
 
 #[cfg(test)]
 fn quote_source(html: Option<&str>, text: &str) -> String {
-    quote(html, None, text, SupportedLocale::ZhCn)
+    quote(html, None, text, SupportedLocale::ZhCn, false, None)
 }
 
 fn quote(
@@ -276,6 +291,8 @@ fn quote(
     links: Option<&[String]>,
     text: &str,
     locale: SupportedLocale,
+    keep_images: bool,
+    images: Option<&HashMap<String, String>>,
 ) -> String {
     let Some(html) = html else {
         // Escaping trusted plain text directly avoids parsing a potentially
@@ -290,10 +307,11 @@ fn quote(
     loop {
         let output = sanitize(&serialize(
             &document,
-            Mode::Quote(locale),
+            Mode::Quote(locale, keep_images),
             links,
             budget,
             None,
+            images,
         ));
         if output.len() <= MAX_QUOTE_BYTES {
             return output;
@@ -308,7 +326,7 @@ fn quote(
 /// constants and never inherited from draft HTML or an original email.
 pub(crate) fn email_document(fragment: &str) -> String {
     let document = Html::parse_fragment(fragment);
-    let body = serialize(&document, Mode::Email, None, usize::MAX, None);
+    let body = serialize(&document, Mode::Email, None, usize::MAX, None, None);
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap\">{body}</div></body></html>"
     )
@@ -317,7 +335,9 @@ pub(crate) fn email_document(fragment: &str) -> String {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Draft,
-    Quote(SupportedLocale),
+    /// `true` keeps `<img src="cid:…">` (a forward carries the images over);
+    /// otherwise quoted mail keeps only its alt text.
+    Quote(SupportedLocale, bool),
     Email,
 }
 
@@ -399,8 +419,11 @@ fn serialize(
     links: Option<&[String]>,
     limit: usize,
     known: Option<&HashSet<&str>>,
+    // Old Content-ID to the forward's own copy of that image, for quoted
+    // images that are kept.
+    images: Option<&HashMap<String, String>>,
 ) -> String {
-    let quoting = matches!(mode, Mode::Quote(_));
+    let quoting = matches!(mode, Mode::Quote(..));
     let mut output = String::new();
     let mut reserved = 0usize;
     let mut full = false;
@@ -428,31 +451,70 @@ fn serialize(
         }
         let mut open = String::new();
         let mut close = String::new();
+        // A quoted image a forward keeps is written with this src instead.
+        let mut quote_src: Option<String> = None;
         if let Some(element) = ElementRef::wrap(node) {
             let original = element.value().name();
             if DROP_CONTENT.contains(&original) {
                 continue;
             }
-            if let Mode::Quote(locale) = mode
+            if let Mode::Quote(locale, keep_images) = mode
                 && original == "img"
             {
-                if let Some(alt) = element
+                // A forward keeps images it brings along; a reply keeps only the
+                // alt text, which stays in the quote instead of a broken image.
+                // The cached reader body carries the Content-ID in its own slot,
+                // never as a `cid:` src the composer would accept.
+                let cid = element
                     .value()
-                    .attr("alt")
-                    .filter(|alt| !alt.trim().is_empty())
-                {
-                    full = !escape_into(
-                        &locale.image_alt(alt),
-                        &mut output,
-                        limit.saturating_sub(reserved),
-                    );
+                    .attr("data-mailx-cid")
+                    .filter(|cid| !cid.is_empty() && !cid.chars().any(char::is_control))
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        element
+                            .value()
+                            .attr("src")
+                            .and_then(cid_of)
+                            .map(str::to_owned)
+                    });
+                let kept = keep_images
+                    .then_some(cid)
+                    .flatten()
+                    .filter(|cid| known.is_none_or(|known| known.contains(cid.as_str())));
+                match kept.and_then(|cid| images.map(|images| (cid, images))) {
+                    Some((cid, images)) => {
+                        // The forward's own copy of the image, under its new
+                        // Content-ID: nothing else of the sender's comes along.
+                        if let Some(new) = images.get(&cid) {
+                            quote_src = Some(format!("cid:{new}"));
+                        } else {
+                            continue;
+                        }
+                    }
+                    None => {
+                        if let Some(alt) = element
+                            .value()
+                            .attr("alt")
+                            .filter(|alt| !alt.trim().is_empty())
+                        {
+                            full = !escape_into(
+                                &locale.image_alt(alt),
+                                &mut output,
+                                limit.saturating_sub(reserved),
+                            );
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
             if original == "img" {
-                // Only reachable outside quoting; a missing or foreign `src`
-                // removes the whole element rather than leaving a stub.
-                let cid = element.value().attr("src").and_then(cid_of);
+                // Only reachable outside quoting, or as the forward's own copy;
+                // a missing or foreign `src` removes the whole element rather
+                // than leaving a stub.
+                let cid = quote_src
+                    .as_deref()
+                    .and_then(cid_of)
+                    .or_else(|| element.value().attr("src").and_then(cid_of));
                 if cid.is_none_or(|cid| known.is_some_and(|known| !known.contains(cid))) {
                     continue;
                 }
@@ -522,7 +584,10 @@ fn serialize(
                 if tag == "img" {
                     open.push_str(" src=\"");
                     escape_into(
-                        element.value().attr("src").unwrap_or_default(),
+                        quote_src
+                            .as_deref()
+                            .or_else(|| element.value().attr("src"))
+                            .unwrap_or_default(),
                         &mut open,
                         usize::MAX,
                     );

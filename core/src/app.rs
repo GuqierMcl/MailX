@@ -676,7 +676,16 @@ impl MailxCore {
         let forwarded = match request.kind {
             crate::DraftKind::Forward => {
                 let blobs = self.accounts()?.body_blobs();
-                crate::drafts::attachments::forwarded_files(&raw, &blobs)?
+                let mut files = crate::drafts::attachments::forwarded_files(&raw, &blobs)?;
+                // The images it referenced come along too, under new IDs
+                // (sending.md 16.11.11).
+                let address = account_address.clone();
+                files.extend(crate::drafts::attachments::forwarded_inline_files(
+                    &raw,
+                    &blobs,
+                    || crate::smtp::message::new_content_id(&address),
+                )?);
+                files
             }
             _ => Vec::new(),
         };

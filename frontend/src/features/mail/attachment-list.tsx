@@ -18,14 +18,17 @@ const SAVED_VISIBLE_MS = 2500
 export function AttachmentList({ client, emailId, attachments }: {
   client: MailxClient
   emailId: string
+  /** Everything the message lists; inline images are shown in the body, not here. */
   attachments: AttachmentSummary[]
 }) {
   useTranslation()
+  const listed = attachments.filter((attachment) => !attachment.isInline)
+  if (listed.length === 0) return null
   return (
     <section className="flex max-h-36 shrink-0 flex-col gap-2 overflow-auto p-4" aria-label={t('mail:attachments')}>
-      <h3 className="text-xs font-medium text-muted-foreground">{t('mail:attachmentCount', { count: attachments.length })}</h3>
+      <h3 className="text-xs font-medium text-muted-foreground">{t('mail:attachmentCount', { count: listed.length })}</h3>
       <ul className="flex flex-wrap gap-2">
-        {attachments.map((attachment) => (
+        {listed.map((attachment) => (
           <AttachmentItem key={attachment.id} client={client} emailId={emailId} attachment={attachment} />
         ))}
       </ul>

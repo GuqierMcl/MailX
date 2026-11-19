@@ -355,6 +355,9 @@ pub struct ReadEmailOutput {
     pub total_chars: usize,
     /// The stored body was cut at the download size limit.
     pub body_truncated: bool,
+    /// Remote images the body referenced; they are never loaded and their
+    /// addresses are not returned.
+    pub remote_images_blocked: u32,
 }
 
 pub(super) fn register(tools: &mut Tools) {
@@ -624,6 +627,10 @@ fn read_email(call: &ToolCall<'_>, input: ReadEmailInput) -> Result<ReadEmailOut
         next_offset: (end < total_chars).then_some(end),
         total_chars,
         body_truncated: truncated,
+        remote_images_blocked: detail
+            .body
+            .as_ref()
+            .map_or(0, |body| body.remote_images_blocked),
     })
 }
 

@@ -2138,3 +2138,87 @@ fn walk(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+/// An HTML mail with one referenced inline image, the shape a forward meets.
+fn html_with_image(cid: &str) -> Vec<u8> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let image = picture(image::ImageFormat::Png, 4, 3);
+    format!(
+        "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=fixture\r\n\r\n\
+         --fixture\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
+         <p>Look at this</p><p><img src=\"cid:{cid}\" alt=\"chart\"></p>\r\n\
+         --fixture\r\nContent-Type: image/png\r\nContent-Disposition: inline\r\n\
+         Content-ID: <{cid}>\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --fixture--\r\n",
+        STANDARD.encode(&image),
+    )
+    .into_bytes()
+}
+
+#[tokio::test]
+async fn a_forward_carries_the_originals_inline_images_under_its_own_content_ids() {
+    let cid = "logo@example.test";
+    let f = fixture(&[html_with_image(cid)]);
+    let forward = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: DraftKind::Forward,
+                client_mutation_id: id(),
+            },
+            crate::SupportedLocale::En,
+        )
+        .unwrap();
+    let [image] = inline_of(&forward)[..] else {
+        panic!(
+            "the forward carries one inline image, got {:?}",
+            forward.attachments
+        );
+    };
+    let new_cid = image
+        .content_id
+        .clone()
+        .expect("an inline Copy has its own id");
+    assert_ne!(new_cid, cid);
+    assert_eq!(
+        super::body::cid_of(&format!("cid:{new_cid}")),
+        Some(new_cid.as_str())
+    );
+    assert!(
+        forward.body_html.contains(&format!("cid:{new_cid}")),
+        "{}",
+        forward.body_html
+    );
+    assert!(
+        !forward.body_html.contains(cid),
+        "the original id does not survive"
+    );
+    // Ordinary attachments are not invented for it.
+    assert!(
+        forward
+            .attachments
+            .iter()
+            .all(|a| a.inline || a.file_name != "image.png")
+    );
+
+    // A reply keeps the alt text and no image: a reply never re-sends pictures.
+    let reply = f
+        .core
+        .create_draft_from_localized(
+            CreateDraftFromRequest {
+                email_id: f.emails[0].clone(),
+                kind: DraftKind::Reply,
+                client_mutation_id: id(),
+            },
+            crate::SupportedLocale::En,
+        )
+        .unwrap();
+    assert!(inline_of(&reply).is_empty());
+    assert!(!reply.body_html.contains("cid:"));
+    assert!(
+        reply.body_text.contains("[Image: chart]"),
+        "{}",
+        reply.body_text
+    );
+}
