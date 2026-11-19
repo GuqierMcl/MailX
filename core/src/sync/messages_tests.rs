@@ -633,7 +633,7 @@ async fn short_flag_fetch_retries_live_uids_and_removes_confirmed_missing_uids()
 }
 
 #[tokio::test]
-async fn unresolved_flags_keep_coverage_incomplete_and_later_batches_still_update() {
+async fn unresolved_flags_keep_last_known_state_and_the_folder_still_completes() {
     let fixture = fixture();
     let uids: Vec<u32> = (1..=501).rev().collect();
     let mut first = commands(21, &uids);
@@ -676,30 +676,24 @@ async fn unresolved_flags_keep_coverage_incomplete_and_later_batches_still_updat
             "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
         ),
     ]);
-    let result = run(&fixture, second, false).await.unwrap_err();
-    assert!(matches!(
-        from_sync_error(result),
-        Outcome::Transient(SyncFailure {
-            code: SyncFailureCode::FlagsIncomplete,
-            will_retry: true,
-            ..
-        })
-    ));
-
+    // A folder the server will not fully answer does not fail the whole round
+    // (2925 answers every flags fetch with nothing): it completes, and the mails
+    // whose flags are unknown keep their last known state.
+    run(&fixture, second, false).await.unwrap();
     let page = fixture
         .service
         .lock()
         .unwrap()
         .list_emails(&EmailListQuery::default())
         .unwrap();
-    assert!(!page.coverage.headers_complete);
+    assert!(page.coverage.headers_complete);
     for subject in ["Unresolved", "Later batch"] {
         let mail = page
             .items
             .iter()
             .find(|mail| mail.subject == subject)
             .unwrap();
-        assert!(mail.is_read);
+        assert!(mail.is_read, "{subject}");
     }
 }
 

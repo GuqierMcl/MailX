@@ -99,7 +99,6 @@ pub(crate) enum ImapError {
     /// A completed command whose mailbox data is unusable; connection is healthy.
     Mailbox(String),
     /// A reconciliation round still lacks flags for some requested messages.
-    FlagsIncomplete(usize),
     /// A declared or received body exceeds the bounded message budget.
     TooLarge,
     Timeout,
@@ -116,7 +115,6 @@ impl fmt::Display for ImapError {
             Self::Protocol(reason) => write!(formatter, "protocol error: {reason}"),
             Self::Rejected => formatter.write_str("protocol error: IMAP command failed"),
             Self::Mailbox(reason) => write!(formatter, "mailbox response error: {reason}"),
-            Self::FlagsIncomplete(count) => write!(formatter, "missing FLAGS for {count} UID(s)"),
             Self::TooLarge => formatter.write_str("message exceeds size limit"),
             Self::Timeout => formatter.write_str("server stopped responding"),
         }
@@ -125,10 +123,7 @@ impl fmt::Display for ImapError {
 
 impl ImapError {
     pub(crate) fn session_usable(&self) -> bool {
-        matches!(
-            self,
-            Self::Rejected | Self::Mailbox(_) | Self::FlagsIncomplete(_)
-        )
+        matches!(self, Self::Rejected | Self::Mailbox(_))
     }
 
     fn diagnostic_outcome(&self) -> ImapDiagnosticOutcome {
@@ -141,7 +136,6 @@ impl ImapError {
             Self::Protocol(_) => ImapDiagnosticOutcome::Protocol,
             Self::Rejected => ImapDiagnosticOutcome::Rejected,
             Self::Mailbox(_) => ImapDiagnosticOutcome::Mailbox,
-            Self::FlagsIncomplete(_) => ImapDiagnosticOutcome::Incomplete,
             Self::TooLarge => ImapDiagnosticOutcome::TooLarge,
         }
     }
