@@ -14,7 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- A brief network drop no longer shows a sync warning: a failure that MailX will retry stays quiet for its first 30 seconds, and problems that need you still appear at once. / 短暂网络中断不再显示同步异常：会自动重试的失败在最初 30 秒内保持安静，需要处理的同步问题仍然立即提示。
+- A brief network drop no longer shows a sync warning: a failure that MailX will retry stays quiet for its first 30 seconds, and problems that need you still appear at once. / 短暂网络中断不再显示同步异常：会自动重试的失败在最初 30 秒内保持安静，需要处理的同步问题仍然立即提示。 ([#161](https://github.com/GuqierMcl/MailX/pull/161))
 
 ### 🚀 Feature
 
