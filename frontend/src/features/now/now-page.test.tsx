@@ -336,7 +336,8 @@ describe('Now page', () => {
     })
 
     it('reports a sync problem, without an icon', async () => {
-      setup({ props: { syncStates: synced({ failure: { code: 'network', message: '', detail: null, willRetry: true } }) } })
+      // The failure has lasted past the quiet window, so the line reports it.
+      setup({ props: { syncStates: synced({ phase: 'failed', failure: { code: 'network', message: '', detail: null, willRetry: true }, failureSince: new Date(Date.now() - 60_000).toISOString() }) } })
       await loaded()
       expect(footer()).toHaveTextContent('部分邮箱同步异常')
       expect(footer()!.querySelector('svg')).toBeNull()

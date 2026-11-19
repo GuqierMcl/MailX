@@ -101,7 +101,7 @@ describe('sync summary', () => {
   it('reports a failure first', () => {
     expect(syncSummary([first, second], {
       a: exampleSyncState({ accountId: 'a', phase: 'syncing' }),
-      b: exampleSyncState({ accountId: 'b', failure: { code: 'network', message: '', detail: null, willRetry: true } }),
+      b: exampleSyncState({ accountId: 'b', failure: { code: 'network', message: '', detail: null, willRetry: true }, failureSince: '2026-10-18T08:00:00.000Z' }),
     })).toEqual({ kind: 'issue' })
   })
 })

@@ -22,13 +22,13 @@ export function exampleAccount(overrides: Partial<Account> = {}): Account {
 }
 
 export function exampleFolderSyncState(folderId: string, overrides: Partial<FolderSyncState> = {}): FolderSyncState {
-  return { folderId, phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, dataRevision: 0, ...overrides }
+  return { folderId, phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, failureSince: null, dataRevision: 0, ...overrides }
 }
 
 export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): AccountSyncState {
   return {
     accountId: exampleAccount().id, mailboxSourceId: 'source-a', generation: 1, sequence: 1, folderRevision: 0,
-    phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, folders: [], ...overrides,
+    phase: 'idle', lastSyncedAt: '2026-10-18T08:00:00.000Z', failure: null, failureSince: null, folders: [], ...overrides,
   }
 }
 

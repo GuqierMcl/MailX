@@ -28,6 +28,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { visibleSyncFailure } from '@/features/accounts/sync-quiet'
 import { buildFolderTree, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
 import { openIntent } from '@/features/outbox/use-compose'
@@ -113,7 +114,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
   const unifiedUnread = inboxes.reduce((total, folder) => total + folder.unreadCount, 0)
   const archivedUnread = inboxes.reduce((total, folder) => total + folder.archivedUnreadCount, 0)
   const junkUnread = folders.some((folder) => folder.selectable && folder.role === 'junk' && folder.countsKnown && folder.unreadCount > 0)
-  const hasSyncFailure = accounts.some((account) => syncStates[account.id]?.failure)
+  const hasSyncFailure = accounts.some((account) => visibleSyncFailure(syncStates[account.id]))
   const isUnified = (role: FolderRole) => mailbox.kind === 'unified' && mailbox.role === role
   const moreActive = isUnified('junk') || isUnified('trash') || (mailbox.kind === 'archived' && !mailbox.accountId)
   const choose = (next: Mailbox) => () => onSelect(next)
@@ -164,7 +165,7 @@ export function MailRail({ accounts, folders, syncStates, mailbox, onSelect, onO
         {accounts.map((account) => {
           const tree = buildFolderTree(folders.filter((folder) => folder.accountId === account.id))
           const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
-          const failure = Boolean(syncStates[account.id]?.failure)
+          const failure = Boolean(visibleSyncFailure(syncStates[account.id]))
           const active = (mailbox.kind === 'folder' && mailbox.folder.accountId === account.id) || (mailbox.kind === 'archived' && mailbox.accountId === account.id)
           const name = failure ? `${account.displayName} · ${t('mail:mailSyncFailed')}` : withUnread(account.displayName, unread)
           return (

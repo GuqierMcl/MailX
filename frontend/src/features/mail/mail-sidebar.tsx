@@ -44,6 +44,7 @@ import { cn } from '@/lib/utils'
 import { buildFolderTree, countedUnread, loadCollapsed, loadExpanded, saveCollapsed, saveExpanded, type FolderNode } from './folder-tree'
 import { folderLabel, type Mailbox } from './mailbox'
 import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { visibleSyncFailure } from '@/features/accounts/sync-quiet'
 import { formatFullTime } from './format'
 import { useManualSync } from './use-manual-sync'
 import { openIntent } from '@/features/outbox/use-compose'
@@ -102,7 +103,7 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
   const archivedUnread = inboxes.reduce((total, folder) => total + folder.archivedUnreadCount, 0)
   const junkUnread = folders.some((folder) => folder.selectable && folder.role === 'junk' && folder.countsKnown && folder.unreadCount > 0)
   const selectedId = mailbox.kind === 'folder' ? mailbox.folder.id : null
-  const hasSyncFailure = accounts.some((account) => syncStates[account.id]?.failure)
+  const hasSyncFailure = accounts.some((account) => visibleSyncFailure(syncStates[account.id]))
 
   /** Each account's folder of this role, in the user's account order. */
   const byAccount = (role: FolderRole): AccountChild[] => accounts.flatMap((account) => {
@@ -247,8 +248,10 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                 const unread = tree.reduce((total, node) => total + node.unreadWithChildren, 0)
                 const countsKnown = tree.every((node) => node.countsKnown)
                 const sync = syncStates[account.id]
+                // A young retryable failure stays quiet here; the header still reports it.
+                const failure = visibleSyncFailure(sync)
                 // Room for the one shared slot (and the warning beside it), never more.
-                const rowStyle = { paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${sync?.failure ? 2.5 : 1}rem)` }
+                const rowStyle = { paddingRight: `calc(${Math.max(2, String(unread).length)}ch + ${failure ? 2.5 : 1}rem)` }
                 const status = (
                   <>
                     <AccountSyncSlot
@@ -258,9 +261,9 @@ export function MailSidebar({ accounts, folders, loading, syncStates, mailbox, o
                       sync={sync}
                       label={account.displayName}
                       onRefresh={() => onRefresh(account.id)}
-                      className={cn(sync?.failure && 'right-7')}
+                      className={cn(failure && 'right-7')}
                     />
-                    {sync?.failure && <SyncFailureAction failure={sync.failure} />}
+                    {failure && <SyncFailureAction failure={failure} />}
                   </>
                 )
                 const avatar = <AccountAvatar displayName={account.displayName} color={account.color} providerId={account.providerId} useProviderIcon={account.useProviderIcon} className="size-[18px] text-[10px]" />

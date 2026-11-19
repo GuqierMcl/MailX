@@ -108,6 +108,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
             phase: SyncPhase::Syncing,
             last_synced_at: None,
             failure: None,
+            failure_since: None,
         },
     );
     Fixture {

@@ -25,7 +25,7 @@ import { useSettings, useUpdateLayout } from '@/features/settings/settings-queri
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { sortAccountsForDisplay } from './account-order'
 import { AccountHeader, type ProfilePreview } from './account-header'
-import { accountIssues, connectionMethod, credentialProblem, firstProblemAccountId } from './account-status'
+import { accountIssues, connectionMethod, credentialProblem } from './account-status'
 import { SortableAccountList } from './sortable-account-list'
 import { ConnectionVerificationActions, VerificationHelp, VerificationNotice, VerificationSummary } from './connection-verification'
 import { useConnectionVerification, verificationFailed, verificationReport } from './use-connection-verification'
@@ -36,7 +36,7 @@ import { ProfileFields } from './profile-fields'
 import { useAccount } from './use-account'
 import { RemoveAccountDialog } from './remove-account-dialog'
 
-/** Where the dialog opens; without `accountId` it selects the first account with a problem, else the first account. */
+/** Where the dialog opens; without `accountId` it selects the first account. */
 export type AccountsTarget = { accountId?: string }
 
 type AccountsDialogProps = {
@@ -76,8 +76,10 @@ export function AccountsDialog({ client, target, accounts, syncStates, onClose, 
     if (target) setSelectedId(target.accountId ?? null)
   }
 
-  // Without an explicit pick, open on the account that needs attention.
-  const implicitId = useCallback((list: Account[]) => firstProblemAccountId(list, syncStates) ?? list[0]?.id ?? null, [syncStates])
+  // Without an explicit pick, open on the first account. The dialog never picks an
+  // account because of a sync failure: opening it is the user's decision, and an
+  // account's own status line already says what is wrong.
+  const implicitId = useCallback((list: Account[]) => list[0]?.id ?? null, [])
   const visibleAccounts = orderedAccounts.filter((account) => !removedIds.has(account.id))
   const activeId = visibleAccounts.some((account) => account.id === selectedId) ? selectedId : implicitId(visibleAccounts)
   // Once loaded, pin the implicit first selection by identity so changing the

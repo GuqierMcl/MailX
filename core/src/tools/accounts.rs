@@ -210,6 +210,7 @@ mod tests {
             folders: Vec::new(),
             phase,
             last_synced_at: synced.then(|| "2026-01-01T00:00:00Z".to_owned()),
+            failure_since: code.map(|_| "2026-01-01T00:00:00Z".to_owned()),
             failure: code.map(|code| SyncFailure {
                 code,
                 message: "server said secret".into(),

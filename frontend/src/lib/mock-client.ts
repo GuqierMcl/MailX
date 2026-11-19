@@ -647,9 +647,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     listSyncStates: async () =>
       accounts.map((account) => ({
         accountId: account.id, mailboxSourceId: account.mailboxSourceId, generation: 1, sequence: 1, folderRevision: 1,
-        phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null,
+        phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, failureSince: null,
         folders: folders.filter((folder) => folder.accountId === account.id && folder.selectable).map((folder) => ({
-          folderId: folder.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, dataRevision: 0,
+          folderId: folder.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, failureSince: null, dataRevision: 0,
         })),
       })),
     onSyncState: () => () => undefined,

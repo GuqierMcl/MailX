@@ -141,6 +141,10 @@ async fn round(shared: &Arc<Shared>, token: &WorkerToken) -> Result<Outcome, Syn
                         shared.folder_update(token, &folder_id, |folder| {
                             folder.phase = manager::FolderSyncPhase::Failed;
                             folder.failure = Some(failure.clone());
+                            folder.failure_since.get_or_insert_with(|| {
+                                chrono::Utc::now()
+                                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                            });
                             folder.data_revision = folder.data_revision.saturating_add(1);
                         });
                         return Ok(Outcome::Blocked(failure));
