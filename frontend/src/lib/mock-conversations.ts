@@ -67,9 +67,9 @@ export function createMockConversations(deps: MockConversationsDeps) {
     const folder = deps.firstFolder?.()?.id
     const card = email ? `\n\n[${zh() ? '账单提醒' : 'Billing reminder'}](mailx://email/${email})\n\n` : '\n\n'
     const inbox = folder ? `[${zh() ? '收件箱' : 'Inbox'}](mailx://folder/${folder})\n\n` : ''
-    const found: ChatTurnTool = { callId: 'call-1', name: 'search_emails', status: 'done', summary: { type: 'found', count: 3 }, textOffset: 0 }
-    const archived: ChatTurnTool = { callId: 'call-1', name: 'archive_emails', status: 'done', summary: { type: 'changed', count: 2, emailIds: [], undo: null }, textOffset: 0 }
-    const asked: ChatTurnConfirmation = { callId: 'call-1', tool: 'archive_emails', action: 'organize', outcome: 'approved', textOffset: 0 }
+    const found: ChatTurnTool = { callId: 'call-1', name: 'mail_search', status: 'done', summary: { type: 'found', count: 3 }, textOffset: 0 }
+    const archived: ChatTurnTool = { callId: 'call-1', name: 'mail_archive', status: 'done', summary: { type: 'changed', count: 2, emailIds: [], undo: null }, textOffset: 0 }
+    const asked: ChatTurnConfirmation = { callId: 'call-1', tool: 'mail_archive', action: 'organize', outcome: 'approved', textOffset: 0 }
     const first = zh() ? '这周有什么要处理的？' : 'What needs my attention this week?'
     const second = zh() ? '把推广邮件归档' : 'Archive the promotional emails'
     store.push(

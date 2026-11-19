@@ -17,7 +17,7 @@ const ready: AiState = {
   translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false,
 }
 const SEND: ConfirmationRequest = {
-  action: 'send', tool: 'send_email',
+  action: 'send', tool: 'outbox_send',
   details: { type: 'send', accountName: '工作邮箱', accountAddress: 'me@example.com', to: [{ name: null, address: 'a@example.com' }], cc: [], bcc: [], subject: '周报', bodyPreview: '正文', attachments: [], warnings: ['newRecipient'] },
 }
 
@@ -192,8 +192,8 @@ describe('Now page: conversation', () => {
     client.getDraft.mockRejectedValue(new Error('no'))
     await ask('看看')
     await emit(
-      event(2, { type: 'tool', callId: 'k1', name: 'read_email', status: 'done', summary: { type: 'read', emailIds: ['m1'] } }),
-      event(3, { type: 'tool', callId: 'k2', name: 'create_draft', status: 'done', summary: { type: 'draft', draftId: 'd1', subject: '回复账单' } }),
+      event(2, { type: 'tool', callId: 'k1', name: 'mail_read', status: 'done', summary: { type: 'read', emailIds: ['m1'] } }),
+      event(3, { type: 'tool', callId: 'k2', name: 'draft_create', status: 'done', summary: { type: 'draft', draftId: 'd1', subject: '回复账单' } }),
       ...done(4),
     )
     await userEvent.click(await screen.findByRole('button', { name: '展开详情' }))
@@ -232,7 +232,7 @@ describe('Now page: confirmation', () => {
     await ask('发出去')
     await emit(
       event(2, { type: 'text', delta: '草稿好了。' }),
-      event(3, { type: 'tool', callId: 'k1', name: 'send_email', status: 'running', summary: { type: 'pending' } }),
+      event(3, { type: 'tool', callId: 'k1', name: 'outbox_send', status: 'running', summary: { type: 'pending' } }),
       event(4, { type: 'state', state: 'awaitingConfirmation' }),
       event(5, { type: 'confirm', requestId: 'q1', callId: 'k1', request: SEND }),
     )

@@ -122,7 +122,7 @@ pub(crate) async fn accounts_list(
 ) -> Result<ApiResult<Vec<Account>>, ()> {
     let args = authorize(&window, "accounts_list").and_then(|_| parse::<EmptyArgs>(request.body()));
     Ok(respond(match args {
-        Ok(_) => state.run(|core| core.list_accounts()).await,
+        Ok(_) => state.run(|core| core.accounts_list()).await,
         Err(error) => Err(error),
     }))
 }
@@ -505,7 +505,7 @@ pub(crate) async fn folders_list(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.list_folders(&args.account_id))
+                .run(move |core| core.mail_folders(&args.account_id))
                 .await
         }
         Err(error) => Err(error),
@@ -571,7 +571,7 @@ pub(crate) async fn emails_get_conversation(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.get_conversation(&args.email_id))
+                .run(move |core| core.mail_conversation(&args.email_id))
                 .await
         }
         Err(error) => Err(error),
@@ -1108,7 +1108,7 @@ pub(crate) async fn contacts_suggest(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.suggest_contacts(&args.query, args.limit))
+                .run(move |core| core.mail_contacts(&args.query, args.limit))
                 .await
         }
         Err(error) => Err(error),
@@ -1197,7 +1197,7 @@ pub(crate) async fn sync_refresh(
     Ok(respond(match args {
         Ok(args) => {
             state
-                .run(move |core| core.refresh_sync(&args.account_id))
+                .run(move |core| core.accounts_refresh_sync(&args.account_id))
                 .await
         }
         Err(error) => Err(error),

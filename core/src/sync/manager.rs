@@ -1172,7 +1172,7 @@ async fn sync_once(
     let listed = folders_due(*last_folder_refresh);
     if listed {
         let result = async {
-            let remote = session.list_folders().await?;
+            let remote = session.mail_folders().await?;
             let records = folders::interpret(&remote);
             let id = token.account_id.clone();
             let source = token.source.clone();

@@ -200,7 +200,7 @@ fn main() {
                                 // when previews are on.
                                 let subject = settings
                                     .show_preview
-                                    .then(|| state.core().ok()?.get_outbox(&outbox_id).ok())
+                                    .then(|| state.core().ok()?.outbox_read(&outbox_id).ok())
                                     .flatten()
                                     .map(|item| item.subject);
                                 Some((settings, subject, locale))

@@ -274,13 +274,13 @@ async fn openai_tool_calls_without_index_start_at_each_new_id() {
 async fn openai_empty_tool_arguments_become_an_empty_object() {
     let server = serve(vec![
         data(json!({"choices":[{"delta":{"tool_calls":[
-            {"index":0,"id":"c","function":{"name":"list_accounts"}}]}}]})),
+            {"index":0,"id":"c","function":{"name":"accounts_list"}}]}}]})),
         oa_finish("tool_calls"),
         done(),
     ])
     .await;
     let run = go(OPENAI, &server).await;
-    assert_eq!(run.calls(), [&call("c", "list_accounts", json!({}))]);
+    assert_eq!(run.calls(), [&call("c", "accounts_list", json!({}))]);
 }
 
 #[tokio::test]
@@ -616,7 +616,7 @@ async fn anthropic_assembles_tool_use_blocks_and_emits_them_at_block_stop() {
             an_stop(1),
             an_block(
                 2,
-                json!({"type":"tool_use","id":"toolu_2","name":"list_accounts","input":{}}),
+                json!({"type":"tool_use","id":"toolu_2","name":"accounts_list","input":{}}),
             ),
             an_json(2, ""),
             an_stop(2),
@@ -632,7 +632,7 @@ async fn anthropic_assembles_tool_use_blocks_and_emits_them_at_block_stop() {
         [
             StreamEvent::Text("Searching.".into()),
             StreamEvent::ToolCall(call("toolu_1", "search_mail", json!({"query":"你好"}))),
-            StreamEvent::ToolCall(call("toolu_2", "list_accounts", json!({}))),
+            StreamEvent::ToolCall(call("toolu_2", "accounts_list", json!({}))),
         ]
     );
     assert_eq!(run.finished().unwrap().0, FinishReason::ToolCalls);

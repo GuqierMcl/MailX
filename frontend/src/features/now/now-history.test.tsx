@@ -33,11 +33,11 @@ const PAST: ConversationDetail = {
     {
       role: 'assistant', text: '先搜索，然后已经归档了。', state: 'completed', finishedReason: 'stop', error: null, at: daysAgo(3),
       tools: [
-        { callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 3 }, textOffset: 0 },
-        { callId: 'b', name: 'archive_emails', status: 'done', summary: { type: 'changed', count: 2, emailIds: [], undo: null }, textOffset: 4 },
+        { callId: 'a', name: 'mail_search', status: 'done', summary: { type: 'found', count: 3 }, textOffset: 0 },
+        { callId: 'b', name: 'mail_archive', status: 'done', summary: { type: 'changed', count: 2, emailIds: [], undo: null }, textOffset: 4 },
       ],
       reasoning: [],
-      confirmations: [{ callId: 'b', tool: 'archive_emails', action: 'organize', outcome: 'approved', textOffset: 4 }],
+      confirmations: [{ callId: 'b', tool: 'mail_archive', action: 'organize', outcome: 'approved', textOffset: 4 }],
     },
     { role: 'user', text: '再发一封', at: daysAgo(3) },
     { role: 'assistant', text: '', state: 'failed', finishedReason: null, error: 'aiUnavailable', tools: [], reasoning: [], confirmations: [], at: daysAgo(3) },
@@ -141,7 +141,7 @@ describe('history button and panel', () => {
       ...PAST,
       turns: [
         { role: 'user', text: '查一下', at: daysAgo(1) },
-        { role: 'assistant', text: '先看看。结果如下。', state: 'completed', finishedReason: 'stop', error: null, at: daysAgo(1), confirmations: [], reasoning: [], tools: [{ callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }] },
+        { role: 'assistant', text: '先看看。结果如下。', state: 'completed', finishedReason: 'stop', error: null, at: daysAgo(1), confirmations: [], reasoning: [], tools: [{ callId: 'a', name: 'mail_search', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }] },
       ],
     })
     const panel = await openPanel()

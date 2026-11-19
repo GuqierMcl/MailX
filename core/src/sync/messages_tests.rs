@@ -849,7 +849,7 @@ async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers()
     }
     script.push(("LOGOUT".into(), "{tag} OK\r\n".into()));
     let (mut session, server) = scripted_session(script).await;
-    let remote = session.list_folders().await.unwrap();
+    let remote = session.mail_folders().await.unwrap();
     assert_eq!(remote.len(), 11);
     assert!(remote.iter().all(|folder| folder.status.is_none()));
     let records = folders::interpret(&remote);
@@ -860,7 +860,7 @@ async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers()
                 .store_folders(&fixture.account_id, &fixture.source, &records)
                 .unwrap()
         );
-        let stored = service.list_folders(&fixture.account_id).unwrap();
+        let stored = service.mail_folders(&fixture.account_id).unwrap();
         assert_eq!(stored.iter().filter(|folder| folder.selectable).count(), 8);
         assert!(stored.iter().all(|folder| !folder.counts_known));
         for role in [
@@ -928,7 +928,7 @@ async fn list_only_discovery_reaches_all_selectable_roles_and_skips_containers()
     server.await.unwrap();
 
     let service = fixture.service.lock().unwrap();
-    let stored = service.list_folders(&fixture.account_id).unwrap();
+    let stored = service.mail_folders(&fixture.account_id).unwrap();
     for folder in &stored {
         assert_eq!(folder.counts_known, folder.selectable);
     }
@@ -1402,7 +1402,7 @@ async fn lossy_status_name_still_syncs_headers_and_preserves_the_status_fast_pat
     assert!(changed);
     {
         let service = fixture.service.lock().unwrap();
-        let folders = service.list_folders(&fixture.account_id).unwrap();
+        let folders = service.mail_folders(&fixture.account_id).unwrap();
         assert!(folders[0].counts_known);
         assert_eq!((folders[0].total_count, folders[0].unread_count), (2, 1));
         let page = service.list_emails(&EmailListQuery::default()).unwrap();
@@ -1443,7 +1443,7 @@ async fn failed_status_fallback_preserves_counts_and_cached_headers() {
     ));
     assert!(run(&fixture, failed, false).await.is_err());
     let service = fixture.service.lock().unwrap();
-    let folders = service.list_folders(&fixture.account_id).unwrap();
+    let folders = service.mail_folders(&fixture.account_id).unwrap();
     assert_eq!(
         folders[0].total_count, 2,
         "failed fallback is not an empty folder"
@@ -1589,7 +1589,7 @@ async fn cached_sent_identity_refreshes_despite_unchanged_status_then_stops() {
             .service
             .lock()
             .unwrap()
-            .get_outbox(&outbox)
+            .outbox_read(&outbox)
             .unwrap()
             .server_copy_message_id
             .is_some()
@@ -1617,7 +1617,7 @@ async fn new_sent_header_uses_provider_identity_without_a_second_fetch() {
             .service
             .lock()
             .unwrap()
-            .get_outbox(&outbox)
+            .outbox_read(&outbox)
             .unwrap()
             .server_copy_message_id
             .is_some()

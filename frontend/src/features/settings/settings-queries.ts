@@ -58,7 +58,7 @@ export const DEFAULT_TRANSLATION: TranslationSettings = {
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
 export const DEFAULT_ASSISTANT: AssistantSettings = {
-  enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '', saveHistory: true,
+  enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '', saveHistory: true, readHtml: false,
 }
 /** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
 export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)

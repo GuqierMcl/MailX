@@ -220,7 +220,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
   - **主题**：加 `Re:` / `Fwd:`，已有 `Re:`、`RE:`、`回复：` 等前缀时不重复添加。
   - **引用**：回复在空段落、日期和发件人之后接引用块；转发在空段落和头部块之后接原文。优先使用已缓存 HTML，经发信白名单降级；没有 HTML 时按行转义为段落。规则见第 14 节“回复与转发”。
   - **会话串联**：`In-Reply-To` 取原 `Message-ID`，`References` 取原 `References` 再接上原 `Message-ID`。头部同步不读 `References`，所以从缓存的原始 MIME 中取；尚未下载时，核心不在创建草稿的调用里下载，而是返回 `bodyNotCached`，由调用方先下载正文再重试（实现与本节原文的差异，原因是创建草稿保持纯本地、无网络）。
-- 空白草稿不出现在草稿列表（`list_drafts` 过滤），核心启动时删除没有活动发送项的空白草稿（崩溃遗留）。
+- 空白草稿不出现在草稿列表（`draft_list` 过滤），核心启动时删除没有活动发送项的空白草稿（崩溃遗留）。
 - 核心对每次草稿变更发出 `DraftChanged`：`created`、`updated`、`deleted`，以及队列的 `locked` / `unlocked`；主窗口据此刷新草稿列表，并在所选草稿被删除时清除选择。
 - 已被 `accepted` 的草稿从草稿列表移除；`failed` 后回到可编辑；`unknown` 期间锁定。
 - 导航新增本地"草稿"，以及仅在有未完成队列项（`queued`、`sending`、`failed`、`unknown`）时出现的"发件箱"。草稿在岛内列出，阅读区显示预览和"继续编辑"；发件箱的项目在阅读区显示状态和可用操作。**已实现（4b）**：两个视图的行与阅读区见[界面设计](ui-design.md#主窗口的写信入口草稿与发件箱)；发件箱操作为 `queued` → 撤销（成功后重新打开写信窗口）/ 立即重试（仅在已安排下次重试时）、`failed` → 编辑并重新发送（打开草稿）、`unknown` → 标记为已发出 / 确认未发出，重新发送（确认对话框）；失败项若同一草稿已有更新的非失败项（已重新发送），不再列出。`mailx://outbox` / `mailx://drafts` 事件使对应查询失效；系统通知点击携带的 `outboxId` 会选中发件箱项。
@@ -339,7 +339,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 
 - `drafts` 的收件人为 `{ name, address }` 的 JSON 数组；`source_email_id` 指向 `messages(id)` 并 `ON DELETE SET NULL`，原邮件消失时草稿保留（引用文字与串联头在创建时已复制进草稿），账号删除则级联删除草稿；`(account_id, client_mutation_id)` 唯一。
 - 额外的 `create_canonical` 列保存创建请求的规范形式，使同一 `clientMutationId` 的重试返回同一草稿（即使之后已被编辑），内容不同则报 `idempotencyConflict`。
-- 默认发件账号由宿主从设置读出后传给 `create_draft(request, default_account_id)`，核心的设置存储与数据库互不依赖。
+- 默认发件账号由宿主从设置读出后传给 `draft_create(request, default_account_id)`，核心的设置存储与数据库互不依赖。
 - 地址校验使用保守的本地校验器（ASCII dot-atom 本地部分 + ASCII 主机名，拒绝引号本地部分与国际化地址）；步骤 2 决定保留它并额外要求 lettre 接受（见第 8 节）。
 - `senderName` 上限 128 个字符，拒绝所有控制字符。
 
@@ -348,7 +348,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - `outbox` 为 STRICT 表，带 CHECK：`state` 六种取值、`accepted` 必有 `accepted_at`、`queued` / `canceled` 不能有 `data_started_at`、`resolution` 只能是 `unknown` 行的 `resent` 或 `accepted` 行的 `markedSent`；`(account_id, client_mutation_id)` 唯一。`draft_id` 为 `ON DELETE SET NULL`，账号删除时级联删除。
 - 列在设计表之外另有：`queue_canonical`（入队请求的规范形式，用于 `clientMutationId` 重放与 `idempotencyConflict`）、`recipients_preview`（最多 3 个信封收件人）与 `recipient_count`（列表不解析 MIME）、`resolution` / `resolution_mutation_id` / `superseded_by`（`unknown` 的处理，取代 `resolved` 布尔值）。`envelope` 为 `{ from, recipients }`，`last_error` 为 `{ reason, smtpCode, text, rejected[] }`，`server_reply` 为 `{ code, text }`，均只含脱敏文本。
 - 索引：`outbox_due`（`queued` 项的下一个到期项，部分索引）、`outbox_by_account`（列表）、`outbox_by_draft`、`outbox_by_message_id`、`outbox_sent`（本地已发送副本，按接受时间倒序，部分索引）。
-- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`update_draft` 与 `delete_draft` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
+- 草稿锁：草稿有“存活”项（`queued`、`sending`、未处理的 `unknown`）时，`draft_update` 与 `draft_delete` 返回 `draftLocked`，再次入队同一草稿也返回 `draftLocked`；检查与插入在同一事务中。`accepted` 时同一事务删除草稿；`failed` / `canceled` 时草稿保持原样，即可编辑。
 - `accepted` 行保留 `mime`、`envelope`、`accepted_at`、`server_reply`，即本地已发送副本；`server_copy_message_id` 与 `deleted_locally_at` 已建列，由第 5 步使用，本步不读写。
 
 快照已改为内容寻址的 blob 文件（第 16.6 节，迁移 v14）：`outbox` 行只记 `snapshot_hash`、`snapshot_size` 与释放时间 `snapshot_released_at`，`mime` 列可空、新行不再写入，旧行由启动外迁搬进 blob 后清空。草稿附件在 `draft_attachments`（迁移 v13）。

@@ -39,31 +39,21 @@ pub(crate) enum Decision {
 }
 
 const READ_TOOLS: &[&str] = &[
-    "list_accounts",
-    "search_emails",
-    "read_email",
-    "list_folders",
-    "get_conversation",
-    "suggest_contacts",
-    "list_drafts",
-    "read_draft",
-    "list_outbox",
-    "get_outbox",
+    "accounts_list",
+    "mail_search",
+    "mail_read",
+    "mail_folders",
+    "mail_conversation",
+    "mail_contacts",
+    "draft_list",
+    "draft_read",
+    "outbox_read",
+    "mail_help",
 ];
-const ORGANIZE_TOOLS: &[&str] = &[
-    "set_email_flags",
-    "archive_emails",
-    "unarchive_emails",
-    "refresh_sync",
-];
-const NEW_DRAFT_TOOLS: &[&str] = &["create_draft", "create_reply_draft"];
-const DRAFT_CHANGE_TOOLS: &[&str] = &[
-    "update_draft",
-    "delete_draft",
-    "add_draft_attachment",
-    "remove_draft_attachment",
-];
-const SEND_TOOLS: &[&str] = &["send_email", "cancel_outbox"];
+const ORGANIZE_TOOLS: &[&str] = &["mail_flags", "mail_archive", "accounts_refresh_sync"];
+const NEW_DRAFT_TOOLS: &[&str] = &["draft_create", "draft_reply"];
+const DRAFT_CHANGE_TOOLS: &[&str] = &["draft_update", "draft_delete", "draft_attachments"];
+const SEND_TOOLS: &[&str] = &["outbox_send", "outbox_cancel"];
 
 /// Whether the tool changes an existing draft, so the loop must look the
 /// draft up before deciding.
@@ -236,7 +226,7 @@ mod tests {
         for tool in DRAFT_CHANGE_TOOLS {
             assert!(needs_draft(tool));
         }
-        assert!(!needs_draft("create_draft") && !needs_draft("send_email"));
+        assert!(!needs_draft("draft_create") && !needs_draft("outbox_send"));
     }
 
     #[test]

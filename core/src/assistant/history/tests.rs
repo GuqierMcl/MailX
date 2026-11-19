@@ -27,7 +27,7 @@ fn undo_data_is_never_written() {
     let record = ToolRecord {
         activity: ToolActivity {
             call_id: "c".into(),
-            name: "archive_emails".into(),
+            name: "mail_archive".into(),
             status: crate::assistant::ToolStatus::Done,
             summary: ToolActivitySummary::Changed {
                 count: 1,
@@ -49,7 +49,7 @@ fn undo_data_is_never_written() {
         "t",
     );
     assert!(!row.content.contains("secret-token"));
-    assert!(row.content.contains("archive_emails"));
+    assert!(row.content.contains("mail_archive"));
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn rows_round_trip_into_model_history() {
             text: "calling".into(),
             tool_calls: vec![ToolCallRequest {
                 id: "1".into(),
-                name: "read_email".into(),
+                name: "mail_read".into(),
                 arguments: json!({"emailId": "e"}),
             }],
             reasoning: None,
@@ -97,13 +97,13 @@ fn rows_round_trip_into_model_history() {
 fn text_offsets_count_utf16_units_like_the_interface() {
     let call = |id: &str| ToolCallRequest {
         id: id.into(),
-        name: "search_emails".into(),
+        name: "mail_search".into(),
         arguments: json!({}),
     };
     let activity = |id: &str| ToolRecord {
         activity: ToolActivity {
             call_id: id.into(),
-            name: "search_emails".into(),
+            name: "mail_search".into(),
             status: crate::assistant::ToolStatus::Done,
             summary: ToolActivitySummary::Found { count: 1 },
         },
@@ -212,7 +212,7 @@ fn reasoning_round_trips_and_old_rows_without_it_still_load() {
             text: "calling".into(),
             tool_calls: vec![ToolCallRequest {
                 id: "1".into(),
-                name: "read_email".into(),
+                name: "mail_read".into(),
                 arguments: json!({"emailId": "e"}),
             }],
             reasoning: Some(reasoning("想一想", vec![span(9, 1500, 0)])),
@@ -256,13 +256,13 @@ fn reasoning_round_trips_and_old_rows_without_it_still_load() {
 fn saved_turns_place_each_thinking_stretch_among_text_and_tools() {
     let call = |id: &str| ToolCallRequest {
         id: id.into(),
-        name: "search_emails".into(),
+        name: "mail_search".into(),
         arguments: json!({}),
     };
     let activity = |id: &str| ToolRecord {
         activity: ToolActivity {
             call_id: id.into(),
-            name: "search_emails".into(),
+            name: "mail_search".into(),
             status: crate::assistant::ToolStatus::Done,
             summary: ToolActivitySummary::Found { count: 1 },
         },

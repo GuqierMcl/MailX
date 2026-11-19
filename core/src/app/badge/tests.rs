@@ -72,11 +72,11 @@ async fn follows_the_sidebar_number_through_reading_archiving_and_deleting() {
     };
     assert_eq!(core.badge_count(&on).unwrap(), 4);
 
-    core.set_email_flags(&ids[..1], Some(true), None, MailChangeSource::User)
+    core.mail_flags(&ids[..1], Some(true), None, MailChangeSource::User)
         .unwrap();
     assert_eq!(core.badge_count(&on).unwrap(), 3);
 
-    core.archive_emails(&ids[1..2]).unwrap();
+    core.mail_archive(&ids[1..2]).unwrap();
     assert_eq!(core.badge_count(&on).unwrap(), 2);
 
     let deletion = core.delete_emails(&ids[2..3], true).unwrap();

@@ -714,7 +714,7 @@ fn folder_counts_update_only_the_current_identity() {
             .unwrap()
             .is_some()
     );
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -732,7 +732,7 @@ fn folder_counts_update_only_the_current_identity() {
             .unwrap()
             .is_none()
     );
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -1135,7 +1135,7 @@ fn list_only_refresh_keeps_known_counts_and_persists_unknown_until_status_succee
         .unwrap();
     drop(f.service);
     f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.role == FolderRole::Inbox)
@@ -1163,7 +1163,7 @@ fn list_only_refresh_keeps_known_counts_and_persists_unknown_until_status_succee
         .unwrap();
     drop(f.service);
     f.service = AccountService::open(f.directory.path(), f.secrets.clone()).unwrap();
-    let after = f.service.list_folders(&f.account.id).unwrap();
+    let after = f.service.mail_folders(&f.account.id).unwrap();
     assert!(
         after
             .iter()
@@ -1363,7 +1363,7 @@ fn noselect_hides_cached_mail_rejects_late_writes_and_excludes_coverage() {
         .store_message_batch(&child_target, &[record(1)], 1)
         .unwrap();
     f.service.finish_backfill(&child_target, false).unwrap();
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let container = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)
@@ -1856,7 +1856,7 @@ fn pending_changes_carry_everything_needed_to_address_the_message() {
 // ---- unread counts follow local read changes ----------------------------
 
 fn folder_counts(f: &Fixture) -> (u32, bool) {
-    let folders = f.service.list_folders(&f.account.id).unwrap();
+    let folders = f.service.mail_folders(&f.account.id).unwrap();
     let inbox = folders
         .iter()
         .find(|folder| folder.id == f.target.folder_id)

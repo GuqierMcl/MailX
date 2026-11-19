@@ -106,7 +106,7 @@ fn local_copy_lifecycle_follows_the_sent_list_rules() {
     assert!(!indexed(&f, &copy));
     assert_eq!(
         f.service
-            .get_outbox(&local_id(1))
+            .outbox_read(&local_id(1))
             .unwrap()
             .sender_email_address,
         "me@example.test"
@@ -120,7 +120,7 @@ fn local_copy_lifecycle_follows_the_sent_list_rules() {
     assert!(!indexed(&f, &other));
     assert_eq!(
         f.service
-            .get_outbox(&local_id(2))
+            .outbox_read(&local_id(2))
             .unwrap()
             .sender_email_address,
         "me@example.test"

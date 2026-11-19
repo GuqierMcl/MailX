@@ -1028,7 +1028,7 @@ mod tests {
         account: &Account,
         now: chrono::DateTime<chrono::Utc>,
     ) -> crate::send::types::OutboxItem {
-        let draft = service.create_draft(serde_json::from_value(json!({"accountId":account.id,"to":[{"name":null,"address":"to@example.org"}],"cc":[],"bcc":[],"subject":"test","bodyHtml":"hello","clientMutationId":new_id()})).unwrap(), "", crate::drafts::types::DraftOrigin::User).unwrap();
+        let draft = service.draft_create(serde_json::from_value(json!({"accountId":account.id,"to":[{"name":null,"address":"to@example.org"}],"cc":[],"bcc":[],"subject":"test","bodyHtml":"hello","clientMutationId":new_id()})).unwrap(), "", crate::drafts::types::DraftOrigin::User).unwrap();
         service
             .queue_send(
                 &crate::send::types::QueueSendRequest {
@@ -1105,7 +1105,7 @@ mod tests {
         service
             .record_oauth_send_blocked(&account.id, "authorizationRequired", start)
             .unwrap();
-        let blocked = service.get_outbox(&item.id).unwrap();
+        let blocked = service.outbox_read(&item.id).unwrap();
         assert_eq!(blocked.state, OutboxState::Queued);
         assert_eq!(blocked.attempts, 0);
         assert_eq!(blocked.error.unwrap().reason, "authorizationRequired");

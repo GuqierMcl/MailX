@@ -27,7 +27,7 @@ Choose a sender with mailx_list_accounts and report the returned senderEmailAddr
 Use mailx_get_conversation for a thread and mailx_suggest_contacts to find recipient candidates. \
 Create draft results include revision for subsequent edits or sends. Read individual bodies with mailx_read_email; \
 download true explicitly fetches an uncached body without marking it read. \
-Save received attachments with mailx_save_email_attachment, using attachment ids from read_email. \
+Save received attachments with mailx_save_email_attachment, using attachment ids from mail_read. \
 Exports are new local files in MailX's managed directory. Keep cursors with their original filters.";
 
 #[derive(Clone)]

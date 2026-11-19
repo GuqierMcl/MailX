@@ -6,13 +6,12 @@
 
 | 工具 | 输入 | 结果 / 动作 |
 | --- | --- | --- |
-| `send_email` | `action: send, draftId, expectedRevision, clientMutationId` | 冻结草稿并入队，返回发送任务 |
-| `send_email` | `action: retry, outboxId` | 唤醒已有 queued 任务，不生成第二项，不跳过撤销窗口 |
-| `list_outbox` | `accountId?, states?[], limit?, cursor?` | `items[]` 与可选 `nextCursor`；默认 20、最大 100 |
-| `get_outbox` | `outboxId` | 单个发送任务 |
-| `cancel_outbox` | `outboxId` | 仅取消 queued，返回更新后的任务 |
-| `add_draft_attachment` | `draftId, expectedRevision, filePath, fileName?` | 从本机绝对路径添加普通附件，返回新 revision 与附件元信息 |
-| `remove_draft_attachment` | `draftId, expectedRevision, attachmentId` | 移除普通草稿附件，返回新 revision 与 `removed` |
+| `outbox_send` | `action: send, draftId, expectedRevision, clientMutationId` | 冻结草稿并入队，返回发送任务 |
+| `outbox_send` | `action: retry, outboxId` | 唤醒已有 queued 任务，不生成第二项，不跳过撤销窗口 |
+| `outbox_read` | `outboxId?`；不带时 `accountId?, states?[], limit?, cursor?` | 带 `outboxId` 返回 `item`（单个发送任务）；不带返回 `items[]` 与可选 `nextCursor`，默认 20、最大 100 |
+| `outbox_cancel` | `outboxId` | 仅取消 queued，返回更新后的任务 |
+| `draft_attachments` | `action: add`：`draftId, expectedRevision, filePath, fileName?, inline?` | 从本机绝对路径添加附件，返回新 revision 与附件元信息；`inline: true` 把图片存为内嵌图片并返回 `contentId`，非图片报 `unsupportedImage` |
+| `draft_attachments` | `action: remove`：`draftId, expectedRevision, attachmentId` | 移除草稿附件（含内嵌图片行），返回新 revision 与 `removed` |
 
 对外名称带 `mailx_`。发送与重试共用一个工具，严格拒绝 action 不匹配的字段。发件箱结果只含 id、账号 / 草稿引用、`senderEmailAddress`、主题、最多三个收件人与总数、状态、尝试次数、时间、人工处理结果及稳定错误类别 / SMTP 代码；不返回服务器原文、路径、MIME 或凭证。
 
@@ -37,7 +36,7 @@
 
 附件工具读取 MailX 所在电脑上的普通文件，复制进现有 blob 存储；客户端自己的远程路径不可用。拒绝 URL、UNC、设备路径、目录与特殊文件；读取有界，沿用单封合计 20 MiB / 20 个附件限制。可选 fileName 只影响展示名，由核心清理。结果与错误不回传本机路径。
 
-来源由宿主主体决定为 mcp / ai，不可由输入伪造；桌面文件和转发附件仍为 user / forwarded。`read_draft.attachments` 补充稳定 id 和 origin，供后续移除。修改增加 revision，已锁定或用户正打开的草稿拒绝修改；本批只管理普通附件，内嵌图片沿用现有写信窗口流程。
+来源由宿主主体决定为 mcp / ai，不可由输入伪造；桌面文件和转发附件仍为 user / forwarded。`draft_read.attachments` 补充稳定 id 和 origin，供后续移除。修改增加 revision，已锁定或用户正打开的草稿拒绝修改；本批只管理普通附件，内嵌图片沿用现有写信窗口流程。
 
 ## 验证
 

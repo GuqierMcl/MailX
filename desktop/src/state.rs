@@ -87,6 +87,13 @@ impl DesktopState {
     }
 
     /// Account the shared tools use when a call names none.
+    /// The user's switch for letting the assistant read a mail's HTML.
+    pub(crate) fn read_mail_html(&self) -> bool {
+        self.settings_store()
+            .and_then(|store| store.get())
+            .is_ok_and(|snapshot| snapshot.settings.assistant.read_html)
+    }
+
     pub(crate) fn default_account_id(&self) -> String {
         self.settings_store()
             .and_then(|store| store.get())
@@ -497,7 +504,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let accounts = tauri::async_runtime::block_on(state.run(|core| core.list_accounts()))
+        let accounts = tauri::async_runtime::block_on(state.run(|core| core.accounts_list()))
             .expect("ready service should accept business calls");
         assert!(accounts.is_empty());
         logs.stop_and_wait_for_writer();

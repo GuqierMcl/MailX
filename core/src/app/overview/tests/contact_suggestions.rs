@@ -6,7 +6,7 @@ use super::*;
 use crate::mail::ContactSuggestion;
 
 fn suggest(f: &Fixture, query: &str) -> Vec<ContactSuggestion> {
-    f.service.suggest_contacts(query, None).unwrap()
+    f.service.mail_contacts(query, None).unwrap()
 }
 
 fn addresses(items: &[ContactSuggestion]) -> Vec<&str> {
@@ -198,11 +198,11 @@ fn ranks_people_written_to_first_then_weighted_count_recency_and_address() {
             "new@team.test",
         ]
     );
-    let all = f.service.suggest_contacts("team", Some(20)).unwrap();
+    let all = f.service.mail_contacts("team", Some(20)).unwrap();
     assert_eq!(all.len(), 9);
     assert_eq!(all[8].address, "old@team.test");
     assert_eq!(
-        addresses(&f.service.suggest_contacts("team", Some(2)).unwrap()),
+        addresses(&f.service.mail_contacts("team", Some(2)).unwrap()),
         ["both@team.test", "recent@team.test"]
     );
 }
@@ -268,16 +268,10 @@ fn validates_query_and_limit() {
         .collect();
     f.put_at(0, "INBOX", &many);
     assert_eq!(suggest(&f, "many").len(), 8);
-    assert_eq!(
-        f.service.suggest_contacts("many", Some(20)).unwrap().len(),
-        10
-    );
-    assert_eq!(
-        f.service.suggest_contacts("many", Some(1)).unwrap().len(),
-        1
-    );
+    assert_eq!(f.service.mail_contacts("many", Some(20)).unwrap().len(), 10);
+    assert_eq!(f.service.mail_contacts("many", Some(1)).unwrap().len(), 1);
     for limit in [0, 21, u32::MAX] {
-        let error = f.service.suggest_contacts("many", Some(limit)).unwrap_err();
+        let error = f.service.mail_contacts("many", Some(limit)).unwrap_err();
         assert_eq!(error.code, crate::ErrorCode::Validation);
         assert_eq!(error.field.as_deref(), Some("limit"));
     }
@@ -286,10 +280,7 @@ fn validates_query_and_limit() {
     }
     assert!(suggest(&f, &"a".repeat(320)).is_empty());
     assert!(suggest(&f, &format!("  {}  ", "a".repeat(320))).is_empty());
-    let error = f
-        .service
-        .suggest_contacts(&"a".repeat(321), None)
-        .unwrap_err();
+    let error = f.service.mail_contacts(&"a".repeat(321), None).unwrap_err();
     assert_eq!(error.code, crate::ErrorCode::Validation);
     assert_eq!(error.field.as_deref(), Some("query"));
     // LIKE wildcards and quotes are plain text.

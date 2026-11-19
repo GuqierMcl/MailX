@@ -230,7 +230,7 @@ impl Storage {
         self.with_attachments(draft)
     }
 
-    pub(crate) fn list_drafts(
+    pub(crate) fn draft_list(
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<DraftSummary>, AppError> {
@@ -337,7 +337,7 @@ impl Storage {
     }
 
     /// Compare-and-swap on `revision`, in one transaction.
-    pub(crate) fn update_draft(
+    pub(crate) fn draft_update(
         &mut self,
         id: &str,
         expected_revision: u32,
@@ -380,7 +380,7 @@ impl Storage {
         self.get_draft(id)
     }
 
-    pub(crate) fn delete_draft(&self, id: &str) -> Result<(), AppError> {
+    pub(crate) fn draft_delete(&self, id: &str) -> Result<(), AppError> {
         if self.db.execute("DELETE FROM drafts WHERE id = ?1", [id])? == 0 {
             return Err(AppError::new(ErrorCode::NotFound));
         }

@@ -188,7 +188,7 @@ fn one_way_notifications_with_the_same_subject_are_not_a_conversation() {
     put(&mut f, &records);
     for uid in 1..=4 {
         assert!(cid(&f, uid).is_none(), "{uid}");
-        let page = f.service.get_conversation(&local_id(&f, uid)).unwrap();
+        let page = f.service.mail_conversation(&local_id(&f, uid)).unwrap();
         assert_eq!(page.messages.len(), 1);
     }
 }
@@ -285,14 +285,14 @@ fn a_self_sent_message_in_sent_and_inbox_is_listed_once() {
         )],
     );
     for opened in [11, 12] {
-        let page = f.service.get_conversation(&local_id(&f, 13)).unwrap();
+        let page = f.service.mail_conversation(&local_id(&f, 13)).unwrap();
         assert_eq!(page.messages.len(), 2);
-        let page = f.service.get_conversation(&local_id(&f, opened)).unwrap();
+        let page = f.service.mail_conversation(&local_id(&f, opened)).unwrap();
         assert_eq!(page.messages.len(), 2, "{opened}");
         assert!(page.messages.iter().any(|m| m.id == local_id(&f, opened)));
     }
     // Not opened: the non-Sent copy wins.
-    let page = f.service.get_conversation(&local_id(&f, 13)).unwrap();
+    let page = f.service.mail_conversation(&local_id(&f, 13)).unwrap();
     assert!(page.messages.iter().any(|m| m.id == local_id(&f, 12)));
     assert!(page.messages.iter().all(|m| m.id != local_id(&f, 11)));
 }
@@ -426,7 +426,7 @@ fn get_conversation_returns_all_messages() {
             msg(4, "Unrelated", "2026-10-04T00:00:00.000Z", None, None),
         ],
     );
-    let page = f.service.get_conversation(&local_id(&f, 2)).unwrap();
+    let page = f.service.mail_conversation(&local_id(&f, 2)).unwrap();
     let ids: Vec<_> = page.messages.iter().map(|m| m.id.clone()).collect();
     assert_eq!(ids, [local_id(&f, 1), local_id(&f, 2), local_id(&f, 3)]);
     assert!(page.possibly_incomplete, "backfill has not finished");
@@ -441,13 +441,13 @@ fn get_conversation_degrades_gracefully_for_solo_message() {
     );
     assert!(cid(&f, 1).is_none());
     let id = local_id(&f, 1);
-    let page = f.service.get_conversation(&id).unwrap();
+    let page = f.service.mail_conversation(&id).unwrap();
     assert_eq!(page.messages.len(), 1);
     assert_eq!(page.messages[0].id, id);
     assert!(!page.possibly_incomplete);
     assert_eq!(
         f.service
-            .get_conversation(&Uuid::new_v4().to_string())
+            .mail_conversation(&Uuid::new_v4().to_string())
             .unwrap_err()
             .code,
         ErrorCode::NotFound
@@ -488,7 +488,7 @@ fn junk_and_trash_copies_are_left_out_of_a_conversation() {
     )
     .unwrap();
     // Both copies now sit in Trash: only the opened one remains.
-    let page = f.service.get_conversation(&local_id(&f, 2)).unwrap();
+    let page = f.service.mail_conversation(&local_id(&f, 2)).unwrap();
     assert_eq!(page.messages.len(), 1);
     assert_eq!(page.messages[0].id, local_id(&f, 2));
 }

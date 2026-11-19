@@ -33,6 +33,8 @@ pub enum ToolErrorCode {
     AlreadySending,
     AttachmentTooLarge,
     TooManyAttachments,
+    /// Not a still PNG, JPEG, GIF or WebP image.
+    UnsupportedImage,
     FileUnavailable,
     FileWriteFailed,
     /// Storage or the core is not ready; retrying later may work.
@@ -48,7 +50,7 @@ impl ToolErrorCode {
             Self::NotPermitted => "This action is not permitted.",
             Self::NotFound => "The requested item was not found.",
             Self::BodyNotCached => {
-                "The message body is not stored on this device. Call read_email with download: true to fetch it, then try again."
+                "The message body is not stored on this device. Call mail_read with download: true to fetch it, then try again."
             }
             Self::DownloadTimeout => "Downloading the message body took too long. Try again later.",
             Self::DownloadFailed => {
@@ -63,6 +65,7 @@ impl ToolErrorCode {
             Self::AlreadySending => "Sending has already started and cannot be canceled.",
             Self::AttachmentTooLarge => "The attachments exceed the allowed size.",
             Self::TooManyAttachments => "The draft has too many attachments.",
+            Self::UnsupportedImage => "Only still PNG, JPEG, GIF and WebP images can be used here.",
             Self::FileUnavailable => "The attachment file could not be read.",
             Self::FileWriteFailed => "The attachment could not be exported.",
             Self::Unavailable => "MailX is temporarily unavailable. Try again later.",
@@ -117,6 +120,7 @@ impl From<AppError> for ToolError {
             ErrorCode::AlreadySending => Self::new(ToolErrorCode::AlreadySending),
             ErrorCode::AttachmentTooLarge => Self::new(ToolErrorCode::AttachmentTooLarge),
             ErrorCode::TooManyAttachments => Self::new(ToolErrorCode::TooManyAttachments),
+            ErrorCode::UnsupportedImage => Self::new(ToolErrorCode::UnsupportedImage),
             ErrorCode::Validation | ErrorCode::IdempotencyConflict => {
                 match error.field.as_deref() {
                     Some(field) if field.len() <= 64 && field.chars().all(is_field_char) => {

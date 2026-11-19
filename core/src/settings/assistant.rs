@@ -60,6 +60,10 @@ pub struct AssistantSettings {
     /// Turning it off stops saving new turns; what is already saved stays
     /// until the user deletes it.
     pub save_history: bool,
+    /// Let the assistant read a mail's HTML structure (headings, lists,
+    /// tables, links) instead of its plain text only. Off by default: it sends
+    /// far more of the message, including markup other people wrote.
+    pub read_html: bool,
 }
 
 impl Default for AssistantSettings {
@@ -74,6 +78,7 @@ impl Default for AssistantSettings {
             send: AssistantSendMode::Confirm,
             instructions: String::new(),
             save_history: true,
+            read_html: false,
         }
     }
 }
@@ -159,7 +164,7 @@ pub(super) fn repair_assistant(value: &mut serde_json::Value) {
         return;
     };
     section.retain(|key, v| match key.as_str() {
-        "enabled" | "saveHistory" => v.is_boolean(),
+        "enabled" | "saveHistory" | "readHtml" => v.is_boolean(),
         "model" => v.is_null() || serde_json::from_value::<AiModelRef>(v.clone()).is_ok(),
         "consented" => v.is_null() || serde_json::from_value::<AiConsent>(v.clone()).is_ok(),
         "excludedAccounts" => v

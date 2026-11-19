@@ -649,7 +649,7 @@ fn execute(
             let mut addresses = Vec::new();
             if matches!(
                 call.name.as_str(),
-                "read_email" | "search_emails" | "get_conversation" | "suggest_contacts"
+                "mail_read" | "mail_search" | "mail_conversation" | "mail_contacts"
             ) {
                 collect_addresses(&output, &mut addresses);
             }
@@ -784,32 +784,36 @@ fn summarize(
     trusted: &TrustedOutput,
 ) -> ToolActivitySummary {
     match name {
-        "search_emails" | "get_conversation" => ToolActivitySummary::Found {
+        "mail_search" | "mail_conversation" => ToolActivitySummary::Found {
             count: count(output.get("emails")),
         },
-        "suggest_contacts" => ToolActivitySummary::Found {
+        "mail_contacts" => ToolActivitySummary::Found {
             count: count(output.get("contacts")),
         },
-        "list_accounts" => ToolActivitySummary::Found {
+        "accounts_list" => ToolActivitySummary::Found {
             count: count(output.get("accounts")),
         },
-        "list_folders" => ToolActivitySummary::Found {
+        "mail_folders" => ToolActivitySummary::Found {
             count: count(output.get("folders")),
         },
-        "list_drafts" => ToolActivitySummary::Found {
+        "draft_list" => ToolActivitySummary::Found {
             count: count(output.get("drafts")),
         },
-        "list_outbox" => ToolActivitySummary::Found {
+        // A single task reads like its own result; a page counts items.
+        "outbox_read" if output.get("item").is_some() => ToolActivitySummary::Outbox {
+            outbox_id: text(output.get("item").unwrap_or(&Value::Null), "id", 64),
+        },
+        "outbox_read" => ToolActivitySummary::Found {
             count: count(output.get("items")),
         },
-        "read_email" => ToolActivitySummary::Read {
+        "mail_read" => ToolActivitySummary::Read {
             email_ids: input
                 .get("emailId")
                 .and_then(Value::as_str)
                 .map(|id| vec![id.chars().take(64).collect()])
                 .unwrap_or_default(),
         },
-        "set_email_flags" => {
+        "mail_flags" => {
             let changed: Vec<String> = output
                 .get("results")
                 .and_then(Value::as_array)
@@ -838,7 +842,7 @@ fn summarize(
                 undo: (!restore.is_empty()).then_some(ToolUndo::Flags { restore }),
             }
         }
-        "archive_emails" | "unarchive_emails" => ToolActivitySummary::Changed {
+        "mail_archive" => ToolActivitySummary::Changed {
             count: output
                 .get("changedCount")
                 .and_then(Value::as_u64)
@@ -849,15 +853,15 @@ fn summarize(
                 .clone()
                 .map(|token| ToolUndo::Archive { token }),
         },
-        "create_draft" | "create_reply_draft" => ToolActivitySummary::Draft {
+        "draft_create" | "draft_reply" => ToolActivitySummary::Draft {
             draft_id: text(output, "draftId", 64),
             subject: text(output, "subject", 200),
         },
-        "update_draft" => ToolActivitySummary::Draft {
+        "draft_update" => ToolActivitySummary::Draft {
             draft_id: text(output, "draftId", 64),
             subject: text(output, "subject", 200),
         },
-        "send_email" | "get_outbox" | "cancel_outbox" => ToolActivitySummary::Outbox {
+        "outbox_send" | "outbox_cancel" => ToolActivitySummary::Outbox {
             outbox_id: text(output, "id", 64),
         },
         _ => ToolActivitySummary::Done,
@@ -961,14 +965,14 @@ mod tests {
     #[test]
     fn summaries_are_structured_and_bounded() {
         let found = summarize(
-            "search_emails",
+            "mail_search",
             &json!({}),
             &json!({"emails": [{"id": "a"}, {"id": "b"}]}),
             &TrustedOutput::default(),
         );
         assert_eq!(found, ToolActivitySummary::Found { count: 2 });
         let changed = summarize(
-            "archive_emails",
+            "mail_archive",
             &json!({"emailIds": ["a", "b"]}),
             &json!({"processedCount": 2, "changedCount": 1}),
             &TrustedOutput::default(),
@@ -982,7 +986,7 @@ mod tests {
             }
         );
         let flags = summarize(
-            "set_email_flags",
+            "mail_flags",
             &json!({"emailIds": ["a", "b", "c"], "isRead": true, "isStarred": true}),
             &json!({"results": [
                 {"emailId": "a", "isRead": {"status": "queued"}},
@@ -1020,7 +1024,7 @@ mod tests {
             }
         );
         let draft = summarize(
-            "create_draft",
+            "draft_create",
             &json!({}),
             &json!({"draftId": "d1", "subject": "Hi", "accountId": "x"}),
             &TrustedOutput::default(),
@@ -1034,7 +1038,7 @@ mod tests {
         );
         assert_eq!(
             summarize(
-                "refresh_sync",
+                "accounts_refresh_sync",
                 &json!({}),
                 &json!({"accepted": true}),
                 &TrustedOutput::default()

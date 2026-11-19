@@ -123,7 +123,7 @@ export function ToolRow({ tool }: { tool: RunTool }) {
   useTranslation()
   const [open, setOpen] = useState(false)
   const { summary } = tool
-  if (tool.status === 'done' && summary.type === 'draft' && tool.name !== 'delete_draft') return <DraftCard draftId={summary.draftId} subject={summary.subject} />
+  if (tool.status === 'done' && summary.type === 'draft' && tool.name !== 'draft_delete') return <DraftCard draftId={summary.draftId} subject={summary.subject} />
   const ids = tool.status === 'done' ? toolEmailIds(tool) : []
   const undo = tool.status === 'done' && summary.type === 'changed' ? summary.undo : null
   const label = toolLabel(tool)

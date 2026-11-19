@@ -10,7 +10,7 @@ const snapshot = (over: Partial<RunSnapshot> = {}): RunSnapshot => ({
 })
 const event = (seq: number, kind: AssistantEventKind, runId = 'r1'): AssistantEvent => ({ runId, seq, kind })
 const SEND: ConfirmationRequest = {
-  action: 'send', tool: 'send_email',
+  action: 'send', tool: 'outbox_send',
   details: { type: 'send', accountName: '工作', accountAddress: 'me@example.com', to: [{ name: null, address: 'a@example.com' }], cc: [], bcc: [], subject: '你好', bodyPreview: '正文', attachments: [], warnings: [] },
 }
 
@@ -106,7 +106,7 @@ describe('useAssistantChat', () => {
     await act(async () => { await result.current.send('发出去') })
     await emit(
       event(2, { type: 'text', delta: '好的。' }),
-      event(3, { type: 'tool', callId: 'k1', name: 'send_email', status: 'running', summary: { type: 'pending' } }),
+      event(3, { type: 'tool', callId: 'k1', name: 'outbox_send', status: 'running', summary: { type: 'pending' } }),
       event(4, { type: 'state', state: 'awaitingConfirmation' }),
       event(5, { type: 'confirm', requestId: 'q1', callId: 'k1', request: SEND }),
     )
@@ -186,9 +186,9 @@ describe('turnFragments', () => {
     await act(async () => { await result.current.send('x') })
     await emit(
       event(2, { type: 'text', delta: '先看看。' }),
-      event(3, { type: 'tool', callId: 'k1', name: 'search_emails', status: 'done', summary: { type: 'found', count: 2 } }),
+      event(3, { type: 'tool', callId: 'k1', name: 'mail_search', status: 'done', summary: { type: 'found', count: 2 } }),
       event(4, { type: 'text', delta: '找到了。' }),
-      event(5, { type: 'tool', callId: 'k2', name: 'send_email', status: 'running', summary: { type: 'pending' } }),
+      event(5, { type: 'tool', callId: 'k2', name: 'outbox_send', status: 'running', summary: { type: 'pending' } }),
       event(6, { type: 'state', state: 'awaitingConfirmation' }),
       event(7, { type: 'confirm', requestId: 'q1', callId: 'k2', request: SEND }),
     )

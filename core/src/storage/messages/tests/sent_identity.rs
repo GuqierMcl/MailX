@@ -50,7 +50,7 @@ fn awaiting(f: &Fixture, n: u32, state: &str) {
 
 fn matched(f: &Fixture, n: u32) -> bool {
     f.service
-        .get_outbox(&local_id(n))
+        .outbox_read(&local_id(n))
         .unwrap()
         .server_copy_message_id
         .is_some()
@@ -429,7 +429,7 @@ fn reopening_reconciles_accepted_copies_against_headers_cached_by_older_builds()
         assert_ne!(page.items[0].id, local);
         assert!(
             service
-                .get_outbox(&local_id(1))
+                .outbox_read(&local_id(1))
                 .unwrap()
                 .server_copy_message_id
                 .is_some()

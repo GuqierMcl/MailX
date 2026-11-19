@@ -409,7 +409,8 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "aiDrafts": "direct",
                     "send": "confirm",
                     "instructions": "",
-                    "saveHistory": true
+                    "saveHistory": true,
+                    "readHtml": false
                 },
                 "translation": {
                     "provider": "microsoftFree",

@@ -49,7 +49,7 @@ async fn flags_report_each_field_and_partial_failure_with_one_local_event() {
     f.db.execute("UPDATE folders SET can_flag = 0", []).unwrap();
     let results = f
         .core
-        .set_email_flags(
+        .mail_flags(
             &[
                 f.ids[0].clone(),
                 uuid::Uuid::new_v4().to_string(),
@@ -97,7 +97,7 @@ async fn flags_validate_the_batch_and_do_not_announce_noops() {
     let f = fixture();
     assert_eq!(
         f.core
-            .set_email_flags(&f.ids, None, None, MailChangeSource::Ai)
+            .mail_flags(&f.ids, None, None, MailChangeSource::Ai)
             .unwrap_err()
             .code,
         ErrorCode::Validation
@@ -135,7 +135,7 @@ async fn archive_refuses_the_entire_batch_without_an_event() {
 #[tokio::test]
 async fn archive_undo_restores_only_new_changes_and_is_single_use() {
     let f = fixture();
-    f.core.archive_emails(&[f.ids[0].clone()]).unwrap();
+    f.core.mail_archive(&[f.ids[0].clone()]).unwrap();
     f.events.lock().unwrap().clear();
     let result = f
         .core
@@ -194,7 +194,7 @@ async fn later_user_noop_invalidates_an_agent_undo() {
         .unwrap();
     // The user expressly chooses this state after the agent. Their choice wins,
     // even though it happens to require no new database write.
-    f.core.archive_emails(&[f.ids[0].clone()]).unwrap();
+    f.core.mail_archive(&[f.ids[0].clone()]).unwrap();
     assert_eq!(
         f.core
             .undo_archive(&result.undo_token.unwrap())
@@ -209,12 +209,12 @@ async fn later_user_noop_invalidates_an_agent_undo() {
 #[tokio::test]
 async fn unarchive_undo_does_not_overwrite_a_later_round_trip() {
     let f = fixture();
-    f.core.archive_emails(&f.ids).unwrap();
+    f.core.mail_archive(&f.ids).unwrap();
     let result = f
         .core
         .change_email_archive(&f.ids, false, MailChangeSource::Mcp)
         .unwrap();
-    f.core.archive_emails(&[f.ids[0].clone()]).unwrap();
+    f.core.mail_archive(&[f.ids[0].clone()]).unwrap();
     f.core.unarchive_emails(&[f.ids[0].clone()]).unwrap();
     assert_eq!(
         f.core
@@ -329,7 +329,7 @@ async fn partial_archive_reports_skips_and_its_undo_covers_only_processed_mail()
     assert_eq!(result.processed_count, 2);
     assert_eq!(result.changed_count, 2);
     assert!(archived(&f, 0) && archived(&f, 1) && !archived(&f, 2));
-    f.core.archive_emails(&[f.ids[2].clone()]).unwrap();
+    f.core.mail_archive(&[f.ids[2].clone()]).unwrap();
     f.core
         .undo_archive(result.undo_token.as_deref().unwrap())
         .unwrap();

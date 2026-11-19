@@ -259,17 +259,17 @@ impl AccountService {
     }
 
     /// Folders last synced from the account's current server.
-    pub fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
+    pub fn mail_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
         super::validate_uuid(account_id, "accountId")?;
         self.storage.load(account_id)?;
-        self.storage.list_folders(account_id)
+        self.storage.mail_folders(account_id)
     }
 
     /// The cached folders of every account, read from local data only.
     pub(crate) fn all_folders(&self) -> Result<Vec<Folder>, AppError> {
         let mut folders = Vec::new();
         for account in self.storage.account_identities()? {
-            folders.extend(self.storage.list_folders(&account.id)?);
+            folders.extend(self.storage.mail_folders(&account.id)?);
         }
         Ok(folders)
     }
@@ -495,7 +495,7 @@ pub(crate) mod tests {
     fn folders_keep_their_ids_and_follow_the_server_listing() {
         let (_directory, mut service, account) = setup(json!({"kind":"direct"}));
         let source = account.mailbox_source_id.clone();
-        assert!(service.list_folders(&account.id).unwrap().is_empty());
+        assert!(service.mail_folders(&account.id).unwrap().is_empty());
 
         let first = [
             record("INBOX", None, FolderRole::Inbox, 3),
@@ -503,7 +503,7 @@ pub(crate) mod tests {
             record("Projects/MailX", Some("Projects"), FolderRole::Other, 1),
         ];
         assert!(service.store_folders(&account.id, &source, &first).unwrap());
-        let folders = service.list_folders(&account.id).unwrap();
+        let folders = service.mail_folders(&account.id).unwrap();
         let by_name = |folders: &[Folder], name: &str| {
             folders
                 .iter()
@@ -531,7 +531,7 @@ pub(crate) mod tests {
                 .store_folders(&account.id, &source, &second)
                 .unwrap()
         );
-        let folders = service.list_folders(&account.id).unwrap();
+        let folders = service.mail_folders(&account.id).unwrap();
         let mut names: Vec<_> = folders.iter().map(|folder| folder.name.as_str()).collect();
         names.sort();
         assert_eq!(names, ["Archive", "INBOX"]);
@@ -563,7 +563,7 @@ pub(crate) mod tests {
         });
         assert_ne!(moved.mailbox_source_id, old_source);
         assert!(
-            service.list_folders(&account.id).unwrap().is_empty(),
+            service.mail_folders(&account.id).unwrap().is_empty(),
             "old server folders are hidden"
         );
         assert!(
@@ -576,6 +576,6 @@ pub(crate) mod tests {
                 .unwrap(),
             "a late result from the old server is ignored"
         );
-        assert!(service.list_folders(&account.id).unwrap().is_empty());
+        assert!(service.mail_folders(&account.id).unwrap().is_empty());
     }
 }

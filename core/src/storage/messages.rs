@@ -628,7 +628,7 @@ impl Storage {
     /// oldest first. An email without a conversation (or a local Sent copy,
     /// which carries no threading data) is returned alone. Junk and Trash
     /// copies are left out unless they are the opened email itself.
-    pub(crate) fn get_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
+    pub(crate) fn mail_conversation(&self, email_id: &str) -> Result<ConversationPage, AppError> {
         if email_id.starts_with(LOCAL_SENT_PREFIX) {
             return Ok(ConversationPage {
                 messages: vec![self.get_email(email_id)?.summary],

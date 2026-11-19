@@ -458,7 +458,7 @@ pub(crate) async fn fetch_folders(
     login: &ImapLogin,
 ) -> Result<Vec<RemoteFolder>, ImapError> {
     let mut session = open_session(route, login).await?;
-    let folders = session.list_folders().await;
+    let folders = session.mail_folders().await;
     let _ = session.logout().await;
     folders
 }
@@ -696,7 +696,7 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) async fn list_folders(&mut self) -> Result<Vec<RemoteFolder>, ImapError> {
+    pub(crate) async fn mail_folders(&mut self) -> Result<Vec<RemoteFolder>, ImapError> {
         // async-imap 0.12's LIST stream drops tagged NO/BAD. Wait for an
         // explicit OK ourselves before allowing folder deletion reconciliation.
         let folders = self
@@ -1726,7 +1726,7 @@ mod tests {
         ));
         let result = async {
             let mut session = test_session(Box::new(client), &login()).await?;
-            let folders = session.list_folders().await?;
+            let folders = session.mail_folders().await?;
             let _ = session.logout().await;
             Ok(folders)
         }
@@ -2548,7 +2548,7 @@ mod tests {
             ("LOGOUT".into(), "{tag} OK\r\n".into()),
         ])
         .await;
-        let listed = session.list_folders().await.unwrap();
+        let listed = session.mail_folders().await.unwrap();
         assert_eq!(listed[0].name, "Quoted \"team\"\\box");
         assert_eq!(listed[1].name, literal_name);
         assert_eq!(session.status(&listed[0].name).await.unwrap().messages, 1);

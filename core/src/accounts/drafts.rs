@@ -102,7 +102,7 @@ impl AccountService {
 
     /// `default_account_id` is the `compose.defaultAccountId` setting; the
     /// settings store is not part of this service, so the host passes it in.
-    pub fn create_draft(
+    pub fn draft_create(
         &mut self,
         request: CreateDraftRequest,
         default_account_id: &str,
@@ -192,7 +192,7 @@ impl AccountService {
         locale: crate::SupportedLocale,
         origin: DraftOrigin,
         intro_html: Option<&str>,
-    ) -> Result<Draft, AppError> {
+    ) -> Result<(Draft, bool), AppError> {
         let SourceMessage {
             detail,
             account_address,
@@ -247,7 +247,7 @@ impl AccountService {
             references,
         } = compose::compose(
             detail,
-            &original,
+            &original.html,
             request.kind,
             account_address,
             headers,
@@ -265,7 +265,7 @@ impl AccountService {
         // The lock was released while the raw MIME was read: an identical
         // request may have created the draft meanwhile.
         if let Some(draft) = self.replay(&request.client_mutation_id, &canonical)? {
-            return Ok(draft);
+            return Ok((draft, false));
         }
         // The message may have been removed while the raw MIME was read.
         self.storage.get_email(&request.email_id)?;
@@ -284,7 +284,7 @@ impl AccountService {
                 origin: AttachmentOrigin::Forwarded,
             })
             .collect();
-        self.storage.insert_draft_with(
+        let draft = self.storage.insert_draft_with(
             &NewDraft {
                 id: &id,
                 account_id: &detail.summary.account_id,
@@ -301,7 +301,8 @@ impl AccountService {
                 canonical: &canonical,
             },
             &attachments,
-        )
+        )?;
+        Ok((draft, original.truncated))
     }
 
     pub fn get_draft(&self, id: &str) -> Result<Draft, AppError> {
@@ -309,11 +310,11 @@ impl AccountService {
         self.storage.get_draft(id)
     }
 
-    pub fn list_drafts(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
+    pub fn draft_list(&self, account_id: Option<&str>) -> Result<Vec<DraftSummary>, AppError> {
         if let Some(account_id) = account_id {
             validate_uuid(account_id, "accountId")?;
         }
-        self.storage.list_drafts(account_id)
+        self.storage.draft_list(account_id)
     }
 
     pub(crate) fn list_drafts_page(
@@ -328,7 +329,7 @@ impl AccountService {
             .list_drafts_page(account_ids, origin, query, after, limit)
     }
 
-    pub fn update_draft(&mut self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
+    pub fn draft_update(&mut self, request: UpdateDraftRequest) -> Result<Draft, AppError> {
         validate_uuid(&request.id, "draftId")?;
         let current = self.storage.get_draft(&request.id)?;
         let unchanged_body = request.body_html == current.body_html;
@@ -353,7 +354,7 @@ impl AccountService {
         if self.storage.draft_locked(&request.id)? {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
-        self.storage.update_draft(
+        self.storage.draft_update(
             &request.id,
             request.expected_revision,
             request.account_id.as_deref(),
@@ -373,12 +374,12 @@ impl AccountService {
         self.storage.draft_locked(id)
     }
 
-    pub fn delete_draft(&mut self, id: &str) -> Result<(), AppError> {
+    pub fn draft_delete(&mut self, id: &str) -> Result<(), AppError> {
         validate_uuid(id, "draftId")?;
         if self.storage.draft_locked(id)? {
             return Err(AppError::new(ErrorCode::DraftLocked));
         }
-        self.storage.delete_draft(id)
+        self.storage.draft_delete(id)
     }
 }
 

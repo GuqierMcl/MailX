@@ -349,7 +349,7 @@ impl Assistant {
 
     /// A saved conversation as turns the interface can show. `NotFound` for
     /// an unknown id.
-    pub async fn get_conversation(&self, id: &str) -> Result<ConversationDetail, AppError> {
+    pub async fn mail_conversation(&self, id: &str) -> Result<ConversationDetail, AppError> {
         let owned = id.to_owned();
         let stored = self
             .inner

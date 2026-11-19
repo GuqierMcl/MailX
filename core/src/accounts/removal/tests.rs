@@ -101,7 +101,7 @@ fn count(service: &AccountService, table: &str) -> u32 {
 }
 fn queue(service: &mut AccountService, account: &str) -> (String, OutboxItem) {
     let draft = service
-        .create_draft(
+        .draft_create(
             serde_json::from_value(json!({
                 "accountId": account, "to": [{"name":null,"address":"recipient@example.test"}],
                 "cc": [], "bcc": [], "subject":"Synthetic", "bodyHtml":"<p>Local only</p>",
@@ -238,7 +238,7 @@ fn removal_cascades_every_source_and_queue_state_without_touching_another_accoun
     assert_eq!(count(&f.service, "mail_connections"), 2);
     assert_eq!(f.service.get(&other.id).unwrap(), other);
     assert!(f.service.get_draft(&other_draft).is_ok());
-    assert!(f.service.get_outbox(&other_item.id).is_ok());
+    assert!(f.service.outbox_read(&other_item.id).is_ok());
     assert!(
         f.service
             .storage

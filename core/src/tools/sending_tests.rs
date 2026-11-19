@@ -48,7 +48,7 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn draft(&self, account: &str) -> Draft {
-        self.core.create_draft(serde_json::from_value(json!({
+        self.core.draft_create(serde_json::from_value(json!({
             "accountId": account, "to": [{"address":"recipient@example.test"}],
             "cc": [], "bcc": [], "subject":"Synthetic send", "bodyHtml":"<p>Frozen body</p>",
             "clientMutationId": id()
@@ -71,7 +71,7 @@ impl Fixture {
 
     fn queue(&self, tools: &Tools, ctx: &RequestContext, draft: &Draft) -> (Value, Value) {
         let input = send_input(draft);
-        let result = tools.call(ctx, "send_email", input.clone()).unwrap();
+        let result = tools.call(ctx, "outbox_send", input.clone()).unwrap();
         (input, result)
     }
 }
@@ -107,14 +107,14 @@ async fn both_audiences_send_frozen_drafts_and_replay_without_duplicate_items() 
         let (input, result) = f.queue(&tools, &ctx, &draft);
         assert_eq!(result["state"], "queued");
         assert_eq!(result["draftId"], draft.id);
-        let queued = f.core.get_outbox(result["id"].as_str().unwrap()).unwrap();
+        let queued = f.core.outbox_read(result["id"].as_str().unwrap()).unwrap();
         let not_before = chrono::DateTime::parse_from_rfc3339(&queued.not_before).unwrap();
         let created = chrono::DateTime::parse_from_rfc3339(&queued.created_at).unwrap();
         assert_eq!((not_before - created).num_seconds(), 30);
         let bytes = f.core.outbox_mime_for_tests(&queued.id);
         let mime = String::from_utf8_lossy(&bytes);
         assert!(mime.contains("Frozen body"));
-        let replay = tools.call(&ctx, "send_email", input).unwrap();
+        let replay = tools.call(&ctx, "outbox_send", input).unwrap();
         assert_eq!(replay["id"], result["id"]);
         assert_eq!(f.core.list_outbox(None, true).unwrap().len(), 1);
         let events = f.events.lock().unwrap();
@@ -156,17 +156,22 @@ async fn every_outbox_result_keeps_the_frozen_sender_after_an_account_change() {
         )
         .unwrap();
         for (tool, input) in [
-            ("send_email", input),
-            ("get_outbox", json!({"outboxId":outbox_id})),
-            ("send_email", json!({"action":"retry","outboxId":outbox_id})),
+            ("outbox_send", input),
+            ("outbox_read", json!({"outboxId":outbox_id})),
+            (
+                "outbox_send",
+                json!({"action":"retry","outboxId":outbox_id}),
+            ),
         ] {
             let result = tools.call(&ctx, tool, input).unwrap();
-            assert_eq!(result["senderEmailAddress"], sender);
+            // A single task comes back under `item`; outbox_send returns it as is.
+            let sender_seen = result.get("item").unwrap_or(&result)["senderEmailAddress"].clone();
+            assert_eq!(sender_seen, sender);
         }
-        let listed = tools.call(&ctx, "list_outbox", json!({})).unwrap();
+        let listed = tools.call(&ctx, "outbox_read", json!({})).unwrap();
         assert_eq!(listed["items"][0]["senderEmailAddress"], sender);
         let canceled = tools
-            .call(&ctx, "cancel_outbox", json!({"outboxId":outbox_id}))
+            .call(&ctx, "outbox_cancel", json!({"outboxId":outbox_id}))
             .unwrap();
         assert_eq!(canceled["senderEmailAddress"], sender);
     }
@@ -191,27 +196,27 @@ async fn send_validates_exact_action_fields_revision_and_mutation() {
         json!({"action":"retry","outboxId":id(),"caller":"Composer"}),
     ] {
         assert_eq!(
-            error(&tools, ctx, "send_email", input),
+            error(&tools, ctx, "outbox_send", input),
             ToolErrorCode::InvalidInput
         );
     }
     let mut mixed = send_input(&draft);
     mixed["outboxId"] = json!(id());
     assert_eq!(
-        error(&tools, ctx, "send_email", mixed),
+        error(&tools, ctx, "outbox_send", mixed),
         ToolErrorCode::InvalidInput
     );
     let mut stale = send_input(&draft);
     stale["expectedRevision"] = json!(draft.revision + 1);
     assert_eq!(
-        error(&tools, ctx, "send_email", stale),
+        error(&tools, ctx, "outbox_send", stale),
         ToolErrorCode::Conflict
     );
     assert!(f.core.list_outbox(None, true).unwrap().is_empty());
     let (mut input, _) = f.queue(&tools, ctx, &draft);
     input["expectedRevision"] = json!(draft.revision + 1);
     assert_eq!(
-        error(&tools, ctx, "send_email", input),
+        error(&tools, ctx, "outbox_send", input),
         ToolErrorCode::InvalidInput
     );
     assert_eq!(f.core.list_outbox(None, true).unwrap().len(), 1);
@@ -232,7 +237,7 @@ async fn replay_survives_draft_deletion_and_never_leaks_another_accounts_mutatio
     .unwrap();
     f.db.execute("DELETE FROM drafts WHERE id=?1", [&draft.id])
         .unwrap();
-    let replay = tools.call(ctx, "send_email", input.clone()).unwrap();
+    let replay = tools.call(ctx, "outbox_send", input.clone()).unwrap();
     assert_eq!(replay["id"], result["id"]);
     assert_eq!(replay["state"], "accepted");
     assert_eq!(replay["senderEmailAddress"], result["senderEmailAddress"]);
@@ -240,13 +245,13 @@ async fn replay_survives_draft_deletion_and_never_leaks_another_accounts_mutatio
     let mut restricted = ctx.clone();
     restricted.grant.accounts = AccountScope::Only(vec![other.clone()]);
     assert_eq!(
-        error(&tools, &restricted, "send_email", input.clone()),
+        error(&tools, &restricted, "outbox_send", input.clone()),
         ToolErrorCode::NotFound
     );
     let mut clash = input;
     clash["draftId"] = json!(f.draft(&other).id);
     assert_eq!(
-        error(&tools, &restricted, "send_email", clash),
+        error(&tools, &restricted, "outbox_send", clash),
         ToolErrorCode::NotFound
     );
     assert_eq!(f.core.list_outbox(None, true).unwrap().len(), 1);
@@ -260,19 +265,19 @@ async fn sending_checks_account_scope_open_editors_and_current_undo_setting() {
     let mut outside = ctx.clone();
     outside.grant.accounts = AccountScope::Only(vec![f.other_account()]);
     assert_eq!(
-        error(&f.tools(), &outside, "send_email", send_input(&draft)),
+        error(&f.tools(), &outside, "outbox_send", send_input(&draft)),
         ToolErrorCode::NotFound
     );
     let open = f.tools().with_draft_open_check(|_| true);
     assert_eq!(
-        error(&open, ctx, "send_email", send_input(&draft)),
+        error(&open, ctx, "outbox_send", send_input(&draft)),
         ToolErrorCode::DraftOpen
     );
     let broken = f
         .tools()
         .with_undo_send_seconds(|| Err(ToolError::new(ToolErrorCode::Unavailable)));
     assert_eq!(
-        error(&broken, ctx, "send_email", send_input(&draft)),
+        error(&broken, ctx, "outbox_send", send_input(&draft)),
         ToolErrorCode::Unavailable
     );
     assert!(f.core.list_outbox(None, true).unwrap().is_empty());
@@ -307,7 +312,7 @@ async fn retry_and_cancel_obey_queue_state_scope_and_emit_changes() {
     .unwrap();
     f.events.lock().unwrap().clear();
     let retry = tools
-        .call(ctx, "send_email", json!({"action":"retry","outboxId":id}))
+        .call(ctx, "outbox_send", json!({"action":"retry","outboxId":id}))
         .unwrap();
     assert_eq!(retry["id"], id);
     assert_eq!(retry["notBefore"], item["notBefore"]);
@@ -322,9 +327,9 @@ async fn retry_and_cancel_obey_queue_state_scope_and_emit_changes() {
     let mut outside = ctx.clone();
     outside.grant.accounts = AccountScope::Only(vec![f.other_account()]);
     for (tool, input) in [
-        ("get_outbox", json!({"outboxId":id})),
-        ("cancel_outbox", json!({"outboxId":id})),
-        ("send_email", json!({"action":"retry","outboxId":id})),
+        ("outbox_read", json!({"outboxId":id})),
+        ("outbox_cancel", json!({"outboxId":id})),
+        ("outbox_send", json!({"action":"retry","outboxId":id})),
     ] {
         assert_eq!(
             error(&tools, &outside, tool, input),
@@ -343,20 +348,20 @@ async fn retry_and_cancel_obey_queue_state_scope_and_emit_changes() {
             error(
                 &tools,
                 ctx,
-                "send_email",
+                "outbox_send",
                 json!({"action":"retry","outboxId":id})
             ),
             expected
         );
         assert_eq!(
-            error(&tools, ctx, "cancel_outbox", json!({"outboxId":id})),
+            error(&tools, ctx, "outbox_cancel", json!({"outboxId":id})),
             expected
         );
     }
     f.db.execute("UPDATE outbox SET state='queued' WHERE id=?1", [id])
         .unwrap();
     let canceled = tools
-        .call(ctx, "cancel_outbox", json!({"outboxId":id}))
+        .call(ctx, "outbox_cancel", json!({"outboxId":id}))
         .unwrap();
     assert_eq!(canceled["state"], "canceled");
     assert!(!f.core.draft_locked(&draft.id).unwrap());
@@ -389,7 +394,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
     }
     expected.reverse();
     let first = tools
-        .call(&restricted, "list_outbox", json!({"limit":2}))
+        .call(&restricted, "outbox_read", json!({"limit":2}))
         .unwrap();
     let got: Vec<_> = first["items"]
         .as_array()
@@ -402,7 +407,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
     let next = tools
         .call(
             &restricted,
-            "list_outbox",
+            "outbox_read",
             json!({"limit":2,"cursor":cursor}),
         )
         .unwrap();
@@ -412,7 +417,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
         error(
             &tools,
             ctx,
-            "list_outbox",
+            "outbox_read",
             json!({"limit":2,"cursor":cursor})
         ),
         ToolErrorCode::InvalidInput
@@ -421,7 +426,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
         error(
             &tools,
             &restricted,
-            "list_outbox",
+            "outbox_read",
             json!({"states":["accepted"],"cursor":cursor})
         ),
         ToolErrorCode::InvalidInput
@@ -434,12 +439,12 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
     let accepted = tools
         .call(
             &restricted,
-            "list_outbox",
+            "outbox_read",
             json!({"states":["accepted"],"limit":1}),
         )
         .unwrap();
     assert_eq!(accepted["items"][0]["id"], expected[0]);
-    let active = tools.call(&restricted, "list_outbox", json!({})).unwrap();
+    let active = tools.call(&restricted, "outbox_read", json!({})).unwrap();
     assert_eq!(active["items"].as_array().unwrap().len(), 2);
     for bad in [
         json!({"limit":0}),
@@ -449,7 +454,7 @@ async fn outbox_pages_filter_scope_and_state_before_limit_and_bind_cursors() {
         json!({"cursor":"bad"}),
     ] {
         assert_eq!(
-            error(&tools, ctx, "list_outbox", bad),
+            error(&tools, ctx, "outbox_read", bad),
             ToolErrorCode::InvalidInput
         );
     }
@@ -517,7 +522,7 @@ async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
     let (_, item) = f.queue(&tools, ctx, &f.draft(&f.account));
     let input = json!({"accountId":f.account});
     assert_eq!(
-        tools.call(ctx, "list_outbox", input.clone()).unwrap()["items"][0]["id"],
+        tools.call(ctx, "outbox_read", input.clone()).unwrap()["items"][0]["id"],
         item["id"]
     );
     f.db.execute(
@@ -537,7 +542,7 @@ async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
     ] {
         *secrets.failure.lock().unwrap() = Some(failure);
         assert_eq!(f.core.get_account(&f.account).unwrap_err().code, code);
-        let accounts = tools.call(ctx, "list_accounts", json!({})).unwrap();
+        let accounts = tools.call(ctx, "accounts_list", json!({})).unwrap();
         assert_eq!(accounts["accounts"].as_array().unwrap().len(), 1);
         assert_eq!(accounts["accounts"][0]["id"], f.account);
         assert_eq!(
@@ -548,7 +553,7 @@ async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
         let draft = tools
             .call(
                 ctx,
-                "create_draft",
+                "draft_create",
                 json!({
                     "to": [{"address":"recipient@example.test"}],
                     "subject":"Local sender metadata", "bodyHtml":"<p>Body</p>"
@@ -557,10 +562,10 @@ async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
             .unwrap();
         assert_eq!(draft["senderEmailAddress"], item["senderEmailAddress"]);
         let read = tools
-            .call(ctx, "read_draft", json!({"draftId":draft["draftId"]}))
+            .call(ctx, "draft_read", json!({"draftId":draft["draftId"]}))
             .unwrap();
         assert_eq!(read["senderEmailAddress"], item["senderEmailAddress"]);
-        let result = tools.call(ctx, "list_outbox", input.clone()).unwrap();
+        let result = tools.call(ctx, "outbox_read", input.clone()).unwrap();
         assert_eq!(result["items"].as_array().unwrap().len(), 1);
         assert_eq!(result["items"][0]["id"], item["id"]);
         assert_eq!(result["items"][0]["error"]["reason"], "secretStore");
@@ -569,13 +574,13 @@ async fn sender_identity_queries_work_when_the_secret_store_is_unavailable() {
             item["senderEmailAddress"]
         );
         assert_eq!(
-            error(&tools, ctx, "list_outbox", json!({"accountId":id()})),
+            error(&tools, ctx, "outbox_read", json!({"accountId":id()})),
             ToolErrorCode::NotFound
         );
         let mut restricted = ctx.clone();
         restricted.grant.accounts = AccountScope::Only(vec![]);
         assert_eq!(
-            error(&tools, &restricted, "list_outbox", input.clone()),
+            error(&tools, &restricted, "outbox_read", input.clone()),
             ToolErrorCode::NotFound
         );
     }
@@ -591,9 +596,10 @@ async fn outbox_results_hide_server_text_and_require_their_own_capabilities() {
     f.db.execute("UPDATE outbox SET last_error=?2,server_reply=?3 WHERE id=?1",params![id,
         json!({"reason":"authRejected","smtpCode":535,"text":"SECRET","rejected":[{"address":"a@x.test","code":550,"text":"SECRET"}]}).to_string(),
         json!({"code":250,"text":"SECRET"}).to_string()]).unwrap();
-    let result = tools
-        .call(ctx, "get_outbox", json!({"outboxId":id}))
+    let looked_up = tools
+        .call(ctx, "outbox_read", json!({"outboxId":id}))
         .unwrap();
+    let result = &looked_up["item"];
     assert_eq!(
         result["error"],
         json!({"reason":"authRejected","smtpCode":535})
@@ -602,13 +608,13 @@ async fn outbox_results_hide_server_text_and_require_their_own_capabilities() {
     assert!(result.get("serverReply").is_none());
     for (tool, input, action) in [
         (
-            "send_email",
+            "outbox_send",
             json!({"action":"retry","outboxId":id}),
             Action::MailSend,
         ),
-        ("get_outbox", json!({"outboxId":id}), Action::OutboxRead),
-        ("list_outbox", json!({}), Action::OutboxRead),
-        ("cancel_outbox", json!({"outboxId":id}), Action::OutboxWrite),
+        ("outbox_read", json!({"outboxId":id}), Action::OutboxRead),
+        ("outbox_read", json!({}), Action::OutboxRead),
+        ("outbox_cancel", json!({"outboxId":id}), Action::OutboxWrite),
     ] {
         let mut denied = ctx.clone();
         denied.grant.actions.remove(&action);

@@ -258,6 +258,13 @@ fn bounded_plain_text_to_html(text: &str, limit: usize) -> String {
     html
 }
 
+/// A quote and whether the original had to be cut short to fit the quote
+/// budget (`QUOTE_TRUNCATED` reports it to the caller of the tool layer).
+pub(crate) struct Quoted {
+    pub html: String,
+    pub truncated: bool,
+}
+
 /// Reading HTML stores links in a trusted, separate table. Restore only those
 /// indexed links before the independent composer sanitizer runs.
 pub(crate) fn quote_cached_source(
@@ -265,7 +272,7 @@ pub(crate) fn quote_cached_source(
     links: &[String],
     text: &str,
     locale: SupportedLocale,
-) -> String {
+) -> Quoted {
     quote(html, Some(links), text, locale, false, None)
 }
 
@@ -277,13 +284,13 @@ pub(crate) fn quote_cached_source_for_forward(
     text: &str,
     locale: SupportedLocale,
     images: &HashMap<String, String>,
-) -> String {
+) -> Quoted {
     quote(html, Some(links), text, locale, true, Some(images))
 }
 
 #[cfg(test)]
 fn quote_source(html: Option<&str>, text: &str) -> String {
-    quote(html, None, text, SupportedLocale::ZhCn, false, None)
+    quote(html, None, text, SupportedLocale::ZhCn, false, None).html
 }
 
 fn quote(
@@ -293,12 +300,17 @@ fn quote(
     locale: SupportedLocale,
     keep_images: bool,
     images: Option<&HashMap<String, String>>,
-) -> String {
+) -> Quoted {
     let Some(html) = html else {
         // Escaping trusted plain text directly avoids parsing a potentially
         // five-times-larger intermediate full of HTML entities.
-        return bounded_plain_text_to_html(truncate(text, MAX_QUOTE_BYTES), MAX_QUOTE_BYTES);
+        let cut = text.len() > MAX_QUOTE_BYTES;
+        return Quoted {
+            html: bounded_plain_text_to_html(truncate(text, MAX_QUOTE_BYTES), MAX_QUOTE_BYTES),
+            truncated: cut,
+        };
     };
+    let input_cut = html.len() > crate::mail::render::MAX_BODY_BYTES;
     // The quote budget applies after dropping layout/resources. A large style
     // block or inline image near the beginning must not hide the text after it.
     // The cached reader body has its own, larger input budget.
@@ -314,7 +326,13 @@ fn quote(
             images,
         ));
         if output.len() <= MAX_QUOTE_BYTES {
-            return output;
+            // Anything the renderer could not fit is a cut too: the loop only
+            // stops shrinking once the output fits, so a shrinking budget means
+            // content was left out.
+            return Quoted {
+                html: output,
+                truncated: input_cut || budget != MAX_QUOTE_BYTES,
+            };
         }
         // HTML repair can insert closing tags. Re-render with room for those;
         // never byte-truncate serialized markup or split a UTF-8 code point.
@@ -901,6 +919,16 @@ fn plain_text(
 mod tests {
     use super::*;
 
+    /// The quote's HTML, for tests that do not look at the truncation flag.
+    fn cached_html(
+        html: Option<&str>,
+        links: &[String],
+        text: &str,
+        locale: SupportedLocale,
+    ) -> String {
+        quote_cached_source(html, links, text, locale).html
+    }
+
     #[test]
     fn composer_sanitizer_has_a_small_independent_allowlist() {
         let body = normalize(r#"<p id="x" style="color:red" onclick="attack()"><b>bold</b><i>italic</i><del>gone</del><img src="https://bad" alt="lost"></p><script>attack()</script><style>evil</style><iframe>hidden</iframe><div>kept</div>"#).unwrap();
@@ -1036,7 +1064,7 @@ mod tests {
             (SupportedLocale::ZhCn, "[图片：{{date}} <b>&]"),
             (SupportedLocale::En, "[Image: {{date}} <b>&]"),
         ] {
-            let html = quote_cached_source(
+            let html = cached_html(
                 Some("<p><img alt='{{date}} &lt;b&gt;&amp;'></p>"),
                 &[],
                 "",
@@ -1055,7 +1083,7 @@ mod tests {
             "x".repeat(MAX_QUOTE_BYTES + 32),
         );
         for locale in [SupportedLocale::ZhCn, SupportedLocale::En] {
-            let html = quote_cached_source(Some(&source), &[], "", locale);
+            let html = cached_html(Some(&source), &[], "", locale);
             assert!(html.len() <= MAX_QUOTE_BYTES);
             assert!(html.ends_with("</p></blockquote>"));
             assert!(normalize(&html).is_ok());
@@ -1064,7 +1092,7 @@ mod tests {
 
     #[test]
     fn cached_links_only_come_from_the_trusted_link_table() {
-        let html = quote_cached_source(
+        let html = cached_html(
             Some(
                 "<p><a data-mailx-link='0' href='https://forged'>safe</a> <a data-mailx-link='7' title='https://forged'>missing</a></p>",
             ),
@@ -1088,7 +1116,7 @@ mod tests {
                 "x".repeat(MAX_QUOTE_BYTES + 32)
             ),
         ] {
-            let html = quote_cached_source(
+            let html = cached_html(
                 Some(&format!("{leading}<p>正文仍然保留</p>")),
                 &[],
                 "",

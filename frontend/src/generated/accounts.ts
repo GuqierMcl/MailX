@@ -1265,7 +1265,13 @@ instructions: string,
  * Turning it off stops saving new turns; what is already saved stays
  * until the user deletes it.
  */
-saveHistory: boolean, };
+saveHistory: boolean,
+/**
+ * Let the assistant read a mail's HTML structure (headings, lists,
+ * tables, links) instead of its plain text only. Off by default: it sends
+ * far more of the message, including markup other people wrote.
+ */
+readHtml: boolean, };
 
 export type StartRun = { kind: RunKind, };
 
@@ -1333,7 +1339,7 @@ subjects: Array<string>, } | { "type": "draft", subject: string, origin: DraftOr
 
 export type ConfirmationRequest = { action: ConfirmAction,
 /**
- * The tool id, e.g. `send_email`.
+ * The tool id, e.g. `outbox_send`.
  */
 tool: string, details: ConfirmationDetails, };
 

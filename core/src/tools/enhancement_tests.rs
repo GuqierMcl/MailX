@@ -14,7 +14,7 @@ async fn search_sender_is_exact_case_insensitive_and_returns_recipients_and_hit_
     let result = f
         .call(
             &mcp(),
-            "search_emails",
+            "mail_search",
             json!({"fromAddress":"SENDER@example.test", "query":"world"}),
         )
         .unwrap();
@@ -36,7 +36,7 @@ async fn search_sender_is_exact_case_insensitive_and_returns_recipients_and_hit_
     assert_eq!(
         f.call(
             &mcp(),
-            "search_emails",
+            "mail_search",
             json!({"fromAddress":"sender@example"})
         )
         .unwrap()["emails"],
@@ -44,7 +44,7 @@ async fn search_sender_is_exact_case_insensitive_and_returns_recipients_and_hit_
     );
     for bad in ["", "\n@example.test"] {
         assert_eq!(
-            code(f.call(&mcp(), "search_emails", json!({"fromAddress":bad}))),
+            code(f.call(&mcp(), "mail_search", json!({"fromAddress":bad}))),
             ToolErrorCode::InvalidInput
         );
     }
@@ -78,7 +78,7 @@ async fn draft_creation_revision_can_be_used_immediately_and_pagination_is_filte
     let page = f
         .call(
             &scoped,
-            "list_drafts",
+            "draft_list",
             json!({"limit":1,"origin":"user","query":"Match"}),
         )
         .unwrap();
@@ -90,7 +90,7 @@ async fn draft_creation_revision_can_be_used_immediately_and_pagination_is_filte
     let next = f
         .call(
             &scoped,
-            "list_drafts",
+            "draft_list",
             json!({"limit":1,"origin":"user","query":"Match","cursor":page["nextCursor"]}),
         )
         .unwrap();
@@ -100,16 +100,16 @@ async fn draft_creation_revision_can_be_used_immediately_and_pagination_is_filte
     assert_eq!(
         code(f.call(
             &scoped,
-            "list_drafts",
+            "draft_list",
             json!({"origin":"ai","query":"Match","cursor":page["nextCursor"]})
         )),
         ToolErrorCode::InvalidInput
     );
     let created = f
-        .call(&mcp(), "create_draft", draft_input(json!({})))
+        .call(&mcp(), "draft_create", draft_input(json!({})))
         .unwrap();
     assert!(created["revision"].as_u64().is_some());
-    let updated = f.call(&mcp(), "update_draft", json!({"draftId":created["draftId"],"expectedRevision":created["revision"],"subject":"Immediate update"})).unwrap();
+    let updated = f.call(&mcp(), "draft_update", json!({"draftId":created["draftId"],"expectedRevision":created["revision"],"subject":"Immediate update"})).unwrap();
     assert_eq!(
         updated["revision"].as_u64(),
         created["revision"].as_u64().map(|r| r + 1)
@@ -125,13 +125,13 @@ async fn conversation_paginates_after_copy_selection_and_checks_seed_scope() {
             params![conversation, if index < 2 {"<same@example.test>"} else {"<different@example.test>"}, format!("2026-11-0{}T00:00:00.000Z", index+1), id]).unwrap();
     }
     let input = json!({"emailId":f.emails[1],"limit":1});
-    let first = f.call(&mcp(), "get_conversation", input.clone()).unwrap();
+    let first = f.call(&mcp(), "mail_conversation", input.clone()).unwrap();
     // Prefer the seed copy over the earlier duplicate before applying LIMIT.
     assert_eq!(first["emails"][0]["id"], f.emails[1]);
     let second = f
         .call(
             &mcp(),
-            "get_conversation",
+            "mail_conversation",
             json!({"emailId":f.emails[1],"limit":1,"cursor":first["nextCursor"]}),
         )
         .unwrap();
@@ -141,7 +141,7 @@ async fn conversation_paginates_after_copy_selection_and_checks_seed_scope() {
     assert_eq!(
         code(f.call(
             &mcp(),
-            "get_conversation",
+            "mail_conversation",
             json!({"emailId":f.emails[2],"cursor":first["nextCursor"]})
         )),
         ToolErrorCode::InvalidInput
@@ -151,7 +151,7 @@ async fn conversation_paginates_after_copy_selection_and_checks_seed_scope() {
         Grant::new(AccountScope::Only(vec![]), [Action::MailRead]),
     );
     assert_eq!(
-        code(f.call(&denied, "get_conversation", input)),
+        code(f.call(&denied, "mail_conversation", input)),
         ToolErrorCode::NotFound
     );
 }
@@ -165,7 +165,7 @@ async fn recipient_tool_enforces_scope_before_contact_lookup() {
     )
     .unwrap();
     let result = f
-        .call(&mcp(), "suggest_contacts", json!({"query":"ali"}))
+        .call(&mcp(), "mail_contacts", json!({"query":"ali"}))
         .unwrap();
     assert_eq!(result["contacts"][0]["address"], "alice@example.test");
     assert_eq!(result["accountIds"], json!([f.account]));
@@ -174,14 +174,14 @@ async fn recipient_tool_enforces_scope_before_contact_lookup() {
         Grant::new(AccountScope::Only(vec![]), [Action::MailRead]),
     );
     let hidden = f
-        .call(&denied, "suggest_contacts", json!({"query":"ali"}))
+        .call(&denied, "mail_contacts", json!({"query":"ali"}))
         .unwrap();
     assert_eq!(hidden["contacts"], json!([]));
     assert_eq!(hidden["accountIds"], json!([]));
     assert_eq!(
         code(f.call(
             &denied,
-            "suggest_contacts",
+            "mail_contacts",
             json!({"query":"ali","accountId":f.account})
         )),
         ToolErrorCode::NotFound
@@ -211,7 +211,7 @@ async fn conversation_never_includes_another_accounts_identical_thread_id() {
         ),
     );
     let result = f
-        .call(&ctx, "get_conversation", json!({"emailId":f.emails[0]}))
+        .call(&ctx, "mail_conversation", json!({"emailId":f.emails[0]}))
         .unwrap();
     let hits = result["emails"].as_array().unwrap();
     assert_eq!(hits.len(), 2);

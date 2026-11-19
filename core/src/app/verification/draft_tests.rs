@@ -109,7 +109,7 @@ async fn probes_are_independent_and_do_not_access_the_service_or_secret_store() 
         Some(ConnectionVerificationCode::Unsupported)
     );
     assert_eq!(report.smtp.code, Some(ConnectionVerificationCode::Network));
-    assert!(core.list_accounts().unwrap().is_empty());
+    assert!(core.accounts_list().unwrap().is_empty());
     assert!(core.sync_states().is_empty());
     assert_eq!(secrets.0.load(Ordering::SeqCst), 0);
     let result = serde_json::to_string(&report).unwrap();

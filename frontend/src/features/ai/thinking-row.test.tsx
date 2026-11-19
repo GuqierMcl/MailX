@@ -13,7 +13,7 @@ import type { RunThought, RunTool } from './use-assistant-run'
 const thought = (over: Partial<RunThought> = {}): RunThought => ({
   segment: 0, text: '先看看未读邮件。', at: 0, toolsBefore: 0, startedAt: Date.now(), durationMs: null, ...over,
 })
-const tool = (callId: string, at = 0): RunTool => ({ callId, name: 'search_emails', status: 'done', summary: { type: 'found', count: 2 }, at, settledAt: null })
+const tool = (callId: string, at = 0): RunTool => ({ callId, name: 'mail_search', status: 'done', summary: { type: 'found', count: 2 }, at, settledAt: null })
 const turn = (over: Partial<ChatTurn>): ChatTurn => ({
   state: 'running', text: '', tools: [], confirms: [], answers: {}, pendingId: null, error: null, finishedReason: null, finishedAt: null, ...over,
 })
@@ -135,7 +135,7 @@ describe('thinking in a reply', () => {
         { role: 'user', text: '查一下', at: '2030-01-01T00:00:00Z' },
         {
           role: 'assistant', text: '先看看。结果如下。', state: 'completed', finishedReason: 'stop', error: null, at: '2030-01-01T00:00:00Z', confirmations: [],
-          tools: [{ callId: 'a', name: 'search_emails', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }],
+          tools: [{ callId: 'a', name: 'mail_search', status: 'done', summary: { type: 'found', count: 7 }, textOffset: 4 }],
           reasoning: [
             { text: '要先搜索。', durationMs: 4200, textOffset: 0, toolsBefore: 0 },
             { text: '', durationMs: 900, textOffset: 4, toolsBefore: 1 },

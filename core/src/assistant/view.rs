@@ -17,7 +17,7 @@ use super::{
 use crate::tools::{Principal, RequestContext, ToolError, ToolErrorCode};
 
 const MAX_ID_CHARS: usize = 128;
-/// Body text of the open email. A model with tools reads on with `read_email`.
+/// Body text of the open email. A model with tools reads on with `mail_read`.
 const OPEN_EMAIL_CHARS_WITH_TOOLS: usize = 4_000;
 const OPEN_EMAIL_CHARS: usize = 8_000;
 /// Body text of each selected email.
@@ -28,7 +28,7 @@ pub(super) struct Described {
     pub note: String,
     /// Accounts the content belongs to: the conversation goes with them.
     pub accounts: Vec<String>,
-    /// Lowercased addresses on the content, as for a `read_email` result.
+    /// Lowercased addresses on the content, as for a `mail_read` result.
     pub addresses: Vec<String>,
 }
 
@@ -80,7 +80,7 @@ fn read(inner: &Inner, run_id: &str, context: &ChatContext, with_tools: bool) ->
     let call = |name: &str, input: Value| inner.tools.call(&context_request, name, input);
     let email = |email_id: &str, max_chars: usize| -> Option<Value> {
         match call(
-            "read_email",
+            "mail_read",
             json!({ "emailId": email_id, "maxChars": max_chars }),
         ) {
             Ok(output) => Some(output),
@@ -116,7 +116,7 @@ fn read(inner: &Inner, run_id: &str, context: &ChatContext, with_tools: bool) ->
         }
         ChatContext::Draft { draft_id } => (
             "a draft",
-            vec![call("read_draft", json!({ "draftId": draft_id })).ok()?],
+            vec![call("draft_read", json!({ "draftId": draft_id })).ok()?],
         ),
     };
     if items.is_empty() {
@@ -164,11 +164,11 @@ fn note(what: &str, context: &ChatContext, with_tools: bool, content: &str) -> S
     let more = match (context, with_tools) {
         (_, false) => "This is all of it you can see.",
         (ChatContext::Email { .. }, true) => {
-            "Only the start of a long body is shown: read_email with nextOffset reads on, and \
-             get_conversation lists the rest of its thread."
+            "Only the start of a long body is shown: mail_read with nextOffset reads on, and \
+             mail_conversation lists the rest of its thread."
         }
         (ChatContext::Emails { .. }, true) => {
-            "Only the start of each body is shown; read_email reads more."
+            "Only the start of each body is shown; mail_read reads more."
         }
         (ChatContext::Draft { .. }, true) => {
             "The user may be writing this draft right now. If a tool reports draftOpen, put \
@@ -217,9 +217,9 @@ mod tests {
         assert!(text.contains("Current view"));
         assert!(text.contains("<tool_result name=\"current_view\" trust=\"untrusted\">"));
         assert_eq!(text.matches(prompt::RESULT_CLOSE).count(), 1);
-        assert!(text.contains("get_conversation"));
+        assert!(text.contains("mail_conversation"));
         let text = note("the email", &context, false, "x");
         assert!(text.contains("all of it you can see"));
-        assert!(!text.contains("read_email"));
+        assert!(!text.contains("mail_read"));
     }
 }

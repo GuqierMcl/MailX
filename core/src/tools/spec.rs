@@ -23,7 +23,7 @@ use crate::MailxCore;
 pub struct AudiencePolicy {
     pub default_page_size: u32,
     pub max_page_size: u32,
-    /// Unicode characters of body text per `read_email` call.
+    /// Unicode characters of body text per `mail_read` call.
     pub default_text_chars: usize,
     pub max_text_chars: usize,
 }
@@ -138,6 +138,23 @@ impl ToolSpec {
         self
     }
 
+    pub(crate) fn is_visible_to(&self, audience: Audience) -> bool {
+        self.policy_for(audience).is_some()
+    }
+
+    /// One line for `mail_help`'s catalog.
+    pub(crate) fn summary(&self) -> String {
+        let flat = self
+            .description
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        match flat.find(". ") {
+            Some(end) => flat[..=end].to_owned(),
+            None => flat,
+        }
+    }
+
     fn policy_for(&self, audience: Audience) -> Option<AudiencePolicy> {
         self.visibility
             .iter()
@@ -222,11 +239,21 @@ pub struct ToolCall<'a> {
     locale: &'a (dyn Fn() -> crate::SupportedLocale + Send + Sync),
     undo_send_seconds: &'a (dyn Fn() -> Result<u32, ToolError> + Send + Sync),
     draft_open: &'a (dyn Fn(&str) -> bool + Send + Sync),
+    read_mail_html: &'a (dyn Fn() -> bool + Send + Sync),
     ui_opener: &'a UiOpener,
     draft_opener: &'a UiOpener,
     attachment_export_dir: Option<&'a Path>,
     resources: RefCell<Vec<String>>,
     trusted: RefCell<TrustedOutput>,
+    catalog: Vec<CatalogTool>,
+}
+
+/// One tool as `mail_help` lists it: what this caller may use, in listed order.
+#[derive(Clone, Debug)]
+pub struct CatalogTool {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub summary: String,
 }
 
 impl ToolCall<'_> {
@@ -250,9 +277,23 @@ impl ToolCall<'_> {
         (self.undo_send_seconds)()
     }
 
+    /// The tools this caller may use, for `mail_help`.
+    pub fn catalog(&self) -> &[CatalogTool] {
+        &self.catalog
+    }
+
     /// Whether the host has this draft open in an editor window.
     pub fn draft_open(&self, draft_id: &str) -> bool {
         (self.draft_open)(draft_id)
+    }
+
+    /// Whether `mail_read` may hand this caller the message's HTML: on only
+    /// for the built-in agent, and only while the user's setting allows it.
+    pub fn read_mail_html(&self) -> bool {
+        matches!(
+            self.ctx.principal,
+            crate::tools::Principal::BuiltinAgent { .. }
+        ) && (self.read_mail_html)()
     }
 
     /// Asks the host UI to show a message (`account_id`, `email_id`).
@@ -310,6 +351,7 @@ pub struct Tools {
     locale: Arc<dyn Fn() -> crate::SupportedLocale + Send + Sync>,
     undo_send_seconds: Arc<dyn Fn() -> Result<u32, ToolError> + Send + Sync>,
     draft_open: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    read_mail_html: Arc<dyn Fn() -> bool + Send + Sync>,
     ui_opener: Arc<UiOpener>,
     draft_opener: Arc<UiOpener>,
     attachment_export_dir: Option<PathBuf>,
@@ -330,6 +372,7 @@ impl Tools {
             locale: Arc::new(crate::SupportedLocale::default),
             undo_send_seconds: Arc::new(|| Ok(0)),
             draft_open: Arc::new(|_| false),
+            read_mail_html: Arc::new(|| false),
             ui_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             draft_opener: Arc::new(|_, _| Err(ToolError::new(ToolErrorCode::Unavailable))),
             attachment_export_dir: None,
@@ -345,6 +388,7 @@ impl Tools {
         super::ui::register(&mut tools);
         super::discovery::register(&mut tools);
         super::attachments::register_exports(&mut tools);
+        super::help::register(&mut tools);
         tools
     }
 
@@ -371,6 +415,14 @@ impl Tools {
         locale: impl Fn() -> crate::SupportedLocale + Send + Sync + 'static,
     ) -> Self {
         self.locale = Arc::new(locale);
+        self
+    }
+
+    /// Whether `mail_read` may return the message's HTML structure to the
+    /// built-in agent (the user's setting), read at call time. Defaults to
+    /// false. MCP clients never get it: their consent is not this setting.
+    pub fn with_read_mail_html(mut self, read: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.read_mail_html = Arc::new(read);
         self
     }
 
@@ -516,6 +568,23 @@ impl Tools {
                 TrustedOutput::default(),
             );
         }
+        // What `mail_help` may list: this caller's tools, in listed order.
+        let catalog = self
+            .entries
+            .iter()
+            .filter(|e| e.spec.is_visible_to(audience))
+            .filter(|e| {
+                e.spec
+                    .required_actions
+                    .iter()
+                    .all(|action| ctx.grant.allows(*action))
+            })
+            .map(|e| CatalogTool {
+                id: e.spec.id,
+                title: e.spec.title,
+                summary: e.spec.summary(),
+            })
+            .collect();
         // Hosts may send null for a tool without arguments.
         let input = if input.is_null() {
             Value::Object(Default::default())
@@ -530,11 +599,13 @@ impl Tools {
             locale: &*self.locale,
             undo_send_seconds: &*self.undo_send_seconds,
             draft_open: &*self.draft_open,
+            read_mail_html: &*self.read_mail_html,
             ui_opener: &*self.ui_opener,
             draft_opener: &*self.draft_opener,
             attachment_export_dir: self.attachment_export_dir.as_deref(),
             resources: RefCell::new(Vec::new()),
             trusted: RefCell::default(),
+            catalog,
         };
         let result = (entry.run)(&call, input);
         (

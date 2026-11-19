@@ -303,7 +303,7 @@ pub struct PendingConfirmation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ConfirmAction {
-    /// `send_email`, including a retry.
+    /// `outbox_send`, including a retry.
     Send,
     CancelSend,
     Organize,
@@ -422,7 +422,7 @@ pub enum ConfirmationDetails {
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmationRequest {
     pub action: ConfirmAction,
-    /// The tool id, e.g. `send_email`.
+    /// The tool id, e.g. `outbox_send`.
     pub tool: String,
     pub details: ConfirmationDetails,
 }

@@ -37,7 +37,7 @@ fn fixture() -> Fixture {
     core.begin_shutdown();
     let account = core.get_email(&emails[0]).unwrap().summary.account_id;
     let draft = core
-        .create_draft(
+        .draft_create(
             CreateDraftRequest {
                 account_id: Some(account),
                 to: vec![MailAddress {
@@ -79,6 +79,7 @@ fn contexts() -> [RequestContext; 2] {
 
 fn input(f: &Fixture) -> Value {
     json!({
+        "action": "add",
         "draftId": f.draft.id,
         "expectedRevision": f.draft.revision,
         "filePath": f.directory.path().join("report.txt"),
@@ -91,10 +92,7 @@ async fn attachment_round_trip_preserves_provenance_and_source_file() {
         let f = fixture();
         let path = f.directory.path().join("report.txt");
         std::fs::write(&path, b"Report contents").unwrap();
-        let result = f
-            .tools
-            .call(&ctx, "add_draft_attachment", input(&f))
-            .unwrap();
+        let result = f.tools.call(&ctx, "draft_attachments", input(&f)).unwrap();
         assert_eq!(result["revision"], f.draft.revision + 1);
         assert_eq!(result["attachment"]["name"], "report.txt");
         assert_eq!(result["attachment"]["size"], 15);
@@ -109,15 +107,16 @@ async fn attachment_round_trip_preserves_provenance_and_source_file() {
         assert!(!result.to_string().contains(path.to_str().unwrap()));
         let read = f
             .tools
-            .call(&ctx, "read_draft", json!({"draftId": f.draft.id}))
+            .call(&ctx, "draft_read", json!({"draftId": f.draft.id}))
             .unwrap();
         assert_eq!(read["attachments"][0], result["attachment"]);
         let removed = f
             .tools
             .call(
                 &ctx,
-                "remove_draft_attachment",
+                "draft_attachments",
                 json!({
+                    "action": "remove",
                     "draftId": f.draft.id,
                     "expectedRevision": result["revision"],
                     "attachmentId": result["attachment"]["id"],
@@ -148,7 +147,7 @@ async fn scope_and_grant_are_checked_before_the_file_is_opened() {
     );
     assert_eq!(
         f.tools
-            .call(&ctx, "add_draft_attachment", input(&f))
+            .call(&ctx, "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::NotFound
@@ -156,7 +155,7 @@ async fn scope_and_grant_are_checked_before_the_file_is_opened() {
     ctx.grant = Grant::new(AccountScope::All, [Action::MailRead]);
     assert_eq!(
         f.tools
-            .call(&ctx, "add_draft_attachment", input(&f))
+            .call(&ctx, "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::NotPermitted
@@ -164,7 +163,7 @@ async fn scope_and_grant_are_checked_before_the_file_is_opened() {
     ctx.grant = Grant::new(AccountScope::All, [Action::DraftWrite]);
     assert_eq!(
         f.tools
-            .call(&ctx, "add_draft_attachment", input(&f))
+            .call(&ctx, "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::NotPermitted
@@ -187,14 +186,14 @@ async fn stale_open_and_queued_drafts_fail_before_file_io() {
     stale["expectedRevision"] = json!(f.draft.revision + 1);
     assert_eq!(
         f.tools
-            .call(&ctx, "add_draft_attachment", stale)
+            .call(&ctx, "draft_attachments", stale)
             .unwrap_err()
             .code,
         ToolErrorCode::Conflict
     );
     let open = Tools::new(f.core.clone(), String::new).with_draft_open_check(|_| true);
     assert_eq!(
-        open.call(&ctx, "add_draft_attachment", input(&f))
+        open.call(&ctx, "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::DraftOpen
@@ -212,7 +211,7 @@ async fn stale_open_and_queued_drafts_fail_before_file_io() {
         .unwrap();
     assert_eq!(
         f.tools
-            .call(&ctx, "add_draft_attachment", input(&f))
+            .call(&ctx, "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::DraftLocked
@@ -236,7 +235,7 @@ async fn an_editor_opened_during_file_io_prevents_the_change() {
         .with_draft_open_check(move |_| seen.fetch_add(1, Ordering::SeqCst) > 0);
     assert_eq!(
         tools
-            .call(&contexts()[0], "add_draft_attachment", input(&f))
+            .call(&contexts()[0], "draft_attachments", input(&f))
             .unwrap_err()
             .code,
         ToolErrorCode::DraftOpen
@@ -261,21 +260,21 @@ async fn names_are_cleaned_and_callers_cannot_forge_origin() {
     forged["origin"] = json!("user");
     assert_eq!(
         f.tools
-            .call(ctx, "add_draft_attachment", forged)
+            .call(ctx, "draft_attachments", forged)
             .unwrap_err()
             .code,
         ToolErrorCode::InvalidInput
     );
     let mut renamed = input(&f);
     renamed["fileName"] = json!("../../final.txt");
-    let added = f.tools.call(ctx, "add_draft_attachment", renamed).unwrap();
+    let added = f.tools.call(ctx, "draft_attachments", renamed).unwrap();
     assert_eq!(added["attachment"]["name"], "final.txt");
     assert_eq!(added["attachment"]["origin"], "mcp");
-    let mut removal = json!({"draftId": f.draft.id, "expectedRevision": f.draft.revision,
-        "attachmentId": added["attachment"]["id"]});
+    let mut removal = json!({"action": "remove", "draftId": f.draft.id,
+        "expectedRevision": f.draft.revision, "attachmentId": added["attachment"]["id"]});
     assert_eq!(
         f.tools
-            .call(ctx, "remove_draft_attachment", removal.clone())
+            .call(ctx, "draft_attachments", removal.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::Conflict
@@ -284,7 +283,7 @@ async fn names_are_cleaned_and_callers_cannot_forge_origin() {
     removal["attachmentId"] = json!(uuid::Uuid::new_v4().to_string());
     assert_eq!(
         f.tools
-            .call(ctx, "remove_draft_attachment", removal)
+            .call(ctx, "draft_attachments", removal)
             .unwrap_err()
             .code,
         ToolErrorCode::NotFound
@@ -293,7 +292,7 @@ async fn names_are_cleaned_and_callers_cannot_forge_origin() {
 }
 
 #[tokio::test]
-async fn inline_images_cannot_be_removed_through_the_regular_attachment_tool() {
+async fn an_inline_image_is_added_with_a_content_id_and_can_be_removed_again() {
     let f = fixture();
     let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
         1,
@@ -302,19 +301,60 @@ async fn inline_images_cannot_be_removed_through_the_regular_attachment_tool() {
     ));
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).unwrap();
-    let (draft, images) = f
-        .core
-        .add_inline_images(
-            &f.draft.id,
-            f.draft.revision,
-            vec![("image.png".into(), png.into_inner())],
+    let path = f.directory.path().join("logo.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+    let ctx = &contexts()[0];
+    let added = f
+        .tools
+        .call(
+            ctx,
+            "draft_attachments",
+            json!({
+                "action": "add", "draftId": f.draft.id, "expectedRevision": f.draft.revision,
+                "filePath": path, "inline": true,
+            }),
         )
         .unwrap();
-    let result = f.tools.call(&contexts()[0], "remove_draft_attachment", json!({
-        "draftId": draft.id, "expectedRevision": draft.revision, "attachmentId": images[0].attachment_id,
-    }));
-    assert_eq!(result.unwrap_err().code, ToolErrorCode::InvalidInput);
-    assert_eq!(f.core.get_draft(&draft.id).unwrap().attachments.len(), 1);
+    assert_eq!(added["attachment"]["inline"], true);
+    let content_id = added["attachment"]["contentId"].as_str().unwrap();
+    assert!(crate::drafts::body::cid_of(&format!("cid:{content_id}")).is_some());
+    // A file that is not an image is refused rather than stored as an inline row.
+    let text = f.directory.path().join("notes.txt");
+    std::fs::write(&text, b"not a picture").unwrap();
+    assert_eq!(
+        f.tools
+            .call(
+                ctx,
+                "draft_attachments",
+                json!({
+                    "action": "add", "draftId": f.draft.id, "expectedRevision": added["revision"],
+                    "filePath": text, "inline": true,
+                })
+            )
+            .unwrap_err()
+            .code,
+        ToolErrorCode::UnsupportedImage
+    );
+    // Removing it works like any other attachment.
+    let removed = f
+        .tools
+        .call(
+            ctx,
+            "draft_attachments",
+            json!({
+                "action": "remove", "draftId": f.draft.id, "expectedRevision": added["revision"],
+                "attachmentId": added["attachment"]["id"],
+            }),
+        )
+        .unwrap();
+    assert_eq!(removed["removed"], true);
+    assert!(
+        f.core
+            .get_draft(&f.draft.id)
+            .unwrap()
+            .attachments
+            .is_empty()
+    );
 }
 
 #[test]
@@ -407,7 +447,7 @@ async fn received_attachment_exports_are_scoped_new_files_and_require_the_write_
         Tools::new(core.clone(), String::new).with_attachment_export_dir(destination.clone());
     let ctx = &contexts()[0];
     let detail = tools
-        .call(ctx, "read_email", json!({"emailId":emails[0]}))
+        .call(ctx, "mail_read", json!({"emailId":emails[0]}))
         .unwrap();
     let attachment = &detail["attachments"][0]["id"];
     assert!(attachment.as_str().is_some());
@@ -419,7 +459,7 @@ async fn received_attachment_exports_are_scoped_new_files_and_require_the_write_
     );
     assert_eq!(
         tools
-            .call(&denied, "save_email_attachment", input.clone())
+            .call(&denied, "mail_save_attachment", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::NotPermitted
@@ -435,7 +475,7 @@ async fn received_attachment_exports_are_scoped_new_files_and_require_the_write_
     );
     assert_eq!(
         tools
-            .call(&denied, "save_email_attachment", input.clone())
+            .call(&denied, "mail_save_attachment", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::NotFound
@@ -443,26 +483,26 @@ async fn received_attachment_exports_are_scoped_new_files_and_require_the_write_
     let unavailable = Tools::new(core, String::new);
     assert_eq!(
         unavailable
-            .call(ctx, "save_email_attachment", input.clone())
+            .call(ctx, "mail_save_attachment", input.clone())
             .unwrap_err()
             .code,
         ToolErrorCode::Unavailable
     );
     let first = tools
-        .call(ctx, "save_email_attachment", input.clone())
+        .call(ctx, "mail_save_attachment", input.clone())
         .unwrap();
     let path = Path::new(first["filePath"].as_str().unwrap());
     assert_eq!(path.parent(), Some(destination.as_path()));
     assert_eq!(first["name"], "report.txt");
     assert_eq!(std::fs::read(path).unwrap(), b"Report contents");
     let second = tools
-        .call(ctx, "save_email_attachment", input.clone())
+        .call(ctx, "mail_save_attachment", input.clone())
         .unwrap();
     assert_ne!(first["filePath"], second["filePath"]);
     assert_eq!(std::fs::read(path).unwrap(), b"Report contents");
     assert_eq!(
         tools
-            .call(&contexts()[1], "save_email_attachment", input)
+            .call(&contexts()[1], "mail_save_attachment", input)
             .unwrap_err()
             .code,
         ToolErrorCode::UnknownTool

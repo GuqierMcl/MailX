@@ -88,11 +88,11 @@ async fn round(shared: &Arc<Shared>, token: &WorkerToken) -> Result<Outcome, Syn
             shape.sort_by(|a, b| a.0.cmp(&b.0));
             shape
         };
-        let before = shape(service.list_folders(&account)?);
+        let before = shape(service.mail_folders(&account)?);
         if !service.store_folders(&account, &source, &records)? {
             return Err(AppError::new(ErrorCode::Conflict));
         }
-        let listed = before != shape(service.list_folders(&account)?);
+        let listed = before != shape(service.mail_folders(&account)?);
         Ok((service.sync_folders(&account, &source)?, listed))
     })
     .await?;

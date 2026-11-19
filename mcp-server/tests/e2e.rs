@@ -108,7 +108,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     let client = connect(&read_discovery(&fixture), "e2e-client").await;
 
     let tools = client.peer().list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 25);
+    assert_eq!(tools.len(), 22);
     for tool in &tools {
         assert!(tool.name.starts_with("mailx_"), "{}", tool.name);
         assert!(tool.output_schema.is_some(), "{}", tool.name);
@@ -124,14 +124,15 @@ async fn tools_list_and_calls_work_end_to_end() {
             hint,
             Some(matches!(
                 tool.name.as_ref(),
-                "mailx_delete_draft" | "mailx_send_email" | "mailx_remove_draft_attachment"
+                // draft_attachments adds and removes, so it is not destructive.
+                "mailx_draft_delete" | "mailx_outbox_send"
             )),
             "{}",
             tool.name
         );
     }
 
-    let accounts = call(&client, "mailx_list_accounts", json!({}))
+    let accounts = call(&client, "mailx_accounts_list", json!({}))
         .await
         .unwrap();
     assert_ne!(accounts.is_error, Some(true));
@@ -143,13 +144,13 @@ async fn tools_list_and_calls_work_end_to_end() {
     );
     assert_eq!(structured["accounts"][0]["isDefault"], true);
 
-    let search = call(&client, "mailx_search_emails", json!({"query": "hello"}))
+    let search = call(&client, "mailx_mail_search", json!({"query": "hello"}))
         .await
         .unwrap();
     assert_ne!(search.is_error, Some(true));
     assert!(search.structured_content.is_some());
 
-    let recipients = call(&client, "mailx_suggest_contacts", json!({"query":"nobody"}))
+    let recipients = call(&client, "mailx_mail_contacts", json!({"query":"nobody"}))
         .await
         .unwrap();
     assert_ne!(recipients.is_error, Some(true));
@@ -159,7 +160,7 @@ async fn tools_list_and_calls_work_end_to_end() {
     );
     let conversation = call(
         &client,
-        "mailx_get_conversation",
+        "mailx_mail_conversation",
         json!({"emailId":"00000000-0000-4000-8000-000000000099"}),
     )
     .await
@@ -188,11 +189,10 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     let client = connect(&read_discovery(&fixture), "organize-client").await;
     let tools = client.peer().list_all_tools().await.unwrap();
     for name in [
-        "mailx_set_email_flags",
-        "mailx_archive_emails",
-        "mailx_unarchive_emails",
-        "mailx_refresh_sync",
-        "mailx_show_draft_in_app",
+        "mailx_mail_flags",
+        "mailx_mail_archive",
+        "mailx_accounts_refresh_sync",
+        "mailx_show_in_app",
     ] {
         assert!(tools.iter().any(|tool| tool.name == name), "{name}");
     }
@@ -203,10 +203,7 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     ] {
         assert!(!tools.iter().any(|tool| tool.name == name), "{name}");
     }
-    let flags = tools
-        .iter()
-        .find(|t| t.name == "mailx_set_email_flags")
-        .unwrap();
+    let flags = tools.iter().find(|t| t.name == "mailx_mail_flags").unwrap();
     let flags = serde_json::to_value(flags).unwrap();
     assert_eq!(flags["annotations"]["readOnlyHint"], false);
     assert_eq!(flags["annotations"]["idempotentHint"], true);
@@ -214,13 +211,13 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     assert_eq!(flags["_meta"]["mailx/writesServerData"], true);
     let archive = tools
         .iter()
-        .find(|t| t.name == "mailx_archive_emails")
+        .find(|t| t.name == "mailx_mail_archive")
         .unwrap();
     let archive = serde_json::to_value(archive).unwrap();
     assert_eq!(archive["annotations"]["idempotentHint"], true);
     assert_eq!(archive["annotations"]["openWorldHint"], false);
     assert_eq!(archive["_meta"]["mailx/writesServerData"], false);
-    let read = tools.iter().find(|t| t.name == "mailx_read_email").unwrap();
+    let read = tools.iter().find(|t| t.name == "mailx_mail_read").unwrap();
     let read = serde_json::to_value(read).unwrap();
     assert_eq!(read["annotations"]["readOnlyHint"], true);
     assert_eq!(read["annotations"]["openWorldHint"], true);
@@ -230,7 +227,7 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     let missing = "00000000-0000-4000-8000-000000000099";
     let flags = call(
         &client,
-        "mailx_set_email_flags",
+        "mailx_mail_flags",
         json!({
             "emailIds": [missing], "isRead": true, "isStarred": true,
         }),
@@ -243,10 +240,15 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
         assert_eq!(result["results"][0][field]["status"], "failed");
         assert_eq!(result["results"][0][field]["errorCode"], "notFound");
     }
-    for name in ["mailx_archive_emails", "mailx_unarchive_emails"] {
-        let result = call(&client, name, json!({"emailIds": [missing]}))
-            .await
-            .unwrap();
+    // One tool now covers both directions of the local archive.
+    for archive in [true, false] {
+        let result = call(
+            &client,
+            "mailx_mail_archive",
+            json!({"emailIds": [missing], "archive": archive}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.is_error, Some(true));
         assert!(result.structured_content.is_none());
         let text = serde_json::to_value(result.content).unwrap().to_string();
@@ -255,20 +257,16 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     }
     let sync = call(
         &client,
-        "mailx_refresh_sync",
+        "mailx_accounts_refresh_sync",
         json!({"accountId": fixture.account_id}),
     )
     .await
     .unwrap();
     assert_ne!(sync.is_error, Some(true));
     assert!(sync.structured_content.unwrap()["accepted"].is_boolean());
-    let draft = call(
-        &client,
-        "mailx_show_draft_in_app",
-        json!({"draftId": missing}),
-    )
-    .await
-    .unwrap();
+    let draft = call(&client, "mailx_show_in_app", json!({"draftId": missing}))
+        .await
+        .unwrap();
     assert_eq!(draft.is_error, Some(true));
     assert!(
         serde_json::to_value(draft.content)
@@ -278,7 +276,7 @@ async fn default_grant_exposes_organizing_and_reports_safe_per_field_failures() 
     );
     let search = call(
         &client,
-        "mailx_search_emails",
+        "mailx_mail_search",
         json!({"starred": true, "archive": "only"}),
     )
     .await
@@ -297,19 +295,18 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     let client = connect(&read_discovery(&fixture), "sending-client").await;
     let tools = client.peer().list_all_tools().await.unwrap();
     for name in [
-        "mailx_send_email",
-        "mailx_list_outbox",
-        "mailx_get_outbox",
-        "mailx_cancel_outbox",
-        "mailx_add_draft_attachment",
-        "mailx_remove_draft_attachment",
+        "mailx_outbox_send",
+        "mailx_outbox_read",
+        "mailx_outbox_cancel",
+        "mailx_draft_attachments",
+        "mailx_mail_help",
     ] {
         assert!(tools.iter().any(|tool| tool.name == name), "{name}");
     }
     let send = serde_json::to_value(
         tools
             .iter()
-            .find(|tool| tool.name == "mailx_send_email")
+            .find(|tool| tool.name == "mailx_outbox_send")
             .unwrap(),
     )
     .unwrap();
@@ -319,7 +316,7 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(send["_meta"]["mailx/writesServerData"], true);
     assert_eq!(send["_meta"]["mailx/requiredActions"], json!(["mail:send"]));
 
-    let accounts = call(&client, "mailx_list_accounts", json!({}))
+    let accounts = call(&client, "mailx_accounts_list", json!({}))
         .await
         .unwrap()
         .structured_content
@@ -331,23 +328,23 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
 
     let created = call(
         &client,
-        "mailx_create_draft",
+        "mailx_draft_create",
         json!({"to": [{"address": "recipient@example.test"}], "subject": "MCP send test", "bodyHtml": "<p>Local fixture only</p>"}),
     )
     .await
     .unwrap();
-    assert_ne!(created.is_error, Some(true));
+    assert_ne!(created.is_error, Some(true), "{:?}", created.content);
     let created = created.structured_content.unwrap();
     assert_eq!(created["accountId"], account["id"]);
     assert_eq!(created["senderEmailAddress"], account["emailAddress"]);
     let draft_id = created["draftId"].clone();
-    let read = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+    let read = call(&client, "mailx_draft_read", json!({"draftId": draft_id}))
         .await
-        .unwrap()
-        .structured_content
         .unwrap();
+    assert_ne!(read.is_error, Some(true), "{:?}", read.content);
+    let read = read.structured_content.unwrap();
     assert_eq!(read["senderEmailAddress"], account["emailAddress"]);
-    let drafts = call(&client, "mailx_list_drafts", json!({}))
+    let drafts = call(&client, "mailx_draft_list", json!({}))
         .await
         .unwrap()
         .structured_content
@@ -361,8 +358,8 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     std::fs::write(&path, "synthetic attachment").unwrap();
     let added = call(
         &client,
-        "mailx_add_draft_attachment",
-        json!({"draftId": draft_id, "expectedRevision": read["revision"], "filePath": path}),
+        "mailx_draft_attachments",
+        json!({"action": "add", "draftId": draft_id, "expectedRevision": read["revision"], "filePath": path}),
     )
     .await
     .unwrap();
@@ -371,7 +368,7 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(added["attachment"]["name"], "attachment.txt");
     assert_eq!(added["attachment"]["origin"], "mcp");
     assert!(!added.to_string().contains(path.to_str().unwrap()));
-    let read = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+    let read = call(&client, "mailx_draft_read", json!({"draftId": draft_id}))
         .await
         .unwrap()
         .structured_content
@@ -379,8 +376,8 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(read["attachments"][0]["id"], added["attachment"]["id"]);
     let removed = call(
         &client,
-        "mailx_remove_draft_attachment",
-        json!({"draftId": draft_id, "expectedRevision": added["revision"], "attachmentId": added["attachment"]["id"]}),
+        "mailx_draft_attachments",
+        json!({"action": "remove", "draftId": draft_id, "expectedRevision": added["revision"], "attachmentId": added["attachment"]["id"]}),
     )
     .await
     .unwrap();
@@ -392,7 +389,7 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
         "action": "send", "draftId": draft_id, "expectedRevision": removed["revision"],
         "clientMutationId": "00000000-0000-4000-8000-000000000057"
     });
-    let queued = call(&client, "mailx_send_email", input.clone())
+    let queued = call(&client, "mailx_outbox_send", input.clone())
         .await
         .unwrap();
     assert_ne!(queued.is_error, Some(true), "{:?}", queued.content);
@@ -400,14 +397,14 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(queued["state"], "queued");
     assert_eq!(queued["senderEmailAddress"], account["emailAddress"]);
     let outbox_id = queued["id"].clone();
-    let replay = call(&client, "mailx_send_email", input).await.unwrap();
+    let replay = call(&client, "mailx_outbox_send", input).await.unwrap();
     let replay = replay.structured_content.unwrap();
     assert_eq!(replay["id"], outbox_id);
     assert_eq!(replay["senderEmailAddress"], account["emailAddress"]);
 
     let retry = call(
         &client,
-        "mailx_send_email",
+        "mailx_outbox_send",
         json!({"action": "retry", "outboxId": outbox_id}),
     )
     .await
@@ -420,7 +417,7 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     assert_eq!(retry["senderEmailAddress"], account["emailAddress"]);
     let list = call(
         &client,
-        "mailx_list_outbox",
+        "mailx_outbox_read",
         json!({"accountId": fixture.account_id, "states": ["queued"], "limit": 1}),
     )
     .await
@@ -432,18 +429,20 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
         list["items"][0]["senderEmailAddress"],
         account["emailAddress"]
     );
-    let item = call(&client, "mailx_get_outbox", json!({"outboxId": outbox_id}))
+    let item = call(&client, "mailx_outbox_read", json!({"outboxId": outbox_id}))
         .await
         .unwrap()
         .structured_content
         .unwrap();
+    // A single task now comes back under `item`.
+    let item = &item["item"];
     assert_eq!(item["state"], "queued");
     assert_eq!(item["senderEmailAddress"], account["emailAddress"]);
     assert!(item.get("serverReply").is_none());
 
     let invalid = call(
         &client,
-        "mailx_send_email",
+        "mailx_outbox_send",
         json!({"action": "retry", "outboxId": outbox_id, "draftId": draft_id}),
     )
     .await
@@ -457,14 +456,14 @@ async fn sending_and_attachments_work_through_the_default_mcp_grant() {
     );
     let canceled = call(
         &client,
-        "mailx_cancel_outbox",
+        "mailx_outbox_cancel",
         json!({"outboxId": outbox_id}),
     )
     .await
     .unwrap();
     assert_ne!(canceled.is_error, Some(true));
     assert_eq!(canceled.structured_content.unwrap()["state"], "canceled");
-    let draft = call(&client, "mailx_read_draft", json!({"draftId": draft_id}))
+    let draft = call(&client, "mailx_draft_read", json!({"draftId": draft_id}))
         .await
         .unwrap()
         .structured_content
@@ -482,7 +481,7 @@ async fn invalid_input_and_unknown_tools_are_tool_errors_but_unprefixed_is_a_pro
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let client = connect(&read_discovery(&fixture), "e2e-client").await;
 
-    let invalid = call(&client, "mailx_search_emails", json!({"query": 5}))
+    let invalid = call(&client, "mailx_mail_search", json!({"query": 5}))
         .await
         .unwrap();
     assert_eq!(invalid.is_error, Some(true));
@@ -496,7 +495,7 @@ async fn invalid_input_and_unknown_tools_are_tool_errors_but_unprefixed_is_a_pro
     let text = serde_json::to_value(&unknown.content).unwrap().to_string();
     assert!(text.contains("unknownTool"), "{text}");
 
-    let unprefixed = call(&client, "list_accounts", json!({})).await.unwrap_err();
+    let unprefixed = call(&client, "accounts_list", json!({})).await.unwrap_err();
     assert_eq!(rpc_code(&unprefixed), Some(-32602));
 
     client.cancel().await.unwrap();
@@ -534,7 +533,7 @@ async fn bad_handshakes_are_rejected() {
 
     // The server is still healthy.
     let client = connect(&discovery, "after-bad").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -559,7 +558,7 @@ async fn oversized_message_ends_the_session() {
 
     // Other sessions are unaffected.
     let client = connect(&discovery, "after-oversize").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
 }
@@ -623,7 +622,7 @@ async fn token_rotates_and_restart_works() {
         let discovery = read_discovery(&fixture);
         tokens.push(discovery.token.clone());
         let client = connect(&discovery, "restart").await;
-        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+        assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
         client.cancel().await.unwrap();
         handle.stop().await;
     }
@@ -638,7 +637,7 @@ async fn stop_disconnects_sessions_and_refuses_new_connections() {
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let discovery = read_discovery(&fixture);
     let client = connect(&discovery, "stopper").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
 
     handle.stop().await;
     assert_eq!(handle.status(), McpStatus::Off);
@@ -690,7 +689,7 @@ async fn second_server_on_the_same_data_dir_reports_endpoint_in_use() {
     assert_eq!(error.code, mailx_mcp_server::McpFailureCode::EndpointInUse);
     // The failed start must not have touched the first server's files.
     let client = connect(&read_discovery(&fixture), "still-alive").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     first.stop().await;
 }
@@ -718,7 +717,7 @@ async fn long_data_dir_falls_back_to_a_short_private_socket_path() {
         0o700
     );
     let client = connect(&discovery, "long-path").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
     client.cancel().await.unwrap();
     handle.stop().await;
     assert!(!endpoint.exists());
@@ -729,11 +728,11 @@ async fn open_session_is_rejected_per_call_once_disabled() {
     let fixture = Fixture::new().await;
     let handle = McpServer::start(fixture.config()).await.unwrap();
     let client = connect(&read_discovery(&fixture), "per-call").await;
-    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 25);
+    assert_eq!(client.peer().list_all_tools().await.unwrap().len(), 22);
 
     // Flip the flag without aborting the session: the call itself must fail.
     handle.disable_calls_only_for_tests();
-    let call_error = call(&client, "mailx_list_accounts", json!({}))
+    let call_error = call(&client, "mailx_accounts_list", json!({}))
         .await
         .unwrap_err();
     assert!(
@@ -825,7 +824,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
     .await;
     assert_eq!(
         list["result"]["tools"].as_array().unwrap().len(),
-        25,
+        22,
         "{list}"
     );
     assert!(matches!(
@@ -839,7 +838,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
         6,
         "tools/call",
         json!({
-            "name": "mailx_list_accounts",
+            "name": "mailx_accounts_list",
             "arguments": {},
             "_meta": stateless_meta()
         }),
@@ -863,7 +862,7 @@ async fn stateless_client_without_initialize_gets_its_name_from_request_meta() {
         &mut write,
         5,
         "tools/call",
-        json!({"name": "mailx_list_accounts", "arguments": {}, "_meta": anonymous}),
+        json!({"name": "mailx_accounts_list", "arguments": {}, "_meta": anonymous}),
     )
     .await;
     assert!(called["error"].is_null(), "{called}");
