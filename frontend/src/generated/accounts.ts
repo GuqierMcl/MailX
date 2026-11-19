@@ -559,7 +559,13 @@ willRetry: boolean, };
 
 export type FolderSyncPhase = "waiting" | "syncing" | "idle" | "failed";
 
-export type FolderSyncState = { folderId: string, phase: FolderSyncPhase, lastSyncedAt: string | null, failure: SyncFailure | null, dataRevision: number, };
+export type FolderSyncState = { folderId: string, phase: FolderSyncPhase, lastSyncedAt: string | null, failure: SyncFailure | null,
+/**
+ * RFC 3339 time the current run of failures began; cleared on success.
+ * Survives round boundaries so a host can wait before showing a
+ * retryable failure that may just be a network blip.
+ */
+failureSince: string | null, dataRevision: number, };
 
 export type AccountSyncState = { accountId: string, mailboxSourceId: string | null,
 /**
@@ -577,7 +583,12 @@ folderRevision: number, folders: Array<FolderSyncState>, phase: SyncPhase,
 /**
  * RFC 3339 time of the last entirely successful round in this session.
  */
-lastSyncedAt: string | null, failure: SyncFailure | null, };
+lastSyncedAt: string | null, failure: SyncFailure | null,
+/**
+ * RFC 3339 time the current run of retryable failures began; cleared by a
+ * fully successful round or a new worker generation.
+ */
+failureSince: string | null, };
 
 export type ThemeMode = "system" | "light" | "dark";
 

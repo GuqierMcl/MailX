@@ -647,9 +647,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     listSyncStates: async () =>
       accounts.map((account) => ({
         accountId: account.id, mailboxSourceId: account.mailboxSourceId, generation: 1, sequence: 1, folderRevision: 1,
-        phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null,
+        phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, failureSince: null,
         folders: folders.filter((folder) => folder.accountId === account.id && folder.selectable).map((folder) => ({
-          folderId: folder.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, dataRevision: 0,
+          folderId: folder.id, phase: 'idle', lastSyncedAt: new Date().toISOString(), failure: null, failureSince: null, dataRevision: 0,
         })),
       })),
     onSyncState: () => () => undefined,
@@ -1178,6 +1178,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     // The preview's composer tabs cannot be brought forward, so none counts as open.
     async focusComposer() { return false },
+    // The preview has no agent tools to keep away from the inline draft.
+    setInlineComposer: async () => undefined,
     closeComposer: async () => undefined,
     cancelComposerClose: async () => undefined,
     onOutbox: (listener) => outbox.subscribe(listener),

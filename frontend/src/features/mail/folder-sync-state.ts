@@ -1,6 +1,7 @@
 import type { Account, AccountSyncState, Folder } from '@/generated/accounts'
 import type { ListSyncStatus } from './email-list'
 import { errorText } from '@/i18n/errors'
+import { visibleFolderFailure, visibleSyncFailure } from '@/features/accounts/sync-quiet'
 
 /** The snapshot query and event delivery may complete in either order. */
 export function acceptsSyncState(account: Pick<Account, 'mailboxSourceId'>, previous: AccountSyncState | undefined, next: AccountSyncState) {
@@ -13,18 +14,26 @@ export function acceptsSyncState(account: Pick<Account, 'mailboxSourceId'>, prev
 export function folderSyncStatus(folders: Folder[], states: Record<string, AccountSyncState>, windowCapped: boolean): ListSyncStatus {
   if (folders.length === 0) {
     const accounts = Object.values(states)
-    const failure = accounts.find((state) => state.phase === 'failed')?.failure
+    const failure = accounts.map((state) => visibleSyncFailure(state)).find(Boolean)
     const phase = failure ? 'failed' : accounts.some((state) => state.phase === 'syncing') ? 'syncing'
       : accounts.length > 0 && accounts.every((state) => state.phase === 'idle') ? 'idle' : 'waiting'
     return { phase, failure: failure ? errorText(failure) : null, windowCapped }
   }
+  // Only a failure worth showing replaces the rows; a young retryable one reads
+  // as "still syncing", because the list is usually still usable.
   const scoped = folders.map((folder) => {
     const account = states[folder.accountId]
     const state = account?.folders.find((item) => item.folderId === folder.id)
     // Account authentication/route failures also explain folders that could not start.
-    return account?.phase === 'failed' && state?.phase !== 'failed' && state?.phase !== 'idle'
-      ? { phase: 'failed' as const, failure: account.failure }
-      : state ?? { phase: 'waiting' as const, failure: null }
+    if (account?.phase === 'failed' && state?.phase !== 'failed' && state?.phase !== 'idle') {
+      return visibleSyncFailure(account)
+        ? { phase: 'failed' as const, failure: account.failure }
+        : { phase: 'syncing' as const, failure: null }
+    }
+    if (!state) return { phase: 'waiting' as const, failure: null }
+    const failure = visibleFolderFailure(state)
+    return failure ? { phase: 'failed' as const, failure }
+      : { phase: state.phase === 'failed' ? 'syncing' as const : state.phase, failure: null }
   })
   const failed = scoped.find((state) => state.phase === 'failed')
   const phase = failed ? 'failed' : scoped.some((state) => state.phase === 'syncing') ? 'syncing'

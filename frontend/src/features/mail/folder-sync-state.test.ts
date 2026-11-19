@@ -4,6 +4,9 @@ import { exampleAccount, exampleFolderSyncState, exampleSyncState } from '@/feat
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 
 const account = exampleAccount()
+/** Old enough that a retryable failure is past the quiet window. */
+const OLD = '2026-10-18T08:00:00.000Z'
+const network = { code: 'network' as const, message: '无法连接到邮件服务器。', detail: null, willRetry: true }
 const sent: Folder = { id: 'sent', accountId: account.id, name: 'Sent', role: 'sent', parentId: null, selectable: true, countsKnown: true, unreadCount: 0, totalCount: 0, archivedCount: 0, archivedUnreadCount: 0 }
 
 describe('folder sync state snapshots', () => {
@@ -27,7 +30,7 @@ describe('folder sync state snapshots', () => {
 
   it('shows an account failure when a folder could not start', () => {
     const state = exampleSyncState({
-      phase: 'failed', failure: { code: 'authentication', message: '请检查账号设置。', detail: null, willRetry: false },
+      phase: 'failed', failure: { code: 'authentication', message: '请检查账号设置。', detail: null, willRetry: false }, failureSince: OLD,
       folders: [exampleFolderSyncState('sent', { phase: 'waiting' })],
     })
     expect(folderSyncStatus([sent], { [account.id]: state }, false)).toEqual({ phase: 'failed', failure: '邮箱服务器拒绝了账号登录，请检查密码或授权码。', windowCapped: false })
@@ -35,5 +38,25 @@ describe('folder sync state snapshots', () => {
 
   it('shows a completed empty scope for an account without an inbox', () => {
     expect(folderSyncStatus([], { [account.id]: exampleSyncState() }, false).phase).toBe('idle')
+  })
+
+  it('reads a young retryable failure as still syncing rather than replacing the rows', () => {
+    const state = exampleSyncState({
+      phase: 'failed',
+      failure: network,
+      failureSince: new Date(Date.now() - 1_000).toISOString(),
+      folders: [exampleFolderSyncState('sent', { phase: 'failed', failure: network, failureSince: new Date(Date.now() - 1_000).toISOString() })],
+    })
+    expect(folderSyncStatus([sent], { [account.id]: state }, false)).toEqual({ phase: 'syncing', failure: null, windowCapped: false })
+  })
+
+  it('shows a retryable failure once it has outlasted the quiet window', () => {
+    const state = exampleSyncState({
+      phase: 'failed',
+      failure: network,
+      failureSince: OLD,
+      folders: [exampleFolderSyncState('sent', { phase: 'failed', failure: network, failureSince: OLD })],
+    })
+    expect(folderSyncStatus([sent], { [account.id]: state }, false)).toEqual({ phase: 'failed', failure: '网络连接失败，请稍后重试。', windowCapped: false })
   })
 })

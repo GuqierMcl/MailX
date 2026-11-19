@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- A brief network drop no longer shows a sync warning: a failure that MailX will retry stays quiet for its first 30 seconds, and problems that need you still appear at once. / 短暂网络中断不再显示同步异常：会自动重试的失败在最初 30 秒内保持安静，需要处理的同步问题仍然立即提示。 ([#161](https://github.com/GuqierMcl/MailX/pull/161))
+
 ### 🚀 Feature
 
 - Forwards now carry the pictures inside the original message, not just its files; replies keep a written note of them instead of a broken image. / 转发现在会带上原邮件正文里的图片，而不只是附件；回复里保留图片的说明文字，不再留空。
@@ -20,6 +24,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🩹 Fixed
 
+- Stop MCP clients and the AI assistant from changing, deleting or sending a draft that is open in the main window's composer, as for a composer window. / 修复 MCP 客户端与 AI 助手可以修改、删除或发送正在主窗口内写信区编辑的草稿的问题，现与写信窗口一致。 ([#159](https://github.com/GuqierMcl/MailX/pull/159))
 - Stop a mailbox whose server never returns message flags (2925) from failing every sync round and eventually being rejected at sign-in; such mails keep their last known read and starred state. / 修复服务器始终不返回邮件标记的邮箱（2925）每轮同步都失败、最终被服务器拒绝登录的问题；这些邮件保留上次已知的已读和星标状态。
 - Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 - Fix sync errors for empty folders on IMAP servers that omit empty search results. / 修复部分 IMAP 服务器省略空搜索结果时，空文件夹同步报错的问题。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))

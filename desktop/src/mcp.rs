@@ -74,7 +74,12 @@ pub(crate) fn shared_tools(
         .with_draft_open_check({
             let handle = app.clone();
             move |draft_id| {
-                crate::window_access::draft_open_in(handle.webview_windows().into_keys(), draft_id)
+                let inline = handle.state::<crate::compose::InlineComposerDraft>().get();
+                crate::window_access::draft_open_in(
+                    handle.webview_windows().into_keys(),
+                    inline,
+                    draft_id,
+                )
             }
         })
         .with_audit(Arc::new(StderrAudit));

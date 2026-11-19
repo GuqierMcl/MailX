@@ -169,6 +169,17 @@ export function useInlineComposer(
   const close = useCallback(() => setCurrent(null), [setCurrent])
   const draftId = useCallback(() => currentRef.current?.draftId ?? null, [])
 
+  // The host keeps agent tools (MCP, the assistant) from changing or sending the
+  // draft on screen, as it does for a composer window. Reported on every change,
+  // including the first mount, so a reloaded page clears what the last one left.
+  const shownId = current?.draftId ?? null
+  useEffect(() => {
+    client.setInlineComposer(shownId).catch(() => undefined)
+  }, [client, shownId])
+  useEffect(() => () => {
+    client.setInlineComposer(null).catch(() => undefined)
+  }, [client])
+
   // The account and its drafts are gone: close at once, nothing to save.
   useEffect(() => client.onAccountRemoved((report) => {
     const draft = currentRef.current

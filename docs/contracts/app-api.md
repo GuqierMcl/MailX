@@ -220,6 +220,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | `outbox_resolve_unknown { id, choice, clientMutationId }` | 是 | 否 | `choice` 为 `markSent` / `resend`；核心接受 `Composer` 与 `MainWindow`，MCP / 模型仍为 `forbidden` |
 | `composer_open { draftId, fresh? }` | 是 | 否 | 草稿必须存在；创建或聚焦 `composer-{draftId}`。`fresh: true`（草稿刚为这个窗口创建）使页面 URL 带 `&fresh=1`，关闭时选择“不保存”会删除草稿；省略即 false |
 | `composer_focus { draftId }` | 是 | 否 | 返回 `bool`：已有 `composer-{draftId}` 窗口时取消最小化并聚焦，返回 `true`；没有则返回 `false`，不创建窗口、不检查草稿是否存在。主窗口内写信打开草稿前用它保证一份草稿只在一处编辑（[发信设计 17.7](../architecture/sending.md#177-写信打开方式)）。非规范 id 为 `validation`（字段 `draftId`） |
+| `composer_set_inline { draftId: string \| null }` | 是 | 否 | 同步命令，按调用顺序生效。报告主窗口内嵌写信区当前显示的草稿（`null` 为没有）；宿主只保存最近一次报告。工具层（MCP 与内置助手）把它与有写信窗口的草稿同样视为正在编辑：修改、删除、发送和增删附件返回 `draftOpen`，`list_drafts` 的 `open` 为 `true`。主窗口每次加载时先报告 `null`，清除上一次页面遗留的值。非规范 id 为 `validation`（字段 `draftId`） |
 | `composer_close { force }` | 否 | 是 | 销毁调用窗口；草稿由前端先写出，宿主只负责关闭 |
 | 其余全部命令（账号修改、邮件 / 正文 / 链接 / 图片 / 附件、同步、设置修改、通知） | 是 | 否 | 与此前一致 |
 

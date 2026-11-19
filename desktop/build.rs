@@ -128,6 +128,7 @@ fn main() {
             "outbox_remove_local_copy",
             "composer_open",
             "composer_focus",
+            "composer_set_inline",
             "composer_close",
             "composer_cancel_close",
             "updater_get_state",

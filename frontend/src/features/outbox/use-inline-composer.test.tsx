@@ -147,3 +147,19 @@ describe('one draft, one editor', () => {
     expect(client.focusComposer).not.toHaveBeenCalled()
   })
 })
+
+describe('the inline draft reported to the host', () => {
+  it('follows the draft on screen and clears on close and unmount', () => {
+    const { hook, client } = setup()
+    const reported = () => vi.mocked(client.setInlineComposer).mock.calls.map(([id]) => id)
+    // A reloaded page first clears whatever the previous one left behind.
+    expect(reported()).toEqual([null])
+    act(() => hook.result.current.show(DRAFT, true))
+    expect(reported()).toEqual([null, DRAFT])
+    act(() => hook.result.current.close())
+    expect(reported()).toEqual([null, DRAFT, null])
+    act(() => hook.result.current.show(DRAFT, false))
+    hook.unmount()
+    expect(reported()).toEqual([null, DRAFT, null, DRAFT, null])
+  })
+})

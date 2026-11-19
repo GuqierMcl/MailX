@@ -39,6 +39,10 @@ fn backoff(failures: u32) -> Duration {
     base + base.mul_f64(f64::from(nanos % 1000) / 4000.0)
 }
 
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncPhase {
@@ -97,6 +101,10 @@ pub struct FolderSyncState {
     pub phase: FolderSyncPhase,
     pub last_synced_at: Option<String>,
     pub failure: Option<SyncFailure>,
+    /// RFC 3339 time the current run of failures began; cleared on success.
+    /// Survives round boundaries so a host can wait before showing a
+    /// retryable failure that may just be a network blip.
+    pub failure_since: Option<String>,
     pub data_revision: u32,
 }
 
@@ -116,6 +124,9 @@ pub struct AccountSyncState {
     /// RFC 3339 time of the last entirely successful round in this session.
     pub last_synced_at: Option<String>,
     pub failure: Option<SyncFailure>,
+    /// RFC 3339 time the current run of retryable failures began; cleared by a
+    /// fully successful round or a new worker generation.
+    pub failure_since: Option<String>,
 }
 
 /// What a finished write-back round tells the host. Not part of the sync state:
@@ -314,6 +325,7 @@ impl Shared {
                         phase: FolderSyncPhase::Waiting,
                         last_synced_at: None,
                         failure: None,
+                        failure_since: None,
                         data_revision: 0,
                     })
                 })
@@ -662,6 +674,7 @@ impl SyncManager {
                     phase: SyncPhase::Syncing,
                     last_synced_at: None,
                     failure: None,
+                    failure_since: None,
                 },
             );
             WorkerToken {
@@ -936,6 +949,7 @@ async fn run(
                     state.phase = SyncPhase::Idle;
                     state.last_synced_at = Some(now);
                     state.failure = None;
+                    state.failure_since = None;
                 });
                 record_round(&mut cadence, &shared, &token, before);
                 Pause::Cadence
@@ -945,6 +959,9 @@ async fn run(
                 shared.update(&token, |state| {
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
+                    // A folder-scoped refusal is not weather: it starts the clock
+                    // too, so a long outage cannot hide behind an early partial.
+                    state.failure_since.get_or_insert_with(now_rfc3339);
                 });
                 // Something is wrong in one folder: not a quiet mailbox, so no backing off.
                 cadence.record(true);
@@ -956,6 +973,9 @@ async fn run(
                 shared.update(&token, |state| {
                     state.phase = SyncPhase::Failed;
                     state.failure = Some(failure);
+                    // Kept across retries: the host waits for this run of
+                    // failures to last long enough to be worth showing.
+                    state.failure_since.get_or_insert_with(now_rfc3339);
                 });
                 Pause::Backoff(wait)
             }
@@ -1246,6 +1266,7 @@ where
                         shared.update(token, |state| {
                             state.phase = SyncPhase::Failed;
                             state.failure = Some(failure);
+                            state.failure_since.get_or_insert_with(now_rfc3339);
                         });
                     }
                     outcome => return outcome,
@@ -1293,7 +1314,14 @@ where
                     folder.last_synced_at = Some(
                         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                     );
-                    folder.failure = warning;
+                    // Some mails kept their last known flags: a retryable
+                    // warning, not a failure of the round.
+                    folder.failure = warning.clone();
+                    if warning.is_some() {
+                        folder.failure_since.get_or_insert_with(now_rfc3339);
+                    } else {
+                        folder.failure_since = None;
+                    }
                     // Readers refetch on a new revision, so it only moves when data did.
                     if changed {
                         folder.data_revision = folder.data_revision.saturating_add(1);
@@ -1308,6 +1336,7 @@ where
                         shared.folder_update(token, &folder_id, |folder| {
                             folder.phase = FolderSyncPhase::Failed;
                             folder.failure = Some(failure.clone());
+                            folder.failure_since.get_or_insert_with(now_rfc3339);
                             folder.data_revision = folder.data_revision.saturating_add(1);
                         });
                         return Outcome::Blocked(failure);
@@ -1317,6 +1346,7 @@ where
                 shared.folder_update(token, &folder_id, |folder| {
                     folder.phase = FolderSyncPhase::Failed;
                     folder.failure = Some(failure.clone());
+                    folder.failure_since.get_or_insert_with(now_rfc3339);
                     folder.data_revision = folder.data_revision.saturating_add(1);
                 });
                 failed.get_or_insert(failure);
