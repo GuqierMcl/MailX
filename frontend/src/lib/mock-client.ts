@@ -196,6 +196,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const MOCK_AI_MODELS: AiModel[] = [
     { id: 'large-1', name: 'Large 1', contextLength: 200000, outputLength: 32000, toolCall: true, source: 'provider' },
     { id: 'small-1', name: 'Small 1', contextLength: 128000, outputLength: 16000, toolCall: true, source: 'provider' },
+  ]
+  const MOCK_AI_PRESETS: AiModel[] = [
     { id: 'legacy', name: 'Legacy', contextLength: null, outputLength: null, toolCall: false, source: 'catalog' },
   ]
   const aiKeys = new Map<string, string>()
@@ -1022,9 +1024,11 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     aiRemoveProxyPassword: async () => { aiProxyPassword = null; return aiState() },
     aiCatalog: async () => ({ providers: clone(MOCK_AI_PROVIDERS), updatedAt: new Date().toISOString(), stale: false, refreshError: null }),
-    aiListModels: async (connectionId) => {
+    aiListModels: async (connectionId, source) => {
+      const connection = aiConnections.find(({ id }) => id === connectionId)
+      if (!connection) throw aiFailure('aiNotConfigured')
+      if (source === 'catalog') return connection.providerId === 'custom' ? [] : clone(MOCK_AI_PRESETS)
       await aiDelay()
-      if (!aiConnections.some((connection) => connection.id === connectionId)) throw aiFailure('aiNotConfigured')
       aiCheckKey(connectionId, null)
       return clone(MOCK_AI_MODELS)
     },

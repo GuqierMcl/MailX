@@ -1177,7 +1177,7 @@ export type SavedAiConnection = { state: AiState,
  */
 connectionId: string,
 /**
- * The provider's models when `verify` was set.
+ * The provider's models when `verify` was set and listing is supported.
  */
 models: Array<AiModel> | null, };
 
@@ -1213,7 +1213,11 @@ export type AiModel = { id: string, name: string, contextLength: number | null, 
 /**
  * `None` when nobody says.
  */
-toolCall: boolean | null, source: AiModelSource, };
+toolCall: boolean | null,
+/**
+ * Display-only attribution reported by the list endpoint, never a route.
+ */
+ownedBy?: string, source: AiModelSource, };
 
 export type AiTestResult = { latencyMs: number, };
 

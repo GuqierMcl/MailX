@@ -434,7 +434,27 @@ async fn model_lists_are_labelled_from_the_catalog() {
         .await
         .unwrap()
         .connection_id;
-    let models = f.service.list_models(&id).await.unwrap();
+    let presets = f
+        .service
+        .list_models(&id, AiModelSource::Catalog)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        server.count(),
+        0,
+        "browsing presets never calls the connection"
+    );
+    let ids: Vec<&str> = presets.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["gpt-a", "nolimit"]);
+    assert!(presets.iter().all(|m| m.source == AiModelSource::Catalog));
+
+    let models = f
+        .service
+        .list_models(&id, AiModelSource::Provider)
+        .await
+        .unwrap()
+        .unwrap();
     let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
     // The catalog says `embed` and `pic` do not output text.
     assert_eq!(ids, ["gpt-a", "nolimit", "unknown"]);
@@ -455,52 +475,136 @@ async fn model_lists_are_labelled_from_the_catalog() {
 
     // A custom connection is never matched against the catalog.
     let custom = save(&f, &server.url(), Some("k")).await;
-    let models = f.service.list_models(&custom).await.unwrap();
+    let models = f
+        .service
+        .list_models(&custom, AiModelSource::Provider)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(models.len(), 5);
     assert!(models.iter().all(|m| m.context_length.is_none()));
 }
 
 #[tokio::test]
-async fn a_provider_without_a_list_falls_back_to_the_catalog() {
+async fn unsupported_empty_and_failed_lists_do_not_replace_presets() {
     let f = fixture();
     write_catalog(&f, now());
     let server = mock_http(|_| MockReply::status(404)).await;
-    let mut known = request(&server.url(), None, false);
-    known.provider_id = "openai".into();
-    let id = f
-        .service
-        .save_connection(known)
-        .await
-        .unwrap()
-        .connection_id;
-    let models = f.service.list_models(&id).await.unwrap();
-    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, ["gpt-a", "nolimit"]);
-    assert!(models.iter().all(|m| m.source == AiModelSource::Catalog));
-    // Not an error when saving with verification either.
-    let mut again = request(&server.url(), None, true);
-    again.provider_id = "openai".into();
+    let mut ask = request(&server.url(), None, true);
+    ask.provider_id = "openai".into();
+    // Unsupported is not an error during save, but cannot verify credentials.
+    let saved = f.service.save_connection(ask).await.unwrap();
+    let id = saved.connection_id;
+    assert_eq!(saved.models, None);
     assert_eq!(
         f.service
-            .save_connection(again)
+            .list_models(&id, AiModelSource::Provider)
             .await
-            .unwrap()
-            .models
-            .unwrap()
-            .len(),
-        2
+            .unwrap(),
+        None
+    );
+    let models = f
+        .service
+        .list_models(&id, AiModelSource::Catalog)
+        .await
+        .unwrap()
+        .unwrap();
+    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["gpt-a", "nolimit"]);
+
+    // A custom connection cannot borrow unrelated presets.
+    let custom = save(&f, &server.url(), None).await;
+    assert_eq!(
+        f.service
+            .list_models(&custom, AiModelSource::Catalog)
+            .await
+            .unwrap(),
+        Some(vec![])
+    );
+    assert_eq!(
+        f.service
+            .list_models("missing", AiModelSource::Catalog)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AiNotConfigured
+    );
+    // A supported but empty listing stays empty.
+    let empty = mock_http(|_| MockReply::json(200, r#"{"data":[]}"#)).await;
+    let id = save(&f, &empty.url(), None).await;
+    assert_eq!(
+        f.service
+            .list_models(&id, AiModelSource::Provider)
+            .await
+            .unwrap(),
+        Some(vec![])
     );
 
-    // A provider the catalog does not know yields an empty list.
-    let custom = save(&f, &server.url(), None).await;
-    assert!(f.service.list_models(&custom).await.unwrap().is_empty());
-    // Other errors stay errors.
+    // Auth errors do not erase the catalog or load it as an API result.
     let denied = mock_http(|_| MockReply::status(403)).await;
-    let id = save(&f, &denied.url(), Some("k")).await;
+    let mut ask = request(&denied.url(), Some("k"), false);
+    ask.provider_id = "openai".into();
+    let id = f.service.save_connection(ask).await.unwrap().connection_id;
     assert_eq!(
-        f.service.list_models(&id).await.unwrap_err().code,
+        f.service
+            .list_models(&id, AiModelSource::Provider)
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::AiKeyRejected
     );
+    assert_eq!(
+        f.service
+            .list_models(&id, AiModelSource::Catalog)
+            .await
+            .unwrap(),
+        Some(models)
+    );
+    assert_eq!(denied.count(), 1);
+}
+
+#[tokio::test]
+async fn gateway_models_keep_attribution_and_send_the_full_selected_id() {
+    let f = fixture();
+    let server = mock_http(|request| {
+        if request.method == "POST" {
+            MockReply::json(200, CHAT)
+        } else {
+            MockReply::json(
+                200,
+                r#"{"data":[
+              {"id":"work/openai/gpt-a","display_name":"GPT A","owned_by":"work"},
+              {"id":"personal/gpt-a","display_name":"GPT A","owned_by":"personal"}
+            ]}"#,
+            )
+        }
+    })
+    .await;
+    let saved = f
+        .service
+        .save_connection(request(&server.url(), Some("gateway-key"), true))
+        .await
+        .unwrap();
+    let models = saved.models.unwrap();
+    assert_eq!(models.len(), 2);
+    for (model, expected, owner) in [
+        (&models[0], "personal/gpt-a", "personal"),
+        (&models[1], "work/openai/gpt-a", "work"),
+    ] {
+        assert_eq!(model.name, "GPT A");
+        assert_eq!(model.id, expected);
+        assert_eq!(model.owned_by.as_deref(), Some(owner));
+        f.service
+            .test(&saved.connection_id, &model.id)
+            .await
+            .unwrap();
+        assert_eq!(server.last().target, "/v1/chat/completions");
+        assert_eq!(server.last().json()["model"], expected);
+        assert_eq!(
+            server.last().header("authorization"),
+            Some("Bearer gateway-key")
+        );
+    }
 }
 
 #[tokio::test]
@@ -569,7 +673,10 @@ async fn the_proxy_is_used_only_when_the_connection_asks_for_it() {
 
     // Direct: the proxy hears nothing.
     let direct = save(&f, &server.url(), None).await;
-    f.service.list_models(&direct).await.unwrap();
+    f.service
+        .list_models(&direct, AiModelSource::Provider)
+        .await
+        .unwrap();
     assert!(targets.lock().unwrap().is_empty());
 
     let mut proxied = request("http://models.invalid:8080", None, false);
@@ -580,7 +687,15 @@ async fn the_proxy_is_used_only_when_the_connection_asks_for_it() {
         .await
         .unwrap()
         .connection_id;
-    assert_eq!(f.service.list_models(&id).await.unwrap().len(), 3);
+    assert_eq!(
+        f.service
+            .list_models(&id, AiModelSource::Provider)
+            .await
+            .unwrap()
+            .unwrap()
+            .len(),
+        3
+    );
     assert!(targets.lock().unwrap()[0].starts_with("CONNECT models.invalid:8080"));
 
     // A dead proxy fails; it never falls back to a direct connection.
@@ -603,7 +718,11 @@ async fn the_proxy_is_used_only_when_the_connection_asks_for_it() {
         .unwrap()
         .connection_id;
     assert_eq!(
-        f.service.list_models(&id).await.unwrap_err().code,
+        f.service
+            .list_models(&id, AiModelSource::Provider)
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::AiProxy
     );
     assert_eq!(server.count(), before);

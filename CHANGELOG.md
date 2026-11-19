@@ -18,6 +18,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Choose AI models from the connection’s API or from presets, and distinguish same-name models on gateways such as Magpie by upstream and full ID. / AI 模型可从接口或预设目录选择，Magpie 等网关的同名模型可按上游和完整 ID 区分。 ([#160](https://github.com/GuqierMcl/MailX/issues/160))
 - Keep rotating local diagnostic logs for startup and mail sync, including failures, sync retries and recovery, and selected IMAP counts. / 新增本地轮转诊断日志，记录启动和同步故障、同步重试与恢复及部分 IMAP 响应计数。 ([#158](https://github.com/GuqierMcl/MailX/pull/158))
 
 ### 🩹 Fixed

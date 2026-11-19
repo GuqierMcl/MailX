@@ -73,13 +73,15 @@ describe('AI settings: assistant', () => {
     expect(screen.getByRole('switch', { name: '启用助手' })).toBeEnabled()
   })
 
-  it('follows the default model, or saves a model from a connection', async () => {
+  it('follows the default model, or saves a preset for a connection', async () => {
     const { client } = await setup()
+    client.aiListModels.mockImplementation(async (_id, source) => source === 'provider' ? MODELS : [{ ...MODELS[0], id: 'preset', name: 'Preset', source: 'catalog' }])
     const picker = await screen.findByRole('combobox', { name: '对话模型' })
     expect(picker).toHaveTextContent('跟随默认模型（Big Model）')
     await userEvent.click(picker)
-    await userEvent.click(await screen.findByText('Big Model', { selector: '[cmdk-item] span, [role="option"] span' }))
-    await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ model: expect.objectContaining({ connectionId: 'c1', modelId: 'big' }) }))
+    await userEvent.click(await screen.findByRole('tab', { name: '预设目录' }))
+    await userEvent.click(await screen.findByRole('option', { name: /Preset/ }))
+    await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ model: expect.objectContaining({ connectionId: 'c1', modelId: 'preset' }) }))
     await userEvent.click(screen.getByRole('combobox', { name: '对话模型' }))
     await userEvent.click(await screen.findByText('跟随默认模型（Big Model）', { selector: '[cmdk-item]' }))
     await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ model: null }))
