@@ -464,5 +464,14 @@
   "mcpConflictTitle": "替换 {{name}} 中的 MailX 配置？",
   "mcpConflictDescription": "此条目指向其他 MailX 安装位置或数据目录。替换后，客户端将连接当前 MailX；其他客户端设置会保留。",
   "mcpConflictReplace": "替换 MailX 条目",
-  "mcpAgentHarnessHint": "可在 Harness 设置中添加 stdio 服务器，或复制专属配置用于个人 Harness 配置。"
+  "mcpAgentHarnessHint": "可在 Harness 设置中添加 stdio 服务器，或复制专属配置用于个人 Harness 配置。",
+  "assistantAutoSummary": "自动总结打开的邮件",
+  "assistantAutoSummaryDescription": "打开邮件后自动生成摘要，正文很短的邮件除外。每封都会发送给模型；也可以在摘要面板里只为某个发件人打开。",
+  "assistantSummarySenders": "总是总结的发件人",
+  "assistantSummarySendersDescription": "来自这些地址的邮件打开后总会生成摘要。在阅读区的摘要面板里添加。",
+  "assistantSummarySenderRemove": "移除 {{address}}",
+  "assistantSummaryCache": "邮件摘要",
+  "assistantSummaryCacheDescription": "生成的摘要保存在这台电脑上，再次打开同一封邮件时直接显示。",
+  "assistantSummaryCacheClear": "清除摘要",
+  "assistantSummaryCacheCleared_other": "已清除 {{count}} 条摘要"
 }

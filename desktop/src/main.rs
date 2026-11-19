@@ -386,6 +386,8 @@ fn main() {
             assistant::assistant_get_conversation,
             assistant::assistant_delete_conversation,
             assistant::assistant_clear_conversations,
+            assistant::assistant_email_summary,
+            assistant::assistant_clear_email_summaries,
             commands::settings_get,
             commands::settings_update,
             commands::notifications_test,

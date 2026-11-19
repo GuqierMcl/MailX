@@ -1235,6 +1235,34 @@ export type AssistantMode = "direct" | "ask";
 
 export type AssistantSendMode = "confirm" | "direct";
 
+export type SummaryStyle = "brief" | "detailed" | "points";
+
+export type SummaryLanguage = { "mode": "interface" } | { "mode": "original" } | { "mode": "fixed", code: string, };
+
+export type EmailSummarySettings = {
+/**
+ * Summarize every email the user opens. Off by default: it sends each
+ * opened message to the model.
+ */
+auto: boolean,
+/**
+ * Lowercased sender addresses whose mail is always summarized, whatever
+ * `auto` says.
+ */
+senders: Array<string>,
+/**
+ * The style the panel last used.
+ */
+style: SummaryStyle,
+/**
+ * The language the panel last used.
+ */
+language: SummaryLanguage,
+/**
+ * The summary card shows only its first line.
+ */
+collapsed: boolean, };
+
 export type AssistantSettings = {
 /**
  * Off: no run starts, whatever asks for it.
@@ -1275,7 +1303,11 @@ saveHistory: boolean,
  * tables, links) instead of its plain text only. Off by default: it sends
  * far more of the message, including markup other people wrote.
  */
-readHtml: boolean, };
+readHtml: boolean,
+/**
+ * Email summaries in the reader.
+ */
+summary: EmailSummarySettings, };
 
 export type StartRun = { kind: RunKind, };
 
@@ -1295,13 +1327,32 @@ occasion?: Occasion, } | { "type": "chat", conversationId?: string, message: str
  * What the user is looking at as they write. The core reads it
  * itself, within the assistant's accounts, for this run only.
  */
-context?: ChatContext, };
+context?: ChatContext, } | { "type": "emailSummary", emailId: string, style?: SummaryStyle, language?: SummaryLanguage,
+/**
+ * Skip the cached summary and ask the model again; the new one
+ * replaces it.
+ */
+fresh?: boolean, };
 
 export type ChatContext = { "type": "email", emailId: string, } | { "type": "emails", emailIds: Array<string>, } | { "type": "draft", draftId: string, };
 
 export type Occasion = "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn" | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi" | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 
-export type RunKindTag = "nowSummary" | "chat";
+export type RunKindTag = "nowSummary" | "chat" | "emailSummary";
+
+export type CachedEmailSummary = { style: SummaryStyle,
+/**
+ * A translation target code, or `original` for the email's own language.
+ */
+language: string,
+/**
+ * Untrusted model output; shown as Markdown without raw HTML.
+ */
+text: string,
+/**
+ * RFC 3339 UTC with milliseconds.
+ */
+createdAt: string, };
 
 export type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
 

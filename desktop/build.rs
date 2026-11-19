@@ -98,6 +98,8 @@ fn main() {
             "assistant_get_conversation",
             "assistant_delete_conversation",
             "assistant_clear_conversations",
+            "assistant_email_summary",
+            "assistant_clear_email_summaries",
             "settings_get",
             "settings_update",
             "notifications_test",

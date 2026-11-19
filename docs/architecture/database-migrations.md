@@ -111,6 +111,10 @@ frontend/src/features/startup/
 
 `0034_exchange_ews.sql` 为账号增加默认 `imapSmtp` 的 `mail_backend`，新增真实 EWS 连接表、按来源和文件夹隔离的 ItemId 映射以及本地 UID 分配状态。旧账号端点、认证引用和来源 ID 不变化，不重建 `mail_connections` 或历史 SQL。EWS 不产生假的 IMAP/SMTP 行，删除账号或文件夹时一起清理其映射；恢复日志继续接受旧账号 JSON。
 
+### 邮件摘要缓存
+
+`0035_message_summaries.sql` 新建 `message_summaries`，保存内置助手对邮件的摘要：主键为 `(message_id, style, language)`，`message_id` 外键引用 `messages(id)` 并随邮件级联删除；`language` 是翻译目标语言代码或 `original`。每行记录 `source_sha256`（主题、发件人、接收时间与正文文字的哈希）与 `prompt_version`，两者任一与当前不一致就视为过期，不需要清理迁移。不改已有表与数据。设置页可清除全部摘要（见 [AI Runtime](../ai-runtime/README.md#4-运行生命周期)）。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

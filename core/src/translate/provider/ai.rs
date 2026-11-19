@@ -60,7 +60,7 @@ fn max_tokens(protocol: AiProtocol, output_length: Option<u32>) -> Option<u32> {
 }
 
 /// English name of a MailX target code, for the prompt.
-fn language_name(code: &str) -> Option<&'static str> {
+pub(crate) fn language_name(code: &str) -> Option<&'static str> {
     Some(match code {
         "zh-Hans" => "Simplified Chinese",
         "zh-Hant" => "Traditional Chinese",

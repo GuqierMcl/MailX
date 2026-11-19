@@ -44,6 +44,8 @@ import { ProviderAuthHelp } from '@/features/accounts/provider-auth-help'
 import { TranslationBar } from './translation/translation-bar'
 import { TranslationToolbarGroup } from './translation/translation-toolbar'
 import type { EmailTranslation } from './translation/use-email-translation'
+import { SummaryCard, SummaryToolbarButton } from './summary/summary-panel'
+import type { EmailSummaryState } from './summary/use-email-summary'
 import { VerificationCodeBar } from './verification-code-bar'
 import type { VerificationCodes } from './use-verification-codes'
 import { openIntent, type OpenIntent } from '@/features/outbox/use-compose'
@@ -93,12 +95,18 @@ type EmailViewProps = {
   onArchive?: (email: EmailSummary, archive: boolean) => void
   /** Translation of the open message, shared with the command palette; absent where nothing can be translated. */
   translation?: EmailTranslation
+  /** The AI summary of the open message; absent where the assistant cannot summarize. */
+  aiSummary?: EmailSummaryState
+  /** Opens the assistant's island about the open message ("继续问" on the summary). */
+  onAskAi?: () => void
+  /** Opens the AI settings, from a summary that cannot run. */
+  onOpenAiSettings?: () => void
   verification?: VerificationCodes
   /** Wraps the reader's content (everything under the toolbar), e.g. with the rest of a conversation. */
   frame?: (content: ReactNode) => ReactNode
 }
 
-export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification }: EmailViewProps) {
+export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification, aiSummary, onAskAi, onOpenAiSettings }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
   // A message is open while it is loading, shown, or failed to open. Only with
@@ -121,7 +129,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
       </EmptyHeader>
     </Empty>
   ) : email ? (
-    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} verification={verification} />
+    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} verification={verification} aiSummary={aiSummary} onAskAi={onAskAi} onOpenAiSettings={onOpenAiSettings} />
   ) : (
     <Empty>
       <EmptyHeader>
@@ -135,7 +143,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   )
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} backButton={backButton} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} backButton={backButton} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} aiSummary={aiSummary} />}
       {frame ? frame(content) : content}
     </div>
   )
@@ -148,7 +156,7 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, translation }: { translation?: EmailTranslation; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; backButton?: EmailViewProps['backButton']; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
+function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, translation, aiSummary }: { translation?: EmailTranslation; aiSummary?: EmailSummaryState; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; backButton?: EmailViewProps['backButton']; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
@@ -214,6 +222,7 @@ function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLoca
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </IconButton>
       </div>}
+      {aiSummary?.available && summary && <SummaryToolbarButton summary={aiSummary} senderName={displayName(summary.from)} />}
       {translation?.available && !localOnly && <TranslationToolbarGroup translation={translation} />}
       {!backButton && <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
@@ -233,9 +242,9 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation' | 'verification'> & { email: EmailDetail }
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation' | 'verification' | 'aiSummary' | 'onAskAi' | 'onOpenAiSettings'> & { email: EmailDetail }
 
-function EmailContent({ email, ...props }: ContentProps) {
+function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }: ContentProps) {
   useTranslation()
   const { summary, attachments } = email
   return (
@@ -261,6 +270,7 @@ function EmailContent({ email, ...props }: ContentProps) {
         </header>
       </ScrollArea>
         <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 text-sm">
+          {aiSummary && <SummaryCard summary={aiSummary} client={props.client} onAsk={onAskAi} onOpenSettings={onOpenAiSettings ?? (() => undefined)} />}
           <VerificationCodeBar emailId={summary.id} verification={summary.localOnly ? undefined : props.verification} />
           <Body email={email} {...props} />
         </div>

@@ -1841,6 +1841,210 @@ async fn a_now_summary_uses_overview_facts_no_tools_and_is_cached() {
     assert_eq!(fx.requests(), 2);
 }
 
+fn email_summary_request(
+    email_id: &str,
+    style: Option<crate::settings::SummaryStyle>,
+    language: Option<crate::settings::SummaryLanguage>,
+    fresh: bool,
+) -> StartRun {
+    StartRun {
+        kind: RunKind::EmailSummary {
+            email_id: email_id.to_owned(),
+            style,
+            language,
+            fresh: Some(fresh),
+        },
+    }
+}
+
+#[tokio::test]
+async fn an_email_summary_reads_the_email_without_tools_and_is_kept_on_this_device() {
+    use crate::settings::{SummaryLanguage, SummaryStyle};
+    let fx = Fx::new().await;
+    let email = fx.emails[0].clone();
+    assert_eq!(fx.assistant.email_summary(&email).await.unwrap(), None);
+    fx.model(vec![
+        say("  - Greeting.  "),
+        say("Hello."),
+        say("Hello again."),
+    ]);
+    let japanese = SummaryLanguage::Fixed { code: "ja".into() };
+    let started = fx
+        .assistant
+        .start(email_summary_request(
+            &email,
+            Some(SummaryStyle::Points),
+            Some(japanese.clone()),
+            false,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(started.kind, RunKindTag::EmailSummary);
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.text, "  - Greeting.  ");
+    assert!(!snapshot.tools_available);
+
+    let request = fx.request(0);
+    assert!(request.get("tools").is_none(), "no tools: {request}");
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Write in Japanese") && system.contains("bullet list"));
+    assert!(system.contains("untrusted data"));
+    let user = request["messages"][1]["content"].as_str().unwrap();
+    assert!(user.starts_with("<email>\nFrom: ") && user.ends_with("\n</email>"));
+    assert!(user.contains("hello world"), "{user}");
+
+    // The same email, style and language: from the local cache, at once.
+    let again = fx
+        .assistant
+        .start(email_summary_request(
+            &email,
+            Some(SummaryStyle::Points),
+            Some(japanese.clone()),
+            false,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(again.state, RunState::Completed);
+    assert_eq!(again.text, "- Greeting.");
+    assert_eq!(fx.requests(), 1);
+    let kept = fx.assistant.email_summary(&email).await.unwrap().unwrap();
+    assert_eq!(
+        (kept.style, kept.language.as_str(), kept.text.as_str()),
+        (SummaryStyle::Points, "ja", "- Greeting.")
+    );
+
+    // Another style asks the model; the newest summary is the one kept for the email.
+    let brief = fx
+        .assistant
+        .start(email_summary_request(
+            &email,
+            Some(SummaryStyle::Brief),
+            Some(japanese.clone()),
+            false,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(fx.finished(&brief.run_id).await.text, "Hello.");
+    assert_eq!(fx.requests(), 2);
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    // Fresh asks again and replaces it.
+    let fresh = fx
+        .assistant
+        .start(email_summary_request(
+            &email,
+            Some(SummaryStyle::Brief),
+            Some(japanese),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(fresh.state, RunState::Running);
+    assert_eq!(fx.finished(&fresh.run_id).await.text, "Hello again.");
+    assert_eq!(fx.requests(), 3);
+    let kept = fx.assistant.email_summary(&email).await.unwrap().unwrap();
+    assert_eq!(
+        (kept.style, kept.text.as_str()),
+        (SummaryStyle::Brief, "Hello again.")
+    );
+    // Another email has none.
+    assert_eq!(
+        fx.assistant.email_summary(&fx.emails[1]).await.unwrap(),
+        None
+    );
+
+    assert_eq!(fx.assistant.clear_email_summaries().await.unwrap(), 2);
+    assert_eq!(fx.assistant.email_summary(&email).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn an_email_summary_follows_the_saved_style_and_language_by_default() {
+    use crate::settings::{SummaryLanguage, SummaryStyle};
+    let fx = Fx::new().await;
+    fx.configure(|a| {
+        a.summary.style = SummaryStyle::Detailed;
+        a.summary.language = SummaryLanguage::Original;
+    });
+    fx.model(vec![say("Ein Gruß.")]);
+    let started = fx
+        .assistant
+        .start(email_summary_request(&fx.emails[0], None, None, false))
+        .await
+        .unwrap();
+    fx.finished(&started.run_id).await;
+    let system = fx.request(0)["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(system.contains("short paragraph"), "{system}");
+    assert!(system.contains("language the email itself"), "{system}");
+    let kept = fx
+        .assistant
+        .email_summary(&fx.emails[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (kept.style, kept.language.as_str()),
+        (SummaryStyle::Detailed, "original")
+    );
+}
+
+#[tokio::test]
+async fn an_email_outside_the_assistant_is_not_summarized_and_nothing_is_sent() {
+    let fx = Fx::new().await;
+    fx.configure(|a| a.excluded_accounts = vec![fx.account.clone()]);
+    fx.model(vec![say("Leaked.")]);
+    let error = fx
+        .assistant
+        .start(email_summary_request(&fx.emails[0], None, None, false))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert_eq!(
+        fx.assistant
+            .email_summary(&fx.emails[0])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    let error = fx
+        .assistant
+        .start(email_summary_request("", None, None, false))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Validation);
+    fx.configure(|a| a.enabled = false);
+    assert_eq!(
+        fx.assistant
+            .email_summary(&fx.emails[0])
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AssistantDisabled
+    );
+    assert_eq!(fx.requests(), 0);
+}
+
+#[tokio::test]
+async fn an_email_summary_cut_off_by_the_output_cap_is_shown_but_not_kept() {
+    let fx = Fx::new().await;
+    fx.model(vec![vec![oa_text("Half a"), oa_finish("length"), done()]]);
+    let started = fx
+        .assistant
+        .start(email_summary_request(&fx.emails[0], None, None, false))
+        .await
+        .unwrap();
+    let snapshot = fx.finished(&started.run_id).await;
+    assert_eq!(snapshot.state, RunState::Completed);
+    assert_eq!(snapshot.finished_reason, Some(FinishedReason::Length));
+    assert_eq!(
+        fx.assistant.email_summary(&fx.emails[0]).await.unwrap(),
+        None
+    );
+}
+
 #[tokio::test]
 async fn a_fresh_now_summary_skips_the_cache_and_replaces_it() {
     let fx = Fx::new().await;

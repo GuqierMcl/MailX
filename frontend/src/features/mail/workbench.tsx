@@ -23,6 +23,7 @@ import { MailSearch } from './mail-search'
 import { ConversationFrame, type ThreadMode } from './conversation-view'
 import { EmailView, RemoveLocalCopyDialog } from './email-view'
 import { TranslationConsentDialog } from './translation/translation-consent-dialog'
+import { useEmailSummary } from './summary/use-email-summary'
 import { useEmailTranslation } from './translation/use-email-translation'
 import { emailQuery } from './format'
 import { NAV_DEFAULT } from '@/features/shell/nav-width'
@@ -486,6 +487,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   }, [listHidden, singleMessage, singlePane])
   // Translation of the opened message; the toolbar, notice bar, body, consent dialog and palette share it.
   const translation = useEmailTranslation(client, opened ? body.email : null, () => setSettings({ section: 'translation' }))
+  // The AI summary of the opened message: the toolbar button, its panel and the card share it.
+  const aiSummary = useEmailSummary(client, opened ? body.email : null)
   // The list only highlights the opened message when it happens to be listed.
   const highlighted = opened && emails.some((email) => email.id === opened.id) ? opened.id : null
   const conversation = useQuery({
@@ -1147,6 +1150,9 @@ export function Workbench({ client }: { client: MailxClient }) {
               onRespond={(kind, intent) => opened && void compose.respond(opened.id, kind, intent)}
               onRemoveLocal={removeLocalCopy}
               translation={translation}
+              aiSummary={aiSummary}
+              onAskAi={openAssistant}
+              onOpenAiSettings={() => setSettings({ section: 'ai' })}
               onDelete={deleteEmail.request}
               frame={threaded && threadPage && opened ? (content) => (
                 <ConversationFrame

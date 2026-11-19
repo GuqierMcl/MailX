@@ -410,7 +410,14 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "send": "confirm",
                     "instructions": "",
                     "saveHistory": true,
-                    "readHtml": false
+                    "readHtml": false,
+                    "summary": {
+                        "auto": false,
+                        "senders": [],
+                        "style": "brief",
+                        "language": { "mode": "interface" },
+                        "collapsed": false
+                    }
                 },
                 "translation": {
                     "provider": "microsoftFree",

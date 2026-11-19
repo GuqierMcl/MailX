@@ -270,3 +270,84 @@ fn update_assistant_changes_only_that_section_and_validates() {
     );
     assert_eq!(store.get().unwrap().revision, 1);
 }
+
+#[test]
+fn summary_senders_and_language_are_checked_and_canonical() {
+    use crate::settings::{MAX_SUMMARY_SENDERS, SummaryLanguage, SummaryStyle};
+    let directory = TempDir::new().unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let defaults = AssistantSettings::default().summary;
+    assert!(!defaults.auto, "auto summary is off by default");
+    assert_eq!(defaults.style, SummaryStyle::Brief);
+    assert_eq!(defaults.language, SummaryLanguage::Interface);
+    let saved = store
+        .patch(SettingsPatch {
+            assistant: Some(assistant(|a| {
+                a.summary.senders = vec![
+                    " News@Apple.com ".into(),
+                    "news@apple.com".into(),
+                    "a@b.example".into(),
+                ];
+                a.summary.language = SummaryLanguage::Fixed { code: "ja".into() };
+            })),
+            ..SettingsPatch::default()
+        })
+        .unwrap()
+        .settings
+        .assistant
+        .summary;
+    assert_eq!(saved.senders, vec!["news@apple.com", "a@b.example"]);
+    assert!(saved.always_for("NEWS@apple.com"));
+    for bad in [
+        assistant(|a| a.summary.senders = vec!["nobody".into()]),
+        assistant(|a| a.summary.senders = vec!["a b@c.example".into()]),
+        assistant(|a| {
+            a.summary.senders = (0..=MAX_SUMMARY_SENDERS)
+                .map(|n| format!("p{n}@example.test"))
+                .collect()
+        }),
+    ] {
+        let error = store
+            .patch(SettingsPatch {
+                assistant: Some(bad),
+                ..SettingsPatch::default()
+            })
+            .unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("assistant.summary.senders"));
+    }
+    let error = store
+        .patch(SettingsPatch {
+            assistant: Some(assistant(|a| {
+                a.summary.language = SummaryLanguage::Fixed { code: "xx".into() }
+            })),
+            ..SettingsPatch::default()
+        })
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("assistant.summary.language"));
+}
+
+#[test]
+fn a_hand_edited_summary_section_is_repaired_per_field() {
+    use crate::settings::{SummaryLanguage, SummaryStyle};
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"general":{"language":"en"},"assistant":{"summary":{
+            "auto":true,"collapsed":"no","style":"poem",
+            "language":{"mode":"fixed","code":"xx"},
+            "senders":["Boss@Work.example","junk","boss@work.example"]}}}}"#,
+    )
+    .unwrap();
+    let summary = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .assistant
+        .summary;
+    assert!(summary.auto);
+    assert!(!summary.collapsed);
+    assert_eq!(summary.style, SummaryStyle::Brief);
+    assert_eq!(summary.language, SummaryLanguage::Interface);
+    assert_eq!(summary.senders, vec!["boss@work.example"]);
+}

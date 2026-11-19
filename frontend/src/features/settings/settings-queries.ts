@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useDebouncedCallback } from '@tanstack/react-pacer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AppSettings, AssistantSettings, LayoutSettings, SettingsPatch, TranslationSettings } from '@/generated/accounts'
+import type { AppSettings, AssistantSettings, EmailSummarySettings, LayoutSettings, SettingsPatch, TranslationSettings } from '@/generated/accounts'
 import { DEFAULT_BADGE, DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { DEFAULT_APPEARANCE, applyAppearance, cacheAppearance, clearLegacyTheme, legacyTheme } from '@/lib/appearance'
@@ -57,8 +57,10 @@ export const DEFAULT_TRANSLATION: TranslationSettings = {
   neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null,
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
+export const DEFAULT_EMAIL_SUMMARY: EmailSummarySettings = { auto: false, senders: [], style: 'brief', language: { mode: 'interface' }, collapsed: false }
 export const DEFAULT_ASSISTANT: AssistantSettings = {
   enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '', saveHistory: true, readHtml: false,
+  summary: DEFAULT_EMAIL_SUMMARY,
 }
 /** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
 export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)

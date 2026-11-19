@@ -20,7 +20,10 @@ use uuid::Uuid;
 
 mod assistant;
 use assistant::repair_assistant;
-pub use assistant::{AssistantMode, AssistantSendMode, AssistantSettings, MAX_INSTRUCTIONS_CHARS};
+pub use assistant::{
+    AssistantMode, AssistantSendMode, AssistantSettings, EmailSummarySettings,
+    MAX_INSTRUCTIONS_CHARS, MAX_SUMMARY_SENDERS, SummaryLanguage, SummaryStyle,
+};
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 const BACKUP_FILE_NAME: &str = "settings.json.bak";

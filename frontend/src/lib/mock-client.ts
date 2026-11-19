@@ -88,7 +88,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -156,6 +156,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return { draft, accountName: account.displayName, accountAddress: account.emailAddress }
     },
     send: (draft) => client.queueSend({ draftId: draft.id, expectedRevision: draft.revision, clientMutationId: crypto.randomUUID() }),
+    email(id) {
+      const found = emails.find((row) => row.summary.id === id)
+      return found ? { subject: found.summary.subject, sender: found.summary.from.name || found.summary.from.address } : null
+    },
+    summaryDefaults() {
+      const { style, language } = settings.settings.assistant.summary
+      const zh = settings.effectiveLocale === 'zh-CN'
+      return { style, language: language.mode === 'fixed' ? language.code : language.mode === 'original' ? 'original' : zh ? 'zh-Hans' : 'en' }
+    },
   })
   // Saved chats: a chat is kept when its run ends, like the core does unless history is off.
   const history = createMockConversations({
@@ -1213,6 +1222,8 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     assistantGetConversation: (conversationId) => history.get(conversationId),
     assistantDeleteConversation: (conversationId) => history.remove(conversationId),
     assistantClearConversations: () => history.clear(),
+    assistantEmailSummary: (emailId) => assistant.emailSummary(emailId),
+    assistantClearEmailSummaries: () => assistant.clearEmailSummaries(),
     onAssistantConversationsChanged: (listener) => history.onChanged(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),

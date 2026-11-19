@@ -4,6 +4,7 @@ import type {
   AiCatalog,
   AiConsent,
   AssistantEvent,
+  CachedEmailSummary,
   ConversationDetail,
   ConversationList,
   ConversationsChanged,
@@ -411,6 +412,14 @@ export interface MailxClient {
   assistantDeleteConversation(conversationId: string): Promise<void>
   /** Deletes every saved conversation and stops running chats. */
   assistantClearConversations(): Promise<void>
+  /**
+   * The newest summary kept on this device for an email whose body has not changed since, of any style and
+   * language; `null` when there is none. Local data only, no consent needed. `bodyNotCached` when the body
+   * is not downloaded, `notFound` outside the assistant's accounts, `assistantDisabled` when it is off.
+   */
+  assistantEmailSummary(emailId: string): Promise<CachedEmailSummary | null>
+  /** Deletes every kept email summary; resolves with how many there were. */
+  assistantClearEmailSummaries(): Promise<number>
   /** Saved conversations changed (a turn was saved, one was deleted, an account's were removed): refetch the list. */
   onAssistantConversationsChanged(listener: (changed: ConversationsChanged) => void): () => void
 
@@ -770,6 +779,8 @@ export function createDesktopClient(): MailxClient {
     assistantGetConversation: (conversationId) => call<ConversationDetail>('assistant_get_conversation', { conversationId }),
     assistantDeleteConversation: (conversationId) => call<void>('assistant_delete_conversation', { conversationId }),
     assistantClearConversations: () => call<void>('assistant_clear_conversations'),
+    assistantEmailSummary: (emailId) => call<CachedEmailSummary | null>('assistant_email_summary', { emailId }),
+    assistantClearEmailSummaries: () => call<number>('assistant_clear_email_summaries'),
     onAssistantConversationsChanged: (listener) => subscribe<ConversationsChanged>(HOST_EVENTS.assistantConversations, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),
