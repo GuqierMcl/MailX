@@ -353,7 +353,7 @@ async fn refresh_cached_flags(
             )?;
         }
         for retry in present.chunks(FLAGS_RETRY_BATCH_SIZE) {
-            let flags = session.fetch_flags(retry).await?;
+            let flags = session.retry_flags(retry).await?;
             let fetched: HashSet<u32> = flags.iter().map(|(uid, _)| *uid).collect();
             unresolved += retry.iter().filter(|uid| !fetched.contains(uid)).count();
             store_flags(shared, token, target, flags, changed).await?;

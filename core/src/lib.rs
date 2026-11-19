@@ -12,6 +12,7 @@ pub mod ai;
 mod app;
 pub mod assistant;
 pub mod auth;
+pub mod diagnostics;
 pub mod drafts;
 pub mod error;
 pub mod events;

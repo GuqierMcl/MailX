@@ -2,6 +2,7 @@
 
 pub(crate) mod bodies;
 pub(crate) mod cadence;
+mod diagnostics;
 pub(crate) mod ews;
 pub(crate) mod folders;
 pub(crate) mod headers;

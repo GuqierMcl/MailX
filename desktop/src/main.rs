@@ -8,6 +8,7 @@ mod body_protocol;
 mod commands;
 mod compose;
 mod compose_files;
+mod diagnostics;
 mod lifecycle;
 mod locale;
 mod mcp;
@@ -29,6 +30,21 @@ mod window_chrome;
 
 use std::sync::Arc;
 use tauri::{Emitter, EventTarget, Manager};
+
+struct DesktopEvents {
+    ui: mailx_core::Events,
+    diagnostics: mailx_core::diagnostics::DiagnosticSink,
+}
+
+impl mailx_core::EventSink for DesktopEvents {
+    fn emit(&self, event: &mailx_core::CoreEvent) {
+        self.ui.emit(event);
+    }
+
+    fn diagnostics(&self) -> Option<mailx_core::diagnostics::DiagnosticSink> {
+        Some(self.diagnostics.clone())
+    }
+}
 
 /// Pushed to the main window whenever an account's sync state changes.
 const SYNC_STATE_EVENT: &str = "mailx://sync-state";
@@ -231,6 +247,18 @@ fn main() {
                         );
                     }
                 });
+            let events: mailx_core::Events = if let Ok(path) = &data_dir {
+                let diagnostics = diagnostics::Diagnostics::start(path);
+                let sink = diagnostics.sink();
+                sink(mailx_core::diagnostics::DiagnosticEvent::Startup);
+                app.manage(diagnostics);
+                Arc::new(DesktopEvents {
+                    ui: events,
+                    diagnostics: sink,
+                })
+            } else {
+                events
+            };
             let state = state::DesktopState::new(data_dir, secrets, events);
             app.manage(state.clone());
             app.manage(compose::Lifecycle::default());
@@ -424,6 +452,9 @@ fn main() {
                 // Close the local MCP endpoint and remove its discovery file
                 // before an update installer or relaunch takes over.
                 mcp::shutdown(_app);
+                if let Some(logs) = _app.try_state::<diagnostics::Diagnostics>() {
+                    logs.shutdown();
+                }
                 updater::on_exit(_app);
             }
         });

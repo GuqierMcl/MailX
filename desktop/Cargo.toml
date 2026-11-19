@@ -36,6 +36,9 @@ toml_edit = "0.25.17"
 jsonc-parser = { version = "0.34.0", features = ["cst", "serde", "serde_json"] }
 base64 = "0.22.1"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
@@ -44,6 +47,7 @@ security-framework = "3"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
 winreg = "0.56"
+winapi-util = "0.1.11"
 keyring = { version = "3.6.3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
