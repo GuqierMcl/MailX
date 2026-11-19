@@ -257,7 +257,7 @@ export interface MailxClient {
   aiRemoveProxyPassword(): Promise<AiState>
   /** The provider list; `refresh` asks the network, otherwise only the local copy is read. */
   aiCatalog(refresh: boolean): Promise<AiCatalog>
-  aiListModels(connectionId: string): Promise<AiModel[]>
+  aiListModels(connectionId: string, source: AiModel['source']): Promise<AiModel[] | null>
   aiTest(connectionId: string, modelId: string): Promise<AiTestResult>
   /** A downloaded provider logo as an SVG data payload, only ever used as a CSS mask; `null` when there is none. */
   aiProviderIcon(providerId: string): Promise<AiProviderIcon | null>
@@ -633,7 +633,7 @@ export function createDesktopClient(): MailxClient {
     aiSetProxyPassword: (password) => call<AiState>('ai_set_proxy_password', { password }),
     aiRemoveProxyPassword: () => call<AiState>('ai_remove_proxy_password'),
     aiCatalog: (refresh) => call<AiCatalog>('ai_catalog', { refresh }),
-    aiListModels: (connectionId) => call<AiModel[]>('ai_list_models', { connectionId }),
+    aiListModels: (connectionId, source) => call<AiModel[] | null>('ai_list_models', { connectionId, source }),
     aiTest: (connectionId, modelId) => call<AiTestResult>('ai_test', { connectionId, modelId }),
     aiProviderIcon: (providerId) => call<AiProviderIcon | null>('ai_provider_icon', { providerId }),
     onSyncState(listener) {

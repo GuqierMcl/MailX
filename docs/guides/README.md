@@ -151,13 +151,15 @@ Settings → Integrations → AI connects MailX to AI model providers. Translati
 
 1. Open Settings → Integrations → AI and choose "Add provider" under "Providers".
 2. Pick a provider from the list, or choose Custom and enter the address and API type yourself (OpenAI-compatible or Anthropic-compatible).
-3. Enter your API key and choose "Connect". MailX asks the provider for its list of models; if that fails, you see why, and "Save anyway" keeps the provider without checking it. Then pick a model.
+3. Enter your API key and choose "Connect". MailX asks the provider for its list of models. If the provider does not offer a list, you can still choose a preset or type a model ID. If the request fails for another reason, you see why, and "Save anyway" keeps the connection without verifying it.
 
 The key is kept on this device and is never shown again. MailX shows which host the key is sent to. Local services such as Ollama and LM Studio run on this computer and need no key.
 
 ### Default model and Test
 
-Under "Default model", choose one of the models of a provider you added. "Test" sends one short fixed sentence (no mail content) and shows how long the reply took, or why it failed. Translation follows this default unless you choose another under Settings → Translation → "Model".
+Under "Default model", choose **From API** for the models listed by your connections, or **Presets** to browse the cached catalog for those providers, even when a model list cannot be fetched. Custom connections without a matching catalog only have the API list and manual entry. You can type a model ID in either view. If a gateway such as Magpie reports upstream providers, the picker groups its models by upstream and shows their full IDs to distinguish models with the same name.
+
+Presets are not verified on the connection. "Test" sends one short fixed sentence (no mail content) and shows how long the reply took, or why it failed. The assistant and translation use the same picker and follow the default unless you choose another model.
 
 ### Use a proxy for AI
 

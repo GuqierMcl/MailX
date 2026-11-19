@@ -60,6 +60,22 @@ async fn openai_compatible_lists_models_with_a_bearer_key() {
     assert_eq!(request.header("x-api-key"), None);
 }
 
+#[test]
+fn model_attribution_is_optional_and_bounded() {
+    let body = json!({"data": [
+        {"id": "a", "owned_by": " Team "},
+        {"id": "b", "owned_by": {"bad": true}},
+        {"id": "c", "owned_by": "a\nb"},
+        {"id": "d", "owned_by": "   "},
+        {"id": "e", "owned_by": "a".repeat(500)},
+    ]});
+    let models = parse_models(&serde_json::to_vec(&body).unwrap()).unwrap();
+    assert_eq!(models.len(), 5);
+    assert_eq!(models[0].owned_by.as_deref(), Some("Team"));
+    assert!(models[1..4].iter().all(|model| model.owned_by.is_none()));
+    assert_eq!(models[4].owned_by.as_ref().unwrap().len(), 256);
+}
+
 #[tokio::test]
 async fn a_keyless_connection_sends_no_credentials() {
     let server = mock_http(|_| MockReply::json(200, OPENAI_LIST)).await;

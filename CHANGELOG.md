@@ -18,6 +18,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Choose AI models from the connection’s API or from presets, and distinguish same-name models on gateways such as Magpie by upstream and full ID. / AI 模型可从接口或预设目录选择，Magpie 等网关的同名模型可按上游和完整 ID 区分。 ([#163](https://github.com/GuqierMcl/MailX/pull/163))
 - Forwards now carry the pictures inside the original message, not just its files; replies keep a written note of them instead of a broken image. / 转发现在会带上原邮件正文里的图片，而不只是附件；回复里保留图片的说明文字，不再留空。
 - Ask the AI assistant about the email you are reading, the emails you selected or the draft you are writing, from a capsule on mail pages and a panel of its own beside the mail. / 邮件页面右下角新增 AI 胶囊，可就正在阅读的邮件、选中的邮件或正在写的草稿向 AI 助手提问，对话在邮件旁单独的对话岛里展开。
 - Add a mail_help tool so MCP clients and the AI assistant can ask how a tool works; reading a mail now says whether its text came from the plain-text part or from HTML, the assistant can optionally read the HTML structure (Settings, off by default), a reply draft reports when the quoted original was cut short, and drafts can take inline pictures. / 新增 mail_help 工具，MCP 客户端与 AI 助手可查询各工具的用法；读取邮件会说明文字来自纯文本还是 HTML，AI 助手可选择读取 HTML 结构（设置项，默认关闭），回复草稿会提示引用的原文是否被截断，草稿可添加内嵌图片。

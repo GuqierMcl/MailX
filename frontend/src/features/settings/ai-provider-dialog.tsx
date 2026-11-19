@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Button } from '@/components/ui/button'
@@ -11,16 +10,15 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import type { AiCatalogProvider, AiConnectionState, AiModel, AiProtocol, AiState } from '@/generated/accounts'
+import type { AiCatalogProvider, AiConnectionState, AiProtocol, AiState } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
-import { aiKeys } from '@/lib/query-client'
-import { useAiCatalog } from './ai-queries'
+import { type ModelPickerConnection, useAiCatalog } from './ai-queries'
 import { AiProviderIcon } from './ai-provider-icon'
 import { ModelList } from './ai-model-picker'
 
 const CUSTOM_ID = 'custom'
 
-type Step = { kind: 'pick' } | { kind: 'form'; provider: AiCatalogProvider } | { kind: 'model'; connectionId: string; name: string; providerId: string; models: AiModel[] | null }
+type Step = { kind: 'pick' } | { kind: 'form'; provider: AiCatalogProvider } | { kind: 'model'; connection: ModelPickerConnection }
 
 /** Adds a provider (pick, fill in, choose a model) or edits one (just the form). Mount it to open it; unmount to close. */
 export function AiProviderDialog({ client, state, editing, onState, onClose }: {
@@ -46,14 +44,17 @@ export function AiProviderDialog({ client, state, editing, onState, onClose }: {
         onPick={(provider) => setStep({ kind: 'form', provider })} />}
       {step.kind === 'form' && <ConnectionForm client={client} state={state} editing={editing} provider={step.provider}
         onBack={editing === null ? () => setStep({ kind: 'pick' }) : undefined} onCancel={onClose}
-        onSaved={(saved) => {
+        onSaved={(saved, verified) => {
           onState(saved.state)
           if (editing === null && saved.state.defaultModel === null) {
             const connection = saved.state.connections.find((entry) => entry.id === saved.connectionId)
-            setStep({ kind: 'model', connectionId: saved.connectionId, name: connection?.name ?? step.provider.name, providerId: step.provider.id, models: saved.models })
+            setStep({ kind: 'model', connection: {
+              id: saved.connectionId, name: connection?.name ?? step.provider.name, providerId: step.provider.id,
+              initialModels: verified ? saved.models : undefined,
+            } })
           } else onClose()
         }} />}
-      {step.kind === 'model' && <ChooseModel client={client} step={step} onState={onState} onClose={onClose} />}
+      {step.kind === 'model' && <ChooseModel client={client} connection={step.connection} onState={onState} onClose={onClose} />}
     </DialogContent>
   </Dialog>
 }
@@ -87,7 +88,7 @@ function ProviderPick({ client, providers, loading, onPick }: {
 
 function ConnectionForm({ client, state, editing, provider, onBack, onCancel, onSaved }: {
   client: MailxClient; state: AiState; editing: AiConnectionState | null; provider: AiCatalogProvider
-  onBack?: () => void; onCancel: () => void; onSaved: (saved: Awaited<ReturnType<MailxClient['aiSaveConnection']>>) => void
+  onBack?: () => void; onCancel: () => void; onSaved: (saved: Awaited<ReturnType<MailxClient['aiSaveConnection']>>, verified: boolean) => void
 }) {
   useTranslation()
   const isCustom = provider.id === CUSTOM_ID
@@ -111,7 +112,7 @@ function ConnectionForm({ client, state, editing, provider, onBack, onCancel, on
     client.aiSaveConnection({
       id: editing?.id ?? null, providerId: provider.id, name: name.trim(), protocol, baseUrl: baseUrl.trim(),
       useProxy: proxyAvailable && useProxy, apiKey: cleared ? '' : typed === '' ? null : typed, verify,
-    }).then(onSaved, (error: unknown) => { setFailure(errorText(error)); setBusy(false) })
+    }).then((saved) => onSaved(saved, verify), (error: unknown) => { setFailure(errorText(error)); setBusy(false) })
   }
   const onSubmit = (event: FormEvent) => { event.preventDefault(); submit(true) }
   return <form className="flex min-h-0 flex-col gap-4 overflow-y-auto" onSubmit={onSubmit}>
@@ -157,20 +158,15 @@ function ConnectionForm({ client, state, editing, provider, onBack, onCancel, on
   </form>
 }
 
-/** After the first provider is connected: its models, or any typed id, become the default model. */
-function ChooseModel({ client, step, onState, onClose }: {
-  client: MailxClient; step: Extract<Step, { kind: 'model' }>; onState: (state: AiState) => void; onClose: () => void
+/** After the first provider is connected, use the shared picker to set the default model. */
+function ChooseModel({ client, connection, onState, onClose }: {
+  client: MailxClient; connection: ModelPickerConnection; onState: (state: AiState) => void; onClose: () => void
 }) {
   useTranslation()
-  const models = useQuery({
-    queryKey: aiKeys.models(step.connectionId), queryFn: () => client.aiListModels(step.connectionId),
-    initialData: step.models ?? undefined, staleTime: step.models ? Infinity : 0, gcTime: 0,
-  })
   const [failure, setFailure] = useState<string | null>(null)
-  const group = { id: step.connectionId, name: step.name, providerId: step.providerId, models: models.data, loading: models.isFetching && !models.data, failure: models.isError ? errorText(models.error) : null }
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="min-h-0 flex-1 overflow-hidden rounded-lg ring-1 ring-foreground/10">
-      <ModelList client={client} groups={[group]} onPick={(model) => {
+      <ModelList client={client} connections={[connection]} onPick={(model) => {
         setFailure(null)
         client.aiSetDefaultModel(model).then((next) => { onState(next); onClose() }, (error: unknown) => setFailure(errorText(error)))
       }} />

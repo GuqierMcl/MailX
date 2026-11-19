@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::{
     AppError, ErrorCode,
     ai::{
-        AiCatalog, AiConnection, AiModel, AiModelRef, AiModelTarget, AiProtocol, AiProviderIcon,
-        AiSettings, AiTestResult, catalog,
+        AiCatalog, AiConnection, AiModel, AiModelRef, AiModelSource, AiModelTarget, AiProtocol,
+        AiProviderIcon, AiSettings, AiTestResult, catalog,
         client::{self, Endpoint},
         icons, models,
         validation::{
@@ -62,8 +62,8 @@ pub struct AiState {
 }
 
 /// Creates (`id` null) or changes a connection. `api_key` null keeps the
-/// stored key; an empty string removes it. With `verify`, nothing is saved
-/// unless the provider answers the model list request with these values.
+/// stored key; an empty string removes it. With `verify`, the model listing is
+/// tried with these values; an unsupported list (404 or 405) is not fatal.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveAiConnection {
@@ -86,7 +86,7 @@ pub struct SavedAiConnection {
     pub state: AiState,
     /// The saved connection, which is new when the request had no `id`.
     pub connection_id: String,
-    /// The provider's models when `verify` was set.
+    /// The provider's models when `verify` was set and listing is supported.
     pub models: Option<Vec<AiModel>>,
 }
 
@@ -129,6 +129,15 @@ fn internal() -> AppError {
 
 fn not_configured() -> AppError {
     AppError::new(ErrorCode::AiNotConfigured)
+}
+
+fn catalog_provider<'a>(
+    data: Option<&'a catalog::CatalogData>,
+    provider_id: &str,
+) -> Option<&'a catalog::CatalogProvider> {
+    data?
+        .provider(provider_id)
+        .filter(|_| provider_id != CUSTOM_PROVIDER_ID)
 }
 
 fn now() -> i64 {
@@ -282,10 +291,8 @@ impl AiService {
                 (None, Some(id)) => self.stored_key(id).await?.unwrap_or_default(),
                 (None, None) => String::new(),
             };
-            Some(
-                self.list_models_for(&Target::of(&connection), &key, &ai.route)
-                    .await?,
-            )
+            self.list_models_for(&Target::of(&connection), &key, &ai.route)
+                .await?
         } else {
             None
         };
@@ -496,14 +503,14 @@ impl AiService {
         slot.clone()
     }
 
-    /// The provider's model list, labelled from the catalog; the catalog's own
-    /// models when the provider has no list.
+    /// The provider's model list, labelled from the catalog. `None` means the
+    /// provider has no list, not that it has no models.
     async fn list_models_for(
         self: &Arc<Self>,
         target: &Target,
         key: &str,
         ai_route: &ServiceRoute,
-    ) -> Result<Vec<AiModel>, AppError> {
+    ) -> Result<Option<Vec<AiModel>>, AppError> {
         let route = self.route(ai_route, target.use_proxy).await?;
         let endpoint = Endpoint {
             protocol: target.protocol,
@@ -511,20 +518,19 @@ impl AiService {
             key: Some(key),
             route: &route,
         };
-        let listed = client::list_models(&endpoint)
+        let Some(listed) = client::list_models(&endpoint)
             .await
-            .map_err(AppError::new)?;
+            .map_err(AppError::new)?
+        else {
+            return Ok(None);
+        };
         let provider_id = target.provider_id.clone();
         self.blocking(move |this| {
             let data = this.catalog_data();
-            let provider = data
-                .as_deref()
-                .and_then(|data| data.provider(&provider_id))
-                .filter(|_| provider_id != CUSTOM_PROVIDER_ID);
-            Ok(match listed {
-                Some(listed) => models::enrich(listed, provider),
-                None => models::from_catalog(provider),
-            })
+            Ok(Some(models::enrich(
+                listed,
+                catalog_provider(data.as_deref(), &provider_id),
+            )))
         })
         .await
     }
@@ -532,10 +538,33 @@ impl AiService {
     pub async fn list_models(
         self: &Arc<Self>,
         connection_id: &str,
-    ) -> Result<Vec<AiModel>, AppError> {
-        let (connection, key, route) = self.load(connection_id).await?;
-        self.list_models_for(&Target::of(&connection), &key, &route)
-            .await
+        source: AiModelSource,
+    ) -> Result<Option<Vec<AiModel>>, AppError> {
+        match source {
+            AiModelSource::Provider => {
+                let (connection, key, route) = self.load(connection_id).await?;
+                self.list_models_for(&Target::of(&connection), &key, &route)
+                    .await
+            }
+            AiModelSource::Catalog => {
+                // Browsing presets does not contact the connection or open the secret store.
+                let id = Self::parse_id(connection_id).map_err(|_| not_configured())?;
+                self.blocking(move |this| {
+                    let ai = this.ai_settings()?;
+                    let connection = ai
+                        .connections
+                        .iter()
+                        .find(|connection| connection.id == id)
+                        .ok_or_else(not_configured)?;
+                    let data = this.catalog_data();
+                    Ok(Some(models::from_catalog(catalog_provider(
+                        data.as_deref(),
+                        &connection.provider_id,
+                    ))))
+                })
+                .await
+            }
+        }
     }
 
     /// A fixed English prompt to one model; no mail text.

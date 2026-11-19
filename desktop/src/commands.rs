@@ -2017,8 +2017,9 @@ struct AiCatalogArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AiConnectionArgs {
+struct AiListModelsArgs {
     connection_id: String,
+    source: mailx_core::AiModelSource,
 }
 
 #[derive(Deserialize)]
@@ -2163,11 +2164,18 @@ pub(crate) async fn ai_list_models(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
     request: tauri::ipc::Request<'_>,
-) -> Result<ApiResult<Vec<mailx_core::AiModel>>, ()> {
+) -> Result<ApiResult<Option<Vec<mailx_core::AiModel>>>, ()> {
     let args = authorize(&window, "ai_list_models")
-        .and_then(|_| parse::<AiConnectionArgs>(request.body()));
+        .and_then(|_| parse::<AiListModelsArgs>(request.body()));
     Ok(respond(
-        async { state.ai()?.list_models(&args?.connection_id).await }.await,
+        async {
+            let args = args?;
+            state
+                .ai()?
+                .list_models(&args.connection_id, args.source)
+                .await
+        }
+        .await,
     ))
 }
 

@@ -12,6 +12,7 @@ const MODELS: AiModel[] = [
   { id: 'big', name: 'Big Model', contextLength: 200000, outputLength: 8000, toolCall: true, source: 'provider' },
   { id: 'small', name: 'Small Model', contextLength: null, outputLength: null, toolCall: null, source: 'provider' },
 ]
+const PRESET: AiModel = { id: 'preset-only', name: 'Preset Model', contextLength: 64000, outputLength: null, toolCall: null, source: 'catalog' }
 const CATALOG: AiCatalog = {
   providers: [
     { id: 'openai', name: 'OpenAI', protocol: 'openaiCompatible', baseUrl: 'https://api.openai.com/v1', builtIn: true },
@@ -32,7 +33,7 @@ function setup(initial: Partial<AiState> = {}, catalog: AiCatalog = CATALOG) {
   let state: AiState = { connections: [], defaultModel: null, translationModel: null, route: { kind: 'direct' }, proxyPasswordSet: false, ...initial }
   client.aiState.mockImplementation(async () => state)
   client.aiCatalog.mockResolvedValue(catalog)
-  client.aiListModels.mockResolvedValue(MODELS)
+  client.aiListModels.mockImplementation(async (_id, source) => source === 'provider' ? MODELS : [PRESET])
   client.aiSaveConnection.mockImplementation(async (request: SaveAiConnection) => {
     const id = request.id ?? 'new-1'
     const old = state.connections.find((entry) => entry.id === id)
@@ -79,6 +80,7 @@ describe('AI settings: providers', () => {
     })
     expect(await screen.findByRole('heading', { name: '选择模型' })).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('option', { name: /Big Model/ }))
+    expect(client.aiListModels).not.toHaveBeenCalled()
     await waitFor(() => expect(client.aiSetDefaultModel).toHaveBeenCalledWith({ connectionId: 'new-1', modelId: 'big', name: 'Big Model', contextLength: 200000, outputLength: 8000, toolCall: true }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByRole('combobox', { name: '默认模型' })).toHaveTextContent('Big Model')
@@ -128,7 +130,22 @@ describe('AI settings: providers', () => {
     // The models were not fetched while saving, so the next step lists them itself.
     expect(await screen.findByRole('heading', { name: '选择模型' })).toBeInTheDocument()
     expect(await screen.findByRole('option', { name: /Small Model/ })).toBeInTheDocument()
-    expect(client.aiListModels).toHaveBeenCalledWith('new-1')
+    expect(client.aiListModels).toHaveBeenCalledWith('new-1', 'provider')
+  })
+
+  it('can choose a preset after connecting without a model listing', async () => {
+    const client = setup()
+    const save = client.aiSaveConnection.getMockImplementation()!
+    client.aiSaveConnection.mockImplementationOnce(async (input) => ({ ...(await save(input)), models: null }))
+    await userEvent.click(await screen.findByRole('button', { name: '添加服务商' }))
+    await userEvent.click(await screen.findByRole('option', { name: /OpenAI/ }))
+    await userEvent.click(screen.getByRole('button', { name: '连接' }))
+    expect(await screen.findByText('此连接不提供模型列表。')).toBeInTheDocument()
+    expect(client.aiListModels).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('tab', { name: '预设目录' }))
+    await userEvent.click(await screen.findByRole('option', { name: /Preset Model/ }))
+    expect(client.aiListModels).toHaveBeenCalledExactlyOnceWith('new-1', 'catalog')
+    expect(client.aiSetDefaultModel).toHaveBeenCalledWith(expect.objectContaining({ connectionId: 'new-1', modelId: 'preset-only' }))
   })
 
   it('closes after saving when a default model already exists', async () => {
@@ -208,6 +225,68 @@ describe('AI settings: default model', () => {
     expect(manual).toHaveLength(2)
     await userEvent.click(manual[1])
     await waitFor(() => expect(client.aiSetDefaultModel).toHaveBeenCalledWith({ connectionId: 'c2', modelId: 'my-model', name: 'my-model', contextLength: null, outputLength: null }))
+  })
+
+  it.each([false, true])('uses the presets independently of the live list (API failure: %s)', async (apiFails) => {
+    const client = setup({ connections: [connection()] })
+    if (apiFails) client.aiListModels.mockRejectedValueOnce(failure('aiKeyRejected'))
+    await userEvent.click(await screen.findByRole('combobox', { name: '默认模型' }))
+    expect(await screen.findByRole('tab', { name: '接口模型' })).toHaveAttribute('aria-selected', 'true')
+    if (apiFails) expect(await screen.findByText('密钥无效或没有权限')).toBeInTheDocument()
+    else expect(await screen.findByRole('option', { name: /Big Model/ })).toBeInTheDocument()
+    expect(client.aiListModels).toHaveBeenCalledExactlyOnceWith('c1', 'provider')
+    await userEvent.click(screen.getByRole('tab', { name: '预设目录' }))
+    const preset = await screen.findByRole('option', { name: /Preset Model/ })
+    expect(screen.getByText('预设模型未经当前连接验证。')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Big Model/ })).not.toBeInTheDocument()
+    expect(client.aiListModels).toHaveBeenLastCalledWith('c1', 'catalog')
+    await userEvent.click(preset)
+    expect(client.aiSetDefaultModel).toHaveBeenCalledExactlyOnceWith({ connectionId: 'c1', modelId: 'preset-only', name: 'Preset Model', contextLength: 64000, outputLength: null })
+    expect(client.aiSaveConnection).not.toHaveBeenCalled()
+  })
+
+  it('shows same-name gateway models separately and tests the exact selected IDs', async () => {
+    const client = setup({ connections: [connection({ providerId: 'custom', name: 'Magpie', baseUrl: 'http://localhost:3425/v1' })] })
+    client.aiListModels.mockResolvedValue([
+      { ...MODELS[1], name: 'GPT Demo', id: 'openai/gpt-demo', ownedBy: 'Work account' },
+      { ...MODELS[1], name: 'GPT Demo', id: 'relay/openai/gpt-demo', ownedBy: 'Personal account' },
+    ])
+    const picker = await screen.findByRole('combobox', { name: '默认模型' })
+    await userEvent.click(picker)
+    expect(await screen.findAllByRole('option', { name: /GPT Demo/ })).toHaveLength(2)
+    expect(screen.getByText('Magpie · Work account')).toBeInTheDocument()
+    expect(screen.getByText('Magpie · Personal account')).toBeInTheDocument()
+
+    for (const [owner, id] of [['Personal account', 'relay/openai/gpt-demo'], ['Work account', 'openai/gpt-demo']]) {
+      const search = await screen.findByPlaceholderText('搜索或输入模型 ID')
+      await userEvent.type(search, owner)
+      const options = await screen.findAllByRole('option', { name: /GPT Demo/ })
+      expect(options).toHaveLength(1)
+      expect(options[0]).toHaveTextContent(id)
+      await userEvent.click(options[0])
+      await waitFor(() => expect(picker).toHaveTextContent('GPT Demo'))
+      expect(client.aiSetDefaultModel).toHaveBeenLastCalledWith(expect.objectContaining({ connectionId: 'c1', modelId: id }))
+      await userEvent.click(screen.getByRole('button', { name: '测试' }))
+      expect(client.aiTest).toHaveBeenLastCalledWith('c1', id)
+      if (owner === 'Personal account') await userEvent.click(picker)
+    }
+  })
+
+  it('loads presets from a refreshed catalog without waiting for the live endpoint', async () => {
+    const client = setup({ connections: [connection()] }, { ...CATALOG, stale: true })
+    let refreshCatalog: (catalog: AiCatalog) => void = () => undefined
+    const refresh = new Promise<AiCatalog>((resolve) => { refreshCatalog = resolve })
+    client.aiCatalog.mockImplementation(async (force) => force ? refresh : { ...CATALOG, stale: true })
+    client.aiListModels.mockImplementation(async (_id, source) => source === 'provider' ? new Promise(() => undefined) : [])
+    await userEvent.click(await screen.findByRole('combobox', { name: '默认模型' }))
+    await userEvent.click(await screen.findByRole('tab', { name: '预设目录' }))
+    await waitFor(() => expect(client.aiListModels).toHaveBeenCalledWith('c1', 'catalog'))
+    expect(screen.getByRole('status')).toHaveTextContent('加载中')
+    client.aiListModels.mockResolvedValueOnce([PRESET])
+    refreshCatalog({ ...CATALOG, updatedAt: '2026-11-19T00:00:00Z' })
+    expect(await screen.findByRole('option', { name: /Preset Model/ })).toBeInTheDocument()
+    expect(client.aiCatalog.mock.calls.filter(([force]) => force)).toHaveLength(1)
   })
 
   it('tests the default model and shows how long it took', async () => {
