@@ -24,6 +24,18 @@
     "openFailed": "Couldn't open that chat",
     "deleteFailed": "Couldn't delete."
   },
+  "island": {
+    "title": "AI assistant",
+    "close": "Close the AI assistant",
+    "resize": "Resize the AI assistant",
+    "empty": "Ask about this email, or have me search, organize mail or draft a reply.",
+    "placeholderEmail": "Ask about this email",
+    "placeholderEmails": "Ask about the selected emails",
+    "placeholderDraft": "Ask about this draft",
+    "selected_one": "{{count}} selected email",
+    "selected_other": "{{count}} selected emails",
+    "dropView": "Leave this out"
+  },
   "chat": {
     "placeholder": "Ask about your mail",
     "send": "Send",

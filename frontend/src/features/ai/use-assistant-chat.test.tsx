@@ -42,6 +42,18 @@ describe('useAssistantChat', () => {
     expect(reply.role === 'assistant' && reply.turn).toMatchObject({ state: 'completed', text: '你好，有什么可以帮你？' })
   })
 
+  it('sends what the user looks at with the message, and asks again about the same thing on retry', async () => {
+    const { client, result, emit } = setup()
+    const context = { type: 'email' as const, emailId: 'e1' }
+    await act(async () => { await result.current.send('这封说了什么', context) })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', message: '这封说了什么', context } })
+    await emit(event(2, { type: 'state', state: 'failed' }))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2' }))
+    await act(async () => { await result.current.retry() })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '这封说了什么', context } })
+  })
+
   it('ignores an empty message and one sent while a reply is going', async () => {
     const { client, result } = setup()
     await act(async () => { expect(await result.current.send('   ')).toBe('empty') })

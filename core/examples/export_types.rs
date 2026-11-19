@@ -211,6 +211,7 @@ fn main() {
         AssistantSettings,
         StartRun,
         RunKind,
+        ChatContext,
         Occasion,
         RunKindTag,
         RunState,

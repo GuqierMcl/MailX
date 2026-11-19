@@ -24,6 +24,17 @@
     "openFailed": "没能打开这段对话",
     "deleteFailed": "没能删除。"
   },
+  "island": {
+    "title": "AI 助手",
+    "close": "关闭 AI 助手",
+    "resize": "调整 AI 助手宽度",
+    "empty": "可以问这封邮件，也可以让我搜索、整理邮件或起草回复。",
+    "placeholderEmail": "问问这封邮件",
+    "placeholderEmails": "问问选中的邮件",
+    "placeholderDraft": "问问这份草稿",
+    "selected_other": "已选 {{count}} 封邮件",
+    "dropView": "不带上这项"
+  },
   "chat": {
     "placeholder": "问问你的邮件",
     "send": "发送",

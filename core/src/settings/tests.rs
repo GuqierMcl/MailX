@@ -389,7 +389,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailboxLabel": "name"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
-                "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "readingMode": "split", "accountOrder": [] },
+                "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "readingMode": "split", "assistantWidth": 380, "accountOrder": [] },
                 "notifications": {
                     "enabled": true,
                     "showPreview": true,
@@ -2310,4 +2310,47 @@ fn a_hand_edited_ai_consent_and_translation_model_are_repaired() {
         .translation;
     assert_eq!(t.consented_ai, None);
     assert!(t.normalized().is_ok());
+}
+
+#[test]
+fn the_assistant_width_has_a_default_a_range_and_survives_other_layout_edits() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join(SETTINGS_FILE_NAME);
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"layout":{"navWidth":300}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.assistant_width, 380);
+
+    for patch in [
+        serde_json::json!({ "layout": { "assistantWidth": 450 } }),
+        serde_json::json!({ "layout": { "listWidth": 510 } }),
+    ] {
+        store.patch(serde_json::from_value(patch).unwrap()).unwrap();
+    }
+    let layout = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap()
+        .settings
+        .layout;
+    assert_eq!((layout.assistant_width, layout.list_width), (450, 510));
+
+    for width in [319, 561] {
+        let patch =
+            serde_json::from_value(serde_json::json!({ "layout": { "assistantWidth": width } }))
+                .unwrap();
+        let error = store.patch(patch).unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("layout.assistantWidth"));
+    }
+
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"layout":{"assistantWidth":99999}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.layout.assistant_width, 560);
 }

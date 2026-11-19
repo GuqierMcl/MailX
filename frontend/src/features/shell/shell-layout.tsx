@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
 import { Island } from './island'
 import { NAV_RAIL_WINDOW } from './layout-defaults'
+import { NAV_RAIL } from './nav-width'
 import { NavRail, NavRailTrigger, type NavSize } from './nav-rail'
 import { ShellContext } from './shell-context'
 
@@ -19,6 +20,12 @@ type ShellLayoutProps = {
   navActions?: ReactNode
   /** Called when the user settles on a width or folds the sidebar; the caller persists it. */
   onNavChange: (change: { navWidth?: number; navCollapsed?: boolean }) => void
+  /**
+   * A second island beside the content (the assistant). It docks to the right when the window leaves
+   * the content at least `asideRoom.content` wide, and floats over the content otherwise (`overlay`).
+   */
+  aside?: (overlay: boolean) => ReactNode
+  asideRoom?: { aside: number; content: number }
   children: ReactNode
 }
 
@@ -35,6 +42,15 @@ function useNarrowWindow() {
   return useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW_QUERY).matches, () => false)
 }
 
+function subscribeWidth(onChange: () => void) {
+  window.addEventListener('resize', onChange)
+  return () => window.removeEventListener('resize', onChange)
+}
+
+function useWindowWidth() {
+  return useSyncExternalStore(subscribeWidth, () => window.innerWidth, () => 1280)
+}
+
 /**
  * Canvas layout under the title bar: navigation sits directly on the canvas
  * (the same plane as the title bar) and the content floats as one island.
@@ -43,8 +59,9 @@ function useNarrowWindow() {
  * user's choice is saved; a narrow window shows the rail on its own, and opening
  * the sidebar there lasts only until the window widens, leaving the choice as it was.
  */
-export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navActions, onNavChange, children }: ShellLayoutProps) {
+export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navActions, onNavChange, aside, asideRoom, children }: ShellLayoutProps) {
   const narrow = useNarrowWindow()
+  const windowWidth = useWindowWidth()
   const [narrowOpen, setNarrowOpen] = useState(false)
   const [wasNarrow, setWasNarrow] = useState(narrow)
   if (wasNarrow !== narrow) {
@@ -100,8 +117,11 @@ export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navAc
     if (!nextFolded && next !== navWidth) onNavChange({ navWidth: next })
   }
 
+  // Sidebar (or rail), the content at its narrowest, the aside, and the 0.5rem gutters between them.
+  const overlay = asideRoom ? windowWidth < (folded ? NAV_RAIL : width) + asideRoom.content + asideRoom.aside + 24 : false
+
   return (
-    <div data-slot="shell-layout" className="flex h-full min-h-0 pr-2 pb-2">
+    <div data-slot="shell-layout" className="relative flex h-full min-h-0 pr-2 pb-2">
       <TitleBarActions side="leading">
         <NavRailTrigger open={!folded} onToggle={toggleNav} />
         {navActions}
@@ -121,6 +141,7 @@ export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navAc
       <ShellContext.Provider value={controls}>
         <Island className={resizing ? 'pointer-events-none' : undefined}>{children}</Island>
       </ShellContext.Provider>
+      {aside?.(overlay)}
     </div>
   )
 }

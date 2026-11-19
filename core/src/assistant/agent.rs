@@ -19,9 +19,10 @@ use super::{
     prompt,
     summary::{self, SUMMARY_OUTPUT_CAP},
     types::{
-        ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason, FlagRestore,
-        ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+        ChatContext, ConfirmAction, ConfirmOutcome, ConfirmationRequest, FinishedReason,
+        FlagRestore, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
     },
+    view,
 };
 use crate::{
     ErrorCode,
@@ -47,7 +48,7 @@ pub(crate) const DEFAULT_CONTEXT_TOKENS: u32 = 32_000;
 /// A conversation stops growing at this share of the window.
 const CONTEXT_SHARE_PERCENT: u64 = 80;
 /// Longest tool result handed to the model, in characters.
-const MAX_RESULT_CHARS: usize = 64_000;
+pub(super) const MAX_RESULT_CHARS: usize = 64_000;
 const MAX_SUMMARY_ITEMS: usize = 50;
 
 enum Outcome {
@@ -243,6 +244,7 @@ pub(crate) async fn chat(
     run_id: String,
     conversation: ActiveConversation,
     mut messages: Vec<ChatMessage>,
+    context: Option<ChatContext>,
 ) {
     let _end = EndGuard {
         inner: inner.clone(),
@@ -253,7 +255,7 @@ pub(crate) async fn chat(
     let mut save = SaveGuard::new(inner.clone(), conversation);
     let id = save.id();
     let mut extras = RunExtras::default();
-    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras).await;
+    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras, context).await;
     save.finish(match &outcome {
         Outcome::Finished(reason) => End::finished(*reason),
         Outcome::Failed(code) => End::failed(*code),
@@ -285,6 +287,7 @@ async fn chat_loop(
     conversation_id: &str,
     messages: &mut Vec<ChatMessage>,
     extras: &mut RunExtras,
+    context: Option<ChatContext>,
 ) -> Outcome {
     let definitions = definitions(&inner.tools);
     let definitions_cost = estimate(
@@ -298,6 +301,8 @@ async fn chat_loop(
     );
     // What this run has shown the model, and what the user turned down.
     let mut memory = Memory::default();
+    // What the user is looking at, read once on the first turn.
+    let mut view_note: Option<String> = None;
     for turn_number in 1..=MAX_TURNS {
         // Settings are read again every turn: a switched-off assistant, a
         // revoked consent or another model applies at once.
@@ -309,12 +314,27 @@ async fn chat_loop(
         // `None` (unknown) tries with tools; only a known "no" leaves them out.
         let with_tools = ready.target.tool_call != Some(false);
         let tools: &[ToolDefinition] = if with_tools { &definitions } else { &[] };
-        let system = prompt::chat_system(
+        if view_note.is_none() {
+            let described = match &context {
+                Some(context) => view::describe(inner, run_id, context.clone(), with_tools).await,
+                None => None,
+            };
+            view_note = Some(match described {
+                Some(described) => {
+                    extras.accounts.extend(described.accounts);
+                    memory.seen.extend(described.addresses);
+                    described.note
+                }
+                None => String::new(),
+            });
+        }
+        let mut system = prompt::chat_system(
             ready.locale,
             &utc_now(),
             &ready.settings.instructions,
             with_tools,
         );
+        system.push_str(view_note.as_deref().unwrap_or_default());
         let tools_cost = if with_tools { definitions_cost } else { 0 };
         let cost =
             estimate(&system) + tools_cost + estimate_messages(messages, &origin(&ready.target));
@@ -578,21 +598,12 @@ fn execute(
             "The assistant is turned off.",
         ));
     }
-    // The ids only matter when some account is left out.
-    let ids: Vec<String> = if settings.excluded_accounts.is_empty() {
-        Vec::new()
-    } else {
-        match inner.core.account_identities() {
-            Ok(identities) => identities.into_iter().map(|a| a.id).collect(),
-            Err(_) => {
-                return Step::Done(Executed::failed(
-                    "unavailable",
-                    "MailX is temporarily unavailable.",
-                ));
-            }
-        }
+    let Some(grant) = grant_for(inner, &settings) else {
+        return Step::Done(Executed::failed(
+            "unavailable",
+            "MailX is temporarily unavailable.",
+        ));
     };
-    let grant = policy::grant(&settings, &ids);
     if !approved {
         if !policy::is_known(&call.name) {
             // Nothing meaningful to show the user; never run.
@@ -666,8 +677,28 @@ fn execute(
     })
 }
 
+/// The grant a call gets under `settings`; `None` when the accounts cannot be
+/// read. The ids only matter when some account is left out.
+pub(super) fn grant_for(
+    inner: &Inner,
+    settings: &crate::settings::AssistantSettings,
+) -> Option<crate::tools::Grant> {
+    let ids: Vec<String> = if settings.excluded_accounts.is_empty() {
+        Vec::new()
+    } else {
+        inner
+            .core
+            .account_identities()
+            .ok()?
+            .into_iter()
+            .map(|a| a.id)
+            .collect()
+    };
+    Some(policy::grant(settings, &ids))
+}
+
 /// Every `address` string in a tool result, lowercased.
-fn collect_addresses(value: &Value, out: &mut Vec<String>) {
+pub(super) fn collect_addresses(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
             for (key, inner) in map {

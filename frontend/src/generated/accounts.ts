@@ -640,11 +640,15 @@ readerCollapsed: boolean,
  */
 readingMode: ReadingMode,
 /**
+ * Width of the assistant's own island beside the mail, `320..=560`.
+ */
+assistantWidth: number,
+/**
  * Display order only; unknown account ids are ignored by the UI.
  */
 accountOrder: Array<string>, };
 
-export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, readingMode?: ReadingMode, accountOrder?: Array<string>, };
+export type LayoutSettingsPatch = { navWidth?: number, navCollapsed?: boolean, listWidth?: number, readerCollapsed?: boolean, readingMode?: ReadingMode, assistantWidth?: number, accountOrder?: Array<string>, };
 
 export type PreviewLines = "none" | "one" | "two" | "three";
 
@@ -1265,7 +1269,14 @@ fresh: boolean,
  * interface works it out the same way as for the preset line. A closed
  * list, never free text, so it cannot carry anything into the prompt.
  */
-occasion?: Occasion, } | { "type": "chat", conversationId?: string, message: string, };
+occasion?: Occasion, } | { "type": "chat", conversationId?: string, message: string,
+/**
+ * What the user is looking at as they write. The core reads it
+ * itself, within the assistant's accounts, for this run only.
+ */
+context?: ChatContext, };
+
+export type ChatContext = { "type": "email", emailId: string, } | { "type": "emails", emailIds: Array<string>, } | { "type": "draft", draftId: string, };
 
 export type Occasion = "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn" | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi" | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 

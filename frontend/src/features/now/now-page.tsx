@@ -61,6 +61,8 @@ export type NowPageProps = {
   onOpenDraft?: (draftId: string) => void
   /** Changes when something outside (the command palette) asks to start typing to the assistant. */
   focusInputToken?: number
+  /** Open on the conversation rather than the overview: the assistant's island just handed it over. */
+  openConversation?: boolean
   /** The workbench's shared verification-code controller: recognition and copying behave as in the list and reader. */
   verification: VerificationCodes
 }
@@ -73,7 +75,7 @@ type AttentionItem = { id: string; icon: IconSvgElement; label: string; tone?: '
  * column, vertically centred while it is shorter than the island and
  * scrolling when taller. Sections appear only with content.
  */
-export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail, onOpenDraft, focusInputToken, verification }: NowPageProps) {
+export function NowPage({ client, accounts, folders, syncStates, draftCount, outbox, onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail, onOpenDraft, focusInputToken, openConversation = false, verification }: NowPageProps) {
   const { i18n } = useTranslation()
   const language = i18n.language
   const now = useDayClock()
@@ -186,6 +188,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
         folders={folders}
         onSelectMailbox={onSelectMailbox}
         focusToken={focusInputToken}
+        openConversation={openConversation}
       >
       <div className="relative h-full overflow-y-auto">
         {/* The column sits between two spacers that share the free height 2:3, so a

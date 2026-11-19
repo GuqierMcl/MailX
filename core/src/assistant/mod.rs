@@ -28,6 +28,7 @@ mod summary;
 #[cfg(test)]
 mod tests;
 mod types;
+mod view;
 
 use std::{
     sync::{
@@ -50,14 +51,14 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, ChatTurn, ChatTurnConfirmation, ChatTurnReasoning,
-    ChatTurnTool, ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome,
-    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
+    AssistantEvent, AssistantEventKind, ChatContext, ChatTurn, ChatTurnConfirmation,
+    ChatTurnReasoning, ChatTurnTool, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
+    ConfirmOutcome, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
     ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged,
-    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_CONVERSATION_PAGE,
-    MAX_MESSAGE_CHARS, Occasion, OrganizeChange, PendingConfirmation, RunKind, RunKindTag,
-    RunReasoning, RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus,
-    ToolUndo, TurnState,
+    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_CONTEXT_EMAILS,
+    MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange, PendingConfirmation,
+    RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState, StartRun, ToolActivity,
+    ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -175,10 +176,18 @@ impl Assistant {
     pub async fn start(&self, request: StartRun) -> Result<RunSnapshot, AppError> {
         let inner = &self.inner;
         let message = match &request.kind {
-            RunKind::Chat { message, .. } => {
+            RunKind::Chat {
+                message, context, ..
+            } => {
                 let message = message.trim();
                 if message.is_empty() || message.chars().count() > MAX_MESSAGE_CHARS {
                     return Err(AppError::validation("message"));
+                }
+                if context
+                    .as_ref()
+                    .is_some_and(|context| !view::valid(context))
+                {
+                    return Err(AppError::validation("context"));
                 }
                 Some(message.to_owned())
             }
@@ -214,7 +223,9 @@ impl Assistant {
                     .await
             }
             RunKind::Chat {
-                conversation_id, ..
+                conversation_id,
+                context,
+                ..
             } => {
                 let message = message.unwrap_or_default();
                 if let Some(id) = conversation_id.as_deref() {
@@ -242,6 +253,7 @@ impl Assistant {
                     run_id.clone(),
                     conversation,
                     history,
+                    context,
                 ));
                 inner.runs.set_abort(&run_id, task.abort_handle());
                 inner.runs.snapshot(&run_id)

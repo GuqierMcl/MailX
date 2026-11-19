@@ -14,6 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Ask the AI assistant about the email you are reading, the emails you selected or the draft you are writing, from a capsule on mail pages and a panel of its own beside the mail. / 邮件页面右下角新增 AI 胶囊，可就正在阅读的邮件、选中的邮件或正在写的草稿向 AI 助手提问，对话在邮件旁单独的对话岛里展开。
 - Keep rotating local diagnostic logs for startup and mail sync, including failures, sync retries and recovery, and selected IMAP counts. / 新增本地轮转诊断日志，记录启动和同步故障、同步重试与恢复及部分 IMAP 响应计数。 ([#158](https://github.com/GuqierMcl/MailX/pull/158))
 
 ### 🩹 Fixed

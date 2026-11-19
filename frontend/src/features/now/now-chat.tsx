@@ -47,7 +47,7 @@ function Pill({ onClick, children, className }: { onClick: () => void; children:
  * views (`useViewSwap`); reduced motion swaps at once. The input is mounted once outside both, so its
  * text and focus ride through the change.
  */
-export function NowChatShell({ client, chat, usable, service, summary, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken = 0, children }: {
+export function NowChatShell({ client, chat, usable, service, summary, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken = 0, openConversation = false, children }: {
   client: MailxClient
   /** Null where no conversation is kept (no provider): the page is then just the overview. */
   chat: AssistantChat | null
@@ -64,11 +64,13 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   onSelectMailbox: (mailbox: Mailbox) => void
   /** Changes when something outside asks to start typing (the command palette). */
   focusToken?: number
+  /** Opens on the conversation (when there is one) instead of the overview. Read when the page mounts. */
+  openConversation?: boolean
   children: ReactNode
 }) {
   useTranslation()
   const reduced = usePrefersReducedMotion()
-    const [view, setView] = useState<View>('overview')
+  const [view, setView] = useState<View>(() => (openConversation && (chat?.messages.length ?? 0) > 0 ? 'conversation' : 'overview'))
   const [input, setInput] = useState<HTMLTextAreaElement | null>(null)
   const footer = useRef<HTMLDivElement | null>(null)
   const shell = useRef<HTMLDivElement | null>(null)
