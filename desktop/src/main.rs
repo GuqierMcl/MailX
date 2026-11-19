@@ -66,6 +66,7 @@ fn main() {
         notifications::is_action_launch(&std::env::args().collect::<Vec<_>>());
     let builder = tauri::Builder::default()
         .manage(verification_codes::VerificationCodes::default())
+        .manage(compose::InlineComposerDraft::default())
         .manage(autostart::StartupIntent::default())
         .manage(autostart::foreground_environment(tauri::Env::default()));
     // AppKit otherwise activates the app even when its initial window is
@@ -415,6 +416,7 @@ fn main() {
             compose::outbox_remove_local_copy,
             compose::composer_open,
             compose::composer_focus,
+            compose::composer_set_inline,
             compose::composer_close,
             compose::composer_cancel_close,
             updater::updater_get_state,

@@ -166,6 +166,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     resolveUnknown: vi.fn<MailxClient['resolveUnknown']>().mockRejectedValue(new Error('unused')),
     openComposer: vi.fn<MailxClient['openComposer']>().mockResolvedValue(undefined),
     focusComposer: vi.fn<MailxClient['focusComposer']>().mockResolvedValue(false),
+    setInlineComposer: vi.fn<MailxClient['setInlineComposer']>().mockResolvedValue(undefined),
     closeComposer: vi.fn<MailxClient['closeComposer']>().mockResolvedValue(undefined),
     cancelComposerClose: vi.fn<MailxClient['cancelComposerClose']>().mockResolvedValue(undefined),
     onOutbox: vi.fn<MailxClient['onOutbox']>().mockReturnValue(() => undefined),

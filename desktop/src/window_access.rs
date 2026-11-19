@@ -25,12 +25,20 @@ pub(crate) fn composer_label(draft_id: &Uuid) -> String {
     format!("{COMPOSER_PREFIX}{}", draft_id.hyphenated())
 }
 
-/// Whether `draft_id` has a composer window among `labels`. Anything that is
-/// not a canonical draft id is never open.
-pub(crate) fn draft_open_in(labels: impl IntoIterator<Item = String>, draft_id: &str) -> bool {
+/// Whether `draft_id` is being edited: it has a composer window among
+/// `labels`, or it is the main window's inline composer draft. Anything that
+/// is not a canonical draft id is never open.
+pub(crate) fn draft_open_in(
+    labels: impl IntoIterator<Item = String>,
+    inline: Option<Uuid>,
+    draft_id: &str,
+) -> bool {
     let Some(id) = parse_draft_id(draft_id) else {
         return false;
     };
+    if inline == Some(id) {
+        return true;
+    }
     let wanted = composer_label(&id);
     labels.into_iter().any(|label| label == wanted)
 }
@@ -202,6 +210,7 @@ const MAIN_ONLY: &[&str] = &[
     "outbox_remove_local_copy",
     "composer_open",
     "composer_focus",
+    "composer_set_inline",
     "updater_get_state",
     "updater_check",
     "updater_download",
@@ -337,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn a_draft_is_open_only_when_its_own_composer_window_exists() {
+    fn a_draft_is_open_only_in_its_own_composer_window_or_the_inline_composer() {
         let draft = id();
         let other = id();
         let labels = || {
@@ -347,18 +356,23 @@ mod tests {
                 "composer-x".to_string(),
             ]
         };
-        assert!(!draft_open_in(labels(), &draft.hyphenated().to_string()));
+        let text = |id: &Uuid| id.hyphenated().to_string();
+        assert!(!draft_open_in(labels(), None, &text(&draft)));
         let mut with_draft = labels();
         with_draft.push(composer_label(&draft));
-        assert!(draft_open_in(with_draft, &draft.hyphenated().to_string()));
-        assert!(draft_open_in(labels(), &other.hyphenated().to_string()));
+        assert!(draft_open_in(with_draft, None, &text(&draft)));
+        assert!(draft_open_in(labels(), None, &text(&other)));
+        // The inline composer's draft is open without any composer window.
+        assert!(draft_open_in(Vec::new(), Some(draft), &text(&draft)));
+        assert!(!draft_open_in(Vec::new(), Some(other), &text(&draft)));
         // Not canonical ids: never open.
         assert!(!draft_open_in(
             labels(),
-            &other.hyphenated().to_string().to_uppercase()
+            Some(other),
+            &text(&other).to_uppercase()
         ));
-        assert!(!draft_open_in(labels(), "composer-x"));
-        assert!(!draft_open_in(labels(), ""));
+        assert!(!draft_open_in(labels(), None, "composer-x"));
+        assert!(!draft_open_in(labels(), None, ""));
     }
 
     #[test]
@@ -625,6 +639,7 @@ mod tests {
             ("outbox_remove_local_copy", true, false),
             ("composer_open", true, false),
             ("composer_focus", true, false),
+            ("composer_set_inline", true, false),
             ("composer_close", false, true),
             ("composer_cancel_close", false, true),
             ("updater_get_state", true, false),

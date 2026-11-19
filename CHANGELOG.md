@@ -18,6 +18,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🩹 Fixed
 
+- Stop MCP clients and the AI assistant from changing, deleting or sending a draft that is open in the main window's composer, as for a composer window. / 修复 MCP 客户端与 AI 助手可以修改、删除或发送正在主窗口内写信区编辑的草稿的问题，现与写信窗口一致。
 - Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 - Fix sync errors for empty folders on IMAP servers that omit empty search results. / 修复部分 IMAP 服务器省略空搜索结果时，空文件夹同步报错的问题。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 

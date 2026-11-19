@@ -908,7 +908,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - 发送：第二次点击入队后收起写信区，阅读区回到之前的内容；发送结果的提示与撤销不变。
 - 主窗口隐藏到后台不影响内嵌写信区。明确退出应用时，内嵌写信区与写信窗口一样先保存，失败则取消退出并保留编辑器（见[后台运行设计](desktop-lifecycle.md)）。
 - 主窗口的单键快捷键在写信区内输入时不触发；`Cmd/Ctrl+Enter` 只在焦点位于写信区内时作用于它。
-- 权限取舍：内嵌写信区与主窗口共用 IPC 权限，没有写信窗口那样按窗口最小授权；写信区不渲染邮件正文，正文仍只在隔离 iframe 中显示，所以不扩大不可信内容的权限。为此主窗口获得写信窗口原有的入队与附件命令（`outbox_queue_send`、`attachments_add` / `attachments_remove` / `attachments_policy`、`inline_images_add` / `inline_images_add_bytes` / `inline_image_preview`，可用于任意草稿），核心 `Caller::MainWindow` 可以入队；另加只读的 `composer_focus`（见下）。以后的 Web 宿主不能开系统窗口，只能使用主窗口内写信。
+- 权限取舍：内嵌写信区与主窗口共用 IPC 权限，没有写信窗口那样按窗口最小授权；写信区不渲染邮件正文，正文仍只在隔离 iframe 中显示，所以不扩大不可信内容的权限。为此主窗口获得写信窗口原有的入队与附件命令（`outbox_queue_send`、`attachments_add` / `attachments_remove` / `attachments_policy`、`inline_images_add` / `inline_images_add_bytes` / `inline_image_preview`，可用于任意草稿），核心 `Caller::MainWindow` 可以入队；另加只读的 `composer_focus` 与报告内嵌草稿的 `composer_set_inline`（见下）。以后的 Web 宿主不能开系统窗口，只能使用主窗口内写信。
 
 **已实现（前端 `features/outbox/use-inline-composer.ts`、`inline-composer.tsx`、`use-compose.ts`，主窗口工作台接入；只有自动测试，三平台实机未验证）：**
 
@@ -920,7 +920,7 @@ S0–S4 已实现；S5 的实际执行结果记入[验证指引](../development/
 - 发送后与“丢弃”后立即收起；账号移除删掉这份草稿时直接收起，不保存。草稿在别处被删除后，“关闭”直接收起。
 - 退出：主窗口的退出准备（`prepareMainWindowQuit`）等待内嵌写信区写出；失败则取消退出并在“无法完成退出前的保存”里说明，写信区保留。退出期间不删除空白草稿。
 - 单键快捷键在写信区内一律不触发（包括焦点在写信区的按钮或收件人标签上），`Esc` 不关闭写信区；写信区打开时，焦点在列表等处按 `E` / `#` / `S` / `U` / `R` / `A` / `F` 也不作用于被遮住的邮件，`J` / `K` 照常移动并离开写信区。
-- 与设计的差异：主窗口不接收系统文件拖入，内嵌写信区只能用回形针按钮或粘贴图片添加附件（`attachments_add_dropped` 仍只给写信窗口）；MCP 修改草稿前的“窗口中已打开”检查只认写信窗口，不知道内嵌写信区，内嵌写信区遇到外部修改时按已有的 `conflict` 处理重新加载并提示。
+- 与设计的差异：主窗口不接收系统文件拖入，内嵌写信区只能用回形针按钮或粘贴图片添加附件（`attachments_add_dropped` 仍只给写信窗口）。内嵌写信区显示的草稿由主窗口经 `composer_set_inline` 报告给宿主，MCP 与内置助手的工具层把它与写信窗口中的草稿同样视为正在编辑（`draftOpen`），不能修改、删除或发送；写信区遇到其他外部修改时仍按已有的 `conflict` 处理重新加载并提示。
 
 ### 17.8 实施与验证
 

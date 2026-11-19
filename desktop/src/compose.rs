@@ -286,6 +286,33 @@ struct FocusArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InlineArgs {
+    draft_id: Option<String>,
+}
+
+/// The draft the main window's inline composer shows, as the main window last
+/// reported it. Agents treat it like a draft with its own composer window.
+#[derive(Default)]
+pub(crate) struct InlineComposerDraft(Mutex<Option<uuid::Uuid>>);
+
+impl InlineComposerDraft {
+    pub(crate) fn get(&self) -> Option<uuid::Uuid> {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn set(&self, draft: Option<uuid::Uuid>) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = draft;
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenArgs {
     draft_id: String,
     /// The draft was just created for this window (写邮件 / 回复 / 转发), so
@@ -636,6 +663,27 @@ pub(crate) async fn composer_focus(
             .set_focus()
             .map(|()| true)
             .map_err(|_| AppError::new(ErrorCode::Internal))
+    });
+    Ok(respond(result))
+}
+
+/// Records which draft the inline composer shows (`null` when none), so agent
+/// tools refuse to change or send it while it is being edited, as they do for a
+/// composer window. Synchronous, so reports apply in the order they were made.
+#[tauri::command]
+pub(crate) fn composer_set_inline(
+    window: WebviewWindow,
+    inline: State<'_, InlineComposerDraft>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let result = authorize(&window, "composer_set_inline").and_then(|_| {
+        let args = parse::<InlineArgs>(request.body())?;
+        let draft = match args.draft_id {
+            Some(id) => Some(parse_draft_id(&id).ok_or_else(|| AppError::validation("draftId"))?),
+            None => None,
+        };
+        inline.set(draft);
+        Ok(())
     });
     Ok(respond(result))
 }

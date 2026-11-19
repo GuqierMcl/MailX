@@ -360,6 +360,8 @@ export interface MailxClient {
   openComposer(draftId: string, fresh?: boolean): Promise<void>
   /** Main window. Focuses the draft's composer window if one is open; false when none is (nothing is opened). */
   focusComposer(draftId: string): Promise<boolean>
+  /** Main window. Reports the inline composer's draft (`null`: none), so agents leave it alone while it is edited. */
+  setInlineComposer(draftId: string | null): Promise<void>
   /** Composer window. Closes its own window; flush the draft first. */
   closeComposer(force?: boolean, generation?: number): Promise<void>
   /** Cancels the matching close or app quit attempt without discarding edits. */
@@ -741,6 +743,7 @@ export function createDesktopClient(): MailxClient {
       call<OutboxItem>('outbox_resolve_unknown', { id, choice: resolution, clientMutationId }),
     openComposer: (draftId, fresh = false) => call<void>('composer_open', fresh ? { draftId, fresh } : { draftId }),
     focusComposer: (draftId) => call<boolean>('composer_focus', { draftId }),
+    setInlineComposer: (draftId) => call<void>('composer_set_inline', { draftId }),
     closeComposer: (force = false, generation) => call<void>('composer_close', { force, generation: generation ?? null }),
     cancelComposerClose: (generation) => call<void>('composer_cancel_close', { generation }),
     onOutbox: (listener) => subscribe<OutboxChanged>(HOST_EVENTS.outbox, listener),
