@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -55,6 +55,7 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
     <ModelRow client={client} ai={ai} assistant={assistant} off={off} update={update} />
     <ConsentRow client={client} ai={ai} assistant={assistant} off={off} />
     <AccountsRow client={client} assistant={assistant} off={off} update={update} />
+    <SummaryRows client={client} assistant={assistant} off={off} update={update} />
     {/* Only the chat uses these. */}
     {chat && <>
       <ModeRow id="assistant.organize" label={t('settings:assistantOrganize')} description={t('settings:assistantOrganizeDescription')}
@@ -146,6 +147,60 @@ function AccountsRow({ client, assistant, off, update }: { client: MailxClient; 
       ))}
     </div>
   </SettingsRow>
+}
+
+/**
+ * Email summaries in the reader: the automatic switch, the senders always summarized (added from the
+ * summary panel, removed here) and the summaries kept on this device.
+ */
+function SummaryRows({ client, assistant, off, update }: { client: MailxClient; assistant: AssistantSettings; off: boolean; update: Update }) {
+  useTranslation()
+  const { summary } = assistant
+  const [cleared, setCleared] = useState<number | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  useEffect(() => {
+    if (cleared === null) return
+    const timer = setTimeout(() => setCleared(null), 2000)
+    return () => clearTimeout(timer)
+  }, [cleared])
+  const clear = () => {
+    setFailure(null)
+    setClearing(true)
+    client.assistantClearEmailSummaries().then(
+      (count) => { setClearing(false); setCleared(count) },
+      (error: unknown) => { setClearing(false); setFailure(errorText(error)) },
+    )
+  }
+  const remove = (address: string) => update.mutate({ summary: { ...summary, senders: summary.senders.filter((item) => item !== address) } })
+  return <>
+    <SettingsRow label={t('settings:assistantAutoSummary')} description={t('settings:assistantAutoSummaryDescription')} htmlFor="assistant.summary.auto">
+      <Switch id="assistant.summary.auto" checked={summary.auto} disabled={off} onCheckedChange={(auto) => update.mutate({ summary: { ...summary, auto } })} />
+    </SettingsRow>
+    {summary.senders.length > 0 && (
+      <SettingsRow label={t('settings:assistantSummarySenders')} description={t('settings:assistantSummarySendersDescription')}>
+        <ul aria-label={t('settings:assistantSummarySenders')} className="flex max-h-48 w-64 flex-col gap-1 overflow-y-auto">
+          {summary.senders.map((address) => (
+            <li key={address} className="flex min-w-0 items-center gap-1 text-sm">
+              <span className="min-w-0 flex-1 truncate" title={address}>{address}</span>
+              <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground" disabled={off}
+                aria-label={t('settings:assistantSummarySenderRemove', { address })} onClick={() => remove(address)}>
+                <HugeiconsIcon icon={Cancel01Icon} />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </SettingsRow>
+    )}
+    <SettingsRow label={t('settings:assistantSummaryCache')} description={t('settings:assistantSummaryCacheDescription')}>
+      <div className="flex flex-col items-end gap-1.5">
+        {cleared !== null
+          ? <span role="status" className="text-sm text-muted-foreground">{t('settings:assistantSummaryCacheCleared', { count: cleared })}</span>
+          : <Button variant="outline" size="sm" disabled={off || clearing} onClick={clear}>{t('settings:assistantSummaryCacheClear')}</Button>}
+        {failure && <span role="alert" className="max-w-72 text-right text-xs text-destructive">{failure}</span>}
+      </div>
+    </SettingsRow>
+  </>
 }
 
 function ModeRow({ id, label, description, value, off, onChange }: { id: string; label: string; description: string; value: AssistantMode; off: boolean; onChange: (mode: AssistantMode) => void }) {

@@ -730,7 +730,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### AI 助手（主窗口）
 
-设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复；聊天记录（对话）按设置保存在本机，见下文“已保存的对话”。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令、保存对话记录）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
+设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复；聊天记录（对话）按设置保存在本机，见下文“已保存的对话”。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令、保存对话记录、邮件摘要 `summary`）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -740,6 +740,8 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 | `assistantRespond(runId, requestId, approved)` | `assistant_respond`，`{ runId, requestId, approved }` | 空 |
 | `assistantGrantConsent()` | `assistant_grant_consent`，`{}` | `AiConsent`（当前助手模型所属的连接 id 与规范化地址） |
 | `assistantRevokeConsent()` | `assistant_revoke_consent`，`{}` | 空；同时取消所有进行中的运行；核心未就绪时也能执行 |
+| `assistantEmailSummary(emailId)` | `assistant_email_summary`，`{ emailId }` | `CachedEmailSummary \| null`：该邮件正文未变时保存的最新一条摘要（任一篇幅与语言）；没有则 `null`。不需要同意、不请求模型。`assistantDisabled`、`validation`（`emailId`）、`notFound`（含账号被助手排除）、`bodyNotCached` |
+| `assistantClearEmailSummaries()` | `assistant_clear_email_summaries`，`{}` | 删除的摘要条数（数字）；只清除已保存的摘要，不取消进行中的运行 |
 | `onAssistantEvent(listener)` | 事件 `mailx://assistant` | `AssistantEvent`，只发给主窗口 |
 | `assistantListConversations({ limit?, cursor? })` | `assistant_list_conversations`，`{ limit?, cursor? }` | `ConversationList`，最新在前；`limit` 1–100（默认 50）；`validation`（`limit`、`cursor`） |
 | `assistantGetConversation(conversationId)` | `assistant_get_conversation`，`{ conversationId }` | `ConversationDetail`；`notFound` |
@@ -754,10 +756,16 @@ type StartRun = { kind: RunKind };
 type RunKind =
   | { type: "nowSummary"; since: string | null; dayStarts?: string[]; fresh?: boolean; occasion?: Occasion }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容。fresh 为 true（「重新生成」）时跳过 30 分钟缓存、重新请求模型，新答案替换缓存项；省略为 false。occasion 是今天的节日或节气（可省略），界面按预设句的同一规则算出：节日按界面语言，节气只在中文界面发送；核心把它变成一行事实，缓存键随之不同
   | { type: "chat"; conversationId?: string; message: string;          // 不带 conversationId 即新对话；message 1–20000 字符
-      context?: ChatContext };                                         // 用户正在看的内容，只用于本次运行
+      context?: ChatContext }                                          // 用户正在看的内容，只用于本次运行
                                                                        // ChatContext = { type: "email"; emailId } | { type: "emails"; emailIds }（1–20 个）
                                                                        //             | { type: "draft"; draftId }；格式不对为 validation（field 为 context）。
                                                                        // 邮件或草稿在助手可用账号之外或不存在时按“没有上下文”处理，不报错。
+  | { type: "emailSummary"; emailId: string; style?: SummaryStyle;     // 总结一封邮件：一次模型调用，不带工具；style、language 省略时取设置 assistant.summary 中保存的值
+      language?: SummaryLanguage; fresh?: boolean };                   // fresh 为 true（“重新生成”）时跳过缓存并替换缓存项，省略为 false
+type SummaryStyle = "brief" | "detailed" | "points";                    // 1–2 句 / 一小段 / 要点列表（有待办时末尾一行加粗的“待办”）
+type SummaryLanguage = { mode: "interface" } | { mode: "original" } | { mode: "fixed"; code: string };  // code 取自翻译的目标语言
+type CachedEmailSummary = { style: SummaryStyle; language: string;     // language 为翻译目标语言代码，或 "original"
+                            text: string; createdAt: string };         // text 是不可信的模型输出，按 Markdown 显示、不渲染原始 HTML                                         // 用户正在看的内容，只用于本次运行
 // 封闭列表，与前端 calendar.ts 的 id 一致，不是自由文本；其他值在反序列化时就被拒绝（validation）
 type Occasion =
   | "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn"
@@ -765,11 +773,11 @@ type Occasion =
   | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
 type RunSnapshot = {
-  runId: string; kind: "nowSummary" | "chat"; state: RunState;
+  runId: string; kind: RunKindTag; state: RunState;   // RunKindTag = "nowSummary" | "chat" | "emailSummary"
   text: string;                     // 模型到目前为止写的全部文字
   tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
   reasoning: RunReasoning[];        // 模型的思考，一段一段按顺序（每轮模型请求可有一段，例如工具调用前后各一段）
-  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述恒为 false
+  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述与邮件摘要恒为 false
   error: ErrorCode | null;          // failed 时的固定错误码
   finishedReason: "stop" | "limit" | "length" | null;
   seq: number;                      // 快照包含的最后一个事件序号
@@ -803,6 +811,8 @@ type AssistantEventKind =
 ```
 
 **运行状态。** 同意有效时直接进入 `running`；没有同意时 `assistantStart` 返回已经结束的 `awaitingConsent` 快照，什么都没有发给服务商，界面询问用户、调用 `assistantGrantConsent` 后再启动一次。运行中每次向模型请求前核心都会重新检查开关与同意，撤销同意或关闭助手立即停止运行。`running ⇄ awaitingConfirmation` 之间来回，最终是 `completed`（`finishedReason`：`stop` 模型答完、`limit` 工具轮数到上限、`length` 输出被截断；`nowSummary` 运行不会以 `length` 结束：被截断的概述句按 `failed` / `aiInvalidResponse` 处理，不缓存）、`failed`（`error` 为固定错误码）或 `canceled`（取消时已输出的文字保留）。同时最多 2 个进行中的运行，一个对话同时只有一个运行。「此刻」概述同样的输入（事实、观察与 `occasion`）、模型、提示词版本与语言在 30 分钟内命中缓存（此前几句概述只在新运行时附给模型，不进缓存键），直接返回 `completed` 快照，没有事件；请求带 `fresh: true` 时不查缓存，照常运行，完成后的答案替换缓存项（被取消、失败或被截断的不写缓存）。
+
+**邮件摘要。** `emailSummary` 运行总结一封邮件：核心按 `emailId` 经工具层的 `mail_read`（正文最多 24,000 字符）读取，助手的“可用账号”照常生效，因此范围外或不存在的邮件返回 `notFound`，正文尚未下载返回 `bodyNotCached`（这两种错误由 `assistantStart` 直接返回，不创建运行；没有同意时先返回 `awaitingConsent`，不读邮件）；邮件内容作为不可信的 `<email>` 数据交给模型，只做一次不带工具的请求，事件与快照与其他运行相同。`style`、`language` 省略时取设置 `assistant.summary` 中保存的值；`{ mode: "interface" }` 按界面语言，`{ mode: "original" }` 用邮件自己的语言。同意规则与其他运行相同：没有同意时返回 `awaitingConsent` 快照。结果按（邮件、篇幅、语言）缓存，仅当 `source_sha256`（主题、发件人、接收时间、正文文字的哈希）与提示词版本都未变时有效（迁移 `0035`）；未带 `fresh` 且命中时直接返回 `completed` 快照，没有事件。因输出上限结束（`finishedReason` 为 `length`）的摘要照常展示，但不写缓存；写缓存失败被忽略；缓存随邮件一起删除。`assistantEmailSummary` 供界面在打开邮件时取已保存的摘要，不经运行。
 
 **无工具的模型。** 助手模型的 `toolCall` 为 `false` 时，对话请求不带 `tools`，系统提示改用不含工具的版本，`RunSnapshot.toolsAvailable` 为 `false`；`null`（未知）与 `true` 照常带工具。服务商因 tools 参数拒绝请求时，核心无法从状态码可靠判断原因，仍按通用错误码返回，不单设错误码。
 
@@ -847,6 +857,8 @@ type FlagRestore = { emailId: string; isRead: boolean | null; isStarred: boolean
 - 归档令牌就是核心整理服务发出的 `undoToken`，沿用其规则：10 分钟有效，对同一批邮件做过后续操作即失效，用过即作废；界面调用 `emails_undo_archive`，过期返回 `notFound` 时撤销按钮消失。
 - 标记按 `restore` 分组：把 `isRead` 相同的邮件合成一次 `emails_set_flags(ids, "read", value)`，星标同理；这是写回原值，不检查之间是否有别的修改。
 - 因此没有 `assistant_undo` 命令：核心不保存撤销数据，不增加状态，撤销与用户自己的整理共用同一条路径与事件。助手自己的整理同样会发出 `MailStateChanged`（`source: "ai"`，含 `undoToken`），列表据此刷新；工具事件里的 `undo` 只是把令牌与这次对话里的那一行对上。
+
+**邮件摘要设置。** `assistant.summary` 为 `EmailSummarySettings { auto, senders, style, language, collapsed }`，默认 `{ false, [], "brief", { mode: "interface" }, false }`。`senders` 是小写地址，最多 500 个，重复项合并；`language` 为 `fixed` 时 `code` 必须有效。校验失败为 `validation`，`field` 为 `assistant.summary.senders` 或 `assistant.summary.language`；手写损坏的设置文件按字段修复，只丢弃有问题的字段。
 
 **已保存的对话。** 设置 `assistant.saveHistory`（默认 `true`，旧文件按 `true` 读取）决定聊天是否保存在本机（迁移 `0032`，设计见 [AI Runtime](../ai-runtime/README.md#4-运行生命周期)）。关闭只停止保存新的轮次，已有记录保留，直到用户删除；关闭期间的对话之后也不补存。四个命令只开放给主窗口，参数拒绝未知字段。`StartRun` 的聊天带已保存对话的 `conversationId` 时继续它：不在内存里就从本机读入，历史原样发给模型；不存在（含涉及的账号已被移除）返回 `notFound`，已有约 400 条消息返回 `assistantContextFull`。
 

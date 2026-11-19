@@ -922,6 +922,86 @@ async fn summary_turn(inner: &Arc<Inner>, run_id: &str, input: String, key: Stri
     Outcome::Finished(FinishedReason::Stop)
 }
 
+/// What an email summary run needs from `start`.
+pub(crate) struct EmailSummaryJob {
+    pub source: super::email_summary::Source,
+    pub style: crate::settings::SummaryStyle,
+    /// The stored language key.
+    pub language: String,
+    /// The language the model writes in; `None` for the email's own.
+    pub language_name: Option<&'static str>,
+}
+
+/// Output cap of an email summary; covers a thinking model's reasoning too.
+const EMAIL_SUMMARY_OUTPUT_CAP: u32 = 8192;
+
+pub(crate) async fn email_summary(inner: Arc<Inner>, run_id: String, job: EmailSummaryJob) {
+    let _end = EndGuard {
+        inner: inner.clone(),
+        run_id: run_id.clone(),
+    };
+    let outcome = email_summary_turn(&inner, &run_id, job).await;
+    report(&inner, &run_id, outcome);
+}
+
+async fn email_summary_turn(inner: &Arc<Inner>, run_id: &str, job: EmailSummaryJob) -> Outcome {
+    let ready = match inner.gate().await {
+        Ok(Gate::Ready(ready)) => ready,
+        Ok(Gate::NeedsConsent) => return Outcome::NeedsConsent,
+        Err(error) => return Outcome::Failed(error.code),
+    };
+    let system = prompt::email_summary_system(job.style, job.language_name);
+    let messages = [ChatMessage::User(job.source.input.clone())];
+    let max_output = ready
+        .target
+        .output_length
+        .map_or(EMAIL_SUMMARY_OUTPUT_CAP, |n| {
+            n.min(EMAIL_SUMMARY_OUTPUT_CAP)
+        });
+    let turn = match model_turn(
+        inner,
+        run_id,
+        &ready,
+        &system,
+        &messages,
+        &[],
+        Some(max_output),
+    )
+    .await
+    {
+        Ok(turn) => turn,
+        Err(code) => return Outcome::Failed(code),
+    };
+    let answer = turn.text.trim().to_owned();
+    if answer.is_empty() {
+        return Outcome::Failed(ErrorCode::AiInvalidResponse);
+    }
+    // A summary cut off by the output cap is shown as it is but never kept.
+    if turn.reason == Some(FinishReason::Length) {
+        return Outcome::Finished(FinishedReason::Length);
+    }
+    let EmailSummaryJob {
+        source,
+        style,
+        language,
+        ..
+    } = job;
+    // Keeping it is a convenience: a failed write still shows the summary.
+    let _ = inner
+        .with_store(move |service| {
+            service.summary_put(&crate::storage::summaries::NewSummary {
+                message_id: &source.message_id,
+                style: style.as_str(),
+                language: &language,
+                source_sha256: &source.sha256,
+                prompt_version: super::prompt::EMAIL_SUMMARY_PROMPT_VERSION,
+                text: &answer,
+            })
+        })
+        .await;
+    Outcome::Finished(FinishedReason::Stop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

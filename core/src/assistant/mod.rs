@@ -20,6 +20,7 @@
 mod agent;
 mod confirm;
 mod conversations;
+mod email_summary;
 mod history;
 mod policy;
 mod prompt;
@@ -51,14 +52,14 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, ChatContext, ChatTurn, ChatTurnConfirmation,
-    ChatTurnReasoning, ChatTurnTool, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
-    ConfirmOutcome, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
-    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged,
-    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_CONTEXT_EMAILS,
-    MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange, PendingConfirmation,
-    RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState, StartRun, ToolActivity,
-    ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext, ChatTurn,
+    ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmAction, ConfirmAttachment,
+    ConfirmDraftChange, ConfirmOutcome, ConfirmWarning, ConfirmationDetails, ConfirmationRequest,
+    ConversationChange, ConversationDetail, ConversationList, ConversationSummary,
+    ConversationsChanged, DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore,
+    MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange,
+    PendingConfirmation, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState, StartRun,
+    ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -191,11 +192,18 @@ impl Assistant {
                 }
                 Some(message.to_owned())
             }
+            RunKind::EmailSummary { email_id, .. } => {
+                if !email_summary::valid_id(email_id) {
+                    return Err(AppError::validation("emailId"));
+                }
+                None
+            }
             RunKind::NowSummary { .. } => None,
         };
         let tag = match request.kind {
             RunKind::NowSummary { .. } => RunKindTag::NowSummary,
             RunKind::Chat { .. } => RunKindTag::Chat,
+            RunKind::EmailSummary { .. } => RunKindTag::EmailSummary,
         };
         let ready = match inner.gate().await? {
             Gate::Ready(ready) => ready,
@@ -204,7 +212,7 @@ impl Assistant {
                     RunKind::Chat {
                         conversation_id, ..
                     } => conversation_id.clone(),
-                    RunKind::NowSummary { .. } => None,
+                    RunKind::NowSummary { .. } | RunKind::EmailSummary { .. } => None,
                 };
                 let id = inner
                     .runs
@@ -220,6 +228,15 @@ impl Assistant {
                 occasion,
             } => {
                 self.start_summary(*ready, since, day_starts, fresh, occasion)
+                    .await
+            }
+            RunKind::EmailSummary {
+                email_id,
+                style,
+                language,
+                fresh,
+            } => {
+                self.start_email_summary(*ready, &email_id, style, language, fresh.unwrap_or(false))
                     .await
             }
             RunKind::Chat {
@@ -445,6 +462,106 @@ impl Assistant {
         let task = tokio::spawn(agent::summary(inner.clone(), run_id.clone(), input, key));
         inner.runs.set_abort(&run_id, task.abort_handle());
         inner.runs.snapshot(&run_id)
+    }
+
+    async fn start_email_summary(
+        &self,
+        ready: Ready,
+        email_id: &str,
+        style: Option<crate::settings::SummaryStyle>,
+        language: Option<crate::settings::SummaryLanguage>,
+        fresh: bool,
+    ) -> Result<RunSnapshot, AppError> {
+        let inner = &self.inner;
+        let style = style.unwrap_or(ready.settings.summary.style);
+        let language = language.unwrap_or_else(|| ready.settings.summary.language.clone());
+        let (language, language_name) = email_summary::resolve_language(&language, ready.locale);
+        let source = email_summary::read(inner, &ready.settings, email_id).await?;
+        if !fresh {
+            let (key_id, sha) = (source.message_id.clone(), source.sha256.clone());
+            let wanted = language.clone();
+            let cached = inner
+                .with_store(move |service| {
+                    service.summary_get(
+                        &crate::storage::summaries::SummaryKey {
+                            message_id: &key_id,
+                            source_sha256: &sha,
+                            prompt_version: prompt::EMAIL_SUMMARY_PROMPT_VERSION,
+                        },
+                        Some((style.as_str(), &wanted)),
+                    )
+                })
+                .await?;
+            if let Some(found) = cached {
+                return Ok(inner.runs.create_completed(
+                    RunKindTag::EmailSummary,
+                    found.text,
+                    found.created_at,
+                ));
+            }
+        }
+        let run_id = inner
+            .runs
+            .create(RunKindTag::EmailSummary, None, RunState::Running)?;
+        let task = tokio::spawn(agent::email_summary(
+            inner.clone(),
+            run_id.clone(),
+            agent::EmailSummaryJob {
+                source,
+                style,
+                language,
+                language_name,
+            },
+        ));
+        inner.runs.set_abort(&run_id, task.abort_handle());
+        inner.runs.snapshot(&run_id)
+    }
+
+    /// The newest summary kept for an email whose body has not changed since,
+    /// of any style and language; `None` when there is none. Reads only local
+    /// data, so no consent is needed, but the assistant must be on and the
+    /// email in its accounts.
+    ///
+    /// Errors: `AssistantDisabled`, `Validation` (`emailId`), `NotFound` (gone
+    /// or outside the assistant's accounts), `BodyNotCached`.
+    pub async fn email_summary(
+        &self,
+        email_id: &str,
+    ) -> Result<Option<CachedEmailSummary>, AppError> {
+        if !email_summary::valid_id(email_id) {
+            return Err(AppError::validation("emailId"));
+        }
+        let inner = &self.inner;
+        let settings = inner.settings.get()?.settings.assistant;
+        if !settings.enabled {
+            return Err(AppError::new(ErrorCode::AssistantDisabled));
+        }
+        let source = email_summary::read(inner, &settings, email_id).await?;
+        let found = inner
+            .with_store(move |service| service.summary_get(&source.key(), None))
+            .await?;
+        Ok(found.and_then(|found| {
+            let style = [
+                crate::settings::SummaryStyle::Brief,
+                crate::settings::SummaryStyle::Detailed,
+                crate::settings::SummaryStyle::Points,
+            ]
+            .into_iter()
+            .find(|style| style.as_str() == found.style)?;
+            Some(CachedEmailSummary {
+                style,
+                language: found.language,
+                text: found.text,
+                created_at: found.created_at,
+            })
+        }))
+    }
+
+    /// Deletes every kept email summary and returns how many there were.
+    pub async fn clear_email_summaries(&self) -> Result<u64, AppError> {
+        self.inner
+            .with_store(|service| service.summary_delete_all())
+            .await
     }
 
     /// Answers the confirmation a run is waiting on: `approved` runs the

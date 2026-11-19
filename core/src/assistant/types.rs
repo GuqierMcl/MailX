@@ -4,7 +4,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{DraftOrigin, ErrorCode, MailAddress};
+use crate::{
+    DraftOrigin, ErrorCode, MailAddress,
+    settings::{SummaryLanguage, SummaryStyle},
+};
 
 /// Longest chat message accepted, in characters.
 pub const MAX_MESSAGE_CHARS: usize = 20_000;
@@ -57,6 +60,39 @@ pub enum RunKind {
         #[ts(optional)]
         context: Option<ChatContext>,
     },
+    /// A summary of one email for the reader (`docs/architecture/ai-chat-ui.md`
+    /// section 5.2). The core reads the email itself, within the assistant's
+    /// accounts; its body must be on this device. A summary already made for
+    /// the same body, style and language is answered from the local cache as
+    /// `completed` at once, unless `fresh`.
+    EmailSummary {
+        email_id: String,
+        #[serde(default)]
+        #[ts(optional)]
+        style: Option<SummaryStyle>,
+        #[serde(default)]
+        #[ts(optional)]
+        language: Option<SummaryLanguage>,
+        /// Skip the cached summary and ask the model again; the new one
+        /// replaces it.
+        #[serde(default)]
+        #[ts(optional)]
+        fresh: Option<bool>,
+    },
+}
+
+/// A summary kept on this device for an email whose body has not changed
+/// since.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedEmailSummary {
+    pub style: SummaryStyle,
+    /// A translation target code, or `original` for the email's own language.
+    pub language: String,
+    /// Untrusted model output; shown as Markdown without raw HTML.
+    pub text: String,
+    /// RFC 3339 UTC with milliseconds.
+    pub created_at: String,
 }
 
 /// What a chat message is about: the mail or draft on screen. Only ids travel;
@@ -120,6 +156,7 @@ pub enum Occasion {
 pub enum RunKindTag {
     NowSummary,
     Chat,
+    EmailSummary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]

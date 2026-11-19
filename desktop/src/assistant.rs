@@ -4,8 +4,8 @@
 //! parses and forwards. The consent is granted here and nowhere else (the
 //! settings patch ignores it).
 use mailx_core::{
-    AiConsent, ApiResult, AppError, ConversationDetail, ConversationList, ErrorCode, RunSnapshot,
-    StartRun,
+    AiConsent, ApiResult, AppError, CachedEmailSummary, ConversationDetail, ConversationList,
+    ErrorCode, RunSnapshot, StartRun,
 };
 use serde::Deserialize;
 use tauri::{State, WebviewWindow};
@@ -256,6 +256,44 @@ pub(crate) async fn assistant_clear_conversations(
         async {
             args?;
             state.assistant(&app)?.clear_conversations().await
+        }
+        .await,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmailArgs {
+    email_id: String,
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_email_summary(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Option<CachedEmailSummary>>, ()> {
+    let args = authorize(&window, "assistant_email_summary")
+        .and_then(|_| parse::<EmailArgs>(request.body()));
+    Ok(respond(
+        async { state.assistant(&app)?.email_summary(&args?.email_id).await }.await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn assistant_clear_email_summaries(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<u64>, ()> {
+    let args = authorize(&window, "assistant_clear_email_summaries")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            state.assistant(&app)?.clear_email_summaries().await
         }
         .await,
     ))

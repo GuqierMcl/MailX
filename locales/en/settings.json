@@ -468,5 +468,15 @@
   "mcpConflictTitle": "Replace the MailX configuration in {{name}}?",
   "mcpConflictDescription": "This entry points to another MailX installation or data folder. Replacing it will connect this client to the current MailX. Other client settings will be kept.",
   "mcpConflictReplace": "Replace MailX entry",
-  "mcpAgentHarnessHint": "Add a stdio server in Harness settings, or copy this configuration for your personal Harness profile."
+  "mcpAgentHarnessHint": "Add a stdio server in Harness settings, or copy this configuration for your personal Harness profile.",
+  "assistantAutoSummary": "Summarize emails as you open them",
+  "assistantAutoSummaryDescription": "Makes a summary when you open an email, except very short ones. Each one is sent to the model. You can also turn this on for a single sender from the summary panel.",
+  "assistantSummarySenders": "Always summarize these senders",
+  "assistantSummarySendersDescription": "Mail from these addresses is always summarized when you open it. Add them from the summary panel in the reader.",
+  "assistantSummarySenderRemove": "Remove {{address}}",
+  "assistantSummaryCache": "Email summaries",
+  "assistantSummaryCacheDescription": "Summaries are kept on this computer, so reopening an email shows its summary at once.",
+  "assistantSummaryCacheClear": "Clear summaries",
+  "assistantSummaryCacheCleared_one": "Cleared {{count}} summary",
+  "assistantSummaryCacheCleared_other": "Cleared {{count}} summaries"
 }

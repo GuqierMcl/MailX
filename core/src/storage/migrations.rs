@@ -235,6 +235,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["ews_connections", "ews_items", "ews_folder_state"],
         sql: include_str!("migrations/0034_exchange_ews.sql"),
     },
+    Migration {
+        version: 35,
+        description: "cached message summaries",
+        required_tables: &["message_summaries"],
+        sql: include_str!("migrations/0035_message_summaries.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -639,7 +645,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 34);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 35);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1347,6 +1353,45 @@ mod tests {
     }
 
     #[test]
+    fn message_summaries_migration_adds_a_table_that_follows_its_message() {
+        let (_directory, mut db) = open_db();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        apply(&mut db, &manifest_up_to(34)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id, revision, display_name, email_address, mailbox_source_id, created_at, updated_at)
+             VALUES ('a', 1, 'Work', 'work@example.invalid', 'source', 't', 't');
+             INSERT INTO folders(id, account_id, mailbox_source_id, remote_name, name, role, selectable,
+               attributes, unread_count, total_count, synced_at)
+             VALUES ('f', 'a', 'source', 'INBOX', 'Inbox', 'inbox', 1, '[]', 0, 1, 't');
+             INSERT INTO messages(id, account_id, mailbox_source_id, folder_id, uid_validity, uid,
+               message_id_header, subject, from_address, to_addresses, cc_addresses, reply_to_addresses,
+               received_at, is_read, is_flagged, flags, has_attachment, remote_state, updated_at)
+             VALUES ('m', 'a', 'source', 'f', 7, 42, 'x@example.invalid', 'Hi', 'a@example.invalid',
+               '[]', '[]', '[]', 't', 1, 1, '[]', 0, 'present', 't');",
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let insert = |message: &str| {
+            db.execute(
+                "INSERT INTO message_summaries(message_id, style, language, source_sha256,
+                   prompt_version, text, created_at)
+                 VALUES (?1, 'brief', 'en', 'h', 1, 'Short.', 't')",
+                [message],
+            )
+        };
+        insert("m").unwrap();
+        assert!(insert("missing").is_err());
+        db.execute("DELETE FROM messages WHERE id = 'm'", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM message_summaries", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn message_translations_migration_adds_a_table_that_follows_its_message() {
         let (_directory, mut db) = open_db();
         db.pragma_update(None, "foreign_keys", true).unwrap();
@@ -1501,7 +1546,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            34
+            35
         );
     }
 

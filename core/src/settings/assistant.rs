@@ -15,6 +15,9 @@ use crate::{AppError, ai::AiModelRef};
 /// Custom instructions, in characters.
 pub const MAX_INSTRUCTIONS_CHARS: usize = 2000;
 const MAX_EXCLUDED_ACCOUNTS: usize = 64;
+/// Senders whose mail is always summarized.
+pub const MAX_SUMMARY_SENDERS: usize = 500;
+const MAX_ADDRESS_CHARS: usize = 320;
 
 /// How an action category the assistant may do on its own is handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -36,6 +39,131 @@ pub enum AssistantSendMode {
     Confirm,
     /// Send without asking.
     Direct,
+}
+
+/// How long an email summary is (`docs/architecture/ai-chat-ui.md` section 5.2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SummaryStyle {
+    /// One or two sentences.
+    #[default]
+    Brief,
+    /// A short paragraph.
+    Detailed,
+    /// Bullet points, then what the reader needs to do.
+    Points,
+}
+
+impl SummaryStyle {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Brief => "brief",
+            Self::Detailed => "detailed",
+            Self::Points => "points",
+        }
+    }
+}
+
+/// The language an email summary is written in.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "mode",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SummaryLanguage {
+    /// The interface language.
+    #[default]
+    Interface,
+    /// The language the email is written in.
+    Original,
+    /// One of the translation target codes (`translate::languages::TARGETS`).
+    Fixed { code: String },
+}
+
+impl SummaryLanguage {
+    fn valid(&self) -> bool {
+        match self {
+            Self::Fixed { code } => crate::translate::languages::is_target(code),
+            Self::Interface | Self::Original => true,
+        }
+    }
+}
+
+/// Email summaries in the reader.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EmailSummarySettings {
+    /// Summarize every email the user opens. Off by default: it sends each
+    /// opened message to the model.
+    pub auto: bool,
+    /// Lowercased sender addresses whose mail is always summarized, whatever
+    /// `auto` says.
+    pub senders: Vec<String>,
+    /// The style the panel last used.
+    pub style: SummaryStyle,
+    /// The language the panel last used.
+    pub language: SummaryLanguage,
+    /// The summary card shows only its first line.
+    pub collapsed: bool,
+}
+
+fn canonical_address(address: &str) -> Option<String> {
+    let address = address.trim().to_lowercase();
+    let (local, domain) = address.split_once('@')?;
+    (!local.is_empty()
+        && !domain.is_empty()
+        && address.chars().count() <= MAX_ADDRESS_CHARS
+        && !address.chars().any(|c| c.is_whitespace() || c.is_control()))
+    .then_some(address)
+}
+
+impl EmailSummarySettings {
+    fn normalized(self) -> Result<Self, AppError> {
+        let mut seen = HashSet::new();
+        let mut senders = Vec::with_capacity(self.senders.len());
+        for sender in &self.senders {
+            let sender = canonical_address(sender)
+                .ok_or_else(|| AppError::validation("assistant.summary.senders"))?;
+            if seen.insert(sender.clone()) {
+                senders.push(sender);
+            }
+        }
+        if senders.len() > MAX_SUMMARY_SENDERS {
+            return Err(AppError::validation("assistant.summary.senders"));
+        }
+        if !self.language.valid() {
+            return Err(AppError::validation("assistant.summary.language"));
+        }
+        Ok(Self { senders, ..self })
+    }
+
+    fn sanitized(self) -> Self {
+        let mut seen = HashSet::new();
+        let senders = self
+            .senders
+            .iter()
+            .filter_map(|sender| canonical_address(sender))
+            .filter(|sender| seen.insert(sender.clone()))
+            .take(MAX_SUMMARY_SENDERS)
+            .collect();
+        let language = if self.language.valid() {
+            self.language
+        } else {
+            SummaryLanguage::Interface
+        };
+        Self {
+            senders,
+            language,
+            ..self
+        }
+    }
+
+    /// Whether mail from `address` is always summarized.
+    pub fn always_for(&self, address: &str) -> bool {
+        let address = address.trim().to_lowercase();
+        self.senders.contains(&address)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -64,6 +192,8 @@ pub struct AssistantSettings {
     /// tables, links) instead of its plain text only. Off by default: it sends
     /// far more of the message, including markup other people wrote.
     pub read_html: bool,
+    /// Email summaries in the reader.
+    pub summary: EmailSummarySettings,
 }
 
 impl Default for AssistantSettings {
@@ -79,6 +209,7 @@ impl Default for AssistantSettings {
             instructions: String::new(),
             save_history: true,
             read_html: false,
+            summary: EmailSummarySettings::default(),
         }
     }
 }
@@ -120,11 +251,13 @@ impl AssistantSettings {
         if instructions.chars().count() > MAX_INSTRUCTIONS_CHARS {
             return Err(AppError::validation("assistant.instructions"));
         }
+        let summary = self.summary.normalized()?;
         Ok(Self {
             model,
             consented,
             excluded_accounts,
             instructions,
+            summary,
             ..self
         })
     }
@@ -152,6 +285,7 @@ impl AssistantSettings {
                 .collect::<String>()
                 .trim()
                 .to_owned(),
+            summary: self.summary.sanitized(),
             ..self
         }
     }
@@ -173,8 +307,27 @@ pub(super) fn repair_assistant(value: &mut serde_json::Value) {
         "organize" | "aiDrafts" => serde_json::from_value::<AssistantMode>(v.clone()).is_ok(),
         "send" => serde_json::from_value::<AssistantSendMode>(v.clone()).is_ok(),
         "instructions" => v.is_string(),
+        "summary" => repair_summary(v),
         _ => true,
     });
+}
+
+/// Keeps a usable `summary` section, dropping its broken fields; `false`
+/// drops the whole section.
+fn repair_summary(value: &mut serde_json::Value) -> bool {
+    let Some(section) = value.as_object_mut() else {
+        return false;
+    };
+    section.retain(|key, v| match key.as_str() {
+        "auto" | "collapsed" => v.is_boolean(),
+        "senders" => v
+            .as_array()
+            .is_some_and(|a| a.iter().all(serde_json::Value::is_string)),
+        "style" => serde_json::from_value::<SummaryStyle>(v.clone()).is_ok(),
+        "language" => serde_json::from_value::<SummaryLanguage>(v.clone()).is_ok(),
+        _ => true,
+    });
+    true
 }
 
 #[cfg(test)]

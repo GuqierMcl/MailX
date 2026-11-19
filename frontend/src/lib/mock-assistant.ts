@@ -2,6 +2,7 @@ import type {
   AiConsent,
   AssistantEvent,
   AssistantEventKind,
+  CachedEmailSummary,
   Draft,
   OutboxItem,
   RunSnapshot,
@@ -27,6 +28,10 @@ export type MockAssistantDeps = {
   send: (draft: Draft) => Promise<OutboxItem>
   /** The connection the assistant would use now, as the core's `assistant_binding`; `null` without a model. */
   binding?: () => AiConsent | null
+  /** An email's subject and sender name, for its preview summary; `null` when there is no such email. */
+  email?: (id: string) => { subject: string; sender: string } | null
+  /** The saved style and language the summary panel last used. */
+  summaryDefaults?: () => Pick<CachedEmailSummary, 'style'> & { language: string }
 }
 
 type Run = { snap: RunSnapshot; waiting: ((approved: boolean) => void) | null }
@@ -44,6 +49,8 @@ export function createMockAssistant(deps: MockAssistantDeps) {
   const runs = new Map<string, Run>()
   const listeners = new Set<(event: AssistantEvent) => void>()
   let consent: AiConsent | null = null
+  /** Summaries kept per email, newest last, like the core's local cache. */
+  const summaries = new Map<string, CachedEmailSummary[]>()
   const zh = () => deps.locale() === 'zh-CN'
   const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, deps.stepMs))
 
@@ -128,6 +135,27 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     await say(run, zh()
       ? `收件箱里有 ${unread} 封未读邮件，其中 ${starred} 封加了星标。`
       : `You have ${unread} unread emails, ${starred} of them starred.`)
+    finish(run)
+  }
+
+  function summaryText(style: CachedEmailSummary['style'], subject: string, sender: string): string {
+    if (zh()) {
+      if (style === 'points') return `- ${sender}发来「${subject}」。\n- 内容涉及本周的安排与几项需要确认的细节。\n- 附带了相关链接和联系方式。\n\n**需要你做的**：周五前回复确认。`
+      if (style === 'detailed') return `${sender}就「${subject}」发来说明：介绍了本周的安排，列出几项需要确认的细节，并附上相关链接和联系方式。对方希望你在周五前回复确认，如有疑问可直接回信。`
+      return `${sender}就「${subject}」说明了本周安排，请你周五前回复确认。`
+    }
+    if (style === 'points') return `- ${sender} wrote about "${subject}".\n- It covers this week's plan and a few details to confirm.\n- Links and contact details are included.\n\n**To do**: reply to confirm by Friday.`
+    if (style === 'detailed') return `${sender} wrote about "${subject}": the plan for this week, a few details that need confirming, and links with contact details. They ask you to confirm by Friday and to reply with any questions.`
+    return `${sender} explains this week's plan for "${subject}" and asks you to confirm by Friday.`
+  }
+
+  async function emailSummary(run: Run, emailId: string, style: CachedEmailSummary['style'], language: string) {
+    const email = deps.email?.(emailId)
+    const text = summaryText(style, email?.subject ?? '', email?.sender ?? '')
+    await say(run, text)
+    if (!alive(run)) return
+    const kept = (summaries.get(emailId) ?? []).filter((item) => item.style !== style || item.language !== language)
+    summaries.set(emailId, [...kept, { style, language, text, createdAt: new Date().toISOString() }])
     finish(run)
   }
 
@@ -237,11 +265,26 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     async start(request: StartRun): Promise<RunSnapshot> {
       const { kind } = request
       if (kind.type === 'chat' && (!kind.message.trim() || kind.message.length > 20_000)) throw failure('validation', 'message')
+      if (kind.type === 'emailSummary' && (!kind.emailId || !deps.email?.(kind.emailId))) throw failure(kind.emailId ? 'notFound' : 'validation', kind.emailId ? null : 'emailId')
       const tag = kind.type
       const conversationId = kind.type === 'chat' ? kind.conversationId ?? crypto.randomUUID() : null
       // Like the core: the consent must name the connection in use now; switching connections asks again.
       const binding = deps.binding?.() ?? MOCK_CONSENT
       if (!consent || consent.connectionId !== binding.connectionId || consent.baseUrl !== binding.baseUrl) return structuredClone(create(tag, 'awaitingConsent', conversationId).snap)
+      if (kind.type === 'emailSummary') {
+        const defaults = deps.summaryDefaults?.() ?? { style: 'brief' as const, language: zh() ? 'zh-Hans' : 'en' }
+        const style = kind.style ?? defaults.style
+        const language = kind.language ? (kind.language.mode === 'fixed' ? kind.language.code : kind.language.mode === 'original' ? 'original' : zh() ? 'zh-Hans' : 'en') : defaults.language
+        const cached = kind.fresh ? undefined : summaries.get(kind.emailId)?.find((item) => item.style === style && item.language === language)
+        if (cached) {
+          const run = create(tag, 'running', null)
+          run.snap = { ...run.snap, state: 'completed', text: cached.text, finishedReason: 'stop', completedAt: cached.createdAt, toolsAvailable: false }
+          return structuredClone(run.snap)
+        }
+        const run = create(tag, 'running', null)
+        void emailSummary(run, kind.emailId, style, language).catch(() => { emit(run, { type: 'failed', code: 'internal' }); emit(run, { type: 'state', state: 'failed' }) })
+        return structuredClone(run.snap)
+      }
       const run = create(tag, 'running', conversationId)
       const body = kind.type === 'chat' ? chat(run, kind.message.trim()) : nowSummary(run)
       void body.catch(() => { emit(run, { type: 'failed', code: 'internal' }); emit(run, { type: 'state', state: 'failed' }) })
@@ -260,6 +303,16 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       run.waiting = null
       emit(run, { type: 'state', state: 'running' })
       answer(approved)
+    },
+    async emailSummary(emailId: string): Promise<CachedEmailSummary | null> {
+      if (!deps.email?.(emailId)) throw failure('notFound')
+      const kept = summaries.get(emailId)
+      return kept?.length ? structuredClone(kept[kept.length - 1]) : null
+    },
+    async clearEmailSummaries(): Promise<number> {
+      const count = [...summaries.values()].reduce((sum, items) => sum + items.length, 0)
+      summaries.clear()
+      return count
     },
     async grantConsent() { consent = deps.binding?.() ?? MOCK_CONSENT; return structuredClone(consent) },
     async revokeConsent() {

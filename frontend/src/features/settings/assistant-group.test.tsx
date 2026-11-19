@@ -183,4 +183,18 @@ describe('AI settings: assistant', () => {
     await screen.findByRole('switch', { name: '启用助手' })
     expect(screen.queryByRole('switch', { name: '保存对话记录' })).not.toBeInTheDocument()
   })
+
+  it('saves the automatic summary switch, removes always-summarized senders and clears kept summaries', async () => {
+    const { client } = await setup({ chat: false, assistant: { summary: { ...DEFAULT_ASSISTANT.summary, senders: ['news@apple.com', 'boss@work.example'] } } })
+    const auto = await screen.findByRole('switch', { name: '自动总结打开的邮件' })
+    expect(auto).not.toBeChecked()
+    await userEvent.click(auto)
+    await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ summary: { auto: true } }))
+    expect(screen.getByRole('list', { name: '总是总结的发件人' })).toHaveTextContent('news@apple.com')
+    await userEvent.click(screen.getByRole('button', { name: '移除 news@apple.com' }))
+    await waitFor(() => expect(lastAssistantPatch(client)).toMatchObject({ summary: { senders: ['boss@work.example'] } }))
+    client.assistantClearEmailSummaries.mockResolvedValue(3)
+    await userEvent.click(screen.getByRole('button', { name: '清除摘要' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('已清除 3 条摘要')
+  })
 })

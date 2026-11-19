@@ -38,3 +38,24 @@ impl AccountService {
         self.storage.assistant_chat_clear()
     }
 }
+
+impl AccountService {
+    pub(crate) fn summary_put(
+        &mut self,
+        row: &crate::storage::summaries::NewSummary<'_>,
+    ) -> Result<String, AppError> {
+        self.storage.summary_put(row)
+    }
+
+    pub(crate) fn summary_get(
+        &self,
+        key: &crate::storage::summaries::SummaryKey<'_>,
+        style_language: Option<(&str, &str)>,
+    ) -> Result<Option<crate::storage::summaries::StoredSummary>, AppError> {
+        self.storage.summary_get(key, style_language)
+    }
+
+    pub(crate) fn summary_delete_all(&mut self) -> Result<u64, AppError> {
+        self.storage.summary_delete_all()
+    }
+}
