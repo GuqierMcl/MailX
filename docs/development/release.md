@@ -47,7 +47,7 @@
 - 条目写给用户看，一行一句；测试、CI、重构、文档等内部改动不写。结尾带 PR 的完整链接，例如 `([#25](https://github.com/GuqierMcl/MailX/pull/25))`：`#25` 这种简写在 Release 页面里会被 GitHub 自动链接，但在仓库的 `.md` 文件里不会，完整链接两处都可点击。
 - **预发布版**不新增小节，发布说明取自 `[Unreleased]`，并自动加上“预发布版本”提示。
 - **正式版**：`version:bump` / `version:set` 把 `[Unreleased]` 归并为 `## [x.y.z] - 日期`、留下新的空 `[Unreleased]` 并更新底部对比链接。`[Unreleased]` 为空会被拒绝；确需跳过用 `--no-changelog`。
-- 发布说明末尾追加 `.github/release-install-notes.md`（未签名安装提示）。签名落地后在那里更新或删除。
+- 发布说明末尾追加 `.github/release-install-notes.md`（安装说明：macOS 已签名并公证，Windows 未签名与钥匙串过渡提示）。内容随签名状态调整，见第 9 节。
 - `bun run version:check --release` 检查日志是否可发布；`bun run release:notes [版本]` 可本地预览将要发布的说明。
 
 ## 4. 发布即推送：Pre-release 标记是开关
@@ -117,7 +117,30 @@ Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEM
 - 第一次接入时先用手动触发（`Run workflow`）跑一遍，确认各平台的 `.sig` 都生成；手动触发只构建并上传本次运行的产物，不建 Release（`latest.json` 在 release 作业里生成，只有标签触发才会运行）。
 - 私钥或密码丢失：已安装用户无法再自动更新，只能手动安装一个内置新公钥的版本。更换公钥同理，需要过渡版本。
 
-## 9. 尚未覆盖（后续阶段）
+## 9. macOS 代码签名与公证
 
-- **代码签名**：macOS Developer ID 加公证、Windows 签名。macOS 钥匙串对不同签名身份的访问提示可能影响已保存凭证的体验，正式面向用户前需要在真机验证。
+macOS 安装包用 Apple Developer ID 签名并公证：Tauri 在构建时对 `.app`、随包的 `mailx-mcp` 和 `.dmg` 签名，再交给 Apple 公证并把票据装订（staple）到产物上。签名与更新器签名是两件事，见上一节；本文只说明操作系统这一层。
+
+- **凭据**只放在 GitHub **`release` 环境**的 secrets，只有 macOS 构建任务读取：
+
+  | Secret | 内容 |
+  | --- | --- |
+  | `APPLE_CERTIFICATE` | Developer ID Application 证书与私钥导出的 `.p12`，base64 编码 |
+  | `APPLE_CERTIFICATE_PASSWORD` | 导出 `.p12` 时设置的密码 |
+  | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: <姓名> (<TEAMID>)` |
+  | `APPLE_API_ISSUER` | App Store Connect API 密钥的 Issuer ID |
+  | `APPLE_API_KEY` | API 密钥的 Key ID（10 位） |
+  | `APPLE_API_PRIVATE_KEY` | `AuthKey_<KeyID>.p8` 文件内容 |
+
+  工作流把 `.p8` 写到 runner 的临时目录并通过 `APPLE_API_KEY_PATH` 指定，文件权限为仅当前用户可读，公证结束后随 runner 销毁。
+
+- **证书有效期**：Developer ID Application 证书约 13 个月到期，到期前需要重新签发并替换前三个 secrets。过期不影响已经签名并公证的版本（签名带安全时间戳），Team ID 不变，用户侧不会感知；但必须在上一个证书过期前完成替换，否则构建会失败。
+- **构建后校验**：`release.yml` 的 `Verify the macOS signature and notarization` 步骤要求 `.app` 通过 `codesign --verify --strict`、带有 Developer ID 签名机构、hardened runtime 与时间戳、通过 `spctl --assess`，内嵌的 `mailx-mcp` 带有同样的签名，并且 `.app` 与 `.dmg` 的票据都能通过 `stapler validate`。任何一项不满足即失败，不发出未签名或公证失败的包。
+- **升级过渡**：未签名阶段的安装版每次构建都被钥匙串当作新的应用。第一个签名版本仍会让老用户遇到一次钥匙串授权（旧条目由未签名身份创建），选择“始终允许”后，之后的签名版本沿用同一身份，不再询问。发版说明与用户指南要保留这条提示，直到确认老用户都已升级。
+- **验证**：签名与公证只能在真实 macOS 上确认，验证方法与通过标准见[验证指引](validation.md)。
+
+## 10. 尚未覆盖（后续阶段）
+
+- **代码签名**：Windows Authenticode 尚未接入（开源项目可申请 SignPath Foundation 的免费签名，或购买 OV 证书）。macOS 已签名，但已签名安装包上的钥匙串首次授权仍需在真机按上一节确认。
+
 - **server**：并入 workspace 后与桌面端共用版本号和标签；在 `release.yml` 增加服务端二进制与容器镜像任务，镜像的 `latest` 与 `X.Y` 标签只给正式版。

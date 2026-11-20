@@ -193,8 +193,32 @@ jobs:
         run: |
           bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"
           bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"
+      # Developer ID signing and notarization credentials. They live in the
+      # release environment and are handed to the macOS build alone; the
+      # certificate, its password and the App Store Connect key never reach
+      # Windows or Linux runners. The key file keeps macOS's default mode on
+      # purpose: notarytool rejects a group- or world-readable key.
+      - name: Prepare the notarization API key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          test -s "$RUNNER_TEMP/AuthKey.p8"
+      - name: Build macOS installers
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: bun run tauri build
       - run: bun run tauri build
-        if: runner.os != 'Linux'
+        if: runner.os == 'Windows'
       # A binary built with an older SDK runs in compatibility mode on macOS 26
       # and later: the traffic lights change size and no longer sit where the
       # title bar layout expects them.
@@ -205,6 +229,34 @@ jobs:
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
           test -n "$app"
           bash scripts/check-macos-sdk.sh "$app"
+      # A signature that only looks right is worse than none: without the
+      # Developer ID authority, the hardened runtime and a secure timestamp,
+      # Gatekeeper either refuses the app or stops accepting it once the
+      # certificate expires. Without a stapled ticket the first launch needs
+      # the network. Without a ticket on the .dmg, the artifact people actually
+      # download is what gets flagged.
+      - name: Verify the macOS signature and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
+          test -n "$app"
+          test -n "$dmg"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          report=$(codesign --display --verbose=4 "$app" 2>&1)
+          printf '%s\n' "$report"
+          grep -q '^Authority=Developer ID Application:' <<<"$report"
+          grep -Eq '^flags=.*runtime' <<<"$report"
+          grep -q '^Timestamp=' <<<"$report"
+          spctl --assess --type exec --verbose=4 "$app"
+          # The bundled MCP sidecar is a nested executable and must carry the
+          # same signature as the app around it.
+          sidecar=$(find "$app/Contents/MacOS" -maxdepth 1 -name 'mailx-mcp*' -type f | head -n 1)
+          test -n "$sidecar"
+          codesign --verify --strict --verbose=2 "$sidecar"
+          xcrun stapler validate "$app"
+          xcrun stapler validate "$dmg"
       - name: Collect and rename installers
         shell: bash
         run: |

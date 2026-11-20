@@ -98,7 +98,7 @@ Published builds are on the [Releases](https://github.com/GuqierMcl/MailX/releas
 | Windows | `MailX_<version>_windows-x64-setup.exe` |
 | Linux | `.AppImage`, `.deb` or `.rpm` (`linux-x64`) |
 
-The builds are not code-signed, so your system may block the first launch; the install notes in each release explain how to open them. The macOS, Windows and AppImage builds can update themselves from within the app. These builds have not been verified on every platform yet.
+The macOS build is signed with a Developer ID and notarized, so it opens normally after download. The Windows and Linux builds are not code-signed yet, so your system may block the first launch; the install notes in each release explain how to open them. The macOS, Windows and AppImage builds can update themselves from within the app. These builds have not been verified on every platform yet.
 
 For account setup, sending, MCP and upgrade precautions, see the [getting started guide](docs/guides/README.md).
 
