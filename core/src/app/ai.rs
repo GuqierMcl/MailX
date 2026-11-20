@@ -721,6 +721,29 @@ impl AiService {
         .await
     }
 
+    /// The assistant's connection binding and its display name, from the
+    /// settings alone; `None` when no model is usable.
+    pub async fn assistant_service(
+        self: &Arc<Self>,
+    ) -> Result<Option<(AiConsent, String)>, AppError> {
+        self.blocking(|this| {
+            let ai = this.ai_settings()?;
+            let own = this.settings.get()?.settings.assistant.model;
+            Ok(
+                Self::assistant_choice(&ai, own.as_ref()).map(|(_, connection)| {
+                    (
+                        AiConsent {
+                            connection_id: connection.id.clone(),
+                            base_url: connection.base_url.clone(),
+                        },
+                        connection.name.clone(),
+                    )
+                }),
+            )
+        })
+        .await
+    }
+
     /// Everything an assistant call needs. `AiNotConfigured` when no model is
     /// usable.
     pub async fn assistant_target(self: &Arc<Self>) -> Result<AiModelTarget, AppError> {

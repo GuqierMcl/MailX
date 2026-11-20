@@ -9,6 +9,7 @@ import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon } from '@hugeicons/co
 import type { Account, AttachmentPolicy } from '@/generated/accounts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { IconButton } from '@/components/icon-button'
+import { MOD_KEY } from '@/features/mail/shortcuts'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -77,6 +78,8 @@ type ComposerProps = {
    * expanded and collapsed, right of the MCP / AI note.
    */
   headerActions?: ReactNode
+  /** Opens the assistant's island about this draft, from writing help ("继续问"); the inline composer only. */
+  onAskAi?: () => void
 }
 
 type ValidationKey = 'composer:validation.recipientsRequired' | 'composer:validation.invalidRecipients' | 'composer:validation.senderUnavailable' | 'composer:validation.credentials' | 'composer:validation.unsaved' | 'composer:validation.alreadyQueued'
@@ -90,7 +93,7 @@ const STATUS_TEXT: Record<SaveStatus, string> = { idle: '', get saved() { return
  * main window's island (sending.md section 2). Closing and window titles belong to
  * the host, which reaches in through `controllerRef`.
  */
-export function Composer({ client, draftId, accounts, onSubjectChange, onSent, onDiscarded, controllerRef, headerActions }: ComposerProps) {
+export function Composer({ client, draftId, accounts, onSubjectChange, onSent, onDiscarded, controllerRef, headerActions, onAskAi }: ComposerProps) {
   useTranslation('composer')
   // Also load on mount for other hosts, independently of the draft's response.
   const { Component: MailBodyEditor, failed: editorLoadFailed, retry: retryEditor } = useMailBodyEditor()
@@ -422,8 +425,8 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
                   autoFocus: fields.to.length === 0 && !fields.subject,
                   trailing: (!ccVisible || !bccVisible) && (
                     <>
-                      {!ccVisible && <RowToggle row="cc" label={t('composer:field.cc')} tip={t('composer:field.ccShortcut')} disabled={readOnly} onOpen={() => focusRow('cc')} />}
-                      {!bccVisible && <RowToggle row="bcc" label={t('composer:field.bcc')} tip={t('composer:field.bccShortcut')} disabled={readOnly} onOpen={() => focusRow('bcc')} />}
+                      {!ccVisible && <RowToggle row="cc" label={t('composer:field.cc')} tip={t('composer:field.ccShortcut', { mod: MOD_KEY })} disabled={readOnly} onOpen={() => focusRow('cc')} />}
+                      {!bccVisible && <RowToggle row="bcc" label={t('composer:field.bcc')} tip={t('composer:field.bccShortcut', { mod: MOD_KEY })} disabled={readOnly} onOpen={() => focusRow('bcc')} />}
                     </>
                   ),
                 })}
@@ -480,6 +483,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           onInsertImage={insertPicked}
           onPasteImages={pasteImages}
           foldReplyQuote={foldsReplyQuote(editor.kind)}
+          ai={{ client, draftId, kind: editor.kind, onAskAi }}
         />
       ) : editorLoadFailed ? (
         <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">

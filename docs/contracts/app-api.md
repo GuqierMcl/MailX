@@ -408,7 +408,7 @@ v9 为旧草稿增加可空 `body_html`；读取旧草稿时由核心把纯文�
 | `Previews(EmailPreviews)` | 一批列表预览抓取完成 | `mailx://email-previews`，仅 main 窗口 |
 | `Outbox(OutboxChanged)` | 发送队列项状态变化 | `mailx://outbox`；进入 `accepted` / `failed` / `unknown` 且主窗口不在前台时发系统通知 |
 | `DraftChanged(DraftChanged)` | 草稿创建 / 保存 / 删除，或被队列锁定 / 释放 | `mailx://drafts` |
-| `Assistant(AssistantEvent)` | 助手运行的状态、文字、工具活动与确认请求 | `mailx://assistant`，仅 main 窗口 |
+| `Assistant(AssistantEvent)` | 助手运行的状态、文字、工具活动与确认请求 | `mailx://assistant`；聊天、概述与摘要只发给 main 窗口，写作运行发给持有该草稿的写信窗口，否则 main（见“AI 写作”） |
 | `AssistantConversationsChanged(ConversationsChanged)` | 已保存的助手对话有变化（保存了一轮、删除、清除、账号移除带走了一些） | `mailx://assistant-conversations`，仅 main 窗口 |
 
 事件在核心的工作线程上发出，宿主必须很快返回，送不到可以丢：事件只是提示，真实数据始终以查询为准。以后加事件种类只需扩展枚举，宿主 `match` 未处理的分支即可，不改 `open` 的签名。服务器宿主可以实现另一个出口（例如把 `NewMail` 投递到 webhook），核心无需改动。
@@ -730,7 +730,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 
 ### AI 助手（主窗口）
 
-设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）。命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段。运行只保存在内存里，应用重启后不恢复；聊天记录（对话）按设置保存在本机，见下文“已保存的对话”。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令、保存对话记录、邮件摘要 `summary`）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
+设计见 [AI Runtime](../ai-runtime/README.md) 与[内置 AI 工具权限](../architecture/ai-permissions.md)。状态：**已实现，仅有自动测试**，没有调用过真实服务商；界面已接入：设置页“助手”、「此刻」AI 概述句与「此刻」对话（含确认卡与撤销）、阅读区邮件摘要与写信窗口的 AI 写作。下列助手命令只开放给主窗口（`window_access` 与 capabilities 两层，写信窗口与邮件正文框架调用一律按 `validation` 拒绝），参数拒绝未知字段；写信窗口的 AI 写作是另一组命令，见下文“AI 写作”。运行只保存在内存里，应用重启后不恢复；聊天记录（对话）按设置保存在本机，见下文“已保存的对话”。助手设置（开关、模型、可用账号、整理 / 草稿 / 发信方式、自定义指令、保存对话记录、邮件摘要 `summary`）经普通的 `settings_update` 修改，`SettingsPatch.assistant` 可用；其中 `consented` 一项**不能**经设置修改：`settings_update` 与整体替换都忽略补丁里的值，保持已存的同意，只有下表的两个同意命令能改它。
 
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
@@ -742,7 +742,7 @@ type AiProviderIcon = { mimeType: "image/svg+xml"; data: string }; // data 为 S
 | `assistantRevokeConsent()` | `assistant_revoke_consent`，`{}` | 空；同时取消所有进行中的运行；核心未就绪时也能执行 |
 | `assistantEmailSummary(emailId)` | `assistant_email_summary`，`{ emailId }` | `CachedEmailSummary \| null`：该邮件正文未变时保存的最新一条摘要（任一篇幅与语言）；没有则 `null`。不需要同意、不请求模型。`assistantDisabled`、`validation`（`emailId`）、`notFound`（含账号被助手排除）、`bodyNotCached` |
 | `assistantClearEmailSummaries()` | `assistant_clear_email_summaries`，`{}` | 删除的摘要条数（数字）；只清除已保存的摘要，不取消进行中的运行 |
-| `onAssistantEvent(listener)` | 事件 `mailx://assistant` | `AssistantEvent`，只发给主窗口 |
+| `onAssistantEvent(listener)` | 事件 `mailx://assistant` | `AssistantEvent`；聊天、概述与摘要的运行只发给主窗口，写作运行发给持有该草稿的窗口（见“AI 写作”） |
 | `assistantListConversations({ limit?, cursor? })` | `assistant_list_conversations`，`{ limit?, cursor? }` | `ConversationList`，最新在前；`limit` 1–100（默认 50）；`validation`（`limit`、`cursor`） |
 | `assistantGetConversation(conversationId)` | `assistant_get_conversation`，`{ conversationId }` | `ConversationDetail`；`notFound` |
 | `assistantDeleteConversation(conversationId)` | `assistant_delete_conversation`，`{ conversationId }` | 空；该对话有运行时先取消；`notFound` |
@@ -762,10 +762,20 @@ type RunKind =
                                                                        // 邮件或草稿在助手可用账号之外或不存在时按“没有上下文”处理，不报错。
   | { type: "emailSummary"; emailId: string; style?: SummaryStyle;     // 总结一封邮件：一次模型调用，不带工具；style、language 省略时取设置 assistant.summary 中保存的值
       language?: SummaryLanguage; fresh?: boolean };                   // fresh 为 true（“重新生成”）时跳过缓存并替换缓存项，省略为 false
+  | { type: "composeAssist"; draftId: string; task: ComposeTask };     // 写信的 AI 写作：一次模型调用，不带工具，只读这份草稿；界面只提交草稿 id 与用户自己的文字，结果不写入草稿（见“AI 写作”）
+type ComposeTask = { type: "draft"; instruction: string; language?: string }  // 按说明起草；language 为翻译目标语言代码，省略时跟随被回复邮件的语言
+  | { type: "rewrite"; text: string; style: RewriteStyle }             // 改写用户自己的文字（Markdown），最多 20,000 字符
+  | { type: "proofread"; text: string };                               // 只改拼写、语法与标点
+type RewriteStyle = "polish" | "formal" | "friendly" | "concise" | "expand"   // 润色 / 更正式 / 更友好 / 更简洁 / 展开写
+  | { type: "translate"; code: string }                                // 翻译成翻译目标语言列表中的一种
+  | { type: "custom"; instruction: string };                           // 自定义说明，最多 2,000 字符
 type SummaryStyle = "brief" | "detailed" | "points";                    // 1–2 句 / 一小段 / 要点列表（有待办时末尾一行加粗的“待办”）
 type SummaryLanguage = { mode: "interface" } | { mode: "original" } | { mode: "fixed"; code: string };  // code 取自翻译的目标语言
 type CachedEmailSummary = { style: SummaryStyle; language: string;     // language 为翻译目标语言代码，或 "original"
                             text: string; createdAt: string };         // text 是不可信的模型输出，按 Markdown 显示、不渲染原始 HTML                                         // 用户正在看的内容，只用于本次运行
+type ComposeAssistState = { usable: boolean; consented: boolean; service: string };
+// usable：助手已开启且有可用模型；consented：已同意向该模型所属连接发送内容；service：连接名，用于询问。
+// 只读设置，不需要同意、不请求模型；没有可用模型时三者分别为 false、false、""。
 // 封闭列表，与前端 calendar.ts 的 id 一致，不是自由文本；其他值在反序列化时就被拒绝（validation）
 type Occasion =
   | "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn"
@@ -773,11 +783,11 @@ type Occasion =
   | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 type RunState = "awaitingConsent" | "running" | "awaitingConfirmation" | "completed" | "failed" | "canceled";
 type RunSnapshot = {
-  runId: string; kind: RunKindTag; state: RunState;   // RunKindTag = "nowSummary" | "chat" | "emailSummary"
+  runId: string; kind: RunKindTag; state: RunState;   // RunKindTag = "nowSummary" | "chat" | "emailSummary" | "composeAssist"
   text: string;                     // 模型到目前为止写的全部文字
   tools: ToolActivity[];            // 按调用顺序，同一 callId 只留最新一条
   reasoning: RunReasoning[];        // 模型的思考，一段一段按顺序（每轮模型请求可有一段，例如工具调用前后各一段）
-  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述与邮件摘要恒为 false
+  toolsAvailable: boolean;          // 本次运行是否带工具；所选模型已知不支持工具调用时的对话为 false（只能凭对话内容回答，界面可轻提示），「此刻」概述、邮件摘要与写作帮助恒为 false
   error: ErrorCode | null;          // failed 时的固定错误码
   finishedReason: "stop" | "limit" | "length" | null;
   seq: number;                      // 快照包含的最后一个事件序号
@@ -891,6 +901,25 @@ type ConversationsChanged = { conversationId: string | null; change: "saved" | "
 **同意规则。** 同意绑定“连接 id 与规范化的服务地址”（`AiConsent`，与翻译共用类型）：换连接或改地址需要重新同意，换模型、换密钥不需要。`assistantGrantConsent` 记录当前助手模型（`assistant.model`，缺省跟随 `ai.defaultModel`）所属连接，没有可用模型时返回 `aiNotConfigured`。同意只能由这两个命令设置与撤销；设置读取里 `assistant.consented` 可见，但写入会被忽略。
 
 **错误码。** `assistantStart` 的失败：`assistantDisabled`（助手在设置里关闭）、`aiNotConfigured`（没有可用的模型或连接）、`assistantBusy`（已有 2 个进行中的运行，或该对话已有运行）、`notFound`（`conversationId` 不存在）、`validation`（`message` 为空或过长，`since` / `dayStarts` 无效，`occasion` 不在列表内）、`coreNotReady`。运行失败时快照的 `error` 为固定码：上述 `assistantDisabled`、`aiNotConfigured`，以及 `assistantContextFull`（对话接近模型上下文的八成，请新开对话）、`aiKeyRejected`、`aiQuotaExceeded`、`aiModelNotFound`、`aiRateLimited`、`aiRequestRejected`、`aiUnavailable`、`aiNetwork`、`aiProxy`（代理失败不回退直连）、`aiTimeout`、`aiInvalidResponse`、`internal`；含义同上文 AI 服务商一节，服务商原文不外传。工具失败不使运行失败：它是对应活动的 `failed` 状态与 `error` 摘要（`code` 为工具层固定码），同时作为错误结果交给模型。
+
+### AI 写作（写信窗口与主窗口）
+
+设计见[AI 交互界面 5.3](../architecture/ai-chat-ui.md#53-写信窗口的-ai-写作)与 [AI Runtime](../ai-runtime/README.md#2-两类运行)。状态：**已实现，仅有自动测试与浏览器预览**，未在桌面实机与真实服务商上验证。主窗口的内嵌写信区与每个写信窗口都可调用下列命令；写信窗口只能处理自己的草稿（草稿 id 必须等于窗口标签里的 id，否则拒绝，规则与 `drafts_get` 相同），主窗口可以跟随任意写作运行。参数拒绝未知字段。
+
+| MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
+| --- | --- | --- |
+| `composeAssistState()` | `compose_assist_state`，`{}` | `ComposeAssistState`；只读设置与连接名，不需要同意、不请求模型 |
+| `composeAssistGrantConsent()` | `compose_assist_grant_consent`，`{}` | `AiConsent`；与助手的同意是同一条，绑定连接而不是窗口 |
+| `composeAssistStart(draftId, task)` | `compose_assist_start`，`{ request: { draftId, task } }` | `RunSnapshot`（启动那一刻的快照） |
+| `composeAssistCancel(runId)` | `compose_assist_cancel`，`{ runId }` | 空；已结束的运行保持原样 |
+| `composeAssistSnapshot(runId)` | `compose_assist_snapshot`，`{ runId }` | `RunSnapshot`；结束后保留十分钟（最多 20 个），之后 `notFound` |
+
+- 运行状态、事件与快照与其他运行相同；`RunKindTag` 为 `composeAssist`，`toolsAvailable` 恒为 `false`。没有同意时 `composeAssistStart` 返回已结束的 `awaitingConsent` 快照，什么都没有发给服务商；批准后重新启动一次。
+- 草稿在助手“可用账号”之外或不存在时，`composeAssistStart` 直接返回 `notFound`，不创建运行。`draftId` 为空或过长、`task.text` 为空或超过 20,000 字符、说明为空或超过 2,000 字符、`task.language` / `task.style` 中的语言无效时为 `validation`，`field` 为 `draftId` / `task.text` / `task.instruction` / `task.language` / `task.style`。
+- `compose_assist_cancel` 与 `compose_assist_snapshot` 只接受属于调用方草稿的写作运行：写信窗口只能跟随自己草稿的运行，主窗口可以跟随任意写作运行；其他运行的 id 按 `notFound` 处理，不区分“不存在”与“不可见”。
+- 结果只是供编辑器预览的 Markdown。采用时由界面作为一次编辑器的编辑写入草稿，核心从不写草稿；被取消或失败的运行不会改动草稿。
+
+**事件路由。** `AssistantEvent` 在 core 中另带一个只给宿主的 `draftId`（`Option<String>`，序列化时跳过、不生成到界面类型）：写作运行的事件由宿主发给持有该草稿的窗口——它的写信窗口，否则主窗口的内嵌写信区；其他运行仍只发给主窗口。界面收到的 `AssistantEvent` 与 `mailx://assistant` 载荷形状不变。
 
 ### 全局提示（Toast）
 

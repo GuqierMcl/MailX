@@ -19,6 +19,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🚀 Feature
 
 - Summarize the email you are reading with AI: choose short, detailed or bullet-point summaries in a chosen language from the reading toolbar, keep them on this computer, and optionally summarize every opened email or always summarize mail from chosen senders (off by default). / 阅读邮件时可用 AI 总结：在阅读区工具栏选择简短、详细或要点摘要和输出语言，摘要保存在本机，还可选择自动总结打开的邮件或总是总结指定发件人的邮件（默认关闭）。 ([#164](https://github.com/GuqierMcl/MailX/pull/164))
+- Write emails with AI: draft from an instruction, rewrite your text in a chosen style or proofread it, and accept the answer as one undoable edit; quoted originals and pictures are never sent or changed. / 写信时可用 AI 写作：按说明起草，按所选风格改写文字或进行校对，采用后可用一次撤销还原；引用的原邮件和图片不会被发送或改动。
 - Choose AI models from the connection’s API or from presets, and distinguish same-name models on gateways such as Magpie by upstream and full ID. / AI 模型可从接口或预设目录选择，Magpie 等网关的同名模型可按上游和完整 ID 区分。 ([#163](https://github.com/GuqierMcl/MailX/pull/163))
 - Forwards now carry the pictures inside the original message, not just its files; replies keep a written note of them instead of a broken image. / 转发现在会带上原邮件正文里的图片，而不只是附件；回复里保留图片的说明文字，不再留空。
 - Ask the AI assistant about the email you are reading, the emails you selected or the draft you are writing, from a capsule on mail pages and a panel of its own beside the mail. / 邮件页面右下角新增 AI 胶囊，可就正在阅读的邮件、选中的邮件或正在写的草稿向 AI 助手提问，对话在邮件旁单独的对话岛里展开。

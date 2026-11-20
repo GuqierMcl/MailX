@@ -79,6 +79,81 @@ pub enum RunKind {
         #[ts(optional)]
         fresh: Option<bool>,
     },
+    /// Writing help in the composer (`docs/architecture/ai-chat-ui.md`
+    /// section 5.3): one model call without tools about one draft. The core
+    /// reads the draft and the email it answers itself; `task` carries the
+    /// user's own words. The answer is Markdown for the editor to preview;
+    /// nothing is written to the draft.
+    ComposeAssist { draft_id: String, task: ComposeTask },
+}
+
+/// Longest text a compose task takes, in characters.
+pub const MAX_COMPOSE_TEXT_CHARS: usize = 20_000;
+/// Longest instruction a compose task takes, in characters.
+pub const MAX_COMPOSE_INSTRUCTION_CHARS: usize = 2_000;
+
+/// What the composer asks for. `text` is the user's own words as Markdown:
+/// the selection, or everything they wrote above the quoted original.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ComposeTask {
+    /// Write the body from an instruction. `language` is a translation target
+    /// code; omitted, the model follows the email answered, else the
+    /// instruction.
+    Draft {
+        instruction: String,
+        #[serde(default)]
+        #[ts(optional)]
+        language: Option<String>,
+    },
+    Rewrite {
+        text: String,
+        style: RewriteStyle,
+    },
+    /// Spelling, grammar and punctuation only.
+    Proofread {
+        text: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum RewriteStyle {
+    Polish,
+    Formal,
+    Friendly,
+    Concise,
+    Expand,
+    /// Into a translation target language.
+    Translate {
+        code: String,
+    },
+    /// The user's own request.
+    Custom {
+        instruction: String,
+    },
+}
+
+/// Whether the composer can offer writing help now. Read without consent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeAssistState {
+    /// The assistant is on and a model is usable.
+    pub usable: bool,
+    /// The user agreed to send mail content to that model's connection.
+    pub consented: bool,
+    /// The connection's name, for the consent question.
+    pub service: String,
 }
 
 /// A summary kept on this device for an email whose body has not changed
@@ -157,6 +232,7 @@ pub enum RunKindTag {
     NowSummary,
     Chat,
     EmailSummary,
+    ComposeAssist,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
@@ -472,6 +548,11 @@ pub struct AssistantEvent {
     #[ts(type = "number")]
     pub seq: u64,
     pub kind: AssistantEventKind,
+    /// The draft of a compose run, for the host to route the event to that
+    /// draft's window; never sent to the interface.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub draft_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]

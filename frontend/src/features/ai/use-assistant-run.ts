@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AssistantEvent, ConfirmationRequest, ErrorCode, FinishedReason, PendingConfirmation, RunKind, RunSnapshot, RunState, ToolActivity } from '@/generated/accounts'
 import { MailxClientError, type MailxClient } from '@/lib/mailx-client'
 
@@ -81,7 +81,23 @@ const failureCode = (error: unknown): ErrorCode => {
  * A run still going when the owner unmounts is cancelled. `resume` names a run to pick up after a
  * remount: its first snapshot restores the state and later events continue from it.
  */
-export function useAssistantRun(client: MailxClient, options: { resume?: string } = {}): AssistantRun {
+/**
+ * The host calls a run goes through. The composer uses its own, narrower commands (`composeAssist*`);
+ * everything else uses the assistant's. Pass a stable object (memoized on the client).
+ */
+export type RunApi = {
+  start: (kind: RunKind) => Promise<RunSnapshot>
+  cancel: (runId: string) => Promise<void>
+  snapshot: (runId: string) => Promise<RunSnapshot>
+}
+
+export function useAssistantRun(client: MailxClient, options: { resume?: string; api?: RunApi } = {}): AssistantRun {
+  const given = options.api
+  const api = useMemo<RunApi>(() => given ?? {
+    start: (kind) => client.assistantStart({ kind }),
+    cancel: (id) => client.assistantCancel(id),
+    snapshot: (id) => client.assistantSnapshot(id),
+  }, [client, given])
   const [view, setView] = useState<View>(IDLE)
   const live = useRef<View>(IDLE)
   const runId = useRef<string | null>(null)
@@ -201,7 +217,7 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     const current = () => mine === generation.current && runId.current === id
     /** One snapshot, then whatever was held past it; true when a gap is still open and another is needed. */
     function round() {
-      client.assistantSnapshot(id).then((snapshot) => {
+      api.snapshot(id).then((snapshot) => {
         if (!current()) return false
         adopt(snapshot)
         const queued = held.current.filter((event) => event.seq > lastSeq.current).sort((a, b) => a.seq - b.seq)
@@ -222,7 +238,7 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
       })
     }
     round()
-  }, [adopt, apply, client, update])
+  }, [adopt, apply, api, update])
 
   const receive = useCallback((event: AssistantEvent) => {
     if (runId.current === null || event.runId !== runId.current) {
@@ -242,7 +258,7 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
 
   useEffect(() => client.onAssistantEvent(receive), [client, receive])
 
-  const cancelId = useCallback((id: string) => { client.assistantCancel(id).catch(() => undefined) }, [client])
+  const cancelId = useCallback((id: string) => { api.cancel(id).catch(() => undefined) }, [api])
 
   const reset = useCallback(() => {
     generation.current += 1
@@ -263,7 +279,7 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     commit()
     let snapshot: RunSnapshot
     try {
-      snapshot = await client.assistantStart({ kind })
+      snapshot = await api.start(kind)
     } catch (error) {
       if (mine !== generation.current) return null
       starting.current = false
@@ -286,7 +302,7 @@ export function useAssistantRun(client: MailxClient, options: { resume?: string 
     }
     if (held.current.length > 0) recover(snapshot.runId)
     return snapshot
-  }, [adopt, apply, cancelId, client, commit, recover, reset, update])
+  }, [adopt, apply, api, cancelId, commit, recover, reset, update])
 
   const cancel = useCallback(() => {
     const id = runId.current

@@ -217,6 +217,11 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     assistantClearConversations: vi.fn<MailxClient['assistantClearConversations']>().mockResolvedValue(undefined),
     assistantEmailSummary: vi.fn<MailxClient['assistantEmailSummary']>().mockResolvedValue(null),
     assistantClearEmailSummaries: vi.fn<MailxClient['assistantClearEmailSummaries']>().mockResolvedValue(0),
+    composeAssistState: vi.fn<MailxClient['composeAssistState']>().mockResolvedValue({ usable: false, consented: false, service: '' }),
+    composeAssistGrantConsent: vi.fn<MailxClient['composeAssistGrantConsent']>().mockResolvedValue({ connectionId: 'c1', baseUrl: 'https://api.example.test/v1' }),
+    composeAssistStart: vi.fn<MailxClient['composeAssistStart']>().mockRejectedValue(new Error('no compose run')),
+    composeAssistCancel: vi.fn<MailxClient['composeAssistCancel']>().mockResolvedValue(undefined),
+    composeAssistSnapshot: vi.fn<MailxClient['composeAssistSnapshot']>().mockRejectedValue(new Error('no compose run')),
     onAssistantConversationsChanged: vi.fn<MailxClient['onAssistantConversationsChanged']>().mockReturnValue(() => undefined),
     onUpdateState: vi.fn<MailxClient['onUpdateState']>().mockReturnValue(() => undefined),
   }

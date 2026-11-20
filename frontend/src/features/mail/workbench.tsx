@@ -1110,7 +1110,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             aria-hidden={(singlePane && readerHidden) || undefined}
           >
             {inlineShown ? (
-              <InlineComposerPane client={client} accounts={displayAccounts} inline={inline} />
+              <InlineComposerPane client={client} accounts={displayAccounts} inline={inline} onAskAi={assistant.usable ? openAssistant : undefined} />
             ) : activeMailbox.kind === 'drafts' ? (
               selectedDraft ? (
                 <DraftDetail

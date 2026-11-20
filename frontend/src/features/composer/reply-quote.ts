@@ -41,6 +41,12 @@ function forwardDividers(): string[] {
   })
 }
 
+/** The top-level block (by its trimmed paragraph text, `''` for others) that opens a forward's header; -1 when none. */
+export function forwardHeaderIndex(paragraphs: readonly string[]): number {
+  const dividers = forwardDividers()
+  return paragraphs.findIndex((text) => text !== '' && dividers.includes(text))
+}
+
 /**
  * What the user wrote themselves: a reply without its quoted original (the
  * span above), a forward without the core's forward header and everything
@@ -60,8 +66,7 @@ export function ownBodyText(html: string, kind: DraftKind): string {
     })))
     if (span) keep = (index) => index < span.start || index > span.end
   } else if (kind === 'forward') {
-    const dividers = forwardDividers()
-    const header = blocks.findIndex((node) => node.nodeName === 'P' && dividers.includes(node.textContent?.trim() ?? ''))
+    const header = forwardHeaderIndex(blocks.map((node) => node.nodeName === 'P' ? node.textContent?.trim() ?? '' : ''))
     if (header >= 0) keep = (index) => index < header
   }
   return blocks.filter((_, index) => keep(index)).map((node) => node.textContent ?? '').join('\n')

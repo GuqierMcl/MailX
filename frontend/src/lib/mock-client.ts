@@ -126,13 +126,14 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     settings = { ...settings, revision: settings.revision + 1 }
     window.dispatchEvent(new CustomEvent('mailx:mock-settings', { detail: settings.revision }))
   }
+  const assistantBinding = () => {
+    const model = settings.settings.assistant.model ?? aiDefault
+    const connection = model && aiConnections.find((item) => item.id === model.connectionId)
+    return connection ? { connectionId: connection.id, baseUrl: connection.baseUrl } : null
+  }
   const assistant = createMockAssistant({
     stepMs: options.assistantStepMs ?? 40,
-    binding() {
-      const model = settings.settings.assistant.model ?? aiDefault
-      const connection = model && aiConnections.find((item) => item.id === model.connectionId)
-      return connection ? { connectionId: connection.id, baseUrl: connection.baseUrl } : null
-    },
+    binding: () => assistantBinding(),
     locale: () => settings.effectiveLocale,
     overview() {
       const inbox = emails.filter((email) => folders.find((folder) => folder.id === email.summary.folderId)?.role === 'inbox' && !email.summary.archived)
@@ -1224,6 +1225,16 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     assistantClearConversations: () => history.clear(),
     assistantEmailSummary: (emailId) => assistant.emailSummary(emailId),
     assistantClearEmailSummaries: () => assistant.clearEmailSummaries(),
+    async composeAssistState() {
+      const binding = settings.settings.assistant.enabled ? assistantBinding() : null
+      const consent = assistant.consent()
+      const connection = binding && aiConnections.find((item) => item.id === binding.connectionId)
+      return { usable: Boolean(binding), consented: Boolean(binding && consent && consent.connectionId === binding.connectionId && consent.baseUrl === binding.baseUrl), service: connection?.name ?? '' }
+    },
+    composeAssistGrantConsent: async () => { const consent = await assistant.grantConsent(); consentChanged(); return consent },
+    composeAssistStart: (draftId, task) => assistant.start({ kind: { type: 'composeAssist', draftId, task } }),
+    composeAssistCancel: (runId) => assistant.cancel(runId),
+    composeAssistSnapshot: (runId) => assistant.snapshot(runId),
     onAssistantConversationsChanged: (listener) => history.onChanged(listener),
     getMcpStatus: async () => structuredClone(mcpStatus),
     getAutostart: async () => ({ enabled: false, available: false }),

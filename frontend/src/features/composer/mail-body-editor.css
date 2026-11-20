@@ -189,3 +189,40 @@
   color: var(--muted-foreground);
 }
 .mail-quote-fold-button.mail-quote-fold-button:hover { background: var(--accent); color: var(--accent-foreground); }
+
+/* Writing help (ai-chat-ui.md 5.3). The text being rewritten is dimmed until the card goes. */
+.mail-body-content .mail-ai-source { opacity: 0.45; transition: opacity 150ms; }
+.mail-ai-card-slot { display: block; white-space: normal; cursor: default; user-select: text; }
+.mail-ai-hint { pointer-events: none; }
+.mail-ai-hint-button {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.mail-ai-hint-button:hover { color: var(--foreground); }
+.mail-ai-bubble {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  outline: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+/* The answer preview renders the very HTML the draft receives, in the editor's own styles. An empty
+   paragraph is the blank line a user gets from pressing Enter twice; the editor's view gives it a line
+   of height with an invisible break, so the preview must do the same or the spaces vanish there. */
+.mail-ai-preview { white-space: pre-wrap; cursor: text; }
+.mail-ai-preview p:empty { min-height: 1.5em; }

@@ -56,11 +56,11 @@ pub use app::{
 };
 pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
-    Assistant, AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext, ConfirmAction,
-    ConfirmAttachment, ConfirmDraftChange, ConfirmWarning, ConfirmationDetails,
-    ConfirmationRequest, FinishedReason, FlagRestore, Occasion, OrganizeChange,
-    PendingConfirmation, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState, StartRun,
-    ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    Assistant, AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext,
+    ComposeAssistState, ComposeTask, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
+    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason, FlagRestore,
+    Occasion, OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning,
+    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
 };
 pub use assistant::{
     ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmOutcome,

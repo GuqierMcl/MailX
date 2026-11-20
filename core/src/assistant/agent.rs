@@ -1002,6 +1002,55 @@ async fn email_summary_turn(inner: &Arc<Inner>, run_id: &str, job: EmailSummaryJ
     Outcome::Finished(FinishedReason::Stop)
 }
 
+/// Output cap of writing help; covers a thinking model's reasoning too.
+const COMPOSE_OUTPUT_CAP: u32 = 8192;
+
+/// One compose task: `input` is the prepared context, `system` its prompt.
+/// The answer stays in the run; nothing is written anywhere.
+pub(crate) async fn compose(inner: Arc<Inner>, run_id: String, system: String, input: String) {
+    let _end = EndGuard {
+        inner: inner.clone(),
+        run_id: run_id.clone(),
+    };
+    let outcome = compose_turn(&inner, &run_id, &system, input).await;
+    report(&inner, &run_id, outcome);
+}
+
+async fn compose_turn(inner: &Arc<Inner>, run_id: &str, system: &str, input: String) -> Outcome {
+    let ready = match inner.gate().await {
+        Ok(Gate::Ready(ready)) => ready,
+        Ok(Gate::NeedsConsent) => return Outcome::NeedsConsent,
+        Err(error) => return Outcome::Failed(error.code),
+    };
+    let messages = [ChatMessage::User(input)];
+    let max_output = ready
+        .target
+        .output_length
+        .map_or(COMPOSE_OUTPUT_CAP, |n| n.min(COMPOSE_OUTPUT_CAP));
+    let turn = match model_turn(
+        inner,
+        run_id,
+        &ready,
+        system,
+        &messages,
+        &[],
+        Some(max_output),
+    )
+    .await
+    {
+        Ok(turn) => turn,
+        Err(code) => return Outcome::Failed(code),
+    };
+    if turn.text.trim().is_empty() {
+        return Outcome::Failed(ErrorCode::AiInvalidResponse);
+    }
+    // Cut off by the cap: shown with a warning, the user decides.
+    if turn.reason == Some(FinishReason::Length) {
+        return Outcome::Finished(FinishedReason::Length);
+    }
+    Outcome::Finished(FinishedReason::Stop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

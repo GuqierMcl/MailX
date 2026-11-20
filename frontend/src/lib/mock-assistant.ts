@@ -159,6 +159,26 @@ export function createMockAssistant(deps: MockAssistantDeps) {
     finish(run)
   }
 
+  function composeText(task: Extract<StartRun['kind'], { type: 'composeAssist' }>['task']): string {
+    const z = zh()
+    if (task.type === 'proofread') return task.text.replace(/teh/g, 'the').replace(/的的/g, '的')
+    if (task.type === 'draft') {
+      return z
+        ? `你好，\n\n谢谢你的邮件。关于你提到的安排，${task.instruction}。如果有需要调整的地方，请随时告诉我。\n\n祝好`
+        : `Hi,\n\nThanks for your email. About the plan you mentioned: ${task.instruction}. Let me know if anything needs to change.\n\nBest`
+    }
+    const text = task.text.trim()
+    switch (task.style.type) {
+      case 'formal': return z ? `您好，${text.replace(/^你好[，,]?/, '')}\n\n此致敬礼` : `Dear colleague, ${text}\n\nKind regards`
+      case 'friendly': return z ? `嗨～${text}` : `Hey! ${text}`
+      case 'concise': return text.split(/(?<=[。.!！?？])/)[0] ?? text
+      case 'expand': return z ? `${text}\n\n补充说明一下：这样安排是为了给大家留出准备时间，如有冲突可以再商量。` : `${text}\n\nTo add some context: this leaves everyone time to prepare, and we can adjust if it clashes.`
+      case 'translate': return `[${task.style.code}] ${text}`
+      case 'custom': return z ? `（按“${task.style.instruction}”改写）${text}` : `(Rewritten: ${task.style.instruction}) ${text}`
+      default: return z ? `${text.replace(/。$/, '')}，期待你的回复。` : `${text.replace(/\.$/, '')}, and I look forward to hearing from you.`
+    }
+  }
+
   /** A reply that uses most of the Markdown the chat can show, to preview it while it streams. */
   function markdownShowcase(): string {
     const email = deps.firstUnread()?.id
@@ -271,6 +291,11 @@ export function createMockAssistant(deps: MockAssistantDeps) {
       // Like the core: the consent must name the connection in use now; switching connections asks again.
       const binding = deps.binding?.() ?? MOCK_CONSENT
       if (!consent || consent.connectionId !== binding.connectionId || consent.baseUrl !== binding.baseUrl) return structuredClone(create(tag, 'awaitingConsent', conversationId).snap)
+      if (kind.type === 'composeAssist') {
+        const run = create(tag, 'running', null)
+        void say(run, composeText(kind.task)).then(() => finish(run)).catch(() => { emit(run, { type: 'failed', code: 'internal' }); emit(run, { type: 'state', state: 'failed' }) })
+        return structuredClone(run.snap)
+      }
       if (kind.type === 'emailSummary') {
         const defaults = deps.summaryDefaults?.() ?? { style: 'brief' as const, language: zh() ? 'zh-Hans' : 'en' }
         const style = kind.style ?? defaults.style

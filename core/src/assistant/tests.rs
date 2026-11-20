@@ -2045,6 +2045,182 @@ async fn an_email_summary_cut_off_by_the_output_cap_is_shown_but_not_kept() {
     );
 }
 
+fn compose_request(draft_id: &str, task: ComposeTask) -> StartRun {
+    StartRun {
+        kind: RunKind::ComposeAssist {
+            draft_id: draft_id.to_owned(),
+            task,
+        },
+    }
+}
+
+#[tokio::test]
+async fn a_reply_draft_is_written_from_the_original_without_tools_and_events_name_the_draft() {
+    let fx = Fx::new().await;
+    let reply = fx
+        .core
+        .create_draft_from(crate::CreateDraftFromRequest {
+            email_id: fx.emails[0].clone(),
+            kind: crate::DraftKind::Reply,
+            client_mutation_id: uuid::Uuid::new_v4().to_string(),
+        })
+        .unwrap();
+    fx.model(vec![say("Hi,\n\nThanks, Wednesday works.\n\nBest")]);
+    let started = fx
+        .assistant
+        .start(compose_request(
+            &reply.id,
+            ComposeTask::Draft {
+                instruction: "say Wednesday works".into(),
+                language: None,
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(started.kind, RunKindTag::ComposeAssist);
+    assert_eq!(
+        fx.assistant.compose_run_draft(&started.run_id).as_deref(),
+        Some(reply.id.as_str())
+    );
+    let done = fx.finished(&started.run_id).await;
+    assert_eq!(done.state, RunState::Completed);
+    assert!(done.text.contains("Wednesday works"));
+    // Every event of the run carries the draft, the first included.
+    let events = fx.run_events(&started.run_id);
+    assert!(!events.is_empty());
+    assert!(
+        events
+            .iter()
+            .all(|event| event.draft_id.as_deref() == Some(reply.id.as_str()))
+    );
+    // A chat's events carry none.
+    let chat = fx.chat_and_wait("hi").await;
+    assert!(
+        fx.run_events(&chat.run_id)
+            .iter()
+            .all(|event| event.draft_id.is_none())
+    );
+
+    let request = fx.request(0);
+    assert!(request.get("tools").is_none(), "{request}");
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("language of <original_email>"), "{system}");
+    let user = request["messages"][1]["content"].as_str().unwrap();
+    assert!(user.contains("<draft>\nFrom (the user): "), "{user}");
+    assert!(user.contains("Kind: reply"), "{user}");
+    assert!(
+        user.contains("<original_email>") && user.contains("hello world"),
+        "{user}"
+    );
+    assert!(
+        user.ends_with("<instruction>\nsay Wednesday works\n</instruction>"),
+        "{user}"
+    );
+    // Nothing was written to the draft.
+    assert_eq!(
+        fx.core.get_draft(&reply.id).unwrap().revision,
+        reply.revision
+    );
+}
+
+#[tokio::test]
+async fn rewriting_and_proofreading_send_only_the_given_text_in_its_language() {
+    let fx = Fx::new().await;
+    let draft = fx.user_draft();
+    fx.model(vec![say("Dear colleague,"), say("Fixed text.")]);
+    let formal = fx
+        .assistant
+        .start(compose_request(
+            &draft.id,
+            ComposeTask::Rewrite {
+                text: "hey **there**".into(),
+                style: RewriteStyle::Translate { code: "ja".into() },
+            },
+        ))
+        .await
+        .unwrap();
+    fx.finished(&formal.run_id).await;
+    let request = fx.request(0);
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("Translate it") && system.contains("Write in Japanese"),
+        "{system}"
+    );
+    let user = request["messages"][1]["content"].as_str().unwrap();
+    assert!(user.ends_with("<text>\nhey **there**\n</text>"), "{user}");
+    assert!(
+        !user.contains("<original_email>") && !user.contains("Mine"),
+        "{user}"
+    );
+
+    let proof = fx
+        .assistant
+        .start(compose_request(
+            &draft.id,
+            ComposeTask::Proofread {
+                text: "teh text".into(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(fx.finished(&proof.run_id).await.text, "Fixed text.");
+    let system = fx.request(1)["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(system.contains("Fix only spelling") && system.contains("Keep the language of <text>"));
+}
+
+#[tokio::test]
+async fn compose_help_follows_the_assistant_scope_state_and_consent() {
+    let fx = Fx::new().await;
+    let draft = fx.user_draft();
+    let state = fx.assistant.compose_state().await.unwrap();
+    assert!(state.usable && state.consented);
+    assert_eq!(state.service, "Mock");
+    // Bad requests and drafts outside the assistant's accounts send nothing.
+    let error = fx
+        .assistant
+        .start(compose_request(
+            &draft.id,
+            ComposeTask::Proofread { text: " ".into() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("task.text"));
+    fx.configure(|a| a.excluded_accounts = vec![fx.account.clone()]);
+    let error = fx
+        .assistant
+        .start(compose_request(
+            &draft.id,
+            ComposeTask::Proofread { text: "x".into() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert_eq!(fx.requests(), 0);
+    fx.configure(|a| a.excluded_accounts.clear());
+    // Without consent the run waits for it, and its event still names the draft.
+    fx.assistant.revoke_consent().unwrap();
+    assert!(!fx.assistant.compose_state().await.unwrap().consented);
+    let waiting = fx
+        .assistant
+        .start(compose_request(
+            &draft.id,
+            ComposeTask::Proofread { text: "x".into() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(waiting.state, RunState::AwaitingConsent);
+    assert_eq!(
+        fx.assistant.compose_run_draft(&waiting.run_id).as_deref(),
+        Some(draft.id.as_str())
+    );
+    fx.configure(|a| a.enabled = false);
+    assert!(!fx.assistant.compose_state().await.unwrap().usable);
+    assert_eq!(fx.requests(), 0);
+}
+
 #[tokio::test]
 async fn a_fresh_now_summary_skips_the_cache_and_replaces_it() {
     let fx = Fx::new().await;

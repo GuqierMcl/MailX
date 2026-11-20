@@ -12,8 +12,10 @@ import type { MailxClient } from '@/lib/mailx-client'
  * Asked once per AI connection, before the assistant first reads mail (ai-runtime §5). Agreeing records the
  * consent in the host; the caller starts what it wanted afterwards, in `onGranted`.
  */
-export function AiConsentDialog({ client, service, open, onOpenChange, onGranted, onFailed }: {
+export function AiConsentDialog({ client, service, open, onOpenChange, onGranted, onFailed, grant }: {
   client: MailxClient
+  /** How consent is recorded; the composer has its own command. Defaults to the assistant's. */
+  grant?: () => Promise<AiConsent>
   /** The connection the mail would go to, by name. */
   service: string
   open: boolean
@@ -28,7 +30,8 @@ export function AiConsentDialog({ client, service, open, onOpenChange, onGranted
   const agree = () => {
     if (busy) return
     setBusy(true)
-    client.assistantGrantConsent().then(
+    const record = grant ?? (() => client.assistantGrantConsent())
+    record().then(
       (consent) => { setBusy(false); onOpenChange(false); onGranted(consent) },
       (error: unknown) => { setBusy(false); onOpenChange(false); onFailed?.(error) },
     )

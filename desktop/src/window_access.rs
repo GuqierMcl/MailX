@@ -249,6 +249,12 @@ const BOTH: &[&str] = &[
     "inline_images_add",
     "inline_images_add_bytes",
     "inline_image_preview",
+    // Writing help: each window only for its own draft (compose_assist.rs).
+    "compose_assist_state",
+    "compose_assist_grant_consent",
+    "compose_assist_start",
+    "compose_assist_cancel",
+    "compose_assist_snapshot",
 ];
 
 /// Commands only a composer window may call.
@@ -270,6 +276,7 @@ const DRAFT_SCOPED: &[&str] = &[
     "inline_image_preview",
     "drafts_delete",
     "outbox_queue_send",
+    "compose_assist_start",
 ];
 
 pub(crate) fn command_allowed(kind: WindowKind, command: &str) -> bool {
@@ -637,6 +644,11 @@ mod tests {
             ("inline_images_add_bytes", true, true),
             ("inline_image_preview", true, true),
             ("outbox_queue_send", true, true),
+            ("compose_assist_state", true, true),
+            ("compose_assist_grant_consent", true, true),
+            ("compose_assist_start", true, true),
+            ("compose_assist_cancel", true, true),
+            ("compose_assist_snapshot", true, true),
             ("outbox_list", true, false),
             ("outbox_get", true, false),
             ("outbox_cancel", true, false),
