@@ -915,7 +915,7 @@ type ConversationsChanged = { conversationId: string | null; change: "saved" | "
 | `composeAssistSnapshot(runId)` | `compose_assist_snapshot`，`{ runId }` | `RunSnapshot`；结束后保留十分钟（最多 20 个），之后 `notFound` |
 
 - 运行状态、事件与快照与其他运行相同；`RunKindTag` 为 `composeAssist`，`toolsAvailable` 恒为 `false`。没有同意时 `composeAssistStart` 返回已结束的 `awaitingConsent` 快照，什么都没有发给服务商；批准后重新启动一次。
-- 草稿在助手“可用账号”之外或不存在时，`composeAssistStart` 直接返回 `notFound`，不创建运行（`compose_assist_state` 不因此报错）。`draftId` 为空或过长、`task.text` 为空或超过 20,000 字符、说明为空或超过 2,000 字符、`task.language` / `task.style` 中的语言无效时为 `validation`，`field` 为 `draftId` / `task.text` / `task.instruction` / `task.language` / `task.style`。
+- 草稿在助手“可用账号”之外或不存在时，`composeAssistStart` 直接返回 `notFound`，不创建运行。`draftId` 为空或过长、`task.text` 为空或超过 20,000 字符、说明为空或超过 2,000 字符、`task.language` / `task.style` 中的语言无效时为 `validation`，`field` 为 `draftId` / `task.text` / `task.instruction` / `task.language` / `task.style`。
 - `compose_assist_cancel` 与 `compose_assist_snapshot` 只接受属于调用方草稿的写作运行：写信窗口只能跟随自己草稿的运行，主窗口可以跟随任意写作运行；其他运行的 id 按 `notFound` 处理，不区分“不存在”与“不可见”。
 - 结果只是供编辑器预览的 Markdown。采用时由界面作为一次编辑器的编辑写入草稿，核心从不写草稿；被取消或失败的运行不会改动草稿。
 
