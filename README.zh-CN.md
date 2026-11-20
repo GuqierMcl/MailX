@@ -98,7 +98,7 @@ Outlook（个人 Outlook.com、Hotmail、Live 邮箱）和 Microsoft 365（工�
 | Windows | `MailX_<版本>_windows-x64-setup.exe` |
 | Linux | `.AppImage`、`.deb` 或 `.rpm`（`linux-x64`） |
 
-安装包尚未做代码签名，系统可能拦截首次启动，各版本发布说明里的安装说明介绍了打开方法。macOS、Windows 和 AppImage 版本可以在应用内自动更新。这些构建尚未在每个平台上逐一验证。
+macOS 安装包已使用 Developer ID 签名并公证，下载后可以直接打开。Windows 与 Linux 安装包尚未做代码签名，系统可能拦截首次启动，各版本发布说明里的安装说明介绍了打开方法。macOS、Windows 和 AppImage 版本可以在应用内自动更新。这些构建尚未在每个平台上逐一验证。
 
 添加账号、发信、连接 MCP 与升级注意事项见[使用入门](docs/guides/zh-CN/README.md)。
 

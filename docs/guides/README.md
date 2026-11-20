@@ -6,7 +6,7 @@ This page covers the basics of the desktop app. Published installers are listed 
 
 ## Install and add an account
 
-1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The installers are not code-signed yet, and you can check your download against the `SHA256SUMS.txt` of the same release.
+1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The macOS build is signed and notarized, so it opens normally; the Windows and Linux builds are not code-signed yet. You can check your download against the `SHA256SUMS.txt` of the same release.
 2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, Outlook, Microsoft 365, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. Outlook and Microsoft 365 sign in in your browser and need no password or authorization code (see below); sign-in in the browser is not available for other providers yet.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. When you choose a folder for one account, that account's name appears beside the message list heading. To give the mail more room, collapse the sidebar from the title bar or with Cmd/Ctrl+B: it becomes a narrow column of icons with the same places, tooltips that show unread counts, and menus for More and each account. Your choice is remembered. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
@@ -293,6 +293,8 @@ MailX records app and mail core startup, sync failures, retries and recovery, an
 ## Upgrading and keeping your data
 
 MailX prepares your local data automatically when you first launch it after an update. Older versions may be unable to open data prepared by a newer version. To roll back, keep a copy of the data from before the update.
+
+On macOS, the first upgrade from an earlier unsigned build to a signed one asks the system for keychain access once, to read the passwords MailX saved. Choose “Always Allow”; later updates do not ask again.
 
 To keep a rollback copy before upgrading, **quit MailX completely** first, then copy the entire MailX data directory, including the database, any SQLite side files, settings and blob files — do not copy only `mailx.sqlite3`:
 

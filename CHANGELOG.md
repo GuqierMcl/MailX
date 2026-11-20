@@ -35,6 +35,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - Keep syncing mail and preserve its last known read and starred status when an IMAP server omits some message flags. / 修复 IMAP 服务器漏回部分邮件状态时同步中断的问题，其他邮件可继续同步，受影响邮件保留上次已知的已读和星标状态。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 - Fix sync errors for empty folders on IMAP servers that omit empty search results. / 修复部分 IMAP 服务器省略空搜索结果时，空文件夹同步报错的问题。 ([#157](https://github.com/GuqierMcl/MailX/pull/157))
 
+### 🔐 Security
+
+- The macOS app is signed with an Apple Developer ID and notarized, so a downloaded copy opens normally; the first upgrade from an earlier unsigned build asks for keychain access once, and later updates do not. / macOS 版使用 Apple Developer ID 签名并公证，下载后可以直接打开；从未签名版本升级时，系统会请求一次钥匙串授权，之后的升级不再询问。 ([#167](https://github.com/GuqierMcl/MailX/pull/167))
+
 ### 🔄 Changed
 
 - MCP and AI assistant tools were renamed and some merged (for example search_emails is now mail_search, archive and unarchive are one mail_archive, and the outbox and draft attachment tools are one each); MCP clients must list the tools again and update any saved tool names. / MCP 与 AI 助手的工具已改名，部分工具合并（例如 search_emails 改为 mail_search，归档与取消归档合并为 mail_archive，发件箱与草稿附件工具各合并为一个）；MCP 客户端需重新获取工具列表，并更新已保存的工具名称。

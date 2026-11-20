@@ -1,9 +1,7 @@
 ## 安装说明
 
-当前安装包**尚未做代码签名**，系统可能拦截首次启动：
-
-- **macOS**：下载 `.dmg` 并拖入“应用程序”后，右键应用选择“打开”；若提示“已损坏”，在终端执行 `xattr -dr com.apple.quarantine /Applications/MailX.app`。
-- **Windows**：SmartScreen 提示时点击“更多信息” → “仍要运行”。
+- **macOS**：下载 `.dmg`，打开后把 MailX 拖入“应用程序”。安装包使用 Developer ID 签名并已公证，首次打开不需要右键或解除隔离。从更早的未签名版本升级时，钥匙串会请求一次读取旧密码的授权，选择“始终允许”即可，之后升级不再询问。
+- **Windows**：安装包尚未做代码签名，SmartScreen 提示时点击“更多信息” → “仍要运行”。
 - **Linux**：`.AppImage` 先执行 `chmod +x`；也可使用 `.deb` / `.rpm`。
 
 请用同目录的 `SHA256SUMS.txt` 核对下载文件。
